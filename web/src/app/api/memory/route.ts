@@ -19,6 +19,14 @@ export async function POST(req: Request) {
   if (!fact.trim()) return NextResponse.json({ error: "fact required" }, { status: 400 });
 
   const result = rememberFact(fact);
-  if (result === "error") return NextResponse.json({ error: "write failed" }, { status: 500 });
+  // "write failed" was misleading for the case that actually happens: the
+  // profile could not be READ, so nothing was written — deliberately, to
+  // avoid clobbering it. Name the file, because the user has to go look at it.
+  if (result === "error") {
+    return NextResponse.json(
+      { error: "could not read or write modes/_profile.md — the fact was not saved and the file was left as it is" },
+      { status: 500 },
+    );
+  }
   return NextResponse.json({ ok: true, deduped: result === "deduped" });
 }

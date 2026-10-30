@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Создано <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Создано <a href="https://github.com/santifer"><strong>@santifer</strong></a> при участии&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders">700+ контрибьюторов</a></p>
 
 <p align="center">
 <strong>Месяцы отправки резюме в&nbsp;тишину.</strong><br>
@@ -123,6 +123,8 @@ npx @santifer/career-ops init
 <br>
 
 Найм сам себя не починит. Люди, которые через него проходят, могут, и они уже в комнате: сверяют заметки и чинят друг другу настройки.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ru" alt="Анимированная стена из GitHub-аватаров участников, которая заполняется в порядке прихода с апрель 2026 г.; следующая клетка оставлена свободной." width="100%"></a></p>
 
@@ -231,17 +233,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -250,7 +243,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -268,11 +261,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-Это устанавливает бинарник `career-ops` глобально, так что вы можете запускать его напрямую, а не через `npx`. В отличие от `npx @santifer/career-ops init` (который создаёт каталог проекта), глобальная установка даёт постоянную команду `career-ops`, доступную где угодно в вашем терминале.
+Это устанавливает бинарник `career-ops` глобально, так что вы можете запускать `career-ops init [folder]` без `npx`. `init` — его единственная команда: она создаёт рабочее пространство, а всё дальнейшее происходит внутри вашего AI-CLI (см. «Использование» ниже), а не через этот бинарник.
 
 **Что выбрать?**
 - `npx @santifer/career-ops init`: лучше всего для первого запуска; создаёт отдельную папку проекта.
-- `npm i -g @santifer/career-ops`: лучше всего, когда папка проекта уже есть и вы хотите запускать команды career-ops напрямую.
+- `npm i -g @santifer/career-ops`: если вам удобнее набирать `career-ops init`, чем форму с `npx`. Других команд он не добавляет.
 
 > **Система спроектирована так, чтобы её настраивал сам ваш AI-CLI.** Режимы, архетипы, веса оценки, скрипты переговоров: просто попросите его изменить их. Он читает те же файлы, которыми пользуется, поэтому точно знает, что редактировать.
 
@@ -331,25 +324,7 @@ career-ops использует общий роутер команд. В CLI, к
 
 ## Как это работает
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Интеграция с Antigravity CLI
 
@@ -530,7 +505,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Функции: 6 вкладок фильтров, 4 режима сортировки, сгруппированный/плоский вид, ленивая загрузка предпросмотра, изменение статусов в строке.
+Функции: 10 вкладок фильтров, 8 режимов сортировки, сгруппированный/плоский вид, ленивая загрузка предпросмотра, изменение статусов в строке.
 
 Есть также **экспериментальный веб-интерфейс** (альфа, опционально: ничего не запускается, пока вы его не запустите): смотрите [`web/README.md`](web/README.md).
 
@@ -650,7 +625,7 @@ career-ops/
 career-ops ([career-ops.org](https://career-ops.org), также известный как **careerops**) является ИИ-поиском работы с открытым кодом, который работает локально в вашем AI-CLI (Claude Code, Codex, OpenCode и других) и оставляет каждое решение за вами. Он оценивает вакансии относительно вашего резюме, генерирует ATS-адаптированные PDF, находит нужного человека для контакта и отслеживает всё в одном месте: последнее слово всегда за вами. Это первая эталонная реализация [Манифеста CareerOps](https://career-ops.org/manifesto).
 
 **Может ли адаптированное резюме что-то выдумать?**
-Не должно, и промпты это говорят: переформулировать, никогда не выдумывать. `generate-pdf` блокирует резюме, в котором есть цифры или факты, отсутствующие в ваших источниках, если только вы не передадите `--skip-fact-check`. Названия должностей он пока не проверяет и переформулировки не оценивает. Это отслеживают два открытых issue: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (названия должностей должны совпадать с cv.md) и [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (проверка достоверности, блокирующая при несовпадении). Пока они не смержены, читайте каждое резюме перед отправкой. [Юридическая оговорка](LEGAL_DISCLAIMER.md) говорит то же самое длиннее.
+Не должно, и промпты это говорят: переформулировать, никогда не выдумывать. `generate-pdf` блокирует резюме, в котором есть цифры или факты, отсутствующие в ваших источниках, если только вы не передадите `--skip-fact-check`. Режим `pdf` также запускает `cv-title-check.mjs`: он сравнивает каждое название должности в адаптированном резюме с названием, которое cv.md даёт той же работе (сопоставление по компании и датам), и спрашивает, оставить или вернуть каждое отличающееся. Он только предупреждает, а не блокирует, потому что переформулировать название должности иногда ваше решение. Переформулировки пока ничто не оценивает: это отслеживает [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (проверка достоверности, блокирующая при несовпадении). До тех пор читайте каждое резюме перед отправкой. [Юридическая оговорка](LEGAL_DISCLAIMER.md) говорит то же самое длиннее.
 
 **Могу ли я запускать career-ops бесплатно или на более дешёвой / локальной модели?**
 Да. career-ops не зависит от CLI и работает на бесплатных и локальных моделях (бесплатные модели OpenRouter, Ollama или любой OpenAI-совместимый эндпоинт), так что вы не привязаны к платной подписке. Полная настройка: [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md).

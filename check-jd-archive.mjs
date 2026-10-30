@@ -83,6 +83,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { loadCanonicalStates, resolveCanonicalState, resolveTrackerPath } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { JD_ARCHIVE_HEADING, JD_HEADING_RE, NEXT_REPORT_SECTION_RE } from './lib/jd-archive-section.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -139,20 +140,13 @@ export function parseReportFilename(filename) {
 }
 
 // --- Archive-section detection ---
-// Matches "## Job Description", with or without a parenthetical/suffix (the
-// canonical heading is "## Job Description (archived verbatim)"). Content is
-// read up to the next KNOWN report-section heading or end of file — not any
-// "## " line, because a JD pasted verbatim can itself contain markdown-style
-// sub-headings (e.g. "## Responsibilities"), which would otherwise truncate
-// the section and falsely report a real archive as missing (CodeRabbit,
-// PR #2791). The allowlist below is every section name modes/oferta.md's
-// report template actually uses; a real JD's own text is vanishingly
-// unlikely to collide with one verbatim. HTML comments are stripped before
-// the length check so a commented-out template stub doesn't count as
-// archived text.
-const JD_HEADING_RE = /^##\s+Job Description\b.*$/im;
-const NEXT_REPORT_SECTION_RE =
-  /^##\s+(?:Machine Summary|Keywords extracted|[A-Z]\)|Block\s[A-Z]\b|Risk Summary|Cover Letter Draft|Post-evaluation|Liveness gate|Blacklist gate|Bounded Research Budget|Step 0\b)/im;
+// JD_HEADING_RE and NEXT_REPORT_SECTION_RE are shared with the evaluators that
+// write the section (lib/jd-archive-section.mjs), so writer and reader agree on
+// where it starts and ends. Content runs to the next KNOWN report-section
+// heading or end of file, not to any "## " line, because a verbatim JD can
+// carry its own sub-headings (CodeRabbit, PR #2791). HTML comments are
+// stripped before the length check so a commented-out template stub doesn't
+// count as archived text.
 
 // The unfilled modes/oferta.md template placeholder ("(the posting's full
 // text, pasted verbatim — see requirement below)") is 66 characters — longer
@@ -162,6 +156,72 @@ const NEXT_REPORT_SECTION_RE =
 // alone.
 const UNFILLED_TEMPLATE_PLACEHOLDER =
   "(the posting's full text, pasted verbatim — see requirement below)";
+
+// Every localized evaluation mode (modes/<lang>/*.md) carries its own
+// translation of that placeholder under the same heading, and each one clears
+// MIN_ARCHIVE_CHARS too. The set is read from the templates themselves rather
+// than copied here, so a new locale or a reworded placeholder cannot drift out
+// of it. A placeholder is the parenthesized line (ASCII or full-width
+// parentheses, for the CJK templates) directly under the heading. The English
+// constant stays in the set even when modes/ cannot be read.
+const PLACEHOLDER_LINE_RE = /^[(（].*[)）]$/;
+
+// Whitespace-insensitive, so a placeholder re-wrapped or re-indented on paste
+// is still recognized. Whitespace is removed, not collapsed to a space: a line
+// break between two CJK characters has no space to collapse to.
+const normalizePlaceholder = (text) => text.replace(/\s+/g, '');
+
+export function collectTemplatePlaceholders(modesDir) {
+  const placeholders = new Set([normalizePlaceholder(UNFILLED_TEMPLATE_PLACEHOLDER)]);
+  const files = [];
+  let entries;
+  try {
+    entries = readdirSync(modesDir, { withFileTypes: true });
+  } catch {
+    return placeholders;
+  }
+  for (const entry of entries) {
+    const path = join(modesDir, entry.name);
+    if (entry.isFile() && entry.name.endsWith('.md')) {
+      files.push(path);
+    } else if (entry.isDirectory()) {
+      // One unreadable locale directory must not drop every other locale.
+      try {
+        for (const name of readdirSync(path)) {
+          if (name.endsWith('.md')) files.push(join(path, name));
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  for (const file of files) {
+    let lines;
+    try {
+      lines = readFileSync(file, 'utf-8').split(/\r?\n/);
+    } catch {
+      continue;
+    }
+    lines.forEach((line, i) => {
+      const next = (lines[i + 1] ?? '').trim();
+      if (line.trim() === JD_ARCHIVE_HEADING && PLACEHOLDER_LINE_RE.test(next)) {
+        placeholders.add(normalizePlaceholder(next));
+      }
+    });
+  }
+  return placeholders;
+}
+
+// The templates require a leading "Posted: ..." line in the section
+// (modes/oferta.md), so an evaluator can fill that line in and leave the
+// placeholder under it. The line is dropped before the comparison, as
+// isPathOnlyPointer() does below.
+let templatePlaceholders = null;
+function isUnfilledTemplatePlaceholder(strippedSection) {
+  templatePlaceholders ??= collectTemplatePlaceholders(join(CAREER_OPS, 'modes'));
+  const withoutPostedLine = strippedSection.replace(POSTED_LINE_RE, '');
+  return templatePlaceholders.has(normalizePlaceholder(withoutPostedLine));
+}
 
 // modes/oferta.md documents a second legitimate shape for this section: a
 // pointer to a jds/ capture in place of the verbatim text, for a JD too long
@@ -318,7 +378,7 @@ export function detectJdSectionMarker(content) {
 export function hasEmbeddedJdArchive(content) {
   const stripped = extractStrippedJdSection(content);
   if (stripped === null) return false;
-  if (stripped === UNFILLED_TEMPLATE_PLACEHOLDER) return false;
+  if (isUnfilledTemplatePlaceholder(stripped)) return false;
   if (isPathOnlyPointer(stripped)) return false;
   if (detectJdSectionMarker(content)) return false;
   return stripped.length >= MIN_ARCHIVE_CHARS;
@@ -716,6 +776,51 @@ function runSelfTest() {
   check(!hasEmbeddedJdArchive(
     "## Job Description (archived verbatim)\n(the posting's full text, pasted verbatim — see requirement below)\n\n## Machine Summary"),
     'hasEmbeddedJdArchive rejects the unfilled modes/oferta.md template placeholder even though it exceeds MIN_ARCHIVE_CHARS by length alone (CodeRabbit, PR #2791)');
+  check(!hasEmbeddedJdArchive(
+    "## Job Description (archived verbatim)\n(the posting's full text,\n   pasted verbatim — see requirement below)\n\n## Machine Summary"),
+    'hasEmbeddedJdArchive rejects the English placeholder when it was re-wrapped on paste');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\nPosted: 2026-10-20 (shown as 1 week ago)\n（职位描述全文，\n逐字粘贴——见下方要求）\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a Chinese placeholder re-wrapped between two CJK characters, under a Posted line that lifts it past MIN_ARCHIVE_CHARS (CodeRabbit, PR #5926)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n（职位描述全文，逐字粘贴——见下方要求）\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects the unfilled modes/zh/oferta.md placeholder, read from the template itself (full-width parentheses)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n(der vollständige Text der Stellenanzeige, wortgleich eingefügt — siehe Anforderung unten)\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects the unfilled modes/de/angebot.md placeholder, read from the template itself');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\nPosted: 3 days ago\n(der vollständige Text der Stellenanzeige, wortgleich eingefügt — siehe Anforderung unten)\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a placeholder left under a filled-in "Posted:" line (CodeRabbit, PR #5926)');
+  check(!hasEmbeddedJdArchive(
+    "## Job Description (archived verbatim)\nPosted: not visible in source\n(the posting's full text, pasted verbatim — see requirement below)\n\n## Machine Summary"),
+    'hasEmbeddedJdArchive rejects the English placeholder under a "Posted: not visible in source" line');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\nPosted: 3 days ago\nWe are looking for a Senior Widget Engineer to join our growing platform team.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive still credits real JD text under a "Posted:" line');
+  {
+    // A locale added after this checker was written is picked up from its
+    // template alone: no list in the checker to update.
+    const modesDir = mkdtempSync(join(tmpdir(), 'jd-archive-placeholders-'));
+    try {
+      mkdirSync(join(modesDir, 'tr'));
+      writeFileSync(join(modesDir, 'tr', 'is-ilani.md'),
+        '```markdown\n## Job Description (archived verbatim)\n(ilanın tam metni, olduğu gibi yapıştırılır — aşağıdaki gereksinime bakın)\n```\n');
+      mkdirSync(join(modesDir, 'xx'));
+      writeFileSync(join(modesDir, 'xx', 'guide.md'),
+        '## Job Description (archived verbatim)\nThis heading is followed by prose, not a placeholder, so nothing is collected.\n');
+      const found = collectTemplatePlaceholders(modesDir);
+      check(found.has(normalizePlaceholder('(ilanın tam metni, olduğu gibi yapıştırılır — aşağıdaki gereksinime bakın)')),
+        'collectTemplatePlaceholders reads a Turkish placeholder from a modes/tr template');
+      check(found.has(normalizePlaceholder("(the posting's full text, pasted verbatim — see requirement below)")),
+        'collectTemplatePlaceholders always keeps the English placeholder');
+      check(found.size === 2,
+        'collectTemplatePlaceholders collects only parenthesized lines directly under the heading');
+      check(collectTemplatePlaceholders(join(modesDir, 'missing')).size === 1,
+        'collectTemplatePlaceholders falls back to the English placeholder when modes/ cannot be read');
+    } finally {
+      rmSync(modesDir, { recursive: true, force: true });
+    }
+  }
   check(!hasEmbeddedJdArchive(
     '## Job Description (archived verbatim)\n\nSee jds/042-acme-corp-2026-01-15.md for the full archive (archive-posting.mjs --report=042).\n\n## Machine Summary'),
     'hasEmbeddedJdArchive does not credit a path-only pointer sentence as embedded text, even though it clears MIN_ARCHIVE_CHARS by length alone — the pointer must resolve via findCaptureForReport instead (CodeRabbit, PR #2791)');

@@ -1,0 +1,126 @@
+{
+  "_comment": "One table, two readers. Node (tracker-parse.mjs splitTrackerCells, asserted in tests/tracker-row-split-parity.test.mjs) and Go (dashboard/internal/data splitTrackerRow, asserted in career_test.go) must each split every line into these trimmed cells, first real column (#) first. A line is tab-delimited only when it holds a tab and at most two pipes; a tab inside a pipe table is note text. Generated from the Node reader; a change to either reader that breaks parity fails CI.",
+  "cases": [
+    {
+      "name": "pipe row",
+      "line": "| 7 | 2026-09-01 | Example Co | Engineer | 4.2/5 | Applied | ✅ | [7](reports/007-example-co-2026-09-01.md) | seed |",
+      "cells": [
+        "7",
+        "2026-09-01",
+        "Example Co",
+        "Engineer",
+        "4.2/5",
+        "Applied",
+        "✅",
+        "[7](reports/007-example-co-2026-09-01.md)",
+        "seed"
+      ]
+    },
+    {
+      "name": "pipe row whose notes contain a tab",
+      "line": "| 7 | 2026-09-01 | Example Co | Engineer | 4.2/5 | Applied | ✅ | [7](reports/007-example-co-2026-09-01.md) | recruiter said:\tcall Tue |",
+      "cells": [
+        "7",
+        "2026-09-01",
+        "Example Co",
+        "Engineer",
+        "4.2/5",
+        "Applied",
+        "✅",
+        "[7](reports/007-example-co-2026-09-01.md)",
+        "recruiter said:\tcall Tue"
+      ]
+    },
+    {
+      "name": "pipe row whose notes contain several tabs, as set-status --note stores them",
+      "line": "| 8 | 2026-09-02 | Example Co | Engineer | 4.0/5 | Evaluated | ❌ | — | first\tsecond\t\tthird |",
+      "cells": [
+        "8",
+        "2026-09-02",
+        "Example Co",
+        "Engineer",
+        "4.0/5",
+        "Evaluated",
+        "❌",
+        "—",
+        "first\tsecond\t\tthird"
+      ]
+    },
+    {
+      "name": "pipe row with a tab in a middle cell and a URL column",
+      "line": "| 9 | 2026-09-03 | Example\tCo | Engineer | 3.9/5 | Applied | ✅ | — | seed | [ashby](https://jobs.ashbyhq.com/example/9) |",
+      "cells": [
+        "9",
+        "2026-09-03",
+        "Example\tCo",
+        "Engineer",
+        "3.9/5",
+        "Applied",
+        "✅",
+        "—",
+        "seed",
+        "[ashby](https://jobs.ashbyhq.com/example/9)"
+      ]
+    },
+    {
+      "name": "pipe row without a closing pipe",
+      "line": "| 10 | 2026-09-04 | Example Co | Engineer | 4.1/5 | Applied | ✅ | — | seed",
+      "cells": [
+        "10",
+        "2026-09-04",
+        "Example Co",
+        "Engineer",
+        "4.1/5",
+        "Applied",
+        "✅",
+        "—",
+        "seed"
+      ]
+    },
+    {
+      "name": "legacy tab row: leading \"| \", closing \" |\"",
+      "line": "| 11\t2026-09-05\tTabCo\tEngineer\t4/5\tApplied\t❌\t—\tseed |",
+      "cells": [
+        "11",
+        "2026-09-05",
+        "TabCo",
+        "Engineer",
+        "4/5",
+        "Applied",
+        "❌",
+        "—",
+        "seed"
+      ]
+    },
+    {
+      "name": "legacy tab row: leading and closing pipe flush against the cells",
+      "line": "|12\t2026-09-06\tTabCo\tEngineer\t4/5\tApplied\t❌\t—\tseed|",
+      "cells": [
+        "12",
+        "2026-09-06",
+        "TabCo",
+        "Engineer",
+        "4/5",
+        "Applied",
+        "❌",
+        "—",
+        "seed"
+      ]
+    },
+    {
+      "name": "legacy tab row without a closing pipe",
+      "line": "| 13\t2026-09-07\tTabCo\tEngineer\t4/5\tApplied\t❌\t—\tseed",
+      "cells": [
+        "13",
+        "2026-09-07",
+        "TabCo",
+        "Engineer",
+        "4/5",
+        "Applied",
+        "❌",
+        "—",
+        "seed"
+      ]
+    }
+  ]
+}

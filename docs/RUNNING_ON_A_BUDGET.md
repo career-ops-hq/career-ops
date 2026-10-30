@@ -81,7 +81,7 @@ Project-level `.claude/settings.json` and `~/.claude/settings.local.json` can se
 
 ### The batch mode is the exception worth knowing
 
-`batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+`batch/batch-runner.sh` drives `claude -p` workers by default, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
 
 ```bash
 claude setup-token          # requires an active Claude subscription
@@ -282,7 +282,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 | **Kimi K2.5** | Moonshot AI | API pricing applies | Verified with OpenCode using the Moonshot OpenAI-compatible endpoint. Produces structured Markdown suitable for Career-Ops evaluations. See the verified OpenCode recipe below. |
 
 
-> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, Cheaper Inference, API Route, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
+> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
 > ```bash
 > OPENAI_BASE_URL=https://openrouter.ai/api/v1 \
 > OPENAI_MODEL=deepseek/deepseek-chat \
@@ -312,6 +312,26 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > node openai-eval.mjs --file ./jds/job.txt
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint. Use it only if you choose to share that data with the provider.
+>
+> OpenCode Go (`https://opencode.ai/zen/go/v1`) is an OpenAI-compatible gateway that works the same way. Its docs ask clients to identify themselves and send a session id, so `openai-eval.mjs` sends a `User-Agent` (`career-ops/<version>`) and one `x-opencode-session` id per run automatically, for `opencode.ai` only. Per its [docs](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it), Go is designed for coding-agent traffic and is monitored for abuse, so check its terms before pointing batch evaluations at it.
+>
+> Runcrate (`https://api.runcrate.ai/v1`) is another OpenAI-compatible endpoint that works the same way. Model ids carry the vendor prefix, such as `deepseek-ai/DeepSeek-V4.1-Flash`:
+> ```bash
+> OPENAI_BASE_URL=https://api.runcrate.ai/v1 \
+> OPENAI_MODEL=deepseek-ai/DeepSeek-V4.1-Flash \
+> OPENAI_API_KEY=your_runcrate_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> CloudGPU (`https://cloudgpu.app/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4.1-flash`:
+> ```bash
+> OPENAI_BASE_URL=https://cloudgpu.app/v1 \
+> OPENAI_MODEL=deepseek-v4.1-flash \
+> OPENAI_API_KEY=your_cloudgpu_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
 >
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
@@ -380,9 +400,14 @@ To prevent unnecessary API costs or hitting rate limits, implement the following
    ./batch/batch-runner.sh --dry-run
    ```
 3. **Resume Interrupted Runs**:
-   If a batch run is interrupted by a rate limit or network error, do not restart from scratch. Use the `--resume-paused` flag to continue from where it left off, skipping completed jobs and preventing wasted tokens:
+   If a batch run stops part-way, do not restart from scratch. Run the same command again: completed offers are skipped and the rest are picked up, so no tokens go to work that already finished:
+   ```bash
+   ./batch/batch-runner.sh
+   ```
+   If the run paused on a Claude session or usage limit, the offers that hit it are marked `paused_rate_limit`, and a plain run leaves them alone. Once the limit resets, re-run just those with `--resume-paused`, then run without it for the offers that had not started:
    ```bash
    ./batch/batch-runner.sh --resume-paused
+   ./batch/batch-runner.sh
    ```
 4. **Use `--verify` on Scans**:
    When running job board scans, use the liveness verifier to filter out expired postings before they enter your pipeline. This prevents wasting LLM tokens evaluating closed jobs:

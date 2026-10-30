@@ -158,6 +158,11 @@ export const PLAYWRIGHT_INSTALL_TIMEOUT_MS = parsePositiveInt(process.env.CAREER
 export const DASHBOARD_REBUILD_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_DASHBOARD_REBUILD_TIMEOUT_MS, 60000);
 export const UPDATE_PATH_CHECKOUT_BUDGET_MS = parsePositiveInt(process.env.CAREER_OPS_UPDATE_PATH_CHECKOUT_BUDGET_MS, 5000);
 export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_REEXEC_BUFFER_TIMEOUT_MS, 60000);
+// apply()'s exit code when the update was applied but `npm install` failed.
+// The re-exec'd child exits with it after its commit, so the parent can tell
+// "finished, with a follow-up step for the user" from a child that failed
+// partway, which still needs the parent to put its updater files back.
+export const UPDATE_APPLIED_INSTALL_FAILED_EXIT = 3;
 
 // The only byte-exact files the system deliberately owns inside user-layer
 // directories. Keep this escape hatch small and reviewable: aliases, parents,
@@ -180,472 +185,114 @@ export const MANIFEST_USER_PATH_OVERLAPS = Object.freeze([
   'reports/.gitkeep',
 ]);
 
-// System layer paths — ONLY these files get updated
-const SYSTEM_PATHS = [
-  // .gitattributes governs how every other path below is written to disk, and
-  // `apply` checks paths out one at a time in this order: if it landed later,
-  // everything before it would be written under the old core.autocrlf setting
-  // on an existing install, silently (once text=auto is live, git status stays
-  // clean and only a second update would repair it).
-  '.gitattributes',
-  'dead-boards.mjs',
-  'modes/README.md',
-  'modes/_shared.md',
-  'modes/_writing.md',
-  'modes/_profile.template.md',
-  'modes/_custom.template.md',
-  'modes/_brief.template.md',
-  'voice-dna.template.md',
-  'modes/oferta.md',
-  'modes/oferta-signals/',
-  'modes/master-profile.md',
-  'modes/pdf.md',
-  'modes/ats.md',
-  'modes/text.md',
-  'modes/pdf/',
-  'modes/cover.md',
-  'modes/email.md',
-  'modes/add.md',
-  'modes/expand.md',
-  'modes/scan.md',
-  'modes/discover.md',
-  'modes/batch.md',
-  'modes/apply.md',
-  'modes/auto-pipeline.md',
-  'modes/contacto.md',
-  'modes/deep.md',
-  'modes/ofertas.md',
-  'modes/pipeline.md',
-  'modes/triage.md',
-  'modes/project.md',
-  'modes/tracker.md',
-  'modes/training.md',
-  'modes/interview.md',
-  'modes/interview-redflag.md',
-  'modes/latex.md',
-  'modes/latex-tex.md',
-  'modes/followup.md',
-  'modes/offer-prep.md',
-  'modes/interview-prep.md',
-  'modes/interview/',
-  'interview-prep/sessions/.gitkeep',
-  'interview-prep/sessions/README.md',
-  'modes/patterns.md',
-  'modes/calibrate.md',
-  'modes/titles.md',
-  'modes/upskill.md',
-  'modes/intake.md',
-  'modes/retro.md',
-  'documents/.gitkeep',
-  // Empty scaffolds are system-owned exceptions inside otherwise user-owned
-  // directories. Ship only these exact files; the data they sit beside stays
-  // in USER_PATHS and is never checked out by the updater.
-  'data/.gitkeep',
-  'data/offers/.gitkeep',
-  'data/parser-output/.gitkeep',
-  'jds/.gitkeep',
-  'output/.gitkeep',
-  'reports/.gitkeep',
-  'documents/README.md',
-  'modes/update.md',
-  'modes/agent-inbox.md',
-  'modes/reply-watch.md',
-  'modes/outcome.md',
-  'modes/ar/',
-  'modes/da/',
-  'modes/de/',
-  'modes/de/interview/',
-  'modes/fr/',
-  'modes/fr/interview/',
-  'modes/hi/',
-  'modes/es/',
-  'modes/es/interview/',
-  'modes/id/',
-  'modes/id/interview/',
-  'modes/it/',
-  'modes/it/interview/',
-  'modes/ja/',
-  'modes/ja/interview/',
-  'modes/ko/',
-  'modes/ko/interview/',
-  'modes/nl/',
-  'modes/pl/',
-  'modes/pl/interview/',
-  'modes/pt/',
-  'modes/pt/interview/',
-  'modes/ru/',
-  'modes/ru/interview/',
-  'modes/sg/',
-  'modes/tr/',
-  'modes/ua/',
-  'modes/ua/interview/',
-  'modes/vi/',
-  'modes/heuristics/',
-  'modes/regional/',
-  'modes/zh/',
-  'modes/zh/interview/',
-  'modes/zh-TW/',
-  'CLAUDE.md',
-  'CODEX.md',
-  'OPENCODE.md',
-  'AGENTS.md',
-  'GEMINI.md',
-  'KIMI.md',
-  'build-dashboard.mjs',
-  'clean-markers.mjs',
-  'cv-experience-order.mjs',
-  'generate-pdf.mjs',
-  'hired-share.mjs',
-  'hired-wall-build.mjs',
-  'HIRED.md',
-  'theme-style.mjs',
-  'generate-latex.mjs',
-  'install-latex-engine.mjs',
-  'extract-latex-content.mjs',
-  'patch-latex-content.mjs',
-  'lib/ascii-fold.mjs',
-  'lib/cli-flags.mjs',
-  'lib/failure-excerpt.mjs',
-  'lib/gemini-node-floor.mjs',
-  'lib/node-floor.mjs',
-  'lib/local-today.mjs',
-  'lib/parse-date.mjs',
-  'lib/personalization.mjs',
-  'lib/reply-proposals.mjs',
-  'lib/placeholder-cell.mjs',
-  'lib/tracker-addition.mjs',
-  'lib/scan-summary-marker.mjs',
-  'lib/scan-history-columns.mjs',
-  'lib/small-board.mjs',
-  'lib/admission-gate.mjs',
-  'lib/tsv-formula-escape.mjs',
-  'lib/is-main-module.mjs',
-  'lib/mjs-files.mjs',
-  'lib/syntax-check.mjs',
-  'lib/syntax-check-child.mjs',
-  'lib/walk-tree.mjs',
-  'lib/dir-lock.mjs',
-  'lib/run-bounded.mjs',
-  'lib/scratch-dirs.mjs',
-  'lib/story-bank.mjs',
-  'lib/outcome-dir.mjs',
-  'lib/outcome-types.mjs',
-  'lib/latex-escape.mjs',
-  'lib/cv-payload-schema.mjs',
-  'lib/career-profile.mjs',
-  'lib/profile-cv-selection.mjs',
-  'lib/cv-markdown.mjs',
-  'lib/page-format.mjs',
-  'lib/template-manifest.mjs',
-  'lib/agent-cli.mjs',
-  'remember-cli.mjs',
-  'lib/yaml-document.mjs',
-  'scan-hn.mjs',
-  'scripts/check-syntax.mjs',
-  'scripts/export-ats-text.mjs',
-  'scripts/followup-sweep.sh',
-  'scripts/ui-server.mjs',
-  'story-provenance-check.mjs',
-  'lib/latex-content.mjs',
-  'lib/context-budget.mjs',
-  // Ships alongside doctor.mjs, which imports it: an upgraded install whose
-  // updater had no entry for it would check out a doctor that cannot load.
-  'lib/title-filter-conflicts.mjs',
-  // Ships alongside liveness-api.mjs, which imports it.
-  'lib/linkedin-url.mjs',
-  // Retired 2026-09-05: the suite moved to tests/context-budget.test.mjs. The
-  // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
-  // drop it once a release has shipped past that move.
-  'lib/context-budget.test.mjs',
-  'lib/golden-budget-analysis.mjs',
-  'img-to-pdf.mjs',
-  'apply-scope.mjs',
-  'archive-posting.mjs',
-  'jd-capture.mjs',
-  'application-answers.mjs',
-  'generate-cover-letter.mjs',
-  'merge-tracker.mjs',
-  'persist-evaluation-report.mjs',
-  'url-key.mjs',
-  'sync-pdf-flags.mjs',
-  'tracker-links.mjs',
-  'tracker.mjs',
-  'find.mjs',
-  'verify-pipeline.mjs',
-  'discard-analytics.mjs',
-  'sync-batch-input.mjs',
-  'reconcile-pipeline.mjs',
-  'dedup-tracker.mjs',
-  'add-entry.mjs',
-  'github-evidence.mjs',
-  'role-matcher.mjs',
-  'tracker-utils.mjs',
-  'tracker-parse.mjs',
-  'tracker-aliases.json',
-  'session-activity.mjs',
-  'set-status.mjs',
-  'onboard-write.mjs',
-  'mark-pdf-ready.mjs',
-  'normalize-statuses.mjs',
-  'fix-report-links.mjs',
-  'cv-sync-check.mjs',
-  'i18n-drift.mjs',
-  'verify-cv-facts.mjs',
-  'verify-cv-structure.mjs',
-  'verify-ats.mjs',
-  'ats-payload.mjs',
-  'update-system.mjs',
-  'path-resolver.mjs',
-  'ats-vendor.mjs',
-  'history-ats-seeds.mjs',
+// System layer paths — ONLY these files get updated. The list lives in
+// lib/update-manifest.mjs (#5554), so a PR that ships a new file edits that
+// list rather than this file; see its header for the rules an entry follows.
+//
+// It is read from source, not imported: this file must stay self-loading
+// (see the note above). A pre-#1245 parent checks out only this file before
+// re-execing it, and a v1.14–v1.37 parent checks out only its import closure,
+// so on the first upgrade to this layout the child runs with no manifest file
+// on disk. That is the one case where the local list is empty, and apply()
+// does not need the file then: it reads the target release's list from the
+// pinned commit (manifestSystemPathsAt) and adopts it as its own
+// (adoptTargetManifest), which is what the child's list always was. What else
+// reads the local list fails closed without it (see requireLocalSystemPaths).
+export const MANIFEST_MODULE = 'lib/update-manifest.mjs';
+const LOCAL_MANIFEST = readLocalManifest();
+const SYSTEM_PATHS = LOCAL_MANIFEST.paths;
 
-  'reserve-report-num.mjs',
-  'scan.mjs',
-  'migrate-scan-runs.mjs',
-  'pipeline-lock.mjs',
-  'portal-health-lock.mjs',
-  'classify-tier.mjs',
-  'scan-ats-full.mjs',
-  'scan-interamt.mjs',
-  'scan-dayforce.mjs',
-  'company-funded.mjs',
-  'match-star.mjs',
-  'jd-skill-gap.mjs',
-  'career-profile.mjs',
-  'cv-title-check.mjs',
-  'prepare-application.mjs',
-  'application-artifacts.mjs',
-  'evaluation-cache.mjs',
-  'batch-evaluate-gemini.mjs',
-  'providers/',
-  'data-static/',
-  'seeds/',
-  'tests/',
+function readLocalManifest(root = ROOT) {
+  let source;
+  try {
+    source = readFileSync(join(root, ...MANIFEST_MODULE.split('/')), 'utf-8');
+  } catch (err) {
+    return { paths: [], problem: `${MANIFEST_MODULE} is unreadable (${err.code || err.message})` };
+  }
+  const paths = extractArrayFromSource(source, 'SYSTEM_PATHS');
+  if (paths.length === 0) return { paths, problem: `${MANIFEST_MODULE} has no readable SYSTEM_PATHS` };
+  return { paths, problem: '' };
+}
 
-  // ── Retired paths ─────────────────────────────────────────────────────────
-  // These files no longer exist upstream: #3765 moved four root suites into
-  // tests/, and #4758 moved tracker-columns-tests.mjs once it no longer
-  // needed its own timeout. They
-  // stay in the manifest anyway, because SYSTEM_PATHS is what `apply()` prunes
-  // AGAINST — `staleSystemFiles` (see pathMatchesManifest) only deletes a local
-  // file that is gone from the remote tree AND matches an entry here. Drop the
-  // entry and an upgrading install keeps its copy of the old root file forever,
-  // where tests/root-tests-registration.test.mjs then reports it as an
-  // unregistered suite and turns `node test-all.mjs` red on a healthy install.
-  //
-  // Probe on this list vs. the pre-#3765 one, with a local tree holding the
-  // four and a remote tree without them: without these entries the prune
-  // returns nothing at all; with them it returns all four.
-  //
-  // NB: keep square brackets out of every comment in this array. Several
-  // assertions in test-all.mjs extract the manifest with a NON-GREEDY regex
-  // that ends at the first closing bracket, so one inside a comment truncates
-  // the parsed list and every entry below it reads as missing. That is not
-  // hypothetical: the first draft of this block wrote the probe result as an
-  // empty-array literal and turned the check-table-freshness assertion red.
-  //
-  // They are therefore expected to be ABSENT from the working tree, which is
-  // why updater-migration-tests.mjs lists them in ALLOWED_MISSING_ENTRIES.
-  // Safe to delete once no supported install can still be carrying them.
-  'agent-inbox-tests.mjs',
-  'followup-seed-tests.mjs',
-  'paste-reply-tests.mjs',
-  'set-status-tests.mjs',
-  'tracker-columns-tests.mjs',
-  // ── end retired paths ─────────────────────────────────────────────────────
-  'user-agent.mjs',
-  'doctor.mjs',
-  'jsonc-parse.mjs',
-  'check-liveness.mjs',
-  'liveness-core.mjs',
-  'liveness-api.mjs',
-  'liveness-browser.mjs',
-  'browser-extract.mjs',
-  'fetch-jd.mjs',
-  'analyze-patterns.mjs',
-  'keyword-match.mjs',
-  'calibrate.mjs',
-  'upskill.mjs',
-  'skill-extract.mjs',
-  'skip-blockers.mjs',
-  'intake.mjs',
-  'learn.mjs',
-  'stats.mjs',
-  'funnel-stages.mjs',
-  'detect-reposts.mjs',
-  'rank-pipeline.mjs',
-  'discover-ats.mjs',
-  'discover-new-companies.mjs',
-  'check-table-freshness.mjs',
-  'check-jd-archive.mjs',
-  'fingerprint-core.mjs',
-  'listing-fingerprint.mjs',
-  'process-quality.mjs',
-  'company-history.mjs',
-  'rejection-latency.mjs',
-  'closing-soon.mjs',
-  'salary-gap.mjs',
-  'negotiation-roi.mjs',
-  'funnel-velocity.mjs',
-  'assessment-log.mjs',
-  'contacts.mjs',
-  'contact-lookup.mjs',
-  'linkedin-join.mjs',
-  'weekly-digest.mjs',
-  'tracker-sync-check.mjs',
-  'followup-cadence.mjs',
-  'invite-match.mjs',
-  'coverage-check.mjs',
-  'agent-inbox.mjs',
-  'followup-seed.mjs',
-  'profile-language.mjs',
-  'title-keywords.mjs',
-  'gemini-eval.mjs',
-  'ollama-eval.mjs',
-  'openai-eval.mjs',
-  'openai-tailor.mjs',
-  'eval-golden.mjs',
-  'evals/',
-  'openrouter-runner.mjs',
-  'jd-similarity.mjs',
-  'test-all.mjs',
-  // Retired 2026-10-04: the suite moved to tests/tracker-writer-lock.test.mjs
-  // (#4759). The entry stays so staleSystemFiles() prunes the orphan on an
-  // upgraded install; drop it once a release has shipped past that move.
-  'tracker-writer-lock-tests.mjs',
-  'validate-portals.mjs',
-  'validate-profile.mjs',
-  'verify-portals.mjs',
-  'audit-portals.mjs',
-  'fix-slugs.mjs',
-  'updater-migration-tests.mjs',
-  'validate-system-paths-coverage.mjs',
-  'validate-untrusted-content-coverage.mjs',
-  'reply-matcher.mjs',
-  'reply-watch.mjs',
-  'paste-reply.mjs',
-  'contact-extract.mjs',
-  // Retired 2026-10-04: the suite moved to tests/contact-extract.test.mjs. The
-  // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
-  // drop it once a release has shipped past that move.
-  'contact-extract-tests.mjs',
-  'outcome.mjs',
-  'batch/batch-prompt.md',
-  'batch/batch-prompt-match.md',
-  'batch/batch-runner.sh',
-  'batch/aggregate-tokens.mjs',
-  'batch/README.md',
-  'utils/token-tracker.mjs',
-  'batch-tailor.mjs',
-  'dashboard/',
-  'templates/',
-  'config/cv-facts.example.json',
-  'fonts/',
-  'examples/',
-  'config/profile.example.yml',
-  'config/local-paths.example.txt',
-  '.env.example',
-  '.editorconfig',
-  '.agents/',
-  '.claude/skills/',
-  '.opencode/skills/',
-  '.opencode/commands/',
-  '.claude-plugin/',
-  '.codex-plugin/',
-  '.qwen/',
-  '.antigravitycli/skills/',
-  '.grok/skills/',
-  '.kimi/skills/',
-  'docs/',
-  'writing-samples/README.md',
-  'VERSION',
-  'DATA_CONTRACT.md',
-  'MANIFESTO.md',
-  'manifesto.mjs',
-  // SIGNATURES.md cannot join SYSTEM_PATHS: unlike every other system file it
-  // is a pure append-only ledger of who signed the manifesto, and it churns
-  // far faster than the code it would ship beside (49 commits in the 30 days
-  // before this was written). Nothing on an install reads it — manifesto.mjs
-  // parses MANIFESTO.md and never opens it — so shipping it buys an install
-  // nothing, while listing it here puts it in the pathspec check() diffs via
-  // systemTreeDiffers, which turns every new signature into a
-  // system-files-changed report on every install in the world that no apply
-  // can clear for long (#4062). That is one cause of the #3149 class of
-  // permanent update-available, beside the SHA-vs-content bug of #2630, the
-  // ignore-rule route of #2756, and the symlinked skill entrypoints that a
-  // core.symlinks=false checkout materialises into regular files. Do not fix
-  // that last one the way this entry was fixed: the entrypoints must stay in
-  // SYSTEM_PATHS and be excluded from the drift comparison instead, because
-  // ensureSkillEntrypoints only refreshes an entry that still holds the
-  // pointer, so an entrypoint dropped from the manifest silently freezes.
-  // The SIGNATURES.md repo-only coverage is declared in
-  // validate-system-paths-coverage.mjs, and the behaviour is pinned by
-  // tests/updater-signature-ledger-drift.test.mjs.
-  //
-  // Keep this comment free of straight quotes: updater-migration-tests.mjs
-  // parses this array with a comment-blind regex, so an apostrophe here
-  // becomes a phantom manifest entry.
-  'CONTRIBUTING.md',
-  'MAINTAINERS.md',
-  'ARCHITECTURE.md',
-  'README.md',
-  'README.ar.md',
-  'README.cn.md',
-  'README.da.md',
-  'README.de.md',
-  'README.es.md',
-  'README.fr.md',
-  'README.hi.md',
-  'README.ja.md',
-  'README.ko-KR.md',
-  'README.pl.md',
-  'README.pt-BR.md',
-  'README.ru.md',
-  'README.ta.md',
-  'README.ua.md',
-  'README.zh-TW.md',
-  'README.tr.md',
-  'README.vi.md',
-  'README.id.md',
-  'CHANGELOG.md',
-  'CODE_OF_CONDUCT.md',
-  'CONTRIBUTORS.md',
-  '.all-contributorsrc',
-  'GOVERNANCE.md',
-  'LEGAL_DISCLAIMER.md',
-  'SECURITY.md',
-  'SUPPORT.md',
-  'TRADEMARK.md',
-  'LICENSE',
-  'CITATION.cff',
-  'funding.json',
-  '.well-known/',
-  '.editorconfig',
-  '.github/',
-  'package.json',
-  'build-cv-latex.mjs',
-  'build-cv-html.mjs',
-  'cv-sections-core.mjs',
-  'cv-templates.mjs',
-  'playwright.cv.config.mjs',
-  'scaffolder/',
-  'Dockerfile',
-  'docker-compose.yml',
-  '.dockerignore',
-  'cops',
-  'DOCKER.md',
-  'plugins/',
-  'plugins.mjs',
-  'plugins-registry/',
-  'plugin-install.mjs',
-  'plugin-audit.mjs',
-  'validate-plugin-registry.mjs',
-  'config/plugins.example.yml',
-  'opencode.example.json',
-  'seed-fixture.mjs',
-  'test-fixtures/',
-  'upgrade-tests.mjs',
-];
+/**
+ * The local system manifest, for a caller that cannot fall back to the
+ * target's. Throws when lib/update-manifest.mjs is missing or unparseable:
+ * an empty list would read as "nothing is a system file", and a pathspec
+ * diff over no paths is a diff over the whole tree.
+ * @param {string} what - The operation, for the error message.
+ * @returns {string[]}
+ */
+function requireLocalSystemPaths(what) {
+  if (LOCAL_MANIFEST.problem) {
+    // A HEAD from before #5554 has no module to restore: that state is a
+    // failed first upgrade that left this updater on disk. Its own updater
+    // holds the whole list inline, so the fix is to put that file back.
+    let restore = `git checkout HEAD -- ${MANIFEST_MODULE}`;
+    try {
+      gitQuiet('cat-file', '-e', `HEAD:${MANIFEST_MODULE}`);
+    } catch {
+      restore = 'git checkout HEAD -- update-system.mjs';
+    }
+    throw new Error(
+      `${what} needs the local system manifest, but ${LOCAL_MANIFEST.problem}. `
+      + `Restore it with \`${restore}\`, then run this again.`,
+    );
+  }
+  return SYSTEM_PATHS;
+}
+
+/**
+ * Fill the local list from the target's when lib/update-manifest.mjs is not on
+ * disk. Only apply() calls it, with the list it read from the pinned commit.
+ *
+ * Before #5554 the child's local list was the target's by construction: the
+ * child IS the target updater, and the list was in its source. On the first
+ * upgrade to this layout an older parent does not check the module out, so
+ * the child starts with an empty list. This gives it back the list its own
+ * release ships, so the LOCAL_PATHS_FILE collision check in localUserPaths()
+ * and every merge below see what they saw before the split. It never replaces
+ * a list that was read from disk.
+ * @param {string[]} paths - The target's SYSTEM_PATHS, already validated.
+ */
+function adoptTargetManifest(paths) {
+  if (!LOCAL_MANIFEST.problem || SYSTEM_PATHS.length > 0) return;
+  SYSTEM_PATHS.push(...paths);
+}
+
+/**
+ * What an installed v1.37 updater reads as this release's SYSTEM_PATHS.
+ *
+ * Unlike every earlier release, v1.37's apply() parses the TARGET's manifest
+ * in the parent, before the re-exec: it extracts the SYSTEM_PATHS array literal
+ * from the target's update-system.mjs, refuses the update when that comes back
+ * empty, and requires the target updater's import closure to be covered by the
+ * merged manifest. Since #5554 the real list is in lib/update-manifest.mjs,
+ * which that parser never opens, so this function holds the first SYSTEM_PATHS
+ * declaration in this file for it to find. The list only needs to
+ * cover what the parent checks out to start the child: the import closure
+ * below. The child is this file, and it reads the complete manifest itself.
+ *
+ * Nothing in this file calls it. tests/update-manifest.test.mjs holds it to
+ * the closure (resolveReexecCheckout) and to the real manifest. Remove it once
+ * v1.37 installs no longer need to upgrade straight to a current release; a
+ * v1.37 parent that finds no list refuses the update cleanly, with nothing
+ * checked out.
+ * @returns {string[]}
+ */
+export function legacyParentManifest() {
+  const SYSTEM_PATHS = [
+    'update-system.mjs',
+    'lib/update-manifest.mjs',
+    'scaffolder/bin/skill-entrypoints.mjs',
+    'cv-templates.mjs',
+    'path-resolver.mjs',
+    'providers/_html-entities.mjs',
+    'lib/is-main-module.mjs',
+    'lib/yaml-document.mjs',
+    'lib/template-manifest.mjs',
+  ];
+  return SYSTEM_PATHS;
+}
 
 const BOOTSTRAP_PATHS = [
   '.agents/',
@@ -1087,9 +734,10 @@ function isCanonicalManifestPath(path) {
  * overwritten". Refusing the entry up front is what keeps that sequence from starting.
  *
  * Apply this to the MERGED manifest, never to the fetched half alone. apply()
- * self-bootstraps — it checks the fetched update-system.mjs out and re-execs it — so
- * by the time the merge runs, the SYSTEM_PATHS constant in this file IS upstream's
- * list. There is no local half left to trust, and filtering only `remoteSystemPaths`
+ * self-bootstraps — it checks the fetched update-system.mjs and lib/update-manifest.mjs
+ * out and re-execs it — so by the time the merge runs, the local SYSTEM_PATHS IS
+ * upstream's list (or empty, under a parent too old to check the manifest out).
+ * There is no local half left to trust, and filtering only `remoteSystemPaths`
  * lets the identical entry back in through the "local" one.
  *
  * Comparison is on path SEGMENTS, and a trailing slash carries no meaning here.
@@ -1646,14 +1294,43 @@ export function gitToplevelMismatch(root = ROOT) {
 }
 
 /**
- * Throw when git operations from ROOT would land in an enclosing repository.
+ * True when ROOT is not a git checkout at all: it has no `.git` of its own and
+ * git finds no repository from it either — a ZIP download unpacked on its own,
+ * or a copy made without its `.git` directory. The nested variant, where git
+ * DOES find a repository by walking up, is gitToplevelMismatch()'s case.
+ *
+ * Requiring both keeps a checkout git cannot read right now (`.git` present,
+ * but git missing or refusing the directory) on its existing error paths.
+ *
+ * @param {string} [root=ROOT] - Directory to test.
+ * @returns {boolean}
+ */
+export function outsideGitCheckout(root = ROOT) {
+  if (existsSync(join(root, '.git'))) return false;
+  try {
+    gitQuietIn(root, 'rev-parse', '--show-toplevel');
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Throw when ROOT is not a git checkout of its own: git operations would land
+ * in an enclosing repository, or there is no repository for them at all.
  * First statement of apply() and rollback(); check() reports a status instead.
  */
 function assertOwnGitToplevel() {
+  const reclone = `Nothing was changed. To make updates work, clone career-ops fresh (git clone ${CANONICAL_REPO}) and move your user-layer files (cv.md, config/, data/, reports/ — see DATA_CONTRACT.md) into the new clone.`;
   const foreignToplevel = gitToplevelMismatch();
   if (foreignToplevel) {
     throw new Error(
-      `career-ops at ${ROOT} is not a git checkout of its own, so git operations would land in the enclosing repository at ${foreignToplevel} — this happens when the install was unpacked from a ZIP or copied without its .git directory. Nothing was changed. To make updates work, clone career-ops fresh (git clone ${CANONICAL_REPO}) and move your user-layer files (cv.md, config/, data/, reports/ — see DATA_CONTRACT.md) into the new clone.`,
+      `career-ops at ${ROOT} is not a git checkout of its own, so git operations would land in the enclosing repository at ${foreignToplevel} — this happens when the install was unpacked from a ZIP or copied without its .git directory. ${reclone}`,
+    );
+  }
+  if (outsideGitCheckout()) {
+    throw new Error(
+      `career-ops at ${ROOT} is not a git checkout, and updates are installed with git — this happens when the install was downloaded as a ZIP or copied without its .git directory. ${reclone}`,
     );
   }
 }
@@ -1793,6 +1470,8 @@ function redirectToMainCheckout(cmd, argv = process.argv, env = process.env) {
   // A nested .git-less install has its own guards and messages (#3334);
   // its enclosing repo's worktrees are not ours to pick from.
   if (gitToplevelMismatch()) return null;
+  // No repository at all: no worktrees to redirect to.
+  if (outsideGitCheckout()) return null;
 
   const target = worktreeUpdateTarget();
   if (!target) return null;
@@ -1936,6 +1615,45 @@ export function extractArrayFromSource(source, name) {
   const match = source.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
   if (!match) return [];
   return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g), (entry) => entry[1]);
+}
+
+/**
+ * The SYSTEM_PATHS a commit ships, read from that commit's tree.
+ *
+ * Since #5554 the list lives in lib/update-manifest.mjs. A commit that has the
+ * file is read from it and from nothing else: its update-system.mjs still
+ * carries legacyParentManifest()'s short list, which is not the manifest.
+ * A commit without the file predates the split, and its update-system.mjs
+ * holds the whole list. An empty result is returned as-is so the caller's
+ * missing-or-empty check refuses it; it never falls back to the other file,
+ * and it throws when update-system.mjs turns out to hold the short list.
+ *
+ * @param {string} ref - A commit, branch or ref whose tree to read.
+ * @param {{has?: (path: string) => boolean, show?: (path: string) => string}} [ctx]
+ *   Test seams. `has` answers whether the tree has the file; `show` returns
+ *   its contents and throws when it cannot.
+ * @returns {{file: string, paths: string[]}} The file read, and its list.
+ */
+export function manifestSystemPathsAt(ref, ctx = {}) {
+  const has = ctx.has ?? ((path) => {
+    try {
+      gitQuiet('cat-file', '-e', `${ref}:${path}`);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  const show = ctx.show ?? ((path) => git('show', `${ref}:${path}`));
+  const file = has(MANIFEST_MODULE) ? MANIFEST_MODULE : 'update-system.mjs';
+  const paths = extractArrayFromSource(show(file), 'SYSTEM_PATHS');
+  // `has` answers false on any git error, not only on a missing file. A
+  // pre-split update-system.mjs never lists the module, so one that does is
+  // legacyParentManifest()'s short list on a commit whose module could not be
+  // read. Throw: apply() and rollback() turn that into their fail-closed path.
+  if (file !== MANIFEST_MODULE && paths.includes(MANIFEST_MODULE)) {
+    throw new Error(`${ref} ships ${MANIFEST_MODULE} but it could not be read; refusing the short list in update-system.mjs`);
+  }
+  return { file, paths };
 }
 
 function mergePathLists(...lists) {
@@ -2432,9 +2150,12 @@ export function wasEverShippedUpstream(candidatePath, ref = 'FETCH_HEAD', revLis
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
 // and its pre-checkout dynamic imports can load. resolveReexecCheckout derives
 // static imports from the fetched source; this list covers literal dynamic
-// imports and their local dependencies because the parser cannot see them.
+// imports and their local dependencies because the parser cannot see them,
+// and the manifest the target reads from disk at load (MANIFEST_MODULE), so
+// the child's local SYSTEM_PATHS is the target's own list.
 export const REEXEC_FALLBACK_FILES = [
   'update-system.mjs',
+  'lib/update-manifest.mjs',
   'scaffolder/bin/skill-entrypoints.mjs',
   'cv-templates.mjs',
   'lib/is-main-module.mjs',
@@ -3773,29 +3494,55 @@ function pathsOutsideUpdate(listed, owned, preserved) {
       || (!files.has(path) && !dirs.some(dir => path.startsWith(dir))));
 }
 
-function dashboardGoSourcesChanged() {
+/**
+ * Whether any of these paths is an input to the compiled dashboard: a Go
+ * source, or the go.mod/go.sum that pin its dependencies. A dependency bump
+ * changes only those two files, and a binary built before it keeps the old
+ * dependency code until something rebuilds it.
+ *
+ * @param {string[]} paths - Changed paths, relative to the install root.
+ * @returns {boolean}
+ */
+export function dashboardBuildInputsChanged(paths) {
+  return paths.some((path) => path.startsWith('dashboard/')
+    && (path.endsWith('.go') || path === 'dashboard/go.mod' || path === 'dashboard/go.sum'));
+}
+
+/**
+ * The dashboard binary's filename, as build-dashboard.mjs names it. `go build
+ * -o` uses the name exactly as given, so on Windows it must carry the `.exe`:
+ * without it Go writes an extension-less file beside the career-dashboard.exe
+ * the user runs, and that one stays stale.
+ *
+ * @param {string} [platform]
+ * @returns {string}
+ */
+export function dashboardBinaryName(platform = process.platform) {
+  return platform === 'win32' ? 'career-dashboard.exe' : 'career-dashboard';
+}
+
+function dashboardInputsChangedSinceHead() {
   try {
     const changed = git('diff', '--name-only', 'HEAD', '--', 'dashboard');
-    return changed
-      .split('\n')
-      .some(path => path.startsWith('dashboard/') && path.endsWith('.go'));
+    return dashboardBuildInputsChanged(changed.split('\n'));
   } catch {
     return false;
   }
 }
 
 function rebuildDashboardBinaryIfNeeded() {
-  if (!dashboardGoSourcesChanged()) return;
+  if (!dashboardInputsChangedSinceHead()) return;
 
+  const binary = dashboardBinaryName();
   try {
-    execFileSync('go', ['build', '-o', 'career-dashboard', '.'], {
+    execFileSync('go', ['build', '-o', binary, '.'], {
       cwd: join(ROOT, 'dashboard'),
       timeout: DASHBOARD_REBUILD_TIMEOUT_MS,
       stdio: 'pipe',
     });
-    console.log('dashboard binary rebuilt');
+    console.log(`dashboard binary rebuilt (dashboard/${binary})`);
   } catch {
-    console.log('dashboard binary rebuild skipped -- run: cd dashboard && go build -o career-dashboard . manually');
+    console.log('dashboard binary rebuild skipped -- run `npm run build:dashboard` manually');
   }
 }
 
@@ -3905,6 +3652,27 @@ export function refspecForTarget(targetRef) {
 // ── CHANNEL RESOLUTION ──────────────────────────────────────────
 
 /**
+ * Value of a value-taking flag in either `--flag value` or `--flag=value`
+ * form; `undefined` when the flag is absent, `null` when it is present with
+ * no value after it. Same reading as lib/cli-flags.mjs's flagValue()/hasFlag(),
+ * kept local because this file must stay self-loading (see the NOTE at the
+ * top). An `argv.indexOf('--flag')` lookup cannot see the `=` form, so
+ * `apply --channel=main` silently installed the release channel and
+ * `--channel=mian` skipped the unknown-channel check below.
+ *
+ * @param {string[]} argv
+ * @param {string} flag - Flag name including leading dashes.
+ * @returns {string|null|undefined}
+ */
+function argvFlagValue(argv, flag) {
+  const eq = argv.find((a) => typeof a === 'string' && a.startsWith(`${flag}=`));
+  if (eq !== undefined) return eq.slice(flag.length + 1);
+  const idx = argv.indexOf(flag);
+  if (idx === -1) return undefined;
+  return argv[idx + 1] ?? null;
+}
+
+/**
  * Which channel apply() should fetch from: the `--channel` flag wins over
  * CAREER_OPS_UPDATE_CHANNEL (the re-exec'd child's copy of the parent's
  * resolved choice — see resolveTargetRef()'s callers). Unset means the
@@ -3917,9 +3685,9 @@ export function refspecForTarget(targetRef) {
  * @returns {'release'|'main'}
  */
 function resolveChannel(argv, env) {
-  const idx = argv.indexOf('--channel');
-  const requested = idx !== -1 ? argv[idx + 1] : env.CAREER_OPS_UPDATE_CHANNEL;
-  if (requested === undefined || requested === 'release') return 'release';
+  const fromFlag = argvFlagValue(argv, '--channel');
+  const requested = fromFlag !== undefined ? fromFlag : env.CAREER_OPS_UPDATE_CHANNEL;
+  if (requested === undefined || requested === null || requested === 'release') return 'release';
   if (requested === 'main') return 'main';
   throw new Error(`Unknown --channel '${requested}'. Supported channels: release (default), main.`);
 }
@@ -4261,8 +4029,10 @@ async function checkMainChannel(local, marker, runCurlGet, localSha) {
       // for why (#3149, second cause: permanent false drift on a
       // core.symlinks=false install).
       const { SKILL_ENTRYPOINTS } = await import('./scaffolder/bin/skill-entrypoints.mjs');
+      // Without the local manifest there is no pathspec to scope the diff, and
+      // the throw lands in the catch below: drift, the conservative answer.
       systemTreeDrift = systemTreeDiffers(
-        driftPathspecExcludingSkillEntrypoints(SYSTEM_PATHS, SKILL_ENTRYPOINTS),
+        driftPathspecExcludingSkillEntrypoints(requireLocalSystemPaths('The drift check'), SKILL_ENTRYPOINTS),
         'FETCH_HEAD',
       );
     } catch {
@@ -4301,6 +4071,12 @@ async function check() {
   const foreignToplevel = gitToplevelMismatch();
   if (foreignToplevel) {
     console.log(JSON.stringify({ status: 'not-a-git-toplevel', local: localVersion(), toplevel: foreignToplevel }));
+    return;
+  }
+  // No repository at all: apply() cannot install anything here, so reporting
+  // update-available would only lead the agent to offer an update that fails.
+  if (outsideGitCheckout()) {
+    console.log(JSON.stringify({ status: 'not-a-git-checkout', local: localVersion() }));
     return;
   }
 
@@ -4785,7 +4561,7 @@ async function apply() {
   const olderTarget = newerThanTarget(local, targetRef);
   if (olderTarget) {
     console.log(`Installed v${local} is newer than the latest release v${olderTarget}. Nothing to install.`);
-    console.log('To follow every merge on main instead: node update-system.mjs apply --channel main --confirm');
+    console.log('To install the latest commit on main instead (one-off; checks keep following releases): node update-system.mjs apply --channel main --confirm');
     return;
   }
 
@@ -4927,15 +4703,24 @@ async function apply() {
     // missing/corrupt. Whether an entry names the user layer is not decided
     // here: rejectUserLayerPaths refuses those entry by entry (3a), so one bad
     // entry cannot block every install.
-    const manifestUserPaths = effectiveUserPaths();
-    let remoteUpdaterSource;
     try {
-      remoteUpdaterSource = git('show', `${targetCommit}:update-system.mjs`);
+      git('show', `${targetCommit}:update-system.mjs`);
     } catch (err) {
       throw new Error(`Target updater is unreadable; refusing to update (${err.message})`);
     }
-    let remoteSystemPaths = extractArrayFromSource(remoteUpdaterSource, 'SYSTEM_PATHS');
-    remoteSystemPaths = assertCanonicalManifestPaths(remoteSystemPaths, 'Target SYSTEM_PATHS');
+    // lib/update-manifest.mjs when the target has it (#5554), its updater otherwise.
+    let remoteSystemPaths;
+    let remoteManifestFile;
+    try {
+      ({ file: remoteManifestFile, paths: remoteSystemPaths } = manifestSystemPathsAt(targetCommit));
+    } catch (err) {
+      throw new Error(`Target manifest is unreadable; refusing to update (${err.message})`);
+    }
+    remoteSystemPaths = assertCanonicalManifestPaths(remoteSystemPaths, `Target SYSTEM_PATHS (${remoteManifestFile})`);
+    // Before effectiveUserPaths(): its LOCAL_PATHS_FILE collision check reads
+    // the local list, which must not be empty on the first upgrade to this layout.
+    adoptTargetManifest(remoteSystemPaths);
+    const manifestUserPaths = effectiveUserPaths();
     const validatedManifestPaths = assertCanonicalManifestPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
       'Merged updater manifest',
@@ -5036,6 +4821,13 @@ async function apply() {
         });
         return;
       } catch (err) {
+        // The child committed the update and already said what is left to do.
+        // Restoring "the updater files loaded to run the new version" now would
+        // copy the pre-update versions over the committed ones.
+        if (err?.status === UPDATE_APPLIED_INSTALL_FAILED_EXIT) {
+          process.exitCode = UPDATE_APPLIED_INSTALL_FAILED_EXIT;
+          return;
+        }
         const timedOut = isTimeoutLikeError(err);
         if (timedOut) {
           console.error(`Updater self-reexec timed out after ${timeoutSeconds(timeout)}s.`);
@@ -5060,11 +4852,11 @@ async function apply() {
     const updated = [];
 
     // 3a. Keep bootstrap paths as a fallback for very old targets, but the
-    // target updater's SYSTEM_PATHS is now the source of truth for new files.
+    // target's SYSTEM_PATHS is now the source of truth for new files.
     // Being the source of truth stops at the user layer. The filter runs over the
     // MERGED list, not just remoteSystemPaths: by the time this code executes it is
     // itself the fetched updater (apply() self-bootstraps and re-execs, step 2), so
-    // the local SYSTEM_PATHS constant above is upstream's list too. Filtering only
+    // the local SYSTEM_PATHS is upstream's list too. Filtering only
     // the remote half would leave the identical entry to walk in through the "local"
     // one. Refuse loudly rather than aborting — one bad manifest entry must not
     // brick every install's updates, but staying silent is what would keep the
@@ -5429,19 +5221,8 @@ async function apply() {
       throw violation;
     }
 
-    // 5. Install any new dependencies
-    try {
-      execSync('npm install --silent', { cwd: ROOT, timeout: NPM_INSTALL_TIMEOUT_MS });
-    } catch {
-      console.log('npm install skipped (may need manual run)');
-    }
-
-    // 5b. Ensure Playwright browser binary is up to date after npm install
-    try {
-      execSync('npx playwright install chromium', { cwd: ROOT, timeout: PLAYWRIGHT_INSTALL_TIMEOUT_MS, stdio: 'ignore' });
-    } catch {
-      console.log('playwright install skipped (run manually: npx playwright install chromium)');
-    }
+    // 5. Install any new dependencies, then the Playwright browser
+    const dependencies = refreshDependencies();
 
     // 6. Rebuild compiled dashboard if Go sources changed
     rebuildDashboardBinaryIfNeeded();
@@ -5618,6 +5399,20 @@ async function apply() {
       process.exit(1);
     }
 
+    // The new system files are in place, but node_modules still holds the
+    // dependencies of the version this install came from. Scripts that import a
+    // new package, or a new major of an old one, fail when they load. Saying
+    // "Update complete" here sends the user straight into those failures.
+    if (!dependencies.ok) {
+      console.error(`\nUpdate incomplete: v${local} → v${remote}`);
+      console.error(`The system files were updated, but npm install failed: ${dependencies.reason}`);
+      console.error('Scripts can fail to load until node_modules matches package.json.');
+      console.error('Run `npm install`, then `node doctor.mjs`.');
+      console.error('Rollback available: node update-system.mjs rollback');
+      process.exitCode = UPDATE_APPLIED_INSTALL_FAILED_EXIT;
+      return;
+    }
+
     if (preservedSet.has('VERSION')) {
       console.log(`\nUpdate complete: target v${remote}; local VERSION preserved at v${localVersion()}`);
     } else {
@@ -5635,6 +5430,85 @@ async function apply() {
     // Remove lock
     if (!isReexec && existsSync(lockFile)) unlinkSync(lockFile);
   }
+}
+
+// ── DEPENDENCIES ────────────────────────────────────────────────
+
+/**
+ * Bring node_modules in line with the package.json on disk.
+ *
+ * `--loglevel=error` rather than `--silent`: silent also suppresses the error,
+ * which left the caller nothing to report when the install failed.
+ * `--no-audit`: the audit is a second request to the registry that the
+ * install does not need, and it shares NPM_INSTALL_TIMEOUT_MS. When the audit
+ * endpoint is slow it alone can use up the budget.
+ *
+ * PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD stops package.json's postinstall from
+ * downloading Chromium inside this command. That download is the slow part,
+ * and it had to finish within NPM_INSTALL_TIMEOUT_MS: on a slow link the
+ * timeout killed npm partway through. refreshDependencies() installs the
+ * browser next, under its own budget (an explicit `playwright install`
+ * ignores the variable).
+ *
+ * @param {{exec?: typeof execSync, root?: string}} [ctx] - test seams.
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+export function installDependencies(ctx = {}) {
+  const exec = ctx.exec || execSync;
+  try {
+    exec('npm install --no-audit --no-fund --loglevel=error', {
+      cwd: ctx.root || ROOT,
+      timeout: NPM_INSTALL_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' },
+    });
+    return { ok: true };
+  } catch (err) {
+    if (isTimeoutLikeError(err)) {
+      return {
+        ok: false,
+        reason: `timed out after ${timeoutSeconds(NPM_INSTALL_TIMEOUT_MS)}s (raise it with CAREER_OPS_NPM_INSTALL_TIMEOUT_MS)`,
+      };
+    }
+    const firstErrorLine = String(err?.stderr || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+    return { ok: false, reason: firstErrorLine || String(err?.message || err).split('\n')[0] };
+  }
+}
+
+/**
+ * Install the npm dependencies, then the Playwright browser, for the
+ * package.json on disk.
+ *
+ * apply() runs this after checking out the target and rollback() after
+ * restoring the backup. Both have just changed package.json, and node_modules
+ * keeps the previous set until npm runs. The browser step stays non-fatal,
+ * since only PDF generation and browser checks need it, and is skipped when
+ * npm failed. A failed npm install is returned, so the caller does not report
+ * success over it.
+ *
+ * @param {{exec?: typeof execSync, root?: string}} [ctx] - test seams.
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+export function refreshDependencies(ctx = {}) {
+  const exec = ctx.exec || execSync;
+  const root = ctx.root || ROOT;
+  if (!existsSync(join(root, 'package.json'))) return { ok: true };
+
+  const install = installDependencies({ exec, root });
+  if (!install.ok) {
+    // Without the pinned playwright in node_modules, npx would fetch whatever
+    // version is current and install that version's browser, and a network
+    // failure would cost another PLAYWRIGHT_INSTALL_TIMEOUT_MS first.
+    console.log(`npm install failed: ${install.reason}`);
+    return install;
+  }
+
+  try {
+    exec('npx playwright install chromium', { cwd: root, timeout: PLAYWRIGHT_INSTALL_TIMEOUT_MS, stdio: 'ignore' });
+  } catch {
+    console.log('playwright install skipped (run manually: npx playwright install chromium)');
+  }
+  return install;
 }
 
 // ── ROLLBACK ────────────────────────────────────────────────────
@@ -5699,20 +5573,20 @@ function rollback() {
       console.error(`Rollback: ignoring unsafe ${origin} path ${JSON.stringify(path)} — ${reason}.`);
     };
     const safeCurrentPaths = filterSafeManifestPaths(
-      mergePathLists(SYSTEM_PATHS, BOOTSTRAP_PATHS),
+      mergePathLists(requireLocalSystemPaths('Rollback'), BOOTSTRAP_PATHS),
       userPaths,
       warnRejected('current-manifest'),
     );
 
-    // The backup's own updater knows files that may have retired from the
+    // The backup's own manifest knows files that may have retired from the
     // current manifest. If it is a legacy backup without a readable manifest,
     // current+bootstrap coverage still gives a conservative restore set.
     let backupManifestPaths = [];
     try {
       const backupSource = git('show', `${latest}:update-system.mjs`);
-      const backupSystemPaths = extractArrayFromSource(backupSource, 'SYSTEM_PATHS');
+      const { file: backupManifestFile, paths: backupSystemPaths } = manifestSystemPathsAt(latest);
       const backupBootstrapPaths = extractArrayFromSource(backupSource, 'BOOTSTRAP_PATHS');
-      if (backupSystemPaths.length === 0) throw new Error('SYSTEM_PATHS is missing or empty');
+      if (backupSystemPaths.length === 0) throw new Error(`SYSTEM_PATHS in ${backupManifestFile} is missing or empty`);
       backupManifestPaths = filterSafeManifestPaths(
         mergePathLists(backupSystemPaths, backupBootstrapPaths),
         userPaths,
@@ -5738,9 +5612,9 @@ function rollback() {
       targetRef = targetRefForBackup(latest);
       git('show-ref', '--verify', '--quiet', targetRef);
       const targetSource = git('show', `${targetRef}:update-system.mjs`);
-      const targetSystemPaths = extractArrayFromSource(targetSource, 'SYSTEM_PATHS');
+      const { file: targetManifestFile, paths: targetSystemPaths } = manifestSystemPathsAt(targetRef);
       const targetBootstrapPaths = extractArrayFromSource(targetSource, 'BOOTSTRAP_PATHS');
-      if (targetSystemPaths.length === 0) throw new Error('target SYSTEM_PATHS is missing or empty');
+      if (targetSystemPaths.length === 0) throw new Error(`target SYSTEM_PATHS in ${targetManifestFile} is missing or empty`);
       const safeTargetPaths = filterSafeManifestPaths(
         mergePathLists(targetSystemPaths, targetBootstrapPaths),
         userPaths,
@@ -5924,7 +5798,21 @@ function rollback() {
     // The restored tree no longer contains the withheld update snapshot.
     clearStagedUpdate();
 
-    console.log(`Rollback complete. Restored ${restored.length} file(s) from ${latest}, removed ${removed.length} target-only file(s).`);
+    // package.json is back at the backup's version, but node_modules still
+    // holds what the update installed, and package-lock.json is not tracked,
+    // so the backup did not carry one to restore.
+    const dependencies = refreshDependencies();
+
+    const summary = `Restored ${restored.length} file(s) from ${latest}, removed ${removed.length} target-only file(s).`;
+    if (dependencies.ok) {
+      console.log(`Rollback complete. ${summary}`);
+    } else {
+      console.error(`Rollback incomplete. ${summary}`);
+      console.error(`npm install failed: ${dependencies.reason}`);
+      console.error('node_modules still holds the dependencies of the version you rolled back from.');
+      console.error('Run `npm install` so it matches the restored package.json.');
+      process.exitCode = 1;
+    }
     console.log('Your data (CV, profile, tracker, reports) was not affected.');
   } catch (err) {
     console.error('Rollback failed:', err.message);
@@ -5945,10 +5833,10 @@ function rollback() {
  * @param {{curlGet?: typeof curlGet, root?: string, now?: () => Date}} [ctx] - test seams.
  */
 export async function dismiss(argv = process.argv, ctx = {}) {
-  const idx = argv.indexOf('--version');
-  let version = idx !== -1 ? String(argv[idx + 1] || '').trim().replace(/^v/i, '') : '';
-  if (idx !== -1 && !/^\d+\.\d+\.\d+$/.test(version)) {
-    throw new Error(`--version '${argv[idx + 1] ?? ''}' is not a release version (X.Y.Z). Nothing was dismissed.`);
+  const raw = argvFlagValue(argv, '--version');
+  let version = raw !== undefined ? String(raw || '').trim().replace(/^v/i, '') : '';
+  if (raw !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`--version '${raw ?? ''}' is not a release version (X.Y.Z). Nothing was dismissed.`);
   }
   if (!version) {
     const latest = await latestRelease(ctx.curlGet || curlGet);
@@ -5986,6 +5874,19 @@ export async function dismiss(argv = process.argv, ctx = {}) {
 // actually matters — a divergence here would make this copy answer differently
 // from the helper on exactly the platforms the helper was hardened for.
 const canonicalizePath = realpathSync.native ?? realpathSync;
+
+// Imported at the point of use, like every other local module here (see the
+// NOTE at the top): an older path-resolver.mjs without the export reads as
+// "not a plugin install".
+async function managedByPlugin() {
+  try {
+    const { isPluginInstallCopy } = await import('./path-resolver.mjs');
+    return typeof isPluginInstallCopy === 'function' && isPluginInstallCopy(ROOT);
+  } catch {
+    return false;
+  }
+}
+
 const entryPath = process.argv[1] ? resolve(process.argv[1]) : '';
 const selfPath = fileURLToPath(import.meta.url);
 let isCli = Boolean(process.argv[1]) && entryPath === selfPath;
@@ -5997,6 +5898,19 @@ if (isCli) {
   const cmd = process.argv[2] || 'check';
 
   try {
+    // A Claude Code plugin install is a copy Claude Code owns and replaces on
+    // every plugin update, with no .git of its own, so this updater has
+    // nothing to act on there. `managed-by-plugin` joins the statuses agents
+    // stay silent on (AGENTS.md → Update Check).
+    if (cmd !== 'status' && await managedByPlugin()) {
+      if (cmd === 'check') {
+        console.log(JSON.stringify({ status: 'managed-by-plugin', local: localVersion() }));
+        process.exit(0);
+      }
+      console.error('career-ops is installed here as a Claude Code plugin, which Claude Code updates: run /plugin, open the Installed tab and update career-ops. Nothing was changed.');
+      process.exit(1);
+    }
+
     // From a linked worktree the update belongs on main, not this branch.
     const redirected = redirectToMainCheckout(cmd);
     if (redirected !== null) process.exit(redirected);

@@ -12,7 +12,7 @@ This repository is two things at once, and which one you are working on depends 
 - Full suite: `node test-all.mjs --quick` (skips the dashboard build). Run it before you finish, every time.
 - One area: `node test-all.mjs --only <substring>` (for example `--only providers/themuse`).
 - Syntax: `npm run lint`.
-- Dashboard (Go): `npm run build:dashboard` only when you touched `dashboard/`.
+- Dashboard (Go): when you touched `dashboard/` or `templates/states.yml`, run `go test ./...` from `dashboard/`. CI runs it on every pull request, and it is the only check that the dashboard accepts every state in `templates/states.yml`; `node test-all.mjs` does not run it. Add `npm run build:dashboard` when you touched `dashboard/`.
 - New tests go in their own file under `tests/**/*.test.mjs` (auto-discovered). Never add a numbered section to `test-all.mjs`.
 
 ## Files you must not touch

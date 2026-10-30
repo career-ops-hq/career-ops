@@ -10,6 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 console.log('\nkeyword-match: archived-JD fallback');
 
@@ -45,7 +46,7 @@ const jdOnlyReport = [
 try {
   check('a report with no keyword section is scored from its archived JD', () => {
     const r = run(jdOnlyReport);
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.match(r.stderr, /no "## Keywords extracted" section/);
     assert.match(r.stdout, /_Keywords: 3 taken from the archived job description/);
     assert.match(r.stdout, /\*\*Present \(2\):\*\* Docker, Python/);
@@ -54,13 +55,13 @@ try {
 
   check('the JSON output names where the keywords came from', () => {
     const r = run(jdOnlyReport, ['--json']);
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.equal(JSON.parse(r.stdout).keywordSource, 'archived-jd');
   });
 
   check('a report with a keyword section reports that source', () => {
     const r = run(`## Keywords extracted\n- Python\n\n${jdOnlyReport}`, ['--json']);
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     const out = JSON.parse(r.stdout);
     assert.equal(out.keywordSource, 'report');
     assert.deepEqual(out.present, ['Python']);
@@ -70,20 +71,20 @@ try {
     mkdirSync(join(dir, 'jds'), { recursive: true });
     writeFileSync(join(dir, 'jds', '007-example.md'), 'Requirements\nKubernetes and Docker\n');
     const r = run('## Job Description (archived verbatim)\nSee jds/007-example.md for the full archive (archive-posting.mjs --report=007).\n', ['--json']);
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.deepEqual(JSON.parse(r.stdout).missing, ['Kubernetes']);
   });
 
   check('an archive pointer that leaves jds/ is not read', () => {
     writeFileSync(join(dir, 'outside.md'), 'Kubernetes and Docker\n');
     const r = run('## Job Description (archived verbatim)\nSee jds/../Kubernetes.md for the full archive (archive-posting.mjs --report=007).\n');
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.equal(r.stdout, '');
   });
 
   check('a report with neither section exits 1 and names both', () => {
     const r = run('# Evaluation\n\n## A) Role Summary\nNothing else.\n');
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stderr, /## Keywords extracted/);
     assert.match(r.stderr, /## Job Description/);
   });

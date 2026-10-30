@@ -14,10 +14,11 @@ import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 import { createInboxSkipActions, queueInboxSkip } from "@/lib/inbox-skip-client.mjs";
+import { useEvaluationOptions } from "@/components/evaluation-options";
+import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
-const CONFIG_KEY = "career-ops:config";
 const BATCH = 20;
 type UndoNotice = { label: string; fn: () => Promise<void>; busy?: boolean; error?: string };
 
@@ -28,6 +29,7 @@ type UndoNotice = { label: string; fn: () => Promise<void>; busy?: boolean; erro
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const router = useRouter();
   const { jobs, startJob } = useJobs();
+  const { sections, setSections } = useEvaluationOptions();
   // Serialize skip/undo per URL so a fast Undo cannot lose the race to Skip.
   const skipChain = useRef(new Map<string, Promise<void>>());
   const undoRunning = useRef(new Set<UndoNotice["fn"]>());
@@ -62,13 +64,23 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         const pending = new Set(inbox.map((j) => j.url));
         setHidden(urls.filter((u) => pending.has(u)));
       }
-      const c = localStorage.getItem(CONFIG_KEY);
-      setHasCli(!!(c && JSON.parse(c).cliId));
     } catch {
       /* ignore */
     }
     setLoaded(true);
     // First SSR inbox only — later refreshes prune via the inbox effect below.
+  }, []);
+  useEffect(() => {
+    function read() {
+      try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        setHasCli(!!(raw && JSON.parse(raw).cliId));
+      } catch {
+        setHasCli(false);
+      }
+    }
+    read();
+    return subscribeConfig(window, read);
   }, []);
   useEffect(() => {
     if (loaded) try { localStorage.setItem(SHORTLIST_KEY, JSON.stringify(shortlist)); } catch { /* quota */ }
@@ -234,13 +246,13 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
   const estimate = useMemo(() => {
     if (shortlist.length === 0) return {};
-    return estimateRunCost(jobs, "evaluate", shortlist.length);
-  }, [jobs, shortlist.length]);
+    return estimateRunCost(jobs, "evaluate", shortlist.length, sections);
+  }, [jobs, shortlist.length, sections]);
 
   const scoreShortlist = () => {
     const batchId = `shortlist-${Date.now()}`;
     for (const it of shortlist) {
-      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
+      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId, evaluationSections: sections });
     }
     setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
   };
@@ -284,7 +296,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {/* multi-select action bar */}
       {selected.size > 0 && (
         <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm">
-          <span className="font-medium text-brand tabular-nums">{selected.size} selected</span>
+          <span className="font-medium text-brand-text tabular-nums">{selected.size} selected</span>
           <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
             Save to shortlist
           </button>
@@ -323,7 +335,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         <button
           type="button"
           onClick={() => setShowAll(true)}
-          className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+          className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
         >
           See all {ordered.length} in inbox →
         </button>
@@ -343,7 +355,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               <span className="text-muted" role="status">{undo.label}</span>
               {undo.error && <p role="alert" className="text-red-600 dark:text-red-400">{undo.error}</p>}
             </div>
-            <button type="button" onClick={() => void handleUndo(undo)} disabled={undo.busy} aria-busy={Boolean(undo.busy)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand disabled:opacity-50 max-sm:min-h-[44px]">
+            <button type="button" onClick={() => void handleUndo(undo)} disabled={undo.busy} aria-busy={Boolean(undo.busy)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-text disabled:opacity-50 max-sm:min-h-[44px]">
               <Undo2 className="size-3.5" /> {undo.busy ? "Undoing…" : undo.error ? "Retry undo" : "Undo"}
             </button>
           </div>
@@ -352,6 +364,8 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
       <ShortlistTray
         items={shortlist}
+        sections={sections}
+        onSectionsChange={setSections}
         estimate={estimate}
         hasCli={hasCli}
         onRemove={(url) => setShortlist((s) => s.filter((x) => x.url !== url))}

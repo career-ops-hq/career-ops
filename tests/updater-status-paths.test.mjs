@@ -35,7 +35,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, sealProcessGitEnv } from './helpers.mjs';
 import { gitIn, gitStatusEntries, parsePorcelainStatus, userLayerViolations } from '../update-system.mjs';
 
 // quotepath: false in most repos here only to keep assertion strings readable —
@@ -64,6 +64,9 @@ function assertRoundTrip(label, dir, expected) {
     fail(`${label} — parsed ${got}, expected ${want}`);
   }
 }
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\n🧪 Testing updater git-status path parsing...');
 

@@ -23,6 +23,15 @@ export function cleanMessages(input) {
       // Confirm callbacks exist only in the live component; never resurrect them.
       if (p.type === 'confirm' && p.state === 'pending') return [];
       if (p.type === 'confirm' && ['done', 'cancelled'].includes(p.state) && typeof p.summary === 'string') return [{ type: 'note', text: `${p.summary} (${p.state})` }];
+      // A confirmed profile or scan-target write still in flight when the chat
+      // was saved: its outcome is unknown, so it is never recorded as done.
+      if (p.type === 'confirm' && p.state === 'saving' && typeof p.summary === 'string') {
+        return [{ type: 'note', text: `${p.summary} (unconfirmed: the write had not finished)` }];
+      }
+      // A confirmed profile or scan-target write the route refused or failed.
+      if (p.type === 'confirm' && p.state === 'failed' && typeof p.summary === 'string') {
+        return [{ type: 'note', text: `${p.summary} (failed${typeof p.message === 'string' ? `: ${p.message.replace(/\.\s*$/, '')}` : ''})` }];
+      }
       throw new Error('Invalid message part');
     }) };
   });

@@ -61,6 +61,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
+import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -429,6 +430,10 @@ async function main() {
   }
 
   const providers = await loadProviders(PROVIDERS_DIR);
+  // Fold in enabled provider plugins as scan.mjs does (#4026). Without them
+  // every `provider: <plugin-id>` entry audits as `no-provider` while the
+  // scanner scans it. No-op when config/plugins.yml is absent.
+  await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: ROOT });
   const rows = await auditCompanies(companies, { providers, smallThreshold });
 
   let drops = [];

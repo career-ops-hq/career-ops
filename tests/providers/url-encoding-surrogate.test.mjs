@@ -97,6 +97,37 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
   );
 
+  // dover.parseDoverPage — for…of over results[]; id builds the apply URL (the dedup key).
+  const { parseDoverPage } = await load('dover.mjs');
+  check(
+    'dover.parseDoverPage',
+    () => parseDoverPage(
+      { results: [
+        { id: `${LONE}bad`, title: 'Bad', locations: [] },
+        { id: 'g-1', title: 'Good', locations: [] },
+      ] },
+      { companyName: 'Acme', companySegment: 'Acme' },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/g-1'),
+  );
+
+  // notion.parseCollectionRows — for…of over blockIds; the row's page id builds
+  // the posting URL. Ids are checked against a uuid regex instead of encoded.
+  const { parseCollectionRows } = await load('notion.mjs');
+  const notionRow = (id, title) => ({ value: { id, type: 'page', properties: { title: [[title]] } } });
+  const goodId = '00000000-0000-4000-8000-000000000001';
+  check(
+    'notion.parseCollectionRows',
+    () => parseCollectionRows(
+      {
+        result: { reducerResults: { collection_group_results: { blockIds: [`${LONE}bad`, goodId] } } },
+        recordMap: { block: { [`${LONE}bad`]: notionRow(`${LONE}bad`, 'Bad'), [goodId]: notionRow(goodId, 'Good') } },
+      },
+      { collectionId: 'c', origin: 'https://acme.notion.site', companyName: 'Acme' },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/00000000000040008000000000000001'),
+  );
+
   // phenom.parseRefineSearch — for…of over refineSearch.data.jobs; jobId is the dedup key.
   const { parseRefineSearch } = await load('phenom.mjs');
   check(
@@ -145,6 +176,18 @@ try {
       normalizeHubJob({ id: 'g-1', title: 'Good' }),
     ],
     ([bad, good]) => bad === null && good !== null && good.url.includes('g-1'),
+  );
+
+  // bulldogjob.parseBulldogjobPage — for…of over __NEXT_DATA__ pageProps.jobs; id feeds the board URL.
+  const { parseBulldogjobPage } = await load('bulldogjob.mjs');
+  const bulldogjobHtml = (jobs) => `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { totalCount: jobs.length, jobs } } })}</script>`;
+  check(
+    'bulldogjob.parseBulldogjobPage',
+    () => parseBulldogjobPage(bulldogjobHtml([
+      { id: `${LONE}bad`, position: 'Bad', company: { name: 'Acme' } },
+      { id: 'g-1', position: 'Good', company: { name: 'Acme' } },
+    ])).rows,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/g-1'),
   );
 
   // manfred.normalizeManfredOffer — slug feeds the URL; a bad one must yield null.
@@ -200,6 +243,21 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
   );
 
+  // apple.parseSearchPage — for…of over the SSR hydration blob's searchResults;
+  // id, slug and team code are all host-supplied URL segments.
+  const { parseSearchPage: appleParse } = await load('apple.mjs');
+  const applePage = (searchResults) => `<script>window.__staticRouterHydrationData = JSON.parse(${JSON.stringify(JSON.stringify({ loaderData: { search: { searchResults, totalRecords: searchResults.length } } }))});</script>`;
+  check(
+    'apple.parseSearchPage',
+    () => appleParse(applePage([
+      { id: `${LONE}bad`, postingTitle: 'Bad Id', transformedPostingTitle: 'bad-id' },
+      { id: '200000001', postingTitle: 'Bad Slug', transformedPostingTitle: `${LONE}bad` },
+      { id: '200000002', postingTitle: 'Bad Team', transformedPostingTitle: 'bad-team', team: { teamCode: `${LONE}x` } },
+      { id: '200000003', postingTitle: 'Good', transformedPostingTitle: 'good' },
+    ]), 'https://jobs.apple.com/en-us/search?page=1', 'Apple').jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://jobs.apple.com/en-us/details/200000003/good',
+  );
+
   // platsbanken.postingUrl — the ad id is the only segment of the permalink, and
   // the helper's null (rather than a throw) is what lets one bad row drop.
   const { postingUrl: platsbankenPostingUrl } = await load('platsbanken.mjs');
@@ -223,6 +281,17 @@ try {
       'Acme',
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.zohorecruit.com/jobs/Careers/101',
+  );
+
+  // paylocity.parsePaylocityBoard — for…of over window.pageData.Jobs; JobId feeds the posting URL.
+  const { parsePaylocityBoard } = await load('paylocity.mjs');
+  check(
+    'paylocity.parsePaylocityBoard',
+    () => parsePaylocityBoard(
+      `<script>window.pageData = ${JSON.stringify({ Jobs: [{ JobId: `${LONE}bad`, JobTitle: 'Bad Id' }, { JobId: 101, JobTitle: 'Good Id' }] })};</script>`,
+      'Acme',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/101',
   );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
@@ -249,8 +318,8 @@ try {
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
   const CONVERTED = [
-    'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
-    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'phenom.mjs', 'platsbanken.mjs',
+    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
+    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
     'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
 
@@ -260,6 +329,7 @@ try {
   const ALLOWLIST = {
     'csod.mjs': 'corpName comes from portals.yml (careers_url), not from the API response',
     '4dayweek.mjs': 'slug is already validated against SLUG_RE, which rejects a surrogate before this line',
+    'dover.mjs': 'the API URL segment is the board uuid from portals.yml (careers_url), already restricted to UUID_RE',
   };
 
   let files;

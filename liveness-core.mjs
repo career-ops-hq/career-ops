@@ -1,5 +1,5 @@
 import { resolveColumns, parseTrackerRow, linkedReportNumbers, reportUrlForNumbers } from './tracker-parse.mjs';
-import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
+import { parseScanHistoryLine, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 
 // Portals write closure banners with typographic punctuation and accents:
 // WTTJ renders "Cette offre n’est plus disponible." with U+2019, not ASCII "'".
@@ -83,6 +83,15 @@ const HARD_EXPIRED_PATTERNS = [
   /ce poste n'est plus (disponible|a pourvoir|ouvert)/i,
   /recrutement (termine|cloture)/i,
   /candidatures (closes|cloturees)/i,
+  // Polish (pracuj.pl and boards on the same layout keep an archived offer
+  // online, "Aplikuj" button included, and say it is closed only in a banner).
+  // Spelled in the normalized alphabet: normalizeForMatch() folds ą/ń/ż but
+  // not ł, which NFD does not decompose, hence the [łl] classes.
+  /og[łl]oszenie wygas[łl]o/i,
+  /pracodawca zakonczy[łl] zbieranie zg[łl]oszen/i,
+  /oferta (jest )?nieaktualna/i,
+  /oferta archiwalna/i,
+  /kandydaci nie sa juz akceptowani/i,
 ];
 
 const LISTING_PAGE_PATTERNS = [
@@ -118,9 +127,10 @@ const SOFT_EXPIRED_PATTERNS = [
 // Anti-bot interstitials (Cloudflare "Just a moment...", hCaptcha walls, etc.)
 // render a tiny challenge page instead of the posting. Headless Playwright trips
 // these on portals like pracuj.pl. They must NOT be read as expired: the body is
-// short and lacks an apply control, so without this guard they fall through to
-// `insufficient_content` → expired, and scan --verify would write live jobs to
-// scan-history and permanently filter them out. Treat as uncertain instead.
+// short and lacks an apply control, so without this guard they fell through to
+// `insufficient_content`, which then read as expired, and scan --verify wrote
+// live jobs to scan-history and permanently filtered them out. Treat as
+// uncertain, with a code that names the wall.
 // Exported so browser scanners (scan-dayforce.mjs) recognise the same walls.
 export const BOT_CHALLENGE_PATTERNS = [
   /just a moment/i,
@@ -160,6 +170,9 @@ const APPLY_PATTERNS = [
   // most getManfred postings, closed ones too, have an FAQ button such as
   // "¿Puedo aplicar si vivo fuera de España?".
   /\bapuntame\b/i,
+  // Spanish (HiringRoom): "Postularse". The label, not the verb: every HiringRoom
+  // posting also links a help article, "¿Cómo me postulo?" ("how do I apply?").
+  /\bpostularse\b/i,
   // Chinese MokaHR and Feishu Jobs detail pages use these exact control texts.
   // Keep them narrow: bare “申请” appears in descriptive prose, while longer
   // labels containing “投递” can be status/history controls rather than Apply.
@@ -171,6 +184,15 @@ const APPLY_PATTERNS = [
   // which is why the deadline check in classifyLiveness runs before the apply
   // control is read.
   /\bnop [dđ]on ung tuyen\b/i,
+  // Bulgarian (dev.bg, zaplata.bg, wherewework.bg): "Кандидатствай" /
+  // "Кандидатствайте сега". normalizeForMatch strips the breve, so "й" arrives
+  // as "и". \b only knows ASCII word characters, so Cyrillic edges use
+  // lookarounds instead.
+  /^кандидатства[ий](?:те)?(?![\p{L}\p{M}])/iu,
+  // jobtiger.bg labels Apply with the noun, wherewework.bg's external link with
+  // "Външно кандидатстване". Only at the start of the label: the noun also ends
+  // advice-article links ("…писмо за кандидатстване"), which are not Apply.
+  /^(?:външно )?кандидатстване(?![\p{L}\p{M}])/iu,
 ];
 
 // CareerViet prints the application deadline in the posting's info block as
@@ -206,9 +228,13 @@ const MIN_CONTENT_CHARS = 300;
 // A job-detail URL almost always carries the posting's identity: a numeric req id
 // (Greenhouse, Workday pid, Microsoft) or a UUID (Lever, Ashby). If the requested
 // URL had one and the final URL lost it, the browser landed somewhere else.
+// liveness-browser.mjs reads the same id to tell the posting's own Apply link
+// from the site's links in the page chrome.
 const JOB_ID_TOKEN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{5,}/gi;
+// Its source, for the control walk, which runs in the page and cannot import it.
+export const JOB_ID_PATTERN = JOB_ID_TOKEN.source;
 
-function jobIdToken(url = '') {
+export function jobIdToken(url = '') {
   const matches = url.match(JOB_ID_TOKEN);
   return matches ? matches[matches.length - 1].toLowerCase() : null;
 }
@@ -276,12 +302,21 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
   // 429 belongs with 403/503: rate limiting is the board throttling US, never
   // evidence the posting is gone. Its body is a short "Too Many Requests", well
   // under MIN_CONTENT_CHARS, so without this it fell through to
-  // insufficient_content and read as `expired` — and an expired result is
+  // insufficient_content, which then read as `expired` — and an expired result is
   // written to scan-history as skipped_expired, whose URL every later scan
   // dedup-skips (indefinitely, unless scan_history.recheck_after_days is set).
   // Scanning harder is exactly what earns a 429, so this compounds.
   if (status === 403 || status === 429 || status === 503) {
     return { result: 'uncertain', code: 'access_blocked', reason: `HTTP ${status} (access blocked, likely anti-bot)` };
+  }
+  // 401 and 451 refuse the REQUEST, not the posting: a sign-in wall, and a
+  // posting withheld for legal reasons, usually by region. AGENTS.md: "a
+  // login/error page is unconfirmed, not closed". Both bodies are short error
+  // pages, so they fell through to insufficient_content and read as expired,
+  // which scan --verify writes as skipped_expired and later scans dedup-skip.
+  if (status === 401 || status === 451) {
+    const why = status === 401 ? 'sign-in required' : 'unavailable for legal reasons, usually by region';
+    return { result: 'uncertain', code: 'access_blocked', reason: `HTTP ${status} (${why})` };
   }
   // Any other 5xx is a transient origin error (502/504 gateway hiccups, 500s
   // during deploys), not evidence the posting is gone. Without this guard the
@@ -342,8 +377,17 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
     return { result: 'expired', code: 'listing_page', reason: `pattern matched: ${listingPage.source}` };
   }
 
+  // A short page with no closure notice, no 404/410 and no apply control has
+  // not said the posting is closed: a client-rendered posting that has not
+  // painted, or a slow single-page app, reads the same way. Every closure this
+  // classifier trusts was checked above, so this is uncertain, not expired.
+  // AGENTS.md calls a loading placeholder unconfirmed, not closed, and an
+  // `expired` here was written to scan-history as skipped_expired by
+  // scan --verify, dedup-filtering a live posting out of later scans. The code
+  // stays `insufficient_content`: liveness-browser.mjs keys its hydration poll
+  // and retries on it, and isUnreadableVerdict() reads it.
   if (bodyText.trim().length < MIN_CONTENT_CHARS) {
-    return { result: 'expired', code: 'insufficient_content', reason: 'insufficient content — likely nav/footer only' };
+    return { result: 'uncertain', code: 'insufficient_content', reason: 'insufficient content — likely nav/footer only, or not rendered yet' };
   }
 
   return { result: 'uncertain', code: 'no_apply_control', reason: 'content present but no visible apply control found' };
@@ -358,14 +402,65 @@ const EXPIRED_HISTORY_STATUS = /expired/i;
 
 /**
  * True when a verdict means "the posting body could not be read", not "the
- * posting is closed". Today that condition is carried inside
- * `result: 'expired'` with `code: 'insufficient_content'` (nav/footer only, or
- * a body that sits in an unreadable iframe). Consumers that must not treat such
- * a verdict as closure call this instead of repeating the code string.
- * Detection only: it does not change what classifyLiveness returns.
+ * posting is closed": `code: 'insufficient_content'` (nav/footer only, or a
+ * body that sits in an unreadable iframe). classifyLiveness returns it as
+ * `uncertain`; consumers that may also see an older or hand-built verdict
+ * labelled `expired` with that code call this instead of repeating the code
+ * string. Detection only: it does not change what classifyLiveness returns.
  */
 export function isUnreadableVerdict(verdict) {
   return verdict?.code === 'insufficient_content';
+}
+
+/**
+ * Does this verdict prove the posting is CLOSED?
+ *
+ * `expired` alone does not. classifyLiveness now returns an
+ * `insufficient_content` verdict as `uncertain`, but an older or hand-built
+ * verdict can still carry that code under `expired`, and it means the body
+ * could not be read — a page still hydrating, a client-side render that never
+ * landed — not that the posting is gone (#5408). AGENTS.md is explicit that
+ * "an unreadable JD, loading placeholder, or login/error page is unconfirmed,
+ * not closed".
+ *
+ * One definition, because the rule used to be COPIED. The scan-history record
+ * planner and batch-evaluate-gemini.mjs each spelled it out as
+ * `result !== 'expired' || isUnreadableVerdict(...)`, and the third caller —
+ * check-liveness.mjs --discard-expired, the only one of the three that writes
+ * to the tracker — took every `expired` verdict and never applied it. So an
+ * Evaluated row whose page was merely slow to render was rewritten to
+ * Discarded with the note "posting closed". Routing all three through here is
+ * what stops a fourth caller drifting the same way.
+ *
+ * @param {{result?: string, code?: string}|null|undefined} verdict
+ * @returns {boolean}
+ */
+export function isClosureEvidence(verdict) {
+  return verdict?.result === 'expired' && !isUnreadableVerdict(verdict);
+}
+
+/**
+ * The URLs `--discard-expired` may close: only those with closure evidence.
+ *
+ * Kept pure and exported so the exact selection the CLI uses is testable
+ * without a browser.
+ *
+ * @param {Array<{url?: string, result?: string, code?: string}>} verdicts
+ * @returns {{closed: string[], unreadable: string[]}} `unreadable` is reported
+ *   rather than silently dropped, so the user can see why a row they expected
+ *   to close was left alone.
+ */
+export function discardableExpiredUrls(verdicts) {
+  const closed = [];
+  const unreadable = [];
+  for (const v of verdicts ?? []) {
+    if (!v?.url) continue;
+    if (isClosureEvidence(v)) closed.push(v.url);
+    // Not gated on `expired`: classifyLiveness returns an unreadable page as
+    // `uncertain`, and the user still needs to hear why that row stayed open.
+    else if (isUnreadableVerdict(v)) unreadable.push(v.url);
+  }
+  return { closed, unreadable };
 }
 
 /**
@@ -377,12 +472,12 @@ export function isUnreadableVerdict(verdict) {
  *   - **Only `expired`.** `uncertain` is a timeout or a bot wall, never a death
  *     certificate; recording it would bury a live posting behind a network
  *     hiccup, a strictly worse failure than the one this closes.
- *   - **Not an unrendered page.** The browser rung reads a page under 300
- *     characters with no closure notice and no apply control as
- *     `insufficient_content`, which is mostly a page that had not rendered yet.
- *     AGENTS.md calls a loading placeholder unconfirmed, not closed, and
- *     batch-evaluate-gemini.mjs skips the same code. A dead posting that reads
- *     this way gets no row, as it did before this recorder existed.
+ *   - **Not an unrendered page.** A page under 300 characters with no
+ *     closure notice and no apply control reads as `insufficient_content`,
+ *     which is mostly a page that had not rendered yet. classifyLiveness
+ *     returns it as `uncertain`, and the code is skipped here too, so a
+ *     verdict built elsewhere with `expired` and that code still writes no
+ *     row. AGENTS.md calls a loading placeholder unconfirmed, not closed.
  *   - **Only URLs the history already knows.** A liveness sweep is not a
  *     discovery channel: a URL scan-history never saw has no row to retire, and
  *     inventing one would put a posting nothing surfaced into the dedup set.
@@ -406,8 +501,8 @@ export function planExpiredHistoryRows(scanHistoryText = '', verdicts = [], norm
   const knownByKey = new Map(); // dedup key -> Map(verbatim url -> row fields)
   const recorded = new Set();   // verbatim urls that already carry an expired row
 
-  // slice(1) skips the header, the same convention collectSeenUrls uses.
-  for (const line of String(scanHistoryText ?? '').split('\n').slice(1)) {
+  // Line 0 only when it is the header, as collectSeenUrls reads it.
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     // parseScanHistoryLine undoes the formula escaping the writer applied. The
     // planned rows go back through appendToScanHistory, which escapes again, so
     // reading the stored cells raw added one more leading apostrophe to a title,
@@ -432,7 +527,7 @@ export function planExpiredHistoryRows(scanHistoryText = '', verdicts = [], norm
   const rows = [];
   const claimed = new Set();
   for (const verdict of verdicts ?? []) {
-    if (verdict?.result !== 'expired' || isUnreadableVerdict(verdict)) continue;
+    if (!isClosureEvidence(verdict)) continue;
     const candidate = typeof verdict.url === 'string' ? verdict.url.trim() : '';
     if (!candidate) continue;
     const known = knownByKey.get(normalizeUrl(candidate));

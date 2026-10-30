@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Dibuat oleh <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Dibuat oleh <a href="https://github.com/santifer"><strong>@santifer</strong></a>, bersama&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.id.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.id.md#builders">700+ kontributor</a></p>
 
 <p align="center">
 <strong>Berbulan-bulan kirim CV tanpa&nbsp;kabar.</strong><br>
@@ -123,6 +123,8 @@ Heningnya kabar setelah Anda menekan tombol kirim bukanlah salah Anda. Cukup ban
 <br>
 
 Proses rekrutmen tidak akan membaik dengan sendirinya. Orang-orang yang menjalaninyalah yang bisa memperbaikinya—dan mereka sudah berkumpul di sini, saling mencocokkan catatan dan membantu mengatur konfigurasi satu sama lain.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=id" alt="Dinding animasi berisi avatar GitHub para kontributor, terisi sesuai urutan kedatangan sejak April 2026, dengan kotak berikutnya dibiarkan kosong." width="100%"></a></p>
 
@@ -230,17 +232,8 @@ npx playwright install chromium   # hanya diperlukan untuk pembuatan PDF
 # package manager distro Anda jika pembuatan PDF gagal membuka browser
 # (dokumentasi resmi Playwright mencantumkan daftar library yang dibutuhkan untuk tiap platform).
 
-# 2. Periksa instalasi
-npm run doctor                    # Memvalidasi semua prasyarat sistem
-
-# 3. Konfigurasi
-cp config/profile.example.yml config/profile.yml  # Edit sesuai detail profil Anda
-cp templates/portals.example.yml portals.yml       # Sesuaikan daftar perusahaan
-
-# 4. Tambahkan CV Anda
-# Buat file cv.md di root proyek berisi CV Anda dalam format Markdown
-
-# 5. Buka AI CLI Anda di direktori ini
+# 2. Buka AI CLI Anda di direktori ini. Saat pertama kali dijalankan, CLI akan
+#    memandu penyiapan (CV, profil, dan target peran Anda) lewat obrolan
 claude   # atau codex / opencode / qwen / agy / grok
 
 # Lalu minta CLI Anda untuk menyesuaikan sistem dengan kebutuhan Anda:
@@ -249,7 +242,7 @@ claude   # atau codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Mulai gunakan
+# 3. Mulai gunakan
 # Tempel URL lowongan atau teks JD untuk memicu auto-pipeline
 # Jika CLI Anda mendukung slash command, gunakan /career-ops (atau alias spesifik CLI tersebut)
 # Di Codex, minta mode yang sama menggunakan bahasa sehari-hari, misalnya:
@@ -273,11 +266,11 @@ Aktifkan *flag* ini **hanya jika *proxy* yang dikonfigurasi memang memblokir kon
 npm i -g @santifer/career-ops
 ```
 
-Perintah ini menginstal *binary* `career-ops` secara global sehingga Anda bisa menjalankannya secara langsung tanpa `npx`. Berbeda dengan `npx @santifer/career-ops init` (yang menyiapkan direktori proyek baru), instalasi global memberi Anda perintah `career-ops` permanen yang dapat dipanggil dari mana saja di terminal Anda.
+Perintah ini menginstal *binary* `career-ops` secara global sehingga Anda bisa menjalankan `career-ops init [folder]` tanpa `npx`. `init` adalah satu-satunya perintahnya: ia menyiapkan *workspace*, dan semua langkah sesudahnya berlangsung di dalam AI coding CLI Anda (lihat Penggunaan di bawah), bukan melalui *binary* ini.
 
 **Mana yang sebaiknya Anda gunakan?**
 - `npx @santifer/career-ops init`: paling pas untuk penggunaan pertama kali; membuatkan folder proyek khusus.
-- `npm i -g @santifer/career-ops`: paling pas setelah Anda memiliki folder proyek dan ingin menjalankan perintah career-ops secara langsung.
+- `npm i -g @santifer/career-ops`: jika Anda lebih suka mengetik `career-ops init` daripada bentuk `npx`. Instalasi ini tidak menambahkan perintah lain.
 
 > **Sistem ini dirancang agar bisa dikustomisasi langsung oleh AI coding CLI Anda.** Mode, arketipe peran, bobot penilaian, hingga skrip negosiasi -- cukup minta AI CLI Anda untuk mengubahnya. Karena ia membaca file yang sama dengan yang ia gunakan, ia tahu persis bagian mana yang harus diedit.
 
@@ -336,25 +329,7 @@ Di Codex, ketersediaan *slash command* tidak selalu dijamin. Gunakan nama mode y
 
 ## Cara Kerjanya
 
-```
-Anda menempelkan URL atau deskripsi lowongan
-        │
-        ▼
-┌──────────────────┐
-│  Deteksi         │  Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Arketipe        │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  Evaluasi A-H    │  Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan
-│  (membaca cv.md) │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Laporan PDF Entri
-   .md  .pdf Tracker
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-id-dark.svg"><img src="docs/how-it-works-id-light.svg" alt="Anda menempelkan URL atau deskripsi lowongan → Deteksi Arketipe (Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation) → Evaluasi A-H (membaca cv.md; Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan) → Laporan (reports/*.md), PDF (output/*.pdf), Entri Tracker (data/applications.md)" width="760"></picture></p>
 
 ## Integrasi Antigravity CLI
 
@@ -513,7 +488,7 @@ npm run serve:dashboard   # jalankan TUI
 npm run build:dashboard   # opsional: build binary mandiri (standalone)
 ```
 
-Fitur: 6 tab filter, 4 mode pengurutan, tampilan berkelompok/rata (*grouped/flat*), pratinjau *lazy-load*, serta pengubahan status langsung dari daftar (*inline*).
+Fitur: 10 tab filter, 8 mode pengurutan, tampilan berkelompok/rata (*grouped/flat*), pratinjau *lazy-load*, serta pengubahan status langsung dari daftar (*inline*).
 
 Tersedia juga **UI web eksperimental** (masih berstatus *alpha* dan bersifat *opt-in*: tidak ada yang berjalan kecuali Anda menyalakannya sendiri): lihat [`web/README.md`](web/README.md).
 
@@ -633,7 +608,7 @@ Dashboard TUI Go, skrip Node.js, dan semua mode agen AI secara otomatis mematuhi
 career-ops ([career-ops.org](https://career-ops.org), juga dikenal sebagai **careerops**) adalah alat pencarian kerja AI *open-source* yang berjalan secara lokal di dalam AI coding CLI Anda (Claude Code, Codex, OpenCode, dan lainnya) serta menyerahkan setiap keputusan sepenuhnya kepada Anda. Alat ini mengevaluasi lowongan kerja terhadap CV Anda, membuatkan PDF ramah ATS yang disesuaikan, menemukan kontak yang tepat untuk dihubungi, dan melacak semuanya di satu tempat: keputusan akhir selalu ada di tangan Anda. Proyek ini adalah implementasi referensi pertama dari [Manifesto CareerOps](https://career-ops.org/manifesto).
 
 **Apakah CV yang disesuaikan bisa mengarang hal yang tidak nyata?**
-Tidak boleh, dan *prompt*-nya secara tegas menginstruksikan demikian: susun ulang kalimatnya, jangan pernah mengarang bebas. Skrip `generate-pdf` akan memblokir pembuatan CV jika ada angka atau fakta yang tidak ditemukan di dalam sumber data Anda, kecuali jika Anda menyertakan *flag* `--skip-fact-check`. Saat ini sistem belum memeriksa kesesuaian nama jabatan atau menilai setiap perubahan gaya bahasa secara menyeluruh. Ada dua *issue* terbuka yang melacak pengembangan fitur tersebut: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (nama jabatan harus sesuai dengan cv.md) dan [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (pemeriksaan keakuratan berbasis *fail-closed*). Sampai keduanya digabungkan (*merge*), pastikan Anda selalu membaca setiap CV sebelum mengirimkannya. [Penafian Hukum (Legal Disclaimer)](LEGAL_DISCLAIMER.md) menjelaskan hal yang sama secara lebih rinci.
+Tidak boleh, dan *prompt*-nya secara tegas menginstruksikan demikian: susun ulang kalimatnya, jangan pernah mengarang bebas. Skrip `generate-pdf` akan memblokir pembuatan CV jika ada angka atau fakta yang tidak ditemukan di dalam sumber data Anda, kecuali jika Anda menyertakan *flag* `--skip-fact-check`. Mode `pdf` juga menjalankan `cv-title-check.mjs`, yang membandingkan setiap nama jabatan di CV yang disesuaikan dengan nama jabatan yang tertulis di cv.md untuk pekerjaan yang sama (dicocokkan berdasarkan perusahaan dan tanggal), lalu menanyakan apakah Anda ingin mempertahankan atau mengembalikan setiap nama jabatan yang berbeda. Pemeriksaan ini hanya memberi peringatan, tidak memblokir, karena membingkai ulang nama jabatan terkadang memang keputusan Anda. Belum ada yang menilai perubahan gaya bahasa: *issue* [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (pemeriksaan keakuratan berbasis *fail-closed*) melacak hal tersebut. Sampai saat itu, pastikan Anda selalu membaca setiap CV sebelum mengirimkannya. [Penafian Hukum (Legal Disclaimer)](LEGAL_DISCLAIMER.md) menjelaskan hal yang sama secara lebih rinci.
 
 **Bisakah saya menjalankan career-ops secara gratis, atau dengan model lokal / yang lebih murah?**
 Bisa. career-ops bersifat CLI-agnostik dan dapat berjalan di atas model gratis maupun lokal (model gratis di OpenRouter, Ollama, atau *endpoint* apa pun yang kompatibel dengan OpenAI), sehingga Anda tidak terikat pada langganan berbayar. Lihat [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) untuk panduan lengkapnya.

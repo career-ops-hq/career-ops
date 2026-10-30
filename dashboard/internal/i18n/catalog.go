@@ -241,6 +241,23 @@ func (c *Catalog) StatusLabel(norm string) string {
 	}
 }
 
+// WorkModeLabel returns the localized display label for a derived work mode
+// ("Remote", "RemoteFlex", "Hybrid", "Full").
+func (c *Catalog) WorkModeLabel(mode string) string {
+	switch mode {
+	case "Remote":
+		return c.ModeRemote
+	case "RemoteFlex":
+		return c.ModeRemoteFlex
+	case "Hybrid":
+		return c.ModeHybrid
+	case "Full":
+		return c.ModeFull
+	default:
+		return mode
+	}
+}
+
 // NowFunc allows injecting a mock clock for testing.
 var NowFunc = time.Now
 
@@ -330,13 +347,13 @@ var En = Catalog{
 
 	// Work modes
 	ModeRemote:     "Remote",
-	ModeRemoteFlex: "RemoteFlex",
+	ModeRemoteFlex: "Remote (flex)",
 	ModeHybrid:     "Hybrid",
-	ModeFull:       "Full",
+	ModeFull:       "On-site",
 
 	// Progress screen
 	ProgressTitle:   "SEARCH PROGRESS",
-	ProgressSummary: "%d tracked | %.1f avg score",
+	ProgressSummary: "%d tracked | %s avg score",
 	FunnelTitle:     "Pipeline Funnel",
 	ScoresTitle:     "Score Distribution",
 	RatesTitle:      "Conversion Rates",
@@ -503,7 +520,7 @@ var Tr = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "TAKİP İLERLEMESİ",
-	ProgressSummary: "%d takipte | %.1f ort. puan",
+	ProgressSummary: "%d takipte | %s ort. puan",
 	FunnelTitle:     "Pipeline Hunisi",
 	ScoresTitle:     "Puan Dağılımı",
 	RatesTitle:      "Dönüşüm Oranları",
@@ -670,7 +687,7 @@ var Es = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "PROGRESO DE BÚSQUEDA",
-	ProgressSummary: "%d en seguimiento | %.1f puntuación media",
+	ProgressSummary: "%d en seguimiento | %s puntuación media",
 	FunnelTitle:     "Embudo del proceso",
 	ScoresTitle:     "Distribución de puntuaciones",
 	RatesTitle:      "Tasas de conversión",

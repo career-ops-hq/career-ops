@@ -23,7 +23,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -266,6 +266,18 @@ test("a terminated child returns a non-zero platform-native status", () => {
   assert.notEqual(run.status, 1, "a killed server must not look like a failed launch");
 });
 
+test("next is started with its usage telemetry off", () => {
+  // Given a next that reports the telemetry switch instead of its argv, and a
+  // caller whose environment does not set it
+  const body = "console.log(JSON.stringify([process.env.NEXT_TELEMETRY_DISABLED ?? null]));\n";
+  for (const command of ["dev", "start"]) {
+    // When the launcher starts it
+    const run = launch({ args: [command], body });
+    // Then next sees the switch, so it records and sends nothing
+    assert.deepEqual(run.argv, ["1"], `${command}: NEXT_TELEMETRY_DISABLED must reach next`);
+  }
+});
+
 test("an unknown command prints usage and exits 1 without starting next", () => {
   // Given argv naming no next subcommand
   // When the launcher runs
@@ -302,6 +314,22 @@ test("no script starts next on its own", () => {
   // Then none bypasses the bind decision — this catches a re-added `"dev": "next dev"`
   // and equally a new `"dev:lan": "next dev -H 0.0.0.0"` nobody thought to review
   assert.deepEqual(offenders, []);
+});
+
+test("the build script, which skips the launcher, still turns telemetry off", () => {
+  // Given `next build`, which npm runs directly rather than through server.mjs
+  assert.ok(/(^|\s)next\s+build\b/.test(scripts.build ?? ""), `build script was: ${scripts.build}`);
+  // When next loads the config it reads before recording anything
+  const config = join(WEB_ROOT, "next.config.mjs");
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(config).href)});
+console.log(process.env.NEXT_TELEMETRY_DISABLED ?? "");`],
+    { encoding: "utf8", timeout: 30_000, env: { PATH: process.env.PATH } },
+  );
+  // Then the config has switched telemetry off for the rest of the build
+  assert.equal(result.status, 0, `importing next.config.mjs failed: ${result.stderr}`);
+  assert.equal(result.stdout.trim(), "1");
 });
 
 test("the bypass check actually fires", () => {

@@ -8,7 +8,7 @@
  * modes (apply Step 9, followup, batch) call this instead of editing the table.
  *
  * Usage:
- *   node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
+ *   node set-status.mjs <tracker#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
  *
  * Row resolution:
  *   - --row N     → exact match on the # column, stated explicitly
@@ -55,6 +55,12 @@
  * non-canonical state, unreadable states.yml, or non-retryable lock/write failure ·
  * 2 row not found or unreadable tracker · 3 ambiguous company match ·
  * 4 tracker lock timeout (busy — retry later).
+ *
+ * --undo takes back the row's last logged status change: it restores the
+ * prior status and appends a retraction line ("-" to-state) to the ledger, so
+ * every ledger reader drops the change as if it never happened. It refuses
+ * when the tracker no longer shows that change's status (someone edited the
+ * row since) and when the change has no known prior status.
  *
  * When the new status is Applied, the JSON output carries
  * `"followupSeedCandidate": true` — the hook point for seeding
@@ -104,22 +110,22 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname, resolve, sep, basename } from 'path';
+import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync, spawn } from 'child_process';
 import { createHash } from 'node:crypto';
-import { extractTrackerReportNumbers, parseMarkdownLinks, firstLinkTarget, soleMarkdownLink, resolveColumns, parseTrackerRow, normalizeTextKey, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
+import { extractTrackerReportNumbers, parseMarkdownLinks, soleMarkdownLink, resolveColumns, parseTrackerRow, normalizeTextKey, splitTrackerCells, trackerRowSeparator, trackerRowIdentity } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
   resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
-  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli, resolveWorkspaceRoot,
-  appendLedgerRows,
+  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
+  appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
-import { claimActivity, releaseActivity, describeActiveOwner } from './session-activity.mjs';
-import { hasEmbeddedJdArchive } from './check-jd-archive.mjs';
-import { captureSlug, findCaptureForReport } from './jd-capture.mjs';
+import { getCareerOpsRoot, resolveTrackerPathForWrite } from './path-resolver.mjs';
+import {
+  claimStatusActivity, appendStatusTransition, statusLogPath, seedFollowupOnApplied, archiveJdOnInterview,
+} from './lib/status-hooks.mjs';
+import { parseStatusLog, replayObservations } from './funnel-velocity.mjs';
 
 // Two roots. CODE_ROOT holds templates/states.yml, which ships with the code;
 // DATA_ROOT is the user's, and getCareerOpsRoot() is the only thing that honours
@@ -134,21 +140,18 @@ import { captureSlug, findCaptureForReport } from './jd-capture.mjs';
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
-const JD_ARCHIVE_TIMEOUT_MS = Math.min(
-  300_000,
-  Math.max(100, Number(process.env.CAREER_OPS_JD_ARCHIVE_TIMEOUT_MS) || 120_000),
-);
 
 // LOCK_TIMEOUT is not destructured here — that exit path is raised inside
 // acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
 const { OK: EXIT_OK, USAGE: EXIT_USAGE, NOT_FOUND: EXIT_NOT_FOUND, AMBIGUOUS: EXIT_AMBIGUOUS } = CLI_EXIT;
 
-const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
+const USAGE = `Usage: node set-status.mjs <tracker#|company> <state> [--note "..."] [--role "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
        node set-status.mjs --row N <state> [...]        (explicit tracker row ID)
        node set-status.mjs --report N <state> [...]     (explicit report ID)
        node set-status.mjs --report-link N <state> [...] (strict Report-cell identity)
+       node set-status.mjs <tracker#|company> --undo [--dry-run] [--json]
 
-  <report#|company>  Row selector: tracker # (exact) or company name (normalized match)
+  <tracker#|company> Row selector: tracker # (exact) or company name (normalized match)
   <state>            Canonical state from templates/states.yml (aliases accepted)
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
@@ -164,6 +167,14 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
                      or web (a caller delegating to this script)
   --expect-tracker HASH  Require the tracker's exact UTF-8 content to match this
                      lowercase SHA-256 hash; checked under the writer lock
+  --expect-row HASH  Require the selected row, every cell but Status, to match this
+                     hash (trackerRowIdentity in tracker-parse.mjs); checked under
+                     the writer lock
+  --expect-status STATE  Require the row's current status to be STATE, unless it
+                     is already <state>; checked under the writer lock
+  --undo             Take back the row's last logged status change: restore the
+                     prior status and retract the change from status-log.tsv.
+                     Replaces <state>
   --force            Allow a numeric selector despite a report-link mismatch, or despite a
                      report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
@@ -183,7 +194,8 @@ Examples:
   node set-status.mjs --report 12 Interview --note "recruiter screen booked"
   node set-status.mjs "Acme Corp" Rejected --on 2026-08-01
   node set-status.mjs "Acme Corp" Applied --role "Platform Engineer"
-  node set-status.mjs --row 7 Discarded --dry-run`;
+  node set-status.mjs --row 7 Discarded --dry-run
+  node set-status.mjs --row 7 --undo`;
 
 /**
  * Render the canonical states from states.yml for `--help`.
@@ -221,8 +233,8 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, repairStatusLog: false, repairFollowup: false, detachJdArchive: false, json: false, expectTracker: null };
-const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source', '--expect-tracker': 'expectTracker' };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, undo: false, repairStatusLog: false, repairFollowup: false, detachJdArchive: false, json: false, expectTracker: null, expectRow: null, expectStatus: null };
+const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source', '--expect-tracker': 'expectTracker', '--expect-row': 'expectRow', '--expect-status': 'expectStatus' };
 
 /**
  * Is the caller asking for help, rather than passing "--help" as a VALUE?
@@ -265,7 +277,7 @@ const WRITER_SOURCES = new Set(['set-status', 'web', 'reply-watch']);
 const failUsage = makeCliFailUsage({
   argv: rawArgs,
   usage: USAGE,
-  defaultMessage: 'Expected 2 arguments: <report#|company> <state>',
+  defaultMessage: 'Expected 2 arguments: <tracker#|company> <state>',
 });
 
 for (let i = 0; i < rawArgs.length; i++) {
@@ -287,14 +299,15 @@ for (let i = 0; i < rawArgs.length; i++) {
     if (a === '--source' && !WRITER_SOURCES.has(value)) {
       failUsage(`--source expects one of ${[...WRITER_SOURCES].join(', ')}, got "${value}"`);
     }
-    if (a === '--expect-tracker' && (value.length !== 64 || !/^[a-f0-9]{64}$/.test(value))) {
-      failUsage('--expect-tracker expects a lowercase SHA-256 hash (64 hex characters)');
+    if ((a === '--expect-tracker' || a === '--expect-row') && (value.length !== 64 || !/^[a-f0-9]{64}$/.test(value))) {
+      failUsage(`${a} expects a lowercase SHA-256 hash (64 hex characters)`);
     }
     flags[VALUE_FLAGS[a]] = value;
     i++;
   }
   else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
+  else if (a === '--undo') { flags.undo = true; }
   else if (a === '--repair-status-log') { flags.repairStatusLog = true; }
   else if (a === '--repair-followup') { flags.repairFollowup = true; }
   else if (a === '--detach-jd-archive') { flags.detachJdArchive = true; }
@@ -315,7 +328,16 @@ if ([flags.row, flags.report, flags.reportLink].filter(value => value !== null).
 }
 const explicitSelector = flags.row !== null || flags.report !== null || flags.reportLink !== null;
 
-if (explicitSelector) {
+if (flags.undo) {
+  const conflicting = [
+    [flags.note !== null, '--note'], [flags.replaceNote !== null, '--replace-note'], [flags.on !== null, '--on'],
+    [flags.repairStatusLog, '--repair-status-log'], [flags.repairFollowup, '--repair-followup'],
+  ].filter(([set]) => set).map(([, name]) => name);
+  if (conflicting.length) failUsage(`--undo cannot be combined with ${conflicting.join(', ')}`);
+  if (positional.length !== (explicitSelector ? 0 : 1)) {
+    failUsage('--undo takes the row selector only, not a state');
+  }
+} else if (explicitSelector) {
   if (positional.length !== 1) {
     failUsage(positional.length === 0
       ? `Expected the state after ${flags.row !== null ? '--row' : flags.report !== null ? '--report' : '--report-link'}`
@@ -361,8 +383,8 @@ try {
 } catch (err) {
   failWith(EXIT_USAGE, 'states-error', `Cannot load canonical states from ${STATES_FILE}: ${err.message}`);
 }
-const newStatus = resolveCanonicalState(stateInput, states);
-if (!newStatus) {
+const requestedStatus = flags.undo ? null : resolveCanonicalState(stateInput, states);
+if (!flags.undo && !requestedStatus) {
   const valid = states.map(s => s.label).join(' · ');
   failWith(EXIT_USAGE, 'invalid-state', `"${stateInput}" is not a canonical state. Valid states: ${valid}`);
 }
@@ -371,7 +393,11 @@ if (!newStatus) {
 
 const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(APPS_FILE)) {
-  failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
+  // The read path falls back to <root>/applications.md when nothing exists yet.
+  // A first evaluation writes data/applications.md (or CAREER_OPS_TRACKER).
+  // Naming the fallback points the first status change at a file that will never appear.
+  const writePath = resolveTrackerPathForWrite(DATA_ROOT);
+  failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${writePath}. The tracker is created when you evaluate your first offer.`);
 }
 
 /**
@@ -478,8 +504,15 @@ function resolveRow(rows) {
 
   const key = normalizeCompany(selector);
   if (!key) failUsage(`Selector "${selector}" is empty after normalization`);
+  // Exact key first. A legal suffix (Inc, LLC) is a different key, so fall
+  // back to the same corporate-form rule outcome and dedup already use.
+  // Only when nothing matched exactly. Two hits stay ambiguous.
+  let matches = rows.filter(r => normalizeCompany(r.company) === key);
+  if (matches.length === 0) {
+    matches = rows.filter(r => companiesMatchIgnoringCorporateForm(selector, r.company));
+  }
   return resolveCandidates(
-    rows.filter(r => normalizeCompany(r.company) === key),
+    matches,
     {
       notFound: `No tracker row with company matching "${selector}"`,
       ambiguous: (count, listing) =>
@@ -631,8 +664,55 @@ if (flags.role && !flags.force && !roleMatchesTarget) {
   );
 }
 const oldStatus = target.status;
+// A status outside states.yml (a hand-typed legacy value) is compared as
+// written rather than refused, so the caller still gets "status changed" and
+// not a usage error for a row it was right to show.
+const statusKey = value => resolveCanonicalState(value, states) ?? String(value ?? '').trim();
+
+// The change --undo takes back is the one a retraction line would pop: the
+// last surviving entry of this row's ledger replay. Read under the lock, so no
+// writer can append between this read and the retraction below.
+let undone = null;
+if (flags.undo) {
+  let ledger = '';
+  try {
+    ledger = readFileSync(statusLogPath(APPS_FILE), 'utf-8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') failWith(EXIT_USAGE, 'read-failure', `Cannot read status log: ${err.message}`);
+  }
+  undone = replayObservations(parseStatusLog(ledger, states).observations).get(target.num)?.at(-1) ?? null;
+  if (!undone) {
+    failWith(EXIT_NOT_FOUND, 'nothing-to-undo', `#${target.num} has no logged status change to undo`);
+  }
+  if (statusKey(oldStatus) !== undone.to) {
+    failWith(EXIT_AMBIGUOUS, 'undo-stale',
+      `#${target.num} is ${oldStatus}, but its last logged change was to ${undone.to}. Set the status you want instead.`,
+      { currentStatus: oldStatus, lastLogged: undone.to });
+  }
+  if (!undone.from) {
+    failWith(EXIT_USAGE, 'undo-unknown-prior',
+      `#${target.num}'s last logged change (to ${undone.to}) has no recorded prior status. Set the status you want instead.`);
+  }
+}
+const newStatus = undone ? undone.from : requestedStatus;
 if (flags.reportLink !== null && !resolveCanonicalState(oldStatus, states)) {
   failWith(EXIT_USAGE, 'invalid-current-state', `Tracker #${target.num} has an unrecognized current status: "${oldStatus}"`);
+}
+// A caller that asked a human first (reply-watch) holds a snapshot of the row
+// it showed. The row can be replaced or edited while the prompt is open, and
+// the yes belongs to the application on screen, not to a reusable row number.
+// Unlike --expect-tracker, these look at the selected row only, so a write to
+// an unrelated row in the meantime does not void the answer.
+// Identity first: an edited row is refused even when it already carries the
+// new status, because the consent was never about that row.
+if (flags.expectRow !== null && trackerRowIdentity(target) !== flags.expectRow) {
+  failWith(EXIT_AMBIGUOUS, 'row-changed', `Tracker #${target.num} changed since review; review it again before retrying`);
+}
+if (flags.expectStatus !== null && statusKey(oldStatus) !== newStatus
+    && statusKey(oldStatus) !== statusKey(flags.expectStatus)) {
+  failWith(EXIT_AMBIGUOUS, 'status-changed',
+    `Tracker #${target.num} is now ${oldStatus}, not ${flags.expectStatus}; review it again before retrying`,
+    { currentStatus: oldStatus });
 }
 const rawLine = lines[target.lineIdx];
 const separator = trackerRowSeparator(rawLine);
@@ -653,37 +733,11 @@ const note = flags.note != null
 // never blocks or changes the exit code, it only lets this run warn when
 // another session already claimed the same row.
 //
-// Keyed by report number when the row has one (the stable identifier a
-// concurrent session reading the same report is most likely to key on too);
-// falling back to normalized company+role for a backfilled row with no
-// report link. Skipped entirely on --dry-run, matching the JD-archive-style
-// triggers elsewhere in this file: a preview claims nothing.
-//
-// This claim is process-bound because set-status releases it in this same
-// process's finally block. A confirmed-dead PID can therefore reclaim a claim
-// left behind by an early process exit; raw CLI claims remain TTL-bound.
-let activityClaim = null;
-if (!flags.dryRun) {
-  const activityReportNums = extractTrackerReportNumbers(target.report, target.notes);
-  const activityKey = activityReportNums.length
-    ? `report:${activityReportNums[0]}`
-    : `tracker-row:${normalizeCompany(target.company)}|${target.role}`;
-  try {
-    const claim = claimActivity(activityKey, {
-      label: `set-status → ${newStatus}`,
-      processBound: true,
-    });
-    if (claim.claimed) {
-      activityClaim = { key: activityKey, token: claim.token };
-    } else if (claim.owner) {
-      console.warn(`⚠ ${describeActiveOwner(claim.owner)}`);
-    }
-  } catch (err) {
-    // Never fails the status change — same policy as every other advisory
-    // hook in this file (follow-up seeding, status-log append).
-    console.warn(`⚠ session-activity claim failed (status change proceeding anyway): ${err.message}`);
-  }
-}
+// The claim and its keying live in lib/status-hooks.mjs, so a writer that
+// commits a status inside its own transaction takes the same one. Skipped
+// entirely on --dry-run, matching the JD-archive-style triggers elsewhere in
+// this file: a preview claims nothing.
+const releaseActivityClaim = flags.dryRun ? () => {} : claimStatusActivity(target, `set-status → ${newStatus}`);
 
 let statusChanged = false;
 let noteChanged = false;
@@ -778,20 +832,44 @@ try {
   // tracker file so CAREER_OPS_TRACKER redirects (tests, custom layouts) keep
   // the ledger next to the tracker it describes. Inside the lock window, so
   // concurrent writers can't interleave lines.
-  if (statusChanged && !flags.dryRun) {
-    const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
+  // An undo retracts the entry it selected even when that entry left the
+  // status as it was (Applied → Applied), or the next undo would pick it again.
+  // The retraction is the undo, so a failed append puts the old status back.
+  if (undone && !flags.dryRun) {
+    statusLogged = appendStatusTransition(APPS_FILE, {
+      num: target.num,
+      date: localToday(),
+      from: '-',
+      to: '-',
+      source: flags.source ?? 'set-status',
+      note: `undo ${undone.from} → ${undone.to}`,
+    });
+    if (!statusLogged) {
+      let restored = !statusChanged;
+      if (statusChanged) {
+        lines[target.lineIdx] = rawLine;
+        try {
+          writeFileAtomic(APPS_FILE, lines.join('\n'));
+          restored = true;
+        } catch { /* reported below */ }
+      }
+      failWith(EXIT_USAGE, 'undo-not-logged', restored
+        ? `Could not log the undo for #${target.num}, so it stays ${oldStatus}`
+        : `Could not log the undo for #${target.num}, and could not put it back to ${oldStatus}; it now reads ${newStatus}`);
+    }
+  } else if (statusChanged && !flags.dryRun) {
     // LOCAL today: the UTC day is TOMORROW for a west-of-Greenwich evening run,
     // so this appended a status-log row dated a day that had not happened yet
     // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
     // time-between-stages, so a future-dated transition skews the interval it
     // measures rather than just looking odd in the file.
-    const eventDate = flags.on ?? localToday();
-    try {
-      appendLedgerRows(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\t${flags.source ?? 'set-status'}\t\n`);
-      statusLogged = true;
-    } catch (err) {
-      console.error(`⚠ status-log append failed (status change itself succeeded): ${err.message}`);
-    }
+    statusLogged = appendStatusTransition(APPS_FILE, {
+      num: target.num,
+      date: flags.on ?? localToday(),
+      from: oldStatus,
+      to: newStatus,
+      source: flags.source ?? 'set-status',
+    });
   }
   // A dashboard call that received the partial-success error above can retry
   // the same Applied action. The tracker is already Applied, so there is no
@@ -800,7 +878,7 @@ try {
   // and idempotent, and the correction source is folded by funnel-velocity.mjs
   // onto the repaired stage.
   if (flags.repairStatusLog && !statusChanged && newStatus === 'Applied' && !flags.dryRun) {
-    const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
+    const logPath = statusLogPath(APPS_FILE);
     const timeline = [];
     let inspectionError = null;
     try {
@@ -860,16 +938,7 @@ try {
   lock?.release();
   // Release the claim once the write (and its log append) has finished, so
   // it never outlives the run — reached even if something above threw.
-  // Never fails the status change: a release failure is only ever a warning,
-  // and the stale-sentinel handling in session-activity.mjs means a leaked
-  // claim self-heals once this process is no longer alive anyway.
-  if (activityClaim) {
-    try {
-      releaseActivity(activityClaim.key, { token: activityClaim.token });
-    } catch (err) {
-      console.warn(`⚠ session-activity release failed (status change already committed): ${err.message}`);
-    }
-  }
+  releaseActivityClaim();
 }
 
 const changed = statusChanged || noteChanged;
@@ -888,180 +957,42 @@ const changed = statusChanged || noteChanged;
 // it, and so does every future caller that delegates here rather than editing
 // the table.
 //
-// AFTER the tracker lock is released, deliberately. seedFollowup() re-reads the
-// tracker to resolve the applied date, and it must read the row this run just
-// wrote. It takes its own followups lock, never the tracker lock, so there is
-// no lock ordering to get wrong.
+// AFTER the tracker lock is released, deliberately: the seeder re-reads the
+// row this run just wrote (lib/status-hooks.mjs has the rest of the why).
 //
 // A seeding failure NEVER fails the status change. The write has already
-// committed and the caller's exit code is about that write — same policy, and
-// the same wording, as the status-log append above. It is also idempotent
-// (`already-seeded` → seeded:false), so a re-run cannot stack duplicate pins.
+// committed and the caller's exit code is about that write — same policy as
+// the status-log append above.
 let followupSeeded = null;
-if ((statusChanged || flags.repairFollowup) && newStatus === 'Applied') {
-  try {
-    const { seedFollowup } = await import('./followup-seed.mjs');
-    // followupsPath is derived from the tracker's own directory, not left to
-    // followup-seed's default. Its default is the REPO's data/follow-ups.md,
-    // so with CAREER_OPS_TRACKER pointing elsewhere — tests, and any install
-    // whose data lives outside the checkout — the status would be written to
-    // one tracker and the follow-up seeded next to a different one. The
-    // status-log append above derives its path the same way.
-    const seed = await seedFollowup(target.num, {
-      trackerPath: APPS_FILE,
-      followupsPath: join(dirname(APPS_FILE), 'follow-ups.md'),
-      // --on is the day the user says the application was sent. Without it,
-      // a fresh transition passes today as the status-change date, which
-      // resolveAppliedDate ranks below an "Applied YYYY-MM-DD" in the notes and
-      // above the evaluation-date column. A repair retry passes neither,
-      // because the apply happened on an earlier run.
-      date: flags.on,
-      statusChangeDate: statusChanged ? localToday() : undefined,
-      dryRun: flags.dryRun,
-      // assumeApplied on a DRY RUN only, and deliberately not `force`.
-      // seedFollowup refuses a row that is not Applied, and on a dry run the
-      // tracker was not written — so the row it re-reads still holds the old
-      // status and the preview would report a failure for the one thing the
-      // real run is about to do. `force` would fix that by ALSO suppressing
-      // the already-seeded check, which is the opposite of a preview: a row
-      // that already has a pin would be promised a new one here and refused
-      // on the real run. assumeApplied relaxes the status guard only. In a
-      // real run the row IS Applied by this point and neither is needed.
-      ...(flags.dryRun ? { assumeApplied: true } : {}),
-    });
-    followupSeeded = { seeded: seed.seeded, nextDate: seed.nextDate ?? null, ...(seed.reason ? { reason: seed.reason } : {}) };
-    if (!flags.json && seed.seeded) {
-      console.log(`📅 Follow-up ${flags.dryRun ? 'would be seeded' : 'seeded'} for #${target.num}: next ${seed.nextDate}`);
-    }
-  } catch (err) {
-    followupSeeded = { seeded: false, reason: 'error', error: err.message };
-    console.error(`⚠ follow-up seeding failed (status change itself succeeded): ${err.message}`);
-  }
+if (!undone && (statusChanged || flags.repairFollowup) && newStatus === 'Applied') {
+  followupSeeded = await seedFollowupOnApplied(target.num, {
+    trackerPath: APPS_FILE,
+    // --on is the day the user says the application was sent. Without it,
+    // a fresh transition passes today as the status-change date, which
+    // resolveAppliedDate ranks below an "Applied YYYY-MM-DD" in the notes and
+    // above the evaluation-date column. A repair retry passes neither,
+    // because the apply happened on an earlier run.
+    date: flags.on,
+    statusChangeDate: statusChanged ? localToday() : undefined,
+    dryRun: flags.dryRun,
+    quiet: flags.json,
+  });
 }
 
 // ── JD archive trigger on Interview (#4506-direction-2) ─────────────
 //
-// AGENTS.md requires every application to carry an archived JD, but that
-// requirement is only ever ENFORCED at `oferta`/`pdf` evaluation time — a row
-// entered through `add` (a referral, a recruiter reach-out, a posting that
-// skipped the pipeline) never gets one written, and nothing here notices
-// until much later. By the time `interview-prep` goes looking for the JD to
-// build prep material, the posting has often closed, and its fetch ladder's
-// last resort is "tell the user and ask them to paste the JD text instead" —
-// which fails silently if the user never saved a copy either.
-//
-// The transition into Interview is the last reliable moment the posting is
-// still likely to be live (an active interview loop implies the req hasn't
-// been pulled yet) AND the first moment prep material will actually be
-// wanted, so it is the right point to archive automatically rather than
-// leaving it to a human to remember. Detection reuses the same functions
-// check-jd-archive.mjs uses to decide "already covered" (#2789), so this
-// never re-archives a row that already has a `## Job Description` section
-// or a resolvable jds/ capture.
-//
-// Same policy as the follow-up seeding above: never fails the status change,
-// never re-archives on an idempotent re-run into an already-Interview row
-// (statusChanged gates that), and does nothing on a dry run (nothing was
-// written yet for archive-posting.mjs to attach a --report to).
+// The last reliable moment the posting is still likely live
+// (lib/status-hooks.mjs has the full reasoning). Same policy as the follow-up
+// seeding above: never fails the status change, never re-archives on an
+// idempotent re-run into an already-Interview row (statusChanged gates that),
+// and does nothing on a dry run.
 let jdArchiveTriggered = null;
-if (statusChanged && newStatus === 'Interview' && !flags.dryRun) {
-  try {
-    const workspaceRoot = resolveWorkspaceRoot(APPS_FILE);
-    const reportsDir = join(workspaceRoot, 'reports');
-    const jdsDir = join(workspaceRoot, 'jds');
-
-    // Resolve the report cell to a real file path under reportsDir, the same
-    // containment discipline merge-tracker.mjs's resolveReportPath uses for
-    // the same reason: the tracker is user-editable, and a report cell is
-    // untrusted input until it is proven to land inside reports/. The link is
-    // written relative to the TRACKER's own directory (docs: "../reports/..."
-    // at data/applications.md, "reports/..." at root), so the leading "../" is
-    // stripped and the remainder resolved against the WORKSPACE root, not
-    // reportsDir itself — resolving "../reports/x.md" against reportsDir would
-    // double the "reports" segment.
-    const reportCell = String(target.report ?? '').trim();
-    const rawReportPath = (firstLinkTarget(reportCell) ?? reportCell).trim().replace(/^<|>$/g, '');
-    let reportPath = null;
-    if (rawReportPath && rawReportPath !== '—' && rawReportPath !== '-') {
-      const normalized = rawReportPath.replace(/\\/g, '/').replace(/^(\.\.\/)+/, '');
-      const candidate = resolve(normalized.includes('/') ? workspaceRoot : reportsDir, normalized);
-      if (candidate.startsWith(reportsDir + sep) && existsSync(candidate)) reportPath = candidate;
-    }
-
-    // A Markdown label is presentation, not identity: `[7](.../008-acme.md)`
-    // belongs to report 8. Once the path has passed containment + existence,
-    // its filename is authoritative for the embedded-JD check and archive.
-    const reportPathNum = reportPath
-      ? Number.parseInt(/^([0-9]+)-/.exec(basename(reportPath))?.[1] ?? '', 10)
-      : NaN;
-    const reportNums = extractTrackerReportNumbers(target.report, target.notes);
-    const reportNum = Number.isInteger(reportPathNum) && reportPathNum > 0
-      ? reportPathNum
-      : (reportNums[0] ?? null);
-
-    const alreadyEmbedded = reportPath ? hasEmbeddedJdArchive(readFileSync(reportPath, 'utf-8')) : false;
-    const alreadyCaptured = !alreadyEmbedded && reportNum != null && existsSync(jdsDir)
-      ? findCaptureForReport(jdsDir, reportNum, { companySlug: captureSlug(target.company) }) !== null
-      : false;
-
-    if (!alreadyEmbedded && !alreadyCaptured) {
-      if (reportNum == null) {
-        jdArchiveTriggered = { attempted: false, reason: 'no-report-number' };
-      } else if (!target.url) {
-        jdArchiveTriggered = { attempted: false, reason: 'no-url' };
-      } else {
-        const archiveArgs = [
-          join(CODE_ROOT, 'archive-posting.mjs'),
-          `--report=${reportNum}`,
-          `--company=${target.company}`,
-          target.url,
-        ];
-        // Keep the capture beside the selected tracker even when
-        // CAREER_OPS_TRACKER redirects it outside the checkout.
-        const archiveEnv = { ...process.env, CAREER_OPS_ROOT: workspaceRoot };
-        if (flags.detachJdArchive) {
-          // The caller has a fixed budget (30s in the web UI and the dashboard)
-          // and archive-posting can spend more than that on one page load, so
-          // waiting here turned a saved status into a reported timeout.
-          // lib/run-bounded.mjs keeps the timeout, since no parent is left to
-          // enforce it. stdio 'ignore' matters: an inherited pipe would hold
-          // the caller's read open until the archive exits.
-          if (!flags.json) console.log(`📄 No JD archived for #${target.num} yet — archiving report ${reportNum} in the background, before the posting can close.`);
-          const child = spawn(
-            process.execPath,
-            [join(CODE_ROOT, 'lib', 'run-bounded.mjs'), String(JD_ARCHIVE_TIMEOUT_MS), ...archiveArgs],
-            { detached: true, stdio: 'ignore', windowsHide: true, env: archiveEnv },
-          );
-          // A spawn failure arrives as an event after the status is written;
-          // unhandled, it would crash this process after its result printed.
-          child.on('error', (err) => console.warn(`⚠ JD archive could not start (status change itself succeeded): ${err.message}`));
-          child.unref();
-          jdArchiveTriggered = { attempted: true, detached: true };
-        } else {
-          if (!flags.json) console.log(`📄 No JD archived for #${target.num} yet — archiving report ${reportNum} now, before the posting can close:`);
-          execFileSync(process.execPath, archiveArgs, {
-            // stdout is a protocol surface under --json: capture child
-            // progress so the parent emits exactly one JSON document.
-            stdio: flags.json ? ['ignore', 'pipe', 'inherit'] : 'inherit',
-            timeout: JD_ARCHIVE_TIMEOUT_MS,
-            env: archiveEnv,
-          });
-          jdArchiveTriggered = { attempted: true };
-        }
-      }
-    } else {
-      jdArchiveTriggered = { attempted: false, reason: alreadyEmbedded ? 'already-embedded' : 'already-captured' };
-    }
-  } catch (err) {
-    const archiveTimedOut = err?.code === 'ETIMEDOUT'
-      || err?.errno === 'ETIMEDOUT'
-      || err?.signal === 'SIGTERM';
-    const archiveError = archiveTimedOut
-      ? `JD archive timed out after ${JD_ARCHIVE_TIMEOUT_MS}ms`
-      : err.message;
-    jdArchiveTriggered = { attempted: true, error: archiveError };
-    console.warn(`⚠ JD archive trigger failed (status change itself succeeded): ${archiveError}`);
-  }
+if (!undone && statusChanged && newStatus === 'Interview' && !flags.dryRun) {
+  jdArchiveTriggered = archiveJdOnInterview(target, {
+    trackerPath: APPS_FILE,
+    detach: flags.detachJdArchive,
+    json: flags.json,
+  });
 }
 
 // ── report ───────────────────────────────────────────────────────
@@ -1082,7 +1013,8 @@ const result = {
   // followupSeedCandidate is kept for any consumer already reading it; the
   // seeding it used to merely advertise now actually happens, and its outcome
   // travels beside it.
-  ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
+  ...(undone ? { undone: { from: undone.from, to: undone.to, date: undone.date } } : {}),
+  ...(!undone && statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
   ...(followupSeeded ? { followupSeeded } : {}),
   ...(jdArchiveTriggered ? { jdArchiveTriggered } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
@@ -1092,7 +1024,7 @@ const result = {
 };
 
 const oldLabel = resolveCanonicalState(oldStatus, states);
-if (statusChanged && !flags.dryRun && states.find(s => s.label === oldLabel)?.terminal) {
+if (!undone && statusChanged && !flags.dryRun && states.find(s => s.label === oldLabel)?.terminal) {
   console.warn(`⚠ #${target.num} was ${oldLabel}, a terminal state. Reopened as ${newStatus}.`);
 }
 
@@ -1100,12 +1032,12 @@ if (flags.json) {
   // JSON must be the last thing written to stdout; machine callers parse stdout as one JSON document.
   console.log(JSON.stringify(result, null, 2));
 } else {
-  const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
+  const verb = undone ? (flags.dryRun ? 'would undo' : 'undid') : flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
   // Only when seeding did NOT happen. The advisory predates the seeding above
   // and asked the user to do by hand what now runs for them; leaving it
   // unconditional would read as a contradiction right under "Follow-up seeded".
-  if (statusChanged && !flags.dryRun && newStatus === 'Applied' && !followupSeeded?.seeded && followupSeeded?.reason !== 'disabled') {
+  if (!undone && statusChanged && !flags.dryRun && newStatus === 'Applied' && !followupSeeded?.seeded && followupSeeded?.reason !== 'disabled') {
     console.error('ℹ️  Status is Applied — consider seeding follow-ups in data/follow-ups.md (#1430: node followup-cadence.mjs)');
   }
 }

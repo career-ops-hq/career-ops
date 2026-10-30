@@ -10,10 +10,10 @@
  * Coverage: the readers and writers under web/src that route through this
  * helper (and cv-template.mjs, which reads the variable itself) follow
  * CAREER_OPS_PROFILE; a scan guard in the root suite fails when a tracked file
- * under web/src builds the path by hand. Outside this change: batch/batch-runner.sh,
- * the prompts under modes/ and batch/, and four prompts in three web files that
- * name config/profile.yml in text sent to a model (web/src/lib/apply/answer-prompt.mjs,
- * web/src/lib/run-prompts.mjs, web/src/app/api/assistant/route.ts).
+ * under web/src builds the path by hand. The prompts the web sends to a model
+ * (web/src/lib/apply/answer-prompt.mjs, web/src/lib/run-prompts.mjs,
+ * web/src/app/api/assistant/route.ts) name the profile through profileRef() and
+ * profileNote() below, so an override reaches the agent as the path it must read.
  *
  * `CAREER_OPS_PROFILE` names the profile file directly. Unlike core's
  * getProfilePath(rootDir), where an explicit rootDir beats the env, this
@@ -45,4 +45,33 @@ function resolveOverride(value, root) {
 export function getProfilePath(root, { explicitRoot = false, env = process.env } = {}) {
   const override = explicitRoot ? undefined : env.CAREER_OPS_PROFILE?.trim();
   return override ? resolveOverride(override, root) : path.join(root, "config", "profile.yml");
+}
+
+/** What the prompts say when no override is set. */
+export const DEFAULT_PROFILE_REF = "config/profile.yml";
+
+/**
+ * The profile as a prompt names it: `config/profile.yml` unless
+ * CAREER_OPS_PROFILE is set, then the resolved absolute path, so the agent
+ * reads the file the readers read.
+ *
+ * @param {string} root Absolute data root (careerOpsRoot()).
+ * @param {{ env?: Record<string, string | undefined> }} [opts]
+ * @returns {string}
+ */
+export function profileRef(root, { env = process.env } = {}) {
+  return env.CAREER_OPS_PROFILE?.trim() ? getProfilePath(root, { env }) : DEFAULT_PROFILE_REF;
+}
+
+/**
+ * One line for prompts that send the agent into mode files, which name
+ * `config/profile.yml` themselves. Empty when `ref` is the default.
+ *
+ * @param {string} ref A value from profileRef().
+ * @returns {string}
+ */
+export function profileNote(ref) {
+  return ref === DEFAULT_PROFILE_REF
+    ? ""
+    : `Profile location: the profile for this install is ${ref}, not ${DEFAULT_PROFILE_REF}. Wherever this prompt or a file you read names ${DEFAULT_PROFILE_REF}, read ${ref} instead.\n\n`;
 }

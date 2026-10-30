@@ -94,3 +94,9 @@ test("scheduled run route has a bounded SIGKILL fallback and idempotent cleanup"
   assert.match(source, /if \(settled\) return/);
   assert.match(source, /clearTimeout\(killTimer\)/);
 });
+
+test("scheduled run route reports the runner's cause, not the first stderr line", () => {
+  const source = fs.readFileSync(new URL("../../src/app/api/scheduled-jobs/[id]/run/route.ts", import.meta.url), "utf8");
+  assert.match(source, /stderrCause\(result\.stderr\)/);
+  assert.doesNotMatch(source, /stderr\.split\([^)]*\)\.find\(Boolean\)/);
+});

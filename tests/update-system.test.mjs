@@ -6,11 +6,14 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync, copyFileSync } from 'fs'
 import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, delimiter } from 'path';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, sealProcessGitEnv } from './helpers.mjs';
 import { gitIn, formatLocalVersion } from '../update-system.mjs';
 
 const NODE = process.execPath;
 const ROOT = join(process.cwd());
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\n🧪 Testing updater version short SHA formatting (#3883)...');
 

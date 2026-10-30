@@ -106,7 +106,12 @@ class FakePage {
     this.log = [];
     this.selectors = [];
     this.handles = [];
-    this.keyboard = { type: async (text) => void this.log.push(`keyboard:${text}`) };
+    // keyboard.type presses a key per character, so a line break is an Enter on the focused
+    // control: implicit submission. insertText dispatches no key events.
+    this.keyboard = {
+      type: async (text) => { this.log.push(`keyboard-type:${text}`); if (/[\r\n]/.test(text)) this.form.submits++; },
+      insertText: async (text) => void this.log.push(`keyboard:${text}`),
+    };
   }
   /** Add a control inside the form (pass `form: null` for one outside it) and
    *  tag it the way a snapshot would. */
@@ -419,6 +424,18 @@ test("type falls back to click-then-keyboard on a control fill() rejects", async
   // Then the fallback runs, on the same cleared element
   assert.equal(outcome.refusal, undefined);
   assert.deepEqual(page.log, ["click:pronouns", "keyboard:they/them"]);
+  assert.equal(page.form.submits, 0);
+});
+
+test("a line break in typed text never submits the form (GHSA-rm8h-2825-ww26)", async () => {
+  // Given a control fill() rejects, and a planner text that ends in a line break
+  const page = applicationForm();
+
+  // When the planner types "she/her\n", "a\r\nb" and "x\r" into it
+  for (const text of ["she/her\n", "a\r\nb", "x\r"]) await act(page, { action: "type", ref: page.ref("pronouns"), text });
+
+  // Then the fallback inserts the text with the breaks flattened, presses no key, and nothing is submitted
+  assert.deepEqual(page.log.filter((l) => l.startsWith("keyboard")), ["keyboard:she/her ", "keyboard:a b", "keyboard:x "]);
   assert.equal(page.form.submits, 0);
 });
 

@@ -10,11 +10,11 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { postingUrl } from "./posting-url.mjs";
+import { sectionKind } from "./core/pipeline-sections.mjs";
 
 export { postingUrl };
 
 const CHECKBOX_LINE = /^(\s*-\s*)\[([ xX])\](.*)$/;
-const PENDING_HEADING = /^##\s+(Pending|Pendientes)\s*$/i;
 
 /**
  * Job URL on a pipeline checkbox line — the first `|` cell, same rule as
@@ -32,7 +32,7 @@ function pendingRange(lines) {
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
-    if (PENDING_HEADING.test(t)) {
+    if (sectionKind(t) === "pending") {
       start = i + 1;
       continue;
     }

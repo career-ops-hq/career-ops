@@ -52,7 +52,7 @@ export const RESERVED_ENV = new Set([
   'PATH', 'HOME', 'NODE_OPTIONS', 'LD_PRELOAD', 'NODE_EXTRA_CA_CERTS',
 ]);
 
-const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+export const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_HOOK_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
 
@@ -752,6 +752,9 @@ export function filterResultsForId(results, id) {
 function inactiveProviderStub(id, reason) {
   return {
     id,
+    // Read by tools that diagnose without fetching (coverage-check.mjs), so
+    // they can say why the board is never scanned instead of calling it live.
+    inactiveReason: reason,
     detect: () => null,
     fetch: async () => { throw new Error(`plugin "${id}" inactive: ${reason}. Run \`node doctor.mjs\` for setup.`); },
   };

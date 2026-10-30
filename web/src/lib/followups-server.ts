@@ -50,8 +50,7 @@ export function withLogLock<T>(fn: () => T | Promise<T>): Promise<T> {
 // one active web request vs the user's CLI". Reversed, two of the user's own
 // browser tabs would contend on the cross-process lock — one wins, the other
 // eats the timeout and a 409 — for a race the free in-process queue already
-// resolves. Every followups writer goes through here so no call site can get
-// the nesting wrong.
+// resolves.
 export function withFollowupsWrite<T>(fn: () => T | Promise<T>): Promise<T> {
   return withLogLock(() => withFollowupsLock(followupsLogPath(), fn));
 }

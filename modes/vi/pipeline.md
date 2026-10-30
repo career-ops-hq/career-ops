@@ -4,7 +4,7 @@ Xử lý các URL tin tuyển dụng lưu trong `data/pipeline.md`. Người dù
 
 ## Quét liveness (Liveness sweep)
 
-**Chạy bước này trước khi xử lý bất kỳ URL nào.** Các mục do scanner thêm ở chế độ headless/batch mang `**Verification:** unconfirmed (batch mode)` vì lúc quét không có Playwright -- chúng chưa từng được kiểm tra còn mở hay không. Nếu không quét, tin đã chết sẽ lọt vào bước đánh giá từng tab một, đốt thời gian và token cho các vai trò ma (một hộp thư 8 URL cũ tạo ra 8 lượt đánh giá vô ích).
+**Chạy bước này trước khi xử lý bất kỳ URL nào.** Các mục trong hộp thư thường chưa được kiểm tra: `scan.mjs` thêm tin tuyển dụng mà không kiểm tra từng tin còn mở hay không, trừ khi chạy với `--verify`, còn URL người dùng tự dán thì chưa từng được kiểm tra. Nếu không quét, tin đã chết sẽ lọt vào bước đánh giá từng tab một, đốt thời gian và token cho các vai trò ma (một hộp thư 8 URL cũ tạo ra 8 lượt đánh giá vô ích).
 
 Quét mọi URL đang chờ trong một lượt bằng bộ kiểm tra liveness không tốn token trước vòng lặp từng URL:
 
@@ -68,7 +68,7 @@ Liệt kê riêng các mục `needs_confirmation` kèm URL và câu hỏi, khôn
 - [x] #144 | https://boards.greenhouse.io/xyz/jobs/012 | BigCo | SA | 2.1/5 | PDF ❌
 ```
 
-> **Luôn ghi tiêu đề mục bằng tiếng Anh: `## Pending` và `## Processed`.** `scan.mjs` (`PENDING_MARKERS`/`PROCESSED_MARKERS`) và `reconcile-pipeline.mjs` (`PENDING_RE`/`PROCESSED_RE`) hiện chỉ nhận cách viết tiếng Anh và tiếng Tây Ban Nha; một tiêu đề tiếng Việt như "Đang chờ" sẽ khiến scanner không tìm thấy mục và ghi sai chỗ. Khi đọc, vẫn chấp nhận tiêu đề bằng ngôn ngữ khác nếu tệp hiện có đã viết như vậy. Khi ghi, nếu tệp có tiêu đề mà scanner không nhận (không phải tiếng Anh hay Tây Ban Nha), đổi chúng thành `## Pending` và `## Processed` trước khi ghi và báo cho người dùng biết đã đổi; không giữ nguyên tiêu đề scanner không đọc được.
+> **Luôn ghi tiêu đề mục bằng tiếng Anh: `## Pending` và `## Processed`.** `scan.mjs`, `sync-batch-input.mjs` và `reconcile-pipeline.mjs` đọc tiêu đề từ cùng một bảng trong `lib/pipeline-sections.mjs`, và bảng đó không có tiêu đề tiếng Việt; một tiêu đề tiếng Việt như "Đang chờ" sẽ khiến scanner không tìm thấy mục và ghi sai chỗ. Khi đọc, vẫn chấp nhận tiêu đề bằng ngôn ngữ khác nếu tệp hiện có đã viết như vậy. Khi ghi, giữ nguyên tiêu đề có trong bảng đó, như `## Offen` hay `## En attente`. Chỉ khi tệp có tiêu đề không có trong bảng, như tiêu đề tiếng Việt, mới đổi chúng thành `## Pending` và `## Processed` trước khi ghi và báo cho người dùng biết đã đổi; không giữ nguyên tiêu đề scanner không đọc được.
 
 Các dòng Pending có độ rộng thay đổi. Dạng thô nhất là URL dán trần, `- [ ] {url}` (1 cột) -- thứ bạn thả vào hộp thư bằng tay. Các mục do scanner viết thêm `| {company} | {title}` (3 cột) cộng hai cột tùy chọn cuối: `| {location}` (cột 4) và `| {compensation}` (cột 5). Scanner chỉ điền các cột cuối khi ATS cung cấp, nên dòng 1, 3, 4 và 5 cột đều hợp lệ -- `{url} | {company} | {title} | {location} | {compensation}` là dạng tối đa (chuẩn), không phải dạng duy nhất. Các cột theo vị trí, nên dòng có lương luôn có ô địa điểm (để trống nếu không biết); dòng chỉ có địa điểm giữ 4 cột. Các dòng ngắn hơn hiện có vẫn hợp lệ và được đọc như có giá trị rỗng ở các cột cuối còn thiếu.
 

@@ -196,7 +196,7 @@ Nếu ứng viên có demo trực tuyến, dashboard hoặc dự án công khai 
 | Red flags | Blocker, cảnh báo (điều chỉnh âm) |
 | **Toàn cục** | Đánh giá tổng thể tích hợp năm chiều trên (không có công thức số học) |
 
-Quyết định điểm toàn cục một lần từ các chiều này, áp dụng mọi Scoring Rules riêng của người dùng trong `modes/_custom.md`. Header báo cáo, `score` trong Machine Summary và tracker phải ghi cùng một giá trị. Block A-H là các phần của báo cáo, không phải đầu vào số học để lấy trung bình; mức quan trọng của yêu cầu ở Block B và độ tin cậy tin tuyển dụng ở Block G tách biệt với điểm 1-5.
+Quyết định điểm toàn cục một lần từ các chiều này, áp dụng mọi quy tắc chấm điểm riêng của người dùng trong `modes/_profile.md` và `modes/_custom.md`. Header báo cáo, `score` trong Machine Summary và tracker phải ghi cùng một giá trị. Block A-H là các phần của báo cáo, không phải đầu vào số học để lấy trung bình; mức quan trọng của yêu cầu ở Block B và độ tin cậy tin tuyển dụng ở Block G tách biệt với điểm 1-5.
 
 **Diễn giải điểm:**
 - 4.5+ → Match mạnh, nên ứng tuyển ngay

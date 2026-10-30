@@ -28,8 +28,10 @@ import {
   nextFutureRun,
   recordCompletion,
   runnerResourcePath,
+  SCAN_TIMEOUT_MS,
 } from "../../scripts/scheduled-jobs-runner.mjs";
 import { assertScheduledJobBody } from "../../src/lib/scheduled-job-input.mjs";
+import { scanFailureMessage, stderrCause } from "../../src/lib/scheduled-scan-error.mjs";
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -604,7 +606,15 @@ test("a worker crash after a persisted claim leaves the queue recoverable", asyn
   }
 });
 
-test("executeJob retries exactly three times and converts scanner timeouts to a final failure", () => {
+// What scan-ats-full.mjs --json writes to stderr before it gets anywhere: its
+// run header, and after an interrupted sweep a checkpoint warning above that.
+const FULL_SCAN_PROGRESS = [
+  "⚠️  Unfinished sweep checkpoint found at /tmp/data/ats-sweep-checkpoint.json — pass --resume to continue it; this fresh run will overwrite it.",
+  "Reverse ATS scan — ats: greenhouse,lever,ashby,workday | since 7d | limit 150/ats",
+  "",
+].join("\n");
+
+test("executeJob retries exactly three times and records the scanner's cause, not its first progress line", () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-retry-"));
   const job = { id: "11111111-1111-4111-8111-111111111111", engine: "full", filters: {}, timezone: "UTC" };
   fs.writeFileSync(path.join(temp, "portals.yml"), "title_filter:\n  positive: [engineer]\nlocation_filter: {}\n", "utf8");
@@ -621,15 +631,78 @@ test("executeJob retries exactly three times and converts scanner timeouts to a 
     assert.equal(recovered.attempt, 3);
 
     attempts = 0;
-    const timedOut = executeJob(temp, job, {
-      spawnFn: () => { attempts += 1; return { status: null, stdout: "", stderr: "", error: new Error("ETIMEDOUT") }; },
+    const fatal = executeJob(temp, job, {
+      spawnFn: () => {
+        attempts += 1;
+        return { status: 1, stdout: "", stderr: `${FULL_SCAN_PROGRESS}  greenhouse: 120/150\nFatal: EACCES: permission denied, open 'data/scan-history.tsv'\n` };
+      },
     });
     assert.equal(attempts, MAX_ATTEMPTS);
-    assert.equal(timedOut.state, "failed");
-    assert.match(timedOut.message, /ETIMEDOUT|failed/i);
+    assert.equal(fatal.state, "failed");
+    assert.equal(fatal.attempt, MAX_ATTEMPTS);
+    assert.equal(fatal.message, "Fatal: EACCES: permission denied, open 'data/scan-history.tsv'");
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
+});
+
+test("executeJob reports a scanner timeout as a timeout and does not retry it", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-timeout-"));
+  const job = { id: "11111111-1111-4111-8111-111111111111", engine: "full", filters: {}, timezone: "UTC" };
+  fs.writeFileSync(path.join(temp, "portals.yml"), "title_filter:\n  positive: [engineer]\nlocation_filter: {}\n", "utf8");
+  try {
+    let attempts = 0;
+    const timedOut = executeJob(temp, job, {
+      spawnFn: () => {
+        attempts += 1;
+        // spawnSync's shape on a timeout: the progress printed so far, a kill
+        // signal, and an ETIMEDOUT error.
+        const error = Object.assign(new Error("spawnSync /usr/bin/node ETIMEDOUT"), { code: "ETIMEDOUT" });
+        return { status: null, signal: "SIGTERM", stdout: "", stderr: FULL_SCAN_PROGRESS, error };
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.equal(timedOut.state, "failed");
+    assert.equal(timedOut.attempt, 1);
+    assert.equal(timedOut.message, `Scanner timed out after ${SCAN_TIMEOUT_MS / 60_000} minutes.`);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("scan failure messages skip progress, stack frames and the Node banner", () => {
+  assert.equal(stderrCause(`${FULL_SCAN_PROGRESS}Error: portals.yml not found. Run onboarding first.\n`), "Error: portals.yml not found. Run onboarding first.");
+  const uncaught = [
+    "file:///repo/scan-ats-full.mjs:42",
+    "    throw new TypeError(\"Cannot read properties of undefined (reading 'positive')\");",
+    "    ^",
+    "",
+    "TypeError: Cannot read properties of undefined (reading 'positive')",
+    "    at main (file:///repo/scan-ats-full.mjs:42:11)",
+    "",
+    "Node.js v22.13.0",
+  ].join("\n");
+  assert.equal(stderrCause(uncaught), "TypeError: Cannot read properties of undefined (reading 'positive')");
+  const missingPackage = [
+    "node:internal/modules/esm/resolve:873",
+    "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
+    "        ^",
+    "",
+    "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'js-yaml' imported from /repo/scan-ats-full.mjs",
+    "    at packageResolve (node:internal/modules/esm/resolve:873:9)",
+    "    at moduleResolve (node:internal/modules/esm/resolve:946:18)",
+    "    at defaultResolve (node:internal/modules/esm/resolve:1188:11) {",
+    "  code: 'ERR_MODULE_NOT_FOUND'",
+    "}",
+    "",
+    "Node.js v22.13.0",
+  ].join("\n");
+  assert.equal(stderrCause(missingPackage), "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'js-yaml' imported from /repo/scan-ats-full.mjs");
+  assert.equal(stderrCause("starting\nboard list unavailable\n"), "board list unavailable");
+  assert.equal(stderrCause(""), "");
+  assert.equal(scanFailureMessage({ status: 2, stderr: "" }), "scanner exit 2");
+  assert.equal(scanFailureMessage({ status: null, signal: "SIGKILL", stderr: "" }), "Scanner stopped by SIGKILL.");
+  assert.equal(scanFailureMessage({ status: null, stderr: FULL_SCAN_PROGRESS, error: Object.assign(new Error("spawnSync node ENOBUFS"), { code: "ENOBUFS" }) }), "spawnSync node ENOBUFS");
 });
 
 test("executeJob retries thrown setup and spawn failures before succeeding", () => {

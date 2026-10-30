@@ -103,8 +103,16 @@ export default {
   `preferred_languages`: a provider that returns language versions
   selectively also returns the ranked ones, after each posting's default
   version, so the scan can keep the preferred one; references
-  `providers/personio.mjs` and `providers/recruitee.mjs`). Returns a
-  normalized `Job[]`.
+  `providers/personio.mjs` and `providers/recruitee.mjs`) and
+  `ctx.idCache` (`get` / `set` / `delete` on this provider's slice of
+  `provider-id-cache.mjs`: a value resolved on one scan, such as a board id
+  only a careers page shows, kept for the next ones; absent in
+  `verify-portals` and tests, so the provider must work without it; go
+  through `cachedLookup` in `providers/_cached-lookup.mjs`, as
+  `providers/join.mjs` and `providers/getro.mjs` do; a value read from a page
+  the provider loads on every fetch anyway gains nothing from the cache, so
+  `providers/consider.mjs` does not use it). A provider never reads or writes
+  files itself. Returns a normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
   When the payload has a dedicated field for them, also set `requisitionId`
@@ -169,15 +177,27 @@ the reverse-ATS sweep, and only for a job that passed the title/location
 filters but came back undated — so the undated-drop policy has a date to
 judge.
 
-`scan-ats-full.mjs` imports a **fixed** set of modules (`greenhouse`,
-`lever`, `ashby`, `workday`, `icims`) with no registry lookup — a provider
-it does not import can define `enrichDate` and nothing will ever call it.
-The hook also overlaps the `fetchDetails` opt-in above, which already
-fetches the detail page on the normal `scan.mjs` path. Pick one:
+`scan-ats-full.mjs` reaches a provider in one of two ways, and both call
+`enrichDate`:
+
+- **The dataset sweep.** A **fixed** `SOURCES` table of 8 directly imported
+  modules (`greenhouse`, `lever`, `ashby`, `workday`, `icims`, `bamboohr`,
+  `paylocity`, `join`), each paired with a public company directory (a
+  dataset, or for `join` the ATS's own sitemap). No registry lookup;
+  joining it means adding an import and a `SOURCES` entry.
+- **The `--history-seeds` pass.** Boards derived from the user's tracker and
+  scan history (`history-ats-seeds.mjs`). This one does load the registry,
+  but it only reaches a provider whose `id` equals a vendor label from
+  `ATS_HOST_PATTERNS` in `ats-vendor.mjs` and whose `detect()` accepts the
+  derived board URL.
+
+A provider reached by neither can define `enrichDate` and nothing will ever
+call it. The hook also overlaps the `fetchDetails` opt-in above, which
+already fetches the detail page on the normal `scan.mjs` path. Pick one:
 `fetchDetails` for a provider reached through `portals.yml`; `enrichDate`
-only when the provider is (or is being) wired into `scan-ats-full.mjs`.
-Don't ship both. If you add it, test it and say in the header comment that
-it is inert until the provider is added there.
+only when `scan-ats-full.mjs` reaches the provider (or is being changed to).
+Don't ship both. If you add it, test it, and if the provider is not reached
+yet, say in the header comment that the hook is inert until it is.
 
 ## 2. Mandatory guards
 
@@ -312,10 +332,11 @@ surface instead of reading as `0` jobs forever. Three outcomes:
   embedded blob (`__NEXT_DATA__`, a JSON-LD script) matching *nothing at
   all* is a markup change → `throw`. An empty list inside an otherwise
   well-formed payload is the empty-board case → `[]`. Reference:
-  `providers/join.mjs` — `!Array.isArray(items)` throws, `items.length
-  === 0` returns `[]`. A **regex scraper** has no array container to
-  type-check, so it keys the same split off a listing signal that only a
-  populated board carries: posting-shaped links (an `href` to a
+  `parseEmbedAppData` in `providers/ashby.mjs` — a missing
+  `window.__appData` or a non-array `jobPostings` throws, an empty
+  `jobPostings` is an empty board. A **regex scraper** has no array
+  container to type-check, so it keys the same split off a listing signal
+  that only a populated board carries: posting-shaped links (an `href` to a
   detail-page path) present in the HTML but zero cards parsed ⇒ a markup
   change → `throw`; neither the links nor the cards present ⇒ a genuinely
   empty board → `[]`. Reference: `providers/itviec.mjs`
@@ -682,10 +703,10 @@ went through them. Must cover:
   documented envelope → a descriptive throw. Assert both branches — for a
   scraper that means a fixture whose card selector / embedded blob matches
   nothing throws, while a well-formed page carrying an empty list still
-  returns `[]` (`join.mjs`). For a regex scraper with no container to
-  type-check, the throwing fixture must carry the listing signal (a
-  detail-page href in the HTML) with zero rows parsed, and the `[]` fixture
-  must carry neither (`itviec.mjs`).
+  returns `[]` (`ashby.mjs`'s embed source). For a regex scraper with no
+  container to type-check, the throwing fixture must carry the listing
+  signal (a detail-page href in the HTML) with zero rows parsed, and the
+  `[]` fixture must carry neither (`itviec.mjs`).
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
   when the source reports more pages; `ctx.maxPages` stops it earlier. For a
   provider that fans out over several query/category passes behind one shared
@@ -735,8 +756,10 @@ Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 | Simple JSON API, no pagination | `providers/greenhouse.mjs` + `tests/providers/greenhouse.test.mjs` |
 | Pagination honoring `ctx.maxPages` | `providers/workday.mjs` |
 | HTML scraping with the shared `decodeEntities` | `providers/icims.mjs` |
-| SSR JSON inside HTML (`__NEXT_DATA__`) | `providers/join.mjs` |
-| Empty board vs a broken selector, told apart | `providers/join.mjs` (array shape), `providers/itviec.mjs` (regex scraper) |
+| SSR JSON inside HTML (`__NEXT_DATA__`) | `providers/joinup.mjs` |
+| Board id read from the careers page, jobs from the API that page uses | `providers/join.mjs`, `providers/getro.mjs` |
+| Rate-limit error in a 200 body, retried through the shared helper | `providers/join.mjs` (`rateLimitAware`) |
+| Empty board vs a broken selector, told apart | `providers/ashby.mjs` (array shape), `providers/itviec.mjs` (regex scraper) |
 | Wildcard-tenant host allowlisting (anchored, not a `Set`) | `providers/bamboohr.mjs`, `providers/workday.mjs` |
 | RSS parsed in-process | `providers/larajobs.mjs` |
 | `job.url` from a host-controlled `id` / `slug` via `safeEncodeURIComponent` | `providers/phenom.mjs`, `providers/bamboohr.mjs` |
@@ -800,8 +823,9 @@ provider whose tuning needs differ from the shared default
       or fail loud) that doesn't misfire the "raise `max_pages`" warning.
 - [ ] A `fetchDetails` detail-fetch loop is paced and retry-wrapped the
       same way, even when the provider does not paginate.
-- [ ] No `enrichDate` unless the provider is (being) wired into
-      `scan-ats-full.mjs`; not shipped alongside the `fetchDetails` opt-in.
+- [ ] No `enrichDate` unless `scan-ats-full.mjs` reaches the provider
+      (or is being changed to); not shipped alongside the `fetchDetails`
+      opt-in.
 - [ ] `tests/providers/{name}.test.mjs` covers everything in section 3.
 - [ ] `node test-all.mjs` — the full suite is green (not just `--only`).
 - [ ] A row is added to

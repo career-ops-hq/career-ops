@@ -44,6 +44,9 @@ func TestDashboardStatusLifecycleMatchesCLIAndWeb(t *testing.T) {
 					t.Fatalf("%v: %s", err, out)
 				}
 			}
+			// The ledger is stamped with the local date at write time. Bracket
+			// the writes so a run that crosses local midnight still passes.
+			firstDay := time.Now().Format("2006-01-02")
 			update("Applied", "sent application")
 			update("Applied", "sent application")
 			followups, err := os.ReadFile(filepath.Join(filepath.Dir(tracker), "follow-ups.md"))
@@ -66,10 +69,15 @@ func TestDashboardStatusLifecycleMatchesCLIAndWeb(t *testing.T) {
 			if caller == "web" {
 				source = "web"
 			}
+			lastDay := time.Now().Format("2006-01-02")
 			for i, pair := range []string{"Evaluated\tApplied", "Applied\tRejected"} {
-				want := "42\t" + time.Now().Format("2006-01-02") + "\t" + pair + "\t" + source
-				if strings.TrimSpace(lines[i]) != want {
-					t.Fatalf("ledger row = %q, want %q", lines[i], want)
+				got := strings.TrimSpace(lines[i])
+				var want []string
+				for _, day := range []string{firstDay, lastDay} {
+					want = append(want, "42\t"+day+"\t"+pair+"\t"+source)
+				}
+				if got != want[0] && got != want[1] {
+					t.Fatalf("ledger row = %q, want %q", got, want[0])
 				}
 			}
 			apps := mustParseApplications(t, root)

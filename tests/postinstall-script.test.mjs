@@ -84,3 +84,41 @@ try {
 } finally {
   rmSync(stubDir, { recursive: true, force: true });
 }
+
+// Chromium is needed for PDF generation and browser checks, not for the rest
+// of career-ops, so a failed download must not fail `npm install`: offline,
+// behind a proxy, or with the CDN down, the dependencies are already in place
+// and only the browser is missing. The script tries twice, then warns and
+// exits 0. Here `npx` is stubbed to fail, so nothing downloads.
+console.log('\n📦 package.json postinstall — a failed Chromium download does not fail npm install');
+
+const failDir = mkdtempSync(join(tmpdir(), 'co-postinstall-fail-'));
+const attempts = join(failDir, 'npx-attempts');
+try {
+  writeFileSync(join(failDir, 'npx'), `#!/bin/sh\necho ran >> "${attempts}"\nexit 1\n`);
+  chmodSync(join(failDir, 'npx'), 0o755);
+  writeFileSync(join(failDir, 'npx.cmd'), `@echo ran>> "${attempts}"\r\n@exit /b 1\r\n`);
+
+  const env = { ...process.env, PATH: `${failDir}${delimiter}${process.env.PATH}` };
+  delete env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD;
+  let output = '';
+  try {
+    output = execSync(`${postinstall} 2>&1`, { cwd: ROOT, env, encoding: 'utf-8' });
+    pass('postinstall exits 0 when both Chromium install attempts fail');
+  } catch (e) {
+    fail(`postinstall exited ${e.status} when the Chromium install failed, which fails npm install: ${postinstall}`);
+  }
+  const ran = existsSync(attempts) ? readFileSync(attempts, 'utf-8').trim().split(/\r?\n/).length : 0;
+  if (ran === 2) {
+    pass('postinstall retries the Chromium install once before giving up');
+  } else {
+    fail(`expected 2 Chromium install attempts, saw ${ran}`);
+  }
+  if (output.includes('npx playwright install chromium')) {
+    pass('postinstall tells the user how to install Chromium later');
+  } else {
+    fail(`postinstall gave no hint after the failed install; output was: ${JSON.stringify(output)}`);
+  }
+} finally {
+  rmSync(failDir, { recursive: true, force: true });
+}

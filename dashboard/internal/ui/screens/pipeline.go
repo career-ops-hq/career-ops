@@ -1456,6 +1456,18 @@ func (m PipelineModel) renderSearchBar() string {
 	return style.Render(prompt + " " + display + matchInfo + hint)
 }
 
+// avgScoreLabel is the header's average score, or "—" when no row has a
+// score. AvgScore is averaged over scored rows only and every score is above
+// zero, so it is positive exactly when there is one; printed as "0.0" it read
+// as a pipeline that had been scored and scored nothing, a mean taken over no
+// values.
+func avgScoreLabel(avg float64) string {
+	if avg > 0 {
+		return fmt.Sprintf("%.1f", avg)
+	}
+	return "—"
+}
+
 func (m PipelineModel) renderHeader() string {
 	style := lipgloss.NewStyle().
 		Bold(true).
@@ -1465,8 +1477,7 @@ func (m PipelineModel) renderHeader() string {
 		Padding(0, 2)
 
 	right := lipgloss.NewStyle().Foreground(m.theme.Subtext)
-	avg := fmt.Sprintf("%.1f", m.metrics.AvgScore)
-	info := right.Render(fmt.Sprintf(i18n.Current.OffersSummary, m.metrics.Total, avg))
+	info := right.Render(fmt.Sprintf(i18n.Current.OffersSummary, m.metrics.Total, avgScoreLabel(m.metrics.AvgScore)))
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render(i18n.Current.AppTitle)
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
@@ -1736,7 +1747,7 @@ func (m PipelineModel) workModeColor(mode string) lipgloss.Color {
 }
 
 func (m PipelineModel) renderLocCell(app model.CareerApplication, width int) string {
-	text := app.WorkMode
+	text := i18n.Current.WorkModeLabel(app.WorkMode)
 	if app.Location != "" {
 		if text != "" {
 			text += " · " + app.Location
@@ -1776,19 +1787,27 @@ func (m PipelineModel) renderPostedCell(app model.CareerApplication, width int) 
 	if app.PostedOn == "" {
 		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
 	}
-	posted, err := time.Parse("2006-01-02", app.PostedOn)
+	// Local calendar days against the dashboard's own clock, the way
+	// FormatTimeAgo counts them for the label in this same cell. time.Parse
+	// read the date as UTC midnight and compared it with the real time.Now(),
+	// so east of UTC a posting dated today was "in the future" until the UTC
+	// date caught up, and got the dash meant for bad data, while its label
+	// would have said "today".
+	posted, err := time.ParseInLocation("2006-01-02", app.PostedOn, time.Local)
 	if err != nil {
 		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
 	}
+	now := i18n.NowFunc()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	// A requisition cannot have gone live in the future. Such a date is bad data
 	// (a typo, or a provider field that isn't the posting date at all), and it
-	// would otherwise read as the freshest possible req: time.Since is negative,
-	// which lands in the first case below and paints it green — the one colour
-	// that says "act on this now".
-	if posted.After(time.Now()) {
+	// would otherwise read as the freshest possible req: a negative age lands in
+	// the first case below and paints it green — the one colour that says "act
+	// on this now".
+	if posted.After(today) {
 		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
 	}
-	days := int(time.Since(posted).Hours() / 24)
+	days := int(math.Round(today.Sub(posted).Hours() / 24))
 	color := m.theme.Red
 	switch {
 	case days <= postedFreshDays:
@@ -1982,7 +2001,7 @@ func (m PipelineModel) renderPreview() string {
 	// and the only place narrow terminals see location/pay/last-contact.
 	var facts []string
 	if app.WorkMode != "" || app.Location != "" {
-		loc := app.WorkMode
+		loc := i18n.Current.WorkModeLabel(app.WorkMode)
 		if app.Location != "" {
 			if loc != "" {
 				loc += " · " + app.Location

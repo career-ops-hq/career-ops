@@ -264,7 +264,8 @@ console.log('\n🧪 Testing updater drift detection over materialized skill entr
   // Anchored on the exact call this file's own doc comment (top) and PR
   // description cite: systemTreeDiffers's first argument must be the
   // filtered pathspec, not the raw SYSTEM_PATHS list.
-  const wired = /systemTreeDiffers\(\s*driftPathspecExcludingSkillEntrypoints\(\s*SYSTEM_PATHS\s*,\s*SKILL_ENTRYPOINTS\s*\)\s*,\s*['"]FETCH_HEAD['"]/.test(source);
+  // The list is the local manifest, through requireLocalSystemPaths() (#5554).
+  const wired = /systemTreeDiffers\(\s*driftPathspecExcludingSkillEntrypoints\(\s*requireLocalSystemPaths\([^)]*\)\s*,\s*SKILL_ENTRYPOINTS\s*\)\s*,\s*['"]FETCH_HEAD['"]/.test(source);
   if (wired) {
     pass("check()'s systemTreeDiffers() call is wired through driftPathspecExcludingSkillEntrypoints(), not the raw SYSTEM_PATHS list");
   } else {

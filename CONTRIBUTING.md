@@ -156,6 +156,7 @@ To propose a source (yours or anyone's): [open a source proposal](https://github
 - Keep modes language-agnostic when possible (Claude handles both EN and ES)
 - Scripts should handle missing files gracefully (check `existsSync` before `readFileSync`)
 - Dashboard changes require a build (`npm run build:dashboard`) — test with real data before submitting
+- Changes to `dashboard/` or `templates/states.yml` need `go test ./...` run from `dashboard/`: CI runs it on every pull request, and it is the only check that the dashboard accepts every state in `templates/states.yml`; `node test-all.mjs` does not run it
 - Don't commit personal data (cv.md, profile.yml, applications.md, reports/)
 
 ## What we do NOT accept
@@ -182,6 +183,7 @@ node cv-sync-check.mjs        # Config check
 # Dashboard
 npm run build:dashboard       # go build with platform-correct binary name
 npm run serve:dashboard       # launch the TUI against the repo root
+(cd dashboard && go test ./...)  # Go tests; CI runs them next to test-all
 
 # Tests
 node test-all.mjs             # Full suite — run before pushing/opening a PR
@@ -228,6 +230,17 @@ The naming is a convention, not a checked contract.
 section (syntax, scripts, dashboard, data contract, personal data, paths,
 etc.). A green `--only` run is **not** a green suite — always run the full
 `node test-all.mjs` before pushing.
+
+**A test that needs a real Chromium or a TeX engine** skips (or warns) where
+the tool is missing, and the `test` CI job installs neither. Declare the tool so
+that CI still runs it: call `toolRequired('browser')` in a node:test `skip`
+condition (from `tests/required-tools.mjs`), or `toolUnavailable('browser', …)`
+in place of `warn()` (from `tests/helpers.mjs`); `'latex'` for a TeX engine. The
+`tool-suites` CI job runs `node test-all.mjs --needs browser,latex` in the
+cv-visual Docker image, where a missing tool fails the run instead of skipping
+it.
+`tests/required-tools-declared.test.mjs` fails a suite that launches Chromium
+without declaring it.
 
 ### Checking translated mode structure
 

@@ -28,7 +28,7 @@ export const BATCH_CAP = 12; // hard ceiling on a single fan-out
 const CANON_STATUS = ["Evaluated", "Applied", "Responded", "Assessment", "Interview", "Offer", "Hired", "Rejected", "Discarded", "SKIP"];
 
 const TAB_VALUES = [
-  "INBOX", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP",
+  "INBOX", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP", "OTHER",
 ] as const;
 const SORT_VALUES = ["company", "role", "score", "status", "date"] as const;
 
@@ -54,8 +54,9 @@ export type ActionCtx = {
   setApplyField: (idOrLabel: string, value: string) => void; // edit an apply-proxy answer
   startApply: (url: string) => void; // open the apply form-proxy for a posting URL
   applyExplore?: (patch: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void; // build a FREE discovery search
-  writeProfile?: (patch: Record<string, unknown>) => void; // merge-safe config/profile.yml write
-  writePortals?: (roles: string[], location?: string[]) => void; // merge-safe portals.yml title_filter write
+  // Both resolve to null once the route confirms the write, else to a sentence saying it was not saved.
+  writeProfile?: (patch: Record<string, unknown>) => Promise<string | null>; // merge-safe config/profile.yml write
+  writePortals?: (roles: string[], location?: string[]) => Promise<string | null>; // merge-safe portals.yml title_filter write
   writePersonalization?: (patch: Record<string, unknown>) => void; // section-safe modes/_profile.md write
 };
 
@@ -88,7 +89,9 @@ function coerceProfile(raw: Record<string, unknown>): ProfilePatch {
   return out;
 }
 
-export type DoneInfo = { jobIds?: string[]; batchId?: string; note?: string };
+// `failure` settles after a confirmed write: null when it saved, otherwise the
+// reason, which the console shows on that write's own confirmation card.
+export type DoneInfo = { jobIds?: string[]; batchId?: string; note?: string; failure?: Promise<string | null> };
 export type DispatchResult =
   | ({ status: "done" } & DoneInfo)
   | { status: "ignored"; note?: string }
@@ -342,9 +345,16 @@ const ACTIONS: Record<string, ActionDef> = {
         status: "confirm",
         summary: `Save your profile?${bits ? ` (${bits})` : ""}`,
         run: () => {
-          ctx.writeProfile!(p as Record<string, unknown>);
-          if (p.roles?.length) ctx.writePortals?.(p.roles, p.location ? [p.location] : undefined);
-          return { note: "Profile saved — your matches will sharpen." };
+          const profile = ctx.writeProfile!(p as Record<string, unknown>);
+          const portals = p.roles?.length && ctx.writePortals ? ctx.writePortals(p.roles, p.location ? [p.location] : undefined) : null;
+          // Two writes, one card: when only one of them fails, the card also
+          // says the other one was saved.
+          const failure = Promise.all([profile, portals]).then(([profileFailure, portalsFailure]) => {
+            if (profileFailure && portalsFailure) return `${profileFailure} ${portalsFailure}`;
+            if (profileFailure) return portals ? `${profileFailure} Your scan targets were saved.` : profileFailure;
+            return portalsFailure ? `Your profile was saved. ${portalsFailure}` : null;
+          });
+          return { note: "Profile saved — your matches will sharpen.", failure };
         },
       };
     },
@@ -384,8 +394,7 @@ const ACTIONS: Record<string, ActionDef> = {
         status: "confirm",
         summary: `Set your scan targets to: ${roles.join(", ")}?`,
         run: () => {
-          ctx.writePortals!(roles, location);
-          return { note: "Scan targets updated." };
+          return { note: "Scan targets updated.", failure: ctx.writePortals!(roles, location) };
         },
       };
     },

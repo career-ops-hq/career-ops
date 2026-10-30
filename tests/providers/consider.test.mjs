@@ -16,12 +16,12 @@ try {
   if (consider.id === 'consider') pass('consider.id is "consider"');
   else fail(`consider.id is ${JSON.stringify(consider.id)}`);
 
-  const okEntry = { name: 'Founderful', consider_board: 'wingman', careers_url: 'https://jobs.founderful.com/jobs' };
+  const okEntry = { name: 'Acme Ventures', consider_board: 'acme-portfolio', careers_url: 'https://jobs.acmevc.example/jobs' };
   const hit = consider.detect(okEntry);
-  if (hit && hit.url === 'https://jobs.founderful.com/api-boards/search-jobs') pass('consider.detect() claims a valid https board');
+  if (hit && hit.url === 'https://jobs.acmevc.example/api-boards/search-jobs') pass('consider.detect() claims a valid https board');
   else fail(`consider.detect() returned ${JSON.stringify(hit)}`);
 
-  if (consider.detect({ name: 'X', careers_url: 'https://jobs.founderful.com/jobs' }) === null) {
+  if (consider.detect({ name: 'X', careers_url: 'https://jobs.acmevc.example/jobs' }) === null) {
     pass('consider.detect() returns null without consider_board');
   } else {
     fail('consider.detect() must require consider_board');
@@ -29,7 +29,7 @@ try {
 
   // SSRF: non-https + IP-literal + loopback/internal hosts are all rejected.
   const considerEvil = [
-    ['http://jobs.founderful.com/jobs', 'non-https'],
+    ['http://jobs.acmevc.example/jobs', 'non-https'],
     ['https://127.0.0.1/jobs', 'IPv4 loopback'],
     ['https://169.254.169.254/jobs', 'cloud metadata IPv4'],
     ['https://[::1]/jobs', 'IPv6 loopback'],
@@ -54,7 +54,7 @@ try {
     _acquireHandshake: noHandshake,
     fetchJson: async (_url, opts) => {
       considerOpts = opts;
-      return { jobs: [{ title: 'AI Eng', url: 'https://jobs.founderful.com/x', companyName: 'Acme', locations: ['Remote'], timeStamp: '2026-01-02' }] };
+      return { jobs: [{ title: 'AI Eng', url: 'https://jobs.acmevc.example/x', companyName: 'Acme', locations: ['Remote'], timeStamp: '2026-01-02' }] };
     },
   });
   if (considerOpts?.redirect === 'error') pass('consider.fetch() passes redirect:"error"');
@@ -70,7 +70,7 @@ try {
   // as permanently stale to the freshness filter).
   const considerZeroStamp = await consider.fetch(okEntry, {
     _acquireHandshake: noHandshake,
-    fetchJson: async () => ({ jobs: [{ title: 'T', url: 'https://jobs.founderful.com/y', companyName: 'Acme', timeStamp: 0 }] }),
+    fetchJson: async () => ({ jobs: [{ title: 'T', url: 'https://jobs.acmevc.example/y', companyName: 'Acme', timeStamp: 0 }] }),
   });
   if (considerZeroStamp[0]?.postedAt == null) pass('consider.fetch() treats a 0 timeStamp as missing, not epoch 0');
   else fail(`consider.fetch() postedAt for timeStamp=0 = ${JSON.stringify(considerZeroStamp[0]?.postedAt)}`);
@@ -102,7 +102,7 @@ try {
     _acquireHandshake: async (origin) => { handshakeOrigin = origin; return { cookie: null, csrfToken: null }; },
     fetchJson: async () => ({ jobs: [] }),
   });
-  if (handshakeOrigin === 'https://jobs.founderful.com') pass('consider.fetch() passes board origin to the handshake');
+  if (handshakeOrigin === 'https://jobs.acmevc.example') pass('consider.fetch() passes board origin to the handshake');
   else fail(`consider.fetch() handshake origin = ${JSON.stringify(handshakeOrigin)}`);
 
   // When the handshake returns a cookie, it must appear in the POST headers.
@@ -156,6 +156,44 @@ try {
   if (degradedPostCalled) pass('consider.fetch() attempts the POST even when the handshake returns null');
   else fail('consider.fetch() must not skip the POST when handshake fails');
 
+  // ── Board id: consider_board, else the board page ──────────────────────────
+  const autoEntry = { name: 'Acme Ventures', careers_url: 'https://jobs.acmevc.example/jobs' };
+  const postedBoard = async (entry, handshake) => {
+    let board = null;
+    await consider.fetch(entry, {
+      _acquireHandshake: async () => handshake,
+      fetchJson: async (_url, opts) => { board = JSON.parse(opts.body).board; return { jobs: [] }; },
+    });
+    return board;
+  };
+
+  {
+    const board = await postedBoard(autoEntry, { cookie: null, csrfToken: null, board: { id: 'acme-portfolio', isParent: false } });
+    if (board?.id === 'acme-portfolio' && board.isParent === false) pass('consider.fetch() posts the board the page names, isParent included, without consider_board');
+    else fail(`consider.fetch() page board = ${JSON.stringify(board)}`);
+  }
+
+  {
+    let posted = false;
+    let error = null;
+    try {
+      await consider.fetch(autoEntry, {
+        _acquireHandshake: noHandshake,
+        fetchJson: async () => { posted = true; return { jobs: [] }; },
+      });
+    } catch (err) {
+      error = err;
+    }
+    if (error && /consider_board/.test(error.message) && !posted) pass('consider.fetch() throws before the POST, naming consider_board, when the page names no board');
+    else fail(`consider.fetch() with no board id: error=${error?.message}, posted=${posted}`);
+  }
+
+  {
+    const board = await postedBoard({ ...autoEntry, consider_board: 'manual-board' }, { cookie: null, csrfToken: null, board: { id: 'acme-portfolio', isParent: false } });
+    if (board?.id === 'manual-board' && board.isParent === true) pass('consider.fetch() lets consider_board win over the page board');
+    else fail(`consider.fetch() override = ${JSON.stringify(board)}`);
+  }
+
   // ── Real acquireCsrfHandshake path (ctx.fetchResponse stub) ────────────────
   // The tests above stub _acquireHandshake and never exercise the actual GET
   // /jobs logic. These leave it unset so the real function runs, and verify
@@ -187,7 +225,7 @@ try {
           handshakeOpts = opts;
           return handshakeResponse(200,
             ['session=s1; Path=/; HttpOnly', 'session.sig=sig1; Path=/'],
-            `<script>window.__cfg={"csrfToken":"handshake-token-ok"}</script>`);
+            `<script>\n  window.serverInitialData = {"csrfToken":"handshake-token-ok"};\n</script>`);
         },
         fetchJson: async (_url, opts) => {
           realHandshakePostHeaders = opts.headers;
@@ -195,7 +233,7 @@ try {
         },
       });
 
-      if (handshakeUrl === 'https://jobs.founderful.com/jobs') {
+      if (handshakeUrl === 'https://jobs.acmevc.example/jobs') {
         pass('acquireCsrfHandshake GETs {origin}/jobs through ctx.fetchResponse');
       } else {
         fail(`acquireCsrfHandshake GET url = ${JSON.stringify(handshakeUrl)}`);
@@ -220,6 +258,59 @@ try {
       } else {
         fail(`acquireCsrfHandshake x-csrf-token = ${JSON.stringify(realHandshakePostHeaders?.['x-csrf-token'])}`);
       }
+
+      // The board object as a live board page embeds it, next to the token.
+      let pageBoardPosted = null;
+      await consider.fetch({ name: 'Acme Ventures', careers_url: 'https://jobs.acmevc.example/jobs' }, {
+        fetchResponse: async () => handshakeResponse(200, [],
+          `<script>\n  window.shouldHydrate = true;\n  window.serverInitialData = {"fixedBoard":"acme-portfolio","csrfToken":"handshake-token-ok","board":{"id":"acme-portfolio","isParent":true},"clientConfig":{"id":"acme-portfolio"}};\n</script>`),
+        fetchJson: async (_url, opts) => { pageBoardPosted = JSON.parse(opts.body).board; return { jobs: [] }; },
+      });
+      if (pageBoardPosted?.id === 'acme-portfolio' && pageBoardPosted.isParent === true) {
+        pass('acquireCsrfHandshake reads the board object from window.serverInitialData');
+      } else {
+        fail(`acquireCsrfHandshake board = ${JSON.stringify(pageBoardPosted)}`);
+      }
+
+      // The same state with the closing tag on its line, as a minified page has it.
+      let sameLineBoard = null;
+      await consider.fetch({ name: 'Acme Ventures', careers_url: 'https://jobs.acmevc.example/jobs' }, {
+        fetchResponse: async () => handshakeResponse(200, [],
+          `<script>window.serverInitialData = {"csrfToken":"handshake-token-ok","board":{"id":"acme-portfolio","isParent":true}};</script><script>window.other = {"board":{"id":"other"}};</script>`),
+        fetchJson: async (_url, opts) => { sameLineBoard = JSON.parse(opts.body).board; return { jobs: [] }; },
+      });
+      if (sameLineBoard?.id === 'acme-portfolio') pass('acquireCsrfHandshake reads window.serverInitialData followed by </script> on the same line');
+      else fail(`acquireCsrfHandshake same-line board = ${JSON.stringify(sameLineBoard)}`);
+
+      // "csrfToken" and "board" keys in any other script are not picked up:
+      // only the top level of window.serverInitialData counts.
+      let strayPosted = false;
+      let strayError = null;
+      try {
+        await consider.fetch({ name: 'Acme Ventures', careers_url: 'https://jobs.acmevc.example/jobs' }, {
+          fetchResponse: async () => handshakeResponse(200, [],
+            `<script>window.widgetConfig = {"csrfToken":"stray-token-123","board":{"id":"stray-board","isParent":true}};</script>\n` +
+            `<script>\n  window.serverInitialData = {"clientConfig":{"board":{"id":"nested-board"},"csrfToken":"nested-token-456"}};\n</script>`),
+          fetchJson: async () => { strayPosted = true; return { jobs: [] }; },
+        });
+      } catch (err) {
+        strayError = err;
+      }
+      if (strayError && /consider_board/.test(strayError.message) && !strayPosted) {
+        pass('acquireCsrfHandshake ignores csrfToken / board keys outside the top level of window.serverInitialData');
+      } else {
+        fail(`acquireCsrfHandshake picked up a stray key: error=${strayError?.message}, posted=${strayPosted}`);
+      }
+
+      // The stray token is not sent either, for an entry that sets its board.
+      let strayTokenHeaders = null;
+      await consider.fetch(okEntry, {
+        fetchResponse: async () => handshakeResponse(200, [],
+          `<script>window.widgetConfig = {"csrfToken":"stray-token-123"};</script>`),
+        fetchJson: async (_url, opts) => { strayTokenHeaders = opts.headers; return { jobs: [] }; },
+      });
+      if (strayTokenHeaders && !strayTokenHeaders['x-csrf-token']) pass('acquireCsrfHandshake sends no token found outside window.serverInitialData');
+      else fail(`acquireCsrfHandshake sent a stray token: ${strayTokenHeaders?.['x-csrf-token']}`);
 
       // A redirect on GET /jobs (e.g. redirect to a private IP) must cause the
       // handshake to degrade gracefully — the POST is still attempted.
@@ -253,7 +344,7 @@ try {
           notOkGetUrl = url;
           return handshakeResponse(403,
             ['session=s_leaked; Path=/; HttpOnly', 'session.sig=sig_leaked; Path=/'],
-            `<script>window.__cfg={"csrfToken":"leaked-token-403"}</script>`);
+            `<script>\n  window.serverInitialData = {"csrfToken":"leaked-token-403"};\n</script>`);
         },
         fetchJson: async (_url, opts) => {
           notOkPostCalled = true;
@@ -261,10 +352,10 @@ try {
           return { jobs: [] };
         },
       });
-      if (notOkGetUrl === 'https://jobs.founderful.com/jobs') {
+      if (notOkGetUrl === 'https://jobs.acmevc.example/jobs') {
         pass('acquireCsrfHandshake !res.ok: GET /jobs was attempted before the guard evaluated res.ok');
       } else {
-        fail(`acquireCsrfHandshake !res.ok: expected GET https://jobs.founderful.com/jobs, got ${JSON.stringify(notOkGetUrl)}`);
+        fail(`acquireCsrfHandshake !res.ok: expected GET https://jobs.acmevc.example/jobs, got ${JSON.stringify(notOkGetUrl)}`);
       }
       if (notOkPostCalled) {
         pass('acquireCsrfHandshake !res.ok (403): POST still attempted (graceful degrade, not abort)');
@@ -315,7 +406,7 @@ try {
       const path = new URL(String(url)).pathname;
       guardedHosts[path] = providerFetchContext.getStore()?.targetHost ?? null;
       if (path === '/jobs') {
-        return new Response(`<script>window.__cfg={"csrfToken":"guarded-token-ok"}</script>`, {
+        return new Response(`<script>\n  window.serverInitialData = {"csrfToken":"guarded-token-ok"};\n</script>`, {
           status: 200,
           headers: { 'content-type': 'text/html', 'set-cookie': 'session=g1; Path=/' },
         });
@@ -327,12 +418,12 @@ try {
     } finally {
       globalThis.fetch = realFetch;
     }
-    if (guardedHosts['/jobs'] === 'jobs.founderful.com') {
+    if (guardedHosts['/jobs'] === 'jobs.acmevc.example') {
       pass('consider handshake GET runs inside providerFetchContext (resolved address is validated)');
     } else {
       fail(`consider handshake GET ran outside the provider DNS guard (context host = ${JSON.stringify(guardedHosts['/jobs'])})`);
     }
-    if (guardedHosts['/api-boards/search-jobs'] === 'jobs.founderful.com') {
+    if (guardedHosts['/api-boards/search-jobs'] === 'jobs.acmevc.example') {
       pass('consider POST runs inside providerFetchContext');
     } else {
       fail(`consider POST context host = ${JSON.stringify(guardedHosts['/api-boards/search-jobs'])}`);

@@ -152,9 +152,13 @@ export async function executeAction(page, frame, act, actionable) {
       // (`context.setDefaultTimeout(8000)`), so this was already bounded,
       // just two seconds looser than the action this loop otherwise treats
       // as its click budget.
+      // The fallback inserts text instead of typing it: keyboard.type presses a real key per
+      // character, so a "\n" or "\r" in the planner's text was an Enter on a focused control,
+      // which is implicit form submission and bypassed the never-submit guard. insertText
+      // dispatches no key events, and line breaks are flattened to spaces before it.
       await target.fill(act.text || "").catch(async () => {
         await target.click({ timeout: 6000 });
-        await page.keyboard.type(act.text || "");
+        await page.keyboard.insertText(String(act.text || "").replace(/[\r\n]+/g, " "));
       });
     } else if (act.action === "select" && target) {
       detail = `select "${act.value}"`;

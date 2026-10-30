@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2 } from "lucide-react";
 import { CoMark } from "@/components/co-mark";
 import { useJobs } from "@/components/jobs/job-store";
@@ -21,7 +19,9 @@ import { pendingActOpenerStart } from "@/lib/act-envelope.mjs";
 import { cleanMessages } from "@/lib/assistant-history.mjs";
 import { StatusConfirmationCard, type StatusConfirmationPart } from "@/components/assistant-status-confirmation";
 import { StatusWriteError, writeAssistantStatus } from "@/lib/assistant-status-write.mjs";
+import { postAssistantWrite } from "@/lib/assistant-file-write.mjs";
 import { cn } from "@/lib/cn";
+import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
 // ── message model: messages are PART arrays so a live worker card can render
 // inline next to text, both fed by the single JobsProvider store ──────────────
@@ -30,12 +30,14 @@ type Part =
   | { type: "note"; text: string }
   | { type: "card"; jobId: string }
   | { type: "batch"; batchId: string; jobIds: string[] }
-  | { type: "confirm"; cid: string; summary: string; state: "pending" | "done" | "cancelled"; statusChange?: undefined }
+  | { type: "confirm"; cid: string; summary: string; state: "pending" | "saving" | "done" | "cancelled" | "failed"; message?: string; statusChange?: undefined }
   | StatusConfirmationPart;
 type Msg = { role: "user" | "assistant"; parts: Part[] };
 type RequestFeedback = { id: number; phase: "working" | "ready" | "error"; announce: boolean };
 
-const CONFIG_KEY = "career-ops:config";
+const loadMarkdown = () => import("@/components/assistant-markdown");
+const AssistantMarkdown = lazy(loadMarkdown);
+
 const CHAT_KEY = "career-ops:chat";
 const SIZE_KEY = "career-ops:assistant-size";
 
@@ -277,7 +279,7 @@ export function AssistantConsole() {
     }
   }, [open]);
 
-  // selected CLI from Config (reacts to changes in other tabs)
+  // Selected CLI from Config, including saves in this tab.
   useEffect(() => {
     function read() {
       try {
@@ -288,8 +290,7 @@ export function AssistantConsole() {
       }
     }
     read();
-    window.addEventListener("storage", read);
-    return () => window.removeEventListener("storage", read);
+    return subscribeConfig(window, read);
   }, []);
 
   async function chatRequest(url: string, init?: RequestInit) {
@@ -538,14 +539,17 @@ export function AssistantConsole() {
         setTimeout(() => applyRef.current.open(u), 60);
       },
       applyExplore: (patch, opts) => exploreRef.current.applyPatch(patch, opts),
-      writeProfile: (patch) => {
-        fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })
-          .then(() => router.refresh())
-          .catch(() => {});
-      },
-      writePortals: (roles, location) => {
-        fetch("/api/portals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roles, location }) }).catch(() => {});
-      },
+      // A refused or failed write must not pass for a saved one: the route
+      // answers 4xx/5xx with the reason, and resolveConfirm puts it on the card.
+      writeProfile: (patch) =>
+        postAssistantWrite("/api/profile", patch).then((failure) => {
+          if (!failure) router.refresh();
+          return failure ? `Your profile was NOT saved: ${failure}.` : null;
+        }),
+      writePortals: (roles, location) =>
+        postAssistantWrite("/api/portals", { roles, location }).then((failure) =>
+          failure ? `Your scan targets were NOT saved: ${failure}.` : null,
+        ),
       writePersonalization: (patch) => {
         fetch("/api/personalization", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })
           .then(async (r) => {
@@ -615,11 +619,23 @@ export function AssistantConsole() {
     const run = confirmRuns.current.get(cid);
     confirmRuns.current.delete(cid);
     const info = accept && run ? run() : null;
+    // A write card stays "saving" until its write settles, so a chat saved in
+    // between records it as unconfirmed, never done. Matched by cid, so a write
+    // that settles after the user switched chats updates only the card that
+    // started it, never the chat now on screen.
+    void info?.failure
+      ?.catch(() => "The write could not be confirmed.")
+      .then((message) => {
+        setMessages((ms) => ms.map((m) => ({ ...m,
+          parts: m.parts.map((p) => p.type === "confirm" && !p.statusChange && p.cid === cid
+            ? (message ? { ...p, state: "failed" as const, message } : { ...p, state: "done" as const }) : p),
+        })));
+      });
     setMessages((ms) =>
       ms.map((m) => {
         if (!m.parts.some((p) => p.type === "confirm" && p.cid === cid)) return m;
         const parts: Part[] = m.parts.map((p) =>
-          p.type === "confirm" && p.cid === cid ? { ...p, state: accept ? "done" : "cancelled" } : p,
+          p.type === "confirm" && p.cid === cid ? { ...p, state: !accept ? "cancelled" : info?.failure ? "saving" : "done" } : p,
         );
         if (info?.jobIds?.length) {
           if (info.batchId && info.jobIds.length > 1) parts.push({ type: "batch", batchId: info.batchId, jobIds: info.jobIds });
@@ -807,11 +823,12 @@ export function AssistantConsole() {
         <button
           ref={openerRef}
           onClick={(e) => openAssistant(e.currentTarget)}
+          onPointerEnter={loadMarkdown}
+          onFocus={loadMarkdown}
           className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px]"
-          aria-label="Open assistant"
         >
           <CoMark size={26} />
-          <span className="text-sm font-medium">Ask</span>
+          <span className="text-sm font-medium">Ask<span className="sr-only"> the assistant</span></span>
         </button>
       )}
 
@@ -906,9 +923,9 @@ export function AssistantConsole() {
                 <button
                   key={i}
                   onClick={() => send(s.send)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand-text"
                 >
-                  <Sparkles className="size-3 text-brand/70" />
+                  <Sparkles className="size-3 text-brand-text/70" />
                   {s.label}
                 </button>
               ))}
@@ -999,7 +1016,9 @@ function PartView({
     if (!part.text.trim()) return null;
     return (
       <div className="report-prose text-sm [&_*]:my-1 [&>:first-child]:mt-0 [&>:last-child]:mb-0">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+        <Suspense fallback={part.text}>
+          <AssistantMarkdown text={part.text} />
+        </Suspense>
       </div>
     );
   }
@@ -1019,7 +1038,7 @@ function PartView({
         job={job}
         variant="inline"
         trailing={
-          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label={workerDetailsLabel(job)}>
+          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand-text" aria-label={workerDetailsLabel(job)}>
             <ArrowUpRight className="size-3.5" />
           </Link>
         }
@@ -1031,7 +1050,7 @@ function PartView({
     return (
       <div className="rounded-xl border border-border bg-surface/40 p-2.5">
         <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
-          <Sparkles className="size-3.5 text-brand" />
+          <Sparkles className="size-3.5 text-brand-text" />
           {part.jobIds.length} evaluations
           <span className="ml-auto tabular-nums text-faint">
             {workerBatchSummary(children, part.jobIds.length)}
@@ -1044,7 +1063,7 @@ function PartView({
               job={j}
               variant="inline"
               trailing={
-                <Link href={`/jobs/${j.id}`} className="text-faint transition-colors hover:text-brand" aria-label={workerDetailsLabel(j)}>
+                <Link href={`/jobs/${j.id}`} className="text-faint transition-colors hover:text-brand-text" aria-label={workerDetailsLabel(j)}>
                   <ArrowUpRight className="size-3.5" />
                 </Link>
               }
@@ -1109,7 +1128,9 @@ function ConfirmationCard({ part, onConfirm }: {
         </div>
       ) : (
         <div ref={resultRef} tabIndex={-1} aria-labelledby={`${summaryId} ${resultId}`} className="mt-1 rounded text-xs text-faint focus-visible:outline-2 focus-visible:outline-brand">
-          <span id={resultId}>{part.state === "done" ? "✓ started" : "cancelled"}</span>
+          <span id={resultId} role={part.state === "failed" ? "alert" : undefined} className={part.state === "failed" ? "text-red-600 dark:text-red-400" : undefined}>
+            {part.state === "done" ? "✓ started" : part.state === "saving" ? "saving…" : part.state === "failed" ? part.message : "cancelled"}
+          </span>
         </div>
       )}
     </div>

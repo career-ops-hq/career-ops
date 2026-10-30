@@ -3,12 +3,17 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import * as yaml from "js-yaml";
 import {
   loadPortalsDocument,
   mergePortalFilters,
+  patchPortalFiltersText,
   PortalsConfigError,
   watchedCompanies,
 } from "../../src/lib/portals-config.mjs";
+
+const TEMPLATE = fileURLToPath(new URL("../../../templates/portals.example.yml", import.meta.url));
 
 const fixtureDirs = [];
 
@@ -112,4 +117,74 @@ test("watchedCompanies lists scanned companies first, then paused ones, with the
     { name: "Globex", enabled: false, host: "jobs.example.test" },
   ]);
   assert.deepEqual(watchedCompanies({ title_filter: {} }), []);
+});
+
+// /api/portals used to write yaml.dump(doc), which drops every comment and
+// every commented-out "# - name:" company block a user enables by uncommenting.
+const commentLines = (text) => text.split("\n").filter((l) => l.trim().startsWith("#"));
+const expectPatched = (source, roles, locations) => {
+  const text = patchPortalFiltersText(source, roles, locations);
+  assert.ok(text, "the text edit should apply");
+  assert.deepEqual(yaml.load(text), mergePortalFilters(yaml.load(source), roles, locations));
+  return text;
+};
+
+test("the shipped template keeps every comment and commented-out company when roles are set", () => {
+  const source = readFileSync(TEMPLATE, "utf8");
+  const text = expectPatched(source, ["Data Engineer", "Analytics: Lead"], undefined);
+  assert.deepEqual(commentLines(text), commentLines(source));
+  assert.ok(commentLines(source).some((l) => /^\s*#\s*- name:/.test(l)), "fixture has commented-out companies");
+});
+
+test("adding a location allow-list to the template keeps its commented example block", () => {
+  const source = readFileSync(TEMPLATE, "utf8");
+  const text = expectPatched(source, ["Data Engineer"], ["United States", "Remote"]);
+  assert.deepEqual(commentLines(text), commentLines(source));
+});
+
+test("an existing allow list is replaced and the other location tiers stay", () => {
+  const source = [
+    "# my notes",
+    "title_filter:",
+    "  positive:",
+    "    - \"Old\"  # was here",
+    "    # - \"Maybe later\"",
+    "  negative: [Intern]",
+    "location_filter:",
+    "  block: [Moon]",
+    "  allow:",
+    "    - Berlin",
+    "    - Paris",
+    "  # trailing note",
+    "tracked_companies:",
+    "  # - name: Paused Co",
+    "  - name: Acme",
+    "",
+  ].join("\n");
+  const text = expectPatched(source, ["New"], ["Lisbon"]);
+  assert.deepEqual(commentLines(text), commentLines(source));
+  // A note after the last item (a commented-out suggestion) stays after the new items.
+  assert.match(text, /  positive:\n    - "New"\n    # - "Maybe later"\n  negative: \[Intern\]/);
+  assert.match(text, /  allow:\n    - "Lisbon"\n  # trailing note\n/);
+});
+
+test("flow-style and same-indent lists are rewritten in place", () => {
+  expectPatched("title_filter:\n  positive: [A, B]  # inline\n  negative: []\n", ["C"], undefined);
+  const sameIndent = expectPatched("title_filter:\n  positive:\n  - A\n  - B\n  negative:\n  - X\n", ["C"], undefined);
+  assert.match(sameIndent, /  positive:\n  - "C"\n  negative:/);
+});
+
+test("missing sections and keys are added", () => {
+  expectPatched("# only a note\ntracked_companies:\n  - name: Acme\n", ["A"], ["Berlin"]);
+  expectPatched("title_filter:\n  negative:\n    - Junior\n", ["A"], undefined);
+});
+
+test("CRLF line endings are kept", () => {
+  const text = expectPatched("title_filter:\r\n  positive:\r\n    - A\r\n# note\r\nother: 1\r\n", ["B"], undefined);
+  assert.ok(!/[^\r]\n/.test(text), "every line ends with CRLF");
+});
+
+test("shapes the line edit cannot place return null so the route falls back", () => {
+  assert.equal(patchPortalFiltersText("title_filter: { positive: [A] }\n", ["B"], undefined), null);
+  assert.equal(patchPortalFiltersText("title_filter:\n  positive: A\n", ["B"], undefined), null);
 });

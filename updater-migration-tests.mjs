@@ -118,8 +118,18 @@ try {
   fail(`migration fixture git setup: ${error.message}`);
 }
 
-function extractArray(name) {
-  const match = source.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
+// The system list moved to lib/update-manifest.mjs (#5554); the user and
+// bootstrap lists are still in update-system.mjs.
+let manifestSource = '';
+try {
+  manifestSource = readFileSync('lib/update-manifest.mjs', 'utf-8');
+  pass('lib/update-manifest.mjs is readable');
+} catch (error) {
+  fail(`lib/update-manifest.mjs is readable: ${error.message}`);
+}
+
+function extractArray(name, from = source) {
+  const match = from.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
   if (!match) {
     fail(`${name} array exists`);
     return [];
@@ -128,7 +138,7 @@ function extractArray(name) {
   return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g), (entry) => entry[1]);
 }
 
-const systemPaths = extractArray('SYSTEM_PATHS');
+const systemPaths = extractArray('SYSTEM_PATHS', manifestSource);
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
@@ -440,8 +450,8 @@ const twoPassManifestChecks = [
     pattern: /git\('show',\s*`\$\{targetCommit\}:update-system\.mjs`\)/,
   },
   {
-    name: 'apply extracts SYSTEM_PATHS from the target updater',
-    pattern: /extractArrayFromSource\([^,]+,\s*'SYSTEM_PATHS'\)/,
+    name: 'apply reads SYSTEM_PATHS from the pinned target, module first (#5554)',
+    pattern: /manifestSystemPathsAt\(targetCommit\)/,
   },
   {
     name: 'apply merges local and target system manifests',
@@ -561,10 +571,11 @@ const twoPassManifestChecks = [
     // earlier self-bootstrap overwrite (#3207); pin the normal call site here.
     pattern: /backupSystemFiles\(atRisk\)/,
   },
-  {
-    name: 'overwriting a locally edited system file requires --force (#2337)',
-    pattern: /updateForce[\s\S]{0,400}?preservedPaths\.push\(\.\.\.atRisk\)/,
-  },
+  // "Overwriting a locally edited system file requires --force" (#2337) is not
+  // pinned here. A regex over the source matched the inverted branch just as
+  // well; `upgrade-tests.mjs --local-edit` runs a real apply, with and without
+  // --force, against a committed local edit, and `--local-edit-canary` proves
+  // that leg goes red on the inverted branch (#5759).
   {
     // Excluded paths must stay out of the scoped commit too, or the
     // "auto-update" commit records the very edit the user kept (#2337).
@@ -717,8 +728,9 @@ if (appearsInOrder(applySource, [pairCall, 'pruneStaleTargetRefs();'])) {
 
 if (appearsInOrder(applySource, [
   pairCall,
-  "remoteUpdaterSource = git('show', `${targetCommit}:update-system.mjs`);",
-  "remoteSystemPaths = assertCanonicalManifestPaths(remoteSystemPaths, 'Target SYSTEM_PATHS');",
+  "git('show', `${targetCommit}:update-system.mjs`);",
+  'manifestSystemPathsAt(targetCommit)',
+  "remoteSystemPaths = assertCanonicalManifestPaths(remoteSystemPaths, `Target SYSTEM_PATHS (${remoteManifestFile})`);",
   'const validatedManifestPaths = assertCanonicalManifestPaths(',
   "'Merged updater manifest',",
   "resolveReexecCheckout(targetCommit, 'update-system.mjs')",
@@ -737,6 +749,7 @@ if (appearsInOrder(rollbackSource, [
   'targetRef = targetRefForBackup(latest);',
   "git('show-ref', '--verify', '--quiet', targetRef);",
   "git('show', `${targetRef}:update-system.mjs`);",
+  'manifestSystemPathsAt(targetRef)',
   'manifestTreeFiles(safeTargetPaths, targetRef, userPaths,',
 ]) && !/\b(?:git|gitQuiet|gitShowRaw)\([^)]*\bFETCH_HEAD\b[^)]*\)/s.test(rollbackSource)) {
   pass('rollback derives target removals only from the durable backup-paired ref, never FETCH_HEAD');

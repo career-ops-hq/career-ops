@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Erstellt von <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Erstellt von <a href="https://github.com/santifer"><strong>@santifer</strong></a>, mit&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.de.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.de.md#builders">700+ Mitwirkenden</a></p>
 
 <p align="center">
 <strong>Monatelang Lebensläufe ins Leere&nbsp;geschickt.</strong><br>
@@ -125,6 +125,8 @@ Die Stille nach dem Absenden hat nichts mit dir zu tun. Genug Leute haben dassel
 <br>
 
 Das Recruiting repariert sich nicht von selbst. Die Leute, die es durchmachen, können das, und sie sind schon im Raum, tauschen Notizen aus und reparieren sich gegenseitig die Setups.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=de" alt="Animierte Wand mit den GitHub-Avataren der Mitwirkenden, die sich seit April 2026 in der Reihenfolge ihrer Ankunft füllt; das nächste Feld bleibt frei." width="100%"></a></p>
 
@@ -233,17 +235,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -252,7 +245,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -270,11 +263,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-Das installiert die `career-ops`-Binary global, sodass du sie direkt statt über `npx` ausführen kannst. Anders als `npx @santifer/career-ops init` (das ein Projektverzeichnis anlegt) gibt dir die globale Installation einen dauerhaften Befehl `career-ops`, der überall in deinem Terminal verfügbar ist.
+Das installiert die `career-ops`-Binary global, sodass du `career-ops init [folder]` ohne `npx` ausführen kannst. `init` ist ihr einziger Befehl: Er richtet einen Arbeitsbereich ein, und alles Weitere passiert in deiner KI-Coding-CLI (siehe Nutzung unten), nicht über diese Binary.
 
 **Welche Variante solltest du nutzen?**
 - `npx @santifer/career-ops init`: am besten für den ersten Einsatz; legt einen eigenen Projektordner an.
-- `npm i -g @santifer/career-ops`: am besten, sobald du einen Projektordner hast und career-ops-Befehle direkt ausführen willst.
+- `npm i -g @santifer/career-ops`: wenn du lieber `career-ops init` tippst als die `npx`-Form. Weitere Befehle kommen dadurch nicht hinzu.
 
 > **Das System ist dafür gebaut, von deiner KI-Coding-CLI selbst angepasst zu werden.** Modi, Archetypen, Bewertungsgewichte, Verhandlungsskripte: Bitte sie einfach, das zu ändern. Sie liest dieselben Dateien, die sie benutzt, und weiß daher genau, was zu bearbeiten ist.
 
@@ -333,25 +326,7 @@ In Codex sind Slash Commands nicht garantiert. Nutze stattdessen dieselben Modus
 
 ## Wie es funktioniert
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity-CLI-Integration
 
@@ -508,7 +483,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Features: 6 Filter-Tabs, 4 Sortiermodi, gruppierte/flache Ansicht, Vorschauen mit Lazy Loading, Statusänderungen inline.
+Features: 10 Filter-Tabs, 8 Sortiermodi, gruppierte/flache Ansicht, Vorschauen mit Lazy Loading, Statusänderungen inline.
 
 Es gibt außerdem eine **experimentelle Web-UI** (Alpha und opt-in: Nichts läuft, solange du sie nicht startest): siehe [`web/README.md`](web/README.md).
 
@@ -628,7 +603,7 @@ Das Go-Dashboard-TUI, die Node.js-Skripte und die KI-Agentenmodi respektieren di
 career-ops ([career-ops.org](https://career-ops.org), auch bekannt als **careerops**) ist eine quelloffene KI-Jobsuche, die lokal in deiner KI-Coding-CLI läuft (Claude Code, Codex, OpenCode und andere) und jede Entscheidung dir überlässt. Es bewertet Stellenangebote gegen deinen Lebenslauf, erzeugt ATS-optimierte PDFs, findet die richtige Kontaktperson und verfolgt alles an einem Ort: Die finale Entscheidung liegt immer bei dir. Es ist die erste Referenzimplementierung des [CareerOps-Manifests](https://career-ops.org/manifesto).
 
 **Kann der zugeschnittene Lebenslauf etwas erfinden?**
-Er darf es nicht, und die Prompts sagen das: umformulieren, nie erfinden. `generate-pdf` blockiert einen Lebenslauf, dessen Zahlen oder Fakten in deinen Quellen fehlen, außer du übergibst `--skip-fact-check`. Jobtitel prüft es noch nicht, und Umformulierungen beurteilt es auch nicht. Zwei offene Issues verfolgen das: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (Jobtitel müssen zu cv.md passen) und [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (Treueprüfung, die bei Verstoß blockiert). Bis sie gemergt sind: Lies jeden Lebenslauf, bevor du ihn abschickst. Der [Haftungsausschluss](LEGAL_DISCLAIMER.md) sagt dasselbe mit mehr Worten.
+Er darf es nicht, und die Prompts sagen das: umformulieren, nie erfinden. `generate-pdf` blockiert einen Lebenslauf, dessen Zahlen oder Fakten in deinen Quellen fehlen, außer du übergibst `--skip-fact-check`. Der `pdf`-Modus führt zusätzlich `cv-title-check.mjs` aus: Es vergleicht jeden Jobtitel im angepassten Lebenslauf mit dem Titel, den cv.md für dieselbe Stelle nennt (zugeordnet über Firma und Zeitraum), und fragt bei jeder Abweichung, ob du sie behalten oder zurücksetzen willst. Es warnt nur und blockiert nicht, weil ein umformulierter Titel manchmal deine Entscheidung ist. Umformulierungen beurteilt noch nichts: [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (Treueprüfung, die bei Verstoß blockiert) verfolgt das. Bis dahin: Lies jeden Lebenslauf, bevor du ihn abschickst. Der [Haftungsausschluss](LEGAL_DISCLAIMER.md) sagt dasselbe mit mehr Worten.
 
 **Kann ich career-ops kostenlos oder mit einem günstigeren / lokalen Modell nutzen?**
 Ja. career-ops ist CLI-unabhängig und läuft mit kostenlosen und lokalen Modellen (über kostenlose OpenRouter-Modelle, Ollama oder jeden OpenAI-kompatiblen Endpoint), sodass du nicht an ein kostenpflichtiges Abo gebunden bist. Die vollständige Einrichtung findest du in [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md).

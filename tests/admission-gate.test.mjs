@@ -21,6 +21,7 @@ import { createAdmissionGate, formatSkipCounts } from '../lib/admission-gate.mjs
 import { parseBlacklist, collectSeenUrls } from '../scan.mjs';
 import { admitPluginJobs } from '../plugins.mjs';
 import { validateManifest } from '../plugins/_engine.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -192,7 +193,7 @@ test('openrouter-runner scan skips tracked, blacklisted and out-of-region postin
       const added = await addToPipeline(${JSON.stringify(entries)}, { location_filter: { allow: ['Berlin'] } });
       console.log('ADDED=' + added);
     `);
-    assert.equal(r.status, 0, `child failed:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `child failed:\n\n`));
     assert.match(r.stdout, /ADDED=1\b/);
     assert.match(r.stdout, /Skipped: 1 already seen, 1 blacklisted, 1 location filter/);
     const pipeline = readFileSync(join(dir, 'data', 'pipeline.md'), 'utf8');
@@ -222,7 +223,7 @@ test('openrouter-runner marks the row whose URL matches exactly, not a prefix of
       await markPipelineDone('https://x.test/jobs/1', { pipelinePath: ${JSON.stringify(pipelinePath)} });
       await markPipelineDone('https://x.test/jobs/404', { pipelinePath: ${JSON.stringify(pipelinePath)} });
     `);
-    assert.equal(r.status, 0, `child failed:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `child failed:\n\n`));
     const lines = readFileSync(pipelinePath, 'utf8').split('\n').filter(l => l.startsWith('- ['));
     assert.deepEqual(lines, [
       '- [ ] https://x.test/jobs/12 | A | Role',

@@ -23,7 +23,7 @@ import { createHash } from 'crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, sealProcessGitEnv } from './helpers.mjs';
 import { gitIn, locallyModifiedSystemFiles, revertPaths } from '../update-system.mjs';
 
 // A throwaway git repo plus a ctx that binds the seam's git runner and
@@ -51,6 +51,9 @@ function writeFixture(dir, rel, lines) {
 function sha256(dir, rel) {
   return createHash('sha256').update(readFileSync(join(dir, rel))).digest('hex');
 }
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\n🧪 Testing updater upgrade safety (#2337, #2007)...');
 

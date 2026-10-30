@@ -201,6 +201,29 @@ function extractSeniorities(title) {
   );
 }
 
+// Short acronyms are invisible to the tokenizer (it drops every word of three
+// letters or fewer except SHORT_SPECIALTY), so "Enterprise Account Executive -
+// DNB" and "Enterprise Account Executive - FSI" tokenize identically. Read them
+// from the raw title instead, and only when written in capitals inside a title
+// that is not itself all capitals: the capitals are what mark a segment, region
+// or platform code ("FSI", "GCP", "DE") rather than a short common word. The
+// noise list holds capitalised words that carry no requisition identity.
+const SHORT_ACRONYM_NOISE = new Set([
+  'ALL', 'AND', 'FOR', 'THE', 'NEW', 'FTE', 'PTE', 'LLC', 'INC', 'LTD',
+  'SR', 'JR', 'II', 'III', 'IV', 'VI',
+]);
+
+export function extractShortAcronyms(title) {
+  const text = String(title ?? '');
+  // Any letter that is not upper case (lower case, or a script without case
+  // such as Japanese or Arabic) means the title is not written in capitals,
+  // whatever the script around the code.
+  const letters = text.replace(/[^\p{L}]/gu, '');
+  if (letters === '' || letters.replace(/\p{Lu}/gu, '') === '') return new Set();
+  const found = text.match(/(?<![A-Za-z0-9])[A-Z]{2,3}(?![A-Za-z0-9])/g) ?? [];
+  return new Set(found.filter(w => !SHORT_ACRONYM_NOISE.has(w)));
+}
+
 /**
  * Decide whether two role titles are likely the same opening.
  *
@@ -305,6 +328,12 @@ export function roleFuzzyMatch(a, b) {
   const unmatchedA = uniqueA.filter(x => !uniqueB.some(y => isPluralOf(x, y)));
   const unmatchedB = uniqueB.filter(y => !uniqueA.some(x => isPluralOf(x, y)));
   if (unmatchedA.length > 0 && unmatchedB.length > 0) return false;
+
+  // A short acronym on EACH side that the other title lacks is the same
+  // disagreement as a unique word on each side; see extractShortAcronyms.
+  const acrA = extractShortAcronyms(a);
+  const acrB = extractShortAcronyms(b);
+  if ([...acrA].some(w => !acrB.has(w)) && [...acrB].some(w => !acrA.has(w))) return false;
 
   // Use a true set-based Jaccard ratio. Dividing by the smaller title inflates
   // matches for roles that share a long generic prefix but differ in specialty.

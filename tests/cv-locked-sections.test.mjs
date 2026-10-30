@@ -185,6 +185,43 @@ try {
     pass('validateLockedSections preserves subheadings inside sections without truncating');
   }
 
+  // A cv.md that opens with an H1 title (as examples/cv-example.md does) keeps
+  // its ## sections addressable: the title must not swallow them.
+  const titledCv = `# Jane Doe
+jane@example.com
+
+## Work Experience
+### Staff AI Engineer — Acme Corp (2022 - Present)
+* Built LLM agent pipelines
+
+## Education
+### University of Oxford
+* M.Sc. Computer Science
+`;
+  let threwTitled = false;
+  try {
+    validateLockedSections(subheadingHtml, titledCv, ['education']);
+  } catch (e) {
+    threwTitled = true;
+    fail(`validateLockedSections lost a ## section under an H1 title: ${e.message}`);
+  }
+  if (!threwTitled) {
+    pass('validateLockedSections finds ## sections in a cv.md that opens with an H1 title');
+  }
+
+  let threwTitledChanged = false;
+  try {
+    validateLockedSections(subheadingHtml.replace('M.Sc.', 'Ph.D.'), titledCv, ['education']);
+  } catch (e) {
+    threwTitledChanged = e.message.includes("Locked section 'education' was modified during tailoring");
+    if (!threwTitledChanged) fail(`validateLockedSections threw wrong error under an H1 title: ${e.message}`);
+  }
+  if (threwTitledChanged) {
+    pass('validateLockedSections still rejects a changed ## section under an H1 title');
+  } else {
+    fail('validateLockedSections must reject a changed ## section under an H1 title');
+  }
+
 } catch (e) {
   fail(`validateLockedSections tests crashed: ${e.message}`);
 }

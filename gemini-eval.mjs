@@ -78,6 +78,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // ---------------------------------------------------------------------------
 import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -91,6 +92,7 @@ const PATHS = {
   evaluate:    join(CODE_ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
   cv:          join(DATA_ROOT, 'cv.md'),
   profile:     join(DATA_ROOT, 'modes', '_profile.md'),
+  custom:      join(DATA_ROOT, 'modes', '_custom.md'),
   profileYml:  getProfilePath(),
   reports:     join(DATA_ROOT, 'reports'),
   tracker:     resolveTrackerPath(DATA_ROOT),
@@ -371,6 +373,8 @@ for (const extraDir of extraModesDirs) {
 const cvContent      = readFile(PATHS.cv,          'cv.md');
 const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
 const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
+// _custom.md is optional: an absent file is a valid end state, so no warning.
+const customContent  = existsSync(PATHS.custom) ? stripBom(readFileSync(PATHS.custom, 'utf-8')).trim() : '';
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
@@ -382,6 +386,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   cvContent,
   profileYml,
   profileContent,
+  customContent,
   jdText,
   noCompress,
   maxTokens: 1_048_576, // gemini-2.5-flash context window
@@ -571,7 +576,7 @@ if (saveReport) {
 
 ---
 
-${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim()}
+${withJdArchiveSection(evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim(), jdText).trimEnd()}
 `;
 
       writeFileSync(reportPath, reportContent, 'utf-8');

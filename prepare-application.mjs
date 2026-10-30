@@ -23,12 +23,15 @@ import { basename, resolve, dirname, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { flagValue } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 
 const ALLOWED_HOSTS = new Set([
   'boards.greenhouse.io',
+  'job-boards.greenhouse.io',
+  'job-boards.eu.greenhouse.io',
   'greenhouse.io',
   'jobs.ashbyhq.com',
   'ashbyhq.com',
@@ -40,7 +43,7 @@ const ALLOWED_HOSTS = new Set([
 // ── CLI args ─────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
-const get = (flag) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : null; };
+const get = (flag) => flagValue(args, flag);
 
 const applyUrl  = get('--url');
 const pdfPath   = get('--pdf');
@@ -101,7 +104,7 @@ const SAFE_SLUG = /^[a-zA-Z0-9._-]+$/;
  */
 function detectAts(url) {
   const path = url.pathname;
-  const GH  = new Set(['boards.greenhouse.io', 'greenhouse.io']);
+  const GH  = new Set(['boards.greenhouse.io', 'job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io', 'greenhouse.io']);
   const ASH = new Set(['jobs.ashbyhq.com', 'ashbyhq.com']);
   const LEV = new Set(['jobs.lever.co', 'jobs.eu.lever.co', 'lever.co']);
 

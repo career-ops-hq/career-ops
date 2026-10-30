@@ -5,7 +5,8 @@
  * Groups by normalized company, then merges only rows whose full role title
  * matches exactly (case- and whitespace-normalized) and whose posting URLs, when
  * both rows carry one, do not conflict. Keeps entry with highest
- * score. If discarded entry had more advanced status, preserves that status.
+ * score. If discarded entry had more advanced status, preserves that status,
+ * and runs the same status hooks set-status.mjs runs (lib/status-hooks.mjs).
  * Merges notes.
  *
  * Run: node career-ops/dedup-tracker.mjs [--dry-run]
@@ -15,12 +16,14 @@ import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
-import { postingUrlRelation } from './url-key.mjs';
+import { relatePostingLanguageKeys, postingLanguageKey, normalizeUrl } from './url-key.mjs';
 import {
-  openTrackerTransaction, rebuildRow, normalizeCompany, companiesMatchIgnoringCorporateForm,
-  MIN_STEM_CHARS, loadCanonicalStates, resolveCanonicalStateId,
+  openTrackerTransaction, rebuildRow, normalizeCompany, corporateFormTokensMatch,
+  MIN_STEM_CHARS, loadCanonicalStates, resolveCanonicalStateId, resolveCanonicalState,
+  stripStatusDecoration,
+  resolveWorkspaceRoot, containedReportFile, reportUrlToken,
 } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow, normalizeVia, extractReqNumber, parseScore } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeVia, extractReqNumber, parseScore, normalizeTextKey } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -28,6 +31,9 @@ const CAREER_OPS = getCareerOpsRoot();
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+// Report links resolve against the same root merge-tracker.mjs uses, so the
+// two tools read the same report for the same cell.
+const REPORTS_ROOT = resolveWorkspaceRoot(APPS_FILE);
 
 // ── CLI args ────────────────────────────────────────────────────────
 // Same shape as scan-ats-full.mjs (#1633/PR #1635) and reply-watch.mjs
@@ -208,7 +214,69 @@ function normalizeRole(role) {
  * @returns {boolean} True when both rows carry a URL and the URLs name two postings.
  */
 function urlsConflict(a, b) {
-  return postingUrlRelation(a.url, b.url) === 'distinct';
+  return relatePostingLanguageKeys(cachedLanguageKey(a), cachedLanguageKey(b)) === 'distinct';
+}
+
+const reportUrls = new Map();
+
+/**
+ * A row's posting URL for the URL guards: its URL cell, else the URL its report
+ * names.
+ *
+ * The default nine-column tracker has no URL cell, so reading the cell alone
+ * left both guards blind there: two same-company, same-title rows whose
+ * reports name two different openings (`…/jobs/1001` and `…/jobs/2002`) looked
+ * identical, and this tool deleted one of them. merge-tracker.mjs already
+ * resolved the report's URL in exactly this case — its own comment says
+ * "without the report the guards never see two same-titled postings as
+ * distinct" — so `node merge-tracker.mjs` kept both rows and `node
+ * dedup-tracker.mjs` then removed one. Both now read through
+ * reportUrlToken(), with the same path containment. A placeholder such as
+ * `N/A` needs no filtering here: postingUrlRelation() gives it no key.
+ *
+ * Read lazily and memoised: only rows that already share a company reach a
+ * guard.
+ *
+ * @param {object} row - A parsed applications.md row.
+ * @returns {string}
+ */
+function postingUrl(row) {
+  if (row.url) return row.url;
+  if (!reportUrls.has(row.report)) {
+    reportUrls.set(row.report, reportUrlToken(containedReportFile(row.report, REPORTS_ROOT)));
+  }
+  return reportUrls.get(row.report);
+}
+
+// Company identity and posting-language keys are pure per row. The pair loop
+// used to rebuild both on every comparison: normalizeTextKey for the company,
+// and a URL parse for the posting. A bucket of a few thousand rows made that
+// the whole command. Each row keeps one of each. The Maps are this run's
+// rows, not a process-wide cache of every string the helpers have seen.
+const compareStats = { normalizes: 0, urlKeys: 0, pairs: 0 };
+const companyKeys = new Map();
+const languageKeys = new Map();
+
+function cachedCompany(entry) {
+  let cached = companyKeys.get(entry);
+  if (cached) return cached;
+  cached = {
+    key: normalizeCompany(entry.company),
+    tokens: normalizeTextKey(entry.company, ' ').split(' ').filter(Boolean),
+  };
+  companyKeys.set(entry, cached);
+  compareStats.normalizes++;
+  return cached;
+}
+
+// Built only when a pair actually compares URLs. A row that never meets
+// another must not pay for a report read it used to skip.
+function cachedLanguageKey(row) {
+  if (languageKeys.has(row)) return languageKeys.get(row);
+  const key = postingLanguageKey(postingUrl(row));
+  languageKeys.set(row, key);
+  compareStats.urlKeys++;
+  return key;
 }
 
 /**
@@ -224,7 +292,7 @@ function urlsConflict(a, b) {
  * @returns {boolean}
  */
 function languageOnOneSide(a, b) {
-  return postingUrlRelation(a.url, b.url) === 'one-sided-language';
+  return relatePostingLanguageKeys(cachedLanguageKey(a), cachedLanguageKey(b)) === 'one-sided-language';
 }
 
 /**
@@ -325,6 +393,14 @@ if (!existsSync(APPS_FILE)) {
 }
 
 let trackerTransaction = null;
+let statusHooks = null;
+let localToday = null;
+let committed = false;
+const releaseClaims = [];
+// Kept rows that take over a removed duplicate's more advanced status. Each is
+// a real status change for that row number, so it gets the status hooks once
+// the write has landed.
+const promotions = [];
 let COLMAP;
 if (!DRY_RUN) {
   try {
@@ -395,26 +471,33 @@ const BLIND_KEY = '\u0000blind-via:';
 // which pairs get compared, never whether they merge, so an over-wide bucket
 // costs a few extra comparisons while an over-narrow one leaves a duplicate
 // row in applications.md forever.
-function companyBucketKey(name) {
-  return normalizeCompany(name).slice(0, MIN_STEM_CHARS);
+function companyBucketKey(entry) {
+  return cachedCompany(entry).key.slice(0, MIN_STEM_CHARS);
 }
 
 // True when two rows name the same employer: identical under normalizeCompany,
 // or one is the other with a corporate-form tail ("Acme Widgets" / "Acme
-// Widgets, APC"). companiesMatchIgnoringCorporateForm() is OR-ed with the
-// exact check because it returns false for two IDENTICAL names (equal token
-// length) — that is the exact tier's business. Deletion is still decided by
-// roleMatch + the status-rank guard; this only widens which pairs reach them.
+// Widgets, APC"). corporateFormTokensMatch() is the token half of
+// companiesMatchIgnoringCorporateForm(), OR-ed with the exact check because
+// that rule returns false for two IDENTICAL names (equal token length) — that
+// is the exact tier's business. Deletion is still decided by roleMatch + the
+// status-rank guard; this only widens which pairs reach them. Both keys were
+// built once per row, above.
 function sameCompany(a, b) {
-  return normalizeCompany(a) === normalizeCompany(b)
-    || companiesMatchIgnoringCorporateForm(a, b);
+  const left = cachedCompany(a);
+  const right = cachedCompany(b);
+  return left.key === right.key || corporateFormTokensMatch(left.tokens, right.tokens);
 }
 
 const groups = new Map();
 for (const entry of entries) {
+  // Every row, including a blind `?` that groups by Via instead. The company
+  // key is cheap next to the pair loop, and a later sameCompany() hit is a
+  // map lookup. Posting keys stay lazy: see cachedLanguageKey().
+  cachedCompany(entry);
   const key = String(entry.company).trim() === '?'
     ? BLIND_KEY + normalizeVia(entry.via || '')
-    : companyBucketKey(entry.company);
+    : companyBucketKey(entry);
   if (!groups.has(key)) groups.set(key, []);
   groups.get(key).push(entry);
 }
@@ -448,6 +531,7 @@ for (const [company, companyEntries] of groups) {
 
     for (let j = i + 1; j < companyEntries.length; j++) {
       if (processed.has(j)) continue;
+      compareStats.pairs++;
       // Named rows share a bucket, not an employer: gate the pair on the
       // corporate-form-aware identity so suffix variants merge but two distinct
       // employers sharing a prefix do not. The gate is against EVERY existing
@@ -460,7 +544,7 @@ for (const [company, companyEntries] of groups) {
       // and are gated on the re-post window instead.
       const companyOk = isBlindGroup
         ? withinBlindWindow(companyEntries[i].date, companyEntries[j].date)
-        : cluster.every((m) => sameCompany(m.company, companyEntries[j].company));
+        : cluster.every((m) => sameCompany(m, companyEntries[j]));
       // roleMatch() only compares against the seed row, so a seed with no URL
       // would admit two rows naming different postings and one would be
       // deleted. Check the candidate's URL and requisition id against every
@@ -493,10 +577,20 @@ for (const [company, companyEntries] of groups) {
     if (bestStatus !== keeper.status) {
       const lineIdx = keeper.lineIdx;
       if (lineIdx !== undefined) {
+        // The donor's spelling, without its bold or trailing date. statusRank()
+        // strips both before ranking, so a legacy `Applied 2026-01-02` cell can
+        // win. Copied verbatim it put a date in the keeper's Status cell, and
+        // resolveCanonicalState() then read the promoted status as unknown: the
+        // ledger recorded `to: -`, which funnel-velocity replays as retracting
+        // the row's last real transition, and the Applied/Interview hooks below
+        // never ran.
+        const promoted = stripStatusDecoration(bestStatus);
         const parts = lines[lineIdx].split('|').map(s => s.trim());
-        parts[COLMAP.status] = bestStatus;
+        parts[COLMAP.status] = promoted;
         lines[lineIdx] = rebuildRow(parts);
-        console.log(`  📝 #${keeper.num}: status promoted to "${bestStatus}" (from #${cluster.find(e => e.status === bestStatus)?.num})`);
+        const donorNum = cluster.find(e => e.status === bestStatus)?.num;
+        console.log(`  📝 #${keeper.num}: status promoted to "${promoted}" (from #${donorNum})`);
+        promotions.push({ keeper, from: keeper.status, to: promoted, donorNum });
       }
     }
 
@@ -531,6 +625,24 @@ for (const [company, companyEntries] of groups) {
       }
     }
 
+    // Carry over a posting URL the keeper lacks. The URL cell is the
+    // deterministic dedup key (#3516): left on a deleted row it went with it,
+    // and the surviving row, often the Applied one whose status was just
+    // promoted onto it, fell back to fuzzy company+role matching from then on.
+    // Cluster members never name two different postings (urlsConflict vetoes
+    // that), so the first URL found is this posting's. The donor's raw cell is
+    // copied, so a `[label](href)` link stays a link.
+    if (COLMAP.url != null && !normalizeUrl(keeper.url) && keeper.lineIdx !== undefined) {
+      const donor = cluster.slice(1).find(e => e.lineIdx !== undefined && normalizeUrl(e.url));
+      if (donor) {
+        const parts = lines[keeper.lineIdx].split('|').map(s => s.trim());
+        parts[COLMAP.url] = lines[donor.lineIdx].split('|').map(s => s.trim())[COLMAP.url];
+        lines[keeper.lineIdx] = rebuildRow(parts);
+        keeper.url = donor.url;
+        console.log(`  🔗 #${keeper.num}: posting URL kept from #${donor.num}`);
+      }
+    }
+
     // Remove duplicates
     for (let k = 1; k < cluster.length; k++) {
       const dup = cluster[k];
@@ -555,8 +667,34 @@ console.log(`\n📊 ${removed} duplicates removed`);
 if (!DRY_RUN && removed > 0) {
   const backupPath = `${APPS_FILE}.bak`;
   copyFileSync(APPS_FILE, backupPath);
+  // Loaded only when a status moves, so a run that just drops duplicates keeps
+  // the import closure it always had.
+  if (promotions.length > 0) {
+    statusHooks = await import('./lib/status-hooks.mjs');
+    ({ localToday } = await import('./lib/local-today.mjs'));
+    for (const p of promotions) releaseClaims.push(statusHooks.claimStatusActivity(p.keeper, `dedup-tracker → ${p.to}`));
+  }
   trackerTransaction.replace(lines.join('\n'));
   console.log(`✅ Written to ${APPS_FILE} (backup: ${backupPath})`);
+  // Inside the lock window, like set-status's own append. The removed row's
+  // history stays under its old number; this row says where the kept row's
+  // status came from. dedup-tracker did not observe the transition, it found
+  // it, so funnel-velocity counts the row but keeps it out of day-math: dated
+  // today, it would otherwise read as "applied today".
+  // The keeper's own cell can be a dated legacy one too; strip it the same way
+  // so a known prior state is not logged as unknown.
+  const ledgerState = status => resolveCanonicalState(stripStatusDecoration(status), CANONICAL_STATES) ?? '-';
+  for (const p of promotions) {
+    statusHooks.appendStatusTransition(APPS_FILE, {
+      num: p.keeper.num,
+      date: localToday(),
+      from: ledgerState(p.from),
+      to: ledgerState(p.to),
+      source: 'dedup-tracker',
+      note: `from #${p.donorNum}`,
+    });
+  }
+  committed = true;
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
 } else {
@@ -564,4 +702,26 @@ if (!DRY_RUN && removed > 0) {
 }
 } finally {
   trackerTransaction?.close();
+}
+
+// After the tracker lock is released: both hooks re-read the row this run
+// wrote, and the follow-up seeder takes its own lock.
+try {
+  if (committed) {
+    for (const p of promotions) {
+      const to = resolveCanonicalState(p.to, CANONICAL_STATES);
+      const keeper = { ...p.keeper, status: p.to };
+      if (to === 'Applied') await statusHooks.seedFollowupOnApplied(keeper.num, { trackerPath: APPS_FILE });
+      if (to === 'Interview') statusHooks.archiveJdOnInterview(keeper, { trackerPath: APPS_FILE });
+    }
+  }
+} finally {
+  for (const release of releaseClaims) release();
+}
+
+// Off unless a test asks. The counts are how many times the keys were built,
+// so a pair loop that recomputes them fails the bound instead of only looking
+// slower. Quiet on a normal run: stderr stays what callers already parse.
+if (process.env.CAREER_OPS_DEDUP_STATS === '1') {
+  console.error(`dedup-stats normalizes=${compareStats.normalizes} urlKeys=${compareStats.urlKeys} pairs=${compareStats.pairs}`);
 }

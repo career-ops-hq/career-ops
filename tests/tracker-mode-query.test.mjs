@@ -10,7 +10,7 @@ test('every tracker.mjs query filter the tracker mode tells agents to use works'
   const mode = readFileSync(join(ROOT, 'modes', 'tracker.md'), 'utf8');
   const paragraph = mode.split('\n').find((l) => l.includes('node tracker.mjs query'));
   assert.ok(paragraph, 'modes/tracker.md points agents at node tracker.mjs query');
-  const filters = [...paragraph.matchAll(/`(--[a-z]+)(?: ([^`]+))?`/g)].map((m) => (m[2] ? [m[1], m[2]] : [m[1]]));
+  const filters = [...paragraph.matchAll(/`(--[a-z-]+)(?: ([^`]+))?`/g)].map((m) => (m[2] ? [m[1], m[2]] : [m[1]]));
   assert.ok(filters.length >= 5, `found filters ${JSON.stringify(filters)}`);
 
   const root = mkdtempSync(join(tmpdir(), 'tracker-mode-'));

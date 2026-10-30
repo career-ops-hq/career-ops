@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -254,7 +255,7 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 			Date:                 at("date"),
 			Company:              at("company"),
 			Role:                 at("role"),
-			JobURL:               extractCellURL(at("url")),
+			JobURL:               trackerPostingURL(at("url")),
 			Status:               at("status"),
 			HasPDF:               strings.Contains(at("pdf"), "\u2705"),
 			Location:             CanonicalizeLocation(at("location")),
@@ -761,10 +762,15 @@ func LoadReportSummary(careerOpsPath, reportPath string) (archetype, tldr, remot
 // the same delimiter logic as ParseApplications: a mixed "| " + tab-separated
 // body, or a pure pipe-delimited row. Field 0 is the first real column (num), so
 // the returned indices match the legacy layout (Status is field 5).
+//
+// A line is tab-delimited only when it holds a tab and at most two pipes, as in
+// tracker-parse.mjs trackerRowSeparator. In a pipe table a tab is note text that
+// set-status.mjs --note keeps verbatim, not a column delimiter.
+// test-fixtures/tracker-row-split-parity.json pins both readers to one table.
 func splitTrackerRow(line string) []string {
 	line = strings.TrimSpace(line)
 	var fields []string
-	if strings.Contains(line, "\t") {
+	if strings.Contains(line, "\t") && strings.Count(line, "|") <= 2 {
 		// Mixed format: starts with "| " then tab-separated.
 		line = strings.TrimPrefix(line, "|")
 		line = strings.TrimSpace(line)
@@ -781,10 +787,31 @@ func splitTrackerRow(line string) []string {
 	return fields
 }
 
+// trackerPostingURL is a row's JobURL from its tracker URL cell: the posting
+// URL the cell names, or "" when it names none — a "—"/"N/A" placeholder (the
+// tracker's empty-cell marker, which a hand-added row carries; "N/A" for a
+// recruiter-sourced role), or a local:jds/ pointer.
+//
+// extractCellURL returns such a cell verbatim, as Node's extractCellUrl does;
+// Node's consumers then key it through normalizeUrl, which yields nothing for
+// a placeholder. Here the consumers only ask whether JobURL is empty: every
+// enrichment tier below runs only for an empty JobURL, so a "—" skipped the
+// report's own **URL:** header and the history tiers, and the pipeline's open
+// action handed "—" to the platform opener. Only an absolute http(s) URL with a
+// host is a posting URL, the same test the viewer's isWebURL applies.
+func trackerPostingURL(cell string) string {
+	value := extractCellURL(cell)
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ""
+	}
+	return value
+}
+
 // extractCellURL returns the posting URL a tracker URL cell points at, in
 // either written form: the href of the first http(s) markdown link, or the cell
 // verbatim when it holds none (a bare URL on an older tracker, or a "—"/"N/A"
-// placeholder the callers already treat as absent).
+// placeholder, which trackerPostingURL drops before it reaches JobURL).
 //
 // This is a PORT of extractCellUrl / parseMarkdownLinks / markdownLinkDestination
 // in tracker-parse.mjs, not an approximation of it. It used to be two regexes,

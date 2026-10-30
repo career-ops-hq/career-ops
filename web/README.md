@@ -11,7 +11,7 @@ database, no server. If you never run it, nothing about your CLI workflow change
 
 ## Quick start
 
-Requires Node 22.6+ (see [Tests](#tests) — `npm test` needs glob discovery, and `--experimental-strip-types` for the suites that import `.ts` modules directly; the flag landed in 22.6.0).
+Requires Node 22.13+ (or 23.4+ on the 23.x line), the same floor as the rest of career-ops. `npm test` runs with `--experimental-strip-types` (see [Tests](#tests)) because some suites import `.ts` modules directly, and Node strips types by default only from 22.18.
 
 ```bash
 cd web
@@ -43,7 +43,29 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
-  CV editing with preview, settings.
+  CV editing with preview, settings. In **CV**, use **Upload PDF / TeX** to
+  import a replacement, review the converted Markdown, then select **Update cv.md**.
+  Conversion uses your configured AI CLI; saving backs up the previous CV.
+
+### Full or focused evaluation
+
+Open **Evaluation options** below the pasted-URL form, or select sections when
+confirming **Score shortlist**. Full evaluation is the default. **Essentials**
+keeps a short job summary; you can also choose optional sections individually.
+Your selection is remembered in this browser.
+
+Every selection keeps the fit score, requirements and gaps, evidence confidence,
+basic posting checks, and the archived job description. Focused reports identify
+their scope in the report and tracker notes. Unselected research and drafting
+tasks are excluded from the request; missing research remains unknown evidence.
+Fewer sections can reduce token use, but there is no fixed saving. Estimates use
+your completed runs with the same selection.
+
+The `/api/run` evaluate request accepts `evaluationSections`, an array of IDs:
+`summary`, `strategy`, `research`, `customization`, `interview`, `application`,
+and `keywords`. Omitting it preserves the full evaluation; `[]` requests the
+required assessment without optional sections. Invalid selections return 400
+before starting an AI run.
 
 ## Safety
 
@@ -98,7 +120,15 @@ npm run dev          # dev server (Turbopack)
 npm test             # unit suites (node --test, no framework)
 npx tsc --noEmit     # typecheck
 npm run build        # production build
+npm run test:browser # tests/lib/*.browser.test.mjs in Chrome, each against its own server (after build)
 ```
+
+The `*.browser.test.mjs` suites skip in `npm test`: each needs a running server's
+URL in an env var. `npm run test:browser` (`tests/browser-suites.mjs`) starts the
+production build once per suite on disposable data, sets those variables and
+fails on any skip. A failing suite gets one more run on a new server, and one
+that passes only then is reported as flaky; `web-ci.yml` runs it. A new browser suite goes in that
+script's `SUITES` table, or the run fails.
 
 Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
 a different career-ops directory (useful for testing against sample data).
@@ -106,7 +136,7 @@ Root scripts such as `doctor.mjs` run from the checkout that holds `web/`, not
 from `CAREER_OPS_ROOT`; set `CAREER_OPS_CODE_ROOT` when the app runs outside it.
 
 Every route but build assets is gated by the same-origin + loopback guard in
-`src/lib/origin-guard.mjs`. Two opt-ins widen it, both unset by default and both in `web/.env.local`:
+`src/lib/origin-guard.mjs`. Two opt-ins widen it, both unset by default:
 `CAREER_OPS_WEB_ALLOWED_HOSTS` names extra non-loopback hosts the dashboard may
 answer on, and `CAREER_OPS_ALLOWED_ORIGINS` names origins allowed to call the
 API from outside the app — a comma- or space-separated list, no trailing slash.
@@ -114,6 +144,12 @@ The second is what a local companion client needs: a browser extension calls
 from a `chrome-extension://` origin, which Fetch Metadata always reports as
 `cross-site`, so the guard refuses it unless the id is named here. The host
 layer still applies to an allowlisted origin.
+
+`CAREER_OPS_ALLOWED_ORIGINS` can live in `web/.env.local`.
+`CAREER_OPS_WEB_ALLOWED_HOSTS` cannot: it also picks the bind address, which the
+launcher (`server.mjs`, or `npm run ui` from the repository root) reads from the
+shell environment before Next.js loads `web/.env.local`
+(see [below](#exposing-it-beyond-this-machine)).
 
 Pass one-off flags through npm's `--`: `npm run dev -- -p 4000`.
 
@@ -127,6 +163,11 @@ loopback and the hosts you named:
 ```bash
 CAREER_OPS_WEB_ALLOWED_HOSTS="192.168.1.50" npm run dev
 ```
+
+Set it in the environment of `npm run dev`, `npm start` or `npm run ui`, as above
+or with `export`. The launcher chooses the bind before Next.js reads `web/.env.local`, so
+a value written only there reaches the guard but not the bind: the server stays on
+`127.0.0.1` and the startup line says `loopback only`.
 
 It is not an on/off switch, and it is not read as one: `off`, `false`, `no` and
 `0` are all valid hostnames, so treating them as words would have opened the
@@ -214,10 +255,11 @@ Root-level scripts are the one exception: `server.mjs` is tested by
 only `web/tests/lib/` and a suite outside it would never run in the required check.
 
 `npm test` discovers them with a glob (`tests/**/*.test.mjs`), so a new suite
-needs **no registration** — just add the file. **Requires Node ≥ 22**: earlier
-versions don't expand CLI globs for `node --test`, so `npm test` prints
-`Could not find '…'`, runs nothing and exits 1. Hence `engines.node` in
-`web/package.json` — a higher floor than `next` itself asks for.
+needs **no registration** — just add the file. Glob discovery needs Node ≥ 22:
+earlier versions don't expand CLI globs for `node --test`, so `npm test` prints
+`Could not find '…'`, runs nothing and exits 1. `engines.node` in
+`web/package.json` sits higher still, at the project range (`^22.13.0 || >=23.4.0`,
+`NODE_ENGINES` in `lib/node-floor.mjs`), and well above what `next` itself asks for.
 
 Three constraints follow from all this:
 
@@ -229,12 +271,11 @@ Three constraints follow from all this:
   coverage and never execute. Extract the logic under test into a plain `.mjs`
   module (the pattern `src/lib/pdf-paths.mjs` and `src/lib/pdf-render.mjs`
   already follow) and import it from the test.
-- **Web suites use `node:test`; core suites don't.** Here you write
-  `import { test } from "node:test"` with `node:assert/strict`. The root
-  `tests/` suite deliberately uses neither — it has its own `pass`/`fail`
-  helpers, because [#1440](https://github.com/career-ops-hq/career-ops/issues/1440)
-  requires the core suite to run on a bare clone with "no framework, not even
-  `node:test`". Don't carry either style across the boundary.
+- **Web suites use `node:test`.** Here you write
+  `import { test } from "node:test"` with `node:assert/strict`. Don't import the
+  root `tests/helpers.mjs` `pass`/`fail` helpers; they belong to the root
+  `tests/` suite, where `test-all.mjs` runs both those and `node:test` suites
+  ([#2463](https://github.com/career-ops-hq/career-ops/issues/2463)).
 
 `tests/web-test-layout.test.mjs` in the **root** suite enforces all of the above
 on every PR, including that `npm test` never goes back to listing suites by name

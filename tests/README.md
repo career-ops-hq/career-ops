@@ -35,10 +35,12 @@ Node.js (`tests/helpers.mjs`).
 
 **Web tests do not live here.** `web/` runs its own `npm test` over
 `web/tests/**/*.test.mjs` (see [../web/README.md](../web/README.md)); this
-directory is for the core. The two suites also differ in style on purpose: web
-suites use `node:test`, while suites here use the `pass`/`fail` helpers because
-this suite must run on a bare clone with no framework — "not even `node:test`"
-(#1440). Don't carry either style across the boundary.
+directory is for the core. Web suites use `node:test`. Suites here may use
+either the `pass`/`fail` helpers or `node:test`, which ships with Node, so both
+run on a bare clone: `test-all.mjs` imports a `pass`/`fail` suite and runs a
+`node:test` suite in a child process under `node --test`, folding its exit code
+into the totals (#2463). `tests/helpers.mjs` is for this directory only; web
+suites do not import it.
 
 The one exception to the split is a guard *about* web's layout —
 `web-test-layout.test.mjs` lives here on purpose, because `web-ci.yml` is
@@ -128,6 +130,30 @@ or in one it used to follow.
 A suite that starts a `test-all.mjs` of its own gets a serial one unless it
 passes `--jobs` itself: the runner sets `CAREER_OPS_TEST_JOBS=1` for everything
 it starts, so N workers do not fan out N more each.
+
+## One full run at a time
+
+A full run already keeps every core busy, so two started together (from two
+agent sessions in two worktrees, say) each get half the machine and overrun
+their timeouts. A full run therefore waits for any other full run on the
+machine to finish first, and says so:
+
+```
+  ⏳ another full test-all.mjs run holds the queue (pid 4242 in /path/to/worktree, for 3 min) — waiting for it to finish.
+```
+
+The queue is a `lib/dir-lock.mjs` lock in the OS temp directory, shared by
+every clone and worktree. A run that is killed leaves a lock whose PID is dead,
+and the next run takes it over. Waiting runs are not served strictly in the
+order they arrived, but only one proceeds at a time. A waiter gives up after
+an hour with the same holder, naming it.
+
+`--only` runs do not queue: they are small, and they are what you run while a
+full run is going. `CAREER_OPS_TEST_QUEUE=0` turns the queue off for a run; the
+run holding the queue sets it for everything it starts, so a suite that starts
+a `test-all.mjs` of its own does not wait for its parent. Fixture runners
+(`tests/test-all-sandbox.mjs`) set it too. `CAREER_OPS_TEST_QUEUE_LOCK=<dir>`
+puts the lock somewhere else.
 
 ## Adding a test
 

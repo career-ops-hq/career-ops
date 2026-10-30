@@ -25,7 +25,7 @@ import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
 import {
   discoverPlugins, pluginRoots, loadPluginConfig, pluginStatus,
   runHook, filterResultsForId, loadDotenvOnce, HOOK_KINDS, loadSkill, resolveSuccessorIds,
-  warnConfigLeftInCodeRoot,
+  warnConfigLeftInCodeRoot, ID_RE,
 } from './plugins/_engine.mjs';
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
 import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
@@ -35,11 +35,14 @@ import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs'
 import { localToday } from './lib/local-today.mjs';
 import { postingKey } from './url-key.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
-const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data', 'applications.md');
+// The same read resolution as set-status.mjs and every other tracker reader:
+// CAREER_OPS_TRACKER, then data/applications.md, then the legacy root copy.
+const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
 const PIPELINE_PATH = path.join(DATA_ROOT, 'data', 'pipeline.md');
 
 // A misbehaving plugin's stray rejection should be attributed and not silently
@@ -62,19 +65,40 @@ function sanitizeJob(job) {
   return out;
 }
 
-/** Generic markdown-table parser → rows keyed by lowercased header. READ-ONLY. */
-function parseMarkdownTable(md) {
-  const lines = md.split('\n').map(l => l.trim()).filter(l => l.startsWith('|'));
-  if (lines.length < 2) return [];
-  const headers = lines[0].split('|').slice(1, -1).map(h => h.trim().toLowerCase());
+// The backfill sentinels a `#` cell may carry instead of a number (AGENTS.md).
+const NUM_SENTINELS = new Set(['N/A', '—', '-']);
+
+/**
+ * Tracker rows for the export snapshot, READ-ONLY. Columns are mapped by
+ * tracker-parse.mjs through tracker-aliases.json, so a localized header
+ * (`| # | Datum | Firma | Rolle |`) yields the same canonical keys as the
+ * English one: num, date, company, role, score, status, pdf, report, notes, url,
+ * plus location / via when the tracker has those columns. Every value is a
+ * string, and `url` is the posting href rather than the rendered link cell.
+ *
+ * parseTrackerRow rejects a row whose `#` is not a number, so a backfilled row
+ * numbered with a sentinel is parsed with a placeholder number and keeps its
+ * sentinel as `num`: the snapshot carries every row the tracker shows.
+ */
+function trackerSnapshotRows(md) {
+  const lines = md.split('\n');
+  const colmap = resolveColumns(lines);
   const rows = [];
-  for (const line of lines.slice(1)) {
-    if (/^\|[\s|:-]+\|?$/.test(line)) continue; // separator row
-    const cells = line.split('|').slice(1, -1).map(c => c.trim());
-    if (cells.length === 0) continue;
-    const row = {};
-    headers.forEach((h, i) => { row[h] = cells[i] ?? ''; });
-    rows.push(Object.freeze(row));
+  for (const line of lines) {
+    if (!line.startsWith('|') || isHeaderRow(line) || isSeparatorRow(line)) continue;
+    let row = parseTrackerRow(line, colmap);
+    if (!row) {
+      const parts = line.split('|');
+      const num = (parts[colmap.num] ?? '').trim();
+      if (!NUM_SENTINELS.has(num)) continue;
+      parts[colmap.num] = ' 0 ';
+      row = parseTrackerRow(parts.join('|'), colmap);
+      if (!row) continue;
+      row.num = num;
+    }
+    const fields = { ...row, num: String(row.num) };
+    delete fields.raw;
+    rows.push(Object.freeze(fields));
   }
   return rows;
 }
@@ -142,9 +166,8 @@ export function admitPluginJobs(found, { id, jobPostings = false, pipelineUrls =
 /** Frozen, read-only view of the user's tracker for `export` hooks. No file handle. */
 function buildSnapshot() {
   const applications = existsSync(APPLICATIONS_PATH)
-    ? parseMarkdownTable(readFileSync(APPLICATIONS_PATH, 'utf8')) : [];
-  // pipeline.md uses a checklist format (`- [ ] url`), not a markdown table —
-  // parseMarkdownTable would always return [] here.
+    ? trackerSnapshotRows(readFileSync(APPLICATIONS_PATH, 'utf8')) : [];
+  // pipeline.md uses a checklist format (`- [ ] url`), not a markdown table.
   const pipeline = existsSync(PIPELINE_PATH)
     ? [...readFileSync(PIPELINE_PATH, 'utf8').matchAll(/- \[[ xX]\]\s+(\S+)/g)]
         .map(m => Object.freeze({ url: m[1] }))
@@ -434,6 +457,11 @@ function cmdTrust(args) {
 function cmdRemove(args) {
   const id = args[0];
   if (!id) { console.error('Usage: node plugins.mjs remove <id>'); process.exit(1); }
+  // Ids reach path.join(ROOT, 'plugins.local', id) → rmSync recursive below;
+  // path.join normalizes `..`, so an unvalidated id escapes plugins.local
+  // (remove .. would take the checkout root with it). Same shape the engine
+  // already enforces for manifest ids (_engine.mjs ID_RE).
+  if (!ID_RE.test(id)) { console.error(`✗ Invalid plugin id ${JSON.stringify(id)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
   const dir = path.join(ROOT, 'plugins.local', id);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   removeLockEntry(ROOT, id);

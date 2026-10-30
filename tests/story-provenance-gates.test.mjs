@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { classifyStoryBank } from '../story-provenance-check.mjs';
 import { analyze, verifyClaim } from '../negotiation-roi.mjs';
 import { formatAts, parseStories } from '../match-star.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -179,7 +180,7 @@ test('npm run star reads the marker from the story bank on disk', () => {
     const run = spawnSync(process.execPath, [join(ROOT, 'match-star.mjs'), 'Tell me about an automation you built'], {
       cwd: dir, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: dir },
     });
-    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.status, 0, describeSpawn(run));
     assert.match(run.stdout, /Weekly reporting/);
     assert.doesNotMatch(run.stdout, /8 hours to 2 hours/);
     assert.match(run.stdout, /\[unconfirmed figure\]/);

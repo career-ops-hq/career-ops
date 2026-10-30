@@ -16,15 +16,16 @@ console.log('\nsync-batch-input — pipeline "Pending" -> batch-input.tsv');
 
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'sync-batch-input.mjs')).href);
-  const { parsePending, urlsFromTsv, maxTsvId, planBatchRows, buildNotes, lineUrl, lineCompany, extractLabels, isSafePublicHttpUrl, PENDING_RE } = mod;
+  const { parsePending, urlsFromTsv, maxTsvId, planBatchRows, buildNotes, lineUrl, lineCompany, extractLabels, isSafePublicHttpUrl } = mod;
   const check = (label, cond) => (cond ? pass(label) : fail(label));
 
-  // ── section-header matching (mirrors reconcile-pipeline's localized PENDING_RE) ──
-  check('English header is recognised', PENDING_RE.test('## Pending'));
-  check('Spanish header is recognised', PENDING_RE.test('## Pendientes'));
-  check('German header is recognised', PENDING_RE.test('## Offen'));
-  check('French header is recognised', PENDING_RE.test('## En attente'));
-  check('a non-pending header is not matched', !PENDING_RE.test('## Processed'));
+  // ── section-header matching (lib/pipeline-sections.mjs, shared with reconcile-pipeline) ──
+  const pendingUnder = (heading) => parsePending(`${heading}\n- [ ] https://example.com/h | Acme | Role\n`).length === 1;
+  check('English header is recognised', pendingUnder('## Pending'));
+  check('Spanish header is recognised', pendingUnder('## Pendientes'));
+  check('German header is recognised', pendingUnder('## Offen'));
+  check('French header is recognised', pendingUnder('## En attente'));
+  check('a non-pending header is not matched', !pendingUnder('## Processed'));
 
   // ── url / company / label extraction ──
   check('bare URL parses', lineUrl('https://example.com/1') === 'https://example.com/1');

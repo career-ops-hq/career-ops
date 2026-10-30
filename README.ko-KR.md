@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;만든 사람: <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;만든 사람: <a href="https://github.com/santifer"><strong>@santifer</strong></a>,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders">700+명의 기여자</a>와 함께</p>
 
 <p align="center">
 <strong>몇 달 동안 이력서를 보내도 답&#8288;이&nbsp;없&#8288;었&#8288;습&#8288;니&#8288;다.</strong><br>
@@ -123,6 +123,8 @@ npx @santifer/career-ops init
 <br>
 
 채용은 저절로 고쳐지지 않습니다. 그것을 겪는 사람들은 고칠 수 있고, 이미 그 방에 모여 서로 메모를 비교하고 서로의 설정을 고쳐 주고 있습니다.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ko-KR" alt="기여자들의 GitHub 아바타가 2026년 4월부터 도착한 순서대로 채워지는 애니메이션 벽. 다음 칸은 비워 두었습니다." width="100%"></a></p>
 
@@ -231,17 +233,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -250,7 +243,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -268,11 +261,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-이렇게 하면 `career-ops` 바이너리가 전역으로 설치되어 `npx` 대신 직접 실행할 수 있습니다. 프로젝트 디렉터리를 만들어 주는 `npx @santifer/career-ops init`과 달리, 전역 설치는 터미널 어디서든 쓸 수 있는 영구적인 `career-ops` 명령을 제공합니다.
+이렇게 하면 `career-ops` 바이너리가 전역으로 설치되어 `npx` 없이 `career-ops init [folder]`를 실행할 수 있습니다. `init`이 유일한 명령입니다. 작업 공간을 만들 뿐이며, 그 이후의 모든 작업은 이 바이너리가 아니라 AI 코딩 CLI 안에서 이루어집니다(아래 사용법 참고).
 
 **어떤 것을 써야 할까요?**
 - `npx @santifer/career-ops init`: 처음 사용할 때 가장 좋습니다. 전용 프로젝트 폴더를 만듭니다.
-- `npm i -g @santifer/career-ops`: 프로젝트 폴더가 이미 있고 career-ops 명령을 직접 실행하고 싶을 때 가장 좋습니다.
+- `npm i -g @santifer/career-ops`: `npx` 형식보다 `career-ops init`을 입력하는 편이 좋을 때. 다른 명령은 추가되지 않습니다.
 
 > **이 시스템은 당신의 AI 코딩 CLI가 직접 커스터마이즈하도록 설계되었습니다.** 모드, 아키타입, 점수 가중치, 협상 스크립트: 바꿔 달라고 말하기만 하면 됩니다. CLI가 자신이 사용하는 파일을 그대로 읽기 때문에 무엇을 편집해야 하는지 정확히 알고 있습니다.
 
@@ -331,25 +324,7 @@ Codex에서는 슬래시 명령이 보장되지 않습니다. 대신 프롬프�
 
 ## 작동 원리
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI 연동
 
@@ -506,7 +481,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-기능: 6개의 필터 탭, 4가지 정렬 모드, 그룹/플랫 보기, 지연 로딩 미리보기, 인라인 상태 변경.
+기능: 10개의 필터 탭, 8가지 정렬 모드, 그룹/플랫 보기, 지연 로딩 미리보기, 인라인 상태 변경.
 
 **실험적인 웹 UI**도 있습니다(알파이자 옵트인: 직접 시작하지 않으면 아무것도 실행되지 않음). [`web/README.md`](web/README.md)를 참고하세요.
 
@@ -626,7 +601,7 @@ Go 대시보드 TUI, Node.js 스크립트, AI 에이전트 모드 모두 이 결
 career-ops([career-ops.org](https://career-ops.org), **careerops**라고도 부릅니다)는 당신의 AI 코딩 CLI(Claude Code, Codex, OpenCode 등) 안에서 로컬로 실행되는 오픈 소스 AI 구직 도구로, 모든 결정을 당신에게 맡깁니다. 이력서 기준으로 채용 공고를 평가하고, ATS 맞춤 PDF를 생성하고, 연락할 적임자를 찾고, 모든 것을 한곳에서 추적합니다: 최종 결정은 항상 당신의 몫입니다. [CareerOps 매니페스토](https://career-ops.org/manifesto)의 첫 번째 참조 구현입니다.
 
 **맞춤 이력서가 없는 내용을 지어낼 수 있나요?**
-그래서는 안 되며, 프롬프트에도 그렇게 적혀 있습니다: 다듬되, 절대 지어내지 않는다. `generate-pdf`는 당신의 원본 자료에 없는 숫자나 사실이 담긴 이력서를 막습니다(`--skip-fact-check`를 넘기지 않는 한). 직함 확인이나 바꿔 쓴 표현의 판단은 아직 하지 않습니다. 열려 있는 이슈 두 개가 이를 추적합니다: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (직함은 cv.md와 일치해야 함), [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (실패 시 차단하는 충실도 검사). 이슈가 병합될 때까지는 보내기 전에 모든 이력서를 읽어보세요. [법적 고지](LEGAL_DISCLAIMER.md)에도 같은 내용이 더 길게 적혀 있습니다.
+그래서는 안 되며, 프롬프트에도 그렇게 적혀 있습니다: 다듬되, 절대 지어내지 않는다. `generate-pdf`는 당신의 원본 자료에 없는 숫자나 사실이 담긴 이력서를 막습니다(`--skip-fact-check`를 넘기지 않는 한). `pdf` 모드는 `cv-title-check.mjs`도 실행합니다. 맞춤 이력서의 각 직함을 cv.md에 적힌 같은 경력(회사와 기간으로 대조)의 직함과 비교하고, 다른 것이 있으면 유지할지 되돌릴지 묻습니다. 직함을 달리 표현하는 것이 당신의 선택일 때도 있으므로 경고만 하고 막지는 않습니다. 바꿔 쓴 표현을 판단하는 검사는 아직 없습니다: [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (실패 시 차단하는 충실도 검사)이 이를 추적합니다. 그때까지는 보내기 전에 모든 이력서를 읽어보세요. [법적 고지](LEGAL_DISCLAIMER.md)에도 같은 내용이 더 길게 적혀 있습니다.
 
 **career-ops를 무료로, 또는 더 저렴한 모델이나 로컬 모델로 쓸 수 있나요?**
 네. career-ops는 CLI에 종속되지 않으며 무료 및 로컬 모델(OpenRouter 무료 모델, Ollama, 또는 OpenAI 호환 엔드포인트)에서 실행되므로 유료 구독에 묶이지 않습니다. 전체 설정은 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)를 참고하세요.

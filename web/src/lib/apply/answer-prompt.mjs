@@ -1,7 +1,7 @@
 /**
  * answer-prompt.mjs - build the planner's pre-fill instruction from a form.
  *
- * Plain .mjs with no imports, for the same reason extract-json-object.mjs is:
+ * Plain .mjs whose only import is the dependency-free profile-path.mjs, for the same reason extract-json-object.mjs is:
  * the prompt is the part of apply/prefill that decides what the model is
  * allowed to answer, and it was unreachable by a test while it lived inline in
  * the route. The sensitive-field carve-out on the fourth bullet is the line that
@@ -12,6 +12,8 @@
  * tab-separated field list and the arrows are the prompt the planner has been
  * receiving all along; this is a relocation, not a rewrite.
  */
+import { DEFAULT_PROFILE_REF } from "../core/profile-path.mjs";
+
 
 /**
  * One form control, as much of it as the prompt needs. Structurally satisfied by
@@ -38,19 +40,20 @@
  * 4b, which settles the same question on the CLI path. Null when no tailored CV
  * exists for this application, and only then does cv.md own the answers.
  *
- * @param {{title: string, fields: PromptField[], memory?: string, cvSource?: string | null}} opts
+ * @param {{title: string, fields: PromptField[], memory?: string, cvSource?: string | null, profile?: string}} opts
+ * `profile` is how the prompt names the profile file: profileRef() in core/profile-path.mjs.
  * @returns {string}
  */
-export function buildAnswerPrompt({ title, fields, memory = "", cvSource = null }) {
+export function buildAnswerPrompt({ title, fields, memory = "", cvSource = null, profile = DEFAULT_PROFILE_REF }) {
   const fieldsList = fields
     .map((f) => `${f.id}\t${f.type}${f.required ? "*" : ""}\t${f.label}${f.options ? `\t[options: ${f.options.join(" | ")}]` : ""}`)
     .join("\n");
   const sources = cvSource
-    ? `SOURCES. The document being attached to this form is the tailored CV at ${cvSource} — read it, and read config/profile.yml. If a matching report for this company exists in reports/, read it too.
-- config/profile.yml owns name, email, phone, address, links, work authorization, visa status and comp expectations. It is authoritative; no CV overrides it.
+    ? `SOURCES. The document being attached to this form is the tailored CV at ${cvSource} — read it, and read ${profile}. If a matching report for this company exists in reports/, read it too.
+- ${profile} owns name, email, phone, address, links, work authorization, visa status and comp expectations. It is authoritative; no CV overrides it.
 - The tailored CV owns employer names, job titles, dates, locations, role descriptions, achievements, education, certifications, skills and the summary. The reviewer is holding it, so every experience answer must describe the roles as it states them.
 - cv.md is the fallback only: read it for a whole section the tailored CV omits, never to top up a role the tailored CV already covers. Where the two disagree, the tailored CV wins.`
-    : `SOURCES. No tailored CV was found for this application. Read cv.md and config/profile.yml; if a matching report for this company exists in reports/, read it too. config/profile.yml owns name, email, phone, address, links, work authorization, visa status and comp expectations, and is authoritative over cv.md.`;
+    : `SOURCES. No tailored CV was found for this application. Read cv.md and ${profile}; if a matching report for this company exists in reports/, read it too. ${profile} owns name, email, phone, address, links, work authorization, visa status and comp expectations, and is authoritative over cv.md.`;
 
   return `You are pre-filling a job application for the user (company/role: ${title}).
 
@@ -62,7 +65,7 @@ FIELDS (id ⇥ type ⇥ label ⇥ options):
 ${fieldsList}
 
 For each field give the best answer:
-- identity/contact (name, email, phone, github, linkedin, location) → from config/profile.yml.
+- identity/contact (name, email, phone, github, linkedin, location) → from ${profile}.
 - experience (employer, job title, dates, location, role description) → from the source that owns it above, verbatim in substance.
 - free-text (Why us?, cover-letter, "most impactful thing you've built", etc.) → a concise, honest, concrete answer in the candidate's own voice (no buzzwords, active voice, real metrics only). Keep each under ~120 words.
 - select/radio → choose the best-matching option using the EXACT option text from the list.

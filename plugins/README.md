@@ -74,6 +74,15 @@ node plugins.mjs run notion search "platform"    # search
 node plugins.mjs run notion export [--dry-run]   # export
 ```
 
+The `export` snapshot is `{ applications, pipeline }`, frozen. `applications`
+holds one row per tracker row, read from the same tracker `set-status.mjs`
+writes (`CAREER_OPS_TRACKER`, else `data/applications.md`, else the legacy root
+copy). Columns are mapped through `tracker-aliases.json`, so the keys are the
+same whatever language the header is in: `num`, `date`, `company`, `role`,
+`score`, `status`, `pdf`, `report`, `notes`, `url`, and `location` / `via` when
+the tracker has those columns. Every value is a string, and `url` is the
+posting link's href. `pipeline` holds `{ url }` per `data/pipeline.md` entry.
+
 ### The `ctx` object
 
 - `fetch(url, opts)` — the **guarded** primitive: HTTPS-only, pinned to your

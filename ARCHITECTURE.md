@@ -14,7 +14,7 @@ Career-ops is built on three commitments that every design decision serves:
 
 The single most important architectural rule: **system files** and **user files** are strictly separated.
 
-- **System layer** — the tool itself: `modes/`, scripts (`*.mjs`), templates, the dashboard. These are versioned and updated by `update-system.mjs`. Listed in `SYSTEM_PATHS`.
+- **System layer** — the tool itself: `modes/`, scripts (`*.mjs`), templates, the dashboard. These are versioned and updated by `update-system.mjs`. Listed in `SYSTEM_PATHS`, in `lib/update-manifest.mjs`.
 - **User layer** — your data: `cv.md`, `config/profile.yml`, `modes/_profile.md`, `data/`, `reports/`, `jds/`, etc. The updater **never** touches these. Listed in `USER_PATHS`.
 
 `DATA_CONTRACT.md` is the source of truth for this boundary, and `updater-migration-tests.mjs` enforces that no system path ever overlaps a user path.
@@ -37,19 +37,7 @@ This was three arrangements until recently — `tests/`, a `test/` directory, an
 
 ## Component map
 
-```
-AI coding CLI  ─┐
-(or scripts)    │  reads prompt files
-                ▼
-   modes/*.md  ──────────────►  the "brain": scoring, evaluation,
-   (_shared.md = scoring core)   apply, scan, interview, etc. prompts
-                │
-   ┌────────────┼─────────────────────────────────────────────┐
-   ▼            ▼                  ▼               ▼            ▼
- scan        evaluate          generate         track       update
- scan.mjs    oferta.md         PDFs/CVs/        data/        update-
- providers/  (+eval scripts)   cover letters    reports/     system.mjs
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/architecture-component-map-dark.svg"><img src="docs/architecture-component-map-light.svg" alt="Component map: an AI coding CLI (or a script) reads the prompt files in modes/*.md, the brain: scoring, evaluation, apply, scan and interview prompts, with _shared.md as the scoring core. They drive five areas: scan (scan.mjs, providers/), evaluate (modes/oferta.md plus the eval scripts), generate (PDFs, CVs, cover letters), track (data/, reports/) and update (update-system.mjs)." width="760"></picture></p>
 
 ### Discovery — `scan.mjs` + `providers/`
 Finds jobs from **open, no-auth public sources**. `scan.mjs` is zero-token: it calls public ATS APIs (Greenhouse, Ashby, Lever, BambooHR, Teamtailor, Workday, Breezy) and RSS/JSON boards via per-board modules in `providers/`. Auth-gated/login-required sources are intentionally out of core (they belong in the plugin layer). Results land in `data/pipeline.md`.
@@ -69,7 +57,7 @@ Every evaluated offer is registered. `data/applications.md` is the canonical tra
 `check-liveness.mjs` / `liveness-*.mjs` verify a posting is still open (zero-token) before it costs evaluation time.
 
 ### Self-update — `update-system.mjs`
-Safely pulls new system files from upstream without touching user data. It backs up, fetches, re-execs the target updater (resolving its import closure so a new import can't break the upgrade), then checks out only `SYSTEM_PATHS`. `BOOTSTRAP_PATHS` covers very old installs.
+Safely pulls new system files from upstream without touching user data. It backs up, fetches, re-execs the target updater (resolving its import closure so a new import can't break the upgrade), then checks out only `SYSTEM_PATHS` (`lib/update-manifest.mjs`, which the updater reads rather than imports so it stays self-loading). `BOOTSTRAP_PATHS` covers very old installs.
 
 ### Multi-CLI entry files
 `CLAUDE.md`, `OPENCODE.md` and `CODEX.md` are thin `@AGENTS.md` wrappers around the canonical `AGENTS.md`. `GEMINI.md` is a legacy no-op guard, so Antigravity does not load the project instructions twice. The `.agents/skills/` entrypoints follow the [open agent skill standard](https://agentskills.io) and route into the same modes.
@@ -79,13 +67,7 @@ A standalone Go TUI under `dashboard/` for browsing the pipeline. Isolated from 
 
 ## Data flow (a typical run)
 
-```
-scan ──► data/pipeline.md ──► evaluate (oferta + cv) ──► reports/NNN-*.md
-                                          │                      │
-                                          └──► data/applications.md (tracker)
-                                                         │
-                                          apply (human reviews + clicks)
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/architecture-data-flow-dark.svg"><img src="docs/architecture-data-flow-light.svg" alt="Data flow of a typical run: scan (scan.mjs) adds URLs to data/pipeline.md; evaluate (oferta.md with cv.md) writes reports/NNN-*.md and a row in the tracker, data/applications.md, which links the report; then you apply: you review and click Submit yourself." width="760"></picture></p>
 
 ## Quality gates
 
@@ -98,4 +80,4 @@ scan ──► data/pipeline.md ──► evaluate (oferta + cv) ──► repor
 - The boundary → `DATA_CONTRACT.md`
 - The scoring → `modes/_shared.md` + `modes/oferta.md`
 - Adding a job source → [`providers/ADDING_A_PROVIDER.md`](providers/ADDING_A_PROVIDER.md)
-- The updater → `update-system.mjs`
+- The updater → `update-system.mjs`; the paths it ships → `lib/update-manifest.mjs`

@@ -493,8 +493,10 @@ export async function fillSession(
         await loc.scrollIntoViewIfNeeded().catch(() => {});
         await loc.click();
         await s.page.waitForTimeout(150);
-        await loc.pressSequentially(value, { delay: 15 }).catch(async () => {
-          await s.page.keyboard.type(value);
+        // No line breaks reach the keyboard: an Enter in a form can submit it.
+        const typed = String(value).replace(/[\r\n]+/g, " ");
+        await loc.pressSequentially(typed, { delay: 15 }).catch(async () => {
+          await s.page.keyboard.insertText(typed);
         });
         await s.page.waitForTimeout(300);
         const menu = '.select__menu .select__option, .select__menu-list [role="option"], [class*="menu" i] [role="option"]';

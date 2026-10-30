@@ -304,6 +304,51 @@
 
 ## ATS 關鍵字擷取
 (列出 15–20 個從該 JD 中擷取的高頻核心技術／業務關鍵字，用於履歷最佳化)
+
+## Keyword Coverage
+（由 `keyword-match.mjs` (1b) 產生——覆蓋率 %、present、thin、missing）
+
+## Job Description (archived verbatim)
+（職缺描述全文，逐字貼上——見下方要求）
+```
+
+**JD 存檔（必要，#2789）：** 每份報告都必須包含 `## Job Description (archived verbatim)` 一節，原樣貼上職缺描述全文，不得摘要或改寫。該標題維持英文，因為 `check-jd-archive.mjs` 依名稱尋找它。`**URL:**` 不是存檔：職缺關閉後連結就會失效，原始要求也再也找不回來。該節第一行寫來源上可見的刊登日期（`Posted: {日期或頁面上顯示的相對時間}`，確實沒有時寫 `Posted: not visible in source`），不要用報告檔案本身的時間代替。若 JD 過長或無法完整引用，用 `archive-posting.mjs` (下方命令) 存檔，並在該節中**只**寫這一句：`See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`。不得以改寫代替原文；完整規則見 `modes/oferta.md` 的 **JD archival**。
+
+**命令參數（#5853）：** 不要把職缺 URL、公司 slug 或報告路徑直接寫進命令列，加引號也不行。用檔案工具把這些值寫入一個 JSON 檔（`{"url": "…", "company": "{company-slug}", "report": "{num}"}`），然後執行下面的命令：它會檢查每個值（slug 必須符合 `^[a-z0-9-]+$`），並且不經過 shell，把每個值作為獨立參數傳給腳本。未通過檢查的值會中止執行：要改的是值，而不是檢查。完整規則見 `modes/oferta.md` 的 **Command arguments**。
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
+
+### 1b. 嵌入 ATS 關鍵字覆蓋率
+
+儲存報告後執行 `keyword-match.mjs` (下方命令)，把 `## Keyword Coverage` 區塊貼在 ATS 關鍵字擷取之下（標題維持英文）。僅供診斷：只有當關鍵字反映真實經驗時才補充。
+
+為此，把 `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` 寫入一個 JSON 檔（見上方 **命令參數**），然後執行：
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
 ```
 
 ### 2. 登錄到 Tracker 紀錄簿

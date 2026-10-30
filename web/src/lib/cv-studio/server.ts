@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusForReport, rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { markTrackerReady, spawnGeneratePdf } from "@/lib/pdf-render.mjs";
@@ -174,14 +175,14 @@ export async function renderEditedPdf(load: Extract<StudioLoad, { ok: true }>, e
   const previousHtml = fs.existsSync(editedHtml) ? fs.readFileSync(editedHtml, "utf8") : null;
   atomicWrite(editedHtml, html);
   const format = /size:\s*a4/i.test(html) ? "a4" : "letter";
-  const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, root, html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
+  const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
   if (!render.ok) {
     if (previousHtml === null) fs.rmSync(editedHtml, { force: true });
     else atomicWrite(editedHtml, previousHtml);
     return { ok: false, error: render.stderr || "PDF rendering failed." };
   }
   const warnings = render.stderr.split("\n").map((l: string) => l.trim()).filter(Boolean);
-  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, root, reportNum: load.reportNum });
+  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), reportNum: load.reportNum });
   if (!mark.ok) warnings.push(`PDF rendered, but the tracker's PDF column was not updated${mark.data?.error ? `: ${mark.data.error}` : "."}`);
   const index = await pdfPathStatusForReport(load.reportNum);
   return { ok: true, pdf: path.basename(editedPdf), indexed: index.status === "found" && index.path === path.resolve(editedPdf), warnings };

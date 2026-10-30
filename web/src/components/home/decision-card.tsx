@@ -20,8 +20,9 @@ const DECISION_TONE: Record<string, string> = {
 };
 
 // Awaiting-decision row: a scored role with no terminal status. Primary action
-// opens the report (PDF + Apply live there). Skip / Applied still write status.
-export function DecisionCard({ app, reason }: { app: Application; reason?: CardReason }) {
+// opens the report (PDF + Apply live there). Skip / Applied still write status,
+// and onDecided lets the parent offer an undo once the card is gone.
+export function DecisionCard({ app, reason, onDecided }: { app: Application; reason?: CardReason; onDecided?: (status: "Applied" | "Discarded") => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
@@ -48,6 +49,7 @@ export function DecisionCard({ app, reason }: { app: Application; reason?: CardR
         return;
       }
       setDone(status);
+      onDecided?.(status);
       router.refresh();
     } catch {
       setError("Could not confirm the change. Check your connection and pipeline, then retry.");

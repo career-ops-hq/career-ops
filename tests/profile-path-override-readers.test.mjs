@@ -1,7 +1,8 @@
 // tests/profile-path-override-readers.test.mjs — the core .mjs readers of
 // config/profile.yml follow CAREER_OPS_PROFILE, and fall back to the data root, not
-// the cwd (#5026). The web app has its own helper and test; batch/batch-runner.sh
-// and the mode prompts that tell an agent to read config/profile.yml are outside it.
+// the cwd (#5026). The web app has its own helper and test; the mode prompts
+// that tell an agent to read config/profile.yml are outside it.
+// batch/batch-runner.sh is covered by tests/batch-runner-profile-override.test.mjs.
 //
 // tests/profile-path-override.test.mjs pins the resolver and the doctor.mjs
 // reproduction. This file runs the REAL modules that used to build the data-root

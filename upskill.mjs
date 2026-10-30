@@ -23,19 +23,26 @@
  */
 
 import { readFileSync, existsSync, statSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
-import { join, dirname, relative, sep } from 'path';
+import { join, dirname, relative, resolve, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { resolveColumns, parseTrackerRow, firstLinkTarget } from './tracker-parse.mjs';
-import { validateFlags } from './lib/cli-flags.mjs';
+import { validateFlags, flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { loadCanonicalStates, resolveCanonicalStateId } from './tracker-utils.mjs';
 import { rankSkipBlockers, parseRequirementImportance } from './skip-blockers.mjs';
 
-import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, rawTrackerPath, resolveTrackerPath } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+// Report links resolve against the tracker's directory as spelled first:
+// withinReports() compares candidates lexically against CAREER_OPS, so the
+// realpath above alone (macOS /var -> /private/var, or any symlinked data
+// root) would push every valid link outside reports/. The realpath's own
+// directory stays a candidate for a tracker file that is itself a symlink,
+// whose links are written relative to its target.
+const TRACKER_DIR = dirname(resolve(rawTrackerPath(CAREER_OPS)));
 const CV_FILE = join(CAREER_OPS, 'cv.md');
 const PROFILE_FILE = getProfilePath();
 const STATES_FILE = join(ROOT, 'templates/states.yml');
@@ -464,10 +471,15 @@ function analyze(minReports) {
     if (linkTarget == null) continue;
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
-    // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
+    // (see merge-tracker.mjs); resolve against it as spelled and as realpathed
+    // (see TRACKER_DIR), with a root-relative fallback.
     // The read is attempted directly instead of probing with existsSync first,
     // which costs a full stat per report and races with the read (#2385).
-    const candidates = new Set([join(dirname(APPS_FILE), linkTarget), join(CAREER_OPS, linkTarget)]);
+    const candidates = new Set([
+      join(TRACKER_DIR, linkTarget),
+      join(dirname(APPS_FILE), linkTarget),
+      join(CAREER_OPS, linkTarget),
+    ]);
     let content = null;
     for (const p of candidates) {
       if (!withinReports(p)) continue;
@@ -831,7 +843,10 @@ const isMain = isMainModule(import.meta.url);
 // are read, and before --help, so `--help --bogus` still errors.
 const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--self-test', '--help', '-h'];
 
-// Only --min-reports and --url-text take their value as the next argv token.
+// Only --min-reports and --url-text take a value, as the next argv token or as
+// `--flag=value`. validateFlags accepts either form, so both are read with
+// flagValue(): an indexOf() lookup cannot see `--url-text=<url>` (the aggregate
+// map ran instead) or `--min-reports=3` (the default of 5 applied instead).
 const VALUE_FLAGS = ['--min-reports', '--url-text'];
 
 const USAGE = `Usage:
@@ -857,13 +872,13 @@ if (isMain) {
   if (args.includes('--self-test')) runSelfTest();
 
   // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
-  const urlTextIdx = args.indexOf('--url-text');
+  const urlTextGiven = hasFlag(args, '--url-text');
   const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
 
-  if (urlTextIdx !== -1 || directUrl) {
+  if (urlTextGiven || directUrl) {
     (async () => {
       let targetText = '';
-      const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
+      const inputSource = urlTextGiven ? flagValue(args, '--url-text') : directUrl;
 
       if (!inputSource) {
         console.error('Error: Please provide a valid URL or file path after --url-text');
@@ -985,10 +1000,10 @@ if (isMain) {
     });
   } else {
     // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
-    const minReportsIdx = args.indexOf('--min-reports');
+    const minReportsRaw = flagValue(args, '--min-reports');
     const MIN_REPORTS = (() => {
-      if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
-      const n = parseInt(args[minReportsIdx + 1], 10);
+      if (minReportsRaw === undefined) return 5;
+      const n = parseInt(minReportsRaw, 10);
       return Number.isNaN(n) || n < 1 ? 5 : n;
     })();
 

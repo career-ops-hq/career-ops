@@ -183,6 +183,40 @@ closedVdab.result === 'expired' && closedVdab.code === 'expired_body'
   ? pass('VDAB "Deze vacature is niet meer gepubliceerd" -> expired, despite its "Solliciteer nu"')
   : fail(`closed VDAB vacancy classified ${closedVdab.result}/${closedVdab.code}, expected expired/expired_body`);
 
+console.log('\nliveness-core — Polish closure banners (pracuj.pl) beat the "Aplikuj" control');
+
+// pracuj.pl keeps an archived offer's full page, "Aplikuj" button included,
+// and marks it closed only in a banner. Before these patterns the visible
+// apply control won and every archived offer read as active.
+const pracujUrl = 'https://www.pracuj.pl/praca/dyrektor-operacyjny-warszawa,oferta,1004567890';
+const polishBody = 'Twój zakres obowiązków\nZarządzanie operacjami w regionie, odpowiedzialność za budżet i zespół.\n'.repeat(4);
+const pracuj = (banner) => classifyLiveness({
+  status: 200,
+  requestedUrl: pracujUrl,
+  finalUrl: pracujUrl,
+  bodyText: `${banner}Dyrektor operacyjny\nWarszawa\n${polishBody}`,
+  applyControls: ['Aplikuj'],
+});
+for (const banner of [
+  'Ogłoszenie wygasło',
+  'OGLOSZENIE WYGASLO',
+  'Pracodawca zakończył zbieranie zgłoszeń na tę ofertę',
+  'Oferta jest nieaktualna',
+  'Oferta archiwalna',
+  'Kandydaci nie są już akceptowani',
+]) {
+  const r = pracuj(`${banner}\n`);
+  r.result === 'expired' && r.code === 'expired_body'
+    ? pass(`pracuj.pl "${banner}" -> expired, despite its "Aplikuj"`)
+    : fail(`pracuj.pl "${banner}" classified ${r.result}/${r.code}, expected expired/expired_body`);
+}
+
+// The same page without a banner is a live offer and must stay active.
+const livePracuj = pracuj('');
+livePracuj.result === 'active'
+  ? pass('pracuj.pl offer without a closure banner stays active')
+  : fail(`live pracuj.pl offer classified ${livePracuj.result}/${livePracuj.code}, expected active`);
+
 console.log('\nliveness-core — the getManfred Apply control, and the date a closed posting shows');
 
 // getManfred labels Apply "¡Apúntame!" ("sign me up"); the walk reads the
@@ -246,6 +280,76 @@ const closedEnglish = classifyLiveness({
 closedEnglish.result === 'expired' && closedEnglish.code === 'expired_body'
   ? pass('a closed getManfred posting in English -> expired, despite its "Can I apply...?" FAQ button')
   : fail(`closed getManfred posting in English classified ${closedEnglish.result}/${closedEnglish.code}, expected expired/expired_body`);
+
+console.log('\nliveness-core — the HiringRoom Apply control');
+
+// HiringRoom labels Apply "Postularse", and the walk reads it twice: the button
+// under the title and the one after the description. With no pattern for it, a
+// live posting read no_apply_control and scan --verify dropped it (#4832). The
+// controls below are what the walk returns on a live posting.
+const hiringRoomUrl = 'https://growuphr.hiringroom.com/jobs/get_vacancy/6a2314c34cf88a4172be80c2';
+const hiringRoomBody = 'Descripción del puesto\nNos encontramos en la búsqueda de un Service Desk Manager para liderar una operación global de soporte.\n'.repeat(4);
+const hiringRoomChrome = ['Portal de empleos', 'Compartir', '¿Cómo me postulo?', 'Actualizá tu perfil', 'Contacto con soporte', 'Cancelar', 'Enviar'];
+const hiringRoomApply = classifyLiveness({
+  status: 200,
+  requestedUrl: hiringRoomUrl,
+  finalUrl: hiringRoomUrl,
+  bodyText: hiringRoomBody,
+  applyControls: ['Postularse', 'Postularse', ...hiringRoomChrome],
+});
+hiringRoomApply.result === 'active' && hiringRoomApply.code === 'apply_control_visible'
+  ? pass('"Postularse" marks a HiringRoom posting active')
+  : fail(`"Postularse" classified ${hiringRoomApply.result}/${hiringRoomApply.code}, expected active/apply_control_visible`);
+
+// Every HiringRoom posting also links the help article "¿Cómo me postulo?"
+// ("how do I apply?"). The pattern reads the label, not the verb, so the help
+// link alone is not an Apply control.
+const hiringRoomHelp = classifyLiveness({
+  status: 200,
+  requestedUrl: hiringRoomUrl,
+  finalUrl: hiringRoomUrl,
+  bodyText: hiringRoomBody,
+  applyControls: hiringRoomChrome,
+});
+hiringRoomHelp.result === 'uncertain' && hiringRoomHelp.code === 'no_apply_control'
+  ? pass('the "¿Cómo me postulo?" help link is not an Apply control')
+  : fail(`the help link alone classified ${hiringRoomHelp.result}/${hiringRoomHelp.code}, expected uncertain/no_apply_control`);
+
+console.log('\nliveness-core — Bulgarian apply controls');
+
+// dev.bg and zaplata.bg label Apply "Кандидатствай", wherewework.bg
+// "Кандидатствайте" / "Външно кандидатстване", jobtiger.bg "Кандидатстване".
+// Without them every live posting on those boards read no_apply_control and
+// scan --verify dropped it for good, as in #4832.
+const bulgarianBody = 'Описание на позицията\nТърсим опитен PHP разработчик, който да се присъедини към екипа ни и да работи по уеб приложения.\n'.repeat(4);
+for (const label of ['Кандидатствай', 'Кандидатствайте сега', 'КАНДИДАТСТВАЙ', 'Кандидатстване', 'Външно кандидатстване']) {
+  const bulgarianApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://www.wherewework.bg/bg/obiavi/backend-developer-php/115000',
+    finalUrl: 'https://www.wherewework.bg/bg/obiavi/backend-developer-php/115000',
+    bodyText: bulgarianBody,
+    applyControls: ['Запазете', label],
+  });
+  bulgarianApply.result === 'active' && bulgarianApply.code === 'apply_control_visible'
+    ? pass(`"${label}" marks a Bulgarian posting active`)
+    : fail(`"${label}" classified ${bulgarianApply.result}/${bulgarianApply.code}, expected active/apply_control_visible`);
+}
+
+// The noun counts only when it opens the label. jobtiger.bg's advice links end
+// with it, and "кандидати" (candidates) and "кандидатствахте" (you applied)
+// share the stem.
+for (const label of ['Мотивационното писмо Как да напишем добро писмо за кандидатстване', 'F.A.Q. Кандидати', 'Вече кандидатствахте']) {
+  const bulgarianNotApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://www.jobtiger.bg/obiavi-za-rabota/back-end-developer-330211-2',
+    finalUrl: 'https://www.jobtiger.bg/obiavi-za-rabota/back-end-developer-330211-2',
+    bodyText: bulgarianBody,
+    applyControls: [label],
+  });
+  bulgarianNotApply.result === 'uncertain' && bulgarianNotApply.code === 'no_apply_control'
+    ? pass(`"${label}" is not an Apply control`)
+    : fail(`"${label}" classified ${bulgarianNotApply.result}/${bulgarianNotApply.code}, expected uncertain/no_apply_control`);
+}
 
 console.log('\nliveness-core — role/position "is closed" and bare "Job Expired" banners classify as expired');
 
@@ -720,3 +824,60 @@ isUnreadableVerdict({ result: 'expired', code: 'hard_expired' }) === false
   && isUnreadableVerdict(undefined) === false
   ? pass('closed, active, other uncertain and missing verdicts are not unreadable')
   : fail('isUnreadableVerdict over-matched a non-insufficient_content verdict');
+
+// ── isClosureEvidence: only closure EVIDENCE closes a tracker row ────────────
+//
+// check-liveness.mjs --discard-expired used to take every `expired` verdict and
+// write Discarded to the tracker. An unreadable page is `expired` too, so an
+// Evaluated row whose posting was merely slow to render was closed out with the
+// note "posting closed". The two other callers already excluded it by copying
+// the rule; the destructive one never did. One predicate now serves all three.
+import { isClosureEvidence, discardableExpiredUrls } from '../liveness-core.mjs';
+import { readFileSync as readLivenessSource } from 'node:fs';
+import { fileURLToPath as toLivenessPath } from 'node:url';
+
+// The premise, asserted rather than assumed: a REAL unreadable verdict from the
+// classifier is `uncertain`. An older or hand-built verdict can still carry the
+// same code as `expired`, which is why `expired` alone cannot gate a write.
+unreadableProbe.result === 'uncertain'
+  ? pass('premise: classifyLiveness() reports an unreadable page as uncertain')
+  : fail(`premise failed: an unreadable page classified as ${unreadableProbe.result}, not uncertain`);
+const legacyUnreadable = { result: 'expired', code: 'insufficient_content' };
+
+isClosureEvidence({ result: 'expired', code: 'hard_expired' }) === true
+  && isClosureEvidence(unreadableProbe) === false
+  && isClosureEvidence(legacyUnreadable) === false
+  && isClosureEvidence({ result: 'uncertain', code: 'bot_challenge' }) === false
+  && isClosureEvidence({ result: 'active' }) === false
+  && isClosureEvidence(null) === false
+  ? pass('closure evidence is a real expired verdict, never an unreadable, uncertain or missing one')
+  : fail('isClosureEvidence accepted something that does not prove the posting closed');
+
+{
+  const { closed, unreadable } = discardableExpiredUrls([
+    { url: 'https://jobs.example.com/closed', result: 'expired', code: 'hard_expired' },
+    { ...unreadableProbe, url: 'https://jobs.example.com/still-loading' },
+    { ...legacyUnreadable, url: 'https://jobs.example.com/old-verdict' },
+    { url: 'https://jobs.example.com/live', result: 'active' },
+    { url: 'https://jobs.example.com/wall', result: 'uncertain', code: 'bot_challenge' },
+    { result: 'expired', code: 'hard_expired' },          // no url: nothing to discard
+  ]);
+  JSON.stringify(closed) === JSON.stringify(['https://jobs.example.com/closed'])
+    ? pass('--discard-expired closes only the posting with closure evidence')
+    : fail(`--discard-expired would close ${JSON.stringify(closed)} — an unreadable page must not be among them`);
+  JSON.stringify(unreadable) === JSON.stringify(['https://jobs.example.com/still-loading', 'https://jobs.example.com/old-verdict'])
+    ? pass('unreadable pages are reported, uncertain or expired, not silently dropped')
+    : fail(`unreadable pages not reported correctly: ${JSON.stringify(unreadable)}`);
+}
+
+{
+  // A guard on the CLI itself. Testing the helper proves nothing if
+  // check-liveness.mjs stops calling it, which is the shape this bug took.
+  const cliPath = toLivenessPath(new URL('../check-liveness.mjs', import.meta.url));
+  const cli = readLivenessSource(cliPath, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+  cli.includes('discardableExpiredUrls(')
+    && !/verdicts\.filter\(\s*\(?\s*v\s*\)?\s*=>\s*v\.result\s*===\s*'expired'\s*\)/.test(cli)
+    ? pass('check-liveness.mjs --discard-expired selects URLs through the shared predicate')
+    : fail('check-liveness.mjs builds its discard list without discardableExpiredUrls() — an unreadable page would be closed');
+}

@@ -29,7 +29,7 @@ const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 
-const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
+const FOLLOWUPS_FILE = process.env.CAREER_OPS_FOLLOWUPS || join(CAREER_OPS, 'data/follow-ups.md');
 const STATUS_LOG_FILE = join(dirname(APPS_FILE), 'status-log.tsv');
 const PROFILE_FILE = getProfilePath();
 

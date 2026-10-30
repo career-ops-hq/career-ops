@@ -33,6 +33,9 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { visibleText } from './_html-to-text.mjs';
+
+export { visibleText } from './_html-to-text.mjs';
 
 const TRUSTED_HOST = 'itviec.com';
 const LIST_URL = 'https://itviec.com/it-jobs';
@@ -80,21 +83,6 @@ function assertItviecUrl(url) {
     throw new Error(`itviec: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
   }
   return url;
-}
-
-/**
- * Collapse a markup fragment to its visible text.
- * @param {string} fragment
- * @returns {string}
- */
-export function visibleText(fragment) {
-  return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 const CITY_SLUGS = /** @type {const} */ ({

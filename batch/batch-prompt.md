@@ -6,7 +6,7 @@ You are a batch worker evaluating one job offer for the candidate. Read the cand
 
 You receive a job URL plus a local JD text file and must produce:
 
-1. A complete A-G evaluation report (`reports/*.md`)
+1. A complete A-G evaluation report (`reports/*.md`). Batch reports never include Block H (draft application answers): interactive evaluation adds it for high-scoring offers, and `apply` drafts answers without it
 2. A tailored ATS-optimized CV PDF when the score passes the configured PDF gate
 3. One tracker TSV line for `merge-tracker.mjs`
 4. A final JSON summary on stdout for the batch orchestrator
@@ -398,7 +398,7 @@ Batch mode limitation: Playwright is not available, so exact apply-button state 
 
 Signals 1-5, 7-9 and 18 set the tier. Signal 6 is `not evaluated` in batch, so it never feeds the tier either — it stays a descriptive, informational finding, as the Risk Summary already reports. Signals 10-16 never change the tier: report each one separately as its own finding, keep every one of them descriptive rather than assertive, and close them as informational, not legal advice. Signals 19, 20, 21 and 22 likewise never change the tier: report each as its own informational finding. Signal 17 likewise never changes the tier: keep it informational, never treat its modeled purchasing-power comparison as a verdict on the offer, and close it as not financial or tax advice. Keep Signal 21 warn-only and informational, and close it as not legal advice.
 
-Use one tier: **High Confidence**, **Proceed with Caution**, or **Suspicious**. Present observations, not accusations, and explain thin evidence.
+Use one tier: **High Confidence**, **Proceed with Caution**, or **Suspicious**. Present observations, not accusations, and explain thin evidence. When the tier-setting signals give too little evidence to decide either way, use **Proceed with Caution** and say what was missing; never pick **Suspicious** without evidence.
 
 #### Verdict (lead)
 
@@ -450,26 +450,6 @@ Block format:
 | Relocation purchasing power | ℹ️ {home.jurisdiction} ~{home.takeHome} vs {dest.jurisdiction} ~{dest.takeHome} |
 ```
 
-#### Score Global
-Read `modes/_custom.md` → Scoring Rules, if it exists, and apply its override here. Default (if absent or silent): calculate global score based on dimension scores below.
-
-Use available signals:
-
-1. JD specificity and realism
-2. salary transparency
-3. boilerplate ratio
-4. company hiring/freeze/layoff signals from WebSearch
-5. prior appearances in `data/scan-history.tsv`
-6. suspicious or scam-like language
-
-Use one tier:
-
-- High Confidence
-- Proceed with Caution
-- Suspicious
-
-If evidence is thin, default to `Proceed with Caution` and explain the limitation.
-
 #### Global Score
 
 Provide a score table:
@@ -483,7 +463,7 @@ Provide a score table:
 | Red flags | -X if any |
 | **Global** | **X.X/5** |
 
-Decide the Global Score once as the holistic judgment across these dimensions, applying any `modes/_custom.md` Scoring Rules. Do not average report blocks A–H. Copy the same value into the report header, Machine Summary `score`, and tracker addition; do not recalculate it at each write.
+Decide the Global Score once as the holistic judgment across these dimensions, applying the user's scoring rules from `modes/_profile.md` and `modes/_custom.md`. Do not average report blocks A–H. Copy the same value into the report header, Machine Summary `score`, and tracker addition; do not recalculate it at each write.
 
 #### Score Evidence
 
@@ -604,7 +584,7 @@ Write the complete evaluation to:
 reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md
 ```
 
-`{company-slug}` is lowercase, hyphenated, and filesystem-safe.
+`{company-slug}` is lowercase, hyphenated, and filesystem-safe: built as `modes/oferta.md` step 1 describes, it must match `^[a-z0-9-]+$`.
 
 Report header:
 
@@ -691,7 +671,7 @@ risk_summary:
 
 Then include:
 
-- `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is). Never paraphrase or restate it under this heading. If you cannot reproduce the text in full, run `node archive-posting.mjs <url> --company={company-slug} --report={{REPORT_NUM}}` (the same slug as in the report filename) and use the pointer sentence from `modes/oferta.md` instead; `check-jd-archive.mjs` does not credit a section that calls itself a paraphrase.
+- `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is). Never paraphrase or restate it under this heading. If you cannot reproduce the text in full, capture it with `archive-posting.mjs` as **Command arguments** below shows (`company` is the same slug as in the report filename, `report` is `{{REPORT_NUM}}`) and use the pointer sentence from `modes/oferta.md` instead; `check-jd-archive.mjs` does not credit a section that calls itself a paraphrase.
 - `## Machine Summary`
 - `## A) Role Summary`
 - `## B) CV Match`
@@ -704,7 +684,40 @@ Then include:
 - `## Risk Summary`
 - `## Score Evidence`
 - `## Extracted Keywords`
-- `## Keyword Coverage`, the block `node keyword-match.mjs {report-path}` prints, pasted after the keyword list. A report without both sections leaves the coverage check in `modes/pdf.md` Step 22 with nothing to read.
+- `## Keyword Coverage`, the block the `keyword-match.mjs` command under **Command arguments** below prints for this report, pasted after the keyword list. A report without both sections leaves the coverage check in `modes/pdf.md` Step 22 with nothing to read.
+
+**Command arguments (#5853):** never type the posting URL, the company slug or the report path into a command line, not even inside quotes: a URL's `&`, `'`, `$` or spaces are shell syntax. Write the values to a JSON file with your file tool and run the fixed command for it, which checks each value and passes each one to the script as its own argument, with no shell (same rule as `modes/oferta.md`). A value that fails its check stops the run: fix the value, never the check. For the archive capture the file is `{"url": "…", "company": "{company-slug}", "report": "{{REPORT_NUM}}"}`:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
+
+For keyword coverage it is `{"report": "reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md"}`:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 Translate these human-facing headings according to `language.output` when it is not English. Keep `## Machine Summary`, the `## Job Description (archived verbatim)` heading, and the YAML keys exact for downstream parsers: `check-jd-archive.mjs` matches the archive heading by its literal English `## Job Description` prefix, so a translated heading reports a real archive as missing.
 

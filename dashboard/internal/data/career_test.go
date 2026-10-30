@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -409,6 +410,45 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 	}
 	if got := apps[2].JobURL; got != "https://jobs.example.com/legacy" {
 		t.Errorf("legacy JobURL = %q, want report URL fallback", got)
+	}
+}
+
+// A URL cell that names no posting is not a JobURL: the "—" empty-cell marker
+// a hand-added row carries, "N/A", or a local:jds/ pointer. Kept as one, it
+// switched off every enrichment tier, since each runs only for an empty
+// JobURL, so the report's own **URL:** header was never read. And the
+// pipeline's open action handed "—" to the platform opener.
+func TestParseApplicationsTreatsPlaceholderURLCellsAsAbsent(t *testing.T) {
+	tempDir, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-08-28 | Acme | Platform Engineer | 4.0/5 | Evaluated | — | [1](../reports/001-acme.md) | dash cell | — |
+| 2 | 2026-08-28 | Globex | Data Engineer | 4.2/5 | Evaluated | — | [2](../reports/002-globex.md) | n/a cell | N/A |
+| 3 | 2026-08-28 | Initech | Analyst | 3.9/5 | Evaluated | — | — | local pointer | local:jds/initech-analyst.md |
+`)
+
+	reportsDir := filepath.Join(tempDir, "reports")
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
+		t.Fatalf("mkdir reports: %v", err)
+	}
+	for name, url := range map[string]string{
+		"001-acme.md":   "https://jobs.example.com/acme",
+		"002-globex.md": "https://jobs.example.com/globex",
+	} {
+		if err := os.WriteFile(filepath.Join(reportsDir, name), []byte("**URL:** "+url+"\n"), 0o644); err != nil {
+			t.Fatalf("write report %s: %v", name, err)
+		}
+	}
+
+	apps := mustParseApplications(t, tempDir)
+	if len(apps) != 3 {
+		t.Fatalf("expected 3 applications, got %d", len(apps))
+	}
+	for i, want := range []string{"https://jobs.example.com/acme", "https://jobs.example.com/globex", ""} {
+		if got := apps[i].JobURL; got != want {
+			t.Errorf("row %d (%s) JobURL = %q, want %q", i+1, apps[i].Company, got, want)
+		}
 	}
 }
 
@@ -813,6 +853,53 @@ func TestExtractCellURLMatchesNodeReader(t *testing.T) {
 		if got := extractCellURL(tc.Cell); got != tc.Href {
 			t.Errorf("%s: extractCellURL(%q) = %q, Node reader gives %q", tc.Name, tc.Cell, got, tc.Href)
 		}
+	}
+}
+
+// One table, two readers: test-fixtures/tracker-row-split-parity.json is
+// asserted here against splitTrackerRow and in
+// tests/tracker-row-split-parity.test.mjs against Node's splitTrackerCells. A
+// tab only marks a legacy tab-delimited row when the line has at most two
+// pipes; in a pipe table it is note text that set-status.mjs --note keeps
+// verbatim. Splitting such a row on tabs left fewer than eight fields, so
+// ParseApplications dropped it while Node and the web still showed it.
+func TestSplitTrackerRowMatchesNodeReader(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "test-fixtures", "tracker-row-split-parity.json"))
+	if err != nil {
+		t.Fatalf("read shared row-split parity fixture: %v", err)
+	}
+	var fixture struct {
+		Cases []struct {
+			Name  string   `json:"name"`
+			Line  string   `json:"line"`
+			Cells []string `json:"cells"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(content, &fixture); err != nil {
+		t.Fatalf("parse shared row-split parity fixture: %v", err)
+	}
+	if len(fixture.Cases) == 0 {
+		t.Fatal("shared row-split parity fixture has no cases")
+	}
+	for _, tc := range fixture.Cases {
+		if got := splitTrackerRow(tc.Line); !reflect.DeepEqual(got, tc.Cells) {
+			t.Errorf("%s: splitTrackerRow(%q) = %q, Node reader gives %q", tc.Name, tc.Line, got, tc.Cells)
+		}
+	}
+}
+
+// A pipe row whose notes hold a tab must still reach the pipeline.
+func TestParseApplicationsKeepsPipeRowWithTabInNotes(t *testing.T) {
+	tempDir, _ := writeTracker(t, "# Applications Tracker\n\n"+
+		"| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n"+
+		"|---|------|---------|------|-------|--------|-----|--------|-------|\n"+
+		"| 7 | 2026-09-01 | Example Co | Engineer | 4.2/5 | Applied | ✅ | — | recruiter said:\tcall Tue |\n")
+	apps := mustParseApplications(t, tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 application, got %d", len(apps))
+	}
+	if apps[0].Company != "Example Co" || apps[0].Status != "Applied" {
+		t.Errorf("row parsed as company %q status %q, want Example Co / Applied", apps[0].Company, apps[0].Status)
 	}
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // career-ops scaffolder — one-command install.
-// Clones the repo at the latest release tag and installs dependencies.
+// Clones the repo at the latest release tag (or main, saying so, when no
+// release can be resolved) and installs dependencies.
 // It deliberately does NOT create cv.md / config/profile.yml / portals.yml:
 // the agent runs a conversational onboarding on first launch (see AGENTS.md
 // "First Run — Onboarding"), which is triggered precisely by those files
@@ -11,9 +12,9 @@ import { existsSync, readdirSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { ensureSkillEntrypoints } from "./skill-entrypoints.mjs";
 import { npmCommand } from "./npm-command.mjs";
+import { resolveReleaseTag } from "./release-tag.mjs";
 
 const REPO = "https://github.com/career-ops-hq/career-ops.git";
-const LATEST_RELEASE = "https://api.github.com/repos/career-ops-hq/career-ops/releases/latest";
 
 // career-ops is AI-agnostic: every one of these CLIs reads AGENTS.md and works
 // out of the box. We only detect them to tailor the final message — we never
@@ -71,19 +72,6 @@ function detectClis() {
   return SUPPORTED_CLIS.filter((c) => onPath(c.cmd));
 }
 
-async function latestTag() {
-  try {
-    const res = await fetch(LATEST_RELEASE, {
-      headers: { "User-Agent": "career-ops-cli", Accept: "application/vnd.github+json" },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.tag_name || null;
-  } catch {
-    return null;
-  }
-}
-
 async function main() {
   const [cmd, dirArg] = process.argv.slice(2);
 
@@ -103,9 +91,16 @@ async function main() {
   const isAbsolute = target.startsWith("/") || /^[A-Za-z]:/.test(target);
   const display = isAbsolute ? target : `./${target}`;
 
-  // 1. Clone at the latest stable release (fall back to the default branch).
-  const tag = await latestTag();
-  console.log(`\n→ Cloning career-ops${tag ? ` @ ${tag}` : ""} into ${display} ...`);
+  // 1. Clone at the latest stable release. Without one, fall back to the
+  // default branch, and say so: main can carry unreleased changes.
+  const { tag, reason } = await resolveReleaseTag();
+  if (!tag) {
+    console.warn(`\n! Could not resolve the latest career-ops release: ${reason}.`);
+    console.warn("  Installing the main branch instead, which can include changes not yet in a release.");
+    console.warn(`  To install a release, delete ${display} and run this command again later.`);
+  }
+  const ref = tag || "main (unreleased)";
+  console.log(`\n→ Cloning career-ops @ ${ref} into ${display} ...`);
   const cloneArgs = ["clone", "--depth=1"];
   if (tag) cloneArgs.push("--branch", tag);
   cloneArgs.push(REPO, target);
@@ -136,11 +131,11 @@ async function main() {
   // their absence is what triggers the agent's conversational onboarding on
   // first launch, which sets them up far better than copying placeholders.
   if (installed) {
-    console.log(`\n✓ career-ops is ready in ${display}\n`);
+    console.log(`\n✓ career-ops @ ${ref} is ready in ${display}\n`);
     console.log("Next steps:");
     console.log(`  1. cd ${target}`);
   } else {
-    console.log(`\n! career-ops is cloned in ${display} but NOT ready: dependencies did not install.\n`);
+    console.log(`\n! career-ops @ ${ref} is cloned in ${display} but NOT ready: dependencies did not install.\n`);
     console.log("Next steps:");
     console.log(`  1. cd ${target} && npm install   (then node doctor.mjs)`);
     process.exitCode = 1;

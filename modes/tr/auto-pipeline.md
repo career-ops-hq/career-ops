@@ -35,7 +35,7 @@ Bu kontrol çözülene kadar Adım 1'e geçmeyin.
 ## Adım 2 — Raporu Kaydet .md
 
 Tam değerlendirmeyi `reports/{###}-{sirket-kisa-adi}-{YYYY-AA-GG}.md` konumuna kaydedin (format için `modes/tr/is-ilani.md` dosyasına bakın).
-Kaydedilen rapora G Blok'u ekleyin. Rapor başlığına **URL:** {url} ve **Meşruiyet:** {tier} ekleyin.
+Kaydedilen rapora G Blok'u ekleyin. Rapor başlığına **URL:** {url} ve **Legitimacy:** {tier} ekleyin.
 
 ## Adım 3 — PDF Oluştur
 
@@ -78,7 +78,7 @@ Eğer final puanı >= 4.5 ise, başvuru formu için yanıt taslakları oluşturu
 - **Neden iyi uyum?** → "[A] ve [B]'nin kesişim noktasındayım, ki bu rol tam da burada yer alıyor."
 - **Nasıl duydunuz?** → Dürüstçe: "[Portal/tarama] aracılığıyla buldum, kriterlerime göre değerlendirdim ve en yüksek puanı aldı."
 
-**Dil**: JD hangi dilde olursa olsun, daima `language.output` dilinde (ayarlanmamışsa EN). `/tech-translate` uygulayın.
+**Dil**: JD hangi dilde olursa olsun, daima `language.output` dilinde (ayarlanmamışsa EN).
 
 ## Adım 5 — Takipçiyi Güncelle
 

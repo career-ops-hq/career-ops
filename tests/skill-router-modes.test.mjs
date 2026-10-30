@@ -68,3 +68,17 @@ for (const mode of ['triage', 'calibrate', 'intake', 'ats', 'retro']) {
     fail(`router registration for ${mode} is incomplete: ${missing.join(', ')}`);
   }
 }
+
+// Every routed mode needs a context-loading rule too. A mode in none of the
+// three lists is loaded however the agent guesses: without `_custom.md` it
+// skips the user's house rules, which AGENTS.md says apply in every mode.
+const routedModes = [...skill.matchAll(/^\| `[^`]+` \| `([^`]+)` \|$/gm)].map((m) => m[1]);
+const withoutContextRule = [...new Set(routedModes)]
+  .filter((m) => ![shared, standalone, ownContext].some((list) => list.includes(`\`${m}\``)));
+if (routedModes.length < 20) {
+  fail(`could not read the router's routing table (found ${routedModes.length} modes)`);
+} else if (withoutContextRule.length === 0) {
+  pass(`all ${routedModes.length} routed modes have a context-loading rule`);
+} else {
+  fail(`routed modes with no context-loading rule: ${withoutContextRule.join(', ')}`);
+}

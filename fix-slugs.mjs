@@ -34,10 +34,11 @@
  *   node fix-slugs.mjs --help        # show this message (-h is an alias)
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -400,7 +401,7 @@ async function main() {
   printDiff(fixes, { dryRun });
 
   if (!dryRun && fixes.length > 0) {
-    writeFileSync(filePath, text, 'utf-8');
+    replaceUserFile(filePath, text);
     console.log(`\nportals.yml updated (${fixes.length} fixed).`);
   } else if (dryRun && fixes.length > 0) {
     console.log('\nRun with --fix to write these changes to portals.yml.');

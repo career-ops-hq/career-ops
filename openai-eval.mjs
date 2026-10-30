@@ -3,7 +3,7 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Together, Groq, DeepSeek, Zhipu GLM,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, Together, Groq, DeepSeek, Zhipu GLM,
  * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
@@ -30,6 +30,7 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
@@ -39,6 +40,7 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
+import { endpointHeaders } from './lib/endpoint-headers.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
@@ -64,6 +66,7 @@ const PATHS = {
   cv:        join(DATA_ROOT, 'cv.md'),
   profileYml: getProfilePath(),
   profile:    join(DATA_ROOT, 'modes', '_profile.md'),
+  custom:     join(DATA_ROOT, 'modes', '_custom.md'),
   reports:    join(DATA_ROOT, 'reports'),
   // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
   // regardless would drop the addition somewhere the merge it instructs never
@@ -93,7 +96,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <id>     Model id            (env OPENAI_MODEL, default gpt-4o-mini)
+    --model <id>     Model id            (env OPENAI_MODEL; MiniMax direct default
+                                         MiniMax-M3.1-Flash, otherwise gpt-4o-mini)
     --url <base>     OpenAI-compatible base URL, including any /v1
                      (env OPENAI_BASE_URL, default https://api.openai.com/v1)
     --key <key>      API key             (env OPENAI_API_KEY)
@@ -111,10 +115,14 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     Requesty:    --url https://router.requesty.ai/v1  --model deepseek/deepseek-chat
     Cheaper Inference: --url https://api.cheaperinference.com/v1  --model gpt-5.4-mini
     API Route:   --url https://global.api-route.com/v1  --model gpt-5.5
+    Runcrate:    --url https://api.runcrate.ai/v1  --model deepseek-ai/DeepSeek-V4.1-Flash
+    CloudGPU:    --url https://cloudgpu.app/v1  --model deepseek-v4.1-flash
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
     Zhipu GLM:   --url https://open.bigmodel.cn/api/paas/v4  --model glm-4-flash
+    MiniMax:     --url https://api.minimax.io/v1       --model MiniMax-M3.1-Flash
+                 --url https://api.minimax.cn/v1       --model MiniMax-M3
     LM Studio:   --url http://localhost:1234/v1        --model <loaded-model>   (no key)
 
   EXAMPLES
@@ -127,7 +135,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 // Parse flags
 let jdText     = '';
 let postingUrl = '';
-let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+let modelName  = process.env.OPENAI_MODEL || '';
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 let apiKey     = process.env.OPENAI_API_KEY || '';
 let saveReport = true;
@@ -197,6 +205,13 @@ let endpointHost;
     process.exit(1);
   }
   endpointHost = parsed.hostname;
+  // Resolve the default after CLI flags, without replacing saved/custom models.
+  // Limit this to the direct API; subscription and gateway routes are separate.
+  if (!modelName) {
+    const isMiniMax = ['https://api.minimax.io', 'https://api.minimax.cn'].includes(parsed.origin)
+      && parsed.pathname === '/v1';
+    modelName = isMiniMax ? 'MiniMax-M3.1-Flash' : 'gpt-4o-mini';
+  }
   const isLoopback = endpointHost === 'localhost' || endpointHost === '127.0.0.1' || endpointHost === '::1';
 
   if (!isLoopback && parsed.protocol !== 'https:') {
@@ -252,6 +267,8 @@ const ofertaLogic   = readFile(PATHS.oferta,     'modes/oferta.md');
 const cvContent     = readFile(PATHS.cv,         'cv.md');
 const profileYml    = readFile(PATHS.profileYml, 'config/profile.yml');
 const profileContent = readFile(PATHS.profile,   'modes/_profile.md');
+// _custom.md is optional: an absent file is a valid end state, so no warning.
+const customContent = existsSync(PATHS.custom) ? readFileSync(PATHS.custom, 'utf-8').trim() : '';
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
@@ -263,6 +280,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   cvContent,
   profileYml,
   profileContent,
+  customContent,
   jdText,
   noCompress,
   modelName,
@@ -338,8 +356,17 @@ if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
 console.log(`\n🔒  Privacy: your cv.md + JD will be sent to ${endpointHost}.`);
 console.log(`🤖  Calling ${modelName} via ${endpointHost}... this may take a minute.\n`);
 
+// One evaluation is one conversation: a single id for every request in this run.
+const SESSION_ID = randomUUID();
+// VERSION may carry a release-please marker ("1.38.0 # x-release-please-version").
+let careerOpsVersion;
+try { careerOpsVersion = readFileSync(join(ROOT, 'VERSION'), 'utf-8').trim().split(/\s+/)[0] || undefined; } catch { /* default User-Agent version */ }
+
 const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+// OpenCode Go asks for a session id and an own user agent (observed: HTTP 400 MissingSessionID without it):
+// https://opencode.ai/v2/docs/console/go/#where-can-i-use-it
+Object.assign(headers, endpointHeaders(endpointHost, SESSION_ID, careerOpsVersion));
 
 let evaluationText;
 try {

@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Unattended follow-up sweep, run via launchd (see docs/AUTOMATION.md).
 # Never sends anything -- writes drafts to output/ for the user to review.
 
@@ -50,9 +50,34 @@ esac
 
 PROMPT="Run the career-ops 'followup' mode (modes/followup.md) against $ROOT/data/applications.md and $ROOT/data/follow-ups.md. Run node followup-cadence.mjs, and for every overdue/urgent entry generate the follow-up email/LinkedIn draft per the mode's framework (voice-dna.md guardrails apply). Write the full dashboard plus every generated draft to $DRAFT_FILE as markdown. Do NOT send, submit, or record anything as sent -- draft-only, for the user to review later. If there is nothing overdue/urgent, write a one-line note to that file saying so instead."
 
+# Headless claude -p denies any tool call that would need approval, so grant
+# exactly what the sweep needs: the read-only scripts modes/followup.md runs,
+# and a write to today's draft file. --add-dir lets it read the tracker when
+# the data root is outside the checkout. `//` makes an Edit rule an absolute
+# path.
+#
+# --allowedTools only adds approvals; it does not narrow what the user's own
+# settings already allow. dontAsk overrides an inherited acceptEdits or auto
+# default, so nothing beyond these rules and the user's explicit allow rules
+# runs, and the deny rules (which beat any allow rule) block the recording
+# scripts and Edit/Write under data/. They can't fence off a broad Bash rule
+# in the user's own settings (`node -e` can write any file); that is the
+# user's grant, and the sweep adds nothing to it.
 {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S') follow-up sweep starting ==="
-  claude -p "$PROMPT"
+  claude -p "$PROMPT" \
+    --permission-mode dontAsk \
+    --add-dir "$ROOT" \
+    --allowedTools \
+      "Bash(node followup-cadence.mjs *)" \
+      "Bash(node funnel-velocity.mjs *)" \
+      "Bash(node rejection-latency.mjs *)" \
+      "Bash(node company-history.mjs *)" \
+      "Edit(/$DRAFT_FILE)" \
+    --disallowedTools \
+      "Bash(node set-status.mjs *)" \
+      "Bash(node followup-seed.mjs *)" \
+      "Edit(/$ROOT/data/**)"
   echo "=== $(date '+%Y-%m-%d %H:%M:%S') follow-up sweep done -> $DRAFT_FILE ==="
 } >> "$LOG_FILE" 2>&1
 

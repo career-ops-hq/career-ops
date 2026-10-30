@@ -133,6 +133,64 @@ try {
   if (unresolvedThrew) pass('getro.fetch() throws an actionable error when collection_id cannot be resolved');
   else fail('getro.fetch() should throw when __NEXT_DATA__ has no network.id');
 
+  // ctx.idCache — the collection id is kept per board host between scans.
+  const memCache = (initial = {}) => {
+    const values = new Map(Object.entries(initial));
+    return { values, get: (k) => values.get(k), set: (k, v) => values.set(k, v), delete: (k) => values.delete(k) };
+  };
+  const searchOnly = (id) => async (url) => {
+    if (url !== `https://api.getro.com/api/v2/collections/${id}/search/jobs`) throw new Error(`unexpected collection in URL: ${url}`);
+    return { results: { count: 0, jobs: [] } };
+  };
+  const autoEntry = { name: 'Auto Fund', careers_url: 'https://Careers.ExampleVC.example/jobs' };
+
+  const hitCache = memCache({ 'careers.examplevc.example': { id: '5555', checkedAt: new Date().toISOString() } });
+  let hitPageCalls = 0;
+  await getro.fetch(autoEntry, { idCache: hitCache, fetchText: async () => { hitPageCalls++; return nextDataHtml; }, fetchJson: searchOnly('5555') });
+  if (hitPageCalls === 0) pass('getro.fetch() uses a cached collection id (keyed by the lower-cased board host) without reading the board page');
+  else fail(`getro.fetch() cache hit still read the board page ${hitPageCalls} time(s)`);
+
+  const missCache = memCache();
+  await getro.fetch(autoEntry, { idCache: missCache, fetchText: async () => nextDataHtml, fetchJson: searchOnly('9911') });
+  const storedCollection = missCache.values.get('careers.examplevc.example');
+  if (storedCollection?.id === '9911' && Number.isFinite(Date.parse(storedCollection.checkedAt))) pass('getro.fetch() stores a resolved collection id as { id, checkedAt }');
+  else fail(`getro.fetch() cache miss stored ${JSON.stringify(storedCollection)}`);
+
+  const oldCheck = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+  const pageGoneCache = memCache({ 'careers.examplevc.example': { id: '5555', checkedAt: oldCheck } });
+  let pageGoneSearchUrl = null;
+  await getro.fetch(autoEntry, {
+    idCache: pageGoneCache,
+    fetchText: async () => { throw Object.assign(new Error('HTTP 404'), { status: 404 }); },
+    fetchJson: async (url) => { pageGoneSearchUrl = url; return { results: { count: 0, jobs: [] } }; },
+  });
+  if (pageGoneSearchUrl?.includes('/collections/5555/') && pageGoneCache.values.get('careers.examplevc.example')?.id === '5555') {
+    pass('getro.fetch() keeps a cached collection id when the recheck of the board page fails, even with 404');
+  } else {
+    fail(`getro.fetch() failed recheck wrong: search=${pageGoneSearchUrl}, cached=${JSON.stringify(pageGoneCache.values.get('careers.examplevc.example'))}`);
+  }
+
+  const apiGoneCache = memCache({ 'careers.examplevc.example': { id: '5555', checkedAt: new Date().toISOString() } });
+  let apiGoneError = null;
+  try {
+    await getro.fetch(autoEntry, {
+      idCache: apiGoneCache,
+      fetchJson: async () => { throw Object.assign(new Error('HTTP 404'), { status: 404 }); },
+    });
+  } catch (err) {
+    apiGoneError = err;
+  }
+  if (apiGoneError?.status === 404 && !apiGoneCache.values.has('careers.examplevc.example')) {
+    pass('getro.fetch() drops the cached collection id when the search API answers 404, and still throws');
+  } else {
+    fail(`getro.fetch() API 404 wrong: error=${apiGoneError?.status}, cached=${apiGoneCache.values.has('careers.examplevc.example')}`);
+  }
+
+  const overrideCache = memCache({ 'jobs.examplevc.example': { id: '5555', checkedAt: new Date().toISOString() } });
+  await getro.fetch(okEntry, { idCache: overrideCache, fetchJson: searchOnly('4283') });
+  if (overrideCache.values.get('jobs.examplevc.example').id === '5555') pass('getro.fetch() lets getro_collection win over a cached id and leaves the cache alone');
+  else fail('getro.fetch() should not touch the cache when getro_collection is set');
+
   // fetch() passes redirect:'error' and a referer derived from careers_url.
   let getroOpts = null;
   const getroJobs = await getro.fetch(okEntry, {

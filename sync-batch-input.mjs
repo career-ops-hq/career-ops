@@ -19,9 +19,8 @@
  * (already-processed URLs). Idempotent: safe to run repeatedly.
  * Read-only over the pipeline; the only write is appending to batch-input.tsv.
  *
- * The "Pending"/"Procesadas" section headers are parsed with the same localized
- * spellings reconcile-pipeline.mjs accepts (EN/ES, plus DE/FR) so a Spanish or
- * German install is not read as having no pending entries.
+ * The "Pending" section heading is read in every language a mode writes it
+ * in (lib/pipeline-sections.mjs, shared with reconcile-pipeline.mjs and scan.mjs).
  *
  * Run: node sync-batch-input.mjs [--dry-run] [--pipeline <path>] [--input <path>] [--state <path>]
  */
@@ -32,6 +31,7 @@ import { fileURLToPath } from 'url';
 import { isIP } from 'net';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { sectionKind } from './lib/pipeline-sections.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const CHECKOUT_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -39,8 +39,6 @@ const CHECKOUT_ROOT = dirname(fileURLToPath(import.meta.url));
 /** Batch source label written into the source column. */
 export const SOURCE = 'pipeline';
 
-/** Localized section-header regex matching "Pending" in EN/ES/DE/FR. */
-export const PENDING_RE = /^##\s+(Pendientes|Pending|Offen|En attente)\s*$/i;
 const SECTION_RE = /^##\s+/;
 const PENDING_ITEM_RE = /^- \[ \]\s+/;
 
@@ -169,11 +167,11 @@ export function isSafePublicHttpUrl(raw) {
 /**
  * Extract labeled segments from a pipeline row body ("| label: value").
  * @param {string} body - Raw pipeline row body.
- * @returns {{note?: string, trust?: string, rank?: string, posted?: string}}
+ * @returns {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}}
  */
 export function extractLabels(body) {
   const labels = {};
-  const labelRe = /\|\s*(posted|trust|note|rank):\s*([^|]+)/g;
+  const labelRe = /\|\s*(posted|trust|yrs|note|rank):\s*([^|]+)/g;
   let m;
   while ((m = labelRe.exec(body)) !== null) {
     labels[m[1]] = m[2].trim();
@@ -193,7 +191,7 @@ export function lineCompany(body) {
 
 /**
  * Build the batch `notes` field from labeled segments.
- * @param {{note?: string, trust?: string, rank?: string, posted?: string}} labels - Label dictionary from extractLabels.
+ * @param {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}} labels - Label dictionary from extractLabels.
  * @returns {string}
  */
 export function buildNotes(labels) {
@@ -209,7 +207,7 @@ export function parsePending(text) {
   const lines = text.split(/\r?\n/);
   let pendStart = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (PENDING_RE.test(lines[i])) { pendStart = i; break; }
+    if (sectionKind(lines[i]) === 'pending') { pendStart = i; break; }
   }
   if (pendStart < 0) return [];
 

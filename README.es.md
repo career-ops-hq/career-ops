@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, con&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders">700+ contribuidores</a></p>
 
 <p align="center">
 <strong>Meses mandando CVs al&nbsp;silencio.</strong><br>
@@ -120,11 +120,13 @@ El silencio después de pulsar enviar no va contigo. Bastante gente vio lo mismo
   <a href="https://career-ops.org/es/manifesto?utm_source=readme&utm_content=es"><img src="docs/manifesto-wall.svg" alt="Tres firmas del manifiesto CareerOps, con sus propias palabras" width="800"></a>
 </p>
 
-<p align="center"><sub>Cada firma es un commit que puedes auditar. <a href="https://career-ops.org/es/manifesto?utm_source=readme&utm_content=es">Léelas todas, o añade la tuya →</a></sub></p>
+<p align="center"><sub>Cada firma es un commit que puedes auditar. <a href="https://career-ops.org/es/manifesto?utm_source=readme&utm_content=es">Léelas todas, o añade la tuya →</a> · <a href="https://career-ops.org/es/manifesto?utm_source=readme&utm_content=es#what-is-ai-job-search">¿Qué es la búsqueda de empleo con IA?</a></sub></p>
 
 <br>
 
 La contratación no va a arreglarse sola. La gente que la sufre sí puede, y ya está en la sala, comparando notas y arreglándose los setups unos a otros.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=es" alt="Muro animado con los avatares de GitHub de quienes contribuyen, que se llena por orden de llegada desde abril de 2026 y deja libre la siguiente casilla." width="100%"></a></p>
 
@@ -233,17 +235,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -252,7 +245,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -270,11 +263,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-Esto instala el binario `career-ops` de forma global para que puedas ejecutarlo directamente en lugar de a través de `npx`. A diferencia de `npx @santifer/career-ops init` (que prepara un directorio de proyecto), la instalación global te da un comando `career-ops` persistente, disponible desde cualquier terminal.
+Esto instala el binario `career-ops` de forma global para que puedas ejecutar `career-ops init [folder]` sin `npx`. `init` es su único comando: prepara un espacio de trabajo, y todo lo demás ocurre dentro de tu CLI de IA (ver Uso más abajo), no a través de este binario.
 
 **¿Cuál deberías usar?**
 - `npx @santifer/career-ops init`: lo mejor para el primer uso; crea una carpeta de proyecto dedicada.
-- `npm i -g @santifer/career-ops`: lo mejor cuando ya tienes una carpeta de proyecto y quieres ejecutar los comandos de career-ops directamente.
+- `npm i -g @santifer/career-ops`: si prefieres escribir `career-ops init` en lugar de la forma con `npx`. No añade ningún otro comando.
 
 > **El sistema está diseñado para que lo personalice tu propio CLI de IA.** Modos, arquetipos, pesos de la puntuación, guiones de negociación: solo pídele que los cambie. Lee los mismos ficheros que usa, así que sabe exactamente qué editar.
 
@@ -333,25 +326,7 @@ En Codex los comandos de barra no están garantizados. Usa los mismos nombres de
 
 ## Cómo funciona
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Integración con Antigravity CLI
 
@@ -508,7 +483,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Funcionalidades: 6 pestañas de filtro, 4 modos de ordenación, vista agrupada o plana, previsualizaciones con carga diferida, cambios de estado en línea.
+Funcionalidades: 10 pestañas de filtro, 8 modos de ordenación, vista agrupada o plana, previsualizaciones con carga diferida, cambios de estado en línea.
 
 También hay una **interfaz web experimental** (alfa y opcional: no se ejecuta nada si no la arrancas tú): ver [`web/README.md`](web/README.md).
 
@@ -628,7 +603,7 @@ El dashboard TUI en Go, los scripts de Node.js y los modos del agente de IA resp
 career-ops ([career-ops.org](https://career-ops.org), también conocido como **careerops**) es una búsqueda de empleo con IA, open source, que corre en local dentro de tu CLI de programación con IA (Claude Code, Codex, OpenCode y otros) y deja cada decisión en tus manos. Evalúa ofertas frente a tu CV, genera PDFs adaptados a los ATS, encuentra a la persona adecuada a la que escribir y lo registra todo en un solo sitio: la última palabra siempre es tuya. Es la primera implementación de referencia del [Manifiesto CareerOps](https://career-ops.org/manifesto).
 
 **¿Puede el CV personalizado inventarse cosas?**
-No debe, y los prompts lo dicen: reformular, nunca inventar. `generate-pdf` bloquea un CV con cifras o datos que no estén en tus fuentes, salvo que pases `--skip-fact-check`. Todavía no comprueba los cargos ni juzga los cambios de redacción. Dos issues abiertas se ocupan de eso: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (los cargos deben coincidir con cv.md) y [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (control de fidelidad que bloquea si falla). Hasta que se mergeen, lee cada CV antes de enviarlo. El [aviso legal](LEGAL_DISCLAIMER.md) dice lo mismo con más palabras.
+No debe, y los prompts lo dicen: reformular, nunca inventar. `generate-pdf` bloquea un CV con cifras o datos que no estén en tus fuentes, salvo que pases `--skip-fact-check`. El modo `pdf` también ejecuta `cv-title-check.mjs`, que compara cada cargo del CV adaptado con el que cv.md da al mismo puesto (emparejado por empresa y fechas) y te pregunta si quieres mantener o revertir cualquiera que difiera. Solo avisa, no bloquea, porque reformular un cargo a veces es decisión tuya. Nada juzga todavía los cambios de redacción: de eso se ocupa [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (control de fidelidad que bloquea si falla). Hasta entonces, lee cada CV antes de enviarlo. El [aviso legal](LEGAL_DISCLAIMER.md) dice lo mismo con más palabras.
 
 **¿Puedo usar career-ops gratis, o con un modelo más barato o local?**
 Sí. career-ops es independiente del CLI y funciona con modelos gratuitos y locales (modelos gratuitos de OpenRouter, Ollama o cualquier endpoint compatible con OpenAI), así que no dependes de ninguna suscripción de pago. Consulta [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) para la configuración completa.

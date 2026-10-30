@@ -10,8 +10,8 @@ Built and used by [santifer](https://santifer.io) for his own job search: 740 li
 
 Two layers — full list in `DATA_CONTRACT.md`:
 
-- **User Layer (NEVER auto-updated; personalization goes HERE):** `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `article-digest.md`, `portals.yml`, `data/*`, `documents/*`, `reports/*`, `output/*`, `interview-prep/*`, `batch/tracker-additions/*`
-- **System Layer (auto-updatable; DON'T put user data here):** `modes/_shared.md` and all other modes, `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `OPENCODE.md`, `KIMI.md`, `GEMINI.md`, `*.mjs` scripts, `dashboard/*`, `templates/*`, `batch/*` (except `batch/tracker-additions/`)
+- **User Layer (NEVER auto-updated; personalization goes HERE):** `cv.md`, `config/profile.yml`, `config/cv-facts.json`, `modes/_profile.md`, `modes/_custom.md`, `modes/_brief.md`, `voice-dna.md`, `writing-samples/*`, `article-digest.md`, `portals.yml`, `data/*`, `documents/*`, `jds/*`, `reports/*`, `output/*`, `interview-prep/*`, `batch/tracker-additions/*`
+- **System Layer (auto-updatable; DON'T put user data here):** `modes/_shared.md` and every other file in `modes/` except the three user files above, `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `OPENCODE.md`, `KIMI.md`, `GEMINI.md`, `*.mjs` scripts, `dashboard/*`, `templates/*`, `batch/*` (except `batch/tracker-additions/`)
 
 **THE RULE: When the user asks to customize facts or targeting (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. When they ask for procedural house rules, custom workflows, output preferences, or automations, write to `modes/_custom.md` (copy it from `modes/_custom.template.md` if missing). NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
 
@@ -19,9 +19,10 @@ Two layers — full list in `DATA_CONTRACT.md`:
 
 **Path Resolution Override & Precedence:**
 The User Layer location (Data Root) is resolved dynamically using the following precedence order:
-1. **Environment Variables:** `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` overrides the root path (resolved relative to the repository root if it is a relative path).
+1. **Environment Variables:** `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` overrides the root path (resolved relative to the repository root if it is a relative path). An override, here or in the marker file, that resolves inside a Claude Code plugin install copy is refused: `getCareerOpsRoot()` throws `UnsafeDataRootError` instead of returning it.
 2. **Marker File:** If no environment variable is set, a `.career-ops-data` file in the repository root containing an absolute or relative path to the user data directory is used.
-3. **Repository Default:** If neither is present, the repository root directory itself is used.
+3. **Plugin Install Default:** If neither is present and the code runs from a Claude Code plugin install copy (inside `~/.claude/plugins/cache/`, `marketplaces/` or `synced/`), `~/career-ops-data` is used. Claude Code replaces that copy on every plugin update, so it never holds user files. See `docs/CLAUDE_PLUGIN.md`.
+4. **Repository Default:** Otherwise, the repository root directory itself is used.
 
 **Tracker Path & Canonical Writes:**
 - **Explicit override:** `CAREER_OPS_TRACKER` environment variable overrides the applications tracker file path. Relative paths are resolved relative to the repository root directory.
@@ -87,7 +88,7 @@ If `{"status": "update-available", "local": ..., "remote": ..., "changelog": ...
 
 > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
 
-If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss --version {remote}`: that quiets v{remote} only, and a newer release asks again. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`, `worktree-without-main`) → say nothing. In an unattended run (`modes/_shared.md` → **Unattended runs**), say nothing about any update and apply none. The user can check anytime, even after saying no ("check for updates" / "update career-ops") → `node update-system.mjs check --force`. To follow every merge on `main` instead of releases: `node update-system.mjs apply --channel main --confirm`. Rollback: `node update-system.mjs rollback`. From a linked git worktree, all of these run in the checkout that has `main` checked out, so the update lands on `main`; afterwards suggest `git merge main` in the worktree.
+If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss --version {remote}`: that quiets v{remote} only, and a newer release asks again. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`, `worktree-without-main`, `managed-by-plugin`) → say nothing. In an unattended run (`modes/_shared.md` → **Unattended runs**), say nothing about any update and apply none. The user can check anytime, even after saying no ("check for updates" / "update career-ops") → `node update-system.mjs check --force`. If that returns `managed-by-plugin`, career-ops runs as a Claude Code plugin and `apply` and `rollback` refuse. Answer the request instead of staying silent: Claude updates the plugin, from the career-ops entry under `/plugin` → **Installed** (**Update now**), or, for a plugin added in Claude desktop, with **Check for updates** under **Customize → Plugins**. In a checkout only (a plugin install refuses both), to install the latest commit on `main` instead of the release: `node update-system.mjs apply --channel main --confirm`. That is a one-off: the choice is not saved and the session check above still looks only at releases, so staying on `main` means running `node update-system.mjs check --channel main` and that `apply` again. Rollback, also checkout only: `node update-system.mjs rollback`. From a linked git worktree, all of these run in the checkout that has `main` checked out, so the update lands on `main`; afterwards suggest `git merge main` in the worktree.
 
 ## What is career-ops
 
@@ -131,25 +132,27 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `verify-cv-structure.mjs` | Non-blocking warning on the tailored-CV JSON payload (`modes/pdf.md` step 17b), before HTML/PDF rendering — flags structure silently lost or reordered vs. `cv.md` (a dropped `"· {descriptor}"` suffix, an experience entry out of cv.md's chronological order) that fact-checking alone can't see, since the surviving content is still true; reports `UNVERIFIED` rather than a false pass when `cv.md` doesn't use a supported Experience header convention |
 | `generate-latex.mjs` | LaTeX CV fact gate + validator + compiler (gates the `.tex` before compiling whenever `cv.md` exists; `--source` adds evidence, `--skip-fact-check` opts out) |
 | `scan.mjs` | Zero-token portal scanner (Greenhouse/Ashby/Lever APIs, zero LLM cost) |
-| `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner over full public ATS datasets (Greenhouse/Lever/Ashby/Workday/iCIMS) plus board seeds derived locally from tracker/scan-history URLs, filtered by portals.yml `title_filter`/`location_filter`; optional `domain_filter` gates whole boards on industry relevance before any title is tested (opt-in, #3105); checkpoints every 500 companies, `--resume` continues an interrupted sweep |
+| `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner over full public ATS datasets (Greenhouse/Lever/Ashby/Workday/iCIMS/BambooHR/Paylocity/join.com) plus board seeds derived locally from tracker/scan-history URLs, filtered by portals.yml `title_filter`/`location_filter`; optional `domain_filter` gates whole boards on industry relevance before any title is tested (opt-in, #3105); checkpoints every 500 companies, `--resume` continues an interrupted sweep |
 | `scan-interamt.mjs` | Playwright browser scanner for Interamt.de (German public sector portal — Apache Wicket, no REST API) |
 | `audit-portals.mjs` | Content audit of `portals.yml` — the companion to `verify-portals.mjs`, which answers "does this board answer?" but never "*whose* postings are these?". Fetches each enabled board through the same `providers/` modules `scan.mjs` uses and reports provider + posting count + sample titles/locations per entry, verdicts worst-first: `no-provider` (enabled but nothing claims it, so `scan.mjs` skips it silently — the highest-value check), `error`, `empty`, `small`, `ok`. `--baseline prev.json` compares against an earlier `--json` run and flags boards that lost ≥50% of their postings, the shape an ATS migration takes. **It cannot detect a well-formed board belonging to the wrong entity** — a parent company's board is full of real jobs — so it surfaces the evidence a reader needs instead of pretending to a verdict (JSON, `--summary`, `--strict`) |
 | `scan-dayforce.mjs` | Playwright browser scanner for Dayforce (Ceridian) Recruiting career sites (jobs.dayforcehcm.com — Cloudflare + NextAuth CSRF gated, no bare-HTTP-reachable API); reads `dayforce_boards` from `portals.yml` |
 | `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text). An `expired` verdict is recorded back into `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead once stops resurfacing in the web "new matches this week" feed (#3891). Only URLs the history already knows are written, once each; `uncertain` is never recorded, and `--no-record` makes the run leave no trace |
 | `fetch-jd.mjs` | JD text for a posting whose ATS is in `liveness-api.mjs`'s `JD_TEXT_API_ATS`, no browser needed. Prints the JD on stdout and exits 0 on a hit; exits 1 with empty stdout otherwise, so the caller's existing browser/WebFetch fallback is the next step. Backed by `browser-extract.mjs`'s `fetchJdViaKnownApi()`, the same dispatch its `jd` mode uses |
-| `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
+| `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs --report <report#> <State>`, or `<tracker#\|company>` as the first argument (a bare number is the tracker `#`, not the report number); `[--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
 | `fix-report-links.mjs` | Repairs tracker rows whose Report link points at a missing file: rewrites only that cell to `—` (single-link cells only; others listed for hand review), same broken-link rule as `verify-pipeline.mjs` Check 3 via `findDeadReportLink()` in `tracker-utils.mjs`; `--dry-run` previews, otherwise `.bak` backup + locked atomic write; idempotent |
-| `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries (JSON or `--summary`) |
+| `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries; for invites also emits a draft-only pre-interview clarification email (reporting line, first-three-month deliverables, full scope) as `clarificationDraft`, never sent, suppressed with `--no-clarification-draft` (JSON or `--summary`) |
 | `coverage-check.mjs` | Explains why the scanners missed a posting the user found by hand: already surfaced, dropped by a filter (`scan-history.tsv` status), tracked but disabled / no provider / title or location filter, untracked company, or a job site no provider reads. Proposes the one `portals.yml` change that would have caught it, never applies it; `--log` appends to `data/coverage-misses.tsv` (zero-network, JSON or text) |
 | `paste-reply.mjs` | Manual/no-Gmail input into reply-watch classification — normalizes a pasted/file email (subject/from/body) and appends to `data/reply-candidates.json`; never overwrites entries, never classifies, never touches the tracker |
 | `evaluation-cache.mjs` | Local Machine Summary job-facts reuse; requires #1030 strong listing identity, a fresh active liveness check, and facts under 24 hours old. See the schema in `batch/batch-prompt.md`; private fit is always recomputed |
-| `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate (JSON) |
+| `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate and interview rate per role family with a small-sample guard (JSON or `--summary`) |
+| `discard-analytics.mjs` | Read-only summary of the pre-screen discard log (`data/discard.log`; `--log batch/logs/discard.log` for batch runs): counts by reason, domain and day, plus the most frequent `title_mismatch` URLs to review when tuning filters |
 | `keyword-match.mjs` | ATS keyword-coverage check — JD keywords (from a report) vs CV/HTML → coverage %, present/thin/missing (diagnostic only, never injects keywords) |
 | `upskill.mjs` | Weighted skill-gap map from tracked reports; known skills from `cv.md`/`config/profile.yml` excluded (JSON) |
 | `stats.mjs` | Lifetime pipeline stats: tracker roll-up, canonical `ever*` funnel, scan totals, portal coverage, follow-up compliance, scan-run trends (JSON or `--summary`) |
 | `data/status-log.tsv` | Append-only status transition ledger, sibling of the tracker file: `{tracker#}\t{date}\t{from}\t{to}\t{source}\t{note}`. Appended by `set-status.mjs` on every real status change; the tracker stays the source of truth for *state*, the ledger records *when*. An unknown from/to state is the sentinel `-`, and the source column is a closed set whose members are `VALID_SOURCES` in `funnel-velocity.mjs` — see `DATA_CONTRACT.md` before writing to it from anywhere else |
 | `funnel-velocity.mjs` | Funnel calibration vs market benchmarks + stage velocity, folded from `data/status-log.tsv` (JSON or `--summary`) |
 | `company-history.mjs` | Read-only per-company evidence card joining the tracker, follow-ups, scan history and the status-log (JSON or `--summary`) |
+| `precheck-duplicate.mjs` | Read-only pre-apply duplicate check — `--company/--title [--req] [--url]` lists tracker rows that could be the same opening (URL/req match, same company + title, same parent organisation); advisory, exit 0, never writes (JSON via `--json`) |
 | `followup-cadence.mjs` | Follow-up cadence calculator (JSON) |
 | `followup-seed.mjs` | Seeds `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied (JSON) |
 | `detect-reposts.mjs` | Flags roles re-listed 2+ times in 90 days from `scan-history.tsv` — requires 2+ distinct URLs seen on 2+ distinct scan dates (`--min-span`) with the same title identity, so concurrent per-city/country/segment openings are not mistaken for reposts (JSON or `--summary`) |
@@ -157,14 +160,17 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `process-quality.mjs` | Per-company recruiting-friction rate from `[process-friction]` tags in `data/active-interviews.md` Notes (JSON or `--summary`) |
 | `rejection-latency.mjs` | Post-interview response-latency signal — flags companies still in `Interview` state whose silence since the last `data/active-interviews.md` round exceeds a courtesy (30d default, configurable) threshold, with a ready-to-copy `data/blacklist.md` suggestion row; suggestion-only, never writes (JSON or `--summary` table output) |
 | `closing-soon.mjs` | Read-only, zero-LLM closing-date surfacer — reads closing dates typed into tracker Notes (`closes 2026-10-22`, `deadline Nov 4`; or the `jds/` capture when Notes have no marker) and lists rows within `--within N` days (default 7), soonest first, with a separate `overdue` group and an `unparsed` list; `--status` (default `Evaluated`), `--today` for deterministic runs; never writes (JSON or `--summary` table output) |
+| `reeval-candidates.mjs` | Read-only, zero-LLM re-evaluation finder — lists tracker rows (`--status`, default `Evaluated`) whose last evaluation (latest of the Date column, `Re-eval YYYY-MM-DD` Notes markers and linked report header dates) predates the last change to `cv.md`, `article-digest.md`, `config/profile.yml` or `modes/_profile.md` (last commit date when the file is committed in git, file mtime otherwise, labelled approximate); never re-evaluates, never writes (JSON or `--summary`) |
 | `tracker-sync-check.mjs` | Status-drift checker between `data/applications.md` and `data/active-interviews.md` — matches rows via a `#N in tracker` Notes reference or fuzzy Company+Role, then two-tier resolves mismatches (auto-tier1 via canonical lifecycle order, needs-review-tier2 via `git blame` timestamps). Read-only/reporting in this version — does not write status fixes. Wired into `verify-pipeline.mjs`'s health check. |
 | `salary-gap.mjs` | Desired/advertised/actual comp gap analyzer — folds report `advertised_comp` + `data/salary-observations.tsv` (JSON or `--summary`) |
 | `negotiation-roi.mjs` | Salary-negotiation talking-point generator — anchors an ask in a quantified `interview-prep/story-bank.md` achievement, kept only if the same number also appears verbatim in `cv.md` (v1 safety gate), converted to an estimated annualized dollar value from an explicit wage/frequency input (never guessed); read-only, draft-only (JSON or `--summary`) |
-| `assessment-log.mjs` | Skills-assessment logger — `add` appends platform/subject/threshold/score + staleness note to `data/assessments.tsv` (JSON or `--summary`) |
+| `assessment-log.mjs` | Skills-assessment logger — `add` appends platform/subject/threshold/score + staleness note to `data/assessments.tsv` (JSON or `--summary`); `--kind take-home` tracks take-home/demo assignments (deadline with offset, deliverable, proof), `submit` records a submission as a new row, `open [--tz]` lists unsubmitted ones by deadline in your timezone with a 48h warning (records and reminds only, never submits) |
 | `ats-payload.mjs` | ATS payload transform for `build-cv-html.mjs` payloads — one safe transform (fold `competencies[]` into `skills[]`, idempotent, so the same facts ship comma-delimited under a header parsers recognise) plus three lints it reports and deliberately never applies (`employer-in-role`, `parenthetical-in-company`, `multiple-date-ranges`). Payload on stdout, findings on stderr; read-only (never writes `cv.md` / `config/profile.yml`) |
-| `github-evidence.mjs` | Optional GitHub evidence step of the `expand` mode (#5295): PRs the user authored (merged / open / closed unmerged per repo, with stars and visibility) through the user's existing `gh auth`, plus a claim check of `cv.md` against them (named but never merged; merged but never named). Read-only and metadata only, never source code; forks and the user's own repos are never evidence, and private repos count only when listed in `config/profile.yml` → `github_evidence.private_allowlist` (others appear by name and count only). Writes `output/github-evidence-{date}.{md,json}`; exits 3 when `gh` is missing or logged out and 2 when a GitHub query fails, and on either `expand` stays zero-key (`--json`) |
+| `github-evidence.mjs` | Optional GitHub evidence step of the `expand` mode (#5295): PRs the user authored (merged / open / closed unmerged per repo, with stars and visibility) and commits the user authored on each repo's default branch (count, first and last date; kept apart from PR counts and never added to them), through the user's existing `gh auth`, plus a claim check of `cv.md` against them (named but never merged; merged but never named; commits only and never named). Read-only and metadata only, never source code or commit messages; forks and the user's own repos are never evidence, and private repos count only when listed in `config/profile.yml` → `github_evidence.private_allowlist` (others appear by name and counts only). Writes `output/github-evidence-{date}.{md,json}`; exits 3 when `gh` is missing or logged out and 2 when a GitHub query fails (a failed commit search is reported in the JSON as `commitSearch` instead), and on either `expand` stays zero-key (`--json`) |
 | `jd-skill-gap.mjs` | Zero-LLM JD skill classifier vs `cv.md`: existing / supportedByResume / gap; never auto-adds claims to `cv.md` (JSON or `--summary`) |
+| `role-clarity.mjs` | Zero-LLM six-point role-clarity check on posting text (supervisor/department, scope, deliverables and format, success measure, coordinating teams, delivery cadence): present / partial / missing with quoted evidence, plus a soft-verb signal; three or more missing sets `askBeforeYouCommit` and lists questions for a recruiter-question draft. Advisory only — no effect on the 1-5 score; read-only, English-only (JSON or `--summary`) |
 | `cv-title-check.mjs` | Zero-LLM job-title consistency checker — pairs each tailored-CV `{company, dates}` entry against `cv.md`'s canonical entry and flags an exact-string title mismatch (case/whitespace-normalized, never fuzzy); warn-only, never edits either file; reads `cv.md` from the data root, and reports "title check did not run" instead of ✅ when nothing could be compared (JSON or `--summary`) |
+| `filter-audit.mjs` | Zero-LLM, read-only audit of `portals.yml` `title_filter.positive`: replays `matchedTitleKeywords()` over `data/scan-history.tsv` to report which keywords never match, which are redundant (zero offers they alone catch), and which are noisy (high volume, low average score once evaluated); duplicate entries are audited once and listed. Ranks by `unique`, not hits (JSON or `--summary`) |
 | `contacts.mjs` | Job-search phonebook → vCard 3.0 exporter — stable UIDs so re-imports update instead of duplicating on platforms that honor vCard UID (JSON, `--summary`, `--vcf`, `--caller-id`) |
 | `contact-lookup.mjs` | Saved-contact company lookup over `data/contacts.tsv`, run by `contacto` before any cold WebSearch to surface a prior contact (e.g. a past interviewer, or a contact from an earlier application) at the same company as an internal-referral lead; exact-key matching via `normalizeCompany()` (tracker-utils.mjs), not fuzzy (`--company <name>`, `--summary`) |
 | `linkedin-join.mjs` | Warm-intro finder — joins a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?"; zero-token, offline, read-only. Operational only: never a scoring input, never a content source (JSON, `--summary`, `--company <name>`, `--tsv`) |
@@ -245,6 +251,7 @@ If `config/profile.yml` is missing, ask:
 > - Your location and timezone
 > - What roles are you targeting? (e.g., 'Senior Backend Engineer', 'AI Product Manager')
 > - Your salary target range and its currency
+> - How many years of professional experience do you have? (optional: the scanner can then skip postings whose stated minimum is out of reach, and how far you'd stretch above it)
 > - How much do you want to spend on model usage per evaluation? Three options:
 >   - **economy** — cheapest and fastest, good for scanning lots of offers quickly
 >   - **standard** — balanced cost and quality (default if you're not sure)
@@ -263,7 +270,7 @@ Then write both files in one run. Do not copy or hand-edit the templates. `templ
 ```bash
 node onboard-write.mjs --answers - <<'JSON'
 {
-  "candidate": { "full_name": "...", "email": "...", "location": "City, Region" },
+  "candidate": { "full_name": "...", "email": "...", "location": "City, Region", "years_of_experience": 6 },
   "target_roles": ["..."],
   "compensation": { "target_range": "...", "currency": "USD", "minimum": "..." },
   "location": { "country": "...", "city": "...", "timezone": "..." },
@@ -282,6 +289,7 @@ JSON
   - When they name cities, pass the cities and leave `countries` empty, since a country in `always_allow` admits every city in it.
   - "Remote" and "Hybrid" are not places, and the writer refuses them, because an allow-list entry like that admits every country.
   - A posting labeled only "Remote" (no country) will not match a US `always_allow` / `allow` list. Tell the candidate that limitation during onboarding; do not add "Remote" as an unconditional country match. Titles that themselves signal remote work can still match on the title filter.
+- `candidate.years_of_experience` is optional. When they give it, also ask whether the scanner should check postings whose JD states a minimum above it, by how much they would stretch (default 1 year), and whether to mark those rows (the default) or drop them. A yes becomes `portals.experience_filter: { "stretch_years": 1 }` (add `"action": "drop"` only if they want those rows removed: a wrong drop silently costs a real job, a wrong label costs one glance). It reads each new posting's JD, marks (or with `drop`, removes) only a clearly stated minimum above the band, and keeps unclear or unread ones unmarked; it is independent of `skip_tiers`, which reads the title.
 - `max_posting_age_days` defaults to 45. Tell them it also hides long-open roles on a company's own board. Set 0 only when they ask for older postings.
 - Contact fields they did not give are blanked, so the example person never reaches a CV.
 - Existing files are kept. Pass `--force` only when the user asks to redo setup. `node onboard-write.mjs --help` shows every field.
@@ -340,25 +348,25 @@ Then run `node doctor.mjs` once before you confirm. Mention a setup command only
 Then confirm:
 > "You're all set! You can now:
 > - Paste a job URL to evaluate it
-> - Run the scan entrypoint for your CLI to search portals: `/career-ops scan`, `/career-ops-scan`, or ask Codex to run `scan`
-> - Open the command menu for your CLI: `/career-ops`, the CLI-specific alias, or ask Codex to show the available career-ops modes
+> - Run the scan entrypoint for your CLI to search portals: `/career-ops scan`, `/skill:career-ops scan` on Pi, or ask Codex to run `scan`
+> - Open the command menu for your CLI: `/career-ops`, `/skill:career-ops` on Pi, or ask Codex to show the available career-ops modes
 >
 > Everything is customizable — just ask me to change anything."
 
 Then suggest automation:
 > "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
 
-If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring scan entrypoint for their CLI (`/career-ops scan`, `/career-ops-scan`, or the equivalent Codex prompt). If those aren't available, point them to [docs/AUTOMATION.md](docs/AUTOMATION.md) for copy-paste cron / launchd / Windows Task Scheduler recipes plus a zero-token triage-to-shortlist prompt, or remind them to run the scan mode periodically.
+If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring scan entrypoint for their CLI (`/career-ops scan`, `/skill:career-ops scan` on Pi, or the equivalent Codex prompt). If those aren't available, point them to [docs/AUTOMATION.md](docs/AUTOMATION.md) for copy-paste cron / launchd / Windows Task Scheduler recipes plus a zero-token triage-to-shortlist prompt, or remind them to run the scan mode periodically.
 
 ### Personalization
 
 This system is designed to be customized by YOU (AI Agent). When the user asks, edit directly:
 
 - Archetypes / targeting → `modes/_profile.md` or `config/profile.yml`
-- Translate modes → files in `modes/`
+- Output language → `language.output` in `config/profile.yml`; market vocabulary → `language.modes_dir` (see Output Language vs Market Modes). A mode set for a new language is a contribution under `modes/{lang}/`, not a personalization: the files in `modes/` are system files, and an update overwrites edits to them
 - Add companies → `portals.yml`
 - Profile details → `config/profile.yml`
-- CV template design → `templates/cv-template.html`
+- CV template design → a copy of `templates/cv-template.html` saved as `templates/cv-template.{name}.html`, selected with `cv.template: {name}` in `config/profile.yml`. Never edit `templates/cv-template.html` itself: it is a system file and the next update replaces it
 - Scoring weights → `modes/_profile.md` for the user; `modes/_shared.md` + `batch/batch-prompt.md` only when changing shared defaults for everyone
 
 ### Language Modes
@@ -457,7 +465,7 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 | Maintains their own hand-tuned `.tex` CV and wants it tailored in place (opt-in; cv.md stays the default) | `latex-tex` |
 | Wants a tailored CV as markdown instead of a PDF (to paste into their own template or editor) | `text` |
 | Wants a cover letter | `cover` |
-| Wants to add a role to the tracker manually | `add` |
+| Wants to add a role to the tracker by hand, without an evaluation | `tracker` — a tracker-addition TSV with the `N/A` score sentinel, merged by `merge-tracker.mjs` |
 | Wants to discover CV competencies they forgot to write down | `expand` |
 | Evaluates a course/cert | `training` |
 | Evaluates portfolio project | `project` |
@@ -542,7 +550,7 @@ Job aggregators keep stale, filled, and ghost listings live long after the emplo
 
 1. Identify the employer, then locate the same role on the **employer's own careers page / ATS** (Greenhouse, Lever, Ashby, Workday, or the company's `/careers`). Same Playwright discipline as above.
 2. **Found at the employer → the employer URL is canonical.** Use it as the report `**URL:**` and apply direct, never through the aggregator.
-3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Mark it in `data/scan-history.tsv`; if it is already in the tracker, run `node set-status.mjs <report#|company> Discarded --note "not found at employer"` — never silently delete the record, since that is what stops it being re-added as new on the next scan.
+3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Record it in `data/scan-history.tsv` with status `skipped_expired`, the status `check-liveness.mjs` records for a dead posting, so the next scan treats the URL as seen until `scan_history.recheck_after_days` releases it. Write the row through `appendToScanHistory` in `scan.mjs`, not by hand. The URL, role and company come from the posting, so never put them into a shell command: write them to a JSON file with your file tool (`{"url": "…", "title": "…", "company": "…"}`), then run `node --input-type=module -e 'import { readFileSync } from "node:fs"; import { appendToScanHistory } from "./scan.mjs"; const p = JSON.parse(readFileSync(process.argv[1], "utf8")); await appendToScanHistory([{ ...p, source: "manual" }], process.argv[2], "skipped_expired")' <file.json> YYYY-MM-DD`. The status decides what the scanner does: `skipped_title`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility` and `skipped_experience` never count as seen, so the listing comes back, and a status the scanner does not know pins the URL for good. If it is already in the tracker, run `node set-status.mjs --report <report#> Discarded --note "not found at employer"` (or `"<company>"` for a row with no report) — never silently delete the record, since that is what stops it being re-added as new on the next scan.
 4. **Employer has no careers page / ATS you can find → leave it UNCONFIRMED, not stale.** Keep the aggregator URL and tell the user the role could not be confirmed at the employer.
 5. **Employer unidentifiable** (some aggregator and agency posts hide the company) → that is a **Block G posting-legitimacy signal**, not a research gap. Report it and stop. NEVER infer, guess, or invent the employer.
 
@@ -575,13 +583,13 @@ Headless worker command per CLI:
 | Antigravity CLI | `agy -p "prompt"` |
 | Grok Build CLI | `grok -p "prompt"` |
 
-**Parallel fan-outs — reserve report numbers first.** Before spawning N parallel evaluators, reserve the range: `node reserve-report-num.mjs --count N` (prints e.g. `042-049`); hand each worker its own number. The allocator treats report files, sentinels, tracker row IDs, and tracker report links as occupied; each slot claim is individually atomic (on collision, claimed slots are released and the reservation restarts past it — permanent, harmless gaps). Release with `node reserve-report-num.mjs --release 042-049` when done; stale sentinels are GC'd after 4h, so reserve right before spawning. Never let parallel workers compute `max+1` themselves — that is the #749 race.
+**Parallel fan-outs — reserve report numbers first.** Before spawning N parallel evaluators, reserve the range: `node reserve-report-num.mjs --count N` (prints e.g. `042-049`); hand each worker its own number. The allocator treats report files, sentinels, tracker row IDs, tracker report links, and tracker numbers still named in `status-log.tsv`, `data/follow-ups.md`, `data/salary-observations.tsv` or `data/contacts.tsv` as occupied, so a deleted or merged-away row's number is never handed to a new application; each slot claim is individually atomic (on collision, claimed slots are released and the reservation restarts past it — permanent, harmless gaps). Release with `node reserve-report-num.mjs --release 042-049` when done; stale sentinels are GC'd after 4h, so reserve right before spawning. Never let parallel workers compute `max+1` themselves — that is the #749 race.
 
 ## Stack and Conventions
 
 - Node.js (`.mjs`), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), Canva MCP (optional visual CV)
 - Output in `output/` (gitignored) · Reports in `reports/` · JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md) · Batch in `batch/` (gitignored except scripts and prompt)
-- Report numbering: sequential 3-digit zero-padded, max existing + 1
+- Report numbering: sequential 3-digit zero-padded. Claim each number with `node reserve-report-num.mjs` (it prints the number and holds it until `--release`); never compute max existing + 1 yourself (see **Parallel fan-outs** above)
 
 **JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `--report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
 - **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
@@ -610,7 +618,7 @@ When the user records a `hired` or `accepted` outcome, celebrate FIRST — a lan
 >
 > One optional thing: career-ops keeps a public wall of people who landed jobs with it. If you want yours there, I'll draft it from what we already know (role, weeks, what helped). You'll see the exact text, and nothing leaves this machine unless you submit it yourself on GitHub. Want the draft? If not, I won't bring this one up again.
 
-If they say yes: run `node hired-share.mjs --report N --anonymity <their choice> --story "<their words>" --open` — it prints the exact payload, opens a prefilled GitHub issue, and the user reviews and submits it themselves. Ask their anonymity level explicitly (handle / role-only / count-only); never default to the most exposed. Offer a 2-sentence draft story built only from tracker data, and let them rewrite it. If they say "not now": `node hired-share.mjs --report N --mark later`. If they say no: `--mark never`, and honor it — that hire is never brought up again.
+If they say yes: run `node hired-share.mjs --report N --anonymity <their choice> --story "<their words>" --open` — it prints the exact payload, opens a prefilled GitHub issue, and the user reviews and submits it themselves. Ask their anonymity level explicitly and pass it as `handle`, `role` or `count` (the only values the script accepts: handle and avatar, role and location without a handle, or a count only); never default to the most exposed. Offer a 2-sentence draft story built only from tracker data, and let them rewrite it. If they say "not now": `node hired-share.mjs --report N --mark later`. If they say no: `--mark never`, and honor it — that hire is never brought up again.
 
 **Cadence rules (hard):** one ask per hire, at outcome time. After an update, `node hired-share.mjs --status` may list hires never asked or marked "later" more than 30 days ago — at most ONE gentle mention, then respect the answer. Never remind on a schedule. Never mention the wall at `offer_received`: an offer can still fall through, and the ask belongs to the signed outcome only.
 
@@ -655,7 +663,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 ### Pipeline Integrity
 
 1. **NEVER edit applications.md to ADD new entries** -- write TSV in `{DATA_ROOT}/batch/tracker-additions/` and let `merge-tracker.mjs` merge.
-2. **UPDATE status/notes of existing entries via `node set-status.mjs <report#|company> <State> [--note]`** — the canonical (locked, validated, atomic) write path. Do not hand-edit the table.
+2. **UPDATE status/notes of existing entries via `node set-status.mjs --report <report#> <State> [--note]`** (or `<tracker#|company>` in place of `--report`: a bare number is the tracker `#`, not the report number) — the canonical (locked, validated, atomic) write path. Do not hand-edit the table.
 3. All reports MUST include `**URL:**` in the header (between Score and PDF), and `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
 4. All statuses MUST be canonical (see `templates/states.yml`).
 5. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs` · Repair dead report links: `node fix-report-links.mjs --dry-run`, then without `--dry-run`

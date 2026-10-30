@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> द्वारा बनाया गया</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> द्वारा बनाया गया,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.hi.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.hi.md#builders">700+ योगदानकर्ताओं</a> के साथ</p>
 
 <p align="center">
 <strong>महीनों तक CV भेजता रहा, जवाब में सिर्फ़&nbsp;खामोशी।</strong><br>
@@ -123,6 +123,8 @@ npx @santifer/career-ops init
 <br>
 
 हायरिंग अपने आप ठीक नहीं होगी। जो लोग इससे गुज़र रहे हैं, वे इसे ठीक कर सकते हैं, और वे पहले से उस कमरे में हैं: नोट्स मिला रहे हैं और एक-दूसरे का सेटअप ठीक कर रहे हैं।
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=hi" alt="योगदानकर्ताओं के GitHub अवतारों की एनिमेटेड दीवार, जो अप्रैल 2026 से आने के क्रम में भरती जाती है, और अगला खाना खुला छोड़ा गया है।" width="100%"></a></p>
 
@@ -231,17 +233,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -250,7 +243,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -268,11 +261,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-यह `career-ops` बाइनरी को ग्लोबली इंस्टॉल करता है ताकि आप इसे `npx` के बजाय सीधे चला सकें। `npx @santifer/career-ops init` (जो एक प्रोजेक्ट डायरेक्टरी तैयार करता है) के उलट, ग्लोबल इंस्टॉल आपको एक स्थायी `career-ops` कमांड देता है जो टर्मिनल में कहीं भी उपलब्ध रहता है।
+यह `career-ops` बाइनरी को ग्लोबली इंस्टॉल करता है ताकि आप `npx` के बिना `career-ops init [folder]` चला सकें। `init` इसकी इकलौती कमांड है: यह एक वर्कस्पेस तैयार करती है, और उसके बाद का सारा काम आपकी AI कोडिंग CLI के अंदर होता है (नीचे Usage देखें), इस बाइनरी के ज़रिए नहीं।
 
 **कौन सा इस्तेमाल करें?**
 - `npx @santifer/career-ops init`: पहली बार के लिए सबसे अच्छा; एक अलग प्रोजेक्ट फ़ोल्डर बनाता है।
-- `npm i -g @santifer/career-ops`: जब आपके पास प्रोजेक्ट फ़ोल्डर हो और आप career-ops कमांड सीधे चलाना चाहें, तब सबसे अच्छा।
+- `npm i -g @santifer/career-ops`: अगर आप `npx` वाले रूप के बजाय `career-ops init` टाइप करना पसंद करते हैं। यह कोई और कमांड नहीं जोड़ता।
 
 > **यह सिस्टम इसलिए बना है कि आपकी AI कोडिंग CLI ख़ुद इसे अनुकूलित करे।** मोड, आर्कटाइप, स्कोरिंग वज़न, नेगोशिएशन स्क्रिप्ट: बस उससे बदलने को कहें। यह वही फ़ाइलें पढ़ती है जो इस्तेमाल करती है, इसलिए उसे ठीक पता है कि क्या संपादित करना है।
 
@@ -331,25 +324,7 @@ Codex में स्लैश कमांड की गारंटी नह
 
 ## यह कैसे काम करता है
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI Integration
 
@@ -506,7 +481,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Features: 6 फ़िल्टर टैब, 4 सॉर्ट मोड, ग्रुप्ड/फ़्लैट व्यू, लेज़ी-लोडेड प्रीव्यू, इनलाइन स्टेटस बदलाव।
+Features: 10 फ़िल्टर टैब, 8 सॉर्ट मोड, ग्रुप्ड/फ़्लैट व्यू, लेज़ी-लोडेड प्रीव्यू, इनलाइन स्टेटस बदलाव।
 
 एक **प्रायोगिक वेब UI** भी है (अल्फ़ा और वैकल्पिक: जब तक आप शुरू न करें, कुछ नहीं चलता): [`web/README.md`](web/README.md) देखें।
 
@@ -626,7 +601,7 @@ Go डैशबोर्ड TUI, Node.js स्क्रिप्ट और AI �
 career-ops ([career-ops.org](https://career-ops.org), जिसे **careerops** भी कहा जाता है) एक ओपन सोर्स AI जॉब सर्च है जो आपकी AI कोडिंग CLI (Claude Code, Codex, OpenCode और अन्य) में लोकल चलती है और हर फ़ैसला आप पर छोड़ती है। यह आपके CV के मुक़ाबले जॉब ऑफ़र का मूल्यांकन करती है, ATS-अनुकूलित PDF बनाती है, संपर्क के लिए सही व्यक्ति ढूँढती है, और सब कुछ एक जगह ट्रैक करती है: अंतिम फ़ैसला हमेशा आपका है। यह [CareerOps घोषणापत्र](https://career-ops.org/manifesto) का पहला संदर्भ कार्यान्वयन है।
 
 **क्या अनुकूलित CV कुछ गढ़ सकता है?**
-नहीं गढ़ना चाहिए, और प्रॉम्प्ट यही कहते हैं: दोबारा लिखो, कभी गढ़ो मत। `generate-pdf` ऐसे CV को रोक देता है जिसके आँकड़े या तथ्य आपके स्रोतों में नहीं हैं, जब तक आप `--skip-fact-check` न दें। यह अभी पद के नाम नहीं जाँचता और न ही दोबारा लिखे गए शब्दों को परखता है। दो खुले issues इसे ट्रैक करते हैं: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (पद के नाम cv.md से मेल खाने चाहिए) और [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (सत्यता जाँच जो विफल होने पर रोक दे)। जब तक वे मर्ज नहीं होते, भेजने से पहले हर CV पढ़ें। [क़ानूनी अस्वीकरण](LEGAL_DISCLAIMER.md) यही बात ज़्यादा शब्दों में कहता है।
+नहीं गढ़ना चाहिए, और प्रॉम्प्ट यही कहते हैं: दोबारा लिखो, कभी गढ़ो मत। `generate-pdf` ऐसे CV को रोक देता है जिसके आँकड़े या तथ्य आपके स्रोतों में नहीं हैं, जब तक आप `--skip-fact-check` न दें। `pdf` मोड `cv-title-check.mjs` भी चलाता है, जो अनुकूलित CV के हर पद के नाम की तुलना उसी नौकरी के लिए cv.md में दिए पद के नाम से करता है (कंपनी और तारीखों से मिलाकर), और जो भी अलग हो उसे रखने या वापस बदलने के बारे में आपसे पूछता है। यह सिर्फ़ चेतावनी देता है, रोकता नहीं, क्योंकि पद के नाम को अलग ढंग से लिखना कभी-कभी आपका फ़ैसला होता है। दोबारा लिखे गए शब्दों को अभी कुछ भी नहीं परखता: [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (सत्यता जाँच जो विफल होने पर रोक दे) इसे ट्रैक करता है। तब तक, भेजने से पहले हर CV पढ़ें। [क़ानूनी अस्वीकरण](LEGAL_DISCLAIMER.md) यही बात ज़्यादा शब्दों में कहता है।
 
 **क्या मैं career-ops मुफ़्त में, या सस्ते / लोकल मॉडल पर चला सकता हूँ?**
 हाँ। career-ops CLI-निरपेक्ष है और मुफ़्त और लोकल मॉडल पर चलता है (OpenRouter के मुफ़्त मॉडल, Ollama, या कोई भी OpenAI-संगत एंडपॉइंट), इसलिए आप किसी पेड सब्सक्रिप्शन से बँधे नहीं हैं। पूरे सेटअप के लिए [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) देखें।

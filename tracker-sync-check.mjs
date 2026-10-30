@@ -58,7 +58,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { findColumn } from './process-quality.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { normalizeCompanyName, companySimilarity } from './invite-match.mjs';
@@ -331,7 +331,10 @@ export function gitBlameTimestamp(filePath, lineNum, cwd = CAREER_OPS) {
  * to fuzzy Company+Role matching when absent: a candidate is a confident
  * fuzzy match only when company-name overlap clears FUZZY_COMPANY_THRESHOLD
  * AND role-matcher.mjs's roleFuzzyMatch agrees, and exactly one such
- * candidate exists. Any ambiguity — a duplicate tracker number, or more than
+ * candidate exists. When every candidate is the same employer, a single
+ * candidate whose role equals the interview role wins over near-miss titles
+ * ("Revenue Analytics Manager" over "Revenue Analytics Manager, Platform").
+ * Any other ambiguity — a duplicate tracker number, or more than
  * one fuzzy candidate regardless of whether their scores tie — is treated as
  * no match, not a guess (CodeRabbit review on PR #1505: silently taking
  * `.find()`'s first result, or only bailing on a score tie, can pair an
@@ -371,11 +374,15 @@ export function matchInterviewRow(interviewRow, trackerEntries) {
   if (candidates.length === 0) {
     return { entry: null, method: 'unmatched', confidence: 0, note: 'No tracker reference in Notes and no confident Company+Role fuzzy match' };
   }
-  if (candidates.length > 1) {
+  const roleKey = normalizeTextKey(role);
+  const exact = candidates.filter(({ entry }) => normalizeTextKey(entry.role) === roleKey);
+  const sameEmployer = candidates.every(({ entry }) => normalizeCompanyName(entry.company) === normCompany);
+  const match = candidates.length === 1 ? candidates[0] : (sameEmployer && exact.length === 1 ? exact[0] : null);
+  if (!match) {
     return { entry: null, method: 'unmatched', confidence: candidates[0].sim, note: `Ambiguous fuzzy match — ${candidates.length} tracker rows scored for "${company}"` };
   }
 
-  return { entry: candidates[0].entry, method: 'fuzzy', confidence: Math.round(candidates[0].sim * 1000) / 1000 };
+  return { entry: match.entry, method: 'fuzzy', confidence: Math.round(match.sim * 1000) / 1000 };
 }
 
 // --- Sync report ---

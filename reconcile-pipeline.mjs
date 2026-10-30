@@ -29,6 +29,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { withPipelineLock, LockTimeoutError } from './pipeline-lock.mjs';
 import { writeFileAtomic } from './tracker-utils.mjs';
+import { sectionKind, processedHeadingFor } from './lib/pipeline-sections.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -179,8 +180,6 @@ function resolvePdf(reportFile) {
 }
 
 // ---- parse pipeline.md ----
-const PENDING_RE = /^##\s+(Pendientes|Pending)\s*$/i;
-const PROCESSED_RE = /^##\s+(Procesadas|Processed)\s*$/i;
 const SECTION_RE = /^##\s+/;
 const PENDING_ITEM_RE = /^- \[ \]\s+/;
 
@@ -200,8 +199,9 @@ function reconcile() {
 
   let pendStart = -1, procStart = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (pendStart < 0 && PENDING_RE.test(lines[i])) pendStart = i;
-    else if (procStart < 0 && PROCESSED_RE.test(lines[i])) procStart = i;
+    const kind = sectionKind(lines[i]);
+    if (pendStart < 0 && kind === 'pending') pendStart = i;
+    else if (procStart < 0 && kind === 'processed') procStart = i;
   }
 
   if (pendStart < 0) {
@@ -309,9 +309,8 @@ function reconcile() {
   // No Procesadas section yet — create one at the end of the file, matching the
   // language the pending section header already uses.
   if (procStart < 0 && movedProcLines.length > 0) {
-    const processedHeader = /Pending/i.test(lines[pendStart]) ? '## Processed' : '## Procesadas';
     if (out.length && out[out.length - 1].trim() !== '') out.push('');
-    out.push(processedHeader, '', ...movedProcLines);
+    out.push(processedHeadingFor(lines[pendStart]), '', ...movedProcLines);
   }
 
   const newContent = out.join('\n');
@@ -319,7 +318,7 @@ function reconcile() {
   const newCount = (() => {
     let n = 0, inPend = false;
     for (const l of out) {
-      if (PENDING_RE.test(l)) { inPend = true; continue; }
+      if (sectionKind(l) === 'pending') { inPend = true; continue; }
       if (SECTION_RE.test(l)) { inPend = false; continue; }
       if (inPend && PENDING_ITEM_RE.test(l)) n++;
     }

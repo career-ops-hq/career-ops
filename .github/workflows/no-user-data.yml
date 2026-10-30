@@ -86,6 +86,8 @@ jobs:
                 'batch/batch-prompt.md',
                 'batch/batch-prompt-match.md',
                 'batch/batch-runner.sh',
+                'batch/company-scope.mjs',
+                'batch/jd-rescue.mjs',
                 'batch/logs/.gitkeep',
                 'batch/tracker-additions/.gitkeep',
               ]),

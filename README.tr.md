@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> tarafından oluşturuldu</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> tarafından oluşturuldu,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.tr.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.tr.md#builders">700+ katkıcıyla</a> birlikte</p>
 
 <p align="center">
 <strong>Aylarca sessizliğe CV&nbsp;gönderdim.</strong><br>
@@ -123,6 +123,8 @@ Gönder'e bastıktan sonraki sessizlik seninle ilgili değil. Aynı şeyi gören
 <br>
 
 İşe alım kendi kendine düzelmeyecek. Onu yaşayanlar düzeltebilir ve onlar zaten odadalar: notları karşılaştırıyor, birbirlerinin kurulumlarını onarıyorlar.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=tr" alt="Katkıda bulunanların GitHub avatarlarından oluşan hareketli duvar; Nisan 2026 tarihinden beri geliş sırasına göre doluyor ve sıradaki kare boş bırakılıyor." width="100%"></a></p>
 
@@ -231,17 +233,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -250,7 +243,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -268,11 +261,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-Bu, `career-ops` ikilisini global olarak kurar; böylece `npx` yerine doğrudan çalıştırabilirsin. Bir proje dizini oluşturan `npx @santifer/career-ops init`'ten farklı olarak, global kurulum terminalinin her yerinde kullanılabilen kalıcı bir `career-ops` komutu verir.
+Bu, `career-ops` ikilisini global olarak kurar; böylece `career-ops init [folder]` komutunu `npx` olmadan çalıştırabilirsin. `init` onun tek komutudur: bir çalışma alanı kurar, sonrasındaki her şey bu ikili üzerinden değil, yapay zekâ kodlama CLI'ının içinde gerçekleşir (aşağıda Kullanım'a bak).
 
 **Hangisini kullanmalısın?**
 - `npx @santifer/career-ops init`: ilk kullanım için en iyisi; özel bir proje klasörü oluşturur.
-- `npm i -g @santifer/career-ops`: bir proje klasörün olduğunda ve career-ops komutlarını doğrudan çalıştırmak istediğinde en iyisi.
+- `npm i -g @santifer/career-ops`: `npx` biçimi yerine `career-ops init` yazmayı tercih ediyorsan. Başka komut eklemez.
 
 > **Sistem, bizzat yapay zekâ kodlama CLI'ın tarafından özelleştirilmek üzere tasarlandı.** Modlar, arketipler, puanlama ağırlıkları, pazarlık senaryoları: değiştirmesini istemen yeterli. Kullandığı dosyaların aynısını okur, bu yüzden neyi düzenleyeceğini tam olarak bilir.
 
@@ -331,25 +324,7 @@ Codex'te eğik çizgi komutları garanti değildir. Bunun yerine aynı mod adlar
 
 ## Nasıl Çalışır
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI Entegrasyonu
 
@@ -506,7 +481,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Özellikler: 6 filtre sekmesi, 4 sıralama modu, gruplu/düz görünüm, tembel yüklenen önizlemeler, satır içi durum değişiklikleri.
+Özellikler: 10 filtre sekmesi, 8 sıralama modu, gruplu/düz görünüm, tembel yüklenen önizlemeler, satır içi durum değişiklikleri.
 
 Ayrıca **deneysel bir web arayüzü** de var (alfa ve isteğe bağlı: sen başlatmadıkça hiçbir şey çalışmaz): bkz. [`web/README.md`](web/README.md).
 
@@ -626,7 +601,7 @@ Go dashboard TUI, Node.js betikleri ve yapay zekâ ajan modlarının tümü bu �
 career-ops ([career-ops.org](https://career-ops.org), **careerops** olarak da bilinir), yapay zekâ kodlama CLI'ında (Claude Code, Codex, OpenCode ve diğerleri) yerel olarak çalışan ve her kararı sana bırakan açık kaynaklı bir yapay zekâ iş arama aracıdır. İş ilanlarını CV'ne göre değerlendirir, ATS'ye uyarlanmış PDF'ler üretir, iletişime geçilecek doğru kişiyi bulur ve her şeyi tek yerde takip eder: son söz her zaman sende. [CareerOps Manifestosu](https://career-ops.org/manifesto)'nun ilk referans uygulamasıdır.
 
 **Uyarlanmış CV bir şeyler uydurabilir mi?**
-Uydurmamalı, prompt'lar da böyle diyor: yeniden ifade et, asla uydurma. `--skip-fact-check` vermediğin sürece `generate-pdf`, kaynaklarında bulunmayan sayı veya bilgi içeren bir CV'yi engeller. İş unvanlarını henüz kontrol etmiyor, ifade değişikliklerini de değerlendirmiyor. İki açık issue bunu takip ediyor: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (iş unvanları cv.md ile eşleşmeli) ve [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (uyuşmazlıkta engelleyen sadakat denetimi). Bunlar birleştirilene kadar, göndermeden önce her CV'yi oku. [Yasal uyarı](LEGAL_DISCLAIMER.md) aynı şeyi daha uzun söylüyor.
+Uydurmamalı, prompt'lar da böyle diyor: yeniden ifade et, asla uydurma. `--skip-fact-check` vermediğin sürece `generate-pdf`, kaynaklarında bulunmayan sayı veya bilgi içeren bir CV'yi engeller. `pdf` modu ayrıca `cv-title-check.mjs`'i çalıştırır: uyarlanmış CV'deki her iş unvanını, cv.md'nin aynı iş için verdiği unvanla (şirket ve tarihlere göre eşleştirerek) karşılaştırır ve farklı olan her unvanı korumak mı yoksa geri almak mı istediğini sana sorar. Bir unvanı farklı ifade etmek bazen senin kararın olduğu için yalnızca uyarır, engellemez. İfade değişikliklerini henüz hiçbir şey değerlendirmiyor: bunu [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (uyuşmazlıkta engelleyen sadakat denetimi) takip ediyor. O zamana kadar, göndermeden önce her CV'yi oku. [Yasal uyarı](LEGAL_DISCLAIMER.md) aynı şeyi daha uzun söylüyor.
 
 **career-ops'u ücretsiz veya daha ucuz / yerel bir modelde çalıştırabilir miyim?**
 Evet. career-ops CLI'dan bağımsızdır ve ücretsiz ve yerel modellerde çalışır (OpenRouter ücretsiz modelleri, Ollama veya herhangi bir OpenAI uyumlu uç nokta), bu yüzden ücretli bir aboneliğe bağlı değilsin. Tam kurulum için bkz. [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md).

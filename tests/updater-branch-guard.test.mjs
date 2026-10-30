@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
-import { pass, fail, warn, getBash, bashSource } from './helpers.mjs';
+import { pass, fail, warn, getBash, bashSource, sealProcessGitEnv } from './helpers.mjs';
 import {
   COMMIT_ON_BRANCH_FLAG,
   commitOnBranchOptIn,
@@ -52,6 +52,9 @@ const repo = () => {
   cleanups.push(r.dir);
   return r;
 };
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\n🧪 Testing updater branch guard (#3846)...');
 

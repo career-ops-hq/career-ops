@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Tạo bởi <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Tạo bởi <a href="https://github.com/santifer"><strong>@santifer</strong></a>, cùng&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.vi.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.vi.md#builders">700+ người đóng góp</a></p>
 
 <p align="center">
 <strong>Nhiều tháng gửi CV vào&nbsp;im&nbsp;lặng.</strong><br>
@@ -123,6 +123,8 @@ Sự im lặng sau khi bạn bấm gửi không phải lỗi của bạn. Đủ 
 <br>
 
 Việc tuyển dụng sẽ không tự sửa. Những người đang trải qua nó thì có thể, và họ đã ở trong phòng, trao đổi kinh nghiệm và sửa cấu hình cho nhau.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=vi" alt="Bức tường động gồm ảnh đại diện GitHub của những người đóng góp, lấp đầy theo thứ tự tham gia từ tháng 4 năm 2026, với ô tiếp theo để trống." width="100%"></a></p>
 
@@ -231,17 +233,8 @@ npx playwright install chromium   # chỉ cần khi tạo PDF
 # gói của bản phân phối nếu việc tạo PDF không mở được trình duyệt
 # (tài liệu của Playwright liệt kê các thư viện cần thiết theo từng nền tảng).
 
-# 2. Kiểm tra thiết lập
-npm run doctor                     # Kiểm tra mọi điều kiện tiên quyết
-
-# 3. Cấu hình
-cp config/profile.example.yml config/profile.yml  # Sửa thành thông tin của bạn
-cp templates/portals.example.yml portals.yml       # Tùy chỉnh danh sách công ty
-
-# 4. Thêm CV của bạn
-# Tạo cv.md ở thư mục gốc dự án với CV của bạn dạng markdown
-
-# 5. Mở AI CLI của bạn trong thư mục này
+# 2. Mở AI CLI của bạn trong thư mục này. Ở lần khởi động đầu tiên, nó hướng dẫn
+#    bạn thiết lập (CV, hồ sơ và vai trò mục tiêu) bằng cách trò chuyện
 claude   # hoặc codex / opencode / qwen / agy / grok
 
 # Rồi nhờ CLI của bạn điều chỉnh hệ thống cho phù hợp với bạn:
@@ -250,7 +243,7 @@ claude   # hoặc codex / opencode / qwen / agy / grok
 # "Thêm 5 công ty này vào portals.yml"
 # "Cập nhật hồ sơ của tôi bằng CV tôi đang dán"
 
-# 6. Bắt đầu dùng
+# 3. Bắt đầu dùng
 # Dán URL tin tuyển dụng hoặc văn bản JD để kích hoạt auto-pipeline
 # Nếu CLI của bạn hỗ trợ slash command, dùng /career-ops (hoặc bí danh riêng của CLI đó)
 # Trong Codex, hãy yêu cầu cùng mode đó bằng ngôn ngữ thường, ví dụ:
@@ -274,11 +267,11 @@ Chỉ đặt cờ này **khi chính proxy được cấu hình đã chặn kết
 npm i -g @santifer/career-ops
 ```
 
-Lệnh này cài binary `career-ops` ở cấp toàn cục để bạn chạy trực tiếp thay vì qua `npx`. Khác với `npx @santifer/career-ops init` (khởi tạo một thư mục dự án), cài toàn cục cho bạn một lệnh `career-ops` cố định dùng được ở bất cứ đâu trong terminal.
+Lệnh này cài binary `career-ops` ở cấp toàn cục để bạn chạy `career-ops init [folder]` mà không cần `npx`. `init` là lệnh duy nhất của nó: nó dựng một workspace, và mọi việc sau đó diễn ra bên trong AI coding CLI của bạn (xem Cách dùng bên dưới), không qua binary này.
 
 **Nên dùng cách nào?**
 - `npx @santifer/career-ops init`: tốt nhất cho lần dùng đầu; tạo một thư mục dự án riêng.
-- `npm i -g @santifer/career-ops`: tốt nhất khi bạn đã có thư mục dự án và muốn chạy trực tiếp các lệnh career-ops.
+- `npm i -g @santifer/career-ops`: nếu bạn thích gõ `career-ops init` hơn dạng `npx`. Nó không thêm lệnh nào khác.
 
 > **Hệ thống được thiết kế để chính AI coding CLI của bạn tùy chỉnh.** Mode, archetype, trọng số chấm điểm, kịch bản đàm phán -- chỉ cần nhờ nó thay đổi. Nó đọc chính những file nó dùng, nên biết chính xác cần sửa gì.
 
@@ -337,25 +330,7 @@ Trong Codex, slash command không được đảm bảo. Hãy dùng cùng tên m
 
 ## Cách hoạt động
 
-```
-Bạn dán URL hoặc mô tả tin tuyển dụng
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-vi-dark.svg"><img src="docs/how-it-works-vi-light.svg" alt="Bạn dán URL hoặc mô tả tin tuyển dụng → Archetype Detection (Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation) → A-H Evaluation (reads cv.md; Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy) → Report (reports/*.md), PDF (output/*.pdf), Tracker (data/applications.md)" width="760"></picture></p>
 
 ## Tích hợp Antigravity CLI
 
@@ -512,7 +487,7 @@ npm run serve:dashboard   # chạy TUI
 npm run build:dashboard   # tùy chọn: build binary độc lập
 ```
 
-Tính năng: 6 tab lọc, 4 kiểu sắp xếp, chế độ nhóm/phẳng, xem trước tải lười, đổi trạng thái ngay trong danh sách.
+Tính năng: 10 tab lọc, 8 kiểu sắp xếp, chế độ nhóm/phẳng, xem trước tải lười, đổi trạng thái ngay trong danh sách.
 
 Ngoài ra còn có một **giao diện web thử nghiệm** (alpha và tùy chọn: không gì chạy trừ khi bạn khởi động): xem [`web/README.md`](web/README.md).
 
@@ -632,7 +607,7 @@ TUI dashboard viết bằng Go, các script Node.js và các mode của AI agent
 career-ops ([career-ops.org](https://career-ops.org), còn gọi là **careerops**) là công cụ tìm việc bằng AI mã nguồn mở chạy cục bộ trong AI coding CLI của bạn (Claude Code, Codex, OpenCode và các CLI khác) và để mọi quyết định cho bạn. Nó đánh giá tin tuyển dụng dựa trên CV của bạn, tạo PDF điều chỉnh cho ATS, tìm đúng người để liên hệ và theo dõi mọi thứ ở một nơi: bạn luôn là người quyết định cuối cùng. Đây là bản triển khai tham chiếu đầu tiên của [Tuyên ngôn CareerOps](https://career-ops.org/manifesto).
 
 **CV đã điều chỉnh có thể bịa ra thông tin không?**
-Không được phép, và các prompt đã nói rõ: diễn đạt lại, không bao giờ bịa. `generate-pdf` chặn CV có số liệu hoặc thông tin không có trong nguồn của bạn, trừ khi bạn truyền `--skip-fact-check`. Nó chưa kiểm tra chức danh hay đánh giá cách diễn đạt lại. Hai issue đang mở theo dõi việc này: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (chức danh phải khớp cv.md) và [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (kiểm tra tính trung thực theo hướng chặn khi lỗi). Cho đến khi chúng được merge, hãy đọc từng CV trước khi gửi. [Tuyên bố miễn trừ pháp lý](LEGAL_DISCLAIMER.md) nói điều tương tự bằng lời dài hơn.
+Không được phép, và các prompt đã nói rõ: diễn đạt lại, không bao giờ bịa. `generate-pdf` chặn CV có số liệu hoặc thông tin không có trong nguồn của bạn, trừ khi bạn truyền `--skip-fact-check`. Chế độ `pdf` cũng chạy `cv-title-check.mjs`, công cụ so sánh từng chức danh trong CV đã tùy chỉnh với chức danh mà cv.md ghi cho cùng công việc đó (ghép theo công ty và thời gian), rồi hỏi bạn muốn giữ hay đổi lại chức danh nào khác biệt. Nó chỉ cảnh báo chứ không chặn, vì diễn đạt lại một chức danh đôi khi là quyết định của bạn. Chưa có gì đánh giá cách diễn đạt lại: [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (kiểm tra tính trung thực theo hướng chặn khi lỗi) đang theo dõi việc này. Cho đến lúc đó, hãy đọc từng CV trước khi gửi. [Tuyên bố miễn trừ pháp lý](LEGAL_DISCLAIMER.md) nói điều tương tự bằng lời dài hơn.
 
 **Tôi có thể chạy career-ops miễn phí, hoặc trên mô hình rẻ hơn / cục bộ không?**
 Được. career-ops không phụ thuộc CLI và chạy được trên mô hình miễn phí và cục bộ (mô hình miễn phí của OpenRouter, Ollama hoặc bất kỳ endpoint tương thích OpenAI nào), nên bạn không bị ràng buộc với gói trả phí. Xem [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) để biết cách thiết lập đầy đủ.

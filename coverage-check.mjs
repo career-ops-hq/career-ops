@@ -17,11 +17,13 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { buildLocationFilter, normalizeUrlForDedup, PORTALS_PATH, SCAN_HISTORY_PATH, PIPELINE_PATH } from './scan.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
+import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -154,8 +156,9 @@ export function diagnose(posting, ctx) {
     }
     if (entry.enabled === false) return { gap: 'tracked-disabled', evidence, fix: `re-enable "${entry.name}" if its board is live` };
     const resolved = resolveProvider(entry, ctx.providers);
+    const inactiveReason = resolved && !resolved.error ? resolved.provider.inactiveReason : undefined;
     if (resolved && !resolved.error) {
-      evidence.push(`provider: ${resolved.provider.id}`);
+      evidence.push(`provider: ${resolved.provider.id}${inactiveReason ? ` (plugin inactive: ${inactiveReason})` : ''}`);
     } else {
       // Scanners with their own company lists (scan-hn.mjs, scan-interamt.mjs, ...)
       // show up only in scan-history, under their own portal names.
@@ -174,6 +177,11 @@ export function diagnose(posting, ctx) {
     }
     if (!titleOk(title)) return { gap: 'tracked-title-filter', evidence, fix: `title keyword: no title_filter keyword matches "${title}"` };
     if (locationOk === false) return { gap: 'tracked-location-filter', evidence, fix: `location: location_filter drops "${location}"` };
+    // An enabled provider plugin that cannot run (missing key, failed
+    // integrity check) resolves to a stub: the scanner never reads this board.
+    if (inactiveReason) {
+      return { gap: 'tracked-not-seen', evidence, fix: `activate the "${resolved.provider.id}" plugin: ${inactiveReason} (node doctor.mjs shows its setup)` };
+    }
     if (otherBoard) {
       return { gap: 'tracked-not-seen', evidence, fix: `the entry reads another board: point "${entry.name}".careers_url at ${careersUrlFor(target)}, or add that board as a second entry` };
     }
@@ -220,7 +228,7 @@ export function loadContext() {
   const history = new Map();
   const historyCompanies = new Map();
   if (existsSync(SCAN_HISTORY_PATH)) {
-    for (const line of readFileSync(SCAN_HISTORY_PATH, 'utf8').split('\n').slice(1)) {
+    for (const line of scanHistoryDataLines(readFileSync(SCAN_HISTORY_PATH, 'utf8'))) {
       const row = line.split('\t');
       if (!row[0]) continue;
       history.set(normalizeUrlForDedup(row[0]), row);
@@ -279,7 +287,12 @@ async function main() {
     console.error(`Error: portals.yml not found at ${PORTALS_PATH}. Run onboarding first - the check reads its title_filter and tracked_companies.`);
     process.exit(1);
   }
-  const ctx = { ...loadContext(), providers: await loadProviders(path.join(CODE_ROOT, 'providers')) };
+  const providers = await loadProviders(path.join(CODE_ROOT, 'providers'));
+  // Same provider map scan.mjs builds (#4026): without the enabled provider
+  // plugins, an entry the scanner reads through one is diagnosed as
+  // tracked-no-provider. No-op when config/plugins.yml is absent.
+  await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: DATA_ROOT });
+  const ctx = { ...loadContext(), providers };
   const result = diagnose(posting, ctx);
   const log = args.includes('--log');
   const logged = log && result.gap !== 'surfaced'

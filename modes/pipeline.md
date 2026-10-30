@@ -4,7 +4,7 @@ Process job URLs stored in `data/pipeline.md`. The user adds URLs at any time an
 
 ## Liveness sweep
 
-**Run this before processing any URLs.** Entries added by the scanner in headless/batch mode carry `**Verification:** unconfirmed (batch mode)` because Playwright was unavailable at scan time — they were never checked for liveness. Without a sweep, dead postings reach evaluation one tab at a time, burning time and tokens on phantom roles (a single inbox of 8 stale URLs produces 8 wasted evaluations).
+**Run this before processing any URLs.** Inbox entries are usually unchecked: `scan.mjs` adds postings without checking that each one is still open unless it ran with `--verify`, and a URL the user pasted was never checked at all. Without a sweep, dead postings reach evaluation one tab at a time, burning time and tokens on phantom roles (a single inbox of 8 stale URLs produces 8 wasted evaluations).
 
 Sweep pending non-LinkedIn URLs in one batch with the zero-token liveness checker before the per-URL loop:
 
@@ -24,7 +24,7 @@ Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tie
 - **`economy` tier:** No gate. The tier is already the cheapest available. Every surviving pending URL goes straight to the full evaluation.
 - This gate only applies to pipeline/batch processing. It never applies to a single interactive evaluation.
 
-**Discard log (auditable):** Every posting the gate filters out MUST be logged with a one-line reason so pre-filtering is never a silent black box. Append one line to `data/discard.log` (create the file if absent) in the format `{ISO8601 timestamp}\t{url}\t{reason}` (three tab-separated fields — interactive pipeline mode has no batch job ID, so the `id` field is omitted here; batch mode's `batch/batch-runner.sh` uses a separate `batch/logs/discard.log` with a four-field format that includes the job ID), in addition to the `skipped` entry already written to "Processed" above. This log is the visible, auditable record of what the gate discarded and why -- review it periodically to tune the North Star archetypes if the gate is too aggressive or too lax.
+**Discard log (auditable):** Every posting the gate filters out MUST be logged with a one-line reason so pre-filtering is never a silent black box. Append one line to `data/discard.log` (create the file if absent) in the format `{ISO8601 timestamp}\t{url}\t{reason}` (three tab-separated fields — interactive pipeline mode has no batch job ID, so the `id` field is omitted here; batch mode's `batch/batch-runner.sh` uses a separate `batch/logs/discard.log` with a four-field format that includes the job ID), in addition to the `skipped` entry already written to "Processed" above. This log is the visible, auditable record of what the gate discarded and why -- review it periodically to tune the North Star archetypes if the gate is too aggressive or too lax. `node discard-analytics.mjs` summarizes it: counts by reason, domain and day, plus the most frequent `title_mismatch` URLs to check by hand.
 
 ## Workflow
 
@@ -70,7 +70,7 @@ List `unreadable` items separately too, with URL and a reason code, when the JD 
 - [x] #144 | https://boards.greenhouse.io/xyz/jobs/012 | BigCo | SA | 2.1/5 | PDF ❌
 ```
 
-> Note: the section headers may be in EN ("Pending"/"Processed"), ES ("Pendientes"/"Procesadas"), or any other language a market mode set writes them in. Be flexible when reading, faithful to the existing file's style when writing. `scan.mjs` (`PENDING_MARKERS`/`PROCESSED_MARKERS`) and `reconcile-pipeline.mjs` (`PENDING_RE`/`PROCESSED_RE`) already accept the EN and ES spellings.
+> Note: the section headers may be in EN ("Pending"/"Processed"), ES ("Pendientes"/"Procesadas"), or any other language a market mode set writes them in. Be flexible when reading, faithful to the existing file's style when writing. `scan.mjs`, `sync-batch-input.mjs` and `reconcile-pipeline.mjs` read every heading a `modes/*/pipeline.md` writes, from one table in `lib/pipeline-sections.mjs`.
 
 Pending lines are variable-width. The rawest form is a bare pasted URL,
 `- [ ] {url}` (1 column) — what you drop into the inbox by hand. Scanner-written
@@ -85,7 +85,7 @@ read as having empty values for the missing trailing columns.
 
 Beyond the positional cells, rows may carry optional **labeled** segments —
 `| {label}: {value}` — that ride on any row shape (bare URL, 3-, 4-, or 5-column),
-because the `{label}:` prefix identifies them regardless of column position. Three
+because the `{label}:` prefix identifies them regardless of column position. These
 are defined:
 
 - `| posted: {YYYY-MM-DD}` — the posting date, when the provider's API exposed one
@@ -103,6 +103,16 @@ are defined:
   a low score as a ghost/scam-posting warning and weigh it in Block G legitimacy
   before spending an evaluation. The same score + flags are also written to the
   trailing columns of `data/scan-history.tsv`.
+- `| yrs: {years}` — the years of experience the JD states, written only when
+  `experience_filter` is on in `portals.yml` (`jd-years.mjs`). `5+` and `3-5` are
+  a required overall bar (ranges by their floor); `2/5+ by degree` lists
+  degree-conditional bars; `2/5+` lists several required bars (the lowest decides);
+  `5+ or equivalent` is a bar the JD lets you meet another way (never drops);
+  `pref 5+` and `skill 3+` are preferred-only or skill-specific figures that do not
+  gate; `none stated` means the JD names no figure; `unread` means it could not be
+  fetched. `… above band` marks a row above your band; the default `action: label`
+  keeps it, `action: drop` would have removed it.
+  Check `unread` and `none stated` rows yourself: the filter never drops them.
 - `| note: {text}` — a free-text ranking signal an importer attached to the offer
   (`- [ ] {url} | {company} | {title} | note: curated shortlist` is valid). The
   deterministic scanner never sets it.
@@ -115,7 +125,7 @@ are defined:
   row can go unranked because the CLI call failed, returned malformed JSON, or
   gave no usable reason — all of which still spent tokens.)
 
-When more than one is present the order is `posted:` → `trust:` → `note:` →
+When more than one is present the order is `posted:` → `trust:` → `yrs:` → `note:` →
 `rank:`. Treat them as hints when triaging; none changes how you process the URL.
 
 ## Intelligent JD detection from URL

@@ -11,8 +11,8 @@
 // WHAT THIS DOES **NOT** PROTECT, and the reason that matters: this is a counter
 // in THIS process's memory. It cannot see the user's CLI, a second `career-ops
 // web` instance, or anything else on the machine. Cross-process exclusion on
-// data/applications.md is the core's FILE lock (tracker-utils.mjs), reached from
-// web via lib/core/tracker-lock.ts.
+// data/applications.md is the core's FILE lock (tracker-utils.mjs), which the
+// web takes by writing the tracker only through set-status.mjs (#2901).
 //
 // The distinction is not academic: /api/status wrote the tracker with no file
 // lock at all while this registry existed one import away, so the route looked
@@ -21,7 +21,7 @@
 // paragraph is here and not in a commit message.
 //
 // Rule of thumb: in-flight question → this registry. Writing the tracker →
-// withTrackerLock. They compose; neither substitutes for the other.
+// set-status.mjs. They compose; neither substitutes for the other.
 
 let seq = 0;
 const writing = new Set<number>();

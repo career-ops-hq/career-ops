@@ -76,6 +76,7 @@ import {
   parseNextOverrides,
   parseDate,
   addDays,
+  isRealCalendarDate,
 } from './followup-cadence.mjs';
 import { flagValue } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot, canonicalizeTrackerPath, resolveTrackerPath as sharedResolveTrackerPath } from './path-resolver.mjs';
@@ -397,6 +398,77 @@ export async function withFollowupsLock(followupsPath, fn, options = {}) {
   } finally {
     releaseOrWarn(lock);
   }
+}
+
+const PIN_LINE = /^-\s+next\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s+\(set\s+(\d{4}-\d{2}-\d{2})\))?(?:\s*[—–-]\s*(.*))?\s*$/i;
+
+function pinLinePattern(appNum) {
+  return new RegExp(`^-\\s+next\\s+#${appNum}\\s`, 'i');
+}
+
+function lastPin(content, appNum) {
+  let found = null;
+  for (const line of String(content ?? '').split('\n')) {
+    const match = line.match(PIN_LINE);
+    if (!match || Number(match[1]) !== appNum) continue;
+    found = { date: match[2], setDate: match[3] || match[2], why: (match[4] || '').trim() };
+  }
+  return found;
+}
+
+function withoutPins(content, appNum) {
+  const pattern = pinLinePattern(appNum);
+  return String(content ?? '').split('\n').filter((line) => !pattern.test(line)).join('\n');
+}
+
+function appendPinLine(content, appNum, line) {
+  const base = content == null ? `${FOLLOWUPS_HEADER}\n` : withoutPins(content, appNum);
+  return `${base.endsWith('\n') ? base : `${base}\n`}${line}\n`;
+}
+
+function pinText(appNum, date, setDate, why) {
+  const line = formatPinLine(appNum, date, setDate);
+  return why ? `${line} — ${why}` : line;
+}
+
+export async function replaceNextPin(appNum, options = {}) {
+  if (!Number.isInteger(appNum) || appNum <= 0) {
+    throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
+  }
+  if (!isRealCalendarDate(options.date)) {
+    throw new SeedError('INVALID_DATE', `next date must be a real calendar date in YYYY-MM-DD form: ${options.date}`);
+  }
+  const why = String(options.why ?? '').trim();
+  if (/[\t\r\n]/.test(why)) {
+    throw new SeedError('USAGE', 'pin note cannot contain a tab or newline');
+  }
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
+  const setDate = localToday(options.now instanceof Date ? options.now : new Date());
+  return withFollowupsLock(followupsPath, () => {
+    const existing = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf8') : null;
+    const current = existing == null ? null : lastPin(existing, appNum);
+    if (current && current.date === options.date && current.why === why) {
+      return { changed: false, date: options.date, setDate: current.setDate };
+    }
+    mkdirSync(dirname(followupsPath), { recursive: true });
+    writeFileAtomic(followupsPath, appendPinLine(existing, appNum, pinText(appNum, options.date, setDate, why)));
+    return { changed: true, date: options.date, setDate };
+  }, { timeoutMs: options.lockTimeoutMs, lockDir: options.lockDir });
+}
+
+export async function clearNextPin(appNum, options = {}) {
+  if (!Number.isInteger(appNum) || appNum <= 0) {
+    throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
+  }
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
+  return withFollowupsLock(followupsPath, () => {
+    if (!existsSync(followupsPath)) return { cleared: false };
+    const existing = readFileSync(followupsPath, 'utf8');
+    const next = withoutPins(existing, appNum);
+    if (next === existing) return { cleared: false };
+    writeFileAtomic(followupsPath, next);
+    return { cleared: true };
+  }, { timeoutMs: options.lockTimeoutMs, lockDir: options.lockDir });
 }
 
 export async function seedFollowup(appNum, options = {}) {

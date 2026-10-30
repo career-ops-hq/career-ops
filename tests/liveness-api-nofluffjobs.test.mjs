@@ -12,7 +12,8 @@
 //   200 {"status":"PUBLISHED"}                       -> active
 //   200 {"status":"EXPIRED","expiredBeforeDays":N}  -> expired
 //   404 {"status":"DOES_NOT_EXIST"}                 -> expired (gone)
-//   any other readable status                       -> uncertain, never expired
+//   any other status on a 200                       -> uncertain, never expired
+//   no status, or a 404 saying anything else        -> null (the browser decides)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveAtsApi, checkLivenessViaApi, classifyNoFluffJobsPosting } from '../liveness-api.mjs';
@@ -78,6 +79,20 @@ test('a slug the board does not have (404 DOES_NOT_EXIST) is gone', async () => 
     () => checkLivenessViaApi(POSTING));
   assert.equal(verdict.result, 'expired');
   assert.equal(verdict.code, 'nofluffjobs_api_gone');
+  assert.match(verdict.reason, /DOES_NOT_EXIST/);
+});
+
+test('a 404 that does not say DOES_NOT_EXIST falls back to the browser (null), never expired', async () => {
+  // Only DOES_NOT_EXIST says the posting is gone. Any other 404 must not close
+  // a live posting: scan --verify would record that expired verdict for good.
+  for (const response of [
+    () => new Response('<!DOCTYPE html><html><body>Not Found</body></html>', { status: 404 }),
+    () => json({ error: 'Not Found', path: `/api/posting/${SLUG}` }, 404),
+    () => json({ status: 'EXPIRED', expiredBeforeDays: 3 }, 404),
+  ]) {
+    const verdict = await withFetch(async () => response(), () => checkLivenessViaApi(POSTING));
+    assert.equal(verdict, null);
+  }
 });
 
 test('a readable status this rung does not know stays uncertain, never expired', async () => {
@@ -101,7 +116,12 @@ test('classifyNoFluffJobsPosting is pure and conservative', () => {
   assert.equal(classifyNoFluffJobsPosting({ status: 'EXPIRED' }).result, 'expired');
   assert.equal(classifyNoFluffJobsPosting({ status: 'EXPIRED' }).reason, 'No Fluff Jobs reports the posting expired');
   assert.equal(classifyNoFluffJobsPosting({ status: 'published' }).result, 'uncertain');
-  assert.equal(classifyNoFluffJobsPosting({}).result, 'uncertain');
+  assert.equal(classifyNoFluffJobsPosting({ status: 'DOES_NOT_EXIST' }, 404).result, 'expired');
+  // On a 404 only DOES_NOT_EXIST is a verdict; a body with no status is no answer.
+  assert.equal(classifyNoFluffJobsPosting({ status: 'PUBLISHED' }, 404), null);
+  assert.equal(classifyNoFluffJobsPosting({}), null);
+  assert.equal(classifyNoFluffJobsPosting({ status: '' }), null);
+  assert.equal(classifyNoFluffJobsPosting({ status: 42 }), null);
   assert.equal(classifyNoFluffJobsPosting(null), null);
   assert.equal(classifyNoFluffJobsPosting('nope'), null);
 });

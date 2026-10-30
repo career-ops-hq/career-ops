@@ -48,6 +48,8 @@ batch/*
 !batch/batch-prompt.md
 !batch/batch-prompt-match.md
 !batch/batch-runner.sh
+!batch/company-scope.mjs
+!batch/jd-rescue.mjs
 # No trailing slash, so git descends into the two keeper directories. A slashed
 # pattern matches only a real directory and would miss a symlink.
 !batch/logs
@@ -227,6 +229,9 @@ opencode.json
 # personal server credentials (e.g. a plugin's API token) once a user adds
 # an MCP server, same risk class as .env.
 .mcp.json
+# Hermes Agent personal project rules. docs/HERMES.md offers it as a way to
+# supply rules that override AGENTS.md without sharing them with the repository.
+.hermes.md
 career-dashboard
 career-dashboard.exe
 package-lock.json

@@ -748,9 +748,54 @@ Importance измеряет, насколько требование весом�
 
 ## Извлечённые ключевые слова
 (список из 15-20 ключевых слов из вакансии для ATS-оптимизации)
+
+## Keyword Coverage
+(генерируется `keyword-match.mjs` (1b) — покрытие в %, present, thin, missing)
+
+## Job Description (archived verbatim)
+(полный текст вакансии, вставленный дословно — см. требование ниже)
+```
+
+**Архив JD (обязательно, #2789):** каждый отчёт ДОЛЖЕН содержать секцию `## Job Description (archived verbatim)` с полным текстом вакансии, вставленным как есть, без пересказа и сокращений. Заголовок остаётся на английском: `check-jd-archive.mjs` ищет его по имени. `**URL:**` — не архив: ссылка перестаёт работать, когда вакансию закрывают, и исходные требования уже не восстановить. Первая строка секции — дата публикации в том виде, в каком она видна в источнике (`Posted: {дата или относительная строка}`, либо `Posted: not visible in source`), но никогда не дата файла отчёта. Если JD очень длинное или его нельзя процитировать целиком, сохранить его командой `archive-posting.mjs` (команда ниже) и написать в секции **ровно** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` и ничего больше. Пересказ вместо текста не допускается; полное правило — в `modes/oferta.md` (**JD archival**).
+
+**Аргументы команд (#5853):** никогда не вписывать URL вакансии, slug компании или путь к отчёту в командную строку, даже в кавычках. Записать значения в JSON-файл инструментом для файлов (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) и выполнить команду ниже: она проверяет каждое значение (slug должен соответствовать `^[a-z0-9-]+$`) и передаёт каждое скрипту отдельным аргументом, без shell. Значение, не прошедшее проверку, останавливает запуск: исправлять значение, а не проверку. Полное правило — в `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
 ```
 
 **Machine Summary (обязательно):** каждый отчёт несёт YAML-фенс `## Machine Summary` сразу после шапки — та же схема, те же имена полей и те же правила, что у блока «Machine Summary» в `batch/batch-prompt.md` (не дублировать схему здесь; источник правды — тот файл). В неё входит `advertised_comp`: собственная зарплатная цифра вакансии **дословно** (например, `"80-90k EUR"`) или `null`, когда вакансия не называет ничего — никогда не оценка, никогда не подмена рыночными данными. Этот ключ питает наблюдение о заявленной зарплате, которое читает `node salary-gap.mjs`. Также входят `risk_summary` — блок Risk Summary, отзеркаленный как карта (схема и значения перечислений в `batch/batch-prompt.md`), — и `requirement_importance`: таблица Блока B, отзеркаленная строка за строкой, с типом свидетельства, уровнем важности и совпадением каждой строки (`[]`, когда вакансия не даёт пригодного списка требований). Потолок для `inferred` из гейта Блока B держится и в YAML: `importance` никогда не бывает `critical` или `high`, когда `evidence: inferred`.
+
+### 1b. Вставить покрытие ATS-ключевых слов
+
+После сохранения отчёта выполнить `keyword-match.mjs` (команда ниже) и вставить блок `## Keyword Coverage` под извлечёнными ключевыми словами (заголовок остаётся на английском). Только для диагностики: добавлять ключевое слово, только если оно отражает реальный опыт.
+
+Для этого записать `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` в JSON-файл (см. **Аргументы команд** выше) и выполнить:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Зарегистрировать в трекере
 
