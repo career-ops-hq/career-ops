@@ -225,3 +225,58 @@ func TestProgressAndStatsChromeStayOneLineWhenNarrow(t *testing.T) {
 		}
 	}
 }
+
+func TestKeysHelpFooterOffersCloseNotQuit(t *testing.T) {
+	i18n.SetLang("en")
+	m := NewPipelineModel(theme.NewTheme(""), fitWidthApps(), fitWidthMetrics(fitWidthApps()), t.TempDir(), 80, 24)
+	m.keysHelp = true
+	out := m.renderHelp()
+	if strings.Contains(out, "quit") {
+		t.Fatalf("footer offers quit while the key list is open: %q", out)
+	}
+	if !strings.Contains(out, "close") {
+		t.Fatalf("footer does not say how to close the key list: %q", out)
+	}
+}
+
+func TestFitPlainCountsWideRunesAsCells(t *testing.T) {
+	// 20 CJK runes are 40 cells. The rune count fits a 30-cell budget, the
+	// cells do not.
+	wide := strings.Repeat("報", 20)
+	if got := fitPlain(30, wide); lipgloss.Width(got) > 30 {
+		t.Fatalf("fitPlain(30) is %d cells: %q", lipgloss.Width(got), got)
+	}
+	long := "Could not open " + strings.Repeat("履歴書", 15) + "-fernhollow.pdf: exit status 1"
+	got := fitPlain(60, long)
+	if lipgloss.Width(got) > 60 {
+		t.Fatalf("fitPlain(60) is %d cells: %q", lipgloss.Width(got), got)
+	}
+	if !strings.HasSuffix(got, "exit status 1") {
+		t.Fatalf("fitPlain dropped the failure reason: %q", got)
+	}
+}
+
+func TestDiscardPickerKeepsTheTypedTailOnScreen(t *testing.T) {
+	i18n.SetLang("en")
+	m := NewPipelineModel(theme.NewTheme(""), fitWidthApps(), fitWidthMetrics(fitWidthApps()), t.TempDir(), 60, 24)
+	m.discardPicker = true
+	m.discardCustomInput = true
+	m.discardCustomText = strings.Repeat("the team moved the role to a later quarter ", 3) + "END"
+	view := m.overlayDiscardPicker("")
+	if !strings.Contains(view, "END") || !strings.Contains(view, "█") {
+		t.Fatalf("typed tail or cursor is off screen:\n%s", view)
+	}
+	for i, line := range viewLines(view) {
+		if w := lipgloss.Width(line); w > 60 {
+			t.Errorf("line %d is %d cells wide", i, w)
+		}
+	}
+
+	m.discardCustomInput = false
+	m.discardOptions = []string{"Pay is below my floor and the posting says the band is fixed for the year END"}
+	m.discardCursor = 0
+	view = m.overlayDiscardPicker("")
+	if !strings.Contains(view, "Pay is below") || !strings.Contains(view, "...") {
+		t.Fatalf("long option row was not cut to one line:\n%s", view)
+	}
+}

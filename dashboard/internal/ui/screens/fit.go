@@ -2,8 +2,10 @@ package screens
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // oneLine forces a chrome strip into the single row the height budget counted.
@@ -17,20 +19,19 @@ func oneLine(width int, style lipgloss.Style, content string) string {
 
 // fitPlain shortens content to budget cells. The start says what failed and
 // the end carries the filename and the reason, so a long path is what gives.
+// Cuts count terminal cells, not runes, so wide runes cannot push the result
+// past budget and onto a second line that oneLine would then drop.
 func fitPlain(budget int, content string) string {
 	if budget < 1 {
 		return ""
 	}
-	if lipgloss.Width(content) <= budget {
+	width := ansi.StringWidth(content)
+	if width <= budget {
 		return content
-	}
-	runes := []rune(content)
-	if len(runes) <= budget {
-		return truncateRunes(content, budget)
 	}
 	const ellipsis = "..."
 	if budget <= len(ellipsis) {
-		return string(runes[:budget])
+		return ansi.Truncate(content, budget, "")
 	}
 	tail := budget / 3
 	if tail < 24 {
@@ -40,13 +41,28 @@ func fitPlain(budget int, content string) string {
 		tail = budget - len(ellipsis) - 8
 	}
 	if tail < 1 {
-		return string(runes[len(runes)-budget:])
+		return lastCells(content, width, budget)
 	}
 	head := budget - tail - len(ellipsis)
 	if head < 1 {
-		return string(runes[len(runes)-budget:])
+		return lastCells(content, width, budget)
 	}
-	return string(runes[:head]) + ellipsis + string(runes[len(runes)-tail:])
+	return ansi.Truncate(content, head, "") + ellipsis + lastCells(content, width, tail)
+}
+
+// lastCells keeps at most n cells from the end of s, which is width cells wide.
+// ansi.TruncateLeft keeps a wide rune that straddles the cut, so drop leading
+// runes until the result fits. It can be one cell short, never over.
+func lastCells(s string, width, n int) string {
+	if width <= n {
+		return s
+	}
+	out := ansi.TruncateLeft(s, width-n, "")
+	for ansi.StringWidth(out) > n {
+		_, size := utf8.DecodeRuneInString(out)
+		out = out[size:]
+	}
+	return out
 }
 
 // fitTitleBar places info on the right when it fits, and drops it when the

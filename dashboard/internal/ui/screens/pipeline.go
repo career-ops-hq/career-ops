@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/santifer/career-ops/dashboard/internal/data"
 	"github.com/santifer/career-ops/dashboard/internal/i18n"
@@ -2376,6 +2377,15 @@ func (m PipelineModel) renderHelp() string {
 		return helpPiece{text: keyStyle.Render(key) + descStyle.Render(desc), pin: pin}
 	}
 
+	// The key list takes q and Esc as "close", so the footer must not offer
+	// q as quit while it is open.
+	if m.keysHelp {
+		return oneLine(m.width, style, joinHelp(budget, []helpPiece{
+			piece("↑↓/jk", i18n.Current.HelpScroll, false),
+			piece("q/Esc/?", i18n.Current.HelpClose, true),
+		}, "", ""))
+	}
+
 	if m.colPicker {
 		return oneLine(m.width, style, joinHelp(budget, []helpPiece{
 			piece("↑↓/jk", i18n.Current.HelpNavigate, false),
@@ -2742,7 +2752,15 @@ func (m PipelineModel) overlayDiscardPicker(body string) string {
 		// Free-text sub-mode
 		picker = append(picker, padStyle.Render(titleStyle.Render("─── Reason (type + Enter) ───────────────")))
 		cursor := lipgloss.NewStyle().Foreground(m.theme.Blue).Render("█")
-		picker = append(picker, padStyle.Render(inputStyle.Render("> "+m.discardCustomText+cursor)))
+		// Show the end of a long reason so the text being typed and the cursor
+		// stay on screen. Room is the row minus padding, "> ", and the cursor.
+		typed := m.discardCustomText
+		if room := m.width - 4 - 2 - 1; room > 0 {
+			if w := ansi.StringWidth(typed); w > room {
+				typed = lastCells(typed, w, room)
+			}
+		}
+		picker = append(picker, padStyle.Render(inputStyle.Render("> "+typed+cursor)))
 		picker = append(picker, padStyle.Render(hintStyle.Render("Enter: confirm   Esc: back")))
 	} else {
 		numPredicted := m.discardPredictedCount
@@ -2768,6 +2786,9 @@ func (m PipelineModel) overlayDiscardPicker(body string) string {
 			if i < numPredicted {
 				label = "★ " + opt
 			}
+			// A label wider than the row would wrap, and MaxHeight(1) would keep
+			// only its first line. Cut it to the row instead.
+			label = ansi.Truncate(label, max(1, pickerWidth-2), "...")
 			picker = append(picker, padStyle.Render(style.Render(prefix+label)))
 		}
 	}
