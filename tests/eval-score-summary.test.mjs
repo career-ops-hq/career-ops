@@ -54,6 +54,14 @@ test('parseScoreSummary drops bold and bullet marks and a trailing /5', () => {
   assert.deepEqual(parseScoreSummary(BOLD), parseScoreSummary(PLAIN));
 });
 
+test('parseScoreSummary drops a /5 that ends the sentence, and keeps any other scale', () => {
+  const score = (line) => parseScoreSummary(`---SCORE_SUMMARY---\nSCORE: ${line}\n---END_SUMMARY---`).score;
+  assert.equal(score('4.3/5.'), '4.3');
+  assert.equal(score('4.3 / 5 (strong fit)'), '4.3 (strong fit)');
+  assert.equal(score('4.2/10'), '4.2/10');
+  assert.equal(score('4.2/5.5'), '4.2/5.5');
+});
+
 test('parseScoreSummary returns null without a block and empty strings for absent keys', () => {
   assert.equal(parseScoreSummary(NO_BLOCK), null);
   const partial = parseScoreSummary('---SCORE_SUMMARY---\nSCORE: 3.1\n---END_SUMMARY---');
