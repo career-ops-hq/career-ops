@@ -88,7 +88,7 @@ test("the list, the studio, and the checklist walk back through the real entry",
   assert.match(pipeline, /listEntrySync\(pathname, params\.toString\(\), q\)/);
   assert.match(pipeline, /state\.__NA !== true/);
   const syncAt = pipeline.indexOf("function syncTypedSearch");
-  const syncEnd = pipeline.indexOf("const lastUrlQ", syncAt);
+  const syncEnd = pipeline.indexOf("useEffect(", syncAt);
   const sync = pipeline.slice(syncAt, syncEnd);
   const modifiedAt = sync.indexOf("event.button === 1) return");
   assert.ok(modifiedAt > 0 && modifiedAt < sync.indexOf("history.replaceState"), "a modified click must return before replaceState");

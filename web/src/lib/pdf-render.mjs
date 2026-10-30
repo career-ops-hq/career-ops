@@ -104,7 +104,11 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
       [path.join(coreRoot, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, `--report=${reportNum}`, "--allow-reorder"],
       // windowsHide: see api/doctor/route.ts — a stale inherited console
       // kills every child with 0xC0000142 on Windows; never inherit one.
-      { cwd: coreRoot, windowsHide: true },
+      {
+        cwd: coreRoot,
+        windowsHide: true,
+        env: { ...process.env, CAREER_OPS_PDF_SHARED: "1" },
+      },
     );
     let stderr = "";
     child.stderr.on("data", (d) => { stderr += d.toString(); });

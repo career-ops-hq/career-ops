@@ -232,6 +232,9 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 		if len(fields) < 8 {
 			continue
 		}
+		for i, field := range fields {
+			fields[i] = SanitizeTerminalText(field)
+		}
 
 		at := func(name string) string {
 			if idx, ok := cols[name]; ok && idx >= 0 && idx < len(fields) {
@@ -749,6 +752,11 @@ func LoadReportSummary(careerOpsPath, reportPath string) (archetype, tldr, remot
 	if m := reComp.FindStringSubmatch(text); m != nil {
 		comp = cleanTableCell(m[1])
 	}
+
+	archetype = SanitizeTerminalText(archetype)
+	tldr = SanitizeTerminalText(tldr)
+	remote = SanitizeTerminalText(remote)
+	comp = SanitizeTerminalText(comp)
 
 	// Truncate long fields
 	if len(tldr) > 120 {
