@@ -54,7 +54,7 @@ test("the tracker remeasures when an off-screen save failure appears", () => {
   assert.ok(deps, "measurement dependencies not found");
   assert.match(deps[1], /\bheldSaves\b/);
   const measure = src.slice(start, start + src.slice(start).indexOf("const next = trackerWindow"));
-  const alertSkip = measure.indexOf("[role='alert']");
+  const alertSkip = measure.indexOf("[role='alert'], [aria-busy='true']");
   const heightRead = measure.indexOf("getBoundingClientRect().height");
-  assert.ok(alertSkip > 0 && alertSkip < heightRead, "an error row must not set the shared spacer height");
+  assert.ok(alertSkip > 0 && alertSkip < heightRead, "an error or pending row must not set the shared spacer height");
 });

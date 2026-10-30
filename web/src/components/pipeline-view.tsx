@@ -159,11 +159,12 @@ export function PipelineView({
     const measure = () => {
       if (el.hidden) return;
       const rect = el.getBoundingClientRect();
-      // A failed save adds a line to that one row. Spacers stand in for
-      // normal rows, so an error row must not set the shared height.
+      // A failed save adds a line. A save in flight can wrap the status
+      // controls. Spacers stand in for a normal row, so neither sets the
+      // shared height.
       let rowHeight = rowPx;
       for (const row of el.querySelectorAll("tr[data-application-key]")) {
-        if (row.querySelector("[role='alert']")) continue;
+        if (row.querySelector("[role='alert'], [aria-busy='true']")) continue;
         rowHeight = row.getBoundingClientRect().height || rowPx;
         break;
       }
