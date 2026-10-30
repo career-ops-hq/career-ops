@@ -180,6 +180,19 @@ try {
       fail(`requireOperand before-help case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
     }
   }
+  {
+    const opts = { valueFlags: ['--file', '--throttle'], requiredFlags: ['--file'] };
+    const missing = runValidate(['--file', '--help'], ['--file', '--throttle', '--help', '-h'], 'USAGE-TEXT', opts);
+    const bare = runValidate(['--throttle', '--help'], ['--file', '--throttle', '--help', '-h'], 'USAGE-TEXT', opts);
+    const unknown = runValidate(['--file', '--bogus'], ['--file', '--throttle', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (missing.status === 1 && /--file requires a value/.test(missing.stderr || '') && !/USAGE-TEXT/.test(missing.stdout || '')
+      && bare.status === 0 && /USAGE-TEXT/.test(bare.stdout || '')
+      && unknown.status === 1 && /unrecognized flag/.test(unknown.stderr || '') && !/--file requires a value/.test(unknown.stderr || '')) {
+      pass('requiredFlags checks only that subset before help, and unknown flags still win');
+    } else {
+      fail(`requiredFlags case => missing=${missing.status} ${missing.stderr} bare=${bare.status} unknown=${unknown.status} ${unknown.stderr}`);
+    }
+  }
 
   {
     const opts = { valueFlags: ['--since'], requireOperand: true };

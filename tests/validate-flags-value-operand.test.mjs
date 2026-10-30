@@ -165,7 +165,7 @@ const OWN_GUARD = new Map([
   ['check-liveness.mjs',
     '--throttle takes an OPTIONAL operand: bare `--throttle` is the 5000ms default, so requireOperand would reject a call the usage documents. ' +
     '--status keeps its own message ("--status needs a value"), locked by tests/check-liveness-status-flag.test.mjs. ' +
-    '--file is rejected beside those, before any token is checked as a URL.'],
+    '--file is rejected beside those, before any token is checked as a URL, and requiredFlags checks it before --help can exit 0.'],
 ]);
 
 // The ratchet. Raising this is a review conversation, not a formality: it means

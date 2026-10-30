@@ -129,3 +129,29 @@ test('the space form of --throttle is the wait, not another URL', () => {
   assert.match(text, /throttle ~1-2s/);
   assert.doesNotMatch(text, /Checking 2 URL/);
 });
+
+test('--throttle 1e3 is the same wait as 1000, not a URL', () => {
+  const result = run(['--throttle', '1e3', '--no-record', '--no-fallback', 'not-a-url']);
+  const text = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(text, /Checking 1 URL/);
+  assert.match(text, /throttle ~1-2s/);
+  assert.doesNotMatch(text, /1e3/);
+});
+
+test('--file --help reports the missing path instead of exiting 0', () => {
+  const result = run(['--file', '--help']);
+  const text = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(text, /--file requires a value/);
+  assert.doesNotMatch(text, /Usage:/);
+});
+
+test('--file --bogus reports the unknown flag before the missing path', () => {
+  const result = run(['--file', '--bogus']);
+  const text = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(text, /unrecognized flag/);
+  assert.match(text, /--bogus/);
+  assert.doesNotMatch(text, /--file requires a value/);
+});

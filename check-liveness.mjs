@@ -57,9 +57,23 @@ const KNOWN_FLAGS = [
 ];
 
 /**
+ * A positive finite millisecond count, shared by the equals form and the
+ * space form. `1e3` is 1000 in both. Anything else is not an operand.
+ *
+ * @param {unknown} token
+ * @returns {number|undefined}
+ */
+function positiveThrottleMs(token) {
+  if (typeof token !== 'string' || token === '') return undefined;
+  const n = Number(token);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * `--throttle` alone means the 5000ms default. `--throttle 1000` and
- * `--throttle=1000` both mean 1000. A non-numeric equals value stays on the
- * default rather than becoming a URL to check.
+ * `--throttle=1000` both mean 1000. A token that is not a positive finite
+ * number stays off the operand, so the space form does not swallow a URL,
+ * and the base stays on the default.
  *
  * @param {string[]} args
  * @returns {number}
@@ -67,13 +81,9 @@ const KNOWN_FLAGS = [
 function throttleBaseMsFrom(args) {
   if (!hasFlag(args, '--throttle')) return 0;
   const eq = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
-  const raw = eq !== undefined ? eq.slice('--throttle='.length) : (() => {
-    const idx = args.indexOf('--throttle');
-    const next = idx === -1 ? undefined : args[idx + 1];
-    return typeof next === 'string' && /^\d+$/.test(next) ? next : undefined;
-  })();
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : 5000;
+  if (eq !== undefined) return positiveThrottleMs(eq.slice('--throttle='.length)) ?? 5000;
+  const idx = args.indexOf('--throttle');
+  return positiveThrottleMs(idx === -1 ? undefined : args[idx + 1]) ?? 5000;
 }
 
 /**
@@ -100,8 +110,7 @@ function urlPositionals(args) {
     }
     if (a === '--throttle') {
       skip.add(i);
-      const next = args[i + 1];
-      if (typeof next === 'string' && /^\d+$/.test(next)) skip.add(i + 1);
+      if (positiveThrottleMs(args[i + 1]) !== undefined) skip.add(i + 1);
       continue;
     }
     if (a === '-h' || a.startsWith('--')) skip.add(i);
@@ -220,12 +229,16 @@ async function main() {
   // Unknown flags used to survive into the URL list: `--dry-run --file urls.txt`
   // checked three strings and never opened the file, and `--help` ran before
   // that filter so `--help --bogus` exited 0. validateFlags rejects the unknown
-  // flag first, then prints help. --throttle's operand is optional (bare
-  // `--throttle` is the 5000ms default), and --status keeps the message the
-  // status-flag test locks, so the missing-operand check stays here rather
-  // than in requireOperand. See tests/validate-flags-value-operand.test.mjs.
+  // flag first, then a missing --file path, then prints help. --throttle stays
+  // optional (bare `--throttle` is the 5000ms default) and --status keeps the
+  // message the status-flag test locks, so those two stay out of requireOperand.
+  // A whitespace-only --file path is still rejected below.
+  // See tests/validate-flags-value-operand.test.mjs.
   validateFlags(args, KNOWN_FLAGS, USAGE, {
     valueFlags: ['--file', '--status', '--throttle'],
+    // --file must have a path before --help can exit 0. --throttle stays
+    // optional, and --status keeps its own message below.
+    requiredFlags: ['--file'],
   });
 
   if (hasFlag(args, '--file')) {
