@@ -106,10 +106,24 @@ export function parseHydration(html) {
   }
 }
 
+/**
+ * A city arrives as a bare `Cupertino` with `countryName` beside it, and a
+ * location filter that names a country has only this string to match. Level 1
+ * entries are the country already, in a shorter spelling: `United States`
+ * against `United States of America`.
+ *
+ * @param {any} l
+ */
+function placeOf(l) {
+  const name = l?.name;
+  const country = l?.countryName;
+  return name && country && l.level !== 1 && !name.includes(country) ? `${name}, ${country}` : name;
+}
+
 /** @param {any} r */
 function locationOf(r) {
   const names = (Array.isArray(r.locations) ? r.locations : [])
-    .map((/** @type {any} */ l) => l?.name)
+    .map(placeOf)
     .filter(Boolean);
   const uniq = [...new Set(names)];
   if (uniq.length) return uniq.join('; ');
