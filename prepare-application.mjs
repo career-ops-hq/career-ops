@@ -156,11 +156,10 @@ function readProfile() {
       const value = source[key];
       if (value == null) return '';
       if (typeof value !== 'object') return String(value).trim();
-      // The example profile keeps country and city under root location.
-      // That mapping is not the form value once a candidate block exists.
-      // Any other collection, including a root email list the candidate
-      // omitted, is still a scalar error.
-      if (source === profile && hasCandidate && key === 'location') continue;
+      // Root location in the example profile is a mapping of country and
+      // city. Skip that mapping once a candidate block exists. A list is
+      // not that mapping, so it is still a scalar error.
+      if (source === profile && hasCandidate && key === 'location' && !Array.isArray(value)) continue;
       console.error(`Error: profile field "${key}" in ${profilePath} must be a scalar value`);
       process.exit(1);
     }

@@ -145,4 +145,19 @@ try {
     assert.ok(omittedLocation.stdout.includes('avery@example.com'));
     assert.ok(!omittedLocation.stderr.includes('must be a scalar'));
   });
+
+  const locationList = run([
+    'candidate:',
+    '  full_name: Avery Quinn',
+    'location:',
+    '  - Denver',
+    '  - Remote',
+    '',
+  ].join('\n'));
+  check('a root location list is a scalar error when candidate omits location', () => {
+    assert.equal(locationList.status, 1, describeSpawn(locationList));
+    assert.match(locationList.stderr, /profile field "location"/);
+    assert.match(locationList.stderr, /must be a scalar value/);
+    assert.equal(locationList.stdout, '');
+  });
 } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10 }); }
