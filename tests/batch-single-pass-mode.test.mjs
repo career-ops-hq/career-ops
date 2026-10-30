@@ -198,6 +198,15 @@ try {
   process.env.CAREER_OPS_REPORTS_DIR = PATHS.reports;
   process.env.CAREER_OPS_BATCH_STATE = join(mockWork, 'batch-state.tsv');
   process.env.CAREER_OPS_TRACKER = join(mockWork, 'applications.md');
+  // Run this report through match mode, which writes no PDF.
+  writeFileSync(join(mockWork, 'cv.md'), '# Jane Doe\n', 'utf-8');
+  writeFileSync(join(mockWork, '_profile.md'), '# Archetypes\n', 'utf-8');
+  writeFileSync(join(mockWork, 'profile.yml'), 'language:\n  output: en\n', 'utf-8');
+  PATHS.cv = join(mockWork, 'cv.md');
+  PATHS.profile = join(mockWork, '_profile.md');
+  PATHS.profileYml = join(mockWork, 'profile.yml');
+  PATHS.custom = join(mockWork, '_custom.md');
+  loadContext('match');
 
   const rawJd = 'Verbatim Job Description: Software Engineer at Acme Corp. Must know Node.js, distributed systems, and CI/CD pipelines.';
   const mockBrowser = {
@@ -234,6 +243,11 @@ LEGITIMACY: High Confidence
     } else {
       fail('processOffer report missing ## Job Description (archived verbatim) or raw JD text');
     }
+    if (reportText.includes('**PDF:** ❌') && !reportText.includes('**PDF:** pending')) {
+      pass('match mode report marks the PDF as not generated instead of pending');
+    } else {
+      fail('match mode report still claims **PDF:** pending');
+    }
   } else {
     fail('processOffer failed to write report file for JD archive test');
   }
@@ -242,6 +256,10 @@ LEGITIMACY: High Confidence
 } finally {
   PATHS.reports = oldReports;
   PATHS.trackerAdditions = oldAdditions;
+  PATHS.cv = originalCv;
+  PATHS.profile = originalProfile;
+  PATHS.profileYml = originalProfileYml;
+  PATHS.custom = originalCustom;
   if (oldReportsEnv === undefined) delete process.env.CAREER_OPS_REPORTS_DIR;
   else process.env.CAREER_OPS_REPORTS_DIR = oldReportsEnv;
   if (oldBatchStateEnv === undefined) delete process.env.CAREER_OPS_BATCH_STATE;

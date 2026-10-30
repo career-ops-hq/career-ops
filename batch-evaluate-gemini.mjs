@@ -157,6 +157,12 @@ async function nextReportNumber() {
 let systemPromptTemplate;
 let currentEvalMode = 'full';
 
+// Match mode never generates a PDF, so its reports say so instead of carrying
+// a "pending" status that nothing will resolve (as batch/batch-prompt-match.md).
+function isMatchMode() {
+  return currentEvalMode === 'match' || currentEvalMode === 'single-pass';
+}
+
 export function loadContext(mode = 'full') {
   currentEvalMode = mode;
   if (mode === 'match' || mode === 'single-pass') {
@@ -447,7 +453,7 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
 **Archetype:** ${archetype}
 **Score:** ${score}
 **Legitimacy:** ${legitimacy}
-**PDF:** pending
+**PDF:** ${isMatchMode() ? '❌' : 'pending'}
 **Tool:** Gemini (${modelName})\n
 ---\n
 ${withJdArchiveSection(evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim(), jdText).trimEnd()}\n`;
