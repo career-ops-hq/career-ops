@@ -446,7 +446,7 @@ function FollowupRow({
           {e.daysUntilNext == null ? (
             <span className="text-faint">—</span>
           ) : (
-            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-600 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
+            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-700 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
               {relativeDays(e.daysUntilNext)}
             </span>
           )}
