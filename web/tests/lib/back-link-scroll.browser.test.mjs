@@ -53,16 +53,17 @@ test("The in-page back link returns to the list where it was left", { skip: live
   assert.equal(new URL(page.url()).search, "");
   assert.equal(await page.evaluate(() => window.scrollY), 0);
 
-  await page.goto(`${origin.origin}/pipeline?tab=ALL&sort=company&dir=1`);
+  const compareQuery = "tab=ALL&min=3.5&sort=company&dir=1&q=Fixture";
+  await page.goto(`${origin.origin}/pipeline?${compareQuery}`);
   await rows.nth(0).getByRole("checkbox").check();
   await rows.nth(1).getByRole("checkbox").check();
   const compareFromKey = await entryKey();
   await page.getByRole("link", { name: "Compare", exact: true }).click();
   await page.getByRole("heading", { name: "Compare" }).waitFor();
-  assert.equal(await back().getAttribute("href"), "/pipeline?tab=ALL&sort=company&dir=1");
+  assert.equal(await back().getAttribute("href"), `/pipeline?${compareQuery}`);
   await back().click();
-  await page.waitForURL((u) => u.pathname === "/pipeline" && u.search === "?tab=ALL&sort=company&dir=1");
-  assert.equal(new URL(page.url()).search, "?tab=ALL&sort=company&dir=1");
+  await page.waitForURL((u) => u.pathname === "/pipeline" && u.search === `?${compareQuery}`);
+  assert.equal(new URL(page.url()).search, `?${compareQuery}`);
   assert.equal(await entryKey(), compareFromKey, "the back link restored the Pipeline entry Compare was opened from");
   assert.deepEqual(errors, []);
 });

@@ -94,7 +94,7 @@ export function PipelineView({
     },
     [params, router, pathname, startNavigation],
   );
-  const { q, setQ, setParams } = useListSearch(params, commitParams, qRef);
+  const { q, setQ, setParams, cancelPendingSearch } = useListSearch(params, commitParams, qRef);
   // Typing stays local until the URL catches up, so include it when leaving.
   const detailQuery = pipelineQuery(params.toString(), q);
   // The list entry has to carry that search too. Otherwise Back compares the
@@ -104,6 +104,9 @@ export function PipelineView({
     // replaceState would show the typed search while Next still has the old
     // params, so the next sort deletes it. The other tab already has the href.
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1) return;
+    // The search timer would router.replace this list and can steal the click
+    // if the list is still mounted while the next page loads.
+    cancelPendingSearch();
     const next = listEntrySync(pathname, params.toString(), q);
     if (!next) return;
     const state = window.history.state;

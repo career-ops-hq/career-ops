@@ -30,6 +30,11 @@ export function useListSearch(
     expectedRef.current = rememberNavigation(expectedRef.current, updates, qRef.current, committed);
   }, [commit, qRef]);
   const queueRef = useRef(queueNavigation);
+  const cancelPendingSearch = useCallback(() => {
+    if (debounceRef.current === null) return;
+    window.clearTimeout(debounceRef.current);
+    debounceRef.current = null;
+  }, []);
   // After commit. A discarded render must not publish a search or a navigation.
   useLayoutEffect(() => {
     qRef.current = q;
@@ -76,5 +81,6 @@ export function useListSearch(
     q,
     setQ,
     setParams: (updates: Record<string, string | number | null>) => queueRef.current(updates),
+    cancelPendingSearch,
   };
 }

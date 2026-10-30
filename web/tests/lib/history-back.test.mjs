@@ -92,6 +92,8 @@ test("the list, the studio, and the checklist walk back through the real entry",
   const sync = pipeline.slice(syncAt, syncEnd);
   const modifiedAt = sync.indexOf("event.button === 1) return");
   assert.ok(modifiedAt > 0 && modifiedAt < sync.indexOf("history.replaceState"), "a modified click must return before replaceState");
+  const cancelAt = sync.indexOf("cancelPendingSearch()");
+  assert.ok(cancelAt > modifiedAt && cancelAt < sync.indexOf("listEntrySync"), "leaving cancels the search timer before the history write");
   assert.match(back, /previousMatchIndex\(href, location\.href, current\.index/);
   assert.match(back, /window\.history\.go\(match - current\.index\)/);
   assert.match(pdf, /cv-studio\$\{jobQuery\}`/);
