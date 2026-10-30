@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=21 level=handle handle=gpirujo role="Staff Software Engineer" sector="Full remote agency" geo="Remote LATAM + EU" weeks=5 link="https://github.com/career-ops-hq/career-ops/issues/6249" -->
+### Hire #21
+
+> Landed a Staff Software Engineer role at Fluxon, ~5.5 weeks from first application to signed offer, through a 4-round interview process ending with a conversation with the CTO. Tar
+
+<a href="https://github.com/gpirujo"><img src="https://github.com/gpirujo.png?size=64" width="28" height="28" align="top" alt="@gpirujo"> **@gpirujo**</a> · Staff Software Engineer · Remote LATAM + EU · 5 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/6249)
+
 <!-- hire n=20 level=handle handle=bluezeb12 role="Database Systems Engineer" sector="Contracting Firm" geo="remote US" weeks=9 link="https://github.com/career-ops-hq/career-ops/issues/5921" -->
 ### Hire #20
 

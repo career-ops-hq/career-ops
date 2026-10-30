@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Sparkles, X, Settings } from "lucide-react";
+import { SETUP_BANNER_KEY, bannerStaysDismissed, setupBannerDismissKey } from "@/lib/home/setup-banner.mjs";
 
 type Doctor = { available: boolean; onboardingNeeded: boolean; missing: string[]; warnings: string[] };
 
@@ -31,10 +32,25 @@ export function OnboardingBanner() {
 
   useEffect(() => {
     setCli(hasCli());
-    fetch("/api/doctor")
-      .then((r) => r.json())
-      .then(setD)
-      .catch(() => {});
+    // Re-read after setup changes. router.refresh() keeps this component's
+    // state, so a dismissal for the old missing set would otherwise stick.
+    const refresh = () => {
+      fetch("/api/doctor")
+        .then((r) => r.json())
+        .then((doctor: Doctor) => {
+          setD(doctor);
+          try {
+            setDismissed(bannerStaysDismissed(localStorage.getItem(SETUP_BANNER_KEY), doctor.missing));
+          } catch {
+            // A blocked storage read just shows the banner again.
+            setDismissed(false);
+          }
+        })
+        .catch(() => {});
+    };
+    refresh();
+    window.addEventListener("co-onboarding-changed", refresh);
+    return () => window.removeEventListener("co-onboarding-changed", refresh);
   }, []);
 
   if (dismissed || !d || !d.onboardingNeeded) return null;
@@ -45,7 +61,14 @@ export function OnboardingBanner() {
   return (
     <div className="dot-bg relative mb-6 overflow-hidden rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/10 via-surface/40 to-transparent p-5">
       <button
-        onClick={() => setDismissed(true)}
+        onClick={() => {
+          try {
+            localStorage.setItem(SETUP_BANNER_KEY, setupBannerDismissKey(d.missing));
+          } catch {
+            // Dismiss still hides the banner for this visit.
+          }
+          setDismissed(true);
+        }}
         className="absolute right-3 top-3 text-faint transition-colors hover:text-foreground"
         aria-label="Dismiss"
       >
