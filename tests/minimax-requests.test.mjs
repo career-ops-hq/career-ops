@@ -54,7 +54,7 @@ try {
       assert.equal(request.body.model, model);
       assert.equal(request.body.stream, true);
       assert.equal(request.body.messages[1].content, 'JOB DESCRIPTION TO EVALUATE:\n\nFictional job description');
-      assert.deepEqual(Object.keys(request.body).sort(), ['messages', 'model', 'stream', 'temperature']);
+      assert.deepEqual(Object.keys(request.body).sort(), ['messages', 'model', 'stream', 'stream_options', 'temperature']);
       // Omission leaves Flash's adaptive thinking/default effort to the API;
       // never inject disabled thinking, none effort, or unsupported service tiers.
       if (model === 'MiniMax-M3.1-Flash' || model === 'MiniMax-M3') {

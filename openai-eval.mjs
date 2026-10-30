@@ -383,6 +383,7 @@ try {
         { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
       stream:      true,
+      stream_options: { include_usage: true },
       temperature: 0.4,
     }),
     signal: AbortSignal.timeout(timeoutMs),
@@ -406,6 +407,7 @@ try {
   const decoder = new TextDecoder();
   let sseBuf = '';
   let thinkOpen = false;
+  let streamUsage;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -419,6 +421,7 @@ try {
       if (payload === '[DONE]') continue;
       let delta;
       try { delta = JSON.parse(payload); } catch { continue; }
+      streamUsage = delta.usage ?? delta.x_groq?.usage ?? streamUsage;
       const d = delta.choices?.[0]?.delta ?? {};
       if (d.reasoning_content) {
         if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
@@ -430,6 +433,7 @@ try {
     }
   }
   if (thinkOpen) parts.push('\n</think>\n');
+  if (streamUsage) tracker.record('evaluation', normalizeOpenAIUsage(streamUsage));
   evaluationText = parts.join('').trim();
   if (!evaluationText) {
     console.error('❌  The endpoint returned an empty response.');
