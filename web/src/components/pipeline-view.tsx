@@ -21,6 +21,7 @@ import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/l
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { moveCursor, rangeKeys, trackerCommand, typingFromTarget } from "@/lib/tracker-keys.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -52,7 +53,10 @@ export function PipelineView({
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState("");
+  const [cursor, setCursor] = useState(-1);
   const activeTab = useRef<HTMLButtonElement>(null);
+  const anchor = useRef<string | null>(null);
+  const busyRef = useRef(false);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
@@ -138,8 +142,19 @@ export function PipelineView({
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
   const allSelected = filteredKeys.length > 0 && filteredKeys.every((k) => selected.has(k));
 
-  function toggleRow(key: string) {
+  function toggleRow(key: string, shift: boolean) {
+    // Read the anchor now. The updater runs later, after it moves to this row.
+    const from = anchor.current;
+    anchor.current = key;
     setSelected((prev) => {
+      if (shift && from) {
+        const range = rangeKeys(filteredKeys, from, key);
+        if (range) {
+          const next = new Set(prev);
+          for (const item of range) next.add(item);
+          return next;
+        }
+      }
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -156,19 +171,85 @@ export function PipelineView({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  async function applyBulkStatus() {
-    if (!bulkStatus || selectedRows.length === 0 || bulkBusy) return;
+  async function commitStatus(rows: Application[], status: string) {
+    if (!status || rows.length === 0 || busyRef.current) return;
+    busyRef.current = true;
     setBulkBusy(true);
     setBulkError("");
-    const { saved, failed } = await saveStatuses(selectedRows, bulkStatus);
-    setBulkBusy(false);
-    setSelected(new Set(selectedRows.filter((r) => failed.some((f) => f.n === r.n)).map(applicationKey)));
-    if (failed.length > 0) {
-      setBulkError(`${failed.length} not saved: ${failed.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
+    try {
+      const { saved, failed } = await saveStatuses(rows, status);
+      const failedNums = new Set(failed.map((f) => f.n));
+      const savedNums = new Set(saved);
+      setSelected(new Set(rows.filter((r) => failedNums.has(r.n)).map(applicationKey)));
+      if (failed.length > 0) {
+        setBulkError(`${failed.length} not saved: ${failed.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
+      }
+      setAnnouncement(`${saved.length} application${saved.length === 1 ? "" : "s"} set to ${status}.`);
+      startTransition(() => {
+        for (const row of rows) {
+          if (savedNums.has(row.n)) showSavedStatus({ key: applicationKey(row), status });
+        }
+        router.refresh();
+      });
+    } finally {
+      busyRef.current = false;
+      setBulkBusy(false);
     }
-    setAnnouncement(`${saved.length} application${saved.length === 1 ? "" : "s"} set to ${bulkStatus}.`);
-    startTransition(() => router.refresh());
   }
+
+  const keyState = useRef({ visibleTab, filtered, cursor, selectedRows });
+  keyState.current = { visibleTab, filtered, cursor, selectedRows };
+  const commitRef = useRef(commitStatus);
+  commitRef.current = commitStatus;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const state = keyState.current;
+      if (state.visibleTab === "INBOX") return;
+      const target = event.target;
+      const typing = typingFromTarget(target instanceof Element ? {
+        tagName: target.tagName,
+        type: target instanceof HTMLInputElement ? target.type : undefined,
+        isContentEditable: target instanceof HTMLElement && target.isContentEditable,
+        closestDialog: Boolean(target.closest("dialog, [role='dialog']")),
+      } : null);
+      const command = trackerCommand({
+        key: event.key,
+        typing,
+        composing: event.isComposing || event.key === "Process",
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+      });
+      if (!command) return;
+      if (command.name === "next" || command.name === "prev") {
+        event.preventDefault();
+        const delta = command.name === "next" ? 1 : -1;
+        setCursor((index) => moveCursor(index, state.filtered.length, delta));
+        return;
+      }
+      const rows = state.selectedRows.length > 0
+        ? state.selectedRows
+        : state.cursor >= 0 && state.filtered[state.cursor]
+          ? [state.filtered[state.cursor]]
+          : [];
+      if (rows.length === 0) return;
+      event.preventDefault();
+      void commitRef.current(rows, command.status);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // Keyed on the count, not the array. filtered is rebuilt whenever sort or the
+  // optimistic rows change identity, and a state update after each rebuild kept
+  // the deferred search render from finishing.
+  const rowCount = filtered.length;
+  useEffect(() => {
+    setCursor((index) => (rowCount === 0 ? -1 : index < 0 ? index : Math.min(index, rowCount - 1)));
+  }, [rowCount]);
+  useEffect(() => {
+    if (cursor < 0 || visibleTab === "INBOX") return;
+    document.querySelector('[data-tracker-cursor="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [cursor, visibleTab]);
 
   return (
     <PageFrame>
@@ -272,7 +353,7 @@ export function PipelineView({
           </select>
           <button
             type="button"
-            onClick={applyBulkStatus}
+            onClick={() => void commitStatus(selectedRows, bulkStatus)}
             disabled={!bulkStatus || bulkBusy}
             className="rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text disabled:opacity-50"
           >
@@ -291,6 +372,10 @@ export function PipelineView({
           </button>
           {bulkError && <span role="alert" className="text-xs text-red-500">{bulkError}</span>}
         </div>
+      )}
+
+      {visibleTab !== "INBOX" && (
+        <p className="mt-2 text-xs text-faint">j and k move. 1 Evaluated, 2 Applied, 3 Responded, 4 Interview, 5 Offer, 6 Rejected, 7 Discarded, 8 SKIP. Shift-click selects the rows in between.</p>
       )}
 
       {visibleTab === "INBOX" ? (
@@ -354,19 +439,19 @@ export function PipelineView({
             {/* Keep editors mounted while query navigation is pending: sorting
                 must not discard an open editor or an in-flight status save. */}
             <tbody className="divide-y divide-border" hidden={isPending} aria-busy={false}>
-              {filtered.map((r) => {
+              {filtered.map((r, index) => {
                 const company = companyPresentation(r);
                 const key = applicationKey(r);
                 const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
                 const posting = postingHref(r.url);
                 return (
-                  <tr key={key} data-application-key={key} className="group transition-colors hover:bg-surface/40">
+                  <tr key={key} data-application-key={key} data-tracker-cursor={cursor === index ? "true" : undefined} className={cn("group transition-colors hover:bg-surface/40", cursor === index && "bg-brand-soft/60")}>
                     <td className="w-8 px-3 py-3">
                       <input
                         type="checkbox"
                         aria-label={`Select ${company.label}, ${r.role} (#${r.n})`}
                         checked={selected.has(key)}
-                        onChange={() => toggleRow(key)}
+                        onChange={(event) => toggleRow(key, (event.nativeEvent as MouseEvent).shiftKey === true)}
                       />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
