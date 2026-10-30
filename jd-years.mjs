@@ -160,10 +160,14 @@ function toNumber(raw) {
   return key in WORD_NUMBERS ? WORD_NUMBERS[key] : Number(raw);
 }
 
+const LIST_MARKER = /^\s*(?:[-*•·]|\d+[.)])(?:\s+|$)/;
+
 /**
  * Plain text for parsing. Provider descriptions arrive as HTML, ATS JD
- * normalizers already return text; both end up as lines.
+ * normalizers already return text; both end up as lines. jdHtmlToText writes an
+ * <li> as "- ", so `item` holds for either source.
  * @param {string} input
+ * @returns {{ text: string, item: boolean }[]}
  */
 function toLines(input) {
   const raw = String(input ?? '');
@@ -173,7 +177,9 @@ function toLines(input) {
   // A marker may also end its line: `<li>\n<p>text` and `<li></li>` arrive as a
   // bare "-", and headingKind would take it for a heading and hide the real one
   // above it. In a 2026-10-30 sample, 654 of 3,573 postings had such a line.
-  return text.replace(/[’‘]/g, "'").replace(/[^\S\r\n]+/g, ' ').split(/\r?\n/).map(l => l.replace(/^\s*(?:[-*•·]|\d+[.)])(?:\s+|$)/, '').trim()).filter(Boolean);
+  return text.replace(/[’‘]/g, "'").replace(/[^\S\r\n]+/g, ' ').split(/\r?\n/)
+    .map(l => ({ text: l.replace(LIST_MARKER, '').trim(), item: LIST_MARKER.test(l) }))
+    .filter(l => l.text);
 }
 
 /**
@@ -185,8 +191,11 @@ function sentences(line) {
   return line.split(/(?<=[a-z0-9)]{2}[.!?])\s+(?=[A-Z("])|;\s+|\s+[•·]\s+/).map(s => s.trim()).filter(Boolean);
 }
 
-/** @param {string} line */
-function headingKind(line) {
+/**
+ * @param {string} line
+ * @param {boolean} item the line was a list item
+ */
+function headingKind(line, item) {
   // "Preferred Qualifications (any 2 of the following)": the parenthetical
   // is an aside, not a figure.
   const bare = line.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
@@ -202,6 +211,10 @@ function headingKind(line) {
     // "Additional Qualifications" may be required or preferred: unclear.
     : REQUIRED_HEADING.test(bare) && !/^additional\b/i.test(bare) ? 'required' : null;
   if (/\d/.test(line) && !known) return null;
+  // "Excellent communication skills" and "Experience in fintech" are items that
+  // happen to hold a heading word. Read as Required, one under Preferred
+  // Qualifications turned the bars after it into a confident drop.
+  if (known === 'required' && !/:$/.test(bare) && (item || /^experience (?:in|with|of)\b/i.test(bare))) return null;
   return known ?? 'other';
 }
 
@@ -338,9 +351,9 @@ export function parseYearsRequirement(jd) {
   let noExperience = false;
   /** @type {YearsMention[]} */
   let previous = [];
-  for (const line of lines) {
+  for (const { text: line, item } of lines) {
     if (NO_EXPERIENCE_RE.test(line)) noExperience = true;
-    const heading = headingKind(line);
+    const heading = headingKind(line, item);
     if (heading) {
       section = heading === 'other' ? 'unclear' : heading;
       continue;
