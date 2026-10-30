@@ -3,7 +3,7 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download, FileText } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -39,12 +39,16 @@ export function PipelineView({
   inbox,
   inboxCount,
   trackerShape = "rows",
+  cvRows = [],
 }: {
   applications: Application[];
   inbox: InboxJob[] | null;
   inboxCount: number;
   trackerShape?: "missing" | "empty" | "malformed" | "rows";
+  /** Tracker row numbers that have a tailored CV PDF on disk. */
+  cvRows?: string[];
 }) {
+  const hasCv = useMemo(() => new Set(cvRows), [cvRows]);
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -504,6 +508,7 @@ export function PipelineView({
                     </button>
                   </th>
                 ))}
+                <th className="whitespace-nowrap px-4 py-2.5 font-medium">resume</th>
               </tr>
             </thead>
             {/* Keep editors mounted while query navigation is pending: sorting
@@ -577,6 +582,21 @@ export function PipelineView({
                     />
                   </td>
                   <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {hasCv.has(r.n) ? (
+                      <a
+                        href={`/api/cv-pdf?application=${encodeURIComponent(r.n)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open the tailored CV PDF"
+                        className="inline-flex items-center gap-1.5 text-brand-text hover:underline"
+                      >
+                        <FileText aria-hidden="true" className="size-3.5" /> PDF
+                      </a>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
                   </tr>
                 );
               })}
