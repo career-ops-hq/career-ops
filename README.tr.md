@@ -285,9 +285,9 @@ Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. caree
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor veya başka herhangi bir CLI | Düz dil: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor veya başka herhangi bir desteklenen CLI | Düz dil: "Run the career-ops scan mode" |
 
-Arkasında hiçbir şey olmayan `/career-ops` komut menüsünü gösterir onu kullanan CLI'larda. Düz dil her CLI'da çalışır. Claude Code eklentisi olarak komut `/career-ops:career-ops` biçimindedir.
+Arkasında hiçbir şey olmayan `/career-ops` komut menüsünü gösterir onu kullanan CLI'larda. Düz dil her desteklenen CLI'da çalışır. Claude Code eklentisi olarak komut `/career-ops:career-ops` biçimindedir.
 
 Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `modes/*.md` dosyalarını paylaşır; bu yüzden bir mod hangi CLI çalıştırırsa çalıştırsın aynı davranır. Codex'te eğik çizgi komutları garanti değildir: düz dille iste ya da `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ile tek bir prompt'u headless çalıştır ([docs/CODEX.md](docs/CODEX.md)). Desteklenen her CLI'da nasıl çalıştırılacağı, headless komutu olan CLI'lar için bu komutlar ve CLI'ya özel kurulum notları [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) içindedir.
 
