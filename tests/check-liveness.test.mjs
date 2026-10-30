@@ -4,9 +4,9 @@
 // from ROOT, not from this file's directory: the first version resolved
 // ./check-liveness.mjs relative to tests/ and every CI job died with
 // ERR_MODULE_NOT_FOUND before a single assertion ran.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
