@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, FileText } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -34,10 +34,14 @@ type SortKey = (typeof SORT_KEYS)[number];
 export function PipelineView({
   applications,
   inbox,
+  cvRows,
 }: {
   applications: Application[];
   inbox: InboxJob[];
+  /** Tracker row numbers that have a tailored CV PDF on disk. */
+  cvRows: string[];
 }) {
+  const hasCv = useMemo(() => new Set(cvRows), [cvRows]);
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -215,6 +219,7 @@ export function PipelineView({
                     </span>
                   </th>
                 ))}
+                <th className="whitespace-nowrap px-4 py-2.5 font-medium">resume</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -241,6 +246,21 @@ export function PipelineView({
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {hasCv.has(r.n) ? (
+                      <a
+                        href={`/api/cv-pdf?application=${encodeURIComponent(r.n)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-brand transition-colors hover:underline"
+                        title="Open the tailored CV PDF"
+                      >
+                        <FileText className="size-3.5" /> PDF
+                      </a>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
                   </tr>
                 );
               })}
