@@ -134,3 +134,19 @@ func TestCopyPathCmdReportsSuccess(t *testing.T) {
 		t.Fatalf("expected success for path, got %#v", res)
 	}
 }
+
+// The clipboard result must reach the pipeline even if the user switched
+// screens while the copy ran.
+func TestClipboardResultReachesPipelineFromAnotherScreen(t *testing.T) {
+	m, _ := newStatusTestModel(t)
+	m.state = viewReport
+	updated, _ := m.Update(screens.PipelineClipboardResultMsg{Path: "/out/cv.pdf"})
+	got := updated.(appModel)
+	if got.state != viewReport {
+		t.Fatalf("state = %v, want the report viewer to stay open", got.state)
+	}
+	got.state = viewPipeline
+	if view := got.View(); !strings.Contains(view, "Copied CV PDF path to clipboard") {
+		t.Fatalf("pipeline did not receive the clipboard result, got %q", view)
+	}
+}
