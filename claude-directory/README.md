@@ -34,5 +34,6 @@ career-ops can fill application forms and draft answers. It drafts and fills; it
 
 ## Privacy and license
 
-- Privacy policy: https://career-ops.org/privacy
+- What leaves your machine, and where it goes: [What it runs, sends and fetches](#what-it-runs-sends-and-fetches), above.
+- The career-ops.org website and its mailing list have their own privacy policy: https://career-ops.org/privacy
 - License: MIT. See [LICENSE](LICENSE).

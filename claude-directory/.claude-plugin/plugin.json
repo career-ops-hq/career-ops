@@ -13,7 +13,7 @@
   "icon": "./.claude-plugin/icon.png",
   "documentationUrl": "https://career-ops.org/docs",
   "supportUrl": "https://github.com/career-ops-hq/career-ops/issues",
-  "privacyPolicyUrl": "https://career-ops.org/privacy",
+  "privacyPolicyUrl": "https://github.com/career-ops-hq/career-ops/blob/main/claude-directory/README.md#what-it-runs-sends-and-fetches",
   "keywords": [
     "job-search",
     "career",
