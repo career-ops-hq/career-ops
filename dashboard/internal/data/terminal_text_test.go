@@ -10,16 +10,20 @@ import (
 func TestParseApplicationsStripsTerminalControlsFromCells(t *testing.T) {
 	company := "Fernhollow" + string(rune(0x1b)) + "[2JLabs"
 	rawCSI := "A" + "\x9b" + "B"
+	// U+009B as valid UTF-8. The raw byte above becomes U+FFFD on decode, so
+	// only this row shows that a real C1 control is removed.
+	c1CSI := "C\u009bD"
 	body := "# Applications Tracker\n\n" +
 		"| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n" +
 		"|---|---|---|---|---|---|---|---|---|\n" +
 		"| 1 | 2026-08-01 | " + company + " | Platform Engineer | 4.2/5 | Evaluated | | | remote\trole |\n" +
-		"| 2 | 2026-08-02 | " + rawCSI + " | Analyst | 3.0/5 | Applied | | | |\n"
+		"| 2 | 2026-08-02 | " + rawCSI + " | Analyst | 3.0/5 | Applied | | | |\n" +
+		"| 3 | 2026-08-03 | " + c1CSI + " | Analyst | 3.0/5 | Applied | | | |\n"
 	tempDir, _ := writeTracker(t, body)
 
 	apps := mustParseApplications(t, tempDir)
-	if len(apps) != 2 {
-		t.Fatalf("expected 2 applications, got %d", len(apps))
+	if len(apps) != 3 {
+		t.Fatalf("expected 3 applications, got %d", len(apps))
 	}
 	if strings.Contains(apps[0].Company, "\x1b") || apps[0].Company != "Fernhollow[2JLabs" {
 		t.Fatalf("company = %q, want the text with the escape removed", apps[0].Company)
@@ -31,6 +35,9 @@ func TestParseApplicationsStripsTerminalControlsFromCells(t *testing.T) {
 		if apps[1].Company[i] == 0x1b || apps[1].Company[i] == 0x9b {
 			t.Fatalf("company kept byte %#x in %q", apps[1].Company[i], apps[1].Company)
 		}
+	}
+	if apps[2].Company != "CD" {
+		t.Fatalf("company = %q, want the U+009B control removed", apps[2].Company)
 	}
 }
 
