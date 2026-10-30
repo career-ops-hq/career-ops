@@ -90,7 +90,7 @@
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
  *
  * Two rules the reader enforces that this writer never has to think about,
- * because it always has a real prior status and always writes its own source.
+ * because it canonicalizes the prior status and always writes its own source.
  * Any other producer does have to, so they are stated here:
  *   - An unknown from- or to-state is the sentinel "-", never an empty cell.
  *     funnel-velocity.mjs reads the two columns differently: a from of "-"
@@ -119,7 +119,7 @@ import { extractTrackerReportNumbers, parseMarkdownLinks, soleMarkdownLink, reso
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
-  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
+  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
   appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
@@ -700,6 +700,11 @@ const oldStatus = target.status;
 // written rather than refused, so the caller still gets "status changed" and
 // not a usage error for a row it was right to show.
 const statusKey = value => resolveCanonicalState(value, states) ?? String(value ?? '').trim();
+// The ledger takes a canonical state or "-", and a row with anything else is
+// dropped by its readers. A legacy cell (`Applied 2026-01-02`) is a known state
+// once its date is off; copied raw, the change was lost to the funnel and to
+// --undo. dedup-tracker.mjs logs its promotions the same way.
+const ledgerState = value => resolveCanonicalState(stripStatusDecoration(value), states) ?? '-';
 
 // The change --undo takes back is the one a retraction line would pop: the
 // last surviving entry of this row's ledger replay. Read under the lock, so no
@@ -898,7 +903,7 @@ try {
     statusLogged = appendStatusTransition(APPS_FILE, {
       num: target.num,
       date: flags.on ?? localToday(),
-      from: oldStatus,
+      from: ledgerState(oldStatus),
       to: newStatus,
       source: flags.source ?? 'set-status',
     });
