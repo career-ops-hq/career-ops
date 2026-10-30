@@ -53,7 +53,7 @@ export function PipelineView({
   // Status saves outlive the virtual row. Pending keeps the chosen status if
   // the row remounts mid-request. Failed is shown on the row, or above the
   // table when that row is off screen.
-  const [heldSaves, setHeldSaves] = useState(() => new Map());
+  const [heldSaves, setHeldSaves] = useState<ReturnType<typeof reduceHeldSave>>(() => new Map());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -469,7 +469,12 @@ export function PipelineView({
                       applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
                       heldSave={heldSaves.get(key)}
                       onHeldSave={(event) => {
-                        setHeldSaves((prev) => reduceHeldSave(prev, { ...event, key, n: r.n }));
+                        // A clear event has no application number. Adding one
+                        // makes the object fail the event union.
+                        const update = event.type === "clear"
+                          ? { type: "clear" as const, key }
+                          : { ...event, key, n: r.n };
+                        setHeldSaves((prev) => reduceHeldSave(prev, update));
                       }}
                       onSaved={(status, restoreFocus) => {
                         // If this focused row leaves its tab, preserve a useful
