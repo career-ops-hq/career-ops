@@ -80,17 +80,16 @@ for (const rel of SPAWNING_ROUTES) {
   });
 }
 
-// A PDF upload judged a stale id that has no fallback as "not Claude", so it
-// answered "PDF upload needs Claude Code" (400) even with Claude installed,
-// instead of the 404 that lists the installed CLIs and points to Config.
-test("cv/ingest/route.ts reports an unavailable CLI before judging PDF eligibility, and resolves it once", () => {
+// File uploads must resolve the fallback before extraction or capability checks.
+test("cv/ingest/route.ts resolves the CLI once before extracting a PDF or checking Word eligibility", () => {
   const src = read("cv/ingest/route.ts");
   const calls = src.match(/resolveCliOrFallback\(/g) ?? [];
   assert.equal(calls.length, 2, "expected one call for uploads and one `??=` for pasted text");
   assert.match(src, /resolved \?\?= resolveCliOrFallback\(cliId\)/, "pasted text must reuse an upload's resolution, not resolve again");
   const unavailable = src.search(/cliUnavailableError\(cliId\)/);
-  const pdfCheck = src.search(/PDF upload needs Claude Code/);
-  assert.ok(unavailable !== -1 && pdfCheck !== -1);
-  assert.ok(unavailable < pdfCheck, "the 404 for an unavailable CLI must come before the PDF check");
+  const pdfCheck = src.search(/await pdfText\(bytes\)/);
+  const wordCheck = src.search(/Word upload needs Claude Code/);
+  assert.ok(unavailable !== -1 && pdfCheck !== -1 && wordCheck !== -1);
+  assert.ok(unavailable < pdfCheck && unavailable < wordCheck, "the unavailable CLI error must come before extraction or capability checks");
   assert.doesNotMatch(src, /\?\.spec\.id \?\? cliId/, "the PDF check must not fall back to the stale id");
 });

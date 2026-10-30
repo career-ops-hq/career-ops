@@ -19,6 +19,13 @@ export function cvReadiness(md: string): CvReadiness {
 export type CvSeed = { title?: string; roles?: string[]; location?: string };
 export type CvIngestResult = { markdown: string; seed: CvSeed | null; error: string | null; trace: string };
 
+export function cvStreamErrorMessage(reason: string): string {
+  if (reason === "unreadable") return "I couldn't read text from that file (it may be a scanned image). Upload the TeX source or paste the text instead.";
+  if (reason === "timeout") return "CV conversion timed out. Try again or check your AI CLI in Config.";
+  if (["cli-failed", "launch-failed", "no-output"].includes(reason)) return "Your AI CLI couldn't finish converting the CV. Check its sign-in and connection in Config, then try again.";
+  return "Couldn't finish converting the CV. Try again or paste the text instead.";
+}
+
 /** Parse the full accumulated ingest stream text into its parts. Tolerant: a
  *  still-streaming buffer just yields partial markdown + the pre-start trace. */
 export function parseCvStream(buf: string): CvIngestResult {
