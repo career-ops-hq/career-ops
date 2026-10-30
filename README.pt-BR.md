@@ -62,7 +62,7 @@ Ele adapta seu currículo e redige suas&nbsp;respostas. <strong>Você&nbsp;clica
 </p>
 
 <p align="center"><a href="#sua-vez">Experimente com uma vaga&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Leia a história&nbsp;completa&nbsp;→</a></p>
-<p align="center"><sub>Prefere não usar o terminal? <a href="https://career-ops.org/waitlist?ref=readme-pt-br">Entre na lista de espera de uma versão web&nbsp;→</a></sub></p>
+<p align="center"><sub>Prefere não usar o terminal? <a href="https://career-ops.org/pt/waitlist?ref=readme-pt-br">Entre na lista de espera de uma versão web&nbsp;→</a></sub></p>
 
 <br>
 

@@ -62,7 +62,7 @@
 </p>
 
 <p align="center"><a href="#轮到你了">拿一个职位试试&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">阅读完整故事&nbsp;→</a></p>
-<p align="center"><sub>不想用终端？ <a href="https://career-ops.org/waitlist?ref=readme-cn">加入网页版的候补名单&nbsp;→</a></sub></p>
+<p align="center"><sub>不想用终端？ <a href="https://career-ops.org/zh/waitlist?ref=readme-cn">加入网页版的候补名单&nbsp;→</a></sub></p>
 
 <br>
 

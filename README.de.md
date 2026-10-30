@@ -62,7 +62,7 @@ Es schneidet deinen Lebenslauf zu und entwirft deine&nbsp;Antworten. <strong>Du&
 </p>
 
 <p align="center"><a href="#du-bist-dran">Probier es mit einer Stelle&nbsp;aus&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Die ganze Geschichte&nbsp;lesen&nbsp;→</a></p>
-<p align="center"><sub>Lieber ohne Terminal arbeiten? <a href="https://career-ops.org/waitlist?ref=readme-de">Trag dich in die Warteliste für eine Web-Version ein&nbsp;→</a></sub></p>
+<p align="center"><sub>Lieber ohne Terminal arbeiten? <a href="https://career-ops.org/de/waitlist?ref=readme-de">Trag dich in die Warteliste für eine Web-Version ein&nbsp;→</a></sub></p>
 
 <br>
 

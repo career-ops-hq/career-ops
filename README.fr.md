@@ -62,7 +62,7 @@ Il adapte votre CV et rédige vos&nbsp;réponses. <strong>Vous&nbsp;cliquez&nbsp
 </p>
 
 <p align="center"><a href="#à-toi">Essayer sur une offre&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Lire l'histoire&nbsp;complète&nbsp;→</a></p>
-<p align="center"><sub>Tu préfères éviter le terminal&nbsp;? <a href="https://career-ops.org/waitlist?ref=readme-fr">Inscris-toi sur la liste d’attente d’une version web&nbsp;→</a></sub></p>
+<p align="center"><sub>Tu préfères éviter le terminal&nbsp;? <a href="https://career-ops.org/fr/waitlist?ref=readme-fr">Inscris-toi sur la liste d’attente d’une version web&nbsp;→</a></sub></p>
 
 <br>
 
