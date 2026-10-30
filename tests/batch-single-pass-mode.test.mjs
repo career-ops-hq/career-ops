@@ -2,9 +2,9 @@
 // covering CLI flags (--mode match, --single-pass), multi-step bypass,
 // and condensed single-pass prompt generation.
 
-import { pass, fail, ROOT, getBash } from './helpers.mjs';
+import { pass, fail, ROOT, getBash, toBashPath, linkNodeModules } from './helpers.mjs';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import {
@@ -70,8 +70,11 @@ const workDir = mkdtempSync(join(tmpdir(), 'cops-matchmode-'));
 const originalProfileYml = PATHS.profileYml;
 const originalCv = PATHS.cv;
 const originalProfile = PATHS.profile;
+const originalCustom = PATHS.custom;
 
 try {
+  PATHS.custom = join(workDir, '_custom.md');
+  writeFileSync(PATHS.custom, '# House rules\n- Never below 90k EUR\n', 'utf-8');
   const dummyProfilePath = join(workDir, 'profile.yml');
   PATHS.profileYml = dummyProfilePath;
 
@@ -83,7 +86,7 @@ try {
   writeFileSync(dummyCvPath, '# Jane Doe\n## Experience\n- Staff Engineer at Acme (2020-2026)\n- Senior Engineer at Beta (2015-2020)\n', 'utf-8');
   PATHS.cv = dummyCvPath;
 
-  writeFileSync(dummyProfilePath, 'candidate:\n  full_name: "Jane Doe"\nspend_tier: standard\n', 'utf-8');
+  writeFileSync(dummyProfilePath, 'candidate:\n  full_name: "Jane Doe"\nspend_tier: standard\ncompensation:\n  minimum: 95000\nlanguage:\n  output: es\n', 'utf-8');
 
   const matchPrompt = loadContext('match');
   const fullPrompt = loadContext('full');
@@ -122,6 +125,19 @@ try {
     fail('match mode prompt unexpectedly included profileContent or profileYml');
   }
 
+  if (!matchPrompt.includes('Never below 90k') && !matchPrompt.includes('95000')) {
+    pass('match mode prompt omits _custom.md and the profile compensation (#5297)');
+  } else {
+    fail('match mode prompt leaked _custom.md or compensation from profile.yml');
+  }
+
+  // language.output is the one profile setting match mode takes (#5297).
+  if (matchPrompt.includes('OUTPUT LANGUAGE') && /human-facing output \(report prose and headings\) in es,/.test(matchPrompt)) {
+    pass('match mode prompt carries language.output from profile.yml');
+  } else {
+    fail('match mode prompt missing language.output');
+  }
+
   // Full mode must retain profileContent and profileYml
   if (fullPrompt.includes('CANDIDATE PROFILE & TARGETS (config/profile.yml)') && fullPrompt.includes('USER ARCHETYPES & NARRATIVE (_profile.md)')) {
     pass('full mode retains profileContent and profileYml');
@@ -142,6 +158,7 @@ try {
   PATHS.profileYml = originalProfileYml;
   PATHS.cv = originalCv;
   PATHS.profile = originalProfile;
+  PATHS.custom = originalCustom;
   rmSync(workDir, { recursive: true, force: true });
 }
 
@@ -350,4 +367,80 @@ try {
 
 } catch (err) {
   fail(`batch-runner.sh tests threw: ${err.message}`);
+}
+
+// ── Test 5: the Claude match path gets the output language, not the profile ──
+// #5297: a match worker must not see _profile.md, _custom.md or the targeting
+// and compensation in profile.yml; the full mode still gets all three.
+{
+  const base = mkdtempSync(join(tmpdir(), 'cops-match-profile-'));
+  const runMode = (modeArgs) => {
+    const dir = join(base, `checkout-${modeArgs.join('-') || 'full'}`);
+    const binDir = join(dir, 'stub-bin');
+    const capture = join(dir, 'captured-system-prompt.md');
+    for (const d of [join(dir, 'batch'), join(dir, 'modes'), join(dir, 'config'), binDir]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(dir, 'batch', 'batch-runner.sh'), readFileSync(join(ROOT, 'batch', 'batch-runner.sh'), 'utf-8'), { mode: 0o755 });
+    writeFileSync(join(dir, 'batch', 'batch-prompt.md'), 'Full worker prompt fixture.\n');
+    writeFileSync(join(dir, 'batch', 'batch-prompt-match.md'), 'Match worker prompt fixture.\n');
+    writeFileSync(join(dir, 'batch', 'batch-input.tsv'), 'id\turl\tsource\tnotes\n1\thttps://example.com/one\tfixture\t-\n');
+    writeFileSync(join(dir, 'path-resolver.mjs'), readFileSync(join(ROOT, 'path-resolver.mjs'), 'utf-8'));
+    writeFileSync(join(dir, 'profile-language.mjs'), readFileSync(join(ROOT, 'profile-language.mjs'), 'utf-8'));
+    mkdirSync(join(dir, 'lib'), { recursive: true });
+    writeFileSync(join(dir, 'lib', 'yaml-document.mjs'), readFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), 'utf-8'));
+    const linkProblem = linkNodeModules(dir);
+    if (linkProblem) throw new Error(linkProblem);
+    writeFileSync(join(dir, 'reserve-report-num.mjs'), "if (!process.argv.includes('--release')) console.log('001');\n");
+    for (const name of ['merge-tracker.mjs', 'reconcile-pipeline.mjs', 'verify-pipeline.mjs']) writeFileSync(join(dir, name), '// Not under test here.\n');
+    writeFileSync(join(dir, 'config', 'profile.yml'), 'compensation:\n  minimum: 95000\nlanguage:\n  output: es\n');
+    writeFileSync(join(dir, 'modes', '_profile.md'), '# Archetypes\n- PROFILE-ARCHETYPE-MARKER\n');
+    writeFileSync(join(dir, 'modes', '_custom.md'), '# House rules\n- CUSTOM-RULE-MARKER\n');
+    writeFileSync(join(binDir, 'claude'), [
+      '#!/usr/bin/env bash',
+      'while [[ $# -gt 0 ]]; do',
+      '  if [[ "$1" == "--append-system-prompt-file" ]]; then cp "$2" "$CAPTURE_FILE"; fi',
+      '  shift',
+      'done',
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    writeFileSync(join(binDir, 'curl'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+    const env = { ...process.env, PATH: `${binDir}${delimiter}${process.env.PATH}`, CAPTURE_FILE: capture };
+    for (const key of ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_PROFILE', 'CAREER_OPS_REPORTS_DIR', 'CAREER_OPS_BATCH_STATE', 'CAREER_OPS_TRACKER']) delete env[key];
+    try {
+      execFileSync(getBash(), [toBashPath(join(dir, 'batch', 'batch-runner.sh')), ...modeArgs, '--parallel', '1', '--max-retries', '0', '--rate-limit-sleep', '0'], {
+        cwd: dir, env, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
+      });
+    } catch { /* the stub worker fails on purpose; only the captured prompt matters */ }
+    return existsSync(capture) ? readFileSync(capture, 'utf-8') : null;
+  };
+  try {
+    const matchPrompt = runMode(['--mode', 'match']);
+    const fullPrompt = runMode([]);
+    if (matchPrompt === null || fullPrompt === null) {
+      fail('Claude match/full prompt test: the stub worker was never launched');
+    } else {
+      if (matchPrompt.startsWith('Match worker prompt fixture.')
+          && !matchPrompt.includes('PROFILE-ARCHETYPE-MARKER')
+          && !matchPrompt.includes('CUSTOM-RULE-MARKER')
+          && !matchPrompt.includes('95000')) {
+        pass('Claude match worker prompt carries no _profile.md, _custom.md or profile.yml content (#5297)');
+      } else {
+        fail('Claude match worker prompt leaked profile content');
+      }
+      if (/## Runtime output language[\s\S]*language\.output for this run: `es`/.test(matchPrompt)) {
+        pass('Claude match worker prompt carries language.output from profile.yml');
+      } else {
+        fail('Claude match worker prompt missing language.output');
+      }
+      if (fullPrompt.includes('PROFILE-ARCHETYPE-MARKER') && fullPrompt.includes('CUSTOM-RULE-MARKER') && fullPrompt.includes('95000')) {
+        pass('Claude full worker prompt still carries the profile personalization');
+      } else {
+        fail('Claude full worker prompt lost the profile personalization');
+      }
+    }
+  } catch (err) {
+    fail(`Claude match/full prompt test threw: ${err.message}`);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 }

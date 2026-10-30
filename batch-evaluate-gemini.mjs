@@ -25,6 +25,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { parseOutputLanguage } from './profile-language.mjs';
 import {
   normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
@@ -183,6 +184,18 @@ export function loadContext(mode = 'full') {
   if (mode === 'match' || mode === 'single-pass') {
     console.log('📂 Loading context for single-pass CV-match mode...');
     const cvContent = readFile(PATHS.cv, 'cv.md');
+    // #5297: match mode never shows the model the user profile (_profile.md,
+    // _custom.md, the targeting or compensation in profile.yml), so none of it
+    // can move the score. The one setting it takes is language.output, which
+    // decides the prose language and not the score.
+    const languageSection = existsSync(PATHS.profileYml) ? `
+═══════════════════════════════════════════════════════
+OUTPUT LANGUAGE
+═══════════════════════════════════════════════════════
+Write all human-facing output (report prose and headings) in ${parseOutputLanguage(readFileSync(PATHS.profileYml, 'utf-8'))}, whatever the
+language of the job description. Keep the SCORE_SUMMARY field names and the LEGITIMACY labels
+exactly as specified below. The output language must not affect the match score.
+` : '';
 
     systemPromptTemplate = `You are career-ops, an AI job search assistant evaluating a job offer in single-pass CV match mode.
 Your objective is to extract candidate CV facts and evaluate candidate alignment with the Job Description in a single, fast inference call to minimize token overhead, bypassing the multi-step reasoning chain (Blocks A through G).
@@ -191,7 +204,7 @@ Your objective is to extract candidate CV facts and evaluate candidate alignment
 CANDIDATE RESUME (cv.md)
 ═══════════════════════════════════════════════════════
 ${cvContent}
-
+${languageSection}
 ═══════════════════════════════════════════════════════
 INSTRUCTIONS (CONDENSED SINGLE-PASS EVALUATION)
 ═══════════════════════════════════════════════════════

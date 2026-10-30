@@ -309,9 +309,25 @@ if [[ "$MODE" != "full" && "$MODE" != "match" ]]; then
   exit 1
 fi
 
+MATCH_OUTPUT_LANGUAGE=""
 if [[ "$MODE" == "match" ]]; then
   PROMPT_FILE="$BATCH_DIR/batch-prompt-match.md"
   SKIP_PDF=true
+  # #5297: a match worker never sees the user profile, so targeting and
+  # compensation cannot move the score. language.output is the one setting it
+  # gets, resolved here once per run with the same reader the evaluators use.
+  if [[ -f "$PROFILE_FILE" ]]; then
+    MATCH_OUTPUT_LANGUAGE="$(node --input-type=module -e '
+      import { readFileSync } from "node:fs";
+      import { pathToFileURL } from "node:url";
+      const { parseOutputLanguage } = await import(pathToFileURL(process.argv[1]).href);
+      process.stdout.write(parseOutputLanguage(readFileSync(process.argv[2], "utf-8")));
+    ' "$PROJECT_DIR/profile-language.mjs" "$PROFILE_FILE" 2>/dev/null)" || {
+      MATCH_OUTPUT_LANGUAGE=""
+      echo "WARN: could not read language.output from $PROFILE_FILE; match workers will write in en." >&2
+    }
+  fi
+  [[ -n "$MATCH_OUTPUT_LANGUAGE" ]] || MATCH_OUTPUT_LANGUAGE="en"
 fi
 
 if [[ -z "$PARALLEL" ]]; then
@@ -1427,7 +1443,12 @@ process_offer() {
     {
       printf '\n\n---\n\n'
       printf '## Runtime paths: data root outside the checkout\n\n'
-      printf 'This install keeps the user layer in a separate data root. The profile for this run is `%s`. Where this prompt names `config/profile.yml`, read that file instead. Wherever this prompt names one of the paths below, resolve it under the data root, not the working directory:\n\n' "$PROFILE_FILE"
+      if [[ "${MODE:-full}" == "match" ]]; then
+        # Match mode names no profile file (#5297), so do not point at one.
+        printf 'This install keeps the user layer in a separate data root. Wherever this prompt names one of the paths below, resolve it under the data root, not the working directory:\n\n'
+      else
+        printf 'This install keeps the user layer in a separate data root. The profile for this run is `%s`. Where this prompt names `config/profile.yml`, read that file instead. Wherever this prompt names one of the paths below, resolve it under the data root, not the working directory:\n\n' "$PROFILE_FILE"
+      fi
       printf 'Data root: %s\n\n' "$DATA_ROOT"
       printf '`cv.md`, `article-digest.md`, `modes/_profile.md`, `modes/_custom.md`, `reports/`, `output/`, `data/`, `interview-prep/`, `batch/tracker-additions/`\n\n'
       printf 'Write the report under `reports/` in the data root and the tracker TSV under `batch/tracker-additions/` in the data root, and give scripts absolute data-root paths for these files. Markdown links written inside the report and the tracker TSV keep the relative form this prompt shows (`reports/...`). Every other path (`templates/`, the `.mjs` scripts, the other `modes/` files) stays relative to the working directory.\n'
@@ -1445,7 +1466,7 @@ process_offer() {
   # getProfilePath() returns the real path while DATA_ROOT keeps the one pwd
   # gave, and that alone used to add this block.
   local profile_override="${CAREER_OPS_PROFILE:-}"
-  if [[ -n "${profile_override//[[:space:]]/}" && "$PROFILE_RESOLVED" == "true" && "$PROFILE_FILE" != "$DATA_ROOT/config/profile.yml" && "$DATA_ROOT" == "$PROJECT_DIR" ]]; then
+  if [[ "${MODE:-full}" != "match" && -n "${profile_override//[[:space:]]/}" && "$PROFILE_RESOLVED" == "true" && "$PROFILE_FILE" != "$DATA_ROOT/config/profile.yml" && "$DATA_ROOT" == "$PROJECT_DIR" ]]; then
     {
       printf '\n\n---\n\n'
       printf '## Runtime profile\n\n'
@@ -1456,16 +1477,25 @@ process_offer() {
   # Inject user-layer personalization into the temporary worker prompt.
   # The resolved prompt is gitignored runtime state, so user profile data stays
   # out of the system layer while batch scoring matches interactive scoring.
-  for context_file in "$DATA_ROOT/modes/_profile.md" "$PROFILE_FILE" "$DATA_ROOT/modes/_custom.md"; do
-    if [[ -f "$context_file" ]]; then
-      {
-        printf '\n\n---\n\n'
-        printf '## Runtime personalization: %s\n\n' "${context_file#"$DATA_ROOT/"}"
-        sed 's/^/    /' "$context_file"
-        printf '\n'
-      } >> "$resolved_prompt"
-    fi
-  done
+  # Match mode gets none of it, only the output language (#5297).
+  if [[ "${MODE:-full}" == "match" ]]; then
+    {
+      printf '\n\n---\n\n'
+      printf '## Runtime output language\n\n'
+      printf 'language.output for this run: `%s`\n' "${MATCH_OUTPUT_LANGUAGE:-en}"
+    } >> "$resolved_prompt"
+  else
+    for context_file in "$DATA_ROOT/modes/_profile.md" "$PROFILE_FILE" "$DATA_ROOT/modes/_custom.md"; do
+      if [[ -f "$context_file" ]]; then
+        {
+          printf '\n\n---\n\n'
+          printf '## Runtime personalization: %s\n\n' "${context_file#"$DATA_ROOT/"}"
+          sed 's/^/    /' "$context_file"
+          printf '\n'
+        } >> "$resolved_prompt"
+      fi
+    done
+  fi
 
 
   # Build the launch command for the configured CLI.
