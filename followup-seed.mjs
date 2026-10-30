@@ -19,12 +19,19 @@
  * always safe — it just appends a fresh pin.
  *
  * Apply-date resolution order (see resolveAppliedDate): explicit --date, then
- * "Applied YYYY-MM-DD" in the row's notes, then today. The tracker's `date`
- * column is NEVER used as a fallback — it is usually the evaluation date, not
- * the date the application actually went out.
+ * "Applied YYYY-MM-DD" in the row's notes, then the tracker's `date` column,
+ * then today. Every result carries an `appDateSource` saying which of those it
+ * came from, so a measured date is never mistaken for a guessed one.
+ *
+ * The `date` column used to be excluded here as "the evaluation date, not the
+ * submission date". It is — but the fallback it was being excluded in favour of
+ * was `today`, which is worse: an early date makes a follow-up fire early
+ * (visible), while today makes an old application look new and silently resets
+ * its follow-up clock (not visible). Preferring the labelled proxy over the
+ * unlabelled guess is the trade that replaced it (#2607).
  *
  * Idempotency: by default, seeding a given appNum is a NO-OP FOREVER once
- * either a pin or a follow-up table row exists for it (exit 0, seeded:false).
+ * either a pin or a logged follow-up exists for it (exit 0, seeded:false).
  * Pass --force to append a fresh pin anyway.
  *
  * Usage:
@@ -46,24 +53,36 @@
  *   CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS   lock acquire timeout
  *   CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS     lock retry interval
  *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS     stale-lock recovery threshold
+ *   CAREER_OPS_OWNERLESS_GRACE_MS          ownerless-lock floor (lib/dir-lock.mjs; shared, not per-script)
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, isAbsolute, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { createHash, randomUUID } from 'crypto';
+// The lock protocol is lib/dir-lock.mjs, shared with every other core lock;
+// this module only picks the follow-ups lock directory, timing and error.
+import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
+import { makeCliFailWith, renameSyncWithRetry } from './tracker-utils.mjs';
 import { tmpdir } from 'os';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { localToday } from './lib/local-today.mjs';
 import {
   resolveCadenceConfig,
+  loadFollowupsEnabled,
   normalizeStatus,
   parseAppliedDate,
+  parseFollowups,
   parseNextOverrides,
   parseDate,
   addDays,
+  isRealCalendarDate,
 } from './followup-cadence.mjs';
+import { flagValue } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot, canonicalizeTrackerPath, resolveTrackerPath as sharedResolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 
 /** Canonical header written when data/follow-ups.md doesn't exist yet. */
 export const FOLLOWUPS_HEADER = [
@@ -75,6 +94,15 @@ export const FOLLOWUPS_HEADER = [
 
 const FOLLOWUPS_LOCK_PREFIX = 'career-ops-followups-';
 
+/**
+ * Minimum age before directory age alone may condemn an ownerless lock.
+ * See `lockRecoveryVerdict` for why the age check needs a floor.
+ *
+ * Re-exported rather than redeclared: the floor is applied inside that function
+ * now, so a local copy would be a constant this file no longer enforces.
+ */
+export { OWNERLESS_GRACE_MS } from './lib/dir-lock.mjs';
+
 /** Structured error carrying an exit-code-mapping `code`. */
 export class SeedError extends Error {
   constructor(code, message) {
@@ -85,7 +113,7 @@ export class SeedError extends Error {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return localToday();
 }
 
 /**
@@ -107,30 +135,60 @@ export function isValidCalendarDate(str) {
 }
 
 /**
- * Resolve the date an application was actually submitted, in strict priority
- * order: explicit `--date` > "Applied YYYY-MM-DD" in the tracker row's notes >
- * today. The tracker's `date` column is never consulted — it is usually the
- * evaluation date, not the submission date (see followup-cadence.mjs).
+ * Resolve the date an application was actually submitted, AND say where that
+ * date came from: explicit `--date` > "Applied YYYY-MM-DD" in the row's notes >
+ * the tracker's `date` column > today.
+ *
+ * The `date` column used to be excluded on the grounds that it is the
+ * evaluation date, not the submission date. True, but it was the wrong
+ * conclusion, because the alternative was `todayStr()` — and today is not a
+ * neutral default here, it is the single most damaging guess available:
+ *
+ *   - the evaluation date is early by however long the user took to apply,
+ *     which makes a follow-up fire early. Visible, and harmless.
+ *   - today makes the application look brand new, which silently RESETS the
+ *     follow-up clock. Someone who applied three weeks ago drops out of the
+ *     chase queue, and the pin looks exactly like a normal fresh entry.
+ *
+ * A wrong date you can see beats a wrong date you cannot, so the proxy is now
+ * preferred over the guess and `appDateSource` says which one you got. That
+ * matches followup-cadence.mjs's `resolveAppliedDate` (same fallback, same
+ * labelling) and company-history.mjs's `dateBasis`, so all three agree.
+ *
+ * `today` remains the last resort for a row whose `date` column is missing or
+ * unusable — but it is now labelled too, rather than being indistinguishable
+ * from a measured date.
  *
  * A notes date that isn't a real calendar date (e.g. "Applied 2026-02-31")
  * throws rather than falling through: `parseDate` would return null for it and
  * the pin would be written with a literal "null" next-date.
  *
- * @param {{num?: number, notes?: string}} row - Parsed tracker row (or any object with `notes`).
+ * @param {{num?: number, notes?: string, date?: string}} row - Parsed tracker row.
  * @param {string|null|undefined} explicitDate - `--date` value, already validated.
- * @returns {string} YYYY-MM-DD
+ * @param {string|null|undefined} [statusChangeDate] - The day a caller moved the row
+ *   to Applied. It ranks below the notes date, which the user wrote on purpose, and
+ *   above the evaluation-date column, which is only a proxy.
+ * @returns {{appliedDate: string, appDateSource: 'explicit'|'notes'|'status-change'|'evaluation-date'|'today'}}
  * @throws {SeedError} INVALID_DATE when the notes carry an impossible date.
  */
-export function resolveAppliedDate(row, explicitDate) {
-  if (explicitDate) return explicitDate;
+export function resolveAppliedDate(row, explicitDate, statusChangeDate) {
+  if (explicitDate) return { appliedDate: explicitDate, appDateSource: 'explicit' };
   const notesDate = parseAppliedDate(row?.notes);
   if (notesDate) {
     if (!isValidCalendarDate(notesDate)) {
       throw new SeedError('INVALID_DATE', `Application #${row?.num ?? '?'} notes carry an impossible "Applied ${notesDate}" date; fix the notes or pass --date`);
     }
-    return notesDate;
+    return { appliedDate: notesDate, appDateSource: 'notes' };
   }
-  return todayStr();
+  if (statusChangeDate) return { appliedDate: statusChangeDate, appDateSource: 'status-change' };
+  // Only a usable calendar date qualifies: a blank or malformed `date` cell
+  // must not become a pin with a "null" next-date, which is the same failure
+  // the notes branch throws over.
+  const columnDate = String(row?.date ?? '').trim();
+  if (isValidCalendarDate(columnDate)) {
+    return { appliedDate: columnDate, appDateSource: 'evaluation-date' };
+  }
+  return { appliedDate: todayStr(), appDateSource: 'today' };
 }
 
 /**
@@ -150,10 +208,7 @@ export function formatPinLine(appNum, nextDate, setDate) {
 
 function resolveTrackerPath(override) {
   if (override) return override;
-  if (process.env.CAREER_OPS_TRACKER) return process.env.CAREER_OPS_TRACKER;
-  return existsSync(join(CAREER_OPS, 'data/applications.md'))
-    ? join(CAREER_OPS, 'data/applications.md')
-    : join(CAREER_OPS, 'applications.md');
+  return sharedResolveTrackerPath(CAREER_OPS);
 }
 
 function resolveFollowupsPath(override) {
@@ -174,35 +229,22 @@ function envInt(name, fallback) {
 function readTrackerRows(trackerPath) {
   const content = readFileSync(trackerPath, 'utf-8');
   const lines = content.split('\n');
-  const colmap = resolveColumns(lines);
+  const parseOptions = { allowTabs: true, allowIndentation: true };
+  const colmap = resolveColumns(lines, parseOptions);
   const rows = [];
   for (const line of lines) {
-    const row = parseTrackerRow(line, colmap);
+    const row = parseTrackerRow(line, colmap, parseOptions);
     if (row) rows.push(row);
   }
   return rows;
 }
 
-// --- Idempotency: pin OR follow-up table row already exists for appNum ----
-
-// Mirrors followup-cadence.mjs's parseFollowups: a `|`-delimited row whose 3rd
-// cell (index 2 after split('|').map(trim) — index 0 is the empty cell before
-// the leading pipe, index 1 is the follow-up's own `num`) is the appNum.
-function hasFollowupTableRow(content, appNum) {
-  for (const line of content.split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map(s => s.trim());
-    if (parts.length < 8) continue;
-    const rowAppNum = parseInt(parts[2], 10);
-    if (!isNaN(rowAppNum) && rowAppNum === appNum) return true;
-  }
-  return false;
-}
+// --- Idempotency: pin OR an existing follow-up for appNum -----------------
 
 function isAlreadySeeded(content, appNum) {
   if (!content) return false;
   if (parseNextOverrides(content).has(appNum)) return true;
-  return hasFollowupTableRow(content, appNum);
+  return parseFollowups(content).some(entry => entry.appNum === appNum);
 }
 
 // --- Locking (mirrors merge-tracker.mjs's tracker lock, scoped to follow-ups) --
@@ -227,109 +269,30 @@ function resolveFollowupsLockDir(envValue, lockKey) {
 
 function resolveLockDir(explicitLockDir, followupsPath) {
   if (explicitLockDir) return explicitLockDir;
-  const lockKey = createHash('sha256').update(followupsPath).digest('hex').slice(0, 16);
+  // Canonicalize the parent so the key stays stable when the file is first created.
+  const lockPath = join(canonicalizeTrackerPath(dirname(followupsPath)), basename(followupsPath));
+  const lockKey = createHash('sha256').update(lockPath).digest('hex').slice(0, 16);
   return resolveFollowupsLockDir(process.env.CAREER_OPS_FOLLOWUPS_LOCK, lockKey);
-}
-
-function sleep(ms) {
-  return new Promise(res => setTimeout(res, ms));
-}
-
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err?.code === 'EPERM';
-  }
-}
-
-function readLockOwner(lockDir) {
-  try {
-    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
-  } catch {
-    return true;
-  }
 }
 
 /**
  * Acquire an exclusive filesystem lock covering the read-check-append
- * critical section for data/follow-ups.md. Mirrors merge-tracker.mjs's
- * tracker lock: atomic `mkdirSync`, an `owner.json` with pid/timestamp,
- * pid-alive detection, stale-lock recovery, and retry/backoff.
+ * critical section for data/follow-ups.md, through the protocol every core
+ * lock shares (lib/dir-lock.mjs).
  *
  * @param {string} lockDir
  * @param {string} followupsPath - Recorded in owner.json for diagnostics.
- * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options]
+ * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options] - `staleMs` is floored at OWNERLESS_GRACE_MS.
  * @returns {Promise<{release: Function}>}
  */
-async function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 60_000;
-  const retryMs = options.retryMs ?? 75;
-  const staleMs = options.staleMs ?? 10 * 60_000;
-  const recoverGuardDir = `${lockDir}.recover`;
-  const token = randomUUID();
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      mkdirSync(lockDir);
-      writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
-        pid: process.pid,
-        token,
-        startedAt: new Date().toISOString(),
-        followups: followupsPath,
-      }, null, 2));
-
-      let released = false;
-      return {
-        release() {
-          if (released) return;
-          released = true;
-          const owner = readLockOwner(lockDir);
-          if (owner?.token === token) {
-            rmSync(lockDir, { recursive: true, force: true });
-          }
-        },
-      };
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
-
-      let hasRecoverGuard = false;
-      try {
-        mkdirSync(recoverGuardDir);
-        hasRecoverGuard = true;
-      } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
-      }
-
-      if (hasRecoverGuard) {
-        try {
-          if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
-            continue;
-          }
-        } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
-        }
-      }
-
-      await sleep(retryMs);
-    }
-  }
-
-  throw new SeedError('LOCK_TIMEOUT', `Timed out waiting for follow-ups lock at ${lockDir}`);
+function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
+  return acquireDirLock(lockDir, {
+    timeoutMs: options.timeoutMs ?? 60_000,
+    retryMs: options.retryMs ?? 75,
+    staleMs: options.staleMs ?? 10 * 60_000,
+    owner: { followups: followupsPath },
+    timeoutError: () => new SeedError('LOCK_TIMEOUT', `Timed out waiting for follow-ups lock at ${lockDir}`),
+  });
 }
 
 // --- Atomic write (mirrors writeFileAtomic in tracker.mjs / merge-tracker.mjs) --
@@ -338,7 +301,7 @@ function writeFileAtomic(filePath, content) {
   const tmpPath = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmpPath, content);
-    renameSync(tmpPath, filePath);
+    renameSyncWithRetry(tmpPath, filePath);
   } catch (err) {
     rmSync(tmpPath, { force: true });
     throw err;
@@ -365,7 +328,13 @@ function appendPins(existingContent, pinLines) {
  * @param {number} appNum
  * @param {object} [options]
  * @param {string} [options.date] - Explicit apply date (YYYY-MM-DD), already validated.
+ * @param {string} [options.statusChangeDate] - The day the row moved to Applied, see resolveAppliedDate.
  * @param {boolean} [options.force] - Bypass idempotency guard and the Applied-status guard.
+ * @param {boolean} [options.assumeApplied] - Relax the Applied-status guard ONLY, keeping
+ *   idempotency intact. For a caller that is about to make the row Applied and wants a
+ *   truthful preview of what will happen: `force` would answer that question by also
+ *   suppressing `already-seeded`, so the preview would promise a pin the real run then
+ *   declines to write. This says "treat the status as Applied", not "write regardless".
  * @param {boolean} [options.dryRun] - Compute and report, but write nothing (no lock taken).
  * @param {string} [options.trackerPath]
  * @param {string} [options.followupsPath]
@@ -376,12 +345,142 @@ function appendPins(existingContent, pinLines) {
  * @param {number} [options.lockStaleMs]
  * @returns {Promise<object>}
  */
+/**
+ * Run `fn` while holding the cross-process lock on a follow-ups file.
+ *
+ * EXISTS BECAUSE "TAKE A LOCK" IS NOT ENOUGH HERE (#3034). The lock directory
+ * is DERIVED — sha256 of the resolved follow-ups path, under tmpdir — so two
+ * writers that each take "a lock" on separately computed directories exclude
+ * nothing at all. Any second implementation has to reproduce that derivation
+ * exactly, and a derivation copied into another codebase is a second body of
+ * the same truth: it works until the day one side changes.
+ *
+ * So the derivation never leaves this file. Callers outside the core (the web
+ * dashboard's follow-up log and override routes) import this function and get
+ * the same directory by construction.
+ *
+ * TWO PROPERTIES CALLERS DEPEND ON, both deliberate:
+ *
+ *   1. The lock is released on EVERY path, including a throw. A long-lived
+ *      process that returns a 500 without releasing would block the user's own
+ *      CLI until staleMs elapses, so the `finally` lives here rather than in
+ *      each caller's hands.
+ *
+ *   2. It is NOT reentrant. Holding this lock and then invoking a core script
+ *      that also takes it (`followup-seed.mjs` itself) self-deadlocks until the
+ *      timeout. Callers that write the file directly are safe; callers that
+ *      orchestrate core scripts must not wrap them in this.
+ *
+ * An in-process queue is not a substitute: it serialises one process against
+ * itself and is blind to every other one. The two compose — queue inside this
+ * lock — and neither replaces the other.
+ *
+ * @param {string} followupsPath - Path to the follow-ups file to guard.
+ * @param {() => Promise<T>|T} fn - Runs while the lock is held.
+ * @param {object} [options]
+ * @param {string} [options.lockDir] - Explicit lock directory (tests).
+ * @param {number} [options.timeoutMs=60000]
+ * @param {number} [options.retryMs=75]
+ * @param {number} [options.staleMs=600000]
+ * @returns {Promise<T>} Whatever `fn` returned.
+ * @template T
+ */
+export async function withFollowupsLock(followupsPath, fn, options = {}) {
+  const resolvedPath = resolveFollowupsPath(followupsPath);
+  const lockDir = resolveLockDir(options.lockDir, resolvedPath);
+  const lock = await acquireFollowupsLock(lockDir, resolvedPath, {
+    timeoutMs: options.timeoutMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS', 60_000),
+    retryMs: options.retryMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS', 75),
+    staleMs: options.staleMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS', 10 * 60_000),
+  });
+  try {
+    return await fn();
+  } finally {
+    releaseOrWarn(lock);
+  }
+}
+
+const PIN_LINE = /^-\s+next\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s+\(set\s+(\d{4}-\d{2}-\d{2})\))?(?:\s*[—–-]\s*(.*))?\s*$/i;
+
+function pinLinePattern(appNum) {
+  return new RegExp(`^-\\s+next\\s+#${appNum}\\s`, 'i');
+}
+
+function lastPin(content, appNum) {
+  let found = null;
+  for (const line of String(content ?? '').split('\n')) {
+    const match = line.match(PIN_LINE);
+    if (!match || Number(match[1]) !== appNum) continue;
+    found = { date: match[2], setDate: match[3] || match[2], why: (match[4] || '').trim() };
+  }
+  return found;
+}
+
+function withoutPins(content, appNum) {
+  const pattern = pinLinePattern(appNum);
+  return String(content ?? '').split('\n').filter((line) => !pattern.test(line)).join('\n');
+}
+
+function appendPinLine(content, appNum, line) {
+  const base = content == null ? `${FOLLOWUPS_HEADER}\n` : withoutPins(content, appNum);
+  return `${base.endsWith('\n') ? base : `${base}\n`}${line}\n`;
+}
+
+function pinText(appNum, date, setDate, why) {
+  const line = formatPinLine(appNum, date, setDate);
+  return why ? `${line} — ${why}` : line;
+}
+
+export async function replaceNextPin(appNum, options = {}) {
+  if (!Number.isInteger(appNum) || appNum <= 0) {
+    throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
+  }
+  if (!isRealCalendarDate(options.date)) {
+    throw new SeedError('INVALID_DATE', `next date must be a real calendar date in YYYY-MM-DD form: ${options.date}`);
+  }
+  const why = String(options.why ?? '').trim();
+  if (/[\t\r\n]/.test(why)) {
+    throw new SeedError('USAGE', 'pin note cannot contain a tab or newline');
+  }
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
+  const setDate = localToday(options.now instanceof Date ? options.now : new Date());
+  return withFollowupsLock(followupsPath, () => {
+    const existing = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf8') : null;
+    const current = existing == null ? null : lastPin(existing, appNum);
+    if (current && current.date === options.date && current.why === why) {
+      return { changed: false, date: options.date, setDate: current.setDate };
+    }
+    mkdirSync(dirname(followupsPath), { recursive: true });
+    writeFileAtomic(followupsPath, appendPinLine(existing, appNum, pinText(appNum, options.date, setDate, why)));
+    return { changed: true, date: options.date, setDate };
+  }, { timeoutMs: options.lockTimeoutMs, lockDir: options.lockDir });
+}
+
+export async function clearNextPin(appNum, options = {}) {
+  if (!Number.isInteger(appNum) || appNum <= 0) {
+    throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
+  }
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
+  return withFollowupsLock(followupsPath, () => {
+    if (!existsSync(followupsPath)) return { cleared: false };
+    const existing = readFileSync(followupsPath, 'utf8');
+    const next = withoutPins(existing, appNum);
+    if (next === existing) return { cleared: false };
+    writeFileAtomic(followupsPath, next);
+    return { cleared: true };
+  }, { timeoutMs: options.lockTimeoutMs, lockDir: options.lockDir });
+}
+
 export async function seedFollowup(appNum, options = {}) {
   if (!Number.isInteger(appNum) || appNum <= 0) {
     throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
   }
   if (options.date != null && !isValidCalendarDate(options.date)) {
     throw new SeedError('INVALID_DATE', `--date must be a real calendar date in YYYY-MM-DD form: ${options.date}`);
+  }
+
+  if (!loadFollowupsEnabled(options.profilePath)) {
+    return { seeded: false, appNum, pin: null, nextDate: null, reason: 'disabled', ...(options.dryRun ? { dryRun: true } : {}) };
   }
 
   const trackerPath = resolveTrackerPath(options.trackerPath);
@@ -397,11 +496,14 @@ export async function seedFollowup(appNum, options = {}) {
   }
 
   const normalized = normalizeStatus(row.status);
-  if (normalized !== 'applied' && !options.force) {
+  if (normalized !== 'applied' && !options.force && !options.assumeApplied) {
     throw new SeedError('NOT_APPLIED', `Application #${appNum} is not Applied (status: "${row.status.trim()}"); use --force to seed anyway`);
   }
 
-  const appliedDate = resolveAppliedDate(row, options.date);
+  // appDateSource travels with the result so a caller can tell a measured apply
+  // date from a proxy or a guess — the same contract followup-cadence.mjs and
+  // company-history.mjs already expose.
+  const { appliedDate, appDateSource } = resolveAppliedDate(row, options.date, options.statusChangeDate);
   const cadence = resolveCadenceConfig({ profilePath: options.profilePath });
   const nextDate = addDays(parseDate(appliedDate), cadence.applied_first);
   const setDate = todayStr();
@@ -410,9 +512,9 @@ export async function seedFollowup(appNum, options = {}) {
   if (options.dryRun) {
     const existingContent = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf-8') : '';
     if (isAlreadySeeded(existingContent, appNum) && !options.force) {
-      return { seeded: false, appNum, pin: null, nextDate, appliedDate, setDate, reason: 'already-seeded', dryRun: true };
+      return { seeded: false, appNum, pin: null, nextDate, appliedDate, appDateSource, setDate, reason: 'already-seeded', dryRun: true };
     }
-    return { seeded: true, appNum, pin, nextDate, appliedDate, setDate, dryRun: true };
+    return { seeded: true, appNum, pin, nextDate, appliedDate, appDateSource, setDate, dryRun: true };
   }
 
   const lockDir = resolveLockDir(options.lockDir, followupsPath);
@@ -425,14 +527,14 @@ export async function seedFollowup(appNum, options = {}) {
   try {
     const existingContent = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf-8') : null;
     if (existingContent != null && isAlreadySeeded(existingContent, appNum) && !options.force) {
-      return { seeded: false, appNum, pin: null, nextDate, appliedDate, setDate, reason: 'already-seeded' };
+      return { seeded: false, appNum, pin: null, nextDate, appliedDate, appDateSource, setDate, reason: 'already-seeded' };
     }
 
     mkdirSync(dirname(followupsPath), { recursive: true });
     writeFileAtomic(followupsPath, appendPins(existingContent, [pin]));
-    return { seeded: true, appNum, pin, nextDate, appliedDate, setDate };
+    return { seeded: true, appNum, pin, nextDate, appliedDate, appDateSource, setDate };
   } finally {
-    lock.release();
+    releaseOrWarn(lock);
   }
 }
 
@@ -447,6 +549,7 @@ export async function seedFollowup(appNum, options = {}) {
  * @returns {Promise<{seeded: object[], skipped: object[]}>}
  */
 export async function seedBackfill(options = {}) {
+  if (!loadFollowupsEnabled(options.profilePath)) return { seeded: [], skipped: [], reason: 'disabled' };
   const trackerPath = resolveTrackerPath(options.trackerPath);
   const followupsPath = resolveFollowupsPath(options.followupsPath);
 
@@ -459,9 +562,9 @@ export async function seedBackfill(options = {}) {
   const setDate = todayStr();
 
   function planFor(row) {
-    const appliedDate = resolveAppliedDate(row, null);
+    const { appliedDate, appDateSource } = resolveAppliedDate(row, null);
     const nextDate = addDays(parseDate(appliedDate), cadence.applied_first);
-    return { appNum: row.num, pin: formatPinLine(row.num, nextDate, setDate), nextDate, appliedDate, setDate };
+    return { appNum: row.num, pin: formatPinLine(row.num, nextDate, setDate), nextDate, appliedDate, appDateSource, setDate };
   }
 
   if (options.dryRun) {
@@ -525,21 +628,35 @@ export async function seedBackfill(options = {}) {
 
     return { seeded, skipped };
   } finally {
-    lock.release();
+    releaseOrWarn(lock);
   }
 }
 
 // --- CLI ---------------------------------------------------------------
 
+const USAGE = `Usage:
+  node followup-seed.mjs <appNum> [--date YYYY-MM-DD] [--force] [--dry-run] [--json]
+  node followup-seed.mjs --backfill [--force] [--dry-run] [--json]
+
+  --date <YYYY-MM-DD>  override applied date (single-app only)
+  --backfill           seed all Applied rows lacking pins/logs
+  --force              re-seed even if already pinned/logged
+  --dry-run            compute without writing follow-ups.md
+  --json               machine-readable JSON output
+  --help, -h           print this and exit`;
+
 function parseCliArgs(argv) {
-  const opts = { force: false, dryRun: false, json: false, backfill: false, date: null, appNum: null };
+  const opts = { force: false, dryRun: false, json: false, backfill: false, date: null, appNum: null, help: false };
   const positionals = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--date') {
-      i++;
-      if (argv[i] === undefined) throw new SeedError('USAGE', '--date requires a value');
-      opts.date = argv[i];
+    if (a === '--date' || a.startsWith('--date=')) {
+      const val = flagValue(argv.slice(i, i + 2), '--date');
+      if (val === undefined) throw new SeedError('USAGE', '--date requires a value');
+      opts.date = val;
+      if (a === '--date') i++;
+    } else if (a === '--help' || a === '-h') {
+      opts.help = true;
     } else if (a === '--force') {
       opts.force = true;
     } else if (a === '--dry-run') {
@@ -554,6 +671,8 @@ function parseCliArgs(argv) {
       positionals.push(a);
     }
   }
+
+  if (opts.help) return opts;
 
   if (opts.backfill) {
     if (positionals.length !== 0) {
@@ -585,10 +704,19 @@ const EXIT_CODES = {
   LOCK_TIMEOUT: 4,
 };
 
-function failWith(exitCode, code, message, json) {
-  if (json) console.log(JSON.stringify({ error: message, code }));
-  console.error(`❌ ${message}`);
-  process.exit(exitCode);
+/**
+ * How the apply date was arrived at, for the human-readable line — empty for a
+ * date that was actually measured.
+ *
+ * The whole point of tracking the source is that the user can see when a
+ * cadence is being counted from a proxy rather than from the real submission
+ * date, so an unmeasured date has to say so where they will actually look. In
+ * --json it travels as `appDateSource`.
+ */
+function appDateNote(source) {
+  if (source === 'evaluation-date') return ', from the evaluation date — notes carry no apply date';
+  if (source === 'today') return ', assumed today — no apply date and no evaluation date';
+  return '';
 }
 
 function reportSingle(result, json) {
@@ -596,9 +724,13 @@ function reportSingle(result, json) {
     console.log(JSON.stringify(result));
     return;
   }
+  if (result.reason === 'disabled') {
+    console.log('⏭️  Follow-ups are turned off (follow_ups.enabled: false in config/profile.yml); nothing seeded.');
+    return;
+  }
   const dryTag = result.dryRun ? ' [dry-run]' : '';
   if (result.seeded) {
-    console.log(`✅ Seeded #${result.appNum}: next follow-up ${result.nextDate} (applied ${result.appliedDate}, set ${result.setDate})${dryTag}`);
+    console.log(`✅ Seeded #${result.appNum}: next follow-up ${result.nextDate} (applied ${result.appliedDate}${appDateNote(result.appDateSource)}, set ${result.setDate})${dryTag}`);
   } else {
     console.log(`⏭️  #${result.appNum} already seeded — no-op (${result.reason})${dryTag}`);
   }
@@ -609,21 +741,33 @@ function reportBackfill(result, json) {
     console.log(JSON.stringify(result));
     return;
   }
+  if (result.reason === 'disabled') {
+    console.log('⏭️  Follow-ups are turned off (follow_ups.enabled: false in config/profile.yml); nothing seeded.');
+    return;
+  }
   const dryTag = result.dryRun ? ' [dry-run]' : '';
   console.log(`✅ Backfill${dryTag}: seeded ${result.seeded.length}, skipped ${result.skipped.length}`);
-  for (const s of result.seeded) console.log(`  + #${s.appNum}: next ${s.nextDate}`);
+  for (const s of result.seeded) console.log(`  + #${s.appNum}: next ${s.nextDate}${appDateNote(s.appDateSource)}`);
   for (const s of result.skipped) console.log(`  - #${s.appNum}: ${s.reason}`);
 }
 
 async function main() {
   const argv = process.argv.slice(2);
   const jsonRequested = argv.includes('--json');
+  // Bound from the raw argv rather than from opts.json: a parse that fails mid-argv
+  // never settles opts.json, and the two disagree for `--date --json` (#5198).
+  const failWith = makeCliFailWith(jsonRequested);
   let opts;
   try {
     opts = parseCliArgs(argv);
   } catch (err) {
-    failWith(EXIT_CODES[err.code] ?? 1, err.code || 'USAGE', err.message, jsonRequested);
+    failWith(EXIT_CODES[err.code] ?? 1, err.code || 'USAGE', err.message);
     return;
+  }
+
+  if (opts.help) {
+    console.log(USAGE);
+    process.exit(0);
   }
 
   try {
@@ -638,11 +782,11 @@ async function main() {
   } catch (err) {
     const code = err.code || 'ERROR';
     const exitCode = EXIT_CODES[code] ?? 1;
-    failWith(exitCode, code, err.message, opts.json);
+    failWith(exitCode, code, err.message);
   }
 }
 
 // Run (CLI only; guarded so the module is safely importable for tests).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

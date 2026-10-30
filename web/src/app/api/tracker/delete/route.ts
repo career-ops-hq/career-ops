@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { careerOpsRoot, rootScript, trackerCanDelete } from "@/lib/career-ops";
 import { isTrackerWriting } from "@/lib/core/run-registry";
+import { parseOrphanReport } from "@/lib/tracker-delete-output.mjs";
+import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,20 +18,9 @@ export const dynamic = "force-dynamic";
 // nothing and can overlap.
 let deleting = false;
 
-function parseOrphan(stderr: string): string | null {
-  // dry-run: "(report file would be orphaned: <path>)"
-  // real:    "Note: report file may now be orphaned — <path>"
-  const m = stderr.match(/orphaned[:—-]+\s*([^\n)]+)\)?\s*$/im);
-  return m ? m[1].trim() : null;
-}
-
 export async function POST(req: Request) {
-  let body: { n?: string | number; dryRun?: boolean };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<{ n?: string | number; dryRun?: boolean }>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const num = String(body.n ?? "").trim();
   if (!/^\d+$/.test(num)) {
     return Response.json({ error: "a numeric application number is required" }, { status: 400 });
@@ -63,7 +54,9 @@ export async function POST(req: Request) {
       let err = "";
       let child;
       try {
-        child = spawn(process.execPath, args, { cwd: careerOpsRoot(), env: process.env });
+        // windowsHide: see api/doctor/route.ts — a stale inherited console
+        // kills every child with 0xC0000142 on Windows; never inherit one.
+        child = spawn(process.execPath, args, { cwd: careerOpsRoot(), env: process.env, windowsHide: true });
       } catch (e) {
         resolve({ code: 1, err: e instanceof Error ? e.message : "failed to start tracker.mjs" });
         return;
@@ -98,7 +91,7 @@ export async function POST(req: Request) {
         { status: notFound ? 404 : 400 },
       );
     }
-    return Response.json({ ok: true, dryRun, orphanReport: parseOrphan(result.err) });
+    return Response.json({ ok: true, dryRun, orphanReport: parseOrphanReport(result.err) });
   } finally {
     if (!dryRun) deleting = false;
   }

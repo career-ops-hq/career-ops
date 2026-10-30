@@ -8,10 +8,12 @@ on:
   pull_request:
     paths:
       - 'web/**'
+      - '.github/workflows/web-ci.yml'
   push:
     branches: [main]
     paths:
       - 'web/**'
+      - '.github/workflows/web-ci.yml'
 
 permissions:
   contents: read
@@ -30,7 +32,28 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # The doctor parity test runs the real core doctor.mjs, which imports the
+      # core's own dependencies (js-yaml, dotenv). Installed the same way as
+      # test.yml: no lockfile at the root, and no browser download.
+      - name: Install core dependencies
+        run: npm install --ignore-scripts
+        working-directory: .
       - run: npm ci
+      # The web tree carries the only tracked lockfile, so this audits the
+      # exact pinned versions (#5771's class of finding). This workflow is
+      # informative by design: a red here blocks nothing, it is one more
+      # place an advisory gets seen before it ships.
+      - run: npm audit --audit-level=high
       - run: npm test
       - run: npx tsc --noEmit
       - run: npm run build
+      # The tests/lib/*.browser.test.mjs suites skip in `npm test` above: each
+      # needs a running server's URL in an env var (#5764). This starts the
+      # build above once per suite on disposable data and runs it there, where a
+      # skip is a failure. They launch Google Chrome (`channel: "chrome"`), which
+      # the ubuntu-latest image ships; checked first, so a runner image without
+      # it fails here by name rather than in twelve launch errors.
+      - name: Browser suites against the built app
+        run: |
+          google-chrome --version
+          npm run test:browser

@@ -11,6 +11,10 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { CadenceSettings } from "@/components/followups/cadence-settings";
+import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
+import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
+import { CONFIG_KEY as STORAGE_KEY, writeConfig } from "@/lib/config-events.mjs";
 
 type Cli = {
   id: string;
@@ -30,7 +34,6 @@ const PROVIDERS = [
   { id: "openrouter", label: "OpenRouter" },
 ] as const;
 
-const STORAGE_KEY = "career-ops:config";
 
 export function ConfigForm() {
   const [mode, setMode] = useState<Mode>("cli");
@@ -66,17 +69,32 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // auto-select first installed if nothing chosen yet
-        setCliId((prev) => prev || list.find((c) => c.installed)?.id || "");
+        setCliId((prev) => {
+          // A restored id whose CLI is no longer installed must not stick: it
+          // would stay selected and save() would write it straight back, so
+          // "open Config and click Save config" could never clear it (#4012).
+          if (keepIfInstalled(prev, list)) return prev;
+          return pickDefaultInstalled(list, typeof d.remembered === "string" ? d.remembered : null) ?? "";
+        });
       })
       .catch(() => setClis([]));
   }, []);
+
+  // Persist the highlighted CLI when Config was never saved. Highlight-only
+  // looks configured while jobs still read empty localStorage, so whatever is
+  // rendered as selected must be written, at ANY installed count. The write
+  // lives here and not in the setCliId updater: React runs updaters during
+  // render, and the config-changed event it fires makes AssistantConsole set
+  // state mid-render.
+  useEffect(() => {
+    if (clis && cliId && !readSavedCliId()) persistCliId(cliId);
+  }, [clis, cliId]);
 
   function save() {
     // The API key is deliberately NOT persisted: nothing reads it yet (the
     // key/manual panel is unwired) and a secret must never sit in clear-text
     // localStorage. Keys belong in the user's own CLI/provider config.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    writeConfig(localStorage, window, { mode, cliId, provider, logos });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -134,7 +152,7 @@ export function ConfigForm() {
             ) : installed.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
                 No AI tool yet? Free options like <span className="text-foreground">OpenCode</span> with Qwen or GLM work great.{" "}
-                <a href="https://career-ops.org/docs/free-ai-engine" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
+                <a href="https://career-ops.org/docs/free-ai-engine" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand-text hover:underline">
                   Get one free <ExternalLink className="size-3" />
                 </a>
               </div>
@@ -142,56 +160,62 @@ export function ConfigForm() {
               <div className="space-y-2">
                 {clis.map((c) => {
                   const selected = c.id === cliId;
+                  const rowClassName = cn(
+                    "flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors",
+                    selected
+                      ? "border-brand/50 bg-brand-soft"
+                      : c.installed
+                        ? "border-border bg-surface/50"
+                        : "border-border/60 bg-surface/20",
+                  );
+
+                  if (c.installed) {
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setCliId(c.id)}
+                        aria-pressed={selected}
+                        className={cn(rowClassName, "w-full cursor-pointer text-left")}
+                      >
+                        <Check className="size-4 shrink-0 text-emerald-400" />
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <span className={cn("font-medium", selected ? "text-foreground" : "")}>
+                            {c.name}
+                          </span>
+                          <span className="font-mono text-xs text-faint">{c.run}</span>
+                        </span>
+                        <span className="hidden max-w-[40%] shrink-0 truncate text-xs text-faint sm:block">
+                          {c.path}
+                        </span>
+                      </button>
+                    );
+                  }
+
                   return (
                     <div
                       key={c.id}
-                      className={cn(
-                        "flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors",
-                        selected
-                          ? "border-brand/50 bg-brand-soft"
-                          : c.installed
-                            ? "border-border bg-surface/50"
-                            : "border-border/60 bg-surface/20",
-                      )}
+                      className={rowClassName}
                     >
-                      {c.installed ? (
-                        <Check className="size-4 shrink-0 text-emerald-400" />
-                      ) : (
-                        <CircleDashed className="size-4 shrink-0 text-faint" />
-                      )}
+                      <CircleDashed className="size-4 shrink-0 text-faint" />
                       <button
                         type="button"
-                        disabled={!c.installed}
-                        onClick={() => setCliId(c.id)}
-                        className={cn(
-                          "flex flex-1 items-center gap-2 text-left max-sm:min-h-[44px]",
-                          c.installed ? "" : "cursor-default",
-                        )}
+                        disabled
+                        className="flex flex-1 items-center gap-2 text-left max-sm:min-h-[44px] cursor-default"
                       >
-                        <span
-                          className={cn(
-                            "font-medium",
-                            selected ? "text-foreground" : c.installed ? "" : "text-muted",
-                          )}
-                        >
+                        <span className="font-medium text-muted">
                           {c.name}
                         </span>
                         <span className="font-mono text-xs text-faint">{c.run}</span>
                       </button>
-                      {c.installed ? (
-                        <span className="hidden max-w-[40%] shrink-0 truncate text-xs text-faint sm:block">
-                          {c.path}
-                        </span>
-                      ) : (
-                        <a
-                          href={c.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex shrink-0 items-center justify-center gap-1 text-xs text-brand hover:underline max-sm:min-h-[44px]"
-                        >
-                          Install <ExternalLink className="size-3" />
-                        </a>
-                      )}
+                      <a
+                        href={c.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex shrink-0 items-center justify-center gap-1 text-xs text-brand-text hover:underline max-sm:min-h-[44px]"
+                      >
+                        Install <ExternalLink className="size-3" />
+                      </a>
                     </div>
                   );
                 })}
@@ -291,6 +315,8 @@ export function ConfigForm() {
         </span>
       </button>
 
+      <CadenceSettings />
+
       <div className="mt-8 flex items-center gap-3">
         <button
           type="button"
@@ -335,7 +361,7 @@ function ModeCard({
             : "border-border bg-surface/50 hover:bg-surface-hover",
       )}
     >
-      <Icon className={cn("size-4", active && !disabled ? "text-brand" : "text-muted")} />
+      <Icon className={cn("size-4", active && !disabled ? "text-brand-text" : "text-muted")} />
       <span className="text-sm font-medium text-foreground">{title}</span>
       <span className="text-xs text-faint">{hint}</span>
     </button>

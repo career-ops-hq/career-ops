@@ -1,0 +1,1192 @@
+#!/usr/bin/env node
+// GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
+// {"builtAt":"2026-10-19T12:04:32.666Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"21 entradas","priority":"7 entradas"}}
+import fs from 'node:fs';
+import path from 'node:path';
+
+const POLICIES = {"labels":{"version":1,"_doc":"Máquina de estados por labels. Los scripts leen de aquí; nada se hardcodea. who_sets/who_clears: action | session | coderabbit | human | collisions | priority.","maintainers":["santifer","Scott-Emberson"],"bots":["coderabbitai","coderabbitai[bot]","github-actions","github-actions[bot]","dependabot","dependabot[bot]","renovate","renovate[bot]","copilot","copilot-pull-request-reviewer","allcontributors","allcontributors[bot]"],"states":["triage/new","triage/ci-hold","triage/needs-split","needs-rebase","triage/waiting-author","triage/ready","triage/trivial","triage/re-review"],"statePrecedence":["needs-rebase","triage/ci-hold","triage/needs-split","triage/waiting-author","triage/trivial","triage/re-review","triage/ready","triage/new"],"areas":{"🔴 core-architecture":["AGENTS.md","CLAUDE.md","OPENCODE.md","DATA_CONTRACT.md","modes/_shared.md"],"⚠️ agent-behavior":["modes/*.md","modes/**/*.md",".claude/skills/**",".cursor/skills/**",".opencode/skills/**",".qwen/skills/**",".antigravitycli/skills/**",".grok/skills/**"],"🔧 scripts":["*.mjs","batch/**"],"📄 docs":["docs/**","README*.md","CONTRIBUTING.md","GOVERNANCE.md","CODE_OF_CONDUCT.md","SECURITY.md","SUPPORT.md"],"🌐 i18n":["README.*.md","modes/de/**","modes/fr/**","modes/hi/**","modes/ja/**","modes/ru/**"],"📊 dashboard":["dashboard/**"],"📦 dependencies":["package.json","package-lock.json"],"⚙️ ci":[".github/**"],"area:web":["web/**"]},"labels":{"triage/new":{"color":"BFD4F2","description":"Sin clasificar todavía: la Action decide estado en el siguiente sweep","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/ci-hold":{"color":"E99695","description":"Primerizo con CI pendiente de aprobación: un maintainer la libera","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/needs-split":{"color":"F9D0C4","description":"Varias entregas independientes en una PR: pedir troceo","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"needs-rebase":{"color":"fbca04","description":"Conflicts with main after recent merges; author rebase needed","who_sets":"action","who_clears":"action","exclusive_group":"triage","exists":true},"triage/waiting-author":{"color":"FBCA04","description":"La pelota está en el tejado del autor (CI rojo o cambios pedidos)","who_sets":"session","who_clears":"action","exclusive_group":"triage"},"triage/ready":{"color":"0E8A16","description":"CI verde y sin bloqueos: lista para revisión humana","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/trivial":{"color":"C2E0C6","description":"Pasa todos los gates de merge trivial: se fusiona sin lote","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/re-review":{"color":"1D76DB","description":"Tenía OK y cambió después: hay que volver a mirar","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"no-split":{"color":"C5DEF5","description":"Maintainer decision: keep as one PR, no split request. Removed if it grows past 1.5x its size.","who_sets":"session","who_clears":"session","_doc":"Cara pública del «no partir» de Santiago (bin/decision.mjs --no-split). La pone y la quita la sesión según su decisión del ledger; la Action no la toca, pero con ella no vuelve a poner triage/needs-split por tamaño (2-oct, #3782)."},"direction/needs-santiago":{"color":"D93F0B","description":"Decisión de dirección reservada a Santiago: no se fusiona sin su OK","who_sets":"session","who_clears":"session","exclusive_group":"direction","blocks_merge":true},"direction/review":{"color":"5319E7","description":"Política de dirección: revisar encaje antes de avanzar","who_sets":"session","who_clears":"session","exclusive_group":"direction"},"needs-maintainer-decision":{"color":"D93F0B","description":"Architecture/strategy/precedent call reserved for Santiago","who_sets":"human","who_clears":"human","exclusive_group":"direction","exists":true,"synonym_of":"direction/needs-santiago"},"maintainer-commitment":{"color":"D876E3","description":"Hay una promesa nuestra registrada en el ledger para esta PR","who_sets":"session","who_clears":"session"},"blocks-others":{"color":"E4E669","description":"Otras PRs abiertas tocan sus mismos ficheros: fusionarla primero","who_sets":"collisions","who_clears":"collisions"},"p0":{"color":"B60205","description":"Critical / blocking","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true},"p1":{"color":"D93F0B","description":"High priority","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true},"p2":{"color":"FBCA04","description":"Medium priority","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true,"no_label":true,"_doc":"p2 es el estado por defecto: no se etiqueta. classify solo añade p0/p1 y quita p0/p1 cuando dejan de cumplirse."},"quality-check":{"color":"D4C5F9","description":"Automated signal: a maintainer reads this one by hand before anything else happens","who_sets":"coderabbit","who_clears":"human","exists":true,"read_only":true},"agent-generated":{"color":"5319e7","description":"Drafted by a coding agent operated by a maintainer; read, run and signed by a human before review","who_sets":"human","who_clears":"human","exists":true,"read_only":true},"stale":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"plugin-candidate":{"color":"8B5CF6","description":"Good integration, lives outside core — candidate for the optional-integrations/plugin surface","who_sets":"human","who_clears":"human","exists":true,"read_only":true},"adoption/track":{"color":"1D76DB","description":"In the PR adoption ladder: author unresponsive, clock running","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/pinged":{"color":"5DA8E8","description":"Adoption ladder step 1: friendly ping posted","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/warned":{"color":"F9A825","description":"Adoption ladder step 2: adoption notice posted, 2 weeks to respond","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/ready":{"color":"D93F0B","description":"Adoption ladder step 3: eligible for close + adoptable companion issue (maintainer action)","who_sets":"action","who_clears":"human","exists":true,"read_only":true},"🔧 scripts":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"⚠️ agent-behavior":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"📄 docs":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"🔴 core-architecture":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"area:web":{"color":"dd7627","description":"Web/UI surface — owned by the career-ops-ui agent (first-party web)","who_sets":"human","who_clears":"human","exists":true,"read_only":true,"area":true},"📊 dashboard":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"📦 dependencies":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"🌐 i18n":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"⚙️ ci":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true}}},"trivial":{"version":1,"_doc":"Gates de merge trivial. Todos en código (bin/lib/triage-core.mjs evaluateGates). Un test negativo por gate en tests/core.test.mjs.","maxLinesSmall":50,"safeAreas":["📄 docs","🌐 i18n"],"safePathPrefixes":["docs/","tests/","test/"],"safeFilePatterns":["README*.md","*.test.mjs","*.test.js","*.test.ts","*_test.go"],"requiredChecks":["test (ubuntu-latest)","test (macos-latest)","test (windows-latest)"],"forbiddenLabels":["quality-check","agent-generated","needs-rebase","🔴 core-architecture","⚠️ agent-behavior","direction/needs-santiago","direction/review","needs-maintainer-decision"],"forbiddenLabelPrefixes":["direction/"],"coderabbitLogins":["coderabbitai","coderabbitai[bot]"],"minAuthorMerged":1,"codeowners":{"file":".github/CODEOWNERS","owner":"@santifer","extraPatterns":["/plugins-registry/"],"_extraPatternsDoc":"plugins-registry.json ya no existe; hoy es plugins-registry/** y sigue siendo chokepoint de Santiago.","fallbackPatterns":["/README*.md","/CONTRIBUTING.md","/GOVERNANCE.md","/MAINTAINERS.md","/ARCHITECTURE.md","/.github/CODEOWNERS","/.github/copilot-instructions.md","/.github/agents/","/.github/instructions/","/CLAUDE.md","/AGENTS.md","/CODEX.md","/OPENCODE.md","/GEMINI.md","/modes/_shared.md","/DATA_CONTRACT.md","/update-system.mjs","/updater-migration-tests.mjs","/plugins-registry.json","/validate-plugin-registry.mjs","/plugin-install.mjs","/plugin-audit.mjs","/plugins/_engine.mjs","/plugins/_lock.mjs","/plugins/_net.mjs","/plugins/_registry.mjs","/.github/workflows/","/docs/PLUGIN_REVIEW.md","/web/"],"_fallbackDoc":"Copia de los patrones de @santifer en CODEOWNERS para cuando no hay checkout (Action). loadPolicies prefiere el fichero real. 5-oct: faltaba /GOVERNANCE.md; tests/core.test.mjs la coteja con el CODEOWNERS de main (fixture core/codeowners-main-3bbf2ae.txt)."},"mergeState":{"requireMergeable":"MERGEABLE","reject":["DIRTY","BLOCKED","BEHIND"],"allowBehind":false,"allowBlocked":true,"_doc":"BLOCKED lo produce la propia protección de rama (falta la aprobación que da act-approve): se permite. BEHIND se permitirá cuando haya merge queue (allowBehind=true)."},"sessionCap":15,"informativeChecks":["CodeRabbit","renovate/artifacts","web typecheck + build","label","welcome","guard"],"_informativeChecksDoc":"Checks que nunca ponen la CI en rojo: informativos por diseño (web-ci.yml) o de servicio.","policyChecks":["direction-gate"],"behindParity":{"dirs":["modes/"],"maxBehind":30,"_doc":"Retro 16-oct, punto 3 (#4727): una PR que AÑADE ficheros bajo un directorio que los tests de paridad enumeran (modes-pending-search, modes-set-status-selector, score-threshold-parity recorren todos los idiomas de modes/) y va más de maxBehind commits por detrás de main no se arma: act-merge pide antes act-update-branch. #4727 entró en la cola 109 por detrás y la expulsaron esos tests en los tres SO. walkers (retro 16-oct, punto 12): los tests que recorren esos directorios; una PR que toca ficheros bajo ellos «toca» esos tests (lib/main-tests touchedBy): el prepare del lote 9 llamó «fallo general» al rojo que causaba #4727 al añadir modes/vi/.","walkers":["^tests/modes-","parity"]},"_policyChecksDoc":"Checks de política, no de CI del autor: ciStatus los ignora (ni rojo ni pendiente, no disparan waiting-author) pero el gate `policy-checks` bloquea el merge trivial si alguno está en rojo.","_flakyCandidatesDoc":"Candidatos a intermitente de main, a mano y sin efecto en los gates: lib/main-tests decide por los logs de 7 días; esto solo lo marca en el expediente cuando la cola saca una PR por esa línea (lib/queue-out). match: texto de la línea de fallo; os: el SO del job (macos, windows, ubuntu); status candidate hasta que se confirme o se descarte.","flakyCandidates":[{"match":"a long run of open parentheses stays linear","test":"verify-ats.mjs --self-test","os":"macos","status":"candidate","since":"2026-10-18","why":"test de tiempo; sacó a #5089 de la cola (merge_group 39040510336) sin tocar verify-ats (retro 18-oct lote 5, punto 6)"}]},"priority":{"version":1,"_doc":"p0/p1/p2 calculados en bin/lib/triage-core.mjs computePriority. Cada asignación lleva why en ≤12 palabras.","p0":{"labels":["security","regression"],"codeqlOpenAlerts":true},"p1":{"commitmentDueWithinHours":48,"blocksOthersMinDependents":10,"firstTimerReadyHours":48,"reReview":true,"_blocksOthersDoc":"blocks-others = las `blocksOthersTop` PRs con más dependientes, siempre que tengan ≥ blocksOthersMinDependents. Con 291 abiertas y ficheros como update-system.mjs tocados por 49 PRs, un umbral solo por número marcaba 120: el grafo es denso y lo útil es el top.","blocksOthersTop":15},"firstResponseHours":20,"needsSplit":{"_doc":"Regla del 19-oct (santiago:2026-10-19:regla-partela, consultas/2026-10-19-regla-partela.md): triage/needs-split solo cuando Jev quality.scope_creep ≥ umbral (threshold_review de scope_creep en policy/jev/quality.yaml; si no existe, scopeCreepThreshold). Sin señal de Jev no se pide partir. maxLines y maxAreas ya no piden troceo: son el umbral de la nota «grande (N ficheros, M líneas): una ronda más» en el porqué y la ficha, sin label pública.","scopeCreepThreshold":0.7,"maxLines":1000,"maxAreas":2,"noSplitGrowth":1.5,"_noSplitDoc":"El «no partir» de Santiago (bin/decision.mjs --no-split) vale mientras la PR no crezca más de noSplitGrowth veces en líneas o en ficheros desde el head en que lo decidió: una lista (rebase, un test) añade un 4-5 % (#3782, #3805) y otra PR entera dentro no cabe.","oneThing":{"newReadme":"^README\\.[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?\\.md$","existingReadme":"^README(?:\\.[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?)?\\.md$","maxLinesPerExisting":3,"extra":["update-system.mjs"],"_doc":"Una traducción nueva del README es una sola cosa aunque toque 20 ficheros (retro 15-oct noche, #5323: 20 ficheros y 762 líneas salían needs-split): el README.<lang>.md nuevo, el enlace en cada README existente (≤ maxLinesPerExisting líneas cambiadas en cada uno) y la línea de SYSTEM_PATHS en update-system.mjs (los ficheros de `extra`, con el mismo tope). Desde el 19-oct el tamaño ya no pide partir a nadie: esta regla solo pone su frase en el porqué en vez de la nota «grande»; scope_creep de Jev sí pide partirla."}},"sizeClasses":{"XS":10,"S":50,"M":250,"L":1000}}};
+const JEV_CATALOG = {"quality":{"domain":"quality","version":1,"state_default":["title","body(4000)","files","diffHead(120)"],"questions":[{"id":"kind","type":"choice","summary":"Tipo de cambio según lo que toca el diff, no según el prefijo del título.","instructions":"What kind of change is this pull request, judged by the files and diff rather than by the title prefix?","criteria":{"fix":"Corrects a bug or regression in existing behaviour.","feature":"Adds new behaviour, a new mode, command, option or provider on the existing path.","provider":"Adds or changes a job-source provider or scanner.","docs":"Documentation, README, guides, comments only.","i18n":"Translations or language packs.","test":"Tests, fixtures or test harness only.","chore":"Dependencies, CI, tooling, formatting, renames without behaviour change.","refactor":"Restructures code without changing behaviour.","mixed":"Several of the above combined in one pull request."},"state":["title","body(4000)","files","diffHead(120)"],"effect":"note","since":"2026-09-22","source":"CONVENTIONS (triage por tipo) y CONTRIBUTING §What makes a good PR"},{"id":"describes_diff","type":"noul","summary":"El cuerpo explica lo que el diff hace de verdad; si no, se pide información antes de revisar.","instructions":"Does the pull request description accurately explain what the diff changes and why, at the level a reviewer needs?","criteria":{"yes":"The body names the problem, the change and how it was checked, and the files listed match that story.","no":"The body is empty, a template left unfilled, unrelated to the files changed, or claims changes that the diff does not show."},"state":["title","body(4000)","files","diffHead(120)"],"threshold_review":0.5,"hit_when":"below","effect":"needs-info","since":"2026-09-22","source":"CONTRIBUTING §What makes a good PR"},{"id":"is_spam","type":"noul","summary":"Solo marca; nunca cierra. Una PR vacía, de prueba o sin relación con el proyecto.","instructions":"Is this pull request spam or noise, meaning it has no plausible intent to improve the project?","criteria":{"yes":"Empty or placeholder changes, link farming, unrelated files, mass-generated boilerplate with no connection to the codebase, test commits opened by mistake.","no":"Any genuine attempt to fix, add or document something, even if low quality, off-scope or poorly written."},"state":["title","body(4000)","files","diffHead(120)"],"threshold_review":0.7,"effect":"flag","since":"2026-09-22","source":"CLAUDE.md constitución regla 4 (nunca spam-close sin presentarlo)"},{"id":"is_success_story","type":"noul","summary":"El autor cuenta que consiguió trabajo o entrevistas gracias al proyecto; recibe reconocimiento, nunca cierre automático.","instructions":"Does the author report a personal success obtained with the project (interviews, offers, a hired outcome) as part of this contribution?","criteria":{"yes":"The body or title tells that the author got interviews, offers or a job using the tool, or thanks the project for a personal outcome.","no":"No personal outcome is reported; it is a plain technical change."},"state":["title","body(4000)"],"threshold_review":0.6,"effect":"flag","since":"2026-09-22","source":"product-routing (una success-story legítima recibe reconocimiento)"},{"id":"ai_generated_signal","type":"noul","summary":"Señal de texto o código generado sin revisión humana; solo orienta la profundidad de la revisión.","instructions":"Does this pull request show signs of being generated by an AI agent without human review of the result?","criteria":{"yes":"Generic marketing-style prose, claims that do not match the diff, invented file paths or APIs, boilerplate sections repeated, very large diffs that touch unrelated areas with uniform style, references to non-existent features.","no":"Focused change with specific reasoning, references to real files and issues, human-scale wording, or an explicitly declared agent-generated change reviewed by a person."},"state":["title","body(4000)","files","diffHead(120)"],"threshold_review":0.7,"effect":"note","since":"2026-09-22","source":"product-routing (apariencia de texto generado es señal para investigar, no evidencia para cerrar)"},{"id":"scope_creep","type":"noul","summary":"La PR mezcla varias entregas independientes; se pide partirla, no se rechaza.","instructions":"Does this pull request bundle several independent changes that could each be reviewed and merged on their own?","criteria":{"yes":"Multiple unrelated features or fixes, a feature plus large refactors or formatting of untouched files, a new component plus docs plus tooling for other areas in one diff.","no":"One coherent change with the tests, docs and small adjacent adjustments it needs."},"state":["title","body(4000)","files","diffHead(120)"],"threshold_review":0.7,"effect":"needs-split","since":"2026-09-22","source":"product-routing (el tamaño puede requerir partir la entrega, no rechazar su existencia)"}]},"intent":{"domain":"intent","version":1,"state_default":["comment(3000)","title"],"questions":[{"id":"author_comment_intent","type":"choice","summary":"Solo delivered o question quitan waiting-author; el resto se registra.","instructions":"What is the author's intent in this comment on their own pull request?","criteria":{"delivered":"The author says the requested change is done, pushed, rebased or ready for another look.","question":"The author asks the maintainers something they need answered to continue.","pushback":"The author disagrees with the review or the routing and argues for their approach.","will_do_later":"The author acknowledges the request and says they will do it later, without delivering yet.","abandoning":"The author says they will not continue, closes the door, or hands the work over.","unrelated":"Thanks, small talk, bot output or content that does not change the state of the pull request."},"state":["comment(3000)","title"],"effect":"clear-waiting-author","since":"2026-09-22","source":"plan 3.7 (quita waiting-author solo con delivered/question)"},{"id":"maintainer_owes_reply","type":"noul","summary":"El comentario deja una pregunta o entrega esperando a que el mantenedor conteste.","instructions":"After this comment, does the maintainer owe the author a reply before the pull request can move?","criteria":{"yes":"The author asked a direct question, delivered what was asked, or is waiting for a decision only the maintainer can make.","no":"The comment needs no answer, is a bot message, or the ball is still on the author's side."},"state":["comment(3000)","title"],"threshold_review":0.6,"effect":"priority","since":"2026-09-22","source":"plan 3.4 (primera respuesta y prioridad p1)"}]}};
+
+// ---- bin/lib/triage-core.mjs (inlineado) ----
+const { PR_QUERY, jevMarkerToSignals, normLogin, MARKER_BOTS, crSummary, coderabbitState, isBotOrder, coderabbitSays, coderabbitOk, shape, globToRegex, matchGlob, areasFor, parseCodeowners, ownersFor, codeownerHits, touchesWorkflows, checkVerdict, ciStatus, sizeClass, NO_SPLIT_LABEL, noSplitHolds, splitThreshold, latestScopeCreep, scopeCreepOf, bigNote, splitWhy, evaluateGates, computePriority, classify, collisions, blocksOthersSet, loadPolicies } = (() => {
+// Núcleo puro de triage: sin red, sin gh.mjs. Corre igual en la sesión y en la Action del repo.
+// Entrada: snapshot (bin/lib/snapshot.mjs) + políticas (policy/*.json). Salida: estado, labels, prioridad, gates, porqués.
+
+
+const H = 3600 * 1000;
+const hoursSince = (iso, now) => iso ? (now - Date.parse(iso)) / H : Infinity;
+const age = (iso, now) => { const h = hoursSince(iso, now); return h >= 48 ? `${Math.floor(h / 24)}d` : `${Math.max(0, Math.floor(h))}h`; };
+
+/** Consulta GraphQL de una PR. Fuente única: snapshot.mjs y la Action (github-src) la importan de aquí. */
+const PR_QUERY = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){ pullRequest(number:$number){
+    number title body author{__typename login} authorAssociation createdAt updatedAt isDraft state
+    headRefOid baseRefName headRefName isCrossRepository headRepository{nameWithOwner} mergeable mergeStateStatus maintainerCanModify
+    additions deletions changedFiles reviewDecision
+    autoMergeRequest{enabledAt mergeMethod}
+    mergeQueueEntry{position state}
+    labels(first:50){nodes{name}}
+    files(first:100){pageInfo{hasNextPage endCursor} nodes{path additions deletions changeType}}
+    commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){pageInfo{hasNextPage} nodes{__typename ... on CheckRun{name status conclusion startedAt completedAt} ... on StatusContext{context state description}}}}}}}
+    reviews(first:100){pageInfo{hasNextPage} nodes{author{login} state submittedAt body commit{oid}}}
+    reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved isOutdated comments(first:1){nodes{author{login} createdAt}}}}
+    comments(first:100){pageInfo{hasNextPage endCursor} nodes{author{login} body createdAt}}
+    timelineItems(last:100, itemTypes:[PULL_REQUEST_COMMIT, HEAD_REF_FORCE_PUSHED_EVENT, LABELED_EVENT, READY_FOR_REVIEW_EVENT]){nodes{__typename
+      ... on PullRequestCommit{commit{committedDate authoredDate author{user{login}}}}
+      ... on HeadRefForcePushedEvent{createdAt actor{login}}
+      ... on LabeledEvent{createdAt label{name}}
+      ... on ReadyForReviewEvent{createdAt}}}
+  } } }`;
+
+// ── snapshot: respuesta GraphQL → objeto plano (pura; la usa snapshot.mjs y la Action) ─────
+const MARKER = /<!--\s*co:([^\s>]+)\s*--!?>/g; // --!?> : CodeQL js/bad-tag-filter exige aceptar también el cierre --!>
+const JEV_META = new Set(['pr', 'sha7', 'v', 'catalogVersion', 'catalog', 'version', 'model', 'ts', 'headSha', 'sha', 'labelsApplied', 'data']);
+/**
+ * Bloque co:jev (tal como lo devuelve `parseJevMarkers` de github-src/scripts/jev-marker.mjs: {pr, sha7, v, model, domains, labelsApplied, ts})
+ * → señales del ledger, una por dominio. Tolera {data:{…}}, {quality:{…}, intent:{…}} y {domain, answers}. answers → {id:{p, value?, confidence?}}.
+ */
+function jevMarkerToSignals(marker, { headSha = null } = {}) {
+  const d = marker.data ? { ...marker, ...marker.data } : marker;
+  const catalogVersion = d.v ?? d.catalogVersion ?? d.catalog ?? d.version ?? null;
+  const model = d.model ?? null;
+  const normA = (answers) => Object.fromEntries(Object.entries(answers || {}).map(([id, v]) => [id, typeof v === 'number' ? { p: v } : { p: v?.p ?? null, ...(v?.value !== undefined ? { value: v.value } : {}), ...(v?.confidence !== undefined ? { confidence: v.confidence } : {}) }]));
+  const domains = d.domains ? Object.entries(d.domains) : d.domain ? [[d.domain, d.answers || {}]] : Object.entries(d).filter(([k, v]) => !JEV_META.has(k) && v && typeof v === 'object' && !Array.isArray(v));
+  // El bloque se calculó sobre marker.sha7: solo se le pone el head actual si es ese mismo commit. Si hubo push después, la señal es de
+  // otro head (stale): antes se estampaba con el head nuevo y 16 de 52 señales quedaban asignadas al commit equivocado.
+  const stale = Boolean(headSha && marker.sha7 && !headSha.startsWith(marker.sha7));
+  const sha = stale ? null : (headSha || marker.sha7 || null);
+  return domains.map(([domain, answers]) => ({ type: 'signal', source: 'action', domain, pr: marker.pr, headSha: sha, sha7: marker.sha7 || (headSha ? headSha.slice(0, 7) : null), ...(stale ? { stale: true } : {}), catalogVersion, model, markerTs: d.ts ?? null, answers: normA(answers) }));
+}
+const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
+const normLogin = (login) => String(login || '').replace(/\[bot\]$/, '');
+/** Bots que escriben nuestros marcadores (la Action y label-bot publican con GITHUB_TOKEN). */
+const MARKER_BOTS = new Set(['github-actions']);
+const norm = normLogin;
+const maxDate = (arr) => arr.filter(Boolean).sort().at(-1) || null;
+const minDate = (arr) => arr.filter(Boolean).sort()[0] || null;
+
+// ── CodeRabbit en el head ──────────────────────────────────────────────────
+// 2-oct: «revisada» era «hay algún comentario del bot», y su check «CodeRabbit» sale success también con «Review rate limited», «Review
+// skipped», «Review paused» y con «Review completed» cuyo resumen dice «Review skipped: We couldn't safely recover the incremental review».
+// Las fichas de #4111 #4113 #3733 #3798 dijeron «revisó, sin hilos abiertos», coderabbit-clean pasó sin revisión y #2678 entró con
+// CodeRabbit en pausa. Ahora el estado es del head y `reviewed` pide una prueba que lo cubra.
+const CR_LOGIN = 'coderabbitai';
+// --!?> como en MARKER: CodeQL js/bad-tag-filter pide aceptar también el cierre --!> (el bundle va al repo público).
+const CR_BLOCKS = /<!-- This is an auto-generated comment: (rate limited|skip review|review paused|failure|review in progress) by coderabbit\.ai --!?>([\s\S]*?)<!-- end of auto-generated comment: \1 by coderabbit\.ai --!?>/g;
+const CR_KIND = { 'rate limited': 'rate-limited', 'skip review': 'skipped', 'review paused': 'paused', failure: 'failed', 'review in progress': 'in-progress' };
+/** Motivo en llano de un salto o un fallo, del texto de CodeRabbit (su bloque en el resumen o la descripción del check). Por orden. */
+const CR_REASONS = [
+  [/couldn't safely recover the incremental review/i, 'no pudo recuperar la revisión incremental'],
+  [/(?:no|not have any) reviewable changes/i, 'sin cambios revisables'],
+  [/path filters/i, 'solo ficheros que la config excluye'],
+  [/(\d+) files exceed the limit of (\d+)/i, (m) => `${m[1]} ficheros, más de ${m[2]}`],
+  [/draft/i, 'era borrador'],
+  [/bot user/i, 'autor bot'],
+  [/author ignored by configuration/i, 'autor ignorado por la config'],
+  [/ignored? keyword/i, 'título de versión ignorado por la config'],
+  [/failed to post review comments/i, 'no pudo publicar sus comentarios'],
+  [/head commit changed during the review/i, 'el head cambió durante la revisión'],
+  [/error occurred/i, 'error de CodeRabbit'],
+  [/limit reached|rate limited/i, 'límite por hora'],
+];
+const crReason = (text) => { for (const [re, out] of CR_REASONS) { const m = re.exec(String(text || '')); if (m) return typeof out === 'function' ? out(m) : out; } return null; };
+/** Saltos que la config hace a propósito (bots y PRs de versión). Solo cuentan como config si el autor es un bot: un humano con ese título no se libra. */
+const CR_CONFIG = /bot user|author ignored by configuration|ignored? keyword/i;
+/** Bots cuyas PRs la config salta A PROPÓSITO (.coderabbit.yaml ignore_usernames, y allcontributors, que solo toca el README de créditos)
+ *  y títulos de versión (ignore_title_keywords). CodeRabbit salta además cualquier bot («bot user not eligible»), pero las PRs de código de
+ *  copilot-swe-agent (gfi-handoff, #4590-#4592) necesitan revisión: ese salto no es intencionado y bloquea (revisión adversarial, 2-oct). */
+const CR_SKIP_BOTS = new Set(['renovate', 'dependabot', 'github-actions', 'allcontributors']);
+const CR_SKIP_TITLE = /^(chore\(main\): release|chore: release main)\b/i;
+const crSkipIntended = (author, title) => CR_SKIP_BOTS.has(String(author || '').toLowerCase().replace(/\[bot\]$/, '')) || CR_SKIP_TITLE.test(String(title || ''));
+/** Texto de un bloque de estado hasta lo plegado (ficheros, configuración: no es el motivo), sin comentarios HTML ni «> ». */
+// Sin comentarios HTML: se repite hasta que no cambie y luego fuera los «<» y «>» sueltos (CodeQL «incomplete multi-character
+// sanitization» en #5513: quitar «<!--» de una pasada puede formar otro). El texto solo se compara con regex; las citas «> » se quitan antes.
+function crBlockText(raw) {
+  let t = String(raw || '').split(/<details/i)[0], prev;
+  do { prev = t; t = t.replace(/<!--[\s\S]*?--!?>/g, ''); } while (t !== prev);
+  return t.replace(/^\s*>\s?/gm, '').replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+}
+/**
+ * Lo que dice el comentario-resumen de CodeRabbit (uno por PR, se edita en cada pasada). `blocks`: sus avisos de estado (límite, salto,
+ * pausa, fallo, en curso) con el commit al que se refieren si lo dicen. `covers`: los commits que cubre su revisión (cobertura
+ * `final_review_risk_coverage`, «between … and <sha>» de la última revisión, «up to `sha`»); un carry_forward (merge de main o reescritura
+ * sin cambios) cubre el commit nuevo y `carried` dice de cuál viene. Los «between» dentro de un aviso son de la pasada que no se hizo.
+ */
+function crSummary(body) {
+  const b = String(body || ''), blocks = [], covers = [], carried = {};
+  for (const m of b.matchAll(CR_BLOCKS)) blocks.push({ kind: CR_KIND[m[1]], text: crBlockText(m[2]), to: /between [0-9a-f]{40} and ([0-9a-f]{40})/.exec(m[2])?.[1] || null });
+  const rest = b.replace(CR_BLOCKS, '');
+  for (const m of rest.matchAll(/final_review_risk_coverage:(\{[^}]*\})/g)) {
+    let j = null; try { j = JSON.parse(m[1]); } catch { continue; }
+    if (j?.kind === 'reviewed' && j.coveredCommitId) covers.push(j.coveredCommitId);
+    else if (/carry_forward$/.test(j?.kind || '') && j.sourceCommitId) { covers.push(j.sourceCommitId); carried[j.sourceCommitId] = { kind: j.kind, from: j.coveredCommitId || null }; }
+  }
+  for (const m of rest.matchAll(/between [0-9a-f]{40} and ([0-9a-f]{40})/g)) covers.push(m[1]);
+  for (const m of rest.matchAll(/up to `([0-9a-f]{5,40})`/g)) covers.push(m[1]);
+  return { blocks, covers: [...new Set(covers)], carried };
+}
+const short = (s) => String(s || '').slice(0, 7);
+/**
+ * Estado de CodeRabbit EN EL HEAD. Pura; la usan shape() y la Action. Fuentes: su check «CodeRabbit» en el commit del head (`status`:
+ * {state, description}), su comentario-resumen (`summary`, texto o crSummary) y sus reviews con texto publicadas sobre el head.
+ * - reviewed: algo cubre el head (review publicada en él o cobertura del resumen). En la duda, no.
+ * - in-progress (check pendiente) · rate-limited · paused · skipped (con motivo) · failed (con motivo): lo dice el check o, con
+ *   «Review completed» sin prueba en el head, el aviso del resumen (#3729: completed y «couldn't safely recover» = skipped).
+ * - skipped-by-config: la config lo salta a propósito (bot de CR_SKIP_BOTS o título de versión) y el autor es un bot; un bot de código
+ *   (copilot-swe-agent) que CodeRabbit salta por ser bot queda en skipped y bloquea.
+ * - stale: revisó otro commit (upTo) y de este head no dice nada · none: ni rastro.
+ * @returns {{state:string|null, reason?:string, upTo?:string, carried?:string, check?:string}}  state null = sin head: no se sabe.
+ */
+function coderabbitState({ headSha, status = null, summary = null, reviews = [], authorIsBot = false, author = null, title = null } = {}) {
+  const head = String(headSha || '').toLowerCase();
+  if (!head) return { state: null };
+  const sum = summary && typeof summary === 'object' ? summary : crSummary(summary);
+  const onHead = (sha) => { const s = String(sha || '').toLowerCase(); return s.length >= 5 && head.startsWith(s); };
+  const desc = String(status?.description || ''), st = String(status?.state || '').toUpperCase();
+  const check = status ? desc || st.toLowerCase() || null : null;
+  const out = (state, extra = {}) => ({ state, ...extra, ...(check ? { check } : {}) });
+  const posted = reviews.some((r) => normLogin(r.author?.login ?? r.author) === CR_LOGIN && onHead(r.commit?.oid ?? r.commit) && String(r.body || '').trim());
+  const covered = sum.covers.find(onHead);
+  const last = sum.covers.find((c) => !onHead(c));
+  const upTo = last ? { upTo: short(last) } : {};
+  // Un aviso con commit es de ese commit; sin commit no se sabe de cuál, y en la duda cuenta para el head.
+  const block = (kind) => sum.blocks.find((b) => b.kind === kind && (!b.to || onHead(b.to)) && !(kind === 'failed' && /pull request is closed/i.test(b.text)));
+  const failed = block('failed');
+  if (st === 'PENDING' || st === 'EXPECTED' || /in progress|queued/i.test(desc)) return out('in-progress');
+  // «Failed to post review comments» con revisión hecha: sus hallazgos no llegaron. Un fallo sin review publicada en el head no es revisión.
+  if (failed && (!posted || /failed to post/i.test(failed.text))) return out('failed', { reason: crReason(failed.text) || 'sin motivo', ...upTo });
+  if (posted || covered) {
+    const c = Object.entries(sum.carried).find(([s]) => onHead(s))?.[1];
+    return out('reviewed', c ? { carried: `${c.kind === 'target_branch_merge_carry_forward' ? 'merge de main' : 'reescritura sin cambios'} sobre ${short(c.from)}` } : {});
+  }
+  if (/rate limited/i.test(desc)) return out('rate-limited', upTo);
+  if (/paused/i.test(desc)) return out('paused', upTo);
+  if (st === 'ERROR' || st === 'FAILURE' || /fail|error/i.test(desc)) return out('failed', { reason: crReason(desc) || 'sin motivo', ...upTo });
+  const skip = block('skipped'), limited = block('rate-limited'), paused = block('paused');
+  if (/skipped/i.test(desc) || skip) {
+    const said = /^review skipped/i.test(desc) ? desc.replace(/^review skipped:?\s*/i, '') : '';
+    const why = said || skip?.text || (limited ? 'limit reached' : '');
+    // author/title null = quien llama no los pasa (tests antiguos): se mantiene el criterio de antes, solo «es un bot».
+    if (CR_CONFIG.test(why) && authorIsBot && (author == null && title == null ? true : crSkipIntended(author, title))) return out('skipped-by-config', { reason: crReason(why) });
+    return out('skipped', { reason: crReason(why) || 'sin motivo', ...upTo });
+  }
+  if (limited) return out('rate-limited', upTo);
+  if (paused) return out('paused', upTo);
+  if (block('in-progress')) return out('in-progress');
+  return last ? out('stale', upTo) : out('none');
+}
+const upToNote = (c) => (c.upTo ? ` (revisó hasta ${c.upTo})` : '');
+const CR_SAYS = {
+  reviewed: (c) => `revisó este head${c.carried ? ` (${c.carried})` : ''}`,
+  'rate-limited': (c) => `límite por hora alcanzado: este head sin revisión${upToNote(c)}`,
+  skipped: (c) => `saltó este head (${c.reason || 'sin motivo'}): sin revisión${upToNote(c)}`,
+  'skipped-by-config': (c) => `no revisa PRs de bots por config (${c.reason || 'sin motivo'})`,
+  paused: (c) => `en pausa: este head sin revisión${upToNote(c)}`,
+  failed: (c) => `falló en este head (${c.reason || 'sin motivo'}): sin revisión${upToNote(c)}`,
+  'in-progress': () => 'revisando este head ahora: aún sin revisión',
+  stale: (c) => `revisó hasta ${c.upTo}: este head sin revisión`,
+  none: () => 'sin rastro en este head: sin revisión',
+};
+// ── órdenes a un bot ───────────────────────────────────────────────────────
+// 5-oct: «@coderabbitai review», «full review» (act-request-review) o «resume» desde la cuenta de un maintainer no le contestan al
+// autor, y contaban en lastMaintainerCommentAt y firstMaintainerResponseAt: la Action y el lote creían que ya le habíamos respondido (sin
+// primera respuesta, y «lo último nuestro» con la fecha de la orden). En la cache del 5-oct, 6 PRs con «@coderabbitai resume» del 3/4-sep
+// (#1666 #2082 #2989 #3083 #3433 #3472). Solo si el comentario ENTERO son órdenes, una por línea («@bot» y unas palabras, a lo sumo con
+// punto final): con algo más (una pregunta, unas líneas para el autor) es una respuesta. Más estricto que adoption.mjs y batch.mjs a
+// propósito: aquí, tomar una respuesta de verdad por una orden haría que la Action publicara una primera respuesta de plantilla encima.
+const ORDER_BOTS = ['coderabbitai', 'dependabot'];
+const ORDER_LINE = new RegExp(`^@(?:${ORDER_BOTS.join('|')})\\s+[a-z][a-z -]{0,40}[.!]?$`, 'i');
+/** ¿Es el comentario solo una orden a un bot (una o varias, una por línea)? Vacío, o con cualquier otra cosa (un marcador incluido): no. */
+function isBotOrder(body) {
+  const lines = String(body || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((l) => ORDER_LINE.test(l));
+}
+
+/** El estado de CodeRabbit en una frase, para gates, lote, expediente y /porque. Una foto sin `state` (cache antigua) es «no pude ver». */
+const coderabbitSays = (cr) => (cr?.state && CR_SAYS[cr.state] ? CR_SAYS[cr.state](cr) : 'no pude ver su estado en este head');
+/** ¿Cuenta como revisada para un merge? reviewed, o skipped-by-config (bots y versiones que la config salta a propósito). */
+const coderabbitOk = (cr) => cr?.state === 'reviewed' || cr?.state === 'skipped-by-config';
+/**
+ * @param pr  nodo `pullRequest` de la consulta PR_QUERY de snapshot.mjs (files/comments/reviewThreads ya paginados)
+ * @param o   { authorMergedCount, codeqlAlerts, maintainers:[login], parseJev?: (body)=>[...] } (parseJev = parseJevMarkers de github-src/scripts/jev-marker.mjs; sin él, jevMarkers=[])
+ */
+function shape(pr, { authorMergedCount = null, codeqlAlerts = null, maintainers = [], parseJev = null } = {}) {
+  const MAINTAINERS = new Set(maintainers);
+  const author = norm(pr.author?.login);
+  const isMaintainer = (l) => MAINTAINERS.has(norm(l)) && norm(l) !== author;
+  const comments = pr.comments.nodes.map(c => ({ author: norm(c.author?.login), body: c.body || '', createdAt: c.createdAt }));
+  const reviews = pr.reviews.nodes.map(r => ({ author: norm(r.author?.login), state: r.state, submittedAt: r.submittedAt, body: r.body || '', commit: r.commit?.oid || null }));
+  const threads = pr.reviewThreads.nodes.map(t => ({ isResolved: t.isResolved, isOutdated: t.isOutdated, author: norm(t.comments?.nodes?.[0]?.author?.login), createdAt: t.comments?.nodes?.[0]?.createdAt || null }));
+  const cr = new Set([CR_LOGIN]);
+  const lastCommit = pr.commits.nodes[0]?.commit || null;
+  const rollup = lastCommit?.statusCheckRollup || null;
+  // startedAt/completedAt: con dos ejecuciones del mismo check en el head, ciStatus mira cuál corrió después (2-oct, #2628).
+  const runs = (rollup?.contexts?.nodes || []).map(c => c.__typename === 'CheckRun'
+    ? { name: c.name, status: c.status, conclusion: c.conclusion, ...(c.startedAt ? { startedAt: c.startedAt } : {}), ...(c.completedAt ? { completedAt: c.completedAt } : {}) }
+    : { name: c.context, status: c.state === 'PENDING' ? 'IN_PROGRESS' : 'COMPLETED', conclusion: c.state, ...(c.description ? { description: c.description } : {}) });
+  // El check «CodeRabbit» es un status del commit: vale para el head solo si el último commit es el head (si GraphQL no da el oid, se fía).
+  const crStatus = lastCommit && (!lastCommit.oid || lastCommit.oid === pr.headRefOid) ? (rollup?.contexts?.nodes || []).filter((c) => c.__typename === 'StatusContext' && c.context === 'CodeRabbit').at(-1) || null : null;
+  const crSummaryBody = comments.filter((c) => c.author === CR_LOGIN && /auto-generated comment: summarize by coderabbit\.ai/.test(c.body)).at(-1)?.body || '';
+  // Marcadores co: y bloques co:jev solo de quien puede escribirlos: el bot de la Action o un maintainer (lo que sale de la cuenta de
+  // Santiago). Un comentario de cualquiera con "<!-- co:… -->" ya no cuenta como primera respuesta ni mete señales de Jev.
+  const trusted = (l) => MAINTAINERS.has(norm(l)) || MARKER_BOTS.has(norm(l));
+  const markers = []; const jevMarkers = [];
+  for (const b of [...comments.filter(c => trusted(c.author)).map(c => c.body), ...reviews.filter(r => trusted(r.author)).map(r => r.body)]) { for (const m of b.matchAll(MARKER)) markers.push(m[1]); if (parseJev) jevMarkers.push(...parseJev(b)); }
+  // Una orden a un bot desde la cuenta de un maintainer no es una respuesta al autor (isBotOrder, 5-oct): ni primera ni última.
+  const maint = [...comments.filter(c => isMaintainer(c.author) && !isBotOrder(c.body)).map(c => c.createdAt), ...reviews.filter(r => isMaintainer(r.author)).map(r => r.submittedAt)];
+  // Lo que dicen los maintainers con texto (comentarios y reviews), recortado: de ahí salen las promesas públicas que no llegaron al
+  // ledger como compromiso (29-sep, #2628: «Monday 8 September» incumplido 21 días sin que nada lo recordara).
+  const maintainerSays = [...comments.filter(c => isMaintainer(c.author)).map(c => ({ kind: 'comment', at: c.createdAt, body: c.body.slice(0, 1500) })),
+    ...reviews.filter(r => isMaintainer(r.author) && r.body).map(r => ({ kind: 'review', at: r.submittedAt, body: r.body.slice(0, 1500) }))];
+  const tl = pr.timelineItems.nodes;
+  const authorActs = [
+    ...comments.filter(c => c.author === author).map(c => c.createdAt),
+    ...tl.filter(t => t.__typename === 'PullRequestCommit').map(t => t.commit?.committedDate),
+    ...tl.filter(t => t.__typename === 'HeadRefForcePushedEvent').map(t => t.createdAt),
+    ...tl.filter(t => t.__typename === 'ReadyForReviewEvent').map(t => t.createdAt),
+  ];
+  // Lo último del autor en persona (comentario, respuesta en un hilo, commit suyo, force-push suyo). lastAuthorActivityAt cuenta también
+  // nuestros empujes (act-push, fix-conflict, update-branch); esto no. Un commit o un force-push sin usuario enlazado cuenta como suyo:
+  // mejor una de más que perder una respuesta (relevo del lote 30-1: la de #2628 llevaba un día sin leer). El commit cuenta por su
+  // authoredDate: un rebase (fix-conflict nuestro, «Update branch» con rebase) le pone committedDate nuevo y deja autor y authoredDate.
+  const own = (l) => !norm(l) || norm(l) === author;
+  const authorReplies = [
+    ...comments.filter(c => c.author === author).map(c => ({ at: c.createdAt, kind: 'comment' })),
+    ...reviews.filter(r => r.author === author).map(r => ({ at: r.submittedAt, kind: 'review' })),
+    ...tl.filter(t => t.__typename === 'PullRequestCommit' && own(t.commit?.author?.user?.login)).map(t => ({ at: t.commit?.authoredDate || t.commit?.committedDate, kind: 'commit' })),
+    ...tl.filter(t => t.__typename === 'HeadRefForcePushedEvent' && own(t.actor?.login)).map(t => ({ at: t.createdAt, kind: 'push' })),
+  ].filter(x => x.at).sort((a, b) => a.at.localeCompare(b.at));
+  const labeledAt = {};
+  for (const t of tl) if (t.__typename === 'LabeledEvent' && t.label?.name) labeledAt[t.label.name] = t.createdAt;
+  const lastCommitAt = maxDate(tl.filter(t => t.__typename === 'PullRequestCommit').map(t => t.commit?.committedDate)) || pr.commits.nodes[0]?.commit?.committedDate || null;
+  return {
+    number: pr.number, title: pr.title, body: (pr.body || '').replace(EMAIL, '[email]'), author, authorAssociation: pr.authorAssociation, authorIsBot: pr.author?.__typename === 'Bot',
+    createdAt: pr.createdAt, updatedAt: pr.updatedAt, isDraft: pr.isDraft, state: pr.state,
+    headSha: pr.headRefOid, baseRef: pr.baseRefName, headRef: pr.headRefName ?? null, isFork: pr.isCrossRepository ?? null, headRepo: pr.headRepository?.nameWithOwner ?? null, mergeable: pr.mergeable, mergeStateStatus: pr.mergeStateStatus, maintainerCanModify: pr.maintainerCanModify,
+    autoMerge: pr.autoMergeRequest ? { enabledAt: pr.autoMergeRequest.enabledAt, method: pr.autoMergeRequest.mergeMethod } : null,
+    mergeQueue: pr.mergeQueueEntry ? { position: pr.mergeQueueEntry.position, state: pr.mergeQueueEntry.state } : null,
+    labels: pr.labels.nodes.map(l => l.name), labeledAt,
+    maintainerSays,
+    files: pr.files.nodes.map(f => ({ path: f.path, status: f.changeType, additions: f.additions, deletions: f.deletions })),
+    additions: pr.additions, deletions: pr.deletions, changedFiles: pr.changedFiles,
+    reviewDecision: pr.reviewDecision,
+    checks: { state: rollup ? rollup.state : null, runs, truncated: !!rollup?.contexts?.pageInfo?.hasNextPage },
+    // Estado de CodeRabbit en ESTE head (coderabbitState): un comentario suyo cualquiera ya no es «revisó» (2-oct, #4111 #3729 #2678).
+    coderabbit: {
+      ...coderabbitState({ headSha: pr.headRefOid, status: crStatus, summary: crSummaryBody, reviews, authorIsBot: pr.author?.__typename === 'Bot' || /\[bot\]$/.test(pr.author?.login || ''), author: pr.author?.login || '', title: pr.title || '' }),
+      changesRequested: reviews.filter(r => cr.has(r.author)).at(-1)?.state === 'CHANGES_REQUESTED',
+      unresolvedThreads: threads.filter(t => cr.has(t.author) && !t.isResolved && !t.isOutdated).length,
+    },
+    reviews: reviews.map(({ body, ...r }) => r),
+    unresolvedThreads: threads.filter(t => !t.isResolved && !t.isOutdated).length,
+    // Los mismos hilos vigentes con quién los abrió y cuándo: un hilo de CodeRabbit anterior a nuestra lista no frena re-revisarla (lote 2026-10-01-3).
+    openThreads: threads.filter(t => !t.isResolved && !t.isOutdated).map(t => ({ author: t.author, at: t.createdAt })),
+    authorMergedCount: authorMergedCount ?? null,
+    codeqlAlerts: codeqlAlerts ?? null,
+    lastCommitAt,
+    lastAuthorActivityAt: maxDate(authorActs) || pr.createdAt,
+    lastAuthorReply: authorReplies.at(-1) || null,
+    lastMaintainerCommentAt: maxDate(maint),
+    firstMaintainerResponseAt: minDate(maint),
+    markers, jevMarkers,
+    commentCount: comments.length,
+  };
+}
+
+// ── globs ──────────────────────────────────────────────────────────────────
+/** Glob estilo minimatch sin matchBase (como actions/labeler): `*` no cruza `/`, `**` sí. */
+function globToRegex(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') { i++; if (glob[i + 1] === '/') { i++; re += '(?:.*/)?'; } else re += '.*'; }
+      else re += '[^/]*';
+    } else if (c === '?') re += '[^/]';
+    else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${re}$`);
+}
+const matchGlob = (glob, file) => globToRegex(glob).test(file);
+
+/** Áreas del labeler que toca una lista de ficheros. */
+function areasFor(files, areas) {
+  const hit = [];
+  for (const [area, globs] of Object.entries(areas || {})) {
+    if (files.some(f => globs.some(g => matchGlob(g, f)))) hit.push(area);
+  }
+  return hit;
+}
+
+// ── CODEOWNERS ─────────────────────────────────────────────────────────────
+/** Reglas [{pattern, owners}] en orden; la última que casa gana. */
+function parseCodeowners(text) {
+  return String(text || '').split('\n').map(l => l.replace(/#.*$/, '').trim()).filter(Boolean)
+    .map(l => { const [pattern, ...owners] = l.split(/\s+/); return { pattern, owners }; });
+}
+function codeownerRegex(pattern) {
+  let p = pattern; let anchored = false, dir = false;
+  if (p.startsWith('/')) { anchored = true; p = p.slice(1); }
+  if (p.endsWith('/')) { dir = true; p = p.slice(0, -1); }
+  if (!anchored && !p.includes('/')) anchored = false; else anchored = true;
+  let re = '';
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === '*') { if (p[i + 1] === '*') { i++; re += '.*'; } else re += '[^/]*'; }
+    else if (c === '?') re += '[^/]';
+    else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  const prefix = anchored ? '^' : '^(?:.*/)?';
+  const suffix = dir ? '(?:/.*)?$' : '(?:/.*)?$';
+  return new RegExp(prefix + re + suffix);
+}
+function ownersFor(file, rules) {
+  let owners = [];
+  for (const r of rules) if (codeownerRegex(r.pattern).test(file)) owners = r.owners;
+  return owners;
+}
+/** Patrones (últimos ganadores) cuyo owner incluye `owner`, más extras. */
+function codeownerHits(files, rules, owner, extra = []) {
+  const extraRules = extra.map(pattern => ({ pattern, owners: [owner] }));
+  return files.filter(f => ownersFor(f, [...rules, ...extraRules]).includes(owner));
+}
+
+// ── CI ─────────────────────────────────────────────────────────────────────
+const CI_RED = ['FAILURE', 'TIMED_OUT', 'ERROR'];
+const CI_GREEN = ['SUCCESS', 'SKIPPED', 'NEUTRAL'];
+const upper = (x) => String(x ?? '').toUpperCase();
+/** Cuándo corrió una ejecución: startedAt (GraphQL) o started_at (REST); si no consta, cuándo acabó. null sin fechas. */
+const ranAt = (r) => { const t = Date.parse(r?.startedAt ?? r?.started_at ?? r?.completedAt ?? r?.completed_at ?? ''); return Number.isNaN(t) ? null : t; };
+/** ¿Toca la PR sus workflows? Con eso, un STARTUP_FAILURE puede ser suyo (un YAML roto); sin eso, el run ni arrancó. */
+const touchesWorkflows = (files) => (files || []).some((f) => String(f?.path ?? f?.filename ?? f ?? '').startsWith('.github/workflows/'));
+/**
+ * Veredicto de UN check en el head con todas sus ejecuciones de ese nombre: un head puede tener dos runs del mismo workflow, o un re-run.
+ * 2-oct, #2628: el run 36591016563 de «Tests» salió CANCELLED en los 3 SO y el 36591014638 pasó en los 3 sobre el mismo head; contar el
+ * cancelado como rojo llevó el plan a triage/waiting-author. Un cancelado no juzga el código del autor: si un verde del mismo check corrió
+ * después (o a la vez), el check cuenta verde con `rerun` (GitHub cuenta los dos: rollup FAILURE y merge BLOCKED hasta relanzarlo); si
+ * no, 'cancelled': relanzar, cosa nuestra. STARTUP_FAILURE (el workflow ni arrancó: no corrió nada de la PR) igual, salvo que la PR toque
+ * .github/workflows/, porque entonces el YAML roto puede ser suyo. FAILURE, TIMED_OUT y ERROR son rojo aunque haya un verde después.
+ * Sin fechas no se puede ordenar: el cancelado no se da por tapado. Acepta GraphQL (MAYÚSCULAS) y REST (minúsculas). Pura.
+ * @returns {{verdict:'red'|'pending'|'cancelled'|'green'|'unknown', run:object, rerun?:true, notStarted?:true}}
+ */
+function checkVerdict(runs, { workflowsTouched = false } = {}) {
+  const done = (r) => upper(r.status) === 'COMPLETED' && r.conclusion != null && upper(r.conclusion) !== 'PENDING';
+  const startup = (r) => upper(r.conclusion) === 'STARTUP_FAILURE';
+  const notRun = (r) => upper(r.conclusion) === 'CANCELLED' || (startup(r) && !workflowsTouched);
+  const red = runs.find((r) => done(r) && (CI_RED.includes(upper(r.conclusion)) || (startup(r) && workflowsTouched)));
+  if (red) return { verdict: 'red', run: red };
+  const pending = runs.find((r) => !done(r));
+  if (pending) return { verdict: 'pending', run: pending };
+  const cancelled = runs.filter(notRun), rest = runs.filter((r) => !notRun(r));
+  const odd = rest.find((r) => !CI_GREEN.includes(upper(r.conclusion)));
+  if (odd) return { verdict: 'unknown', run: odd };
+  if (!cancelled.length) return { verdict: 'green', run: rest[0] };
+  const at = cancelled.map(ranAt), lastAt = at.includes(null) ? null : Math.max(...at);
+  const last = lastAt === null ? cancelled.at(-1) : cancelled[at.indexOf(lastAt)];
+  const cover = lastAt === null ? null : rest.find((r) => ranAt(r) !== null && ranAt(r) >= lastAt);
+  if (cover) return { verdict: 'green', run: cover, rerun: true };
+  return { verdict: 'cancelled', run: last, ...(startup(last) ? { notStarted: true } : {}) };
+}
+/**
+ * Estado de CI en el headSha: green | red | pending | cancelled (relanzar: no es del autor) | held (espera aprobación) | absent (sin checks) |
+ * stale (sin la matriz actual) | unknown. Cada check requerido se juzga con todas sus ejecuciones (checkVerdict). `rerun`: los checks
+ * requeridos que hay que relanzar (los cancelados, solos o junto a un verde posterior: con uno en verde el estado es green, pero GitHub cuenta
+ * el cancelado y el gate ci-green no pasa hasta relanzarlo).
+ */
+function ciStatus(snapshot, trivialPolicy) {
+  const checks = snapshot.checks;
+  if (!checks || checks.state === undefined) return { status: 'unknown', why: 'no pude ver los checks' };
+  const policyChecks = trivialPolicy?.policyChecks || [];
+  // Un depends-on en rojo con su dependencia ya fusionada no dice nada (retro 17-oct lote 16, punto 4; lib/checks-split staleChecks).
+  const stale = snapshot.staleChecks || [];
+  const runs = (checks.runs || []).filter(r => !policyChecks.includes(r.name) && !stale.includes(r.name));
+  if (checks.state === null && runs.length === 0) return { status: 'absent', why: 'sin checks en el head' };
+  const req = trivialPolicy?.requiredChecks || [];
+  const held = runs.filter(r => r.conclusion === 'ACTION_REQUIRED');
+  if (held.length) return { status: 'held', why: 'CI espera aprobación de un maintainer' };
+  const missing = req.filter(n => !runs.some(r => r.name === n));
+  if (missing.length) return { status: 'stale', why: `CI antigua en el head: falta ${missing[0]}` };
+  const workflowsTouched = touchesWorkflows(snapshot.files);
+  const verdicts = req.map((name) => ({ name, ...checkVerdict(runs.filter((r) => r.name === name), { workflowsTouched }) }));
+  const first = (v) => verdicts.find((x) => x.verdict === v);
+  const red = first('red');
+  if (red) return { status: 'red', why: `${red.name} en rojo` };
+  const pending = first('pending');
+  if (pending) return { status: 'pending', why: `${pending.name} aún corriendo` };
+  if (first('unknown')) return { status: 'unknown', why: 'checks en estado no reconocido' };
+  const informative = trivialPolicy?.informativeChecks || [];
+  const anyRed = runs.find(r => r.status === 'COMPLETED' && CI_RED.includes(r.conclusion) && !informative.includes(r.name));
+  if (anyRed) return { status: 'red', why: `${anyRed.name} en rojo` };
+  const cancelled = verdicts.filter((x) => x.verdict === 'cancelled');
+  if (cancelled.length) return { status: 'cancelled', why: `${cancelled[0].name} ${cancelled[0].notStarted ? 'no arrancó' : 'cancelado'}: relanzar (no es del autor)`, rerun: cancelled.map((x) => x.name) };
+  const rerun = verdicts.filter((x) => x.rerun).map((x) => x.name);
+  if (rerun.length) return { status: 'green', why: `${rerun[0]} cancelado junto a uno en verde: relanzarlo (GitHub cuenta ambos)`, rerun };
+  return { status: 'green', why: 'matriz completa en verde' };
+}
+
+// ── tamaño / fronteras ─────────────────────────────────────────────────────
+function sizeClass(lines, classes) {
+  for (const [k, max] of Object.entries(classes)) if (lines < max) return k;
+  return 'XL';
+}
+const lines = (s) => (s.additions || 0) + (s.deletions || 0);
+const has = (s, l) => (s.labels || []).includes(l);
+
+// ── «no partir» ────────────────────────────────────────────────────────────
+const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const dia = (iso) => { const d = new Date(iso || ''); return Number.isNaN(d.getTime()) ? '?' : `${d.getUTCDate()}-${MES[d.getUTCMonth()]}`; };
+/** Label pública del «no partir» (policy/labels.json): la Action no ve el ledger, ve la label. */
+const NO_SPLIT_LABEL = 'no-split';
+/**
+ * ¿Sigue valiendo el «no partir» de Santiago con la PR como está ahora? `dec` es su decisión (kind 'no-split' en el ledger, bin/decision.mjs):
+ * `base` = líneas y ficheros del head en que lo decidió. Vale mientras la PR no crezca más de `growth` veces en líneas ni en ficheros: lo que
+ * pide una lista cabe de sobra (#3782 pasó de 1734 a 1798 líneas con el rebase y el test que le pedimos, ×1,04; #3805 de 1199 a 1263, ×1,05)
+ * y otra PR entera metida dentro no (×1,5 son ≥500 líneas sobre una de 1000). Retirada ('no-split-off'): no vale. Sin base: vale hasta que
+ * la retire. Sin decisión pero con la label `label` puesta (la Action, o una que puso un maintainer a mano): vale, sin límite de tamaño; con
+ * decisión, manda la decisión (si caducó, la label no la salva). Devuelve {holds, why} (el porqué en una línea) o null. Pura.
+ */
+function noSplitHolds(dec, snapshot, { growth = 1.5, label = null } = {}) {
+  if (!dec) return label && has(snapshot, label) ? { holds: true, label: true, why: `no partir: label ${label} (decisión de un maintainer)` } : null;
+  const when = dia(dec.decidedAt || dec.ts), ref = dec.authRef || 'sin firma';
+  if (dec.decision === 'no-split-off') return { holds: false, off: true, why: `«no partir» retirado el ${when} [${ref}]` };
+  const cur = { lines: lines(snapshot), files: (snapshot.files || []).length || snapshot.changedFiles || 0 }, b = dec.base || {};
+  const over = ['lines', 'files'].filter((k) => b[k] > 0 && cur[k] > b[k] * growth).map((k) => `${cur[k]} ${k === 'lines' ? 'líneas' : 'ficheros'} (${b[k]} al decidir)`);
+  if (over.length) return { holds: false, grown: true, why: `«no partir» del ${when} ya no vale: ${over.join(' y ')}, más de ×${String(growth).replace('.', ',')} [${ref}]` };
+  return { holds: true, why: `no partir: decidido el ${when} [${ref}]` };
+}
+
+// ── «pártela»: solo Jev (regla del 19-oct, santiago:2026-10-19:regla-partela) ─────
+// needs-split solo cuando Jev quality.scope_creep ≥ su threshold_review (0,7): de las 10 abiertas en needs-split con dato el 19-oct, las 10
+// eran una sola pieza para Jev (p ≤ 0,45) y 13 de 25 propuestas de partir por tamaño acabaron fusionadas enteras. Las áreas (>maxAreas) y las
+// líneas (>maxLines) quedan como nota «grande: una ronda más» (manifiesto, punto 10), sin label pública. Sin señal de Jev no se pide partir.
+const SCOPE_CREEP = 'scope_creep';
+/** Umbral de scope_creep: su threshold_review en el catálogo quality (policy/jev/quality.yaml) si existe; si no, el de
+ *  policy/priority.json needsSplit.scopeCreepThreshold; si no, 0,7. Pura: el catálogo lo lee quien llama (aquí no hay YAML). */
+function splitThreshold(priorityPolicy, qualityCatalog = null) {
+  const q = (qualityCatalog?.questions || []).find((x) => x.id === SCOPE_CREEP);
+  const t = Number(q?.threshold_review ?? priorityPolicy?.needsSplit?.scopeCreepThreshold ?? 0.7);
+  return Number.isFinite(t) ? t : 0.7;
+}
+const pOf = (a) => (a === null || a === undefined ? null : typeof a === 'number' ? a : Number.isFinite(Number(a.p)) ? Number(a.p) : null);
+/** La señal scope_creep más útil de una PR entre señales con forma de ledger ({domain:'quality', headSha, sha7, ts|markerTs, answers}):
+ *  la última del head actual; si no hay, la última de cualquier head (stale). → {p, sha7, stale} o null. Pura. */
+function latestScopeCreep(signals, { headSha = null } = {}) {
+  const rows = (signals || []).filter((e) => e && (e.domain === undefined || e.domain === 'quality') && pOf(e.answers?.[SCOPE_CREEP]) !== null)
+    .map((e) => ({ p: pOf(e.answers[SCOPE_CREEP]), sha7: e.sha7 || (e.headSha ? String(e.headSha).slice(0, 7) : null), ts: String(e.ts || e.markerTs || '') }))
+    .sort((a, b) => a.ts.localeCompare(b.ts));
+  const onHead = headSha ? rows.filter((r) => r.sha7 && String(headSha).startsWith(r.sha7)) : [];
+  const r = onHead.at(-1) || rows.at(-1);
+  return r ? { p: r.p, sha7: r.sha7, stale: Boolean(headSha && !onHead.length) } : null;
+}
+/** La señal scope_creep que trae la foto: la de esta pasada (snapshot.signals, la Action la pide a Jev sobre el head) o, si no, la de los
+ *  bloques co:jev de la PR (snapshot.jevMarkers). → {p, sha7, stale} o null. Pura. */
+function scopeCreepOf(snapshot) {
+  const fresh = pOf(snapshot?.signals?.domains?.quality?.[SCOPE_CREEP]);
+  if (fresh !== null) return { p: fresh, sha7: snapshot.headSha ? String(snapshot.headSha).slice(0, 7) : null, stale: false };
+  const sigs = (snapshot?.jevMarkers || []).flatMap((m) => jevMarkerToSignals(m));
+  return latestScopeCreep(sigs, { headSha: snapshot?.headSha || null });
+}
+/** ¿Grande? (más de maxLines líneas o más de maxAreas áreas): solo una nota, «grande (N ficheros, M líneas): una ronda más». → {…, why} o null. */
+function bigNote(snapshot, { labelsPolicy, priorityPolicy }) {
+  const files = (snapshot.files || []).map((f) => f.path ?? f), n = lines(snapshot), areas = areasFor(files, labelsPolicy?.areas || {});
+  const ns = priorityPolicy?.needsSplit || {};
+  if (!(n > ns.maxLines || areas.length > ns.maxAreas)) return null;
+  return { lines: n, files: files.length, areas: areas.length, why: `grande (${files.length} ficheros, ${n} líneas${areas.length > ns.maxAreas ? `, ${areas.length} áreas` : ''}): una ronda más` };
+}
+const fmtP = (p) => String(Math.round(p * 100) / 100);
+/** Porqué del needs-split: la p de Jev, de qué head, y el umbral. */
+const splitWhy = (sc, thr) => `Jev scope_creep p=${fmtP(sc.p)}${sc.stale ? ` (de ${sc.sha7 || 'otro head'}, no del head)` : ''} ≥ ${fmtP(thr)}: varias entregas independientes`;
+
+// ── gates de merge trivial ─────────────────────────────────────────────────
+/**
+ * @returns {{gates:[{id,status:'pass'|'fail'|'unknown',why}], pass:boolean}}
+ * `sessionCount` = merges triviales ya hechas hoy (ledger); si es null se evalúa `unknown`.
+ * `crRebase` = rebaseUnchanged() de bin/lib/coderabbit-rebase.mjs (lo lee quien llama: aquí no hay red); null = no se comparó.
+ */
+function evaluateGates(snapshot, trivialPolicy, { labelsPolicy, sessionCount = null, crRebase = null } = {}) {
+  const tp = trivialPolicy; const gates = [];
+  const files = (snapshot.files || []).map(f => f.path);
+  const g = (id, status, why) => gates.push({ id, status, why });
+  const n = lines(snapshot);
+  const areas = areasFor(files, labelsPolicy?.areas || {});
+  const safeFile = (f) => tp.safePathPrefixes.some(p => f.startsWith(p)) || tp.safeFilePatterns.some(p => matchGlob(p, f) || matchGlob('**/' + p, f));
+  const onlySafe = files.length > 0 && files.every(safeFile);
+  const onlySafeAreas = files.length > 0 && areas.length > 0 && areas.every(a => tp.safeAreas.includes(a)) && files.every(f => areas.some(a => (labelsPolicy.areas[a] || []).some(gl => matchGlob(gl, f))));
+  if (files.length === 0) g('scope', 'unknown', 'no pude ver los ficheros');
+  else if (onlySafe || onlySafeAreas) g('scope', 'pass', 'solo docs/i18n/tests');
+  else if (n < tp.maxLinesSmall) g('scope', 'pass', `${n} líneas (< ${tp.maxLinesSmall})`);
+  else g('scope', 'fail', `${n} líneas y toca código`);
+
+  const ci = ciStatus(snapshot, tp);
+  // Verde con un cancelado que relanzar (#2628) no pasa: GitHub cuenta el cancelado y el merge queda BLOCKED hasta relanzarlo.
+  g('ci-green', ci.status === 'green' && !ci.rerun?.length ? 'pass' : ci.status === 'unknown' ? 'unknown' : 'fail', ci.why);
+
+  g('no-quality-check', has(snapshot, 'quality-check') ? 'fail' : 'pass', has(snapshot, 'quality-check') ? 'CodeRabbit pidió lectura humana' : 'sin quality-check');
+
+  // Pasa solo con CodeRabbit en `reviewed` en el head (o saltada por config en una PR de bot): «no ha comentado», límite, salto, pausa o
+  // un head sin revisar ya no pasan (2-oct, #4111 #3729 #2678). Una foto sin estado (cache de antes) es «no pude ver».
+  const cr = snapshot.coderabbit;
+  if (!cr || !cr.state) g('coderabbit-clean', 'unknown', 'no pude ver CodeRabbit en este head');
+  else if (cr.changesRequested) g('coderabbit-clean', 'fail', 'CodeRabbit pidió cambios');
+  else if (cr.unresolvedThreads > 0) g('coderabbit-clean', 'fail', `${cr.unresolvedThreads} hilos de CodeRabbit sin resolver`);
+  else if (coderabbitOk(cr)) g('coderabbit-clean', 'pass', cr.state === 'reviewed' ? 'CodeRabbit revisó este head, sin findings abiertos' : `CodeRabbit ${coderabbitSays(cr)}`);
+  // Retro 17-oct, punto 4 (#5306): revisó c1f971c y el head 319a627 es su rebase con los mismos blobs en los ficheros de la PR; CodeRabbit
+  // ya no revisa («Already reviewed the last commit») y esto fallaba. Con el mismo código que revisó, pasa. Sin comparación, como antes.
+  else if (crRebase?.same === true && cr.upTo && crRebase.from === cr.upTo) g('coderabbit-clean', 'pass', `CodeRabbit: ${crRebase.why}, sin findings abiertos`);
+  else g('coderabbit-clean', 'fail', `CodeRabbit: ${coderabbitSays(cr)}${crRebase?.same === false && crRebase.from === cr.upTo ? ` (${crRebase.why})` : ''}`);
+
+  const m = snapshot.authorMergedCount;
+  if (m === null || m === undefined) g('author-merged', 'unknown', 'no pude contar merges del autor');
+  else g('author-merged', m >= tp.minAuthorMerged ? 'pass' : 'fail', m >= tp.minAuthorMerged ? `autor con ${m} merges previos` : 'primerizo: sin merges previos');
+
+  const rules = tp.codeownersRules?.length ? tp.codeownersRules : (tp.codeowners?.fallbackPatterns || []).map(pattern => ({ pattern, owners: [tp.codeowners.owner] }));
+  if (!rules.length) g('no-codeowners', 'unknown', 'sin CODEOWNERS cargado');
+  else {
+    const hits = codeownerHits(files, rules, tp.codeowners.owner, tp.codeowners.extraPatterns || []);
+    g('no-codeowners', hits.length ? 'fail' : 'pass', hits.length ? `${hits[0]} es de ${tp.codeowners.owner}` : 'ningún fichero de Santiago');
+  }
+
+  const bad = (snapshot.labels || []).find(l => tp.forbiddenLabels.includes(l) || tp.forbiddenLabelPrefixes.some(p => l.startsWith(p)));
+  g('no-blocking-labels', bad ? 'fail' : 'pass', bad ? `lleva ${bad}` : 'sin labels bloqueantes');
+
+  const ms = tp.mergeState;
+  if (snapshot.mergeable === null || snapshot.mergeable === undefined || snapshot.mergeable === 'UNKNOWN') g('mergeable', 'unknown', 'GitHub aún no calculó mergeable');
+  else if (snapshot.mergeable !== ms.requireMergeable) g('mergeable', 'fail', 'en conflicto con main');
+  else {
+    const st = snapshot.mergeStateStatus;
+    const rejected = ms.reject.includes(st) && !(st === 'BEHIND' && ms.allowBehind) && !(st === 'BLOCKED' && ms.allowBlocked);
+    g('mergeable', rejected ? 'fail' : 'pass', rejected ? `mergeStateStatus ${st}` : `mergeable, ${st || 'estado ok'}`);
+  }
+
+  g('not-draft', snapshot.isDraft ? 'fail' : 'pass', snapshot.isDraft ? 'es borrador' : 'no es borrador');
+
+  // Checks de política (direction-gate): no son CI del autor, pero un merge trivial nunca pasa con uno en rojo.
+  const pc = (snapshot.checks?.runs || []).filter(r => (tp.policyChecks || []).includes(r.name));
+  const pcRed = pc.find(r => ['FAILURE', 'TIMED_OUT', 'ERROR', 'ACTION_REQUIRED', 'CANCELLED'].includes(r.conclusion));
+  const pcPending = pc.find(r => r.status !== 'COMPLETED' || r.conclusion === null);
+  if (pcRed) g('policy-checks', 'fail', `${pcRed.name} en rojo: reserva nuestra`);
+  else if (pcPending) g('policy-checks', 'unknown', `${pcPending.name} aún corriendo`);
+  else g('policy-checks', 'pass', pc.length ? 'checks de política en verde' : 'sin checks de política en el head');
+
+  if (sessionCount === null || sessionCount === undefined) g('session-cap', 'unknown', 'sin contador de sesión');
+  else g('session-cap', sessionCount < tp.sessionCap ? 'pass' : 'fail', `${sessionCount}/${tp.sessionCap} triviales hoy`);
+
+  return { gates, pass: gates.every(x => x.status === 'pass'), failing: gates.filter(x => x.status !== 'pass').map(x => x.id) };
+}
+
+// ── prioridad ──────────────────────────────────────────────────────────────
+/**
+ * @param {object} ctx  { commitments: [{pr,due,status,text}], dependents: number, now, state }
+ */
+function computePriority(snapshot, priorityPolicy, { commitments = [], dependents = 0, blocksOthers = undefined, now = Date.now(), state = null } = {}) {
+  const pp = priorityPolicy;
+  const hit = (snapshot.labels || []).find(l => pp.p0.labels.includes(l));
+  if (hit) return { priority: 'p0', why: `lleva label ${hit}` };
+  if (pp.p0.codeqlOpenAlerts && snapshot.codeqlAlerts > 0) return { priority: 'p0', why: `${snapshot.codeqlAlerts} alertas CodeQL abiertas` };
+  const open = commitments.filter(c => Number(c.pr) === Number(snapshot.number) && c.status === 'open' && c.due);
+  const soon = open.map(c => ({ ...c, h: (Date.parse(c.due) - now) / H })).sort((a, b) => a.h - b.h)[0];
+  if (soon && soon.h <= pp.p1.commitmentDueWithinHours) return { priority: 'p1', why: soon.h < 0 ? `compromiso vencido hace ${age(soon.due, now)}` : `compromiso vence en ${Math.max(1, Math.round(soon.h))}h` };
+  const blocks = blocksOthers === undefined ? dependents >= pp.p1.blocksOthersMinDependents : blocksOthers;
+  if (blocks) return { priority: 'p1', why: `bloquea ${dependents} PRs por ficheros compartidos` };
+  const readyAt = snapshot.labeledAt?.['triage/ready'];
+  if (snapshot.authorMergedCount === 0 && has(snapshot, 'triage/ready') && hoursSince(readyAt || snapshot.createdAt, now) > pp.p1.firstTimerReadyHours) return { priority: 'p1', why: `primerizo listo desde hace ${age(readyAt || snapshot.createdAt, now)}` };
+  if (pp.p1.reReview && (state === 'triage/re-review' || has(snapshot, 'triage/re-review'))) return { priority: 'p1', why: 'tenía OK y cambió después' };
+  return { priority: 'p2', why: 'sin señal de urgencia' };
+}
+
+// ── clasificación ──────────────────────────────────────────────────────────
+const GATE_SHORT = { scope: 'tamaño', 'ci-green': 'CI', 'no-quality-check': 'quality-check', 'coderabbit-clean': 'CodeRabbit', 'author-merged': 'primerizo', 'no-codeowners': 'CODEOWNERS', 'no-blocking-labels': 'labels', mergeable: 'BEHIND/conflicto', 'not-draft': 'borrador' };
+function staleApproval(snapshot, maintainers) {
+  const approvals = (snapshot.reviews || []).filter(r => r.state === 'APPROVED' && maintainers.includes(r.author));
+  if (!approvals.length) return false;
+  const last = approvals.sort((a, b) => (a.submittedAt || '').localeCompare(b.submittedAt || '')).at(-1);
+  return !!last.commit && last.commit !== snapshot.headSha;
+}
+
+/**
+ * Función pura. `extras`: { sessionCount, commitments, dependents, okGiven, noSplit } (vienen del ledger/colisiones; opcionales).
+ * `noSplit`: el «no partir» de Santiago para esta PR (su entrada del ledger, ver noSplitHolds); la Action no lo tiene.
+ */
+function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now = Date.now(), sessionCount = null, commitments = [], dependents = 0, blocksOthers = undefined, okGiven = false, rebaseManual = new Set(), rebaseClean = new Set(), noSplit = null, scopeCreep = undefined, splitThreshold: thr = undefined } = {}) {
+  const why = [];
+  const files = (snapshot.files || []).map(f => f.path);
+  const n = lines(snapshot);
+  const areas = areasFor(files, labelsPolicy.areas);
+  const size = sizeClass(n, priorityPolicy.sizeClasses);
+  const ci = ciStatus(snapshot, trivialPolicy);
+  const firstTimer = snapshot.authorMergedCount === 0;
+  const needsRebase = snapshot.mergeable === 'CONFLICTING' || snapshot.mergeStateStatus === 'DIRTY';
+  // Regla del 19-oct (santiago:2026-10-19:regla-partela): partir solo si Jev ve varias entregas (scope_creep ≥ umbral). El tamaño y las
+  // áreas son una nota (`big`). `scopeCreep`: la señal que pasa quien llama ({p}, número o null = sin señal); sin pasarla, la de la foto.
+  const big = bigNote(snapshot, { labelsPolicy, priorityPolicy });
+  const sc = scopeCreep === undefined ? scopeCreepOf(snapshot) : typeof scopeCreep === 'number' ? { p: scopeCreep, stale: false } : scopeCreep;
+  const threshold = thr ?? splitThreshold(priorityPolicy);
+  const jevSplit = Number.isFinite(sc?.p) && sc.p >= threshold;
+  // «No partir» de Santiago (2-oct): no se pide troceo mientras valga su decisión, ni con la señal de Jev. Si ya no vale (creció o la
+  // retiró), needs-split vuelve con su porqué (si Jev lo pide).
+  const nsLabel = labelsPolicy.labels?.[NO_SPLIT_LABEL] ? NO_SPLIT_LABEL : null;
+  const keep = noSplitHolds(noSplit, snapshot, { growth: priorityPolicy.needsSplit.noSplitGrowth, label: nsLabel });
+  // A un bot no se le pide partir (la PR de versión de career-ops-release, #5335, salía con scope_creep 0.8: es un release, no una mezcla).
+  const botSplit = Boolean(snapshot.authorIsBot) || (labelsPolicy.bots || []).some(b => b === snapshot.author || b === `${snapshot.author}[bot]`) || /\[bot\]$/.test(String(snapshot.author || ''));
+  const needsSplit = jevSplit && !keep?.holds && !botSplit;
+  // Primerizo: GitHub no crea check-runs para los workflows retenidos, así que el head aparece sin la matriz (stale) o sin checks (absent): es CI retenida.
+  const ciHold = firstTimer && (ci.status === 'held' || ci.status === 'absent' || ci.status === 'stale');
+  const responded = !!snapshot.lastMaintainerCommentAt || (snapshot.markers || []).length > 0;
+  // A un maintainer o a un bot no se le debe primera respuesta (ni disculpa): el sweep de la Action ya los excluye; aquí igual.
+  const authorIsMaintainer = (labelsPolicy.maintainers || []).includes(snapshot.author);
+  const authorIsBot = Boolean(snapshot.authorIsBot) || (labelsPolicy.bots || []).some(b => b === snapshot.author || b === `${snapshot.author}[bot]`) || /\[bot\]$/.test(String(snapshot.author || ''));
+  const firstResponseMissing = !responded && !authorIsMaintainer && !authorIsBot && hoursSince(snapshot.createdAt, now) > priorityPolicy.firstResponseHours;
+  const gatesRes = evaluateGates(snapshot, trivialPolicy, { labelsPolicy, sessionCount });
+  const trivialCandidate = gatesRes.gates.filter(g => g.id !== 'session-cap').every(g => g.status === 'pass');
+  // waiting-author se conserva solo mientras el autor no haya actuado (push/comentario) después de nuestro último
+  // comentario o de la puesta del label (labeledAt). Sin ninguna referencia no se conserva: manda la causa objetiva.
+  const waitRef = [snapshot.lastMaintainerCommentAt, snapshot.labeledAt?.['triage/waiting-author']].filter(Boolean).sort().at(-1) || null;
+  const waitingKept = has(snapshot, 'triage/waiting-author') && !!waitRef && !(snapshot.lastAuthorActivityAt > waitRef);
+  const changesRequested = snapshot.reviewDecision === 'CHANGES_REQUESTED';
+  const reReview = okGiven || staleApproval(snapshot, labelsPolicy.maintainers);
+
+  let state;
+  if (snapshot.isDraft) { state = 'triage/new'; why.push('borrador: no se toca'); }
+  else if (needsRebase) {
+    state = 'needs-rebase'; const key = `${snapshot.number}@${snapshot.headSha}`;
+    // "ours" solo con sondeo limpio (rebase-probe): sin sondeo no se promete nada.
+    why.push(rebaseManual.has(key) ? 'conflicto con main; el rebase automático no es limpio: rebase del autor' : !snapshot.maintainerCanModify ? 'conflicto con main; rebase del autor' : rebaseClean.has(key) ? 'conflicto con main; sondeo limpio: podemos arreglarlo nosotros' : 'conflicto con main; permite edits: sondear con rebase-probe');
+  }
+  else if (ciHold) { state = 'triage/ci-hold'; why.push('primerizo con CI retenida'); }
+  else if (needsSplit) { state = 'triage/needs-split'; why.push(`${splitWhy(sc, threshold)}: pedir troceo`); }
+  else if (waitingKept) { state = 'triage/waiting-author'; why.push('esperando al autor desde nuestro último comentario'); }
+  else if (ci.status === 'red') { state = 'triage/waiting-author'; why.push(`CI rojo: ${ci.why}`); }
+  else if (changesRequested) { state = 'triage/waiting-author'; why.push('cambios pedidos en revisión'); }
+  else if (reReview) { state = 'triage/re-review'; why.push('tenía OK y cambió después'); }
+  else if (trivialCandidate) { state = 'triage/trivial'; why.push('pasa todos los gates: merge trivial'); }
+  else if (ci.status === 'green') { state = 'triage/ready'; why.push(`CI verde; no trivial: ${gatesRes.failing.filter(f => f !== 'session-cap').map(f => f === 'ci-green' && ci.rerun?.length ? 'relanzar CI' : GATE_SHORT[f] || f).slice(0, 3).join(', ') || 'nada'}`); }
+  // CI cancelada (2-oct, #2628): ni rojo ni waiting-author; relanzarla es cosa nuestra y el porqué lo dice.
+  else { state = 'triage/new'; why.push(ci.status === 'pending' ? 'CI aún corriendo' : ci.status === 'cancelled' ? ci.why : ci.status === 'held' ? 'CI retenida' : ci.status === 'absent' ? 'sin CI en el head' : ci.status === 'stale' ? 'CI antigua en el head: relanzar' : 'CI ilegible'); }
+  if (ci.rerun?.length && !snapshot.isDraft && !needsRebase && !why.includes(ci.why)) why.push(ci.why);
+  if (jevSplit && keep) why.push(keep.why);
+  if (big && !needsSplit) why.push(big.why);
+
+  const pr = computePriority(snapshot, priorityPolicy, { commitments, dependents, blocksOthers, now, state });
+  const current = new Set(snapshot.labels || []);
+  const labelsToAdd = []; const labelsToRemove = [];
+  const exclusive = (name) => Object.entries(labelsPolicy.labels).filter(([k, v]) => v.exclusive_group === labelsPolicy.labels[name]?.exclusive_group && k !== name).map(([k]) => k);
+  const setExclusive = (name) => {
+    if (!current.has(name) && !labelsPolicy.labels[name]?.no_label) labelsToAdd.push(name);
+    for (const other of exclusive(name)) if (current.has(other) && !labelsPolicy.labels[other]?.read_only && !labelsPolicy.labels[other]?.no_label && labelsPolicy.labels[other]?.exclusive_group !== 'direction') labelsToRemove.push(other);
+  };
+  setExclusive(state);
+  setExclusive(pr.priority);
+  // La label pública sigue a su decisión del ledger (solo la sesión la pasa): puesta mientras valga, fuera si caducó o la retiró.
+  if (noSplit && nsLabel) { if (keep?.holds && !current.has(nsLabel)) labelsToAdd.push(nsLabel); else if (!keep?.holds && current.has(nsLabel)) labelsToRemove.push(nsLabel); }
+  if (firstResponseMissing) why.push(`sin respuesta nuestra desde hace ${age(snapshot.createdAt, now)}`);
+
+  return {
+    number: snapshot.number, state, priority: pr.priority, priorityWhy: pr.why, why, labelsToAdd, labelsToRemove,
+    sizeClass: size, lines: n, areas, trivialCandidate, needsSplit, big, scopeCreep: sc || null, splitThreshold: threshold, noSplit: keep, needsRebase, ciHold, firstResponseMissing, authorIsMaintainer, authorIsBot, dependents, blocksOthers: !!(blocksOthers === undefined ? dependents >= priorityPolicy.p1.blocksOthersMinDependents : blocksOthers),
+    ci: ci.status, ciRerun: ci.rerun || [], gates: gatesRes.gates, failingGates: gatesRes.failing, age: age(snapshot.createdAt, now),
+  };
+}
+
+// ── colisiones (grafo PR↔ficheros) ─────────────────────────────────────────
+const READINESS = { 'triage/trivial': 4, 'triage/ready': 3, 'triage/re-review': 3, 'triage/new': 2, 'triage/waiting-author': 1, 'triage/ci-hold': 1, 'triage/needs-split': 0, 'needs-rebase': 0 };
+/**
+ * @param {Array<{number, files:[{path}], additions, deletions, createdAt, state?, maintainerCanModify}>} prs  (state = estado de triage si se conoce)
+ * @returns {{ pairs, blocks: {n:[...]}, dependsOn: {n:[...]}, order:[n], dependents:{n:count} }}
+ */
+function collisions(prs) {
+  const byFile = new Map();
+  for (const p of prs) for (const f of (p.files || [])) { const k = f.path; if (!byFile.has(k)) byFile.set(k, new Set()); byFile.get(k).add(p.number); }
+  const shared = new Map(); // "a|b" -> [files]
+  for (const [file, set] of byFile) {
+    const arr = [...set].sort((a, b) => a - b);
+    for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) { const k = `${arr[i]}|${arr[j]}`; if (!shared.has(k)) shared.set(k, []); shared.get(k).push(file); }
+  }
+  const info = new Map(prs.map(p => [p.number, p]));
+  const rank = (p) => READINESS[p.state] ?? 2;
+  const sz = (p) => (p.additions || 0) + (p.deletions || 0);
+  // A bloquea a B si comparten ficheros y A está más cerca de merge (readiness, luego tamaño menor, luego más antigua).
+  const aBeforeB = (a, b) => rank(a) !== rank(b) ? rank(a) > rank(b) : sz(a) !== sz(b) ? sz(a) < sz(b) : (a.createdAt || '') !== (b.createdAt || '') ? (a.createdAt || '') < (b.createdAt || '') : a.number < b.number;
+  const blocks = {}, dependsOn = {}; const pairs = [];
+  for (const p of prs) { blocks[p.number] = []; dependsOn[p.number] = []; }
+  for (const [k, files] of shared) {
+    const [a, b] = k.split('|').map(Number); const A = info.get(a), B = info.get(b);
+    const first = aBeforeB(A, B) ? a : b, second = first === a ? b : a;
+    blocks[first].push(second); dependsOn[second].push(first);
+    pairs.push({ a: first, b: second, files: files.sort() });
+  }
+  const dependents = Object.fromEntries(Object.entries(blocks).map(([n, l]) => [n, l.length]));
+  // Orden greedy: primero las que más bloquean y menos dependen; desempate tamaño menor, número menor. Estable.
+  const remaining = new Set(prs.map(p => p.number)); const order = [];
+  while (remaining.size) {
+    let best = null, bestScore = -Infinity;
+    for (const n of [...remaining].sort((x, y) => x - y)) {
+      const b = blocks[n].filter(x => remaining.has(x)).length, d = dependsOn[n].filter(x => remaining.has(x)).length;
+      const score = b - d;
+      const p = info.get(n);
+      if (score > bestScore || (score === bestScore && best !== null && sz(p) < sz(info.get(best)))) { best = n; bestScore = score; }
+    }
+    order.push(best); remaining.delete(best);
+  }
+  pairs.sort((x, y) => x.a - y.a || x.b - y.b);
+  return { pairs, blocks, dependsOn, dependents, order };
+}
+
+/** PRs que llevan blocks-others: top `blocksOthersTop` por dependientes con al menos `blocksOthersMinDependents`. Orden estable. */
+function blocksOthersSet(dependents, priorityPolicy) {
+  const { blocksOthersTop = 15, blocksOthersMinDependents = 2 } = priorityPolicy.p1;
+  return new Set(Object.entries(dependents).filter(([, d]) => d >= blocksOthersMinDependents).sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0])).slice(0, blocksOthersTop).map(([n]) => Number(n)));
+}
+
+// ── carga de políticas (fs, sin red) ───────────────────────────────────────
+/** Lee policy/*.json y, si hay checkout de career-ops, su CODEOWNERS real; si no, los patrones de respaldo de trivial.json. */
+function loadPolicies({ root, checkout = process.env.CO_CHECKOUT || path.join(process.env.HOME || '', 'code', 'career-ops') } = {}) {
+  const read = (f) => JSON.parse(fs.readFileSync(path.join(root, 'policy', f), 'utf8'));
+  const labelsPolicy = read('labels.json'), trivialPolicy = read('trivial.json'), priorityPolicy = read('priority.json');
+  const co = trivialPolicy.codeowners || {};
+  const file = checkout ? path.join(checkout, co.file || '.github/CODEOWNERS') : null;
+  const found = file && fs.existsSync(file);
+  trivialPolicy.codeownersRules = found ? parseCodeowners(fs.readFileSync(file, 'utf8')) : [];
+  trivialPolicy.codeownersSource = found ? file : 'policy/trivial.json#codeowners.fallbackPatterns';
+  return { labelsPolicy, trivialPolicy, priorityPolicy };
+}
+return { PR_QUERY, jevMarkerToSignals, normLogin, MARKER_BOTS, crSummary, coderabbitState, isBotOrder, coderabbitSays, coderabbitOk, shape, globToRegex, matchGlob, areasFor, parseCodeowners, ownersFor, codeownerHits, touchesWorkflows, checkVerdict, ciStatus, sizeClass, NO_SPLIT_LABEL, noSplitHolds, splitThreshold, latestScopeCreep, scopeCreepOf, bigNote, splitWhy, evaluateGates, computePriority, classify, collisions, blocksOthersSet, loadPolicies };
+})();
+
+// ---- github-src/scripts/jev-marker.mjs (inlineado) ----
+const { JEV_MARKER_RE, MAX_COMMENT_BYTES_JEV, round2, buildJevMarker, parseJevMarkers, parseJevMarker, upsertJevMarker } = (() => {
+// Señal de Jev persistida en la PR como bloque oculto dentro del comentario de primera respuesta:
+//   <!-- co:jev:<pr>:<sha7> {"v":"…","model":"…","domains":{…},"labelsApplied":[…],"ts":"…"} -->
+// Un bloque por sha7 (se reemplaza, nunca se duplica); números a 2 decimales; comentario ≤ 60 KB.
+// Lo usan la Action (github-src/scripts/triage.mjs, inlineado en el bundle) y la sesión (import directo).
+
+const JEV_MARKER_RE = /<!--\s*co:jev:(\d+):([0-9a-f]{7})\s+(\{[\s\S]*?\})\s*--!?>/g; // `--!?>`: CodeQL js/bad-tag-filter
+const MAX_COMMENT_BYTES_JEV = 60 * 1024;
+
+/** Redondea todo número a 2 decimales, recursivamente. */
+function round2(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? v : Math.round(v * 100) / 100;
+  if (Array.isArray(v)) return v.map(round2);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, round2(x)]));
+  return v;
+}
+function buildJevMarker(pr, sha7, payload) {
+  const json = JSON.stringify(round2(payload)).replace(/--!?>/g, (m) => m.slice(0, -1) + '\\u003e'); // "-->" y "--!>" dentro del JSON cerrarían el comentario (CodeQL js/bad-tag-filter); \u003e es un escape JSON válido
+  return `<!-- co:jev:${pr}:${sha7} ${json} -->`;
+}
+/** Todos los bloques del cuerpo, en orden: [{pr, sha7, ...payload}]. Un JSON corrupto se salta. */
+function parseJevMarkers(body) {
+  const out = [];
+  for (const m of String(body || '').matchAll(JEV_MARKER_RE)) {
+    try { out.push({ pr: Number(m[1]), sha7: m[2], ...JSON.parse(m[3]) }); } catch { /* corrupto: se ignora */ }
+  }
+  return out;
+}
+/** El último bloque (señal más reciente) o null. Con `sha7`, el de ese sha o null. */
+function parseJevMarker(body, sha7 = null) {
+  const all = parseJevMarkers(body);
+  return sha7 ? all.find((b) => b.sha7 === sha7) || null : all.at(-1) || null;
+}
+/** Inserta o reemplaza el bloque de ese sha7 al final del cuerpo. Si no cabe en 60 KB, quita los bloques más antiguos. */
+function upsertJevMarker(body, pr, sha7, payload) {
+  const block = buildJevMarker(pr, sha7, payload);
+  const own = new RegExp(`\\n*<!--\\s*co:jev:${pr}:${sha7}\\s+\\{[\\s\\S]*?\\}\\s*--!?>`, 'g');
+  let out = String(body || '').replace(own, '').replace(/\s+$/, '') + `\n\n${block}`;
+  for (;;) {
+    if (Buffer.byteLength(out) <= MAX_COMMENT_BYTES_JEV) return out;
+    const oldest = [...out.matchAll(JEV_MARKER_RE)].find((m) => m[2] !== sha7);
+    if (!oldest) throw new Error(`bloque jev de #${pr} supera 60 KB (${MAX_COMMENT_BYTES_JEV} bytes) por sí solo`);
+    out = out.replace(oldest[0], '').replace(/\n{3,}/g, '\n\n');
+  }
+}
+return { JEV_MARKER_RE, MAX_COMMENT_BYTES_JEV, round2, buildJevMarker, parseJevMarkers, parseJevMarker, upsertJevMarker };
+})();
+
+// ---- github-src/scripts/triage.mjs (sin dev-only) ----
+// pr-triage: wrapper de Action alrededor de `classify(snapshot, {labelsPolicy, trivialPolicy, priorityPolicy, now})`
+// (bin/lib/triage-core.mjs, función pura). Este fichero es la FUENTE; `build.mjs` genera `triage.bundle.mjs`
+// (core + policy/*.json inlineados, sin imports externos) que es lo que se copia a .github/scripts/ del repo.
+//
+// Qué hace: lee el evento (GITHUB_EVENT_PATH), construye el snapshot de la PR con la MISMA query GraphQL que
+// bin/lib/snapshot.mjs (fetch nativo, token GITHUB_TOKEN), llama a `classify`, aplica los labels de estado y
+// publica la primera respuesta con marcador `<!-- co:first-reply:N:sha7 -->` (se busca antes: nunca duplica).
+// En `schedule` hace el sweep: (1) PRs abiertas >20h y ≤TRIAGE_BACKLOG_HOURS sin comentario de maintainer ni marcador
+// reciben labels + primera respuesta; (2) las más viejas (backlog) reciben labels + la misma primera respuesta con una disculpa
+// por la espera y sin fechas (S18: el acuse es del bot, nunca de la cuenta de un maintainer); (3) las pegadas en
+// `triage/new` >1h se re-triagean (la CI ya acabó).
+// En `workflow_run` (Tests completada) re-triagea la PR de ese head: la label `triage/new` promete "en el siguiente sweep"
+// y aquí no hay sweep hasta 6h después.
+//
+// Qué NO hace: prioridad (p0/p1/p2), direction/* ni maintainer-commitment. La prioridad necesita ledger
+// (compromisos) y colisiones, que solo tiene la sesión; si la Action la recalculara sin eso, degradaría p1.
+// Toca labels con who_sets/who_clears = "action" en policy/labels.json, más `triage/waiting-author` cuando
+// classify la propone por señal objetiva (CHANGES_REQUESTED de un maintainer o CI en rojo): decisión del lead.
+// Un check cancelado no es CI en rojo (2-oct, #2628): no es del autor, toca relanzarlo (triage/new, o ready si el mismo
+// check pasó después en otro run del head).
+// `triage/needs-split` (regla del 19-oct): nunca por tamaño ni por áreas; solo con Jev quality.scope_creep ≥ su threshold_review
+// (la señal de esta pasada o, sin clave o con fallo, la del bloque co:jev de la PR). Sin señal no se pide partir, y la que haya puesta
+// (la de tamaño de antes) se quita en la siguiente pasada: es de who_clears "action".
+//
+// Env: GITHUB_TOKEN · GITHUB_REPOSITORY · GITHUB_EVENT_NAME · GITHUB_EVENT_PATH
+//      DRY_RUN=true → no escribe en GitHub; solo GITHUB_STEP_SUMMARY
+//      JEV_API_KEY opcional → snapshot.signals con los catálogos PÚBLICOS quality (siempre) e intent (en issue_comment),
+//        inlineados por build.mjs desde policy/jev/*.yaml (nunca direction.yaml). Sin clave o con fallo: null (`jev:unavailable`).
+//        La señal se persiste en la PR como bloque oculto `<!-- co:jev:N:sha7 {…} -->` dentro del comentario de
+//        primera respuesta (editándolo: sin entradas nuevas en el timeline; un bloque por sha7). Sin primera
+//        respuesta (bot/borrador) no se crea comentario: la señal queda solo en el job summary.
+//      TRIAGE_SWEEP_MAX (60) → tope de primeras respuestas por sweep (evita bombardeo y el rate limit de 1000 req/h)
+//      TRIAGE_BACKLOG_HOURS (72) → a partir de esa edad la primera respuesta lleva la disculpa por la espera (backlogReply)
+//      TRIAGE_RETRIAGE_MAX (30) → tope de re-triages (backlog + triage/new pegadas) por sweep
+//      CODEOWNERS_PATH (.github/CODEOWNERS) → reglas reales para el gate no-codeowners (checkout de la base)
+
+
+const MARKER_SLUG = 'first-reply';
+const JEV_MODEL = 'jev-1.13.0';
+const SWEEP_HOURS = 20;
+const BACKLOG_HOURS = Number(process.env.TRIAGE_BACKLOG_HOURS || 72);
+const STUCK_HOURS = 1; // triage/new más vieja que esto y sin evento: la CI acabó y nadie la reclasificó
+const MAX_COMMENT_BYTES = 1600;
+const DEFAULT_FIRST_REPLY = [
+  'Thanks for the PR: it is in the queue and a maintainer will read it by hand.',
+  '',
+  'What happens next:',
+  '- The `triage/*` label tells you where it stands. It is ours to move, not yours to worry about.',
+  '- If we need something from you, it will be a concrete list, not a vague "please fix".',
+  '- Nothing here gets closed by a bot.',
+  '',
+  'CONTRIBUTING.md has the rest. Thanks for the time you put into this.',
+].join('\n');
+/** Primera respuesta a una PR que esperó más de TRIAGE_BACKLOG_HOURS: la misma, con la disculpa delante. Sin fechas: el bot
+ *  no puede registrar un compromiso, y el manifiesto no deja prometer lo que no se registra. */
+export function backlogReply(days) {
+  return [
+    `Thanks for the PR, and sorry for the wait: it went ${days} days without a reply from us. That is on us, not on you.`,
+    '',
+    'It is in the queue and a maintainer will read it by hand. What happens next:',
+    '- The `triage/*` label tells you where it stands. It is ours to move, not yours to worry about.',
+    '- If we need something from you, it will be a concrete list, not a vague "please fix".',
+    '- Nothing here gets closed by a bot.',
+    '',
+    'CONTRIBUTING.md has the rest. Thanks for the time you put into this, and for your patience.',
+  ].join('\n');
+}
+
+// ---------- GitHub (fetch nativo, sin dependencias) ----------
+const API = 'https://api.github.com';
+const REPO = process.env.GITHUB_REPOSITORY || '';
+const [OWNER, NAME] = REPO.split('/');
+const TOKEN = process.env.GITHUB_TOKEN;
+const DRY = /^(1|true|yes)$/i.test(process.env.DRY_RUN || '');
+const summaryLines = [];
+function log(line) { summaryLines.push(line); process.stdout.write(line + '\n'); }
+const headers = (extra = {}) => ({ authorization: `Bearer ${TOKEN}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'career-ops-pr-triage', ...extra });
+
+async function rest(method, url, body) {
+  const res = await fetch(url.startsWith('http') ? url : `${API}/${url.replace(/^\//, '')}`, { method, headers: headers(body ? { 'content-type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 204) return null;
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${method} ${url} → ${res.status}: ${text.slice(0, 200)}`);
+  return text ? JSON.parse(text) : null;
+}
+async function graphql(query, variables = {}) {
+  const res = await fetch(`${API}/graphql`, { method: 'POST', headers: headers({ 'content-type': 'application/json' }), body: JSON.stringify({ query, variables }) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.errors?.length) throw new Error(`graphql → ${res.status}: ${(json.errors || []).map((e) => e.message).join('; ') || 'sin detalle'}`.slice(0, 300));
+  return json.data;
+}
+async function write(method, url, body, what) {
+  if (DRY) { log(`DRY-RUN ${what}: ${method} ${url} ${body ? JSON.stringify(body).slice(0, 160) : ''}`); return null; }
+  const r = await rest(method, url, body); log(`hecho ${what}`); return r;
+}
+
+// ---------- Snapshot (misma query que bin/lib/snapshot.mjs; la forma la da shape() del core) ----------
+const norm = (login) => String(login || '').replace(/\[bot\]$/, '');
+const isBotLogin = (login) => /\[bot\]$/.test(login || '') || (POLICIES.labels.bots || []).includes(norm(login));
+const sha7 = (s) => String(s || '').slice(0, 7);
+const marker = (pr, sha) => `<!-- co:${MARKER_SLUG}:${pr}:${sha7(sha)} -->`;
+
+// PR_QUERY viene de triage-core.mjs (la misma que bin/lib/snapshot.mjs): una sola query, una sola forma.
+const MORE = (field, sel) => `query($owner:String!,$name:String!,$number:Int!,$after:String){ repository(owner:$owner,name:$name){ pullRequest(number:$number){ ${field}(first:100, after:$after){pageInfo{hasNextPage endCursor} nodes{${sel}}} } } }`;
+async function pageRest(field, sel, number, after) {
+  const out = [];
+  while (after) {
+    const d = await graphql(MORE(field, sel), { owner: OWNER, name: NAME, number, after });
+    const c = d.repository.pullRequest[field]; out.push(...c.nodes); after = c.pageInfo.hasNextPage ? c.pageInfo.endCursor : null;
+  }
+  return out;
+}
+async function mergedCount(login) {
+  try { const d = await graphql(`query($q:String!){ search(query:$q, type:ISSUE, first:1){ issueCount } }`, { q: `repo:${REPO} is:pr is:merged author:${login}` }); return d.search.issueCount; }
+  catch (e) { log(`merges de ${login}: no pude contar (${e.message.slice(0, 60)})`); return null; }
+}
+// ---------- Jev (misma API y mismo recorte de estado que bin/lib/jev.mjs; solo catálogos públicos) ----------
+const JEV_ENDPOINT = process.env.JEV_URL || 'https://api.typesafe.ai/v1/systemone';
+const JEV_API_MODEL = 'jev-latest';
+function jevStateText(state, spec) {
+  const parts = [];
+  for (const s of spec) {
+    const m = /^([a-zA-Z][a-zA-Z0-9_]*)(?:\((\d+)\))?$/.exec(s); if (!m) continue;
+    const key = m[1], n = m[2] ? Number(m[2]) : null;
+    let v;
+    if (key === 'diffHead') continue; // la Action no descarga el diff
+    else if (key === 'files') v = Array.isArray(state.files) ? `${state.files.length} files:\n` + state.files.slice(0, n ?? 200).map((f) => `${f.path}${f.status && f.status !== 'MODIFIED' ? ` [${String(f.status).toLowerCase()}]` : ''}${f.additions != null ? ` (+${f.additions}/-${f.deletions ?? 0})` : ''}`).join('\n') : null;
+    else v = state[key];
+    if (v == null || v === '') continue;
+    v = typeof v === 'string' ? v : JSON.stringify(v);
+    if (n && key !== 'files' && v.length > n) v = v.slice(0, n) + ' […]';
+    parts.push(`${key.toUpperCase()}:\n${v}`);
+  }
+  return parts.join('\n\n').slice(0, 24000 * 4);
+}
+function jevApiQuestion(q) {
+  const base = { type: q.type, instructions: q.instructions };
+  if (q.type === 'noul' && q.criteria) base.instructions += `\nAnswer YES when: ${q.criteria.yes}\nAnswer NO when: ${q.criteria.no}`;
+  if (q.type === 'choice') base.criteria = q.criteria;
+  if (q.type === 'score') base.criteria = q.scale;
+  return base;
+}
+/** Normaliza una respuesta cruda a {p, value?, confidence?} (noul = número p). Formato jev-1.13.0, ver bin/lib/jev.mjs. */
+export function jevAnswer(q, raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (q.type === 'noul') return typeof raw.noul === 'number' ? Math.max(0, Math.min(1, raw.noul)) : null;
+  const probs = raw.probabilities && typeof raw.probabilities === 'object' ? raw.probabilities : null;
+  if (q.type === 'choice') { if (!Object.hasOwn(q.criteria || {}, raw.choice)) return null; const p = probs && Number.isFinite(Number(probs[raw.choice])) ? Number(probs[raw.choice]) : Number(raw.confidence ?? 0); return { p, value: raw.choice, confidence: Number(raw.confidence ?? 0) }; }
+  const score = Number(raw.score); if (!Number.isFinite(score)) return null;
+  return { p: probs && Number.isFinite(Number(probs[Math.round(score)])) ? Number(probs[Math.round(score)]) : Number(raw.confidence ?? 0), value: Math.round(score), score, confidence: Number(raw.confidence ?? 0) };
+}
+async function askJev(domain, state, key) {
+  const cat = JEV_CATALOG[domain]; if (!cat) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const qs = (cat.questions || []).filter((q) => !q.until || q.until > today);
+  const groups = new Map();
+  for (const q of qs) { const k = (q.state || cat.state_default).join('+'); if (!groups.has(k)) groups.set(k, { spec: q.state || cat.state_default, questions: [] }); groups.get(k).questions.push(q); }
+  const answers = {}; let model = null;
+  for (const g of groups.values()) {
+    const req = { model: JEV_API_MODEL, state: jevStateText(state, g.spec), questions: Object.fromEntries(g.questions.map((q) => [q.id, jevApiQuestion(q)])) };
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const res = await fetch(JEV_ENDPOINT, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(req), signal: ctrl.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`);
+      const json = await res.json(); model = json.model || model;
+      for (const q of g.questions) { const a = jevAnswer(q, json.answers?.[q.id]); if (a !== null) answers[q.id] = a; }
+    } finally { clearTimeout(t); }
+  }
+  return { version: cat.version, model, answers };
+}
+/** { v, model, domains: { quality: {...}, intent?: {...} } } o null (sin clave o fallo: `jev:unavailable`). */
+async function collectSignals(snapshot, { comment = null } = {}) {
+  const key = process.env.JEV_API_KEY;
+  if (!key) return null;
+  try {
+    const domains = {}; const versions = []; let model = null;
+    const q = await askJev('quality', { title: snapshot.title, body: snapshot.body, files: snapshot.files }, key);
+    if (q) { domains.quality = q.answers; versions.push(`quality@${q.version}`); model = q.model || model; }
+    if (comment) { const i = await askJev('intent', { comment, title: snapshot.title }, key); if (i) { domains.intent = i.answers; versions.push(`intent@${i.version}`); model = i.model || model; } }
+    return { v: versions.join(','), model: model || JEV_MODEL, domains };
+  } catch (e) { log(`jev #${snapshot.number}: unavailable (${e.message.slice(0, 80)})`); return null; }
+}
+export async function buildSnapshot(number) {
+  const d = await graphql(PR_QUERY, { owner: OWNER, name: NAME, number });
+  const pr = d.repository?.pullRequest;
+  if (!pr) throw new Error(`PR #${number} no existe`);
+  if (pr.files.pageInfo.hasNextPage) pr.files.nodes.push(...await pageRest('files', 'path additions deletions changeType', number, pr.files.pageInfo.endCursor));
+  if (pr.comments.pageInfo.hasNextPage) pr.comments.nodes.push(...await pageRest('comments', 'author{login} body createdAt', number, pr.comments.pageInfo.endCursor));
+  // shape() viene de triage-core.mjs (la misma que usa bin/lib/snapshot.mjs): una sola forma de snapshot.
+  const snap = shape(pr, { authorMergedCount: await mergedCount(norm(pr.author?.login)), maintainers: POLICIES.labels.maintainers || [], parseJev: parseJevMarkers });
+  snap.authorIsBot = pr.author?.__typename === 'Bot' || isBotLogin(pr.author?.login);
+  snap.authorIsMaintainer = (POLICIES.labels.maintainers || []).includes(norm(pr.author?.login)); // a un maintainer no se le da primera respuesta
+  snap.signals = null; // se rellena en triageOne (necesita el comentario del evento, si lo hay)
+  return snap;
+}
+
+// ---------- Predicados puros (testeables) ----------
+export function needsFirstReply(snapshot) {
+  const marked = (snapshot.markers || []).some((m) => m.startsWith(`${MARKER_SLUG}:`));
+  const maintainerSpoke = !!snapshot.lastMaintainerCommentAt;
+  // Borradores: la primera respuesta llega en ready_for_review, no antes (mod-core: "borrador: no se toca").
+  return { needs: !marked && !maintainerSpoke && !snapshot.authorIsBot && !snapshot.authorIsMaintainer && !snapshot.isDraft, marked, maintainerSpoke, draft: !!snapshot.isDraft, maintainer: !!snapshot.authorIsMaintainer };
+}
+/** La Action toca labels cuyo who_sets (añadir) / who_clears (quitar) sea "action", más ACTION_MAY_ALSO_SET. */
+export const ACTION_MAY_ALSO_SET = new Set(['triage/waiting-author']);
+export function planLabels(current, result, labelsPolicy) {
+  const L = labelsPolicy.labels || {};
+  const add = (result.labelsToAdd || []).filter((l) => !current.includes(l) && (L[l]?.who_sets === 'action' || (ACTION_MAY_ALSO_SET.has(l) && L[l] && !L[l].read_only)));
+  const remove = (result.labelsToRemove || []).filter((l) => current.includes(l) && L[l]?.who_clears === 'action' && !L[l]?.read_only);
+  return { add, remove };
+}
+export function policiesForAction({ codeownersText = null } = {}) {
+  const trivialPolicy = { ...POLICIES.trivial };
+  trivialPolicy.codeownersRules = codeownersText ? parseCodeowners(codeownersText) : [];
+  return { labelsPolicy: POLICIES.labels, trivialPolicy, priorityPolicy: POLICIES.priority, splitThreshold: splitThreshold(POLICIES.priority, JEV_CATALOG.quality) };
+}
+
+/** Payload del bloque co:jev a partir de snapshot.signals (forma libre de Jev: {v|catalogVersion, model, domains|<dominio>: {...}}). */
+export function jevPayload(signals, labelsApplied, now = Date.now()) {
+  if (!signals || typeof signals !== 'object') return null;
+  const { v, catalogVersion, model, domains, ...rest } = signals;
+  return { v: String(v || catalogVersion || 'unknown'), model: String(model || JEV_MODEL), domains: domains || rest, labelsApplied, ts: new Date(now).toISOString() };
+}
+/** La primera respuesta del bot entre los comentarios REST: la marca solo cuenta si la escribió el bot de la Action. Un comentario de otra
+ *  persona con el mismo texto no es nuestro y no se edita nunca (persistJev hace PATCH del que encuentre). */
+export function botFirstReply(comments) {
+  return comments.find((c) => MARKER_BOTS.has(norm(c.user?.login)) && new RegExp(`<!--\\s*co:${MARKER_SLUG}:`).test(c.body || '')) || null;
+}
+async function persistJev(number, sha7v, payload) {
+  const comments = []; let page = 1;
+  for (;;) { const c = await rest('GET', `repos/${REPO}/issues/${number}/comments?per_page=100&page=${page++}`); comments.push(...c); if (c.length < 100) break; }
+  const first = botFirstReply(comments);
+  if (!first) { log(`#${number}: señal jev solo en summary (sin primera respuesta)`); return; }
+  const body = upsertJevMarker(first.body, number, sha7v, payload);
+  if (body === first.body) { log(`#${number}: bloque jev ya al día`); return; }
+  await write('PATCH', `repos/${REPO}/issues/comments/${first.id}`, { body }, `bloque jev en primera respuesta #${number}`);
+}
+
+// ---------- Aplicar ----------
+let policies = null;
+function loadPoliciesOnce() {
+  if (policies) return policies;
+  const p = process.env.CODEOWNERS_PATH || '.github/CODEOWNERS';
+  const text = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+  if (!text) log(`sin ${p}: gate no-codeowners con patrones de respaldo`);
+  return (policies = policiesForAction({ codeownersText: text }));
+}
+async function triageOne(number, { now, firstReply, backlog = false, since = null, comment = null }) {
+  const snapshot = await buildSnapshot(number);
+  if (snapshot.state !== 'OPEN') { log(`#${number}: ${snapshot.state.toLowerCase()}, nada que hacer`); return; }
+  snapshot.signals = await collectSignals(snapshot, { comment });
+  const result = classify(snapshot, { ...loadPoliciesOnce(), now });
+  const { add, remove } = planLabels(snapshot.labels, result, POLICIES.labels);
+  log(`#${number}: ${result.state} : ${result.why[0] || 'sin porqué'}`);
+  if (add.length) await write('POST', `repos/${REPO}/issues/${number}/labels`, { labels: add }, `labels +${add.join(',')} #${number}`);
+  for (const l of remove) await write('DELETE', `repos/${REPO}/issues/${number}/labels/${encodeURIComponent(l)}`, null, `label -${l} #${number}`);
+  const jev = jevPayload(snapshot.signals, add, now);
+  if (jev) log(`#${number}: jev ${JSON.stringify(jev.domains).slice(0, 200)}`);
+  const fr = needsFirstReply(snapshot);
+  if (firstReply && fr.needs) {
+    const days = Math.max(1, Math.floor((now - (since || new Date(snapshot.createdAt))) / 864e5));
+    let body = `${backlog ? backlogReply(days) : DEFAULT_FIRST_REPLY}\n\n${marker(number, snapshot.headSha)}`;
+    if (jev) body = upsertJevMarker(body, number, sha7(snapshot.headSha), jev);
+    if (Buffer.byteLength(body) > MAX_COMMENT_BYTES && !jev) throw new Error(`primera respuesta #${number} supera ${MAX_COMMENT_BYTES} bytes`);
+    await write('POST', `repos/${REPO}/issues/${number}/comments`, { body }, `primera respuesta #${number}`);
+    return true; // publicada: cuenta para el tope del sweep (en DRY_RUN, simulada: el ensayo reproduce el tope de la pasada real)
+  }
+  if (firstReply) log(`#${number}: sin primera respuesta (${fr.marked ? 'ya tiene marcador' : fr.maintainerSpoke ? 'ya habló un maintainer' : fr.draft ? 'borrador' : fr.maintainer ? 'autor maintainer' : 'autor bot'})`);
+  if (jev && fr.marked) await persistJev(number, sha7(snapshot.headSha), jev);
+}
+
+const SWEEP_QUERY = `query($owner:String!,$name:String!,$after:String){ repository(owner:$owner,name:$name){
+  pullRequests(states:OPEN, first:50, after:$after, orderBy:{field:CREATED_AT, direction:ASC}){ pageInfo{hasNextPage endCursor}
+    nodes{ number createdAt updatedAt isDraft author{login __typename} labels(first:30){nodes{name}} comments(first:100){nodes{author{login} body}} reviews(first:50){nodes{author{login}}} timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT], last:1){nodes{... on ReadyForReviewEvent{createdAt}}} } } } }`;
+/** Desde cuándo espera una PR a un maintainer: su creación o, si fue borrador, su último ready_for_review (un borrador no espera
+ *  a nadie: la disculpa del backlog no puede contar esos días). */
+export const waitingSince = (p) => Math.max(Date.parse(p.createdAt) || 0, Date.parse(p.timelineItems?.nodes?.[0]?.createdAt || '') || 0);
+/** Orden de primeras respuestas con hueco para el backlog: las recientes hasta max - reserva, el backlog entero, el resto de recientes. */
+export function backlogFirstOrder(reply, backlog, max) {
+  const reserve = Math.min(backlog.length, Math.ceil(max / 3));
+  // El backlog, de la espera más larga a la más corta (desde el último ready_for_review): el hueco reservado va a quien más esperó.
+  const r = reply.map((p) => ({ p, backlog: false })), b = [...backlog].sort((x, y) => waitingSince(x) - waitingSince(y)).map((p) => ({ p, backlog: true }));
+  return [...r.slice(0, Math.max(0, max - reserve)), ...b, ...r.slice(Math.max(0, max - reserve))];
+}
+export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
+  const maintainers = new Set(labelsPolicy.maintainers || []);
+  return prs.filter((p) => {
+    if (p.isDraft || (now - waitingSince(p)) / 36e5 <= SWEEP_HOURS) return false;
+    if (p.author?.__typename === 'Bot' || isBotLogin(p.author?.login)) return false;
+    const author = norm(p.author?.login);
+    // Una orden a un bot desde la cuenta de un maintainer («@coderabbitai review») no es responder al autor (5-oct, isBotOrder del core).
+    const spoke = [...p.comments.nodes, ...p.reviews.nodes].some((c) => maintainers.has(norm(c.author?.login)) && norm(c.author?.login) !== author && !isBotOrder(c.body));
+    // La marca de primera respuesta solo cuenta si la escribió el bot o un maintainer: la de un tercero suprimiría el acuse para siempre.
+    const marked = p.comments.nodes.some((c) => (MARKER_BOTS.has(norm(c.author?.login)) || maintainers.has(norm(c.author?.login))) && new RegExp(`<!--\\s*co:${MARKER_SLUG}:`).test(c.body || ''));
+    return !spoke && !marked;
+  });
+}
+/** Plan del sweep, puro. reply: sin respuesta y ≤backlogHours (labels + primera respuesta) · backlog: sin respuesta y más viejas
+ *  (labels + primera respuesta con disculpa, backlogReply) · stuck: `triage/new` sin tocar >stuckHours (la CI acabó, reclasificar). */
+export function sweepPlan(prs, now, labelsPolicy = POLICIES.labels, { backlogHours = BACKLOG_HOURS, stuckHours = STUCK_HOURS } = {}) {
+  const cands = sweepCandidates(prs, now, labelsPolicy);
+  const age = (p) => (now - waitingSince(p)) / 36e5;
+  const reply = cands.filter((p) => age(p) <= backlogHours), backlog = cands.filter((p) => age(p) > backlogHours);
+  const seen = new Set(cands.map((p) => p.number));
+  const stuck = prs.filter((p) => !p.isDraft && !seen.has(p.number) && (p.labels?.nodes || []).some((l) => l.name === 'triage/new') && (now - new Date(p.updatedAt || p.createdAt)) / 36e5 > stuckHours);
+  return { reply, backlog, stuck };
+}
+async function sweep(now) {
+  const max = Number(process.env.TRIAGE_SWEEP_MAX || 60), maxRe = Number(process.env.TRIAGE_RETRIAGE_MAX || 30);
+  const all = []; let after = null;
+  do {
+    const d = await graphql(SWEEP_QUERY, { owner: OWNER, name: NAME, after });
+    const c = d.repository.pullRequests; all.push(...c.nodes); after = c.pageInfo.hasNextPage ? c.pageInfo.endCursor : null;
+  } while (after);
+  const { reply, backlog, stuck } = sweepPlan(all, now);
+  log(`sweep: ${all.length} abiertas · ${reply.length} sin respuesta >${SWEEP_HOURS}h y ≤${BACKLOG_HOURS}h (tope ${max}) · ${backlog.length} en backlog >${BACKLOG_HOURS}h (con disculpa) · ${stuck.length} pegadas en triage/new (tope ${maxRe} re-triages)`);
+  let done = 0, re = 0;
+  // Tope por pasada con un hueco reservado para el backlog (un tercio), para que las viejas no se queden sin acuse si siempre hay
+  // recientes: primero las recientes hasta su parte, luego el backlog de la más vieja a la más nueva, y el hueco sobrante, a las recientes.
+  const firsts = backlogFirstOrder(reply, backlog, max);
+  for (const [i, { p, backlog: late }] of firsts.entries()) {
+    if (done >= max) { log(`sweep: tope ${max} alcanzado, quedan ${firsts.length - i} para la próxima pasada`); break; }
+    try { if (await triageOne(p.number, { now, firstReply: true, backlog: late, since: waitingSince(p) })) done++; } // solo cuenta lo publicado
+    catch (e) { log(`#${p.number}: fallo (${e.message.slice(0, 120)})`); }
+  }
+  for (const p of stuck) {
+    if (re >= maxRe) { log(`sweep: tope ${maxRe} re-triages alcanzado`); break; }
+    try { await triageOne(p.number, { now, firstReply: false }); re++; }
+    catch (e) { log(`#${p.number}: fallo (${e.message.slice(0, 120)})`); }
+  }
+  log(`sweep: ${done} primeras respuestas${DRY ? ' simuladas (DRY_RUN: no se publicó ninguna; el tope cuenta igual que en real)' : ''} · ${re} re-triages`);
+}
+
+/** PRs abiertas de un workflow_run. El payload trae `pull_requests` solo para ramas del propio repo y `commits/{sha}/pulls`
+ *  devuelve [] para commits de fork: se busca por head `owner:rama` (viene en el payload) y, si no, por `sha:` en search.
+ *  Un run de la rama por defecto (push a main) no es una PR: nada. `fetchPulls(run)` → [{number, state, headSha}]. */
+export async function prsFromWorkflowRun(event, fetchPulls, { defaultBranch = 'main' } = {}) {
+  const run = event.workflow_run || {};
+  if (!run.head_sha || run.head_branch === defaultBranch) return [];
+  let list = (run.pull_requests || []).map((p) => ({ number: p.number, state: 'open', headSha: p.head?.sha || run.head_sha }));
+  if (!list.length) list = (await fetchPulls(run)) || [];
+  const open = list.filter((p) => p.state === 'open');
+  const numbers = [...new Set(open.filter((p) => !p.headSha || p.headSha === run.head_sha).map((p) => p.number))];
+  // head desfasado: la PR recibió un push después de este run; su run nuevo llegará solo (no es "sin PR")
+  const superseded = open.filter((p) => p.headSha && p.headSha !== run.head_sha && !numbers.includes(p.number)).map((p) => ({ number: p.number, headSha: p.headSha }));
+  return Object.assign(numbers, { superseded });
+}
+async function pullsForRun(run) {
+  const owner = run.head_repository?.owner?.login, branch = run.head_branch;
+  if (owner && branch) {
+    const byHead = await rest('GET', `repos/${REPO}/pulls?state=open&per_page=20&head=${encodeURIComponent(`${owner}:${branch}`)}`);
+    const list = (byHead || []).map((p) => ({ number: p.number, state: p.state, headSha: p.head?.sha }));
+    if (list.length) return list;
+  }
+  const s = await rest('GET', `search/issues?q=${encodeURIComponent(`repo:${REPO} is:pr is:open sha:${run.head_sha}`)}`);
+  return (s?.items || []).map((i) => ({ number: i.number, state: i.state, headSha: null }));
+}
+
+async function main() {
+  if (!TOKEN || !REPO) throw new Error('faltan GITHUB_TOKEN o GITHUB_REPOSITORY');
+  const now = Date.now();
+  const eventName = process.env.GITHUB_EVENT_NAME;
+  const event = process.env.GITHUB_EVENT_PATH ? JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')) : {};
+  log(`pr-triage ${eventName}${DRY ? ' (DRY_RUN: no escribe en GitHub)' : ''}`);
+  if (eventName === 'schedule' || eventName === 'workflow_dispatch') await sweep(now);
+  else if (eventName === 'workflow_run') { // Tests completada: reclasificar (triage/new → ready/trivial/waiting-author) sin esperar al sweep
+    const nums = await prsFromWorkflowRun(event, pullsForRun);
+    if (!nums.length) {
+      const sup = nums.superseded || [];
+      log(sup.length ? `workflow_run ${String(event.workflow_run?.head_sha).slice(0, 7)}: ${sup.map((p) => `PR #${p.number} con head más nuevo (${p.headSha.slice(0, 7)})`).join(', ')}: se espera su run` : `workflow_run ${event.workflow_run?.head_sha?.slice(0, 7) || '?'} (${event.workflow_run?.head_repository?.full_name || '?'}:${event.workflow_run?.head_branch || '?'}): sin PR abierta, nada`);
+      return;
+    }
+    for (const n of nums) await triageOne(n, { now, firstReply: false });
+  }
+  else if (eventName === 'pull_request_target') await triageOne(event.pull_request.number, { now, firstReply: ['opened', 'ready_for_review'].includes(event.action) });
+  else if (eventName === 'issue_comment') {
+    if (!event.issue?.pull_request) { log('comentario en issue, no en PR: nada'); return; }
+    if (event.comment?.user?.type === 'Bot' || isBotLogin(event.comment?.user?.login)) { log('comentario de bot: nada'); return; }
+    await triageOne(event.issue.number, { now, firstReply: false, comment: event.comment?.body || null });
+  } else log(`evento ${eventName} no gestionado`);
+}
+
+const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (isMain) {
+  main().then(() => {
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### pr-triage\n\n${summaryLines.map((l) => `- ${l}`).join('\n')}\n`);
+  }).catch((e) => { process.stderr.write(`pr-triage: ${e.message}\n`); process.exit(1); });
+}

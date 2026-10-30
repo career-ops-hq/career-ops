@@ -76,6 +76,39 @@ try {
     fail(`resolveConfig jobs-endpoint-as-api wrong: base=${brandJobsEndpoint.base} jobsApi=${brandJobsEndpoint.jobsApi}`);
   }
 
+  // A /go/<Category>/<id>/ saved-search page copied from a careers site is not a
+  // brand prefix: it must resolve to the tenant root, where the tile endpoint
+  // answers, not to .../go/<Category>/<id>/tile-search-results/ (200, zero tiles).
+  const goRoot = 'https://jobs.canadalife.com';
+  for (const [label, url] of [
+    ['category page', `${goRoot}/go/All-Jobs/9170201/`],
+    ['category page with a locale query', `${goRoot}/go/All-Jobs/9170201/?locale=en_US`],
+    ['paginated category page', `${goRoot}/go/All-Jobs/9170201/25/`],
+    ['category page without a trailing slash', `${goRoot}/go/All-Jobs/9170201`],
+  ]) {
+    const go = resolveConfig({ name: 'Canada Life', careers_url: url });
+    if (go.base === goRoot && go.tileApi === `${goRoot}/tile-search-results/` && go.jobsApi === `${goRoot}/services/recruiting/v1/jobs`) {
+      pass(`resolveConfig: /go/<Category>/<id>/ ${label} resolves to the tenant root`);
+    } else {
+      fail(`resolveConfig /go/ ${label} wrong: base=${go.base} tileApi=${go.tileApi}`);
+    }
+  }
+  const brandGo = resolveConfig({ name: 'Bluebeam', careers_url: 'https://careers.nemetschek.com/Bluebeam/go/Sales/123/' });
+  if (brandGo.base === 'https://careers.nemetschek.com/Bluebeam' && brandGo.tileApi === 'https://careers.nemetschek.com/Bluebeam/tile-search-results/') {
+    pass('resolveConfig: a brand segment in front of /go/<Category>/<id>/ is kept');
+  } else {
+    fail(`resolveConfig brand + /go/ wrong: base=${brandGo.base} tileApi=${brandGo.tileApi}`);
+  }
+  // Only a /go/ page is stripped: a brand whose own name is "go", or a path that
+  // merely contains /go/, must be left alone.
+  const goBrand = resolveConfig({ name: 'X', careers_url: 'https://careers.example.com/go/' });
+  const goDeep = resolveConfig({ name: 'X', careers_url: 'https://careers.example.com/Brand/go/jobs/' });
+  if (goBrand.base === 'https://careers.example.com/go' && goDeep.base === 'https://careers.example.com/Brand/go/jobs') {
+    pass('resolveConfig: a path that is not /go/<Category>/<numeric id>/ is left alone');
+  } else {
+    fail(`resolveConfig over-stripped a non-category /go/ path: ${goBrand.base} | ${goDeep.base}`);
+  }
+
   // detect() — literal SF hosts auto-claim; branded RMK hosts (jobs.zf.com) do
   // NOT (they carry no "successfactors" string and rely on explicit provider:).
   if (sf.detect({ name: 'X', careers_url: 'https://acme.successfactors.eu/careers' })) {
@@ -180,6 +213,21 @@ try {
   if (extractLocales('<p>no locales here</p>').length === 0) pass('extractLocales returns [] when the page carries none');
   else fail('extractLocales should return [] for a page with no locale links');
 
+  // The date format follows the query locale: BMW's fr_FR and pt_BR pages send
+  // D/M/YYYY with slashes, and hu_HU sends "YYYY. MM. DD.".
+  {
+    const rec = (id, d) => ({ response: { id, unifiedStandardTitle: `Role ${id}`, unifiedStandardStart: d } });
+    const posted = (d, locale) => parseCsbJobs({ jobSearchResult: [rec('1', d)] }, { origin: 'https://jobs.example.com' }, locale)[0].postedAt;
+    const got = [
+      posted('05/10/2026', 'fr_FR'),
+      posted('13/10/2026', 'pt_BR'),
+      posted('2025. 07. 03.', 'hu_HU'),
+      posted('6/18/26', 'en_US'),
+    ];
+    const want = [Date.UTC(2026, 9, 5), Date.UTC(2026, 9, 13), Date.UTC(2025, 6, 3), Date.UTC(2026, 5, 18)];
+    if (JSON.stringify(got) === JSON.stringify(want)) pass('parseCsbJobs reads the posting date in the query locale order');
+    else fail(`parseCsbJobs locale dates wrong: ${JSON.stringify(got.map((t) => (t ? new Date(t).toISOString().slice(0, 10) : t)))}`);
+  }
   // parseCsbDate — locale-dependent short date; separator infers field order.
   if (parseCsbDate('6/18/26') === Date.UTC(2026, 5, 18)) pass('parseCsbDate reads US M/D/YY');
   else fail(`parseCsbDate US wrong: ${parseCsbDate('6/18/26')}`);
@@ -198,6 +246,21 @@ try {
   else fail(`cleanCsbLocation multi wrong: ${JSON.stringify(cleanCsbLocation(['Munich<br/>', 'Berlin<br/>']))}`);
   if (cleanCsbLocation(undefined) === '' && cleanCsbLocation([]) === '') pass('cleanCsbLocation tolerates missing/empty location');
   else fail('cleanCsbLocation should return "" for missing/empty input');
+
+  // The jobs API appends a trailing comma ("City, Region, Country, ").
+  // clean() alone would keep it, so cleanCsbLocation trims it after clean().
+  // Interior commas and a trailing postal code stay.
+  const commaCases = [
+    [['Karlovy Vary, CZE, 36004,'], 'Karlovy Vary, CZE, 36004'],
+    [['Bend, OR, USA, '], 'Bend, OR, USA'],
+    [['Oslo, NOR,'], 'Oslo, NOR'],
+    [['Columbus, OH, USA,<br/>'], 'Columbus, OH, USA'],
+    [['Bend, OR, USA, ', 'Oslo, NOR,'], 'Bend, OR, USA / Oslo, NOR'],
+  ];
+  const commaBad = commaCases.filter(([raw, want]) => cleanCsbLocation(raw) !== want)
+    .map(([raw, want]) => `${JSON.stringify(raw)} => ${JSON.stringify(cleanCsbLocation(raw))} (wanted ${JSON.stringify(want)})`);
+  if (commaBad.length === 0) pass('cleanCsbLocation strips a trailing comma and keeps interior commas');
+  else fail(`cleanCsbLocation trailing comma: ${commaBad.join('; ')}`);
 
   // parseCsbJobs — map the {response:{…}} records; build {id}-{locale} URLs and
   // sanitize the cosmetic slug (HTML entities, URL-structural chars).
@@ -219,6 +282,25 @@ try {
   else fail(`parseCsbJobs url wrong: ${JSON.stringify(c1 && c1.url)}`);
   if (c1 && c1.location === 'Anyang, KOR, 14058') pass('parseCsbJobs cleans jobLocationShort');
   else fail(`parseCsbJobs location wrong: ${JSON.stringify(c1 && c1.location)}`);
+  // A trailing comma is a location artifact. A title can end in a comma for
+  // real, and titles get only clean(), so the comma trim in cleanCsbLocation
+  // must not reach them.
+  const commaParsed = parseCsbJobs({
+    jobSearchResult: [{
+      response: {
+        id: '9001',
+        unifiedStandardTitle: 'Ops Lead,',
+        unifiedUrlTitle: 'Ops-Lead',
+        jobLocationShort: ['Bend, OR, USA, '],
+        unifiedStandardStart: '10/1/26',
+      },
+    }],
+  }, csbCfg, 'en_US');
+  if (commaParsed[0]?.location === 'Bend, OR, USA' && commaParsed[0]?.title === 'Ops Lead,') {
+    pass('parseCsbJobs strips a trailing location comma and leaves a title comma');
+  } else {
+    fail(`parseCsbJobs comma row: ${JSON.stringify(commaParsed[0])}`);
+  }
   if (c1 && c1.postedAt === Date.UTC(2026, 5, 18)) pass('parseCsbJobs sets postedAt from unifiedStandardStart');
   else fail(`parseCsbJobs postedAt wrong: ${JSON.stringify(c1 && c1.postedAt)}`);
   const c2 = csbJobs[1];
@@ -233,6 +315,147 @@ try {
     pass('parseCsbJobs uses cfg.base (brand-scoped) when present (#2010)');
   } else {
     fail(`parseCsbJobs did not honor cfg.base: ${JSON.stringify(csbBrandJobs[0]?.url)}`);
+  }
+
+  // Regression (#1639 lineage) — a numeric entity above U+10FFFF must not throw
+  // RangeError out of the whole parse. The local decodeEntities copy guarded
+  // only with Number.isFinite (no `<= 0x10FFFF` / surrogate check), so ONE
+  // adversarial/malformed entity (&#99999999;, &#xFFFFFFFF;) crashed the entire
+  // provider parse and scan.mjs's per-company catch dropped EVERY posting for
+  // that run. parseTiles now routes through the shared guarded decoder, which
+  // degrades an out-of-range or lone-surrogate entity to literal text while
+  // still decoding valid ones (&amp;).
+  {
+    const badFrag2 = `<ul>
+      <li class="job-tile job-id-9001" data-url="/job/City-Bad-Entity/9001/">
+        <a class="jobTitle-link fontcolorx" href="/x">Overflow &#99999999; &amp; Hex &#xFFFFFFFF; Surrogate &#xD800;</a>
+      </li>
+    </ul>`;
+    let badTiles, badThrew = null;
+    try { badTiles = parseTiles(badFrag2, 'https://jobs.example.com'); } catch (e) { badThrew = e; }
+    if (badThrew) fail(`successfactors.parseTiles() threw ${badThrew.name} on an out-of-range numeric entity (unguarded String.fromCodePoint): ${badThrew.message}`);
+    else if (badTiles.length === 1 && badTiles[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('successfactors.parseTiles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
+    else fail(`successfactors.parseTiles() out-of-range entity wrong: ${JSON.stringify(badTiles)}`);
+  }
+  // CSB: when every locale fails without one successful jobs-API request, the
+  // board is unreachable, not empty. fetch() must throw so scan/portal-health
+  // record a failure instead of "live but empty".
+  {
+    let csbErr = null;
+    let csbCalls = 0;
+    try {
+      await sf.fetch(
+        { name: 'DeadCo', careers_url: 'https://careers.deadco.example', sfVariant: 'csb' },
+        {
+          sleep: async () => {},
+          fetchText: async () => { throw new Error('discovery down'); }, // locale discovery is best-effort
+          // Each locale fails with a DISTINCT message so the assertion below
+          // pins WHICH failure fetch() surfaces, not merely THAT it throws.
+          fetchJson: async () => { csbCalls++; throw new Error(`jobs api down (call ${csbCalls})`); },
+        },
+      );
+    } catch (err) {
+      csbErr = err;
+    }
+    // Discovery is down, so both default locales (de_DE, en_US) are tried and
+    // fail → 2+ calls; the surfaced error must be the FIRST locale's, pinning
+    // the deterministic firstErr retention.
+    if (csbErr?.message === 'jobs api down (call 1)' && csbCalls >= 2) {
+      pass('successfactors CSB fetch() throws the FIRST locale failure when every locale fails (dead board ≠ empty board, deterministic error)');
+    } else {
+      fail(`successfactors CSB fetch() wrong: ${csbErr ? `threw "${csbErr.message}"` : 'swallowed an all-locales failure into []'} after ${csbCalls} jobs-API calls`);
+    }
+  }
+  // Dispatcher default path (NO sfVariant): a healthy RMK tenant with zero
+  // postings triggers the post-RMK CSB probe. The probe failing on every
+  // locale must NOT throw — RMK already answered, so the board is reachable
+  // and legitimately empty, not a dead slug.
+  {
+    let probeErr = null;
+    let probeJobs = null;
+    let probeCalls = 0;
+    try {
+      probeJobs = await sf.fetch(
+        { name: 'EmptyCo', careers_url: 'https://jobs.emptyco.example' },
+        {
+          sleep: async () => {},
+          // Serves both the RMK tile endpoint (healthy 200, zero tiles) and
+          // the best-effort /search/ locale discovery.
+          fetchText: async () => '<!DOCTYPE html>',
+          fetchJson: async () => { probeCalls++; throw new Error('no CSB endpoint on this tenant'); },
+        },
+      );
+    } catch (err) {
+      probeErr = err;
+    }
+    // probeCalls >= 1 pins that the CSB probe actually RAN — an empty array
+    // straight off the RMK path would otherwise pass this test vacuously.
+    if (!probeErr && Array.isArray(probeJobs) && probeJobs.length === 0 && probeCalls >= 1) {
+      pass('successfactors fetch() without sfVariant: empty RMK + failing CSB probe returns [] (healthy empty board ≠ dead slug)');
+    } else {
+      fail(`successfactors fetch() empty-RMK CSB-probe wrong: ${probeErr ? `threw "${probeErr.message}"` : JSON.stringify(probeJobs)} after ${probeCalls} jobs-API calls`);
+    }
+  }
+  // CSB paging against a server whose default sort reshuffles ties on every
+  // request (BMW's live behavior): every posting must still come back.
+  {
+    const ids = Array.from({ length: 25 }, (_, i) => String(1000 + i));
+    const rec = (id) => ({ response: { id, unifiedStandardTitle: `Role ${id}`, unifiedUrlTitle: `Role-${id}` } });
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    let dateCalls = 0;
+    const jobs = await sf.fetch(
+      { name: 'ShuffleCo', careers_url: 'https://jobs.shuffleco.example', sfVariant: 'csb' },
+      {
+        sleep: async () => {},
+        fetchText: async () => '<a href="/search/?locale=en_US">en</a>',
+        fetchJson: async (_url, opts) => {
+          const { pageNumber, sortBy } = JSON.parse(opts.body);
+          let order;
+          if (sortBy === 'date') {
+            dateCalls++;
+            order = [...ids];
+            if (dateCalls <= 3 && pageNumber === 1) order[10] = order[9];
+          } else {
+            order = [...ids].sort(() => rand() - 0.5);
+          }
+          return { totalJobs: ids.length, jobSearchResult: order.slice(pageNumber * 10, pageNumber * 10 + 10).map(rec) };
+        },
+      },
+    );
+    const got = new Set(jobs.map((j) => j.url.split('/').pop().split('-')[0]));
+    if (got.size === 25 && jobs.length === 25) pass('successfactors CSB returns every posting when the server reshuffles page order');
+    else fail(`successfactors CSB lost postings under unstable paging: ${got.size} of 25`);
+  }
+  {
+    let inFlight = 0;
+    let peak = 0;
+    const pagesAsked = [];
+    const jobs = await sf.fetch(
+      { name: 'ParallelCo', careers_url: 'https://careers.parallelco.example', sfVariant: 'csb' },
+      {
+        sleep: async () => {},
+        fetchText: async () => '<a href="/search/?q=&startrow=0&locale=de_DE">de</a>',
+        fetchJson: async (_url, opts) => {
+          const { pageNumber } = JSON.parse(opts.body);
+          pagesAsked.push(pageNumber);
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight--;
+          const count = Math.max(0, Math.min(10, 125 - pageNumber * 10));
+          return {
+            totalJobs: 125,
+            jobSearchResult: Array.from({ length: count }, (_, i) => ({ response: { id: String(pageNumber * 10 + i), unifiedStandardTitle: `Role ${pageNumber * 10 + i}`, unifiedUrlTitle: 'Role' } })),
+          };
+        },
+      },
+    );
+    if (jobs.length === 125 && pagesAsked.length === 13 && peak === 6 && jobs[0].title === 'Role 0' && jobs[124].title === 'Role 124') {
+      pass('successfactors CSB fetch() asks for the pages after page 0 six at a time and keeps board order');
+    } else {
+      fail(`successfactors CSB parallel pages: ${jobs.length} jobs, ${pagesAsked.length} requests, peak ${peak} in flight, first=${jobs[0]?.title} last=${jobs.at(-1)?.title}`);
+    }
   }
 } catch (err) {
   fail(`successfactors provider test threw: ${err.message}`);

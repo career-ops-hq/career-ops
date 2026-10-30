@@ -1,0 +1,24 @@
+# Aggregator domains: known job aggregators and scrapers that repost listings from primary sources.
+# This list is maintained by the project via updates; it is not a user-editable file — do not add personal entries here.
+# Note: Indeed (indeed.com) is deliberately excluded because companies post there directly as a primary board.
+
+recruit.net # aggregator, reposts listings from other boards
+builtin.com # aggregator (Built In), tech job aggregator
+zippia.com # aggregator, scrapes and reposts job listings
+expertini.com # aggregator, scrapes job listings from third-party boards
+jooble.org # aggregator, indexes and reposts job listings
+adzuna.com # aggregator, job search engine aggregating external postings
+neuvoo.com # aggregator (Talent.com), job aggregator scraping external sites
+talent.com # aggregator, job search engine aggregating third-party listings
+jobisjob.com # aggregator, job search engine indexing external postings
+jobrapido.com # aggregator, job search engine collecting external listings
+careerjet.com # aggregator, job search engine indexing third-party boards
+trovit.com # aggregator, search engine aggregating classified job ads
+simplyhired.com # aggregator, job search engine aggregating external listings
+jobtome.com # aggregator, job aggregator indexing external postings
+lensa.com # aggregator, job aggregator scraping external postings
+jora.com # aggregator, search engine aggregating external job listings
+jobg8.com # aggregator, job distribution network and aggregator
+geebo.com # aggregator, job aggregator scraping third-party postings
+careerbuilder.com # aggregator, aggregates third-party syndication listings
+monster.com # aggregator, aggregates third-party syndication listings

@@ -5,6 +5,7 @@ import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins } f
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
+import { CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
 
@@ -21,7 +22,7 @@ function Logo({ company }: { company: string }) {
   const [failed, setFailed] = useState(false);
   const letter = (company || "?").trim().charAt(0).toUpperCase();
   if (failed || !company.trim()) {
-    return <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-sm font-semibold text-brand">{letter}</div>;
+    return <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-sm font-semibold text-brand-text">{letter}</div>;
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element
@@ -55,6 +56,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   const isAdded = added.has(offer.url) || inPipeline || working || doneEval;
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
+  const employer = CHINA_SOURCES.includes(offer.source);
   const fresh = freshness(offer.postedAt) || offer.postedHint || "";
 
   const evaluate = () => {
@@ -65,12 +67,12 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   return (
     <div className="co-rise group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm">
       <div className="flex items-start gap-3">
-        <Logo company={offer.company} />
+        {employer ? <div aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand-text">{offer.company.charAt(0)}</div> : <Logo company={offer.company} />}
         <a href={offer.url} target="_blank" rel="noopener noreferrer" className="block min-w-0 flex-1 max-sm:min-h-[44px]">
-          <h3 className={`${instrumentSerif.className} truncate text-[17px] leading-tight text-foreground transition-colors group-hover:text-brand`}>{offer.title}</h3>
+          <h3 className={`${instrumentSerif.className} truncate text-[17px] leading-tight text-foreground transition-colors group-hover:text-brand-text`}>{offer.title}</h3>
           <p className="mt-0.5 truncate text-[13px] text-muted">
             {offer.company}
-            {offer.location && <span className="text-faint"> · {offer.location}</span>}
+            {(offer.location || employer) && <span className="text-faint"> · {offer.location || "Location unknown"}</span>}
           </p>
         </a>
         <a
@@ -86,8 +88,8 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
-        {fresh && <span className="text-faint">{fresh}</span>}
+        <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? EMPLOYER_LABEL[offer.ats as keyof typeof EMPLOYER_LABEL] ?? offer.ats}</span>
+        {(fresh || employer) && <span className="text-faint">{fresh || "Posting date unknown"}</span>}
         {unverified && (
           <span
             className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-300"
@@ -98,13 +100,26 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
         )}
         {offer.matchedKeyword && (
           <span className="text-faint" title="Keyword match — not yet scored. Evaluate to get an A–F fit score.">
-            · matched <span className="text-brand/80">{offer.matchedKeyword}</span>
+            · matched <span className="text-brand-text">{offer.matchedKeyword}</span>
+          </span>
+        )}
+        {offer.fit && (
+          <span
+            className={cn(
+              "rounded border px-1 py-0.5 text-[11px] font-medium",
+              offer.fit.band === "strong"
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : "text-faint",
+            )}
+            title="Free keyword-level estimate: posting title vs your profile's target roles (config/profile.yml). Not an evaluation — Evaluate still gives the real A–F fit score."
+          >
+            · {offer.fit.band} fit
           </span>
         )}
       </div>
 
       {offer.why && (
-        <p className="flex items-start gap-1.5 text-[12px] leading-snug text-brand/80">
+        <p className="flex items-start gap-1.5 text-[12px] leading-snug text-brand-text">
           <Sparkles className="mt-0.5 size-3 shrink-0" />
           {offer.why}
         </p>
@@ -114,15 +129,15 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
         {evaluatedN || doneEval ? (
           <a
             href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-2 text-xs font-medium text-brand max-sm:min-h-[44px]"
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-2 text-xs font-medium text-brand-text max-sm:min-h-[44px]"
           >
             <Check className="size-3.5" /> Evaluated · view report
           </a>
         ) : working ? (
-          <div className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-2 text-xs font-medium text-brand">
+          <div className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-2 text-xs font-medium text-brand-text">
             <Loader2 className="size-3.5 animate-spin" />
             {statusLabel}
-            <span className="text-brand/60">· in pipeline</span>
+            <span className="text-brand-text">· in pipeline</span>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -132,7 +147,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
               onClick={() => addToPipeline([offer])}
               className={cn(
                 "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                isAdded ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand",
+                isAdded ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand-text",
               )}
             >
               {isAdding ? <Loader2 className="size-3.5 animate-spin" /> : isAdded ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
@@ -142,7 +157,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
               type="button"
               onClick={evaluate}
               title={unverified ? "Runs a real evaluation — and verifies the posting is live. Uses tokens." : "Runs a real A–F evaluation. Uses tokens."}
-              className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 px-2.5 py-2 text-xs font-medium text-brand transition-colors hover:bg-brand-soft max-sm:min-h-[44px]"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 px-2.5 py-2 text-xs font-medium text-brand-text transition-colors hover:bg-brand-soft max-sm:min-h-[44px]"
             >
               Evaluate <Coins className="size-3.5 opacity-80" />
             </button>

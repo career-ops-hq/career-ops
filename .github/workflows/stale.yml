@@ -1,4 +1,4 @@
-name: 'Close stale issues and PRs'
+name: 'Mark stale issues and PRs'
 on:
   schedule:
     - cron: '0 6 * * 1' # Every Monday at 6am UTC
@@ -12,23 +12,35 @@ jobs:
   stale:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v10
+      - uses: actions/stale@v11
         with:
           stale-issue-message: >
-            This issue has been automatically marked as stale because it has not had
-            activity in 60 days. It will be closed in 14 days if no further activity occurs.
-            If this is still relevant, please comment to keep it open.
+            This issue has had no activity in 60 days, so it is marked stale. It stays open:
+            nothing here is closed by a bot. If it still matters to you, a comment keeps it
+            fresh; a maintainer closes it by hand if it is resolved or no longer relevant.
           stale-pr-message: >
-            This PR has been automatically marked as stale because it has not had
-            activity in 30 days. It will be closed in 14 days if no further activity occurs.
-            If you're still working on this, please rebase and comment to keep it open.
+            This PR has had no activity in 30 days, so it is marked stale. It stays open:
+            nothing here is closed by a bot. If you are still on it, push or comment and the
+            label goes away; if you have moved on, a maintainer may offer it for adoption
+            with your commits and your credit intact (see CONTRIBUTING).
           close-issue-message: 'Closed due to inactivity. Feel free to reopen if this is still relevant.'
           close-pr-message: 'Closed due to inactivity. Feel free to reopen with a fresh rebase if you want to continue.'
           days-before-issue-stale: 60
           days-before-pr-stale: 30
-          days-before-issue-close: 14
-          days-before-pr-close: 14
+          # Nothing is closed by a bot: stale is a signal for a maintainer, who closes by hand
+          # (issues when resolved or no longer relevant, PRs through the adoption ladder).
+          days-before-issue-close: -1
+          days-before-pr-close: -1
           stale-issue-label: 'stale'
           stale-pr-label: 'stale'
-          exempt-issue-labels: 'pinned,security,roadmap'
-          exempt-pr-labels: 'pinned,security'
+          # good first issue / help wanted are our curated on-ramps and architectural-proposal
+          # waits on a maintainer decision: none of them should ever read as stale.
+          exempt-issue-labels: 'pinned,security,roadmap,adoptable,good first issue,help wanted,architectural-proposal'
+          # adoption/* PRs are governed by the adoption ladder (pr-adoption.yml),
+          # which pings, warns, and hands the close to a human. Two clocks on
+          # one PR would race each other.
+          # triage/ready, triage/trivial, triage/re-review, triage/ci-hold, triage/new,
+          # direction/* and maintainer-commitment mean the ball is in OUR court (ready
+          # or queued for merge, CI waiting on us, not triaged yet, a maintainer decision,
+          # or a promise we made): our delay must never become the author's stale.
+          exempt-pr-labels: 'pinned,security,adoption/track,adoption/pinged,adoption/warned,adoption/ready,triage/ready,triage/trivial,triage/re-review,triage/ci-hold,triage/new,direction/needs-santiago,direction/review,maintainer-commitment'

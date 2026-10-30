@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { readJsonObject } from "@/lib/json-body";
 
 function cvPath() {
   return path.join(careerOpsRoot(), "cv.md");
@@ -13,18 +14,15 @@ const MAX_CV_BYTES = 200_000;
 export async function GET() {
   try {
     return NextResponse.json({ content: fs.readFileSync(cvPath(), "utf8"), exists: true });
-  } catch {
-    return NextResponse.json({ content: "", exists: false });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return NextResponse.json({ content: "", exists: false });
+    return NextResponse.json({ error: "Couldn't read cv.md." }, { status: 500 });
   }
 }
 
 export async function POST(req: Request) {
-  let body: { content?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<{ content?: string }>(req);
+  if (!body) return NextResponse.json({ error: "bad json" }, { status: 400 });
   if (typeof body.content !== "string") {
     return NextResponse.json({ error: "content required" }, { status: 400 });
   }

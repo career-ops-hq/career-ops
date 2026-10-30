@@ -11,8 +11,11 @@
 // or lazily-malicious author and gives the reviewer a checklist. A determined
 // attacker can obfuscate; the real controls are review + pinning + capability.
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { listTree } from './lib/walk-tree.mjs';
 
 // Built from fragments so the literal API/firewall tokens never appear verbatim
 // (keeps this file clean against any future repo-wide grep).
@@ -35,6 +38,13 @@ const DYN_IMPORT_RE = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 const REQUIRE_RE = /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g;
 const firewallRe = new RegExp('\\b(' + ['revenue', 'pricing', 'paywall', 'monetiz\\w*', 'moat'].join('|') + ')\\b', 'i');
 
+// --- CLI args ---
+const KNOWN_FLAGS = ['--help', '-h'];
+
+const USAGE = `Usage:
+  node plugin-audit.mjs <plugin-dir>
+  node plugin-audit.mjs --help`;
+
 function collectSpecifiers(src) {
   const specs = [];
   for (const re of [IMPORT_RE, DYN_IMPORT_RE, REQUIRE_RE]) {
@@ -46,18 +56,20 @@ function collectSpecifiers(src) {
 }
 
 function listMjs(dir) {
-  const out = [];
-  const walk = (d, rel) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git') continue;
-      const abs = path.join(d, e.name);
-      const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) walk(abs, r);
-      else if (/\.(mjs|js|cjs)$/.test(e.name)) out.push({ abs, rel: r });
-    }
-  };
-  walk(dir, '');
-  return out;
+  return listTree(dir, {
+    match: /\.(mjs|js|cjs)$/,
+    skip: (e) => e.name === 'node_modules' || e.name === '.git',
+    // Deliberately walks INTO a nested checkout. This is a deny-list scan over
+    // third-party plugin code: a directory that could opt out of the audit by
+    // planting a `.git` marker is a place to hide a forbidden import.
+    allowNestedCheckouts: true,
+    // ...and follows links, for the same reason. `import()` resolves a symlink
+    // of either kind, so whatever a link reaches is code the plugin can load:
+    // a symlinked file (which the hand-rolled walk this replaced did read) and
+    // a symlinked directory (which it did not — a hole this closes). walkTree
+    // stops at a link onto its own ancestor, so a loop cannot hang the audit.
+    links: 'follow',
+  }).map((abs) => ({ abs, rel: path.relative(dir, abs).split(path.sep).join('/') }));
 }
 
 /**
@@ -86,9 +98,11 @@ export function auditPlugin(dir) {
 }
 
 // CLI: node plugin-audit.mjs <dir>
-if (import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1] || '').href) {
-  const dir = process.argv[2];
-  if (!dir) { console.error('Usage: node plugin-audit.mjs <plugin-dir>'); process.exit(2); }
+if (isMainModule(import.meta.url)) {
+  const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE);
+  const dir = args.find(a => !a.startsWith('-'));
+  if (!dir) { console.error(USAGE); process.exit(2); }
   let result;
   try { result = auditPlugin(path.resolve(dir)); } catch (e) { console.error('audit failed:', e.message); process.exit(2); }
   if (result.ok) { console.log('✓ audit clean'); process.exit(0); }

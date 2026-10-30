@@ -124,6 +124,29 @@ try {
   if (fetched.every(j => !('_id' in j))) pass('dassault.fetch() strips the internal _id from returned jobs');
   else fail('dassault.fetch() leaked _id into returned jobs');
 
+  // Regression (#1639 lineage) — a numeric entity above U+10FFFF must not throw
+  // RangeError out of the whole parse. The local decodeEntities copy guarded
+  // only with Number.isFinite (no `<= 0x10FFFF` / surrogate check), so ONE
+  // adversarial/malformed entity (&#99999999;, &#xFFFFFFFF;) crashed the entire
+  // provider parse and scan.mjs's per-company catch dropped EVERY posting for
+  // that run. parseHits now routes through the shared guarded decoder, which
+  // degrades an out-of-range or lone-surrogate entity to literal text while
+  // still decoding valid ones (&amp;).
+  {
+    const xmlBad = `<Answer><hits>` +
+      mkHit({ id: 'bad1', title: 'Overflow &#99999999; &amp; Hex &#xFFFFFFFF; Surrogate &#xD800;', cta1: 'https://www.3ds.com/careers/jobs/bad-1' }) +
+      mkHit({ id: 'ok1', title: 'Normal Role', cta1: 'https://www.3ds.com/careers/jobs/ok-1' }) +
+      `</hits></Answer>`;
+    let bad, badThrew = null;
+    try { bad = parseHits(xmlBad, 'Dassault Systèmes'); } catch (e) { badThrew = e; }
+    if (badThrew) fail(`dassault.parseHits() threw ${badThrew.name} on an out-of-range numeric entity (unguarded String.fromCodePoint): ${badThrew.message}`);
+    else if (bad.length === 2) pass('dassault.parseHits() tolerates out-of-range / surrogate numeric entities (no RangeError crash)');
+    else fail(`dassault.parseHits() out-of-range entity: expected 2 jobs, got ${bad.length}`);
+    const bj = badThrew ? null : bad.find((j) => j.url.endsWith('/bad-1'));
+    if (bj && bj.title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('dassault.parseHits() degrades bad entities to literal text while still decoding &amp;');
+    else if (!badThrew) fail(`dassault.parseHits() degraded title wrong: ${JSON.stringify(bj && bj.title)}`);
+  }
+
 } catch (e) {
   fail(`dassault provider tests crashed: ${e.message}`);
 }

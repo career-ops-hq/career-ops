@@ -2,14 +2,222 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { basename, join, dirname, resolve, sep, delimiter } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
+import { localToday } from '../lib/local-today.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
+import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
+import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
+
+// The suite must never follow a developer's own tracker override into their
+// real data. CAREER_OPS_TRACKER outranks the CAREER_OPS_ROOT that fixtures pin,
+// so with it set in the shell a test that runs normalize-statuses.mjs against
+// its fixture root rewrote the developer's tracker instead (and left a .bak
+// beside it), and a dozen checks failed on rows that were not theirs.
+//
+// Blanked here because test-all.mjs imports this module before it runs
+// anything, so the runner and each child it spawns start without the override;
+// a suite that imports these helpers is covered when run on its own as well.
+// Blanked rather than deleted: every reader trims the value and treats an empty
+// one as unset, which is also how the Go tests neutralise it
+// (`t.Setenv("CAREER_OPS_TRACKER", "")`), and a variable that is set is not
+// overwritten by a later .env load (#4707 did the same for one test and
+// CAREER_OPS_PIPELINE). A test that needs the override sets its own.
+process.env.CAREER_OPS_TRACKER = '';
+
+// A shell that opted into the shared PDF painter must not make the suite
+// attach to that painter or start one. Blanked rather than deleted, same as
+// the tracker override above. A test that wants the painter sets it itself.
+process.env.CAREER_OPS_PDF_SHARED = '';
+
+// The same rule for the data root itself, which is where everything else a
+// script reads and writes is resolved from (#5113). Left alone, the suite ran
+// against whatever the shell pointed at: with CAREER_OPS_ROOT exported the way
+// the README suggests, the script smoke tests appended a fixture row to the
+// developer's real data/assessments.tsv on every run, and with nothing
+// exported, three suites overwrote live files in the checkout's own data/ and
+// restored them from memory — so an interrupted run left a three-row fixture
+// where the tracker had been, in a directory git does not track.
+//
+// So the suite gets a data root of its own. Pinned through CAREER_OPS_ROOT
+// because that outranks both CAREER_OPS_DATA_DIR and the `.career-ops-data`
+// marker (path-resolver.mjs), and set here for the reason the tracker override
+// is cleared here: the runner and every child it spawns inherit it, and a suite
+// run on its own is covered as well. A test that needs a particular root pins
+// its own, in its child's env or around its own import.
+//
+// One directory per run, not per process. The process that creates it exports
+// it as CAREER_OPS_TEST_DATA_ROOT; a child that loads these helpers finds that
+// and joins the run's root rather than making another, and only the creator
+// removes it.
+const SANDBOX_ENV = 'CAREER_OPS_TEST_DATA_ROOT';
+const SANDBOX_PREFIX = 'career-ops-test-data-';
+
+// The variable is inherited, so it is only as trustworthy as the shell it came
+// from: a stale export naming a real directory would make this process a
+// guest in it — fixtures written there, no snapshot, no drift check. Join only
+// what these helpers could have made: a directory of that name, directly under
+// the OS temp directory.
+function isRunSandbox(path) {
+  try {
+    const real = realpathSync(path);
+    return statSync(real).isDirectory()
+      && dirname(real) === realpathSync(tmpdir())
+      && basename(real).startsWith(SANDBOX_PREFIX);
+  } catch {
+    return false;
+  }
+}
+
+const inheritedSandbox = process.env[SANDBOX_ENV]?.trim();
+const ownsSandbox = !(inheritedSandbox && isRunSandbox(inheritedSandbox));
+
+/**
+ * The data root the developer's own commands resolve to, read before it is
+ * overridden below. Null in a child of the run: the process that owns the
+ * sandbox is the one that answers for the real root.
+ */
+export const REAL_DATA_ROOT = ownsSandbox ? getCareerOpsRoot() : null;
+const realRootBefore = ownsSandbox ? snapshotDataRoot(REAL_DATA_ROOT, ROOT) : null;
+
+/** The scratch data root every script resolves to while the suite runs. */
+export const SANDBOX_DATA_ROOT = ownsSandbox
+  ? realpathSync(mkdtempSync(join(tmpdir(), SANDBOX_PREFIX)))
+  : realpathSync(inheritedSandbox);
+
+/**
+ * Point the data root back at the suite's sandbox.
+ *
+ * Called when these helpers load, and again by any test that had to move or
+ * unset the variable in-process: `delete process.env.CAREER_OPS_ROOT` in a
+ * `finally` does not restore anything, it hands every later suite in the same
+ * process the developer's real root.
+ *
+ * @returns {void}
+ */
+export function pinSandboxDataRoot() {
+  process.env[SANDBOX_ENV] = SANDBOX_DATA_ROOT;
+  process.env.CAREER_OPS_ROOT = SANDBOX_DATA_ROOT;
+  // Blanked, not deleted, for the same reasons as CAREER_OPS_TRACKER above.
+  process.env.CAREER_OPS_DATA_DIR = '';
+}
+pinSandboxDataRoot();
+
+/**
+ * Environment for a child that runs a COPY of the scripts as its own checkout.
+ *
+ * Many fixtures copy a script and path-resolver.mjs into a temp directory and
+ * expect the copy to treat that directory as its data root, which is what the
+ * resolver does when nothing overrides it. Something does now — the pin above —
+ * and a developer's exported CAREER_OPS_ROOT always did, so the expectation is
+ * stated in the child's env instead of assumed from the shell's.
+ *
+ * @param {Record<string, string>} [extra] - Further variables for the child.
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function ownRootEnv(extra = {}) {
+  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_PDF_SHARED: '', ...extra };
+}
+
+let realRootChecked = false;
+
+/**
+ * Compare the real data root with how the run found it.
+ *
+ * Answers once: finish() reports through the counters, and the exit hook
+ * below must not report the same paths a second time.
+ *
+ * @returns {string[]|null} Lines describing what changed, or null when nothing
+ *   did, the check already ran, or this process does not own the sandbox.
+ */
+export function realDataRootDrift() {
+  if (!ownsSandbox || realRootChecked) return null;
+  realRootChecked = true;
+  const drift = diffSnapshots(realRootBefore, snapshotDataRoot(REAL_DATA_ROOT, ROOT));
+  return drift.length > 0 ? describeDrift(REAL_DATA_ROOT, drift, ROOT) : null;
+}
+
+/**
+ * Make SIGINT and SIGTERM end the process through process.exit().
+ *
+ * Node's default for both is to die where it stands, which skips the 'exit'
+ * hook below — so the run most likely to have left something behind in the
+ * developer's data was the one run that never looked. Exiting through
+ * process.exit() runs the hook, and removes the scratch data root on the way.
+ *
+ * Opt-in, for the long-lived runner: a handler only runs between two turns of
+ * the event loop, so the caller has to be a process that yields.
+ *
+ * @returns {void}
+ */
+export function exitOnInterrupt() {
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    process.on(signal, () => {
+      console.log(`\n  ⛔ interrupted (${signal}) — this is not a test result`);
+      process.exit(code);
+    });
+  }
+}
+
+if (ownsSandbox) {
+  // 'exit' also fires for process.exit(), so this covers a suite run on its
+  // own, which never reaches finish(), and a run ended by exitOnInterrupt().
+  process.on('exit', () => {
+    const drift = realDataRootDrift();
+    if (drift) {
+      console.log(`\n  ❌ ${drift.join('\n     ')}\n`);
+      // Keep a signal's own exit status; anything else becomes a failure.
+      if (!process.exitCode) process.exitCode = 1;
+    }
+    try {
+      _rmSync(SANDBOX_DATA_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Under the OS temp directory, which is reclaimed without us.
+    }
+  });
+}
+
+/**
+ * A merge-tracker fixture must not consult the install's batch history.
+ * Keep the default state path beside the fixture additions directory; tests
+ * that exercise explicit batch-state behavior should pass their own path.
+ * @param {string} additionsDir - Fixture additions directory.
+ * @returns {string} Fixture-local batch-state path.
+ */
+export function isolatedBatchStatePath(additionsDir) {
+  return join(dirname(additionsDir), 'batch-state.tsv');
+}
+
+// Windows keeps a handle open on a just-exited child's files for a short
+// window (antivirus widens it), so a cleanup rmSync can fail with EPERM even
+// though every assertion passed — `force: true` suppresses ENOENT, not EPERM.
+// Node retries exactly that error class (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM)
+// with linear backoff when given maxRetries, so default it here. An explicit
+// option still wins, and a removal that keeps failing still throws. Same
+// wrapper test-all.mjs applies to its own call sites (#3066), shared so the
+// suites under tests/ cannot drift from it.
+export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+
+/**
+ * The per-script budget run() applies when a caller does not override it.
+ *
+ * Deliberately NOT substituted into the `timeout: 30000` literal inside run()
+ * below. The comment there explains why that execFileSync call is kept
+ * byte-identical: editing the line makes CodeQL re-attribute its long-standing
+ * "uncontrolled command line" finding to whichever PR touched it. Exported so
+ * callers can reason about the budget — how close a script came to it, say —
+ * rather than hard-coding the number in a second file. The two are linked by
+ * this comment, not by the compiler: change one, change the other.
+ */
+export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;
 
 let passed = 0;
 let failed = 0;
@@ -48,17 +256,131 @@ export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
  */
 export function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
 
+/**
+ * Report that a tool this suite needs is missing (see tests/required-tools.mjs).
+ *
+ * A warning on a machine that simply lacks the tool, and a failure in a run
+ * that must have it (`test-all.mjs --needs <tool>`, or its variable set to 1),
+ * where a skip would turn the check green without running it.
+ *
+ * @param {'browser'|'latex'} tool
+ * @param {string} msg - What was skipped and why.
+ * @returns {void}
+ */
+export function toolUnavailable(tool, msg) {
+  if (toolRequired(tool)) fail(`${msg} — ${REQUIRED_TOOL_ENV[tool]}=1, so a missing ${tool} is a failure in this run`);
+  else warn(msg);
+}
+
 /** Current counter snapshot. */
 export function results() { return { passed, failed, warnings }; }
+
+/**
+ * Add another process's counters to this one's.
+ *
+ * `test-all.mjs --jobs N` runs each discovered suite in a child process. The
+ * child counts its own pass()/fail()/warn() calls and has already printed their
+ * lines; the parent only needs the totals, so the summary line and the exit
+ * code cover every suite exactly as they do when suites run in-process.
+ *
+ * @param {{passed?: number, failed?: number, warnings?: number}} counts - A results() snapshot from a child.
+ * @returns {void}
+ */
+export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0 } = {}) {
+  passed += p;
+  failed += f;
+  warnings += w;
+}
+
+/**
+ * Import one discovered pass/fail-style suite, containing a throw.
+ *
+ * Shared by the two places a suite is imported: test-all.mjs's in-process loop
+ * (`--jobs 1`) and tests/run-discovered-child.mjs (one suite per process), so a
+ * crashing suite reads the same whichever way the run was started.
+ *
+ * An uncaught THROW from a suite ends the run just as completely as a
+ * process.exit() would, and rather more quietly: node unwinds straight out of
+ * test-all, finish() never prints its summary, and every suite sorting after
+ * this one silently never runs. That does not read as a broken suite — it reads
+ * as a finished one, so the screen of green above the cut looks like a pass.
+ * (Measured on a Windows box with no symlink privilege: tests/intake.test.mjs
+ * threw at import and took 2067 of 3693 checks with it, with no verdict line at
+ * all — #2828.) A discovered suite is a guest, not a co-host: its crash is one
+ * failure, not the end of the run.
+ *
+ * How much "one failure" actually cost is reported as `ran`, the exact number
+ * of assertions made before the throw; the reported totals only ever include
+ * those, and nothing else says the rest never happened (#3976). An earlier
+ * version also estimated how many assertions never ran, from a static count of
+ * pass()/fail() call sites in the file. artemtrofymenko (the issue's author)
+ * measured that estimate against real suites and found it wrong in both
+ * directions badly enough to make the diagnostic worse than none: a suite
+ * asserting through a local wrapper has far more real assertions than call
+ * sites (tests/discover-ats.test.mjs: 155 executed, 4 call sites — the estimate
+ * goes negative and the line silently does not print, for 38 of 278 in-process
+ * suites), and a suite writing `if (cond) pass(...); else fail(...)` pairs has
+ * roughly twice as many call sites as real assertions, so the estimate invents
+ * lost assertions that never existed. A signal present for some suites and
+ * silently absent for others turns its own absence into a false reassurance.
+ * `ran` alone does not have that failure mode, so it is printed
+ * unconditionally.
+ *
+ * @param {string} file - Absolute path of the suite.
+ * @param {string} rel - The name to report it under (repo-relative path).
+ * @returns {Promise<void>} Resolves when the import has; never rejects.
+ */
+export async function importSuiteContained(file, rel) {
+  const before = results();
+  try {
+    await import(pathToFileURL(file).href);
+  } catch (err) {
+    const ran = (results().passed - before.passed) + (results().failed - before.failed);
+    fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+    console.log(`      ${ran} assertion${ran === 1 ? '' : 's'} ran before the throw; everything after it in this file did not run`);
+    // The throw site, not just the message: a suite that dies mid-import
+    // leaves no other clue how far it got.
+    for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+      if (line.trim()) console.log(`      ${line.trim()}`);
+    }
+  } finally {
+    // A suite that sealed git (sealProcessGitEnv) hands the environment back,
+    // so the suites after it in this process do not inherit the seal.
+    if (unsealGitEnv) {
+      unsealGitEnv();
+      unsealGitEnv = null;
+    }
+  }
+}
 
 /**
  * Print the summary line and exit with the suite's exit code.
  * Moved verbatim from the tail of test-all.mjs — output must stay byte-identical.
  */
 export function finish() {
+  // A discovered suite under tests/ that uses node:test reports through node's
+  // own runner, which increments none of the counters above. node:test does set
+  // process.exitCode = 1 when one of its tests fails, but process.exit(0) below
+  // overwrites that -- so a failing tests/*.test.mjs printed "All tests passed"
+  // and exited 0. Verified 2026-08-03 by dropping a deliberately failing suite
+  // into tests/: "📊 2049 passed, 0 failed" / "🟢 All tests passed" / exit 0.
+  //
+  // That silently covered every node:test suite in the directory (url-identity,
+  // digest, stats, filter-precision, pipeline-state, the provider tests...):
+  // they only ever reported when run directly with `node --test`.
+  //
+  // Read before printing so the summary line tells the truth too. The counters
+  // stay authoritative for inline assertions; this only adds a failure source
+  // that was already being computed and thrown away.
+  const runnerFailed = Boolean(process.exitCode);
+  // Before the summary, so a run that wrote to the developer's data cannot
+  // print "All tests passed" above the line that says it did (#5113).
+  const drift = realDataRootDrift();
+  if (drift) fail(drift.join('\n     '));
   console.log('\n' + '='.repeat(50));
-  console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`);
-  if (failed > 0) {
+  console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`
+    + (runnerFailed ? ' — plus failures in a discovered node:test suite (see above)' : ''));
+  if (failed > 0 || runnerFailed) {
     console.log('🔴 TESTS FAILED — do NOT push/merge until fixed\n');
     process.exit(1);
   } else if (warnings > 0) {
@@ -75,9 +397,41 @@ export function finish() {
 // to the OS), so a test can never be tricked into executing an arbitrary
 // binary — and CodeQL's uncontrolled-command-line finding is closed by
 // construction rather than dismissed (alerts #36/#41/#42).
+// Scoop installs Git for Windows under the user profile, not Program Files, so
+// a Program-Files-only list misses it entirely and getBash() falls through to
+// WSL bash. That fallback launches the script but not the environment: WSL has
+// its own PATH, so the Windows `node` (and any stub binary a test injects via
+// PATH) is invisible, and batch-runner.sh dies with `node: command not found`,
+// exit 127. run() converts that to null, the caller does `|| ''`, and the
+// assertion reports an empty argv -- which reads as a routing bug in the code
+// under test rather than a missing shell. That is what all five spend_tier
+// tests were doing on a machine where Git Bash was installed the whole time
+// (#2344).
+//
+// Kept as fixed-shape literals joined onto %USERPROFILE% / %SCOOP% rather than
+// a PATH search, so this stays an allowlist of trusted literals (see
+// resolveAllowedExecutable below and CodeQL alerts #36/#41/#42).
+const SCOOP_ROOTS = [
+  process.env.SCOOP,
+  process.env.USERPROFILE ? join(process.env.USERPROFILE, 'scoop') : null,
+].filter(Boolean);
+
 const WINDOWS_BASH_CANDIDATES = [
   'C:\\Program Files\\Git\\bin\\bash.exe',
   'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+  ...SCOOP_ROOTS.flatMap((root) => [
+    join(root, 'apps', 'git', 'current', 'bin', 'bash.exe'),
+    join(root, 'apps', 'git', 'current', 'usr', 'bin', 'bash.exe'),
+  ]),
+];
+
+// Same discovery problem, same fix: cygpath must come from the SAME Git
+// install as the bash above. Mixing them is #1409 in reverse -- cygpath emits
+// /c/... while WSL bash expects /mnt/c/..., so the path silently fails to
+// resolve inside the shell that receives it.
+const WINDOWS_CYGPATH_CANDIDATES = [
+  'C:\\Program Files\\Git\\usr\\bin\\cygpath.exe',
+  ...SCOOP_ROOTS.map((root) => join(root, 'apps', 'git', 'current', 'usr', 'bin', 'cygpath.exe')),
 ];
 
 /**
@@ -96,6 +450,12 @@ function resolveAllowedExecutable(cmd) {
   for (const candidate of WINDOWS_BASH_CANDIDATES) {
     if (cmd === candidate) return candidate;
   }
+  // The PATH probe resolves bash to an install dir the candidate list does not
+  // know (a Git outside Program Files/Scoop, e.g. D:\Git). Allow exactly the
+  // path getBash() itself resolved and memoized — never an arbitrary caller
+  // string: bash callers reach it as run(getBash(), ...), so the cache is set
+  // by construction, and what it holds is the same shell the probes ran.
+  if (bashCache !== null && cmd === bashCache) return cmd;
   throw new Error(`run(): executable not in the test-helper allowlist: ${cmd}`);
 }
 
@@ -113,12 +473,249 @@ function resolveAllowedExecutable(cmd) {
  * @returns {string|null} Trimmed stdout, or null when the command fails.
  */
 export function run(cmd, args = [], opts = {}) {
+  // Cleared as the very first statement. resolveAllowedExecutable() throws for a
+  // command outside the allowlist, so a reset placed after it is skipped on that
+  // path and the previous run's diagnostics survive, which would let a later
+  // formatRunFailure() attribute an unrelated child's stderr to whatever failed
+  // most recently. A stale diagnostic is worse than none.
+  //
+  // Clearing here rather than on the success path also keeps the execFileSync
+  // call below byte-identical: editing that line makes CodeQL re-attribute its
+  // long-standing "uncontrolled command line" finding to whichever PR touched
+  // it. Nothing about what reaches the child changes either way, since the
+  // executable is still allowlisted and the arguments are still an argv vector.
+  lastFailure = null;
   const exe = resolveAllowedExecutable(cmd);
+  const env = opts.env ?? process.env;
+  const isolatedOpts = args.includes('merge-tracker.mjs') && env.CAREER_OPS_ADDITIONS
+    ? { ...opts, env: { ...env, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.CAREER_OPS_ADDITIONS) } }
+    : opts;
+  opts = isolatedOpts;
   try {
     return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
+    // execFileSync attaches the child's streams and exit status to the error.
+    // Keep them: callers report failure as `<name> crashed`, and without this a
+    // CI-only failure arrives as a single line with no stack, no assertion text,
+    // and no exit code, which is not enough to act on.
+    lastFailure = {
+      status: e?.status ?? null,
+      signal: e?.signal ?? null,
+      // 'ETIMEDOUT' when the timeout killed the child. A killed child has no
+      // exit status, so this is the only field that says it ran out of time.
+      code: e?.code ?? null,
+      stdout: e?.stdout == null ? '' : String(e.stdout),
+      stderr: e?.stderr == null ? '' : String(e.stderr),
+    };
+    warnFallbackShell(exe);
     return null;
   }
+}
+
+/** Diagnostics from the most recent failed run(), or null if the last run succeeded. */
+let lastFailure = null;
+
+/**
+ * Diagnostics for the most recently failed run().
+ *
+ * Cleared by a successful run so a stale record is never attributed to a later
+ * command. The suite is sequential, so "most recent" is unambiguous.
+ *
+ * @returns {{status: number|null, signal: string|null, code: string|null, stdout: string, stderr: string}|null}
+ */
+// describeSpawn lives in helpers/describe-spawn.mjs and is re-exported here so
+// the 410 tests that already import from this file can reach it. It is a
+// SEPARATE module because importing this one is not free: the lines above set
+// process.env.CAREER_OPS_TRACKER, call pinSandboxDataRoot() and register an
+// 'exit' hook. A test that does not already depend on that must be able to
+// describe a failed child without inheriting it.
+export { describeSpawn } from './helpers/describe-spawn.mjs';
+
+export function lastRunFailure() {
+  return lastFailure;
+}
+
+// A V8 stack frame as Node prints it for an uncaught exception:
+// `    at fn (/path/file.mjs:12:5)`, `    at /path/file.mjs:12:5`.
+const STACK_FRAME_RE = /^ {4}at \S.*:\d+:\d+\)?$/m;
+
+/**
+ * Run a command that is expected to refuse its input, and report whether it
+ * refused it the intended way.
+ *
+ * `run(...) === null` is not that check. run() returns null for every failure:
+ * the intended rejection, but also an uncaught TypeError (Node exits 1 for that
+ * too), a signal, and the 30 s timeout. A script that crashed on the bad input
+ * therefore read as "correctly rejected". This requires the expected exit
+ * status, no signal, the expected message on stderr, and no stack trace there,
+ * so a crash whose text happens to contain the message still fails.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} args - Argument vector.
+ * @param {{stderr: string|RegExp, status?: number|null}} expected - The rejection:
+ *   a substring (or pattern) stderr must contain, and the exit status (default 1).
+ *   A signal-killed child has status null; it still never passes, since any
+ *   signal is refused.
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {boolean} True only for the intended rejection. On false,
+ *   formatRunFailure() describes what the child actually did.
+ */
+export function runRejects(cmd, args, { stderr, status = 1 }, opts = {}) {
+  if (run(cmd, args, opts) !== null) return false;
+  const f = lastFailure;
+  if (!f || f.signal !== null || f.status !== status) return false;
+  if (STACK_FRAME_RE.test(f.stderr)) return false;
+  return typeof stderr === 'string' ? f.stderr.includes(stderr) : stderr.test(f.stderr);
+}
+
+/**
+ * Today as `YYYY-MM-DD` in UTC — the form the scripts under test emit from
+ * their own `today()`.
+ *
+ * @param {Date} [at=new Date()] - Instant to render; injectable for tests.
+ * @returns {string}
+ */
+export function utcDay(at = new Date()) {
+  return at.toISOString().split('T')[0];
+}
+
+/**
+ * Every UTC day an operation bracketed by `before` and `after` could have
+ * observed, inclusive: one when it stayed inside a day, two when it crossed
+ * midnight, and each intervening day for anything longer.
+ *
+ * Returning only the two boundaries would be enough for a run() call left on
+ * its default timeout, but that timeout is caller-overridable, and a child
+ * spanning two midnights can report a day that sits between them. Filling the
+ * range keeps the result a property of the inputs rather than of a timeout
+ * somebody may change later.
+ *
+ * The bounds are ordered before use, so a clock stepped backwards mid-call
+ * (NTP correction on a CI runner) still yields the covering range instead of
+ * an empty one. Either bound unparseable yields [] — including when both are
+ * the same unparseable string, so the answer never depends on which branch a
+ * bad input happens to take.
+ *
+ * @param {string} before - utcDay() read before the operation.
+ * @param {string} after - utcDay() read after it.
+ * @returns {string[]} Ascending, inclusive of both bounds; [] if either is unparseable.
+ */
+export function daysSpanned(before, after) {
+  const start = Date.parse(`${before}T00:00:00Z`);
+  const end = Date.parse(`${after}T00:00:00Z`);
+  if (Number.isNaN(start) || Number.isNaN(end)) return [];
+  if (start === end) return [before];
+  const [lo, hi] = start < end ? [start, end] : [end, start];
+  const days = [];
+  for (let t = lo; t <= hi; t += 86_400_000) {
+    days.push(utcDay(new Date(t)));
+  }
+  return days;
+}
+
+/**
+ * run(), plus the UTC day(s) the child could have seen on its own clock.
+ *
+ * A test that captures the day once and compares it to a date the child
+ * computed for itself is reading the clock twice, and a UTC midnight between
+ * those two reads makes them disagree — turning an otherwise-green run red on
+ * whichever runner happens to straddle the boundary (#3816: macOS crossed
+ * midnight four seconds into test-all §12, while ubuntu and windows reached
+ * the same section after the rollover and passed).
+ *
+ * Bracketing the call removes the race without weakening the assertion: the
+ * child ran somewhere inside [before, after], so its own day is one of the
+ * returned days, and the caller still checks the date is current rather than
+ * merely date-shaped.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} [args=[]]
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {{out: string|null, days: string[]}}
+ */
+export function runAcrossUtcDay(cmd, args = [], opts = {}) {
+  const before = utcDay();
+  const out = run(cmd, args, opts);
+  return { out, days: daysSpanned(before, utcDay()) };
+}
+
+/**
+ * Like {@link runAcrossUtcDay}, for a child that dates its output with the LOCAL
+ * calendar day (lib/local-today.mjs) instead of the UTC one.
+ *
+ * Same midnight hazard, different midnight: a single capture taken before the
+ * call fails a run that crosses the child's LOCAL midnight (#3816 is the UTC
+ * version of exactly this). Reusing daysSpanned() is safe -- it is date
+ * arithmetic over two YYYY-MM-DD strings and does not care which clock produced
+ * them.
+ *
+ * @param {string} cmd - Executable to run.
+ * @param {string[]} [args] - Arguments.
+ * @param {object} [opts] - Passed through to run().
+ * @returns {{out: string|null, days: string[]}} Output, and the local day(s) the call spanned.
+ */
+export function runAcrossLocalDay(cmd, args = [], opts = {}) {
+  const before = localToday();
+  const out = run(cmd, args, opts);
+  return { out, days: daysSpanned(before, localToday()) };
+}
+
+/**
+ * The last failure rendered for interpolation into a failure message, or an
+ * empty string when nothing has failed, so a caller can append it
+ * unconditionally without changing its message on the success path.
+ *
+ * Over-long streams keep BOTH ENDS rather than the head. A failing script's
+ * diagnostic line can be at either end: an early case that blew up, or — for
+ * the suites here, which print a tick per assertion — the `Results:` summary
+ * and the newest cases at the very bottom. Keeping only the head means the
+ * later a case was added, the more certain it is to be truncated away, which
+ * is exactly backwards for something read only when a run goes red.
+ *
+ * That is not hypothetical: `tests/agent-inbox.test.mjs` grew past this cap, and a
+ * windows-latest failure of its §7 cut off mid-word one assertion short of §8's
+ * verdict — the assertion added specifically to attribute that failure (#3035).
+ *
+ * @param {number} [maxChars=2000] - Per-stream cap, keeping a runaway log readable.
+ * @returns {string}
+ */
+export function formatRunFailure(maxChars = 2000) {
+  if (!lastFailure) return '';
+  const clip = (s) => {
+    const t = String(s ?? '').trim();
+    if (!t || t.length <= maxChars) return t;
+    // The marker's own width comes OUT of the budget rather than on top of it,
+    // so maxChars is a promise about the string this returns. (Appending the
+    // marker after slicing to maxChars, as this did before, put every clipped
+    // stream over its documented cap.)
+    const mark = (n) => `\n    ... (${n} more chars elided)\n`;
+    // The dropped count is printed inside the marker, so the marker's width
+    // depends on the budget and the budget depends on its width. Break the
+    // circle with the widest that count can ever be — t.length — which can only
+    // over-reserve, never under.
+    const budget = maxChars - mark(t.length).length;
+    // Degenerate cap, narrower than the marker itself: honour the number rather
+    // than emit a marker that alone overruns it.
+    if (budget <= 0) return t.slice(0, maxChars);
+    // Weighted to the tail, which is where a suite that prints per-assertion
+    // puts its summary, but never zero head — an early stack trace is the
+    // other common shape and dropping it entirely would just invert the bug.
+    //
+    // Math.floor(budget * 0.35) rounds to 0 below budget 3, which would hand
+    // the whole allowance to the tail and quietly reinstate exactly that
+    // inversion. Floor the head at one character whenever there is room for
+    // two. A one-character budget is genuinely single-sided — there is no way
+    // to keep both ends of a string in one character — so it keeps the tail.
+    const head = budget >= 2 ? Math.max(1, Math.floor(budget * 0.35)) : 0;
+    const tail = budget - head;
+    return `${t.slice(0, head)}${mark(t.length - budget)}${t.slice(t.length - tail)}`;
+  };
+  const parts = [` (exit ${lastFailure.status ?? 'null'}${lastFailure.signal ? `, signal ${lastFailure.signal}` : ''})`];
+  const out = clip(lastFailure.stdout);
+  const err = clip(lastFailure.stderr);
+  if (out) parts.push(`\n    stdout: ${out.replace(/\n/g, '\n    ')}`);
+  if (err) parts.push(`\n    stderr: ${err.replace(/\n/g, '\n    ')}`);
+  return parts.join('');
 }
 
 /**
@@ -129,7 +726,623 @@ export function run(cmd, args = [], opts = {}) {
  */
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
 
+/**
+ * Every TRACKED file under `dir` whose basename matches `match`.
+ *
+ * Enumerated through lib/mjs-files.mjs (#3890), not a private walk. This used
+ * to recurse the working tree with a skip-list its one caller passed in
+ * (`node_modules`, `.next`, `.git`, `out`, `dist`, `coverage`) — the same
+ * hand-maintained shape #3419 removed from the syntax gate, and the same silent
+ * narrowing: a suite added under a directory somebody forgot to un-skip never
+ * enters the guard, and the run is exactly as green as one that read it. Git
+ * already knows which of those trees is repository content, so the skip-list
+ * parameter is gone rather than reproduced here.
+ *
+ * That also retires the `isNestedCheckout` guard this walk used to need, and
+ * retires it rather than losing it: a name-matching skip-list never fired on a
+ * linked worktree, which marks itself with a `.git` FILE, so the walk descended
+ * into a whole second checkout of this repository (#3499, #3762). Nothing in
+ * that second checkout is tracked HERE, so the index cannot name it — the
+ * hazard is gone by construction instead of by a rule each walker remembers.
+ *
+ * Deterministic by construction (sorted), which is the property test-all.mjs's
+ * own `tests/` discovery relies on (#1440).
+ *
+ * A missing `dir` yields `[]` rather than throwing, so the caller reports its
+ * own contract failure (e.g. "discovery is empty") instead of the run dying on
+ * an ENOENT that says nothing about what was expected. A `dir` that EXISTS but
+ * that git can see nothing in is a different thing entirely — that is a scan
+ * that could not look, and trackedFiles throws rather than let it read as a
+ * clean sweep.
+ *
+ * @param {string} dir - Absolute directory inside a git working tree.
+ * @param {RegExp} match - Tested against each tracked file's basename.
+ * @returns {string[]} Absolute paths, lexicographically sorted.
+ */
+export function walkFiles(dir, match) {
+  if (!existsSync(dir)) return [];
+  return trackedFiles(dir, (rel) => match.test(basename(rel)));
+}
+
+/**
+ * Directory of the installation of `pkgName` that Node's bare-specifier lookup
+ * would find from `fromDir`, or null when there is none.
+ *
+ * Walks the same way Node does: `<dir>/node_modules/<pkgName>` for `fromDir`
+ * and then each ancestor up to the filesystem root, nearest first, skipping any
+ * `<dir>` that is itself named `node_modules` (Node never looks for
+ * `node_modules/node_modules`). A candidate counts only if it holds a
+ * package.json, so an empty or half-removed directory is not mistaken for an
+ * installation. Walked by hand rather than through
+ * `require.resolve('<pkg>/package.json')`, which a package's `exports` map is
+ * allowed to refuse.
+ *
+ * @param {string} pkgName - Package name, scoped names included (`@scope/name`).
+ * @param {string} [fromDir=ROOT] - Directory the lookup starts from.
+ * @returns {string|null} The package directory, or null if not installed.
+ */
+export function findInstalledPackage(pkgName, fromDir = ROOT) {
+  let dir = resolve(fromDir);
+  for (;;) {
+    if (basename(dir) !== 'node_modules') {
+      const candidate = join(dir, 'node_modules', pkgName);
+      if (existsSync(join(candidate, 'package.json'))) return candidate;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Copy an installed package into `dest` together with the packages it depends
+ * on, so the copy can load them from where it now sits.
+ *
+ * A LINKED package needs none of this: Node resolves a module's imports from
+ * its real location, so everything installed beside the original is still in
+ * reach. A COPY has only its own directory. Copying js-yaml alone leaves it
+ * unable to find argparse; the sandbox then dies with ERR_MODULE_NOT_FOUND,
+ * which reads as a failure of whatever the suite was testing.
+ *
+ * Each dependency is resolved the way Node would resolve it for the original
+ * (findInstalledPackage from the package's real path) and placed in the copy's
+ * own `node_modules`, the first place Node looks from there, so two packages
+ * that need different versions of a third cannot collide. One that is installed
+ * nowhere is skipped: the original could not load it either (an optional
+ * dependency for another platform). One already inside the package came along
+ * with the copy. `chain` stops a dependency cycle from recursing forever; the
+ * member it skips is an ancestor directory of the copy, where Node finds it.
+ *
+ * @param {string} source - The installed package directory.
+ * @param {string} dest - Where the copy goes.
+ * @param {Set<string>} [chain] - Real paths of the packages being copied above this one.
+ * @returns {void}
+ */
+function copyPackageWithDependencies(source, dest, chain = new Set()) {
+  // The real directory, not a link to it: a package manager may install a
+  // package as a symlink, and copying that would recreate the link this
+  // fallback exists because we could not make.
+  const real = realpathSync(source);
+  cpSync(real, dest, { recursive: true });
+  const within = new Set(chain).add(real);
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(real, 'package.json'), 'utf-8'));
+  } catch {
+    return;
+  }
+  // Peers too. A package imports its peer like any other dependency, and npm
+  // installs the peer beside it, so the original resolves it from its own
+  // location and a copy that left it behind does not.
+  for (const name of Object.keys({ ...manifest.peerDependencies, ...manifest.optionalDependencies, ...manifest.dependencies })) {
+    const installed = findInstalledPackage(name, real);
+    if (installed === null) continue;
+    const depReal = realpathSync(installed);
+    if (depReal.startsWith(real + sep) || within.has(depReal)) continue;
+    copyPackageWithDependencies(depReal, join(dest, 'node_modules', name), within);
+  }
+}
+
+/**
+ * Put one installed package at `<nodeModulesDir>/<pkgName>`: a link when the
+ * platform allows one, otherwise a copy that carries its dependencies.
+ *
+ * 'junction' is ignored on POSIX, and on Windows it is the one link type
+ * granted without Developer Mode or elevation -- the privilege whose absence
+ * aborted a whole suite in #2828. The copy is the last resort.
+ *
+ * @param {string} nodeModulesDir - The sandbox's `node_modules` (created if absent).
+ * @param {string} pkgName - Package name, scoped names included.
+ * @param {string} source - The installed package directory.
+ * @param {(target: string, path: string, type: string) => void} [link] - Link
+ *   primitive; a test passes one that throws to exercise the copy.
+ * @returns {string} Path to the package inside the sandbox.
+ */
+function placePackage(nodeModulesDir, pkgName, source, link = symlinkSync) {
+  const dest = join(nodeModulesDir, pkgName);
+  mkdirSync(dirname(dest), { recursive: true });
+  try {
+    link(source, dest, 'junction');
+  } catch {
+    copyPackageWithDependencies(source, dest);
+  }
+  return dest;
+}
+
+/**
+ * Make one of the repo's own dependencies resolvable from a sandbox Node cannot
+ * reach `ROOT/node_modules` from.
+ *
+ * The PDF sandboxes are created under `ROOT/output` and run a copy of
+ * generate-pdf.mjs, whose siblings theme-style.mjs and tracker-utils.mjs both
+ * `import * as yaml from 'js-yaml'`. That specifier resolves by walking parent
+ * directories up into `ROOT/node_modules`, and the walk starts from the
+ * importer's REALPATH, because --preserve-symlinks is off by default. On a
+ * checkout whose `output/` is symlinked out of the repo -- the layout people
+ * adopt as the manual workaround for #524 -- the walk begins outside the repo,
+ * never reaches `ROOT/node_modules`, and every spawned script dies with
+ * ERR_MODULE_NOT_FOUND before parsing a single argument. The suite then reports
+ * 20 behaviour regressions in assertions that never ran (#3165).
+ *
+ * Relocating those sandboxes to `tmpdir()` does NOT fix this: tmpdir is outside
+ * the repo too. They work today only because `ROOT/output` happens to be
+ * physically inside it, which is the assumption worth removing rather than
+ * relocating. Linking the package into the sandbox's own `node_modules` --
+ * beside the `playwright` stub each sandbox already writes there -- makes the
+ * sandbox self-sufficient wherever it physically lives.
+ *
+ * The package is taken from wherever Node would resolve it for the repo, not
+ * from `ROOT/node_modules` specifically. A git worktree (for example one under
+ * `.claude/worktrees/<name>`) usually has no `node_modules` of its own: the
+ * scripts under test import fine there because Node walks up into the main
+ * checkout's `node_modules`, so insisting on `ROOT/node_modules` failed every
+ * suite that links a package while the code it tests resolved without trouble.
+ *
+ * @param {string} sandboxDir - Sandbox root; its `node_modules/` is created if absent.
+ * @param {string} pkgName - Package name, as it would be imported from the repo root.
+ * @returns {string} Path to the package as seen from inside the sandbox.
+ */
+export function linkRepoPackage(sandboxDir, pkgName) {
+  const dest = join(sandboxDir, 'node_modules', pkgName);
+  if (existsSync(dest)) return dest;
+  const source = findInstalledPackage(pkgName);
+  if (source === null) {
+    throw new Error(`linkRepoPackage: ${pkgName} is not installed in any node_modules from ${ROOT} upward -- run npm install`);
+  }
+  return placePackage(join(sandboxDir, 'node_modules'), pkgName, source);
+}
+
+/**
+ * Source with its comments blanked, for a structural check that greps a file
+ * for a call or a guard it has to contain.
+ *
+ * A regex cannot tell code from a comment that mentions it, so a suite that
+ * only documents the construct -- or a revert that comments one out instead of
+ * deleting it -- satisfies a raw grep and the check goes vacuous. Shared, so
+ * every suite that pins a caller structurally strips the same way.
+ *
+ * The line-comment pass cannot see strings, so `"a//b"` loses everything after
+ * the `//`, including any real call later on that line. Use this only where
+ * losing the rest of such a line is acceptable. A scan that must keep code next
+ * to a string holding comment-like text should use `codeMask` and `isCodeRange`.
+ *
+ * @param {string} source - JavaScript source text.
+ * @returns {string} The same source without block and line comments.
+ */
+export function stripJsComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
+ * Whether the `/` at `i` opens a regex literal rather than being division.
+ *
+ * The classic heuristic — look at the last significant token before it. A regex
+ * can only appear where a VALUE is expected, so an operator, an opening
+ * bracket, a comma, a semicolon or a value-position keyword before it means
+ * regex; an identifier, a number or a closing paren/bracket means division.
+ * `}` is genuinely ambiguous (block end vs object literal end) and is read as
+ * regex, the usual choice: over-reading here masks a few characters, while
+ * under-reading lets a regex's contents open a phantom string frame, which is
+ * the failure that hides code.
+ */
+export function startsRegex(src, i) {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(src[j])) j--;
+  if (j < 0) return true;
+  const prev = src[j];
+  if ('=(,:[!&|?{};+-*%~^<>'.includes(prev)) return true;
+  // A `)` normally ends an expression, so `/` after it is division — except
+  // when it closes a CONTROL condition, where a statement (and so a regex) may
+  // follow: `if (enabled) /"/.test(value);`. Walk back to the matching `(` and
+  // look at the keyword in front of it.
+  if (prev === ')') {
+    let depth = 0;
+    let k = j;
+    for (; k >= 0; k--) {
+      if (src[k] === ')') depth++;
+      else if (src[k] === '(' && --depth === 0) break;
+    }
+    if (k < 0) return false;
+    let w = k - 1;
+    while (w >= 0 && /\s/.test(src[w])) w--;
+    let e = w;
+    while (w >= 0 && /[A-Za-z0-9_$]/.test(src[w])) w--;
+    return ['if', 'while', 'for', 'switch', 'catch', 'with'].includes(src.slice(w + 1, e + 1));
+  }
+  if (/[A-Za-z0-9_$]/.test(prev)) {
+    let k = j;
+    while (k >= 0 && /[A-Za-z0-9_$]/.test(src[k])) k--;
+    const word = src.slice(k + 1, j + 1);
+    // Every name below is also a legal PROPERTY name, and `obj.return / 7` is
+    // division. Read as a regex, it runs to the next `/` and masks whatever
+    // follows -- and this scan's failure direction is a silent pass, so masked
+    // code reads as a clean repo. A preceding `.` (or `?.`) settles it.
+    if (k >= 0 && src[k] === '.') return false;
+    // `throw` and `default` were absent until this function became shared. Both
+    // take an operand, so `throw /x/` and `export default /x/` are regexes; read
+    // as division, a quote inside one opens a phantom string that masks the
+    // lines after it. That is the exact failure the docblock above calls the
+    // unsafe direction, and the raw-link scan's failure direction is a silent
+    // pass, so a masked line reads as a clean repo.
+    return ['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
+      'case', 'do', 'else', 'yield', 'await', 'throw', 'default'].includes(word);
+  }
+  return false;
+}
+
+/**
+ * A per-character map of which positions in `src` are CODE — string and
+ * template TEXT and comments are not, but a template's `${...}` substitution
+ * is, recursively.
+ *
+ * Not a JavaScript lexer, and deliberately not one: `test-all.mjs` states the
+ * suite runs "on a fresh clone with only Node", so there is no parser
+ * dependency available to a test here. This covers the constructs a
+ * scan-history call is actually written with — the status string argument
+ * (`'added'`, `'skipped_title'`), a commented-out call, and the template-string
+ * child snippet the repo already uses to drive these writers
+ * (web/src/lib/core/pipeline.ts builds one).
+ *
+ * Regex literals are NOT distinguished from division. A `/.../ ` argument to
+ * appendToScanHistory would make the gate fail LOUDLY, which is the safe
+ * direction for a sentinel and a signal to revisit this — never a silent pass.
+ *
+ * @param {string} src
+ * @returns {boolean[]} isCode[i] for every index in src.
+ */
+export function codeMask(src) {
+  const mask = new Array(src.length).fill(true);
+  // Bottom frame is the file itself. A `${` pushes a code frame whose parent is
+  // the template it interpolates into; `braces` tracks object/block nesting so
+  // the `}` that CLOSES the substitution is told apart from an inner one.
+  const stack = [{ template: false, braces: 0 }];
+  let i = 0;
+
+  while (i < src.length) {
+    const top = stack[stack.length - 1];
+    const c = src[i];
+    const n = src[i + 1];
+
+    if (top.template) {
+      if (c === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+      if (c === '`') { mask[i++] = false; stack.pop(); continue; }
+      if (c === '$' && n === '{') {
+        mask[i++] = false;
+        mask[i++] = false;
+        stack.push({ template: false, braces: 0 });
+        continue;
+      }
+      mask[i++] = false;
+      continue;
+    }
+
+    if (c === '/' && n === '/') {
+      while (i < src.length && src[i] !== '\n') mask[i++] = false;
+      continue;
+    }
+    if (c === '/' && n === '*') {
+      const close = src.indexOf('*/', i + 2);
+      const stop = close === -1 ? src.length : close + 2;
+      while (i < stop) mask[i++] = false;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      mask[i++] = false;                                  // opening quote
+      while (i < src.length) {
+        if (src[i] === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+        const closing = src[i] === c;
+        mask[i++] = false;
+        if (closing) break;
+      }
+      continue;
+    }
+    if (c === '`') { mask[i++] = false; stack.push({ template: true }); continue; }
+    if (c === '/' && startsRegex(src, i)) {
+      // A regex literal's contents are DATA. Not masking them let a quote or a
+      // backtick inside one open a phantom string or template frame that then
+      // swallowed real code — scan-hn.mjs carries `/```yaml|```/g`, six
+      // backticks, which is that hazard live in a writer file today.
+      mask[i++] = false;                                  // opening slash
+      let inClass = false;
+      while (i < src.length) {
+        const ch = src[i];
+        if (ch === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+        if (ch === '\n') break;                            // unterminated; stop rather than run away
+        if (ch === '[') inClass = true;
+        else if (ch === ']') inClass = false;
+        else if (ch === '/' && !inClass) { mask[i++] = false; break; }
+        mask[i++] = false;
+      }
+      while (i < src.length && /[a-z]/.test(src[i])) mask[i++] = false;   // flags
+      continue;
+    }
+    if (c === '{') { top.braces++; i++; continue; }
+    if (c === '}') {
+      const closesSubstitution = top.braces === 0 && stack.length > 1 && stack[stack.length - 2].template;
+      if (closesSubstitution) { mask[i++] = false; stack.pop(); continue; }
+      if (top.braces > 0) top.braces--;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return mask;
+}
+
+/** Whether every character of `src.slice(from, to)` is code. */
+export const isCodeRange = (isCode, from, to) => isCode.slice(from, to).every(Boolean);
+
+/**
+ * Give a sandbox the packages a checkout with no `node_modules` of its own
+ * actually runs on, one link per package.
+ *
+ * A git worktree (for example one under `.claude/worktrees/<name>`) usually has
+ * no `node_modules`: its scripts import fine because Node walks up into the
+ * main checkout's tree. Each package `<root>/package.json` declares is resolved
+ * the way those scripts resolve it (findInstalledPackage, nearest first) and
+ * linked into the sandbox's own `node_modules` from wherever it was found.
+ *
+ * Per package, not one link to "the" inherited tree, because there may be more
+ * than one: Node resolves each specifier separately, so js-yaml can come from a
+ * nearer ancestor and undici from a farther one. A single link to the nearer
+ * tree left the sandbox unable to load the second package while the worktree
+ * loaded both, which is the false failure this fallback exists to remove.
+ *
+ * Keyed on the declared dependencies rather than on whatever `node_modules`
+ * sits on the way up, because an unrelated one is easy to have there (a stray
+ * `~/node_modules` above a fresh clone). Nothing declared, or none of it
+ * installed anywhere above, is therefore "not installed". A package.json that
+ * is there and cannot be read is a different fault with a different remedy, and
+ * is reported as itself: `npm ci` does not fix a manifest that does not parse.
+ *
+ * @param {string} destDir - Sandbox directory to receive `node_modules/`.
+ * @param {string} root - Checkout whose own `node_modules` is absent.
+ * @param {Function} [link] - Link primitive, passed through to placePackage.
+ * @returns {string|null} null once linked; otherwise why it could not be.
+ */
+function linkInheritedDependencies(destDir, root, link) {
+  const manifestPath = join(root, 'package.json');
+  let names = [];
+  let text = null;
+  try {
+    text = readFileSync(manifestPath, 'utf-8');
+  } catch (err) {
+    // Absent is the ordinary case (a fixture directory, a bare clone of
+    // something else) and means "declares nothing". Anything else is a manifest
+    // that exists and could not be read.
+    if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') {
+      return `package.json at ${manifestPath} is unreadable (${err.code})`;
+    }
+  }
+  if (text !== null) {
+    try {
+      const declared = JSON.parse(text)?.dependencies;
+      if (declared && typeof declared === 'object' && !Array.isArray(declared)) names = Object.keys(declared);
+    } catch (err) {
+      return `package.json at ${manifestPath} is not valid JSON (${err.message})`;
+    }
+  }
+  const found = names
+    .map((name) => [name, findInstalledPackage(name, root)])
+    .filter(([, dir]) => dir !== null);
+  if (found.length === 0) {
+    return `node_modules is not installed at ${root} or in a parent directory -- run \`npm ci\` there`;
+  }
+  const nodeModules = join(destDir, 'node_modules');
+  for (const [name, dir] of found) placePackage(nodeModules, name, dir, link);
+  return null;
+}
+
+/**
+ * Link the repository's whole installed dependency tree into a sandbox
+ * directory, so a script copied out of the repo can still resolve its package
+ * imports.
+ *
+ * Checking and linking are one operation on purpose. symlinkSync succeeds
+ * against a target that does not exist, so a separate check is one a call site
+ * can forget. The link is then created dangling, the sandboxed script dies with
+ * ERR_MODULE_NOT_FOUND, and the section's own catch reports that as a crash of
+ * whatever it was testing. The suite is designed to run on a fresh clone with
+ * only Node (see the file header), where an absent tree is the expected state,
+ * so the caller is handed a reason to report and skip on instead of a broken
+ * sandbox.
+ *
+ * A git worktree is not that state, though it looks like it: `join(root,
+ * 'node_modules')` does not exist there either, while test-all.mjs and every
+ * script under test resolve their packages through the parent checkout's tree
+ * by Node's upward walk. Reporting "not installed" there skipped (or, where the
+ * caller throws on the reason, failed) suites whose dependencies were one
+ * directory up. So when `root` has no tree of its own, the packages it
+ * inherits are linked instead, one by one (linkInheritedDependencies), the
+ * same position linkRepoPackage takes for a single package. The sandbox's
+ * `node_modules` is then a real directory holding those links, not one link.
+ *
+ * 'junction' on Windows, because a directory symlink needs
+ * SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless Developer
+ * Mode is on. Junctions need no privilege, and the two constraints they add are
+ * already met: the target is absolute and is a directory on a local volume. The
+ * type argument is ignored off Windows.
+ *
+ * @param {string} destDir - Sandbox directory to receive the node_modules link.
+ * @param {string} [root=ROOT] - Repository root whose installed tree is linked:
+ *   its own `node_modules`, or the packages it inherits from parent directories.
+ * @param {{link?: Function}} [options] - `link` replaces the link primitive for
+ *   the inherited packages; a test passes one that throws to exercise the copy.
+ * @returns {string|null} null once linked; otherwise why it could not be.
+ */
+export function linkNodeModules(destDir, root = ROOT, { link } = {}) {
+  const target = join(root, 'node_modules');
+  try {
+    let stats;
+    try {
+      stats = statSync(target);
+    } catch (err) {
+      // Only an ABSENT own tree falls back to the inherited packages. Anything
+      // that is there and cannot be used (a loop, no permission) is still
+      // reported as itself below, never papered over with a parent's tree.
+      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') throw err;
+      return linkInheritedDependencies(destDir, root, link);
+    }
+    // isDirectory, because statSync succeeds on a regular FILE standing where the
+    // tree belongs. Without this an executable one links cleanly and the sandbox
+    // gets a symlink to a file, which is the broken sandbox this function exists
+    // to refuse. The message says what it is rather than calling it unreadable.
+    if (!stats.isDirectory()) {
+      return `node_modules at ${target} is not a directory`;
+    }
+    // Traverse permission, not read permission, is what resolution needs, and
+    // statSync alone proves neither: it succeeds on a directory the caller
+    // cannot enter. Measured here on 4 modes of a node_modules holding one
+    // package, importing it through a link:
+    //
+    //   mode  import  statSync  readdirSync  accessSync X_OK
+    //   0755  works   ok        ok           ok
+    //   0111  works   ok        EACCES       ok
+    //   0444  EACCES  ok        ok           EACCES
+    //   0000  EACCES  ok        EACCES       EACCES
+    //
+    // Node resolves a bare specifier by stat'ing paths under the directory
+    // rather than listing it, so `x` alone is enough and `r` alone is not.
+    // X_OK is the only probe that agrees with the import on all 4 rows;
+    // readdirSync disagrees on both of the interesting ones, skipping a tree
+    // that works and passing one that does not.
+    accessSync(target, constants.X_OK);
+  } catch (err) {
+    // statSync, because existsSync collapses EACCES and ELOOP into the same
+    // false an absent tree produces, and `npm ci` is the wrong advice for a
+    // tree that is there and unreadable. Both cases still skip: throwing here
+    // lands in the call site's catch, which is where the misattribution this
+    // function exists to prevent came from.
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
+      return `node_modules is not installed at ${root} or in a parent directory -- run \`npm ci\` there`;
+    }
+    return `node_modules at ${target} is unreadable (${err.code})`;
+  }
+  symlinkSync(target, join(destDir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+  return null;
+}
+
 let bashCache = null;
+let bashSourceCache = null;
+
+/**
+ * Which probe in getBash() produced the current bash, or null before the first
+ * getBash() call.
+ *
+ * getBash() returns the bare string 'bash' from two different branches -- the
+ * WSL probe and the give-up path -- so its return value alone cannot tell a
+ * caller which shell it is about to run. On Windows those are not
+ * interchangeable: 'bash' via WSL is a different OS with a different PATH and a
+ * different mount scheme (/mnt/c/... vs /c/...). Recording the branch is what
+ * lets a failure name the shell instead of leaving the reader to infer it
+ * (#2344).
+ *
+ * @returns {'posix'|'git-bash'|'wsl'|'path'|'unresolved'|null} Resolution source.
+ */
+export function bashSource() { return bashSourceCache; }
+
+/** Sources whose shell is ambiguous or foreign, and worth naming on failure. */
+const FALLBACK_BASH_SOURCES = new Set(['wsl', 'path', 'unresolved']);
+
+let warnedFallbackShell = false;
+
+/**
+ * Say out loud, once per process, that a failing shell command ran in a
+ * fallback shell rather than Git Bash.
+ *
+ * Unconditional by design. formatRunFailure() already surfaces the child's
+ * stderr to callers that ask for it, but the shell that produced it is still
+ * invisible, and the whole failure mode of #2344 is that nobody suspects the
+ * shell: it is missing, the script dies at `node`, run() returns null, `|| ''`
+ * turns that into an empty string, and the assertion accuses the code under
+ * test of a routing bug it does not have.
+ *
+ * Two things keep this from becoming noise in the suites that provoke command
+ * failures on purpose. It fires only when getBash() landed on a fallback -- a
+ * Git Bash resolved by literal path is unambiguous and stays silent, which is
+ * every correctly provisioned machine -- and it fires at most once per process.
+ *
+ * @param {string} exe - Executable that just failed.
+ * @returns {void}
+ */
+function warnFallbackShell(exe) {
+  if (warnedFallbackShell) return;
+  if (bashCache === null || exe !== bashCache) return;
+  if (!FALLBACK_BASH_SOURCES.has(bashSourceCache)) return;
+  warnedFallbackShell = true;
+  const where = {
+    wsl: 'WSL bash (`wsl -e bash`) -- a different OS with its own PATH',
+    path: '`bash` from PATH, provenance unknown',
+    unresolved: '`bash`, which no probe could confirm exists',
+  }[bashSourceCache];
+  console.error(`    [shell] this command ran under ${where},`);
+  console.error('            because no Git Bash was found at any known location.');
+  console.error('            The Windows `node` and any PATH-injected stub binary may be invisible there,');
+  console.error('            so scripts calling node die with `node: command not found` (exit 127) and the');
+  console.error('            assertion sees an empty result. Suspect the shell before the code under test.');
+  console.error('            Install Git for Windows, or see formatRunFailure() for the raw stderr.');
+}
+
+/**
+ * The absolute path of `name` as the ambient PATH resolves it, or null when
+ * no PATH entry holds it.
+ *
+ * The bare command name only resolves through the process's own PATH, and
+ * several bash-driven fixtures deliberately spawn with PATH replaced by a
+ * POSIX-only list (`SYSTEM_PATH`, e.g. tests/batch-runner-dry-run-without-cli
+ * .test.mjs). On Windows that override hides every real install directory, so
+ * a bare `bash` cached from the probe comes back ENOENT at spawn time. Resolve
+ * the file once here, while the ambient PATH is still intact, and later spawns
+ * need no PATH at all.
+ *
+ * Follows Windows executable resolution order (current directory unless
+ * NoDefaultCurrentDirectoryInExePath is set, then PATH directories in order,
+ * checking executable extensions: .com before .exe).
+ *
+ * @param {string} name - Executable base name, e.g. 'bash'.
+ * @returns {string|null} Absolute path, or null if not found on PATH.
+ */
+function resolveOnPath(name) {
+  const pathEnv = process.env.PATH || '';
+  const pathext = ['.com', '.exe'];
+  const includeCwd = !process.env.NoDefaultCurrentDirectoryInExePath;
+  const dirs = [
+    ...(includeCwd ? ['.'] : []),
+    ...pathEnv.split(delimiter).filter(Boolean),
+  ];
+  for (const entry of dirs) {
+    const dir = entry.replace(/^"|"$/g, ''); // Windows PATH entries may be quoted
+    for (const ext of pathext) {
+      for (const e of [ext, ext.toUpperCase()]) {
+        const candidate = join(dir, `${name}${e}`);
+        try { if (statSync(candidate).isFile()) return resolve(candidate); } catch {}
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Resolve the bash executable to use for shell-script checks, lazily.
@@ -144,24 +1357,31 @@ let bashCache = null;
  */
 export function getBash() {
   if (bashCache !== null) return bashCache;
-  if (process.platform !== 'win32') return (bashCache = 'bash');
+  if (process.platform !== 'win32') { bashSourceCache = 'posix'; return (bashCache = 'bash'); }
   for (const cmd of WINDOWS_BASH_CANDIDATES) {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
+      bashSourceCache = 'git-bash';
       return (bashCache = cmd);
     } catch {}
   }
   try {
     // Probe via argv vector — no shell string, nothing to interpolate.
     execFileSync('wsl', ['-e', 'bash', '-c', 'true'], { stdio: 'ignore' });
+    bashSourceCache = 'wsl';
     return (bashCache = 'bash');
   } catch {}
   for (const cmd of ['bash']) {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
-      return (bashCache = cmd);
+      bashSourceCache = 'path';
+      // The probe proved `bash` resolves on the ambient PATH; cache the file
+      // it resolved to, not the bare name — a spawn that overrides PATH (the
+      // POSIX-only SYSTEM_PATH fixtures) cannot re-resolve it on Windows.
+      return (bashCache = resolveOnPath(cmd) || cmd);
     } catch {}
   }
+  bashSourceCache = 'unresolved';
   return (bashCache = 'bash');
 }
 
@@ -179,7 +1399,7 @@ export function toBashPath(wpath) {
   try {
     // execFileSync: the path is passed as an argv element, never interpolated
     // into a shell string, so quotes/spaces in it can't be re-parsed.
-    const cygpathCmd = existsSync('C:\\Program Files\\Git\\usr\\bin\\cygpath.exe') ? 'C:\\Program Files\\Git\\usr\\bin\\cygpath.exe' : 'cygpath';
+    const cygpathCmd = WINDOWS_CYGPATH_CANDIDATES.find((p) => existsSync(p)) || 'cygpath';
     const out = execFileSync(cygpathCmd, ['-u', forwardSlashed], { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
     if (out) return out;
   } catch {}
@@ -213,4 +1433,328 @@ export async function captureConsoleErrors(fn) {
   } finally {
     console.error = original;
   }
+}
+
+/**
+ * Build a throwaway git repository for the updater suites that hand the
+ * updater its git runner (`updater-add-paths`, `updater-is-tracked`, and
+ * `updater-rollback-target-manifest`). The first asserts on ignore RESOLUTION;
+ * the second writes its own .gitignore and asks about index membership; the
+ * third builds real backup/target commits and invokes the rollback CLI.
+ *
+ * The pins below are the reason this is shared rather than copied, but they are
+ * not all load-bearing for every caller, and this docstring should not imply
+ * otherwise. Mutation-tested by dropping each pin under a GIT_CONFIG_GLOBAL it
+ * exists to neutralise:
+ *
+ *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
+ *     inherited from the environment breaks every commit the fixtures make.
+ *     Dropping either reddens all three suites.
+ *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
+ *     what is measured (the failure mode reported in #2269). Dropping it reddens
+ *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
+ *     then reads index membership, while updater-rollback-target-manifest stages
+ *     snapshots with `git add -A`, so a global rule could drop a fixture file;
+ *     it stayed green in the mutation run only because no such rule was set.
+ *
+ * Point `core.excludesFile` at an empty file rather than /dev/null: git on
+ * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
+ * exclude file".
+ *
+ * Kept as one body so a pin cannot be dropped from one caller while the other
+ * keeps it — which is the drift CodeRabbit flagged on #2531, where two copies
+ * meant a pin added to one left the other silently unprotected. Note that is a
+ * weaker guarantee than "deleting a pin fails both suites", which the table
+ * above shows is only true for two of the three.
+ *
+ * The two other `makeRepo` fixtures under tests/ are deliberately NOT folded in
+ * here: `updater-local-system-edits` pins line endings instead of excludes and
+ * seeds a base commit plus an `upstream` branch, and `updater-rollback-behavior`
+ * pins nothing. They are different fixtures that share a name, not copies of
+ * this one.
+ *
+ * The pins above are the FILE layer. They do not hold against the runtime layer:
+ * an ambient GIT_CONFIG_COUNT pair is applied after every config file, so a
+ * `core.excludesFile` injected that way overrode the one pinned here, the seed
+ * file was never staged, and the base commit died before the first assertion
+ * (#3801). So the fixture runs git through `hermeticGitRunner` rather than
+ * through the updater's own `gitIn`, which inherits the environment as a real
+ * install must. That also keeps this module on Node builtins alone: most suites
+ * import it, and none of them should pull in update-system.mjs as a side effect
+ * of asking for `pass`/`fail`.
+ *
+ * @param {object} [options]
+ * @param {string} [options.prefix='co-updater-'] - mkdtemp prefix, so a leftover
+ *   temp dir names the suite that made it.
+ * @param {boolean} [options.includeRoot=false] - Add `root` to the returned ctx.
+ *   `addPaths` resolves paths against it to decide what is a directory; without
+ *   it the guard would lstat the real career-ops checkout instead of the
+ *   fixture. `isTracked` never reads it.
+ * @returns {{dir: string, g: Function, ctx: {git: Function, root?: string}}}
+ */
+export function makeUpdaterRepo({ prefix = 'co-updater-', includeRoot = false } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const g = hermeticGitRunner(dir);
+  g('init', '-q', '-b', 'main', '.');
+  g('config', 'core.autocrlf', 'false');
+  g('config', 'user.email', 'test@example.com');
+  g('config', 'user.name', 'Test');
+  const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
+  const emptyHooks = join(dir, '.git', 'co-empty-hooks');
+  writeFileSync(emptyExcludes, '');
+  mkdirSync(emptyHooks, { recursive: true });
+  g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.excludesFile', emptyExcludes);
+  g('config', 'core.hooksPath', emptyHooks);
+  return { dir, g, ctx: includeRoot ? { git: g, root: dir } : { git: g } };
+}
+
+/**
+ * Build a git environment nothing ambient can reach into.
+ *
+ * GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM pin the FILE layers. They do not
+ * close the RUNTIME layer: GIT_CONFIG_COUNT with its KEY_n / VALUE_n pairs is
+ * applied AFTER every config file, so an ambient `core.excludesFile` injected
+ * that way overrides even the one a fixture sets for itself, and the isolation
+ * silently stops holding - the exact leak this pinning exists to close,
+ * arriving through the one door left open (#2567).
+ *
+ * COUNT is set to 0 rather than deleting the variables: it is a single
+ * authoritative value, and git reads KEY_n / VALUE_n only up to COUNT, so any
+ * stragglers are inert without having to enumerate them.
+ *
+ * `base` exists so a regression case can hand in a parent environment
+ * carrying the injection. Every caller shares this one construction on purpose:
+ * a test that hand-rolled its own env would keep passing if the pin were
+ * dropped here, which is how the gap got in.
+ */
+export function hermeticGitEnv(gitConfigPath, base = process.env) {
+  const env = {
+    ...base,
+    GIT_CONFIG_COUNT: '0',
+    GIT_CONFIG_GLOBAL: gitConfigPath,
+    GIT_CONFIG_SYSTEM: gitConfigPath,
+  };
+  // These two DO have to be enumerated, because COUNT governs KEY_n / VALUE_n
+  // and nothing else, and neither of them is a config FILE that GLOBAL/SYSTEM
+  // could shadow. Both survive all three pins above:
+  //
+  //   GIT_CONFIG_PARAMETERS  the channel git uses to hand `-c` down to a
+  //                          subprocess, so it reaches every git invocation.
+  //                          Measured: with it set, a commit made through this
+  //                          env took its author from the ambient value.
+  //   GIT_CONFIG             redirects the `git config` command, reads AND
+  //                          writes. The fixtures in test-all.mjs call `git config` to
+  //                          set themselves up, so with it set that write lands
+  //                          in the ambient file instead of the fixture: the
+  //                          setting never takes effect, and the suite mutates
+  //                          a file outside its own temp dir.
+  delete env.GIT_CONFIG_PARAMETERS;
+  delete env.GIT_CONFIG;
+  return env;
+}
+
+const REPO_LOCATION_ENV = [
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_IMPLICIT_WORK_TREE', 'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_GRAFT_FILE', 'GIT_SHALLOW_FILE', 'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+];
+
+/**
+ * A git runner bound to one fixture repository and to `hermeticGitEnv`.
+ *
+ * Same shape as the updater's `gitIn(dir, ...args)` with the directory already
+ * applied: trimmed stdout, a throw on a non-zero exit. It can stand in for it
+ * wherever a function under test takes its runner as `{ git }`. The difference
+ * is the environment. `gitIn` passes none, so it inherits the contributor's,
+ * and a fixture built with it is only as isolated as their shell (#3801).
+ *
+ * The environment is built once, here, and held for the life of the runner: a
+ * fixture hands its `g` back to the suite, which keeps calling it long after
+ * the fixture was built, so sealing only the setup calls would leave the rest
+ * exposed. The config path does not have to exist; a missing global file is
+ * simply an empty one.
+ *
+ * Config is not the only way in. A runner is bound to ONE directory, so every
+ * variable that tells git where a repository is has to go as well: with an
+ * ambient GIT_DIR, `cwd` stops deciding which repository a command touches.
+ * Measured before this was closed: the fixture's `git config user.name Test`
+ * rewrote the user.name of the repository GIT_DIR pointed at. A git hook is
+ * the ordinary way to inherit one. The list is git's own, the rest of
+ * `git rev-parse --local-env-vars` after the three hermeticGitEnv handles.
+ *
+ * `stdio` is for the calls whose git failure is the expected outcome. The
+ * default inherits stderr, so those print git's own `fatal:` line into an
+ * otherwise passing suite; pass `['pipe', 'pipe', 'pipe']` for a runner that
+ * keeps it. A suite that needs a quiet runner must get it from here rather than
+ * from a bare execFileSync, which would be sealed against nothing.
+ *
+ * @param {string} dir - The fixture repository.
+ * @param {{stdio?: import('child_process').StdioOptions}} [options]
+ * @returns {(...args: string[]) => string}
+ */
+export function hermeticGitRunner(dir, { stdio } = {}) {
+  const env = hermeticGitEnv(join(dir, '.git', 'co-hermetic-gitconfig'));
+  for (const name of REPO_LOCATION_ENV) delete env[name];
+  const options = { cwd: dir, encoding: 'utf-8', env, ...(stdio ? { stdio } : {}) };
+  return (...args) => execFileSync('git', args, options).trim();
+}
+
+/**
+ * Seal THIS process's git environment, for a suite whose fixtures run git
+ * through something that inherits process.env rather than through
+ * `hermeticGitRunner`: the updater's own `gitIn` / `gitQuietIn` and the `*In`
+ * helpers built on them, a bare `execFileSync('git', ...)`, or a CLI spawned
+ * with the parent's environment. Those inherit the environment as a real
+ * install must, so a fixture built with them is only as isolated as the
+ * contributor's shell. With `tag.gpgSign = true` in ~/.gitconfig a lightweight
+ * `git tag` becomes a signed annotated tag with no message and git dies with
+ * "no tag message?"; with `commit.gpgSign = true` every fixture commit is
+ * signed with the contributor's own key, or fails where gpg cannot sign.
+ *
+ * Sealing the process rather than one runner is what reaches the git calls
+ * the code under test makes for itself. Call it before the suite's first git
+ * command; a later `process.env` override (an identity negative control, say)
+ * still applies on top and restores back to the seal.
+ *
+ * A suite run directly, under `node --test`, or by `test-all.mjs --jobs N` has
+ * a process of its own. The serial loop (`--jobs 1`, or a single matched file)
+ * imports the suite into test-all's process instead, so the seal records every
+ * variable it changes and `importSuiteContained` puts them back once the import
+ * settles, thrown or not. The suites after it see the environment they would
+ * have seen without it.
+ *
+ * The environment is `hermeticGitEnv`'s, so the runtime-layer pins come with
+ * it, and the variables that helper and `hermeticGitRunner` drop are deleted
+ * from process.env, not merely left uncopied. The repository-location names
+ * are matched without regard to case: Windows environment names are
+ * case-insensitive, so a `Git_Dir` would otherwise survive and still point git
+ * at another repository. The config path names a file that is never created:
+ * a missing global file is simply an empty one.
+ */
+export function sealProcessGitEnv() {
+  // One directory per process: the serial loop imports several sealing suites
+  // into one, and an exit listener each would add up.
+  if (!sealDir) {
+    const dir = mkdtempSync(join(tmpdir(), 'co-sealed-git-'));
+    process.on('exit', () => _rmSync(dir, { recursive: true, force: true }));
+    sealDir = dir;
+  }
+  const sealed = hermeticGitEnv(join(sealDir, 'gitconfig'));
+  const repoLocation = new Set(REPO_LOCATION_ENV);
+  for (const name of Object.keys(sealed)) {
+    if (repoLocation.has(name.toUpperCase())) delete sealed[name];
+  }
+  const changed = new Map();
+  for (const name of Object.keys(process.env)) {
+    if (!Object.hasOwn(sealed, name)) {
+      changed.set(name, process.env[name]);
+      delete process.env[name];
+    }
+  }
+  for (const [name, value] of Object.entries(sealed)) {
+    if (process.env[name] !== value && !changed.has(name)) changed.set(name, process.env[name]);
+    process.env[name] = value;
+  }
+  // A second seal in the same suite must not record the first one's values as
+  // the originals.
+  if (!unsealGitEnv) {
+    unsealGitEnv = () => {
+      for (const [name, value] of changed) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    };
+  }
+}
+
+/** Set while a seal is in force; `importSuiteContained` calls and clears it. */
+let unsealGitEnv = null;
+let sealDir = null;
+
+/**
+ * Can a directory write-deny actually stop THIS process from creating a file?
+ *
+ * Two suites arrange a write failure by making the tracker's directory
+ * unwritable and asserting the structured error that follows. An elevated
+ * Windows shell is not bound by that ACE: the temp-file write lands, the CLI
+ * exits 0, and the assertion reports `code=0 json=undefined`, which reads like
+ * the CLI is broken rather than like a setup step that could not be arranged
+ * (#3423). That is the same "permissions do not apply to me" case those suites
+ * already skip for root on POSIX, so it takes the same loud skip.
+ *
+ * Measured, never inferred: this performs the very operation those tests depend
+ * on - apply the deny, then create a file with the same fs API - instead of
+ * asking a proxy whether the shell is elevated. A proxy is the wrong tool here.
+ * A restricted token still lists the Administrators SID in `whoami /groups`
+ * (present for deny only), and inside one elevated token PowerShell's
+ * Set-Content is refused while Node's writeFileSync succeeds, so "is elevated"
+ * and "can still write" are genuinely different questions.
+ *
+ * Fails toward RUNNING the assertion: if the probe cannot be arranged at all
+ * (no icacls, a non-zero exit, anything thrown) it answers true so the caller
+ * still executes its check. A skip on an inconclusive probe would quietly turn
+ * "the failure could not be arranged" into "the failure handling is fine",
+ * which is the blind spot those assertions exist to catch.
+ *
+ * Lives here rather than in each suite because the two copies of this setup
+ * have already drifted once: `tests/mark-pdf-ready.test.mjs` says it mirrors
+ * `set-status-tests.mjs`, and it mirrored this bug along with the arrangement.
+ *
+ * @returns {boolean} true when the deny binds, or when it could not be evaluated.
+ */
+export function directoryDenyBinds() {
+  let probeDir = null;
+  try {
+    probeDir = mkdtempSync(join(tmpdir(), 'co-denyprobe-'));
+    execFileSync('icacls', [probeDir, '/deny', '*S-1-1-0:(WD,AD)'], { stdio: 'ignore' });
+    try {
+      writeFileSync(join(probeDir, 'canary.tmp'), 'x');
+      return false;
+    } catch {
+      return true;
+    }
+  } catch {
+    return true;
+  } finally {
+    if (probeDir) {
+      // Cleanup must not escape this function. A throw from `finally` replaces
+      // the value the try block already computed, so a failed rmSync would turn
+      // a decided probe into an exception and take both callers down with it -
+      // the opposite of the fail-toward-running-the-assertion contract above.
+      // Windows makes that reachable: rmSync can answer EPERM for a while after
+      // a child exits (the reason the wrapper retries at all), and this
+      // directory carries a deny ACE. A leaked temp directory is the cheaper
+      // failure.
+      try { execFileSync('icacls', [probeDir, '/remove:d', '*S-1-1-0'], { stdio: 'ignore' }); } catch {}
+      try { rmSync(probeDir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+/**
+ * Point provider requests for a public-looking origin at a local test server.
+ *
+ * providers/_http.mjs refuses a loopback destination, by name (`localhost`,
+ * at lookup time) and as a literal (`127.0.0.1`, before dialling), so a test
+ * can no longer hand it a local URL. Address the request to `publicOrigin`
+ * instead and run it inside this wrapper: the guard sees the public name, and
+ * the transport is redirected to `localOrigin` here, at the fetch boundary.
+ * The local server still receives a real socket, so timeouts and headers are
+ * exercised for real. Restores the original fetch when `fn` settles.
+ *
+ * @template T
+ * @param {string} publicOrigin - e.g. 'http://stalls.example.test'
+ * @param {string} localOrigin  - e.g. `http://127.0.0.1:${port}`
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withLocalServerAs(publicOrigin, localOrigin, fn) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    const url = String(input);
+    return realFetch(url.startsWith(publicOrigin) ? localOrigin + url.slice(publicOrigin.length) : input, init);
+  };
+  try { return await fn(); } finally { globalThis.fetch = realFetch; }
 }

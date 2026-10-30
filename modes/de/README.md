@@ -50,7 +50,7 @@ Diese erste Iteration deckt die vier Modi mit dem höchsten Hebel ab:
 | Datei | Übersetzt aus | Zweck |
 |-------|---------------|-------|
 | `_shared.md` | `modes/_shared.md` (EN) | Geteilter Kontext, Archetypen, globale Regeln, DACH-Markt-Spezifika |
-| `angebot.md` | `modes/oferta.md` (ES) | Vollständige Bewertung einer einzelnen Stellenanzeige (Blöcke A-F) |
+| `angebot.md` | `modes/oferta.md` (ES) | Vollständige Bewertung einer einzelnen Stellenanzeige (Blöcke A-H) |
 | `bewerben.md` | `modes/apply.md` (EN) | Live-Assistent fürs Bewerbungsformular |
 | `pipeline.md` | `modes/pipeline.md` (ES) | URL-Inbox / Second Brain für gesammelte Stellenanzeigen |
 
@@ -108,5 +108,5 @@ Wenn du eine Übersetzung verbessern oder einen weiteren Modus eindeutschen will
 1. Öffne ein Issue mit dem Vorschlag (laut `CONTRIBUTING.md`)
 2. Halte dich an das Vokabular oben, um den Ton konsistent zu halten
 3. Übersetze sinngemäß und idiomatisch — keine wörtlichen Wort-für-Wort-Übersetzungen
-4. Behalte die strukturellen Elemente (Block A-F, Tabellen, Code-Blöcke, Tool-Anweisungen) exakt bei
+4. Behalte die strukturellen Elemente (Block A-H, Tabellen, Code-Blöcke, Tool-Anweisungen) exakt bei
 5. Teste mit einer echten deutschen Stellenanzeige (z. B. von StepStone oder XING), bevor du den PR aufmachst

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,23 +25,77 @@ const (
 	viewPipeline viewState = iota
 	viewReport
 	viewProgress
+	viewStats
 )
 
 type appModel struct {
 	pipeline        screens.PipelineModel
 	viewer          screens.ViewerModel
 	progress        screens.ProgressModel
+	stats           screens.StatsModel
 	state           viewState
 	careerOpsPath   string
 	theme           theme.Theme
 	progressMetrics model.ProgressMetrics
+	statsMetrics    model.StatsMetrics
+	evaluatedCount  int
 }
 
 func (m *appModel) reloadPipelineData() {
-	apps := data.ParseApplications(m.careerOpsPath)
+	apps, trackerErr := data.ParseApplications(m.careerOpsPath)
+	if trackerErr != nil {
+		// Retain every derived value and surface the failure, the same way the
+		// status-ledger read below does. Rebuilding from a failed read would
+		// empty the pipeline AND drop every rate to 0% through
+		// ComputeProgressMetrics, so the screen would report an empty, failing
+		// search because a file could not be opened.
+		m.pipeline, _ = m.pipeline.Update(screens.PipelineTrackerFailedMsg{Err: trackerErr.Error()})
+		return
+	}
 	metrics := data.ComputeMetrics(apps)
-	m.progressMetrics = data.ComputeProgressMetrics(apps)
+	ledger, historyErr := data.ReadStatusLedger(m.careerOpsPath)
+	if historyErr == nil {
+		m.progressMetrics = data.ComputeProgressMetrics(apps, ledger.Reached)
+	}
+	// After a failed ledger read LatestDate is nil, so the DATE column falls
+	// back to each row's tracker date while current statuses still refresh.
+	data.ApplyStatusDates(apps, ledger.LatestDate)
 	m.pipeline = m.pipeline.WithReloadedData(apps, metrics)
+	enrichArchetypes(m.careerOpsPath, apps, &m.pipeline)
+	m.statsMetrics = data.ComputeStatsMetrics(apps)
+	// Count only apps with a score so the header reflects evaluated offers.
+	m.evaluatedCount = 0
+	for _, a := range apps {
+		if a.Score > 0 {
+			m.evaluatedCount++
+		}
+	}
+	if historyErr != nil {
+		// Refresh current statuses, but retain historical metrics and surface
+		// the failed history read in the TUI after rebuilding the pipeline.
+		m.pipeline, _ = m.pipeline.Update(screens.PipelineHistoryFailedMsg{Err: historyErr.Error()})
+	}
+}
+
+// enrichArchetypes lazy-loads each app's report-derived archetype (used by
+// the stats screen's breakdown table) and, as a side effect, primes the
+// pipeline model's report preview cache the same way main()'s startup loop
+// does — so a manual refresh doesn't blank out report previews.
+func enrichArchetypes(careerOpsPath string, apps []model.CareerApplication, pm *screens.PipelineModel) {
+	for i := range apps {
+		if apps[i].ReportPath == "" {
+			continue
+		}
+		archetype, tldr, remote, comp := data.LoadReportSummary(careerOpsPath, apps[i].ReportPath)
+		// Only overwrite when the report actually supplies a non-empty archetype;
+		// preserve any value already derived from the tracker.
+		if archetype != "" {
+			apps[i].Archetype = archetype
+		}
+		if archetype != "" || tldr != "" || remote != "" || comp != "" {
+			pm.EnrichReport(apps[i].ReportPath, archetype, tldr, remote, comp)
+		}
+	}
 }
 
 func (m appModel) Init() tea.Cmd {
@@ -67,6 +123,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == viewProgress {
 			m.progress.Resize(msg.Width, msg.Height)
 		}
+		if m.state == viewStats {
+			m.stats.Resize(msg.Width, msg.Height)
+		}
 		pm, cmd := m.pipeline.Update(msg)
 		m.pipeline = pm
 		return m, cmd
@@ -81,20 +140,21 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case screens.PipelineUpdateStatusMsg:
 		err := data.UpdateApplicationStatus(msg.CareerOpsPath, msg.App, msg.NewStatus)
-		if err != nil {
-			// Log the error but still reload data to keep UI consistent
-			fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
-		}
 		m.reloadPipelineData()
+		if err != nil {
+			m.pipeline, _ = m.pipeline.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+		} else if data.NormalizeStatus(msg.NewStatus) == "hired" {
+			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
+		}
 		return m, nil
 
 	case screens.PipelineUpdateStatusAndNotesMsg:
 		// Issue 1380: atomic status + notes write from the discard reason picker.
 		err := data.UpdateApplicationStatusAndNotes(msg.CareerOpsPath, msg.App, msg.NewStatus, msg.NotesAppend)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: status+notes update failed: %v\n", err)
-		}
 		m.reloadPipelineData()
+		if err != nil {
+			m.pipeline, _ = m.pipeline.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+		}
 		return m, nil
 
 	case screens.PipelineRefreshMsg:
@@ -127,18 +187,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case screens.ViewerUpdateStatusMsg:
 		normalized := data.NormalizeStatus(msg.NewStatus)
-		if normalized == "hired" {
-			err := data.UpdateApplicationStatus(m.careerOpsPath, msg.App, msg.NewStatus)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
-				m.reloadPipelineData()
-				return m, nil
-			}
-			m.state = viewPipeline
-			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
-			m.reloadPipelineData()
-			return m, nil
-		}
 		if normalized == "discarded" || normalized == "skip" {
 			m.state = viewPipeline
 			m.pipeline, _ = m.pipeline.StartDiscardReasonFlow(msg.App, msg.NewStatus)
@@ -147,16 +195,39 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		err := data.UpdateApplicationStatus(m.careerOpsPath, msg.App, msg.NewStatus)
+		m.reloadPipelineData()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
+			// A sidecar failure can follow a successful tracker write. Reflect
+			// the persisted status, retaining the old one if it cannot be read
+			// or the report identity is no longer unique.
+			if msg.App.ReportNumber != "" {
+				savedStatus, matches := "", 0
+				// A failed re-read leaves matches at 0, so the displayed status
+				// stays as it was — which is what the comment above promises.
+				saved, _ := data.ParseApplications(m.careerOpsPath)
+				for _, app := range saved {
+					if app.ReportNumber == msg.App.ReportNumber {
+						savedStatus = app.Status
+						matches++
+					}
+				}
+				if matches == 1 {
+					m.viewer.UpdateAppStatus(savedStatus)
+				}
+			}
+			m.viewer, _ = m.viewer.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+			return m, nil
 		}
 		m.viewer.UpdateAppStatus(msg.NewStatus)
-		m.reloadPipelineData()
+		if normalized == "hired" {
+			m.state = viewPipeline
+			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
+		}
 		return m, nil
 
 	case screens.PipelineOpenProgressMsg:
 		m.progress = screens.NewProgressModel(
-			theme.NewTheme("catppuccin-mocha"),
+			m.theme,
 			m.progressMetrics,
 			m.pipeline.Width(), m.pipeline.Height(),
 		)
@@ -164,6 +235,20 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case screens.ProgressClosedMsg:
+		m.state = viewPipeline
+		return m, nil
+
+	case screens.PipelineOpenStatsMsg:
+		m.stats = screens.NewStatsModel(
+			m.theme,
+			m.statsMetrics,
+			m.evaluatedCount,
+			m.pipeline.Width(), m.pipeline.Height(),
+		)
+		m.state = viewStats
+		return m, nil
+
+	case screens.StatsClosedMsg:
 		m.state = viewPipeline
 		return m, nil
 
@@ -187,6 +272,11 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.progress = pg
 			return m, cmd
 		}
+		if m.state == viewStats {
+			sm, cmd := m.stats.Update(msg)
+			m.stats = sm
+			return m, cmd
+		}
 		pm, cmd := m.pipeline.Update(msg)
 		m.pipeline = pm
 		return m, cmd
@@ -194,23 +284,35 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // openCmd wraps openWithDefaultApp (OS-specific) as a tea.Cmd. Shared by the
-// job-URL (`o`) and CV-PDF (`d`) actions.
+// job-URL (`o`, pipeline and report viewer) and CV-PDF (`d`) actions.
 func openCmd(target string) tea.Cmd {
 	return func() tea.Msg {
 		if err := openWithDefaultApp(target); err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: failed to open %q: %v\n", target, err)
+			// Issue 3913: the dashboard runs with tea.WithAltScreen(), so a
+			// message on stderr is never visible. Report the failure back to
+			// the pipeline screen, which flashes it in the help bar.
+			return screens.PipelineOpenFailedMsg{Target: target, Err: err.Error()}
 		}
 		return nil
 	}
 }
 
-// runGeneratePDF shells out to node generate-pdf.mjs in the career-ops root,
+// runGeneratePDF runs the checkout's generate-pdf.mjs against the selected data root,
 // opens the resulting PDF on success, and reports the outcome back to the
 // pipeline screen as a PipelinePDFGeneratedMsg. Runs in a tea.Cmd goroutine,
 // so the UI stays responsive while Chromium renders.
 func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"generate-pdf.mjs", msg.HTMLPath, msg.PDFPath}
+		script, err := data.CheckoutScriptPath("generate-pdf.mjs")
+		if err != nil {
+			return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+		}
+		pdfAbs := filepath.Join(root, filepath.FromSlash(msg.PDFPath))
+		args := []string{script, filepath.Join(root, filepath.FromSlash(msg.HTMLPath)), pdfAbs}
 		if msg.Format != "" {
 			args = append(args, "--format="+msg.Format)
 		}
@@ -218,12 +320,23 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 			args = append(args, "--report="+msg.ReportNumber)
 		}
 		cmd := exec.Command("node", args...)
-		cmd.Dir = msg.CareerOpsPath
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		// Preserve relative overrides before changing the child's working directory.
+		if tracker := resolveEnvPath(os.Getenv("CAREER_OPS_TRACKER")); tracker != "" {
+			cmd.Env = append(cmd.Env, "CAREER_OPS_TRACKER="+tracker)
+		}
+		if index := os.Getenv("CAREER_OPS_PDF_INDEX"); index != "" {
+			absolute, err := filepath.Abs(index)
+			if err != nil {
+				return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+			}
+			cmd.Env = append(cmd.Env, "CAREER_OPS_PDF_INDEX="+absolute)
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: summarizeCmdError(err, out)}
 		}
-		pdfAbs := filepath.Join(msg.CareerOpsPath, filepath.FromSlash(msg.PDFPath))
 		if err := openWithDefaultApp(pdfAbs); err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("PDF generated but could not open: %v", err)}
 		}
@@ -250,13 +363,92 @@ func (m appModel) View() string {
 		return m.viewer.View()
 	case viewProgress:
 		return m.progress.View()
+	case viewStats:
+		return m.stats.View()
 	default:
 		return m.pipeline.View()
 	}
 }
 
+// getRepoRoot defers to internal/data, which already walks up from cwd looking
+// for path-resolver.mjs and is the function a relative CAREER_OPS_TRACKER
+// resolves through.
+//
+// This used to be a second, shorter search — cwd and cwd's PARENT, then a
+// silent fallback to cwd — so from anywhere deeper the data root and the
+// tracker could anchor to different directories. One walker, one answer.
+func getRepoRoot() string {
+	root, err := data.FindRepoRoot()
+	if err != nil {
+		// The checkout could not be examined, which is not the same as not
+		// being there. Say so: everything below resolves against this.
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	if root != "" {
+		return root
+	}
+	cwd, wdErr := os.Getwd()
+	if wdErr != nil {
+		return "."
+	}
+	return cwd
+}
+
+func resolveEnvPath(envVal string) string {
+	trimmed := strings.TrimSpace(envVal)
+	if trimmed == "" {
+		return ""
+	}
+	if filepath.IsAbs(trimmed) {
+		return filepath.Clean(trimmed)
+	}
+	root, err := data.FindRepoRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	if root == "" {
+		// Anchoring to cwd here is a guess, and what is being guessed at is
+		// which tracker to read. Getting it wrong is invisible: the dashboard
+		// shows one file while every .mjs writer uses another, and neither side
+		// reports anything. The guess is still made — exiting would be worse
+		// for a user whose layout we cannot see — but it is said out loud, with
+		// the absolute path the reader can check.
+		cwd, wdErr := os.Getwd()
+		if wdErr != nil {
+			return filepath.Clean(trimmed)
+		}
+		resolved := filepath.Clean(filepath.Join(cwd, trimmed))
+		fmt.Fprintf(os.Stderr,
+			"Warning: no career-ops checkout found above the working directory or the executable, "+
+				"so the relative path %q was resolved against the working directory: %s\n"+
+				"         The .mjs scripts resolve it against the repository root, so they may be using a "+
+				"different tracker. Pass an absolute path or --path to be sure.\n",
+			trimmed, resolved)
+		return resolved
+	}
+	return filepath.Clean(filepath.Join(root, trimmed))
+}
+
 func main() {
-	pathFlag := flag.String("path", ".", "Path to career-ops directory")
+	defaultPath := getRepoRoot()
+	if envPath := resolveEnvPath(os.Getenv("CAREER_OPS_ROOT")); envPath != "" {
+		defaultPath = envPath
+	} else if envPath := resolveEnvPath(os.Getenv("CAREER_OPS_DATA_DIR")); envPath != "" {
+		defaultPath = envPath
+	} else {
+		markerFile := filepath.Join(getRepoRoot(), ".career-ops-data")
+		if content, err := os.ReadFile(markerFile); err == nil {
+			trimmed := strings.TrimSpace(string(content))
+			if trimmed != "" {
+				if filepath.IsAbs(trimmed) {
+					defaultPath = filepath.Clean(trimmed)
+				} else {
+					defaultPath = filepath.Clean(filepath.Join(getRepoRoot(), trimmed))
+				}
+			}
+		}
+	}
+	pathFlag := flag.String("path", defaultPath, "Path to career-ops directory")
 	langFlag := flag.String("lang", "", "Language for UI (en, tr). Defaults to auto-detect/en.")
 	flag.Parse()
 
@@ -269,35 +461,51 @@ func main() {
 	careerOpsPath := *pathFlag
 
 	// Load applications
-	apps := data.ParseApplications(careerOpsPath)
-	if apps == nil {
-		fmt.Fprintf(os.Stderr, "Error: could not find applications.md in %s or %s/data/\n", careerOpsPath, careerOpsPath)
+	apps, trackerErr := data.ParseApplications(careerOpsPath)
+	if trackerErr != nil {
+		// Absent is a first run and keeps the original wording. Anything else is
+		// a file that IS there and could not be opened, and saying "could not
+		// find" sent the user looking for a file sitting in front of them.
+		if errors.Is(trackerErr, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Error: could not find applications.md in %s or %s/data/\n", careerOpsPath, careerOpsPath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", trackerErr)
+		}
 		os.Exit(1)
 	}
 
 	// Compute metrics
+	ledger, err := data.ReadStatusLedger(careerOpsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	data.ApplyStatusDates(apps, ledger.LatestDate)
 	metrics := data.ComputeMetrics(apps)
-	progressMetrics := data.ComputeProgressMetrics(apps)
+	progressMetrics := data.ComputeProgressMetrics(apps, ledger.Reached)
 
 	// Batch-load all report summaries
 	t := theme.NewTheme("auto")
 	pm := screens.NewPipelineModel(t, apps, metrics, careerOpsPath, 120, 40)
 
-	for _, app := range apps {
-		if app.ReportPath == "" {
-			continue
-		}
-		archetype, tldr, remote, comp := data.LoadReportSummary(careerOpsPath, app.ReportPath)
-		if archetype != "" || tldr != "" || remote != "" || comp != "" {
-			pm.EnrichReport(app.ReportPath, archetype, tldr, remote, comp)
-		}
-	}
+	enrichArchetypes(careerOpsPath, apps, &pm)
+	statsMetrics := data.ComputeStatsMetrics(apps)
 
 	m := appModel{
 		pipeline:        pm,
 		careerOpsPath:   careerOpsPath,
 		theme:           t,
 		progressMetrics: progressMetrics,
+		statsMetrics:    statsMetrics,
+		evaluatedCount: func() int {
+			n := 0
+			for _, a := range apps {
+				if a.Score > 0 {
+					n++
+				}
+			}
+			return n
+		}(),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

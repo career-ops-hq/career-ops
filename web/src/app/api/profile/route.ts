@@ -1,8 +1,12 @@
 import fs from "node:fs";
+import { profilePatchError } from "@/lib/profile-patch.mjs";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
+import { isMapping } from "@/lib/portals-config.mjs";
+import { patchProfileText } from "@/lib/profile-yaml-edit.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,44 +60,59 @@ function patchToProfile(p: ProfilePatch): Record<string, unknown> {
 }
 
 export async function POST(req: Request) {
-  let patch: ProfilePatch;
+  let payload: unknown;
   try {
-    patch = (await req.json()) as ProfilePatch;
+    payload = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const proposed = patchToProfile(patch);
+  const error = profilePatchError(payload);
+  if (error) return Response.json({ error }, { status: 400 });
+  const proposed = patchToProfile(payload as ProfilePatch);
   if (Object.keys(proposed).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
 
   const root = careerOpsRoot();
-  const file = path.join(root, "config", "profile.yml");
+  const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
+  let source = "";
   let seeded = false;
   // DATA-LOSS GUARD (maintainer, bug-class #649/#704/#920/#958): distinguish
   // "no profile yet" (safe to seed from the example) from "profile EXISTS but is
   // malformed" (NEVER overwrite — that would silently destroy the user's data).
   if (!fs.existsSync(file)) {
     try {
-      base = (yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8")) as Record<string, unknown>) || {};
+      source = fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8");
+      base = (yaml.load(source) as Record<string, unknown>) || {};
       seeded = Object.keys(base).length > 0;
     } catch {
+      source = "";
       base = {};
     }
   } else {
     let parsed: unknown;
     try {
-      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+      source = fs.readFileSync(file, "utf8");
+      parsed = yaml.load(source);
     } catch {
       return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
     }
-    base = isObj(parsed) ? (parsed as Record<string, unknown>) : {};
+    // Valid YAML can still be a list, scalar, or null. Treating those as an
+    // empty profile would discard the existing document on this partial write.
+    if (!isMapping(parsed)) {
+      return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value. Refusing to overwrite it." }, { status: 409 });
+    }
+    base = parsed as Record<string, unknown>;
   }
 
   const merged = deepMerge(base, proposed);
   try {
-    // Back up the prior profile before the first normalized write (yaml.dump
-    // reformats — comments are not preserved; the .bak is the safety net).
-    atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
+    // Edit only the proposed keys' lines so the profile keeps its comments
+    // (#5662). A shape the line edit cannot place falls back to yaml.dump,
+    // which drops comments; the backup holds the prior bytes either way.
+    const text =
+      patchProfileText(source, proposed as Parameters<typeof patchProfileText>[1], merged) ??
+      yaml.dump(merged, { lineWidth: 100, noRefs: true });
+    atomicWriteWithBackup(file, text);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }

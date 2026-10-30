@@ -45,7 +45,7 @@ func writePDFFixture(t *testing.T, root, rel string) {
 func TestPDFKeyFlashesWhenNoPDFExists(t *testing.T) {
 	root := t.TempDir()
 	apps := []model.CareerApplication{
-		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0},
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -66,7 +66,7 @@ func TestPDFKeyOpensSingleMatchDirectly(t *testing.T) {
 	root := t.TempDir()
 	writePDFFixture(t, root, "output/cv-jane-doe-globex-2026-06-05.pdf")
 	apps := []model.CareerApplication{
-		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0},
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -93,7 +93,7 @@ func TestPDFKeyOpensNewestForMultipleMatches(t *testing.T) {
 	writePDFFixture(t, root, "output/cv-jane-doe-anthropic-2026-06-05.pdf")
 	writePDFFixture(t, root, "output/cv-jane-doe-anthropic-2026-06-10.pdf")
 	apps := []model.CareerApplication{
-		{Company: "Anthropic", Role: "Staff UI Engineer", Status: "Evaluated", Score: 4.6},
+		{Company: "Anthropic", Role: "Staff UI Engineer", Status: "Evaluated", Score: 4.6, HasScore: true},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -115,10 +115,28 @@ func TestPDFKeyOpensNewestForMultipleMatches(t *testing.T) {
 	}
 }
 
+func TestPDFKeyDoesNotOpenCompanyPrefixMatch(t *testing.T) {
+	root := t.TempDir()
+	writePDFFixture(t, root, "output/cv-jane-doe-metabase-2026-06-05.pdf")
+	apps := []model.CareerApplication{
+		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
+	}
+
+	pm := newPDFTestModel(t, root, apps)
+	updated, cmd := pm.Update(keyMsg("d"))
+
+	if cmd != nil {
+		t.Fatalf("expected no open command for Metabase's PDF, got %#v", cmd())
+	}
+	if updated.flash == "" {
+		t.Fatal("expected a no-PDF flash for the Meta application")
+	}
+}
+
 func TestRegenerateKeyFlashesWithoutManifestEntry(t *testing.T) {
 	root := t.TempDir()
 	apps := []model.CareerApplication{
-		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, ReportNumber: "001"},
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true, ReportNumber: "001"},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -132,6 +150,32 @@ func TestRegenerateKeyFlashesWithoutManifestEntry(t *testing.T) {
 	}
 }
 
+func TestRegenerateKeyDoesNotUseCompanyPrefixMatch(t *testing.T) {
+	root := t.TempDir()
+	pdfPath := "output/cv-jane-doe-metabase-2026-06-05.pdf"
+	htmlPath := "output/cv-jane-doe-metabase-2026-06-05.html"
+	writePDFFixture(t, root, pdfPath)
+	writePDFFixture(t, root, htmlPath)
+	writePDFFixture(t, root, "data/pdf-index.tsv")
+	manifest := "\t" + pdfPath + "\t" + htmlPath + "\tletter\t2026-06-05\n"
+	if err := os.WriteFile(filepath.Join(root, "data", "pdf-index.tsv"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	apps := []model.CareerApplication{
+		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
+	}
+
+	pm := newPDFTestModel(t, root, apps)
+	updated, cmd := pm.Update(keyMsg("D"))
+
+	if cmd != nil {
+		t.Fatalf("expected no regeneration command for Metabase's artifacts, got %#v", cmd())
+	}
+	if updated.flash == "" {
+		t.Fatal("expected a no-source flash for the Meta application")
+	}
+}
+
 func TestRegenerateKeyEmitsGenerateMsgFromManifest(t *testing.T) {
 	root := t.TempDir()
 	writePDFFixture(t, root, "output/cv-jane-doe-globex.html")
@@ -141,7 +185,7 @@ func TestRegenerateKeyEmitsGenerateMsgFromManifest(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	apps := []model.CareerApplication{
-		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, ReportNumber: "001"},
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true, ReportNumber: "001"},
 	}
 
 	pm := newPDFTestModel(t, root, apps)

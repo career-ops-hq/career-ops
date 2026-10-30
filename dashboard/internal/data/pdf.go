@@ -74,12 +74,40 @@ func (m PDFManifest) Lookup(app model.CareerApplication) (PDFManifestEntry, bool
 	return PDFManifestEntry{}, false
 }
 
-// LoadPDFEntriesByPath reads data/pdf-index.tsv and returns all entries indexed
+// PDFWorkspaceRoot returns the workspace owning the selected tracker. Manifest
+// artifact paths are relative to this root, even with an external index override.
+// Derive it before resolving symlinks so linking only data/ does not relocate output/.
+func PDFWorkspaceRoot(careerOpsPath string) string {
+	return pdfWorkspaceRootForTracker(resolveTrackerPath(careerOpsPath))
+}
+
+func pdfWorkspaceRootForTracker(tracker string) string {
+	root := filepath.Dir(tracker)
+	if filepath.Base(root) == "data" {
+		root = filepath.Dir(root)
+	}
+	return root
+}
+
+// resolvePDFIndexPath mirrors tracker-utils.mjs: an explicit override wins
+// (relative to cwd), otherwise the index follows the tracker workspace.
+func resolvePDFIndexPath(careerOpsPath string) string {
+	if override := os.Getenv("CAREER_OPS_PDF_INDEX"); override != "" {
+		return override
+	}
+	tracker := resolveTrackerPath(careerOpsPath)
+	if canonical, err := canonicalPath(tracker); err == nil {
+		tracker = canonical
+	}
+	return filepath.Join(pdfWorkspaceRootForTracker(tracker), "data", "pdf-index.tsv")
+}
+
+// LoadPDFEntriesByPath reads the selected PDF index and returns CV entries indexed
 // by their relative PDF path. Unlike LoadPDFManifest, this includes rows that
 // were generated without a --report flag. Later rows in the file win.
 func LoadPDFEntriesByPath(careerOpsPath string) map[string]PDFManifestEntry {
 	byPath := make(map[string]PDFManifestEntry)
-	raw, err := os.ReadFile(filepath.Join(careerOpsPath, "data", "pdf-index.tsv"))
+	raw, err := os.ReadFile(resolvePDFIndexPath(careerOpsPath))
 	if err != nil {
 		return byPath
 	}
@@ -90,6 +118,11 @@ func LoadPDFEntriesByPath(careerOpsPath string) map[string]PDFManifestEntry {
 		}
 		fields := strings.Split(line, "\t")
 		if len(fields) < 2 {
+			continue
+		}
+		// A report may have both a CV and a cover letter. Legacy rows without
+		// the sixth kind column are CVs, matching find.mjs's reader contract.
+		if len(fields) > 5 && strings.TrimSpace(fields[5]) == "cover" {
 			continue
 		}
 		entry := PDFManifestEntry{
@@ -116,14 +149,14 @@ func LoadPDFEntriesByPath(careerOpsPath string) map[string]PDFManifestEntry {
 	return byPath
 }
 
-// LoadPDFManifest reads data/pdf-index.tsv under careerOpsPath. A missing
+// LoadPDFManifest reads the selected workspace's PDF index. A missing
 // file is not an error — the manifest is optional and absent until the
 // first generate-pdf.mjs run that writes it. Later rows win over earlier
-// ones for the same report number, so regenerated PDFs supersede stale
+// CV rows for the same report number, so regenerated PDFs supersede stale
 // entries without any compaction step.
 func LoadPDFManifest(careerOpsPath string) PDFManifest {
 	manifest := make(PDFManifest)
-	raw, err := os.ReadFile(filepath.Join(careerOpsPath, "data", "pdf-index.tsv"))
+	raw, err := os.ReadFile(resolvePDFIndexPath(careerOpsPath))
 	if err != nil {
 		return manifest
 	}
@@ -135,6 +168,9 @@ func LoadPDFManifest(careerOpsPath string) PDFManifest {
 		}
 		fields := strings.Split(line, "\t")
 		if len(fields) < 2 {
+			continue
+		}
+		if len(fields) > 5 && strings.TrimSpace(fields[5]) == "cover" {
 			continue
 		}
 		entry := PDFManifestEntry{
@@ -172,7 +208,8 @@ var rePDFDate = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})\.pdf$`)
 //  1. Manifest entry for the application's report number, when the file
 //     still exists. This is exact — generate-pdf.mjs recorded the linkage.
 //  2. Filename match: output/cv-*.pdf whose name contains the kebab-cased
-//     company. This covers every PDF generated before the manifest existed.
+//     company at hyphen boundaries. This covers every PDF generated before
+//     the manifest existed without matching a longer company's slug.
 //     Multiple matches are all returned (newest first) so the caller can
 //     offer a picker instead of guessing — one company can have several
 //     role-variant CVs from the same day.
@@ -207,16 +244,12 @@ func ResolvePDFs(careerOpsPath string, app model.CareerApplication, manifest PDF
 	return matches
 }
 
-// matchesCompanySlug reports whether a generated CV filename refers to the
-// company. Short slugs (< 3 runes) require a full "-slug-" segment so a
-// company like "X" can't match every file; longer slugs use substring
-// containment, which tolerates role-variant suffixes (cv-…-anthropic-staff-
-// ui-….pdf matches "anthropic").
+// matchesCompanySlug reports whether a generated CV filename contains the
+// company as a complete hyphen-delimited segment. This still permits role
+// variants (cv-…-anthropic-staff-ui-….pdf matches "anthropic") without letting
+// a company prefix match a different company ("meta" must not match "metabase").
 func matchesCompanySlug(base, slug string) bool {
-	if len([]rune(slug)) < 3 {
-		return strings.Contains(base, "-"+slug+"-")
-	}
-	return strings.Contains(base, slug)
+	return strings.Contains(base, "-"+slug+"-")
 }
 
 // sortPDFsNewestFirst orders candidate paths by the date stamp embedded in

@@ -1,5 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { decodeEntities } from './_html-entities.mjs';
+import { sleep } from './_http.mjs';
 
 // Rheinmetall provider — single-company (like ibm.mjs / dassault.mjs). The
 // public vacancy list at https://www.rheinmetall.com/{lang}/career/vacancies is
@@ -28,20 +30,6 @@ const MAX_PAGES = 150; // safety cap (~1350 postings at 10/page); tune via entry
 const MAX_JOBS = 1500; // cap total postings pulled
 const PAGE_DELAY_MS = 150; // polite pacing — full walks are >100 sequential requests
 
-// Minimal HTML entity decoder — titles carry named (&amp;) and numeric
-// (&#252; / &#xfc;) entities. Mirrors successfactors.mjs / dassault.mjs.
-const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-/** @param {string} s */
-function decodeEntities(s) {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
-    }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? m;
-  });
-}
-
 /** @param {string} s */
 function clean(s) {
   return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
@@ -52,8 +40,13 @@ export function resolveListUrl(entry) {
   const raw = entry.api || entry.careers_url || '';
   try {
     const u = new URL(raw);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
     const host = u.host.toLowerCase();
     if (host !== 'rheinmetall.com' && !host.endsWith('.rheinmetall.com')) return null;
+    // The apex 301s to www and http 301s to https (same registrable domain). Pin
+    // both here so the transport's redirect:'error' never refuses a URL detect() accepts.
+    if (host === 'rheinmetall.com') u.host = 'www.rheinmetall.com';
+    u.protocol = 'https:';
     if (/\/career\/vacancies\/?$/.test(u.pathname)) return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
     // Any other rheinmetall.com URL (e.g. the branded career hub) → EN default.
     return `${u.origin}/en/career/vacancies`;
@@ -81,7 +74,19 @@ export function parseVacancies(html, origin) {
     // the markup shifts, so a styling change degrades titles instead of
     // dropping postings.
     const titleM = block.match(/md:text-xl[^"]*">([\s\S]*?)<\/div>/);
-    const title = titleM ? clean(titleM[1]) : clean(decodeURIComponent(link[1].split('/')[3] || '').replace(/_/g, ' '));
+    let title;
+    if (titleM) {
+      title = clean(titleM[1]);
+    } else {
+      // Fallback: reconstruct the title from the URL slug. decodeURIComponent
+      // throws URIError on a malformed percent-sequence in the scraped href, so
+      // decode defensively — a bad link falls back to its raw slug instead of
+      // aborting the whole page's parse loop.
+      const slug = link[1].split('/')[3] || '';
+      let decoded;
+      try { decoded = decodeURIComponent(slug); } catch { decoded = slug; }
+      title = clean(decoded.replace(/_/g, ' '));
+    }
     if (!title) continue;
     // "{Company GmbH} | {City}" line; the city is what location filters need.
     const orgM = block.match(/class="flex flex-wrap mr-6">([\s\S]*?)<\/div>/);
@@ -115,13 +120,12 @@ export default {
     if (!listUrl) throw new Error(`rheinmetall: cannot resolve vacancies URL for ${entry.name}`);
     const origin = new URL(listUrl).origin;
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const jobs = [];
     const seen = new Set();
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await wait(PAGE_DELAY_MS);
+      if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       const html = await ctx.fetchText(`${listUrl}?page=${page}`, {
         headers: { accept: 'text/html' },
       });

@@ -11,10 +11,11 @@ Run a realistic practice interview — one question at a time — and give struc
 3. **Question list** (optional) — specific questions to cover; if not provided, generate from round type
 4. **CV** at `cv.md` + `article-digest.md` (if present) — to verify claims in answers and ground stronger versions in real experience
 5. **Profile** at `config/profile.yml` + `modes/_profile.md` — candidate narrative, deal-breakers, comp targets
-6. **Story bank** at `interview-prep/story-bank.md` — to verify story accuracy in feedback
+6. **Story bank** at `interview-prep/story-bank.md` — to verify story accuracy in feedback (its figures follow the provenance rule under Rules)
 7. **Question bank** at `interview-prep/question-bank.md` — to update status after each answer
 8. **Role-specific prep file** — for company intel, sourced questions, comp strategy
 9. **Retracted claims** at `interview-prep/retracted-claims.md` (if present) — claims the candidate has explicitly rejected as indefensible; treat as a hard gate
+10. **Prior interviewer-stated priorities** (if present) — `stated_priorities` in the front matter of matching `interview-prep/sessions/*.md` files (same company and role, not `source: practice`), as quoted data. Use them to weight the question list toward what the interviewer said the role needs and to judge in feedback whether the candidate's chosen example fits. Only sessions dated before the session being practised for count (before today if unknown). Absent field, no change in behaviour.
 
 ---
 
@@ -99,7 +100,7 @@ Keep feedback tight. One or two things to sharpen per answer — not a full rewr
 
 **Verify suspicious claims before coaching them.** When the candidate states a specific metric or scope claim (headcount managed, AUM, revenue figure, percentage improvement) that you cannot confirm from prior context, check it against `cv.md`, `article-digest.md`, and `interview-prep/retracted-claims.md` before giving feedback. If the claim isn't supported, flag it: "I can't find that number in your CV — is it defensible if they push? If not, here's a version that doesn't depend on it." Never coach a candidate to repeat a claim they can't back up.
 
-**Never invent experience or metrics.** The stronger version may only use facts the candidate actually stated, or claims that exist in `cv.md`, `article-digest.md`, or the story bank. Tightening framing is the job — adding accomplishments is fabrication. If a claim appears in `interview-prep/retracted-claims.md`, do not use it in a stronger version even if the candidate said it.
+**Never invent experience or metrics.** The stronger version may only use facts the candidate actually stated, or claims that exist in `cv.md`, `article-digest.md`, or the story bank (a story-bank figure only under the provenance rule in Rules). Tightening framing is the job — adding accomplishments is fabrication. If a claim appears in `interview-prep/retracted-claims.md`, do not use it in a stronger version even if the candidate said it.
 
 **Offer to record retractions.** When a candidate concedes mid-session that a claim isn't defensible under pressure ("you're right, I can't back that up"), offer to append it to `interview-prep/retracted-claims.md`: "Want me to add that to your retracted list so it doesn't surface again?" If yes, append: `**"[claim]"** ([context]). Reason: [one-line reason + correct framing if applicable].`
 
@@ -189,6 +190,8 @@ A recruiter screen is box-checking, not depth probing. Keep answers crisp; don't
 
 **Comp coaching (recruiter screen only).** Watch for the candidate volunteering a salary floor unprompted (e.g., "the minimum I can go to is X"). If they do, flag it after the answer: "You just gave them your floor — that caps your negotiation before it starts. The stronger move is to anchor on a researched target and defer to the package: 'I'm targeting the upper half of the market range for this level — I'd want to understand base, bonus, and equity together before settling on a number.'" If the role-specific prep file defines a comp strategy, follow that; otherwise give only this generic mechanics note — never invent target numbers.
 
+**Rehearse the opening question (screens and later).** Beyond the questions above, have the candidate practise asking, early in the interview rather than last: "What are the top two or three priorities for this role in the first six months?" Play the interviewer and give a short answer (drawn from `stated_priorities` if on file, otherwise a plausible one labelled `[inferred]`), then check that the candidate's next answer picks an example that fits it. Real priorities come from the real interviewer; never present an inferred one as something a person said.
+
 ### Screening — Hiring Manager (30–45 min)
 
 An HM screen probes leadership philosophy, judgment, and experience depth. Answers can be longer and carry more story weight. The HM is deciding whether to invest rounds of their team's time.
@@ -240,10 +243,12 @@ Mix in at least 2 situational / forward-looking questions from the set below —
 
 ## Rules
 
+- **AI-tools constraint.** If the invite carries a `no-ai` constraint (`node invite-match.mjs` prints `[constraint:no-ai]`), say once at the start: practicing with the assistant here is fine, but never use any AI tool during the real interview.
 - **One question at a time.** Never front-load multiple questions. Real interviewers ask one at a time.
 - **No hints before the answer.** Don't prime the candidate with "this is about X." Ask cold.
 - **Honest feedback only.** False encouragement is worse than silence — it sends a candidate into a real interview underprepared.
 - **No fabricated claims in suggested answers.** Stronger versions draw only on what the candidate said or what's in `cv.md`, `article-digest.md`, or the story bank — never invented experience or metrics.
+- **Story-bank figures need provenance.** The story bank supplies narrative and phrasing; its numbers are not `cv.md`-equivalent (AGENTS.md, Source-of-Truth Boundary). Before a story-bank figure goes into a stronger version or a feedback note, run `node story-provenance-check.mjs --summary` and follow its bucket for that figure: `existing` may be used; `supportedByResume` and `derived-unverified` are never restated as fact, so either leave the number out or ask the candidate with AGENTS.md's four outcomes (confirm as stated, give the correct figure, narrative only, "I don't know") rather than a leading confirm/deny; `user-cannot-confirm` is never used as a figure, only as narrative. This mode does not write the `**Provenance:**` marker; the candidate's answer holds for this session.
 - **Retracted claims are a hard gate.** If a claim appears in `interview-prep/retracted-claims.md`, never use it in a stronger version — even if the candidate said it in their answer. Flag it instead.
 - **Track status.** Update `interview-prep/question-bank.md` after the session if it exists.
 - **Stop when asked.** If the candidate says "let's pause" or "that's enough for today," respect it. Don't push for one more question.

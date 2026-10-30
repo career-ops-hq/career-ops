@@ -1,0 +1,145 @@
+# Career-Ops — Candidate-Paid Fees Rules (jurisdiction table) (#5448)
+#
+# Consumed prompt-level by modes/oferta.md Block G ("Candidate-Paid Fees"
+# signal, Signal 21). This file is a DATA REFERENCE, not instruction logic:
+# extending it to a new jurisdiction never requires touching the rule text in
+# modes/oferta-signals/. No script reads it — the agent does. Nothing in this
+# system ever fetches or scrapes an official page: the candidate clicks the
+# official link themselves (zero-fetch by design, same as the vacancy-status
+# and AI-screening tables). Jurisdiction-compliance-lens umbrella #2026.
+#
+# CONTRIBUTION RULE (mandatory): no entry lands in this table without
+#   1. a regulator-grade citable source (statute, regulation, or official
+#      government page), AND
+#   2. an explicit effective date, AND
+#   3. an `as_of` date recording when the row was last verified, AND
+#   4. an `official_source.url` pointing at the OFFICIAL government/regulator
+#      page (statute text or regulator guide) —
+#      never a third-party mirror, aggregator, or law-firm copy of the text.
+# Secondary summaries are not enough. Unverified rows will be rejected in
+# review. Seed narrow and verified; extend via community PRs.
+#
+# NEVER-ASSERT RULE (mandatory — mirrored in the Signal 21 file): a posting
+# or message that asks the candidate to pay a fee is NEVER a basis for
+# asserting that the charge is unlawful. Who is protected depends on the
+# candidate's status and on the role of the party charging, neither of which
+# can be fully seen from a posting. The agent quotes the phrase, states whom
+# the jurisdiction's rule protects, says plainly when the candidate's status
+# is not covered by the cited rule, notes that a request to pay up front is a
+# recognised scam pattern regardless, and stops there. Not legal advice. The
+# agent never accuses a named employer or agency of breaking the law.
+#
+# Schema per entry (key = jurisdiction code, matching the other tables, e.g.
+# CA-ON):
+#   jurisdiction_name: string    — human-readable name for report output
+#   law_name: string             — short name of the statute(s)
+#   effective: YYYY-MM-DD        — date the cited consolidation took effect
+#   applies_to: string           — WHO is protected (scope), stated exactly
+#   exceptions: list             — prescribed exceptions / scope limits
+#   official_source:
+#     url: string                — OFFICIAL regulator/statute page
+#     what_it_shows: string      — what a candidate finds there
+#   legal_basis: string          — statute citation
+#   sources: list                — citable pages backing the row
+#   as_of: YYYY-MM-DD            — date this row was last verified
+#
+# NOT FOUND, DELIBERATELY ABSENT FROM THE ONTARIO ROW: a general Ontario ban
+# on charging job seekers who are Canadian citizens or permanent residents.
+# Only advocacy submissions asking for one were seen, no statutory text. The
+# note for a citizen or permanent-resident candidate therefore must not say
+# the fee is unlawful.
+#
+# GREAT BRITAIN (key UK, as in agency-licensing.yml): the rule protects every
+# work-seeker, whatever their immigration status, so unlike Ontario the note
+# for a candidate in Great Britain may say the rule applies to them. Northern
+# Ireland has its own regime and is not covered by that row.
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (comments only — NOT seeds; do NOT add as
+# rows until each has an official source, an effective date, and an as_of
+# date read first-hand):
+#   - ILO : Private Employment Agencies Convention (C181), Art. 7: private
+#           agencies shall not charge workers fees or costs; exceptions may
+#           be authorised by the competent authority. Context only, not a
+#           jurisdiction row.
+#   - AU  : Australia, by state. NSW and Queensland (Private Employment
+#           Agents (Code of Conduct) Regulation 2026) bar charging a work
+#           seeker a fee for finding work. Other states and territories
+#           differ.
+#   - SG  : Singapore. Employment Agencies Act 1958; MOM treats collecting
+#           fees before the job seeker is placed as a contravention, with a
+#           cap of two months salary on fees.
+#   - US  : No general ban on placement fees; the FTC acts against "advance
+#           fee plus guaranteed job" schemes under the FTC Act and the
+#           Telemarketing Sales Rule. A row would carry a scam note, not a
+#           prohibition.
+
+jurisdictions:
+  CA-ON:
+    jurisdiction_name: "Ontario, Canada"
+    law_name: "Employment Protection for Foreign Nationals Act, 2009 (EPFNA), ss. 1 (1), 7, 7.1, 8 and 9; Employment Standards Act, 2000 (ESA), s. 74.8 (1)"
+    effective: "2023-10-26"
+    applies_to: >-
+      EPFNA protects a "foreign national": an individual who is not a Canadian
+      citizen and not a permanent resident (s. 1 (1)). It applies (s. 3 (1)) to
+      a foreign national who, pursuant to an immigration or foreign temporary
+      employee program, is employed in Ontario or is attempting to find
+      employment in Ontario, to the employer and to the recruiter, and to
+      persons acting for them. It applies to an employer unless the ESA does not
+      apply to the employment (s. 3 (2)) and to a recruiter unless the ESA would
+      not apply to the employment (s. 3 (3)); this can leave out, for example,
+      federally regulated employment. Whether a given work permit falls within
+      "an immigration or foreign temporary employee program" is not stated here
+      and is not verified. It does NOT cover Canadian citizens or permanent
+      residents. ESA s. 74.8 (1) protects assignment
+      employees of temporary help agencies, whatever their status. No general
+      Ontario statute banning fees charged to job seekers who are citizens or
+      permanent residents was found, so no such rule is stated here.
+    exceptions:
+      - "EPFNA s. 7 (1): no person who acts as a recruiter in connection with the employment of a foreign national shall directly or indirectly charge the foreign national (or other prescribed persons) a fee for any service, good or benefit provided"
+      - "EPFNA s. 7 (2): prescribed exceptions to s. 7 (1); s. 7 (3): no person acting on behalf of a recruiter shall collect a fee charged in contravention of s. 7 (1)"
+      - "EPFNA s. 7.1: no recruiter or employer shall knowingly use the services of a recruiter who has charged a fee in contravention of s. 7 (1)"
+      - "EPFNA s. 8 (1): no employer shall directly or indirectly recover or attempt to recover from a foreign national any cost incurred in arranging to become, or attempting to become, the employer (prescribed exceptions in s. 8 (2))"
+      - "EPFNA s. 9: employers and recruiters shall not take possession of or retain property the foreign national is entitled to possess"
+      - "ESA s. 74.8 (1) para. 1: a temporary help agency shall not charge an assignment employee a fee for becoming an assignment employee; para. 2: for being assigned work; para. 3: for help preparing resumes or interviews; para. 5: no fee to the assignment employee in connection with a client entering into an employment relationship with the employee; para. 8 and s. 74.8 (2): the agency may charge the client a hiring fee only during the six-month period beginning when the employee first started to perform the work for the client"
+    official_source:
+      url: "https://www.ontario.ca/laws/statute/09e32"
+      what_it_shows: "Official e-Laws text of the Employment Protection for Foreign Nationals Act, 2009: s. 1 (1) definition of 'foreign national' and ss. 7, 7.1, 8 and 9. The Employment Standards Act, 2000 (s. 74.8) is at https://www.ontario.ca/laws/statute/00e41."
+    legal_basis: "Employment Protection for Foreign Nationals Act, 2009, S.O. 2009, c. 32, ss. 1 (1), 7 (1)-(3), 7.1, 8 and 9 (consolidation period from 2023-10-26; s. 7 current wording in force since 2015-11-20, s. 7.1 since 2021-12-02); Employment Standards Act, 2000, S.O. 2000, c. 41, s. 74.8 (1) paras. 1, 2, 3, 5 and 8 and s. 74.8 (2) (verified on ontario.ca/laws)"
+    sources:
+      - "e-Laws — Employment Protection for Foreign Nationals Act, 2009 (ontario.ca/laws/statute/09e32)"
+      - "e-Laws — Employment Standards Act, 2000 (ontario.ca/laws/statute/00e41)"
+    as_of: "2026-10-18"
+
+  UK:
+    jurisdiction_name: "United Kingdom (Great Britain)"
+    law_name: "Employment Agencies Act 1973, s. 6(1)(a)-(c) and (2); Conduct of Employment Agencies and Employment Businesses Regulations 2003 (S.I. 2003/3319), reg. 26(1)-(5) and Schedule 3"
+    # s. 6(1) as substituted dates from 2004-04-06; "effective" is the date reg. 26(5)'s current wording took effect.
+    effective: "2010-10-01"
+    applies_to: >-
+      Section 6(1) of the Employment Agencies Act 1973 (extent: England, Wales
+      and Scotland) restricts what a person carrying on an employment agency or
+      an employment business may charge. It is not limited by the work-seeker's
+      nationality or immigration status: it protects any work-seeker in Great
+      Britain, whatever their immigration status. The restriction in s. 6(1) is
+      subject to "such cases or classes of case as the Secretary of State may
+      prescribe". Whether a given intermediary counts as an "employment agency"
+      or an "employment business" is not stated here and is not verified. This
+      row does NOT cover Northern Ireland, which has its own regime.
+    exceptions:
+      - "Employment Agencies Act 1973, s. 6(1)(a): a person carrying on an employment agency shall not request or directly or indirectly receive any fee from any person for providing services (whether by the provision of information or otherwise) for the purpose of finding him employment or seeking to find him employment"
+      - "s. 6(1)(b): a person carrying on an employment business shall not request or directly or indirectly receive any fee from an employee for providing services (whether by the provision of information or otherwise) for the purpose of finding or seeking to find another person, with a view to the employee acting for and under the control of that other person"
+      - "s. 6(1)(c): a person carrying on an employment business shall not request or directly or indirectly receive any fee from a second person for providing services (whether by the provision of information or otherwise) for the purpose of finding or seeking to find a third person, with a view to the second person becoming employed by the first person and acting for and under the control of the third person"
+      - "s. 6(2): a person who contravenes s. 6 is guilty of an offence and liable to a fine on conviction (no other remedy is stated here)"
+      - "Conduct Regulations 2003, reg. 26(1): subject to paragraphs (3) and (4), the s. 6(1)(a) restriction does not apply to a fee charged by an agency for finding or seeking to find a work-seeker employment in an occupation listed in Schedule 3 (a category of entertainment and modelling occupations; the list is not reproduced here)"
+      - "reg. 26(2): where reg. 26(1) applies, subject to paragraph (5), any fee charged by the agency may consist only of a charge or commission payable out of the work-seeker's earnings in employment the agency has found for him"
+      - "reg. 26(3): paragraph (1) does not apply where the agency, or any person connected with it, charges a fee to the hirer in respect of the service of supplying or introducing that work-seeker to him"
+      - "reg. 26(4): where the agency is connected with the hirer, paragraph (1) applies only if, before providing the service for which the fee is to be charged, the agency informs the work-seeker that it is connected with the hirer"
+      - "reg. 26(5): paragraph (2) does not apply to a fee charged for including information about the work-seeker (other than a work-seeker seeking employment as a photographic or fashion model) in a publication, subject to the conditions in reg. 26(5)(a)-(h), which include a 7-day period (30 days for actors, background artists, dancers, extras, musicians, singers and other performers) during which no such fee may be charged and the work-seeker may cancel without penalty; other provisions of reg. 26 are not summarised here"
+    official_source:
+      url: "https://www.legislation.gov.uk/ukpga/1973/35/section/6"
+      what_it_shows: "Official legislation.gov.uk text of the Employment Agencies Act 1973, s. 6 (Restriction on charging persons seeking employment, etc.; extent E+W+S). The Conduct of Employment Agencies and Employment Businesses Regulations 2003, reg. 26 (Circumstances in which fees may be charged to work-seekers) is at https://www.legislation.gov.uk/uksi/2003/3319/regulation/26."
+    legal_basis: "Employment Agencies Act 1973 (c. 35), s. 6(1)(a)-(c) (as substituted from 2004-04-06) and s. 6(2); Conduct of Employment Agencies and Employment Businesses Regulations 2003 (S.I. 2003/3319), reg. 26(1)-(5) (current wording of reg. 26(5) in force since 2010-10-01) and Schedule 3. Extent: England, Wales and Scotland (verified on legislation.gov.uk)"
+    sources:
+      - "legislation.gov.uk — Employment Agencies Act 1973, section 6 (legislation.gov.uk/ukpga/1973/35/section/6)"
+      - "legislation.gov.uk — Conduct of Employment Agencies and Employment Businesses Regulations 2003, regulation 26 (legislation.gov.uk/uksi/2003/3319/regulation/26)"
+    as_of: "2026-10-19"

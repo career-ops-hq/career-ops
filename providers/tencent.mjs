@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { sleep } from './_http.mjs';
+
 // Tencent careers provider — hits the public careers.tencent.com JSON API.
 // Zero-token, no browser needed. Verified 2026-07: GET returns structured
 // JSON with title, location, BG, category, JD text and last-update time.
@@ -10,16 +12,16 @@
 //     careers_url: https://careers.tencent.com/search.html   # auto-detected
 //     keywords: ["AI", "大模型"]   # each keyword is queried server-side separately, results deduped;
 //                                  # omit to pull the whole board (empty-keyword query)
-//     max_pages: 20                # per keyword, pageSize 100 → up to 2000 posts/keyword
+//     max_pages: 100               # per keyword, pageSize 100 → up to 10000 posts/keyword
 
 const API_HOST = 'careers.tencent.com';
 const API_PATH = '/tencentcareer/api/post/Query';
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
-const DEFAULT_MAX_PAGES = 20;
+const DEFAULT_MAX_PAGES = 100;  // whole board is ~2260 postings ≈ 23 pages (2026-10)
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday).
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 /** Parse "2026年06月23日" → epoch ms. NaN-safe. */
 function parseCnDate(value) {
@@ -97,18 +99,18 @@ export default {
       : DEFAULT_KEYWORDS;
     const entryMaxPages = Number(entry.max_pages) > 0 ? Number(entry.max_pages) : DEFAULT_MAX_PAGES;
     // Honor the ctx.maxPages pagination hint (verify-portals' health probe passes 1).
-    const maxPages = Math.min(entryMaxPages, Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity);
+    const probeMaxPages = Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity;
+    const maxPages = Math.min(entryMaxPages, probeMaxPages);
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
         let json;
         try {
           json = /** @type {any} */ (
@@ -132,6 +134,11 @@ export default {
         }
 
         if (page * PAGE_SIZE >= total) break;
+        // The page cap, not the board, ended this keyword. Stay quiet when the
+        // cap is the health probe's, not max_pages.
+        if (page === maxPages && probeMaxPages > entryMaxPages) {
+          console.error(`  ⚠ tencent: keyword "${keyword}" truncated at ${page * PAGE_SIZE} of ${total} postings — raise max_pages on this entry for complete coverage`);
+        }
       }
     }
 

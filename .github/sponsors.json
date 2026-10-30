@@ -1,0 +1,15 @@
+{
+  "$comment": "Source of truth for the Sponsors section of README.md and the sponsor rows of every README.<lang>.md. Rendered by .github/scripts/sponsors.mjs (run with --write after editing; test-all.mjs runs --check so the READMEs cannot drift from this file). One entry per corporate sponsor. Position is the explicit `order` field (1 = most visible), never a sort by date or name: placement is part of what a sponsor agreed to, so it changes only when someone edits this number on purpose. `label` is a badge shown after the name and stays empty unless the agreement grants one. `name` and `description` are rendered verbatim and untranslated in every language. Nothing here describes amounts or tiers: sponsorship buys clearly labeled visibility, never influence.",
+  "sponsors": [
+    {
+      "id": "serpapi",
+      "name": "SerpApi",
+      "url": "https://serpapi.com/career-ops-org",
+      "logo": "docs/sponsors/serpapi.svg",
+      "description": "Build a portfolio project with live search data. SerpApi gives developers structured JSON/Markdown from Google Search, Maps, Shopping, and other engines through a simple API call.",
+      "order": 1,
+      "label": "",
+      "since": "2026-09"
+    }
+  ]
+}

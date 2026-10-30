@@ -1,5 +1,12 @@
+// Next sends anonymous usage telemetry unless this is set, and career-ops
+// promises none. server.mjs sets it for dev and start; this covers `next build`,
+// which npm runs directly and which loads this file before it records anything.
+process.env.NEXT_TELEMETRY_DISABLED = "1";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // PDF.js resolves its local worker relative to its own package in Node.
+  serverExternalPackages: ["pdfjs-dist"],
   // Two lockfiles exist on purpose (repo root + web/), so Next would infer the
   // repo root as the workspace root. On Windows that misinference can send
   // Turbopack's postcss workers into an unbounded respawn loop that exhausts

@@ -6,7 +6,8 @@
  *
  * Every tracked file in the repo must be covered by either SYSTEM_PATHS
  * (system layer, fetched on `update-system.mjs apply`) or USER_PATHS
- * (user-owned, never touched). Anything else is a coverage gap: it
+ * (user-owned, except for exact system-owned `.gitkeep` scaffolds explicitly
+ * listed in SYSTEM_PATHS). Anything else is a coverage gap: it
  * lives in the repo but the auto-updater won't propagate it to
  * clients on `apply`. That breaks them on the next test run.
  *
@@ -18,32 +19,48 @@ import { execFileSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { extractArrayFromSource } from './update-system.mjs';
+import { extractArrayFromSource, localUserPaths, LOCAL_PATHS_FILE } from './update-system.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+// SYSTEM_PATHS lives in lib/update-manifest.mjs (#5554); USER_PATHS is still in
+// the updater. Both are read with the updater's own parser, as it reads them.
 const sourcePath = join(ROOT, 'update-system.mjs');
+const manifestPath = join(ROOT, 'lib', 'update-manifest.mjs');
 
-if (!existsSync(sourcePath)) {
-  console.error('FAIL: update-system.mjs not found');
-  process.exit(1);
+for (const path of [sourcePath, manifestPath]) {
+  if (!existsSync(path)) {
+    console.error(`FAIL: ${path} not found`);
+    process.exit(1);
+  }
 }
 
-const source = readFileSync(sourcePath, 'utf-8');
-
-const SYSTEM_PATHS = extractArrayFromSource(source, 'SYSTEM_PATHS');
-const USER_PATHS = extractArrayFromSource(source, 'USER_PATHS');
+const SYSTEM_PATHS = extractArrayFromSource(readFileSync(manifestPath, 'utf-8'), 'SYSTEM_PATHS');
+const USER_PATHS = extractArrayFromSource(readFileSync(sourcePath, 'utf-8'), 'USER_PATHS');
 
 if (SYSTEM_PATHS.length === 0 || USER_PATHS.length === 0) {
-  console.error('FAIL: SYSTEM_PATHS or USER_PATHS not found in update-system.mjs');
+  console.error('FAIL: SYSTEM_PATHS not found in lib/update-manifest.mjs, or USER_PATHS not found in update-system.mjs');
   process.exit(1);
 }
-const ALL_PATHS = [...SYSTEM_PATHS, ...USER_PATHS];
+// Paths a fork declared as its own in the gitignored local file (#2421).
+// Without these, a tracked fork-local file (a nightly runner, an .mcp.json)
+// is an orphan here and fails the whole suite, and the only fix is to edit
+// USER_PATHS inside update-system.mjs — the file `apply` overwrites and git
+// re-merges on every sync. A malformed declaration fails loudly: this guard
+// exists to be trustworthy, so it must never fall back to a partial view.
+let LOCAL_PATHS;
+try {
+  LOCAL_PATHS = localUserPaths(ROOT);
+} catch (err) {
+  console.error(`FAIL: ${err.message}`);
+  process.exit(1);
+}
+
+const ALL_PATHS = [...SYSTEM_PATHS, ...USER_PATHS, ...LOCAL_PATHS];
 
 const EXCLUDES = [
   '.coderabbit.yaml',
   '.editorconfig',
   '.envrc',
-  '.gitignore',
   '.npmignore',
   '.release-please-manifest.json',
   'release-please-config.json',
@@ -53,7 +70,42 @@ const EXCLUDES = [
   'batch/logs/.gitkeep',
   'batch/tracker-additions/.gitkeep',
   'interview-prep/.gitkeep',
+  // The declaration file itself. Normally untracked, so normally invisible to
+  // this check — but a FORK that runs this suite in CI has to commit it, or CI
+  // checks out the repo without it, every declared path is an orphan there, and
+  // the suite is red on a machine the author cannot inspect. Committing it made
+  // it its own orphan, and it cannot declare itself (localUserPaths refuses,
+  // correctly: its reason is that nothing updates a gitignored file). That loop
+  // sent forks back to editing USER_PATHS in update-system.mjs, which is exactly
+  // the permanent conflict #2421 removed. Excluded rather than declared, because
+  // like the entries above it never reaches an install: what ships is
+  // config/local-paths.example.txt.
+  LOCAL_PATHS_FILE,
 ];
+
+// .gitignore is excluded from the manifest but NOT from installs, and the
+// difference is the whole of #2756. It cannot join SYSTEM_PATHS: it is the one
+// system file users also write to, so the raw `git checkout` that ships every
+// other path would delete their own rules. It reaches installs by a different
+// route instead — update-system.mjs's reconcileGitignore(), which appends the
+// system-owned rules an install is missing and touches nothing else.
+//
+// Kept in its own group rather than folded in above, because the entries above
+// genuinely never reach an install and this one does. Reading it as the same
+// kind of exclusion is what let 43 releases' worth of new ignore rules stay in
+// this repository only, leaving a candidate's CV stageable in every fork.
+const RECONCILED_NOT_CHECKED_OUT = ['.gitignore'];
+
+// Repo-only files: tracked here, deliberately never shipped to an install.
+//
+// SIGNATURES.md is the append-only ledger of who signed the manifesto. It is
+// read by nobody on an install — manifesto.mjs parses MANIFESTO.md and never
+// touches it — and it changes far more often than the code does, so while it
+// sat in SYSTEM_PATHS every new signature made check()'s content diff report
+// `system-files-changed` on every install in the world, with no `apply` able
+// to clear it for long (#4062). Excluded rather than shipped: the fix is that
+// installs stop tracking a ledger they never use.
+const REPO_ONLY = ['SIGNATURES.md'];
 
 // Trees that live in the repo but deliberately OUTSIDE the updater's world:
 // web/ is the experimental web UI — its own release-please component, never
@@ -64,11 +116,27 @@ const EXCLUDE_PREFIXES = ['web/'];
 function covered(file) {
   // If explicitly excluded, it is covered
   if (EXCLUDES.includes(file)) return true;
+  if (RECONCILED_NOT_CHECKED_OUT.includes(file)) return true;
+  if (REPO_ONLY.includes(file)) return true;
   if (EXCLUDE_PREFIXES.some((p) => file.startsWith(p))) return true;
 
   return ALL_PATHS.some((path) =>
     path.endsWith('/') ? file.startsWith(path) : file === path,
   );
+}
+
+// USER_PATHS directory prefixes normally make every child look covered, but
+// tracked .gitkeep files inside those trees need an exact updater policy: an
+// exact SYSTEM_PATHS entry ships the scaffold, or an exact EXCLUDES entry
+// leaves it repo-only. A broad USER_PATHS prefix must not silently choose.
+function isUserLayerPlaceholder(file) {
+  return file.endsWith('/.gitkeep') && USER_PATHS.some((path) =>
+    path.endsWith('/') ? file.startsWith(path) : file === path,
+  );
+}
+
+function hasExplicitPlaceholderPolicy(file) {
+  return SYSTEM_PATHS.includes(file) || EXCLUDES.includes(file);
 }
 
 if (process.argv.includes('--self-test')) {
@@ -85,6 +153,21 @@ if (process.argv.includes('--self-test')) {
   assert(covered('.gitignore') === true, '.gitignore must be covered (excluded)');
   assert(covered('.coderabbit.yaml') === true, '.coderabbit.yaml must be covered (excluded)');
   assert(covered('.editorconfig') === true, '.editorconfig must be covered (excluded, #1438/#1613)');
+  // Pinned as the CONSTANT, not the literal: if the declaration file is ever
+  // renamed, an assertion on 'config/local-paths.txt' would keep passing while
+  // the real file went back to being an orphan in a fork's CI.
+  // How a fork makes it visible to CI without tripping `user-layer-untracked`:
+  // append `!config/local-paths.txt` to .gitignore and commit it, so it is tracked
+  // and NOT ignored (#4128). `config/local-paths.example.txt` carries the recipe.
+  assert(covered(LOCAL_PATHS_FILE) === true, 'the local-paths declaration file must be covered when a fork commits it (excluded, #2991)');
+  // The example is asserted through its MECHANISM, not just through covered().
+  // covered() answers true for any of them, EXCLUDES included, so a single
+  // covered() assertion would keep passing if the example were ever folded into
+  // the exclude above; it would then stop shipping, silently, which is the one
+  // failure this pair of assertions exists to catch.
+  assert(!EXCLUDES.includes('config/local-paths.example.txt'), 'the shipped example must NOT ride the exclude: it has to keep reaching installs');
+  assert(SYSTEM_PATHS.includes('config/local-paths.example.txt'), 'the shipped example must stay in SYSTEM_PATHS (#2991)');
+  assert(covered('config/local-paths.example.txt') === true, 'the shipped example must stay covered by SYSTEM_PATHS, not by the exclude');
 
   // Test exact matches in SYSTEM_PATHS / USER_PATHS
   assert(covered('CLAUDE.md') === true, 'CLAUDE.md must be covered (exact match)');
@@ -99,6 +182,19 @@ if (process.argv.includes('--self-test')) {
   assert(covered('web/package.json') === true, 'web/ tree must be covered (isolation-contract prefix exclude)');
   assert(covered('web-dashboard/index.html') === false, 'web-dashboard/ must NOT ride the web/ prefix exclude');
   assert(covered('.npmignore') === true, '.npmignore must be covered (excluded)');
+  // Asserted through the MECHANISM as well as covered(): if SIGNATURES.md ever
+  // went back into SYSTEM_PATHS, covered() would still answer true while the
+  // #4062 false-positive drift came back on every install.
+  assert(covered('SIGNATURES.md') === true, 'SIGNATURES.md must be covered (repo-only exclude, #4062)');
+  assert(!SYSTEM_PATHS.includes('SIGNATURES.md'), 'SIGNATURES.md must NOT re-enter SYSTEM_PATHS: its churn reads as system-files-changed drift on every install (#4062)');
+
+  // This path is already covered by reports/ in USER_PATHS, so generic
+  // coverage alone cannot prove that an updater policy was chosen.
+  assert(covered('data/new-subdir/.gitkeep') === true, 'a nested placeholder is covered by USER_PATHS');
+  assert(isUserLayerPlaceholder('data/new-subdir/.gitkeep'), 'a nested placeholder is a user-layer placeholder');
+  assert(!hasExplicitPlaceholderPolicy('data/new-subdir/.gitkeep'), 'a USER_PATHS prefix alone must not count as an explicit placeholder policy');
+  assert(hasExplicitPlaceholderPolicy('data/.gitkeep'), 'data/.gitkeep must have an explicit ship-or-exclude policy');
+  assert(hasExplicitPlaceholderPolicy('interview-prep/.gitkeep'), 'interview-prep/.gitkeep must have an explicit ship-or-exclude policy');
 
   // Test unrelated file
   assert(covered('untracked-orphan-file-xyz.js') === false, 'untracked-orphan-file-xyz.js must NOT be covered');
@@ -121,13 +217,42 @@ try {
   process.exit(1);
 }
 
+// An empty file list is NOT "nothing to check" — it means this run could not
+// inspect anything, and reporting success would make the guard a no-op.
+//
+// That is exactly what happened for as long as this check has existed. test-all
+// runs the scripts from a throwaway copy created *inside* the repo, and
+// `git ls-files` from an untracked subdirectory returns zero paths. So CI printed
+// "OK: 0 tracked files covered" and exited 0 while the real tree had an
+// unregistered top-level file. A file missing from SYSTEM_PATHS is not cosmetic:
+// `update-system` never ships it, so every user who updates silently loses it.
+// This bug class has landed five times (#649, #704, .editorconfig, and twice
+// since) and the guard meant to stop it was green throughout.
+//
+// A check that cannot look must fail, not pass.
+if (tracked.length === 0) {
+  console.error('FAIL: git ls-files returned no paths — this run could not inspect anything.');
+  console.error('');
+  console.error('Run this from the repository root. An empty listing usually means the');
+  console.error('script was invoked from an untracked directory (a temp copy, a fixture');
+  console.error('dir), where git reports nothing and the coverage check is meaningless.');
+  process.exit(1);
+}
+
 const orphans = tracked.filter((f) => !covered(f));
+const placeholderGaps = tracked.filter((f) => isUserLayerPlaceholder(f) && !hasExplicitPlaceholderPolicy(f));
+
+if (placeholderGaps.length > 0) {
+  console.error('Coverage gap — tracked .gitkeep placeholders under USER_PATHS need an exact SYSTEM_PATHS entry (ship) or EXCLUDES entry (repo-only):');
+  for (const path of placeholderGaps) console.error(`  ${path}`);
+  process.exit(1);
+}
 
 if (orphans.length > 0) {
   console.error('Coverage gap — tracked files not in SYSTEM_PATHS or USER_PATHS:');
   for (const orphan of orphans) console.error(`  ${orphan}`);
   console.error('');
-  console.error('Add each path to update-system.mjs SYSTEM_PATHS (if system layer)');
+  console.error('Add each path to SYSTEM_PATHS in lib/update-manifest.mjs (if system layer)');
   console.error('or USER_PATHS (if user-owned), then re-run this check.');
   process.exit(1);
 }

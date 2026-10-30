@@ -3,22 +3,183 @@ name: Tests
 on:
   pull_request:
     branches: [main]
+  # The merge queue builds a temporary merge commit per group and needs the
+  # same required checks to report on it; without this trigger every queued
+  # PR would wait forever on `test (...)`.
+  merge_group:
+
+# merge_group runs carry the base repo's GITHUB_TOKEN (write-capable by
+# default, unlike a fork pull_request) while executing code that came from a
+# fork. Nothing in this workflow needs to write, and no other secret is
+# referenced here, so the token is pinned read-only and never persisted.
+permissions:
+  contents: read
+
+# A force-push supersedes the running matrix; cancel it instead of letting
+# stale legs occupy runners (3 jobs per push at this repo's PR volume).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      # One OS failing must not cancel the evidence from the others —
+      # a platform-specific failure is exactly what this matrix exists to isolate.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Without a limit a hung job holds its runner for GitHub's default of six
+    # hours. test-all.mjs kills a discovered suite that runs past its budget,
+    # but its inline sections and the install steps have no limit of their
+    # own. The slowest leg (macOS) takes about 11 minutes.
+    timeout-minutes: 30
     steps:
+      # The repo is committed with LF; Windows runners default to autocrlf,
+      # which would rewrite every text file on checkout and make regexes that
+      # rely on `.` (no \r) fail in ways the other platforms never see.
+      - name: Force LF checkout on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+        with:
+          # Test code (fork code, in a merge_group) must not find a token in .git/config.
+          persist-credentials: false
+      # The declared floor (lib/node-floor.mjs, package.json engines). Exact on
+      # purpose: a bare '22' resolves to the newest 22.x and tests nothing.
+      # Renovate is told to leave node-version in this file alone (renovate.json);
+      # tests/node-floor.test.mjs fails if this drifts from NODE_MIN.
+      - name: Set up the Node floor (22.13) for syntax compatibility
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.13'
+      - run: npm run lint
+      - name: Set up Node 24 for the test suite
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
-      # Skip the postinstall (npx playwright install chromium); the tests
-      # never launch a browser, so the ~170 MB download is pure CI overhead.
+          go-version: '1.27'
+          # The module lives in dashboard/, so without this setup-go looks for
+          # go.sum at the root, warns, and caches nothing.
+          cache-dependency-path: dashboard/go.sum
+      # Skip the postinstall (npx playwright install chromium): the ~170 MB
+      # download on three OSes would buy only the few suites that launch a
+      # browser, and those skip here and run in the tool-suites job instead.
       - run: npm install --ignore-scripts
       - run: node test-all.mjs --quick
       - name: Go dashboard tests
         run: go test ./...
         working-directory: dashboard
+
+  cv-visual:
+    # Not a required check, so the merge queue never waits on it: a red queue
+    # run blocks nothing (14 failed in Oct-2026 and every one of those PRs
+    # merged on that same attempt). It still runs on every PR, where a red
+    # result is seen before the PR is queued (#5723).
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    # About 3 minutes, image build included. Limited for the test job's reason.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the canonical CV rendering environment
+        run: docker build --platform linux/amd64 --tag career-ops-cv-visual tests/cv-visual
+      - name: Check every CV template and PDF page
+        run: |
+          docker run --rm --init --ipc=host --platform linux/amd64 \
+            --volume "$PWD:/work" --volume /work/node_modules \
+            career-ops-cv-visual \
+            sh -c 'npm install --ignore-scripts --package-lock=false && npm run test:cv-visual'
+      - name: Upload CV visual diffs and rendered previews
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cv-visual-artifacts
+          path: |
+            test-results/cv-visual-artifacts/
+            test-results/cv-visual-results/
+          if-no-files-found: ignore
+  tool-suites:
+    name: Browser and LaTeX suites
+    # The test job installs no browser and no TeX engine, so the suites that
+    # need one skip there and their checks ran on no job (#5756, #5758). This
+    # runs them in the cv-visual image, which has Chromium, Poppler and the CJK
+    # fonts; tectonic comes from the repo's pinned, checksummed installer and
+    # fetches its TeX bundle on the first compile. `--needs` selects the suites
+    # that declare those tools (tests/required-tools.mjs) and turns a missing
+    # tool into a failure instead of a skip. A job of its own rather than a
+    # step in cv-visual, so its result has its own check. Not a required
+    # check, so the merge queue would gain nothing from running it again.
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    # Image build plus the TeX bundle download. Limited for the test job's reason.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the canonical CV rendering environment
+        run: docker build --platform linux/amd64 --tag career-ops-cv-visual tests/cv-visual
+      - name: Run the suites that need Chromium or a TeX engine
+        run: |
+          docker run --rm --init --ipc=host --platform linux/amd64 \
+            --volume "$PWD:/work" --volume /work/node_modules \
+            career-ops-cv-visual \
+            sh -c 'npm install --ignore-scripts --package-lock=false && node install-latex-engine.mjs && node test-all.mjs --needs browser,latex'
+  upgrade-gate:
+    name: Upgrade regression gate
+    # Skipped in the merge queue for cv-visual's reason above.
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    # About 3 minutes. Limited for the test job's reason.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0            # harness needs release tags
+          persist-credentials: false # the harness only ever touches a local mirror
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27'   # old updaters rebuild the dashboard during apply
+          cache-dependency-path: dashboard/go.sum
+      - run: npm install --ignore-scripts
+      - name: Upgrade PR gate (newest old release -> this commit)
+        run: node upgrade-tests.mjs --pr-gate
+      - name: Canary (harness must be able to fail)
+        run: node upgrade-tests.mjs --canary
+      - name: Local-paths declaration survives a real apply (#2421)
+        run: node upgrade-tests.mjs --local-paths
+      - name: User-layer manifest entry is refused, not fatal (#3782)
+        run: node upgrade-tests.mjs --user-layer-refusal
+      - name: Failed npm install is reported, rollback reinstalls
+        run: node upgrade-tests.mjs --failed-install
+      - name: A locally edited system file is kept, and replaced only with --force (#2337)
+        run: node upgrade-tests.mjs --local-edit
+      - name: Local-edit canary (an inverted --force branch must go red)
+        run: node upgrade-tests.mjs --local-edit-canary
+
+  dependency-audit:
+    name: Dependency audit
+    # Informative by design: the root has no tracked lockfile (ranges resolve
+    # at install time), so a newly published advisory in a third-party range
+    # must not turn required checks red on unrelated PRs (#5897).
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts
+      - run: npm audit --audit-level=high

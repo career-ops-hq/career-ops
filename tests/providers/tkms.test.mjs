@@ -59,6 +59,19 @@ try {
   if (tkRows[1]?.url === 'https://jobs.tkmsgroup.com/en/job/Slash-Id/12%2F34') pass('tkms.parseQuery() percent-encodes an id path segment');
   else fail(`tkms.parseQuery() encoding wrong: ${JSON.stringify(tkRows[1]?.url)}`);
 
+  // The configured locale is a trusted portals.yml segment. A structural
+  // character in it is percent-encoded so the URL stays well-formed (not
+  // spliced in raw); a lone surrogate — a genuine config error — throws out of
+  // parseQuery loudly rather than silently dropping every posting one by one.
+  const tkLocaleJson = { totalHits: 1, nextPage: null, jobs: [{ data: { id: '1', title: 'Job' } }] };
+  const { rows: tkOddLocale } = parseQuery(tkLocaleJson, { origin: 'https://jobs.tkmsgroup.com', locale: 'x/y' });
+  if (tkOddLocale[0]?.url === 'https://jobs.tkmsgroup.com/x%2Fy/job/Job/1') pass('tkms.parseQuery() percent-encodes a structural char in the configured locale');
+  else fail(`tkms.parseQuery() locale encoding wrong: ${JSON.stringify(tkOddLocale[0]?.url)}`);
+  let tkThrew = false;
+  try { parseQuery(tkLocaleJson, { origin: 'https://jobs.tkmsgroup.com', locale: 'e\uD800n' }); } catch { tkThrew = true; }
+  if (tkThrew) pass('tkms.parseQuery() throws on a lone-surrogate configured locale (loud config error, not a silent empty page)');
+  else fail('tkms.parseQuery() should throw on a lone-surrogate configured locale');
+
   // fetch — paginates by page until nextPage===null, dedups, sends subclient.
   const tkPage = (ids, next) => ({ totalHits: 40, nextPage: next, jobs: ids.map((i) => ({ data: { id: String(i), title: `Job ${i}`, city: 'Kiel', country: 'Germany' } })) });
   const tkPages = [tkPage([1, 2], 1), tkPage([2, 3], null)];

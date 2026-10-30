@@ -1,0 +1,403 @@
+#!/usr/bin/env node
+
+/**
+ * scan-interamt.mjs — Interamt.de scanner via Playwright
+ *
+ * Interamt uses Apache Wicket (stateful Java framework) — no REST API exists.
+ * Playwright maintains a browser session so the wicket-crypt token and cookies
+ * are handled transparently.
+ *
+ * Reads `interamt_searches` from portals.yml. Falls back to a generic set of
+ * German IT keywords if the section is absent.
+ *
+ * Usage:
+ *   node scan-interamt.mjs
+ *   node scan-interamt.mjs --dry-run
+ *   node scan-interamt.mjs --all            # skip date filter (use for first scan)
+ *   node scan-interamt.mjs --keyword "Softwareentwickler"
+ *   node scan-interamt.mjs --debug          # save a screenshot and the page HTML to output/
+ */
+
+import { chromium } from 'playwright';
+import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { appendToPipeline, appendToScanHistory, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { createAdmissionGate } from './lib/admission-gate.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+
+// ── Config ───────────────────────────────────────────────────────────
+
+// Both imported from scan.mjs (#3510). This scanner appends through
+// scan.mjs's appendToScanHistory — anchored to the data root — while reading its
+// own bare-relative copy to work out the last scan date, so within a single run
+// it could write one history file and read another. Its portals copy also
+// ignored CAREER_OPS_PORTALS, which #2271 added so a second search lane does not
+// poison the first one's dedup history.
+const SCAN_HISTORY    = SCAN_HISTORY_PATH;
+const DATA_ROOT       = getCareerOpsRoot();
+const INTERAMT_HOME   = 'https://interamt.de/koop/app/';
+// Direct offer URL — constructed from StellenangebotId.
+// Wicket adds a session version number (?28&id=...) during live navigation,
+// but the bookmarkable form (?id=...) works without a session.
+// If a specific offer fails to load from pipeline, open Interamt manually
+// and navigate to it — Wicket will assign a valid version for that session.
+const OFFER_BASE_URL  = 'https://interamt.de/koop/app/stelle?id=';
+
+// Generic fallback — configure interamt_searches in portals.yml for your target roles
+const DEFAULT_KEYWORDS = [
+  'Informatiker',
+  'Softwareentwickler',
+  'IT-Spezialist',
+  'Datenwissenschaftler',
+  'Systemadministrator',
+  'Datenanalyst',
+];
+
+// ── Args ─────────────────────────────────────────────────────────────
+
+// Checked by validateFlags() in the main-module block below, before main()
+// runs (#4599). Without it, --help or a mistyped --dryrun fell through to a
+// live scan that appended to data/pipeline.md.
+const KNOWN_FLAGS = ['--dry-run', '--debug', '--all', '--keyword', '--help', '-h'];
+const VALUE_FLAGS = ['--keyword'];
+
+const USAGE = `Usage:
+  node scan-interamt.mjs
+  node scan-interamt.mjs --dry-run
+  node scan-interamt.mjs --all            # skip date filter (use for first scan)
+  node scan-interamt.mjs --keyword "Softwareentwickler"
+  node scan-interamt.mjs --debug          # save a screenshot and the page HTML to output/
+  node scan-interamt.mjs --help|-h        # print this usage block and exit`;
+
+const args = process.argv.slice(2);
+const DRY_RUN    = args.includes('--dry-run');
+const DEBUG      = args.includes('--debug');
+const NO_DATE_FILTER = args.includes('--all');
+// flagValue/hasFlag rather than indexOf: validateFlags accepts --keyword=value
+// for a value flag, and indexOf() cannot see that form, so the scan would run
+// every keyword instead of the one asked for.
+const SINGLE_KEYWORD = flagValue(args, '--keyword') ?? null;
+if (hasFlag(args, '--keyword') && (!SINGLE_KEYWORD || SINGLE_KEYWORD.startsWith('--'))) {
+  console.error('Error: --keyword requires a value, e.g. --keyword "Softwareentwickler"');
+  process.exit(1);
+}
+
+// ── Load portals.yml ─────────────────────────────────────────────────
+
+let config = {};
+if (existsSync(PORTALS_PATH)) {
+  config = loadYaml(readFileSync(PORTALS_PATH, 'utf-8')) || {};
+}
+
+const interamtSearches = config.interamt_searches || DEFAULT_KEYWORDS.map(k => ({ was: k }));
+const keywords = SINGLE_KEYWORD
+  ? [SINGLE_KEYWORD]
+  : interamtSearches.map(s => s.was).filter(Boolean);
+
+// ── Filters ──────────────────────────────────────────────────────────
+
+// title_filter, location_filter, data/blacklist.md and the seen set all go
+// through the shared admission gate in main(), built from the same scan.mjs
+// matchers every other scanner uses. The private `includes()` matchers that
+// lived here read `word:Intern` as literal text, matched "KI" inside "Kita",
+// never matched an AND group and ignored always_allow/block_hard (#5478).
+
+// ── Date helpers ─────────────────────────────────────────────────────
+
+// Parse Interamt date format DD.MM.YYYY → Date (midnight UTC)
+function parseDE(str) {
+  if (!str) return null;
+  const [d, m, y] = str.trim().split('.');
+  if (!d || !m || !y) return null;
+  return new Date(`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`);
+}
+
+// Returns the most recent first_seen date for 'interamt' portal entries, or null
+function loadLastScanDate() {
+  if (!existsSync(SCAN_HISTORY)) return null;
+  let latest = null;
+  scanHistoryDataLines(readFileSync(SCAN_HISTORY, 'utf-8')).forEach(line => {
+    const parts = line.split('\t');
+    if (parts[2] !== 'interamt') return;
+    const d = new Date((parts[1] || '') + 'T00:00:00Z');
+    if (!isNaN(d) && (!latest || d > latest)) latest = d;
+  });
+  return latest;
+}
+
+// ── Stable selectors (Wicket name attributes don't change between sessions) ──
+
+const SEL_EDIT_BTN    = 'a.ia-e-link--icon:has-text("Suchkriterien ändern"), a:has-text("Suchkriterien ändern")';
+const SEL_NEXT_INPUT  = 'input[name="stellensucheFilterAttributes.suchtextContainer:stellensucheFilterAttributes.suchText"]';
+const SEL_NEXT_SUBMIT = 'button.ia-e-button--primary:has-text("Detailsuche")';
+
+// ── Scraper ──────────────────────────────────────────────────────────
+
+async function extractRows(page) {
+  return page.$$eval('tr.ia-e-table__row', rows =>
+    rows.map(row => {
+      const cell = field => row.querySelector(`td[data-field="${field}"]`)?.textContent?.trim() || '';
+
+      const title        = cell('Stellenbezeichnung');
+      const id           = row.querySelector('td[data-field="StellenangebotId"] span')?.textContent?.trim() || '';
+      const company      = cell('Behoerde') || 'Interamt';
+      const modality     = cell('Dienstort');
+      const city         = cell('PLZOrte');
+      const publishedDate = cell('Von');
+      const deadline     = cell('Bewerbungsfrist');
+
+      return { title, id, company, modality, city, publishedDate, deadline };
+    }).filter(r => r.title && r.id)
+  );
+}
+
+async function searchInteramt(page, keyword, isFirst) {
+  const found = [];
+
+  if (isFirst) {
+    // Initial search: navigate to homepage and use the landing form
+    await page.goto(INTERAMT_HOME, { waitUntil: 'networkidle', timeout: 30000 });
+
+    // Dismiss cookie modal — it has a backdrop overlay that blocks all clicks
+    const cookieModal = page.locator('#ia-m-cookie-modal');
+    const isModalVisible = await cookieModal.isVisible().catch(() => false);
+    if (isModalVisible) {
+      await page.locator('#ia-m-cookie-modal .ia-m-modal__close').click();
+      await cookieModal.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => null);
+    }
+
+    await page.waitForSelector('#idOrSuchtext', { state: 'visible', timeout: 15000 });
+    await page.fill('#idOrSuchtext', keyword);
+
+    // #ida is Wicket auto-generated; fallback to class selector if ID changes
+    const submitBtn = page.locator('#ida, button.ia-e-button--primary.ia-e-button--icon').first();
+    await submitBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await submitBtn.click();
+  } else {
+    // Subsequent search: use "Suchkriterien ändern" to reuse the Wicket session.
+    // Fall back to a fresh homepage load if the button isn't found (e.g. after an error).
+    const editBtn = page.locator(SEL_EDIT_BTN).first();
+    const editVisible = await editBtn.isVisible({ timeout: 5000 }).catch(() => false);
+
+    if (editVisible) {
+      // Dismiss any modal/backdrop that Wicket may have raised during the previous search
+      const anyModal = page.locator('.ia-m-modal__close').first();
+      if (await anyModal.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await anyModal.evaluate(el => el.click());
+        await page.locator('.ia-m-modal__container').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => null);
+      }
+      await page.locator('.ia-e-backdrop').waitFor({ state: 'hidden', timeout: 10000 }).catch(() => null);
+      await editBtn.evaluate(el => el.click());
+      await page.waitForSelector(SEL_NEXT_INPUT, { state: 'visible', timeout: 15000 });
+      await page.fill(SEL_NEXT_INPUT, keyword);
+      const submitBtn = page.locator(SEL_NEXT_SUBMIT);
+      await submitBtn.waitFor({ state: 'visible', timeout: 10000 });
+      await submitBtn.click();
+    } else {
+      // Fallback: reload homepage (no cookie modal on subsequent loads)
+      await page.goto(INTERAMT_HOME, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.waitForSelector('#idOrSuchtext', { state: 'visible', timeout: 15000 });
+      await page.fill('#idOrSuchtext', keyword);
+      const submitBtn = page.locator('#ida, button.ia-e-button--primary.ia-e-button--icon').first();
+      await submitBtn.waitFor({ state: 'visible', timeout: 10000 });
+      await submitBtn.click();
+    }
+  }
+
+  // Wait for results table or "no results" message
+  await Promise.race([
+    page.waitForSelector('tr.ia-e-table__row', { timeout: 20000 }),
+    page.waitForSelector('.ia-e-no-results, .ia-no-results, [class*="no-result"]', { timeout: 20000 }),
+  ]).catch(() => null);
+
+  if (DEBUG) {
+    // output/ is User Layer, so the debug dump follows the data root rather than
+    // appearing in whatever directory the scan was launched from (#3510).
+    const debugDir = join(DATA_ROOT, 'output');
+    const debugPng = join(debugDir, 'debug-interamt.png');
+    const debugHtml = join(debugDir, 'debug-interamt.html');
+    mkdirSync(debugDir, { recursive: true });
+    await page.screenshot({ path: debugPng, fullPage: true });
+    const { writeFileSync: wf } = await import('fs');
+    wf(debugHtml, await page.content());
+    console.log(`  [debug] screenshot → ${debugPng}`);
+    console.log(`  [debug] html       → ${debugHtml}`);
+    console.log('  [debug] url:', page.url());
+    const rowCount = await page.$$eval('tr', rows => rows.length);
+    console.log(`  [debug] total <tr> on page: ${rowCount}`);
+  }
+
+  // Wait for Wicket AJAX to fully settle — networkidle ensures no pending requests
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => null);
+
+  // "mehr laden" appends rows to the same page — click until gone, then extract all at once
+  const loadMoreBtn = page.locator('button.ia-m-searchresults__btn-load').first();
+  let pageNum = 1;
+  while (pageNum <= 50) {
+    const visible = await loadMoreBtn.isVisible().catch(() => false);
+    if (!visible) break;
+    const beforeCount = await page.$$eval('tr.ia-e-table__row', rows => rows.length);
+    await loadMoreBtn.evaluate(el => el.click());
+    // Wait for backdrop to clear, then for new rows to appear
+    await page.locator('.ia-e-backdrop').waitFor({ state: 'hidden', timeout: 10000 }).catch(() => null);
+    await page.waitForFunction(
+      n => document.querySelectorAll('tr.ia-e-table__row').length > n,
+      beforeCount,
+      { timeout: 15000 }
+    ).catch(() => null);
+    pageNum++;
+  }
+
+  const rows = await extractRows(page);
+  for (const row of rows) {
+    found.push({
+      title:         row.title,
+      url:           `${OFFER_BASE_URL}${row.id}`,
+      company:       row.company,
+      modality:      row.modality,
+      city:          row.city,
+      publishedDate: row.publishedDate,
+      deadline:      row.deadline,
+    });
+  }
+
+  return found;
+}
+
+// ── Main ─────────────────────────────────────────────────────────────
+
+async function main() {
+  mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
+
+  const gate = createAdmissionGate({ config });
+  const date = localToday();
+
+  const lastScanDate = NO_DATE_FILTER ? null : loadLastScanDate();
+  if (NO_DATE_FILTER) {
+    console.log(`  --all: date filter disabled — fetching all available offers`);
+  } else if (lastScanDate) {
+    console.log(`  Last Interamt scan: ${lastScanDate.toISOString().slice(0,10)} — skipping older offers`);
+  }
+
+  let totalFound = 0;
+  const newOffers = [];
+  const titleSkipped = [];
+  const locationSkipped = [];
+  const dateSkipped = [];
+  const dupeSkipped = [];
+  const errors = [];
+  // Searches overlap, so one offer often comes back under several keywords.
+  // Its first sighting already got the right verdict and scan-history row; a
+  // repeat must not add a skipped_dup row, which pins the URL, on top of a
+  // blacklist, location or date skip that is meant to be revisited later.
+  const handledThisRun = new Set();
+
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+  const page = await context.newPage();
+
+  try {
+    for (let i = 0; i < keywords.length; i++) {
+      const kw = keywords[i];
+      process.stdout.write(`  Searching "${kw}"... `);
+      try {
+        const found = await searchInteramt(page, kw, i === 0);
+        totalFound += found.length;
+        process.stdout.write(`${found.length} found\n`);
+
+        for (const offer of found) {
+          const location = [offer.modality, offer.city].filter(Boolean).join(' ')
+            + (offer.deadline ? ` (Frist: ${offer.deadline})` : '');
+          const pubDate = parseDE(offer.publishedDate);
+          const canonical = {
+            url: offer.url,
+            company: offer.company,
+            title: offer.title,
+            location,
+            source: 'interamt',
+            postedAt: pubDate ? pubDate.getTime() : undefined,
+          };
+
+          if (handledThisRun.has(canonical.url)) continue;
+          handledThisRun.add(canonical.url);
+          const reason = gate.check(canonical);
+          if (reason === 'seen') { dupeSkipped.push(canonical); continue; }
+          // Blacklist skips are counted, not written to scan-history, as in
+          // scan.mjs: removing the entry later lets the posting through again.
+          if (reason === 'blacklisted') continue;
+          if (reason === 'title') { titleSkipped.push(canonical); continue; }
+          if (reason === 'location') { locationSkipped.push(canonical); continue; }
+          // Same-day offers pass: lastScanDate is the day of the last run, and an
+          // offer published later that same day should not be treated as stale.
+          if (lastScanDate && pubDate && pubDate < lastScanDate) { dateSkipped.push(canonical); continue; }
+          newOffers.push(canonical);
+        }
+      } catch (err) {
+        process.stdout.write(`ERROR\n`);
+        errors.push({ keyword: kw, error: err.message });
+      }
+    }
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+
+  if (!DRY_RUN) {
+    if (newOffers.length > 0) await appendToPipeline(newOffers);
+    if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
+    if (titleSkipped.length > 0) await appendToScanHistory(titleSkipped, date, 'skipped_title');
+    if (locationSkipped.length > 0) await appendToScanHistory(locationSkipped, date, 'skipped_location');
+    if (dateSkipped.length > 0) await appendToScanHistory(dateSkipped, date, 'skipped_date');
+    if (dupeSkipped.length > 0) await appendToScanHistory(dupeSkipped, date, 'skipped_dup');
+  }
+
+  // Summary
+  printScanSummaryHeader('Interamt Scan', date);
+  console.log(`Keywords searched:  ${keywords.length}`);
+  console.log(`Total found:        ${totalFound}`);
+  console.log(`Filtered by title:  ${titleSkipped.length}`);
+  console.log(`Filtered location:  ${locationSkipped.length}`);
+  console.log(`Blacklisted:        ${gate.counts.blacklisted}`);
+  console.log(`Filtered by date:   ${dateSkipped.length}`);
+  console.log(`Duplicates:         ${dupeSkipped.length}`);
+  console.log(`New offers:         ${newOffers.length}`);
+
+  if (errors.length > 0) {
+    console.log(`\nErrors (${errors.length}):`);
+    for (const e of errors) console.log(`  ✗ "${e.keyword}": ${e.error}`);
+  }
+
+  if (newOffers.length > 0) {
+    console.log('\nNew offers:');
+    for (const o of newOffers) {
+      console.log(`  + ${o.company} | ${o.title} | ${o.location || 'N/A'}`);
+    }
+    if (DRY_RUN) {
+      console.log('\n(dry run — not saved)');
+    } else {
+      console.log(`\nSaved to data/pipeline.md`);
+    }
+  }
+
+  console.log('\n→ Run /career-ops pipeline to evaluate new offers.');
+}
+
+// Guarded like every sibling scanner (scan-hn.mjs:122, scan-ats-full.mjs:1115).
+// Unguarded, merely IMPORTING this module drove a live browser scan of
+// interamt.de and appended its results to the user's pipeline and scan history —
+// so the file could not be imported by a test, or by anything else, without
+// doing that. A module should not scan the internet as a side effect of being
+// loaded (#3510).
+if (isMainModule(import.meta.url)) {
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  main().catch(err => {
+    console.error('Fatal:', err.message);
+    process.exit(1);
+  });
+}

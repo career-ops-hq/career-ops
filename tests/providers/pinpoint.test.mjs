@@ -185,6 +185,57 @@ try {
   if (badEntryThrew) pass('pinpoint.fetch() throws when the careers_url is not a pinpointhq.com host');
   else fail('pinpoint.fetch() should throw for a non-pinpoint careers_url');
 
+  // ── Demo-tenant filtering (#4190) ──────────────────────────────────────────
+  // Fingerprint captured live from 6 unrelated companies with no real
+  // Pinpoint board (Telefonica, NTT Data, Michael Page, Robert Walters,
+  // Adevinta, TravelPerk): every one serves this exact malformed YouTube
+  // embed in its description, verbatim, regardless of tenant.
+  const demoDescription = '<div><!--block-->We are seeking a passionate and strategic Head of DEI...'
+    + '<figure data-trix-attachment="{&quot;content&quot;:&quot;<div data-plyr-provider=\\&quot;youtube\\&quot; '
+    + 'data-plyr-embed-id=\\&quot;https://www.youtube.com/embed/https://www.youtube.com/embed/pFxm6fszrpw\\&quot;'
+    + '><iframe src=\\&quot;https://www.youtube.com/embed/https://www.youtube.com/embed/pFxm6fszrpw\\&quot;>'
+    + '</iframe></div>&quot;}"></figure></div>';
+
+  const demoTenant = {
+    data: [{
+      title: 'Head of DEI - UK',
+      url: 'https://exampleco.pinpointhq.com/postings/abc',
+      description: demoDescription,
+      location: { name: 'Remote' },
+    }],
+  };
+  if (parsePinpointResponse(demoTenant, 'ExampleCo').length === 0) {
+    pass('parsePinpointResponse drops a posting carrying the shared demo-video fingerprint (#4190)');
+  } else {
+    fail('parsePinpointResponse should drop the seeded demo posting');
+  }
+
+  // Negative control: a real posting that happens to embed some OTHER
+  // YouTube video (a real company demo reel, say) must survive — only the
+  // exact known demo video id is a signal, not "embeds any video".
+  const realTenantWithVideo = {
+    data: [{
+      title: 'Senior Backend Engineer',
+      url: 'https://acme.pinpointhq.com/postings/xyz',
+      description: '<div>Join our team! <iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"></iframe></div>',
+      location: { name: 'Remote' },
+    }],
+  };
+  if (parsePinpointResponse(realTenantWithVideo, 'Acme').length === 1) {
+    pass('parsePinpointResponse keeps a real posting that embeds an unrelated YouTube video');
+  } else {
+    fail('parsePinpointResponse must not flag every video embed as demo content — only the known fingerprint');
+  }
+
+  // A tenant with no description field at all is unaffected (no crash, no
+  // false-positive drop).
+  const noDescription = { data: [{ title: 'Role With No Description', url: 'https://acme.pinpointhq.com/postings/1' }] };
+  if (parsePinpointResponse(noDescription, 'Acme').length === 1) {
+    pass('parsePinpointResponse keeps a posting with no description field at all');
+  } else {
+    fail('parsePinpointResponse should not drop a posting merely for lacking a description');
+  }
+
 } catch (e) {
   fail(`pinpoint provider tests crashed: ${e.message}`);
 }

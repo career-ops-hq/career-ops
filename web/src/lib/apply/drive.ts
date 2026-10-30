@@ -1,9 +1,13 @@
-import { spawn } from "node:child_process";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { Page, Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
+import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
+import { executeAction, factsOf } from "./drive-action.mjs";
 import type { DriveStep } from "./issue";
+import { CAPS } from "../worker-capabilities.mjs";
+import { scopeFrom } from "../claude-invocation.mjs";
 
 export type { DriveStep };
 
@@ -12,8 +16,13 @@ export type { DriveStep };
 // observe (ref-tagged snapshot) → the LLM picks ONE action → WE execute it on OUR
 // headed session → observe again → adapt. We orchestrate the loop (CLI-agnostic in
 // principle; Claude-first via --resume) and execute every action ourselves, so:
-//   • NEVER-SUBMIT is by CONSTRUCTION — the action vocabulary has no "submit", and
-//     we refuse to click any submit/apply-final control. The human submits.
+//   • NEVER-SUBMIT is by CONSTRUCTION for the planner's action vocabulary — it has
+//     no "submit", a submit/apply-final control is listed with no ref so it cannot
+//     be named, and we re-check the element before every action that names one.
+//     What this does NOT construct away: an allowed control's own click handler can
+//     still call requestSubmit(). Closing that needs an interlock on the submit
+//     event itself, not another DOM heuristic (see submit-guard.mjs's header). The
+//     human submits every path this loop does cover.
 //   • everything stays in OUR session (screenshots, handoff, the streamed UI).
 // HYBRID = drive only until a fillable application form is reached, then hand back
 // to deterministic fill+verify. FULL = keep driving (fill the fields too).
@@ -21,45 +30,89 @@ export type { DriveStep };
 
 export type DriveResult = { reached: boolean; turns: number; reason: string; steps: DriveStep[] };
 
-const SUBMIT_RX = /\b(submit|send application|finish( application)?|complete application|apply (and|&) submit|enviar|finalizar)\b/i;
+/** Controls tagged per turn. The planner reads every one of them. */
+const MAX_REFS = 70;
 
 /** Ref-tagged snapshot of the interactive page (a browser_snapshot-style view the
- *  LLM reasons over). Tags data-co-ref on each element so actions are unambiguous. */
-async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
-  return frame.evaluate(() => {
-    const clean = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim().slice(0, 80);
-    const vis = (el: Element) => {
-      const r = (el as HTMLElement).getBoundingClientRect();
-      return (el as HTMLElement).offsetParent !== null && r.width > 2 && r.height > 2;
-    };
-    const sel = 'a, button, input, textarea, select, [role="button"], [role="link"], [role="combobox"], [role="checkbox"], [role="radio"], [contenteditable="true"]';
-    const els = Array.from(document.querySelectorAll(sel)).filter(vis);
-    const lines: string[] = [];
-    let n = 0;
-    for (const el of els.slice(0, 70)) {
-      const tag = el.tagName.toLowerCase();
-      const itype = ((el as HTMLInputElement).type || "").toLowerCase();
-      if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(itype)) {
-        // surface submit buttons in the snapshot as read-only context (not actionable)
-      }
-      const ref = `e${n}`;
-      el.setAttribute("data-co-ref", ref);
-      const role = el.getAttribute("role") || (tag === "a" ? "link" : tag);
-      const label = clean(el.getAttribute("aria-label") || (el as HTMLInputElement).placeholder || el.textContent || (el as HTMLInputElement).value || (el as HTMLInputElement).name);
-      const kind = tag === "input" ? itype || "text" : tag === "a" ? "link" : tag === "select" ? "select" : tag === "textarea" ? "textarea" : role;
-      lines.push(`[${ref}] ${kind} "${label}"`);
-      n++;
+ *  LLM reasons over). Tags data-co-ref on each element so actions are unambiguous.
+ *  A submit control is listed WITHOUT a ref: the planner can see that it exists
+ *  and stop, but it has no name for it, so no action can address it. `actionable`
+ *  is the set of refs it may use, which every ref-bearing action is held to. */
+async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<string> }> {
+  // A fresh prefix per snapshot. The guarantee is structural, not statistical:
+  // every existing `data-co-ref` is stripped before this turn's are written, so
+  // only the current epoch's refs exist on the page, and `actionable` is built
+  // from that same pass. A ref from the previous turn names an attribute that no
+  // longer exists anywhere, so neither the actionable check nor the selector can
+  // find it. Numbering from e0 each turn would hand the same name to a different
+  // element across turns, and both lookups would have accepted it.
+  const epoch = `e${Math.random().toString(36).slice(2, 8)}`;
+  const tagged = await frame.evaluate(
+    ({ prefix, max }) => {
+      for (const stale of Array.from(document.querySelectorAll("[data-co-ref]"))) stale.removeAttribute("data-co-ref");
+      const vis = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return (el as HTMLElement).offsetParent !== null && r.width > 2 && r.height > 2;
+      };
+      const sel = 'a, button, input, textarea, select, [role="button"], [role="link"], [role="combobox"], [role="checkbox"], [role="radio"], [contenteditable="true"]';
+      const els = Array.from(document.querySelectorAll(sel)).filter(vis);
+      let n = 0;
+      for (const el of els.slice(0, max)) el.setAttribute("data-co-ref", `${prefix}-${n++}`);
+      return n;
+    },
+    { prefix: epoch, max: MAX_REFS },
+  );
+  const lines: string[] = [];
+  const actionable = new Set<string>();
+  if (!tagged) return { text: "", actionable };
+  // One handle per candidate, read through the same extractor the action path
+  // uses. Handles rather than one `$$eval` so there is a single copy of the
+  // rule; the reads are issued together and the handles released straight after.
+  const handles = await frame.$$(`[data-co-ref^="${epoch}-"]`);
+  const els = await Promise.all(handles.map((h) => h.evaluate(factsOf, null).catch(() => null)));
+  await Promise.all(handles.map((h) => h.dispose().catch(() => {})));
+  for (const el of els) {
+    if (!el || !el.ref) continue;
+    if (el.tag === "input" && el.type === "hidden") continue;
+    const label = snapshotLabel(el);
+    if (isSubmitControl(el)) {
+      lines.push(`[--] submit "${label}" (not actionable, the human submits)`);
+      continue;
     }
-    return { text: lines.join("\n"), n };
-  });
+    actionable.add(el.ref);
+    const kind = el.tag === "input" ? el.type || "text" : el.tag === "a" ? "link" : el.tag === "select" ? "select" : el.tag === "textarea" ? "textarea" : el.role;
+    lines.push(`[${el.ref}] ${kind} "${label}"`);
+  }
+  return { text: lines.join("\n"), actionable };
 }
+
+// The narrowest scope in the app. scopeFrom("") grants nothing, so every
+// write-capable and network tool is denied BY DERIVATION; Read, Glob and Grep are
+// denied on top so the planner reasons over the snapshot it was handed and
+// nothing else. Derived rather than hand-listed for the reason agent-interpret.ts
+// gives (#2185): a tool added to WRITE_CAPABLE_TOOLS or NETWORK_TOOLS must not
+// leave this argv silently permissive — and verifyClaudeArgs would refuse the
+// spawn the moment the hand-written copy fell behind.
+const PLANNER_DENIED = [scopeFrom("").disallowed, "Read", "Glob", "Grep"].join(",");
 
 /** One planner turn (Claude-first: --resume keeps the loop's context cheaply). */
 function plannerTurn(binPath: string, prompt: string, resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
   const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
-  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", PLANNER_DENIED];
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    // Claude-only by construction — driveSession returns before the loop unless
+    // cliId is "claude", and this argv is Claude's own (--resume, --output-format
+    // json). That is why there is deliberately no unfenced notice here, unlike the
+    // other CLI-spawning paths: claude is always fenceable, so the check could
+    // never fire and the branch would be dead code (#2507). The narrowest scope in
+    // the app: the disallowedTools above denies every tool including Read, so the
+    // planner reasons over the snapshot it was handed and nothing else.
+    const child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId: "claude", capabilities: CAPS.localReadOnly },
+    );
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
@@ -134,22 +187,21 @@ export async function driveSession(
 ANSWERS (match by the field's label):
 ${answersBlock || "(no answers provided — just reach/observe)"}`;
   let resumeId: string | null = null;
-  let lastUrl = page.url();
 
   const stopVerb = goal === "reach" ? '{"action":"reached_form"}            STOP — the fillable application form is now visible' : '{"action":"done"}                    STOP — every answer is filled (you NEVER submit; the human does)';
   for (let turn = 1; turn <= budget; turn++) {
     if (goal === "reach" && (await isFormReady().catch(() => false))) return { reached: true, turns: turn - 1, reason: "form-reached", steps };
     await dropNewTabs(page); // any "Apply" link/popup navigates in OUR tab, not a new one
     const frame = page.mainFrame();
-    const snap = await snapshot(frame).catch(() => ({ text: "", n: 0 }));
+    const snap = await snapshot(frame).catch(() => ({ text: "", actionable: new Set<string>() }));
     const prompt =
       turn === 1
         ? `You are an agent driving a real web browser for a job seeker (we execute your actions; the human submits at the end). ${goalText}
 You NEVER submit a form — there is no submit action; the human does that.
 Reply with EXACTLY ONE action as a JSON object, nothing else:
-  {"action":"click","ref":"e3"}            click an element
-  {"action":"type","ref":"e4","text":"…"}  type into a field
-  {"action":"select","ref":"e9","value":"…"} pick an option
+  {"action":"click","ref":"<ref>"}         click an element (refs are the bracketed names below, and they change every turn)
+  {"action":"type","ref":"<ref>","text":"…"}  type into a field
+  {"action":"select","ref":"<ref>","value":"…"} pick an option
   {"action":"scroll"}                        scroll down to reveal more
   ${stopVerb}
   {"action":"stuck","reason":"…"}            you can't proceed (login/captcha/dead-end)
@@ -183,45 +235,14 @@ Reply ONE action JSON.`;
       return { reached: false, turns: turn, reason: act.reason || "stuck", steps };
     }
 
-    // execute the action on OUR session — NEVER submit.
-    let detail = "";
-    let note = "";
-    try {
-      const loc = act.ref ? frame.locator(`[data-co-ref="${act.ref}"]`).first() : null;
-      if (act.action === "click" && loc) {
-        const txt = (await loc.innerText().catch(() => "")) || (await loc.getAttribute("value").catch(() => "")) || "";
-        if (SUBMIT_RX.test(txt)) {
-          note = "refused to click a submit control (the human submits)";
-          detail = `blocked submit "${txt.slice(0, 40)}"`;
-        } else {
-          detail = `click "${txt.slice(0, 40)}"`;
-          await loc.scrollIntoViewIfNeeded().catch(() => {});
-          await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {}), loc.click({ timeout: 6000 })]);
-        }
-      } else if (act.action === "type" && loc) {
-        detail = `type into ${act.ref}`;
-        await loc.fill(act.text || "").catch(async () => {
-          await loc.click();
-          await page.keyboard.type(act.text || "");
-        });
-      } else if (act.action === "select" && loc) {
-        detail = `select "${act.value}"`;
-        await loc.selectOption({ label: act.value || "" }).catch(() => loc.selectOption(act.value || ""));
-      } else if (act.action === "scroll") {
-        detail = "scroll";
-        await page.evaluate(() => window.scrollBy(0, 700)).catch(() => {});
-      } else {
-        detail = `unknown action ${act.action}`;
-      }
-    } catch (e) {
-      detail = `${act.action} failed: ${e instanceof Error ? e.message.slice(0, 50) : "err"}`;
-    }
+    // execute the action on OUR session — NEVER submit. The executor, and the
+    // guard it applies to every action naming a ref, live in drive-action.mjs so
+    // a test can drive them: nothing here acts on an element directly.
+    const { detail, note, refusal } = await executeAction(page, frame, act, snap.actionable);
     await page.waitForTimeout(700);
-    const s: DriveStep = { turn, action: act.action, detail, thumb: await shot(), note: note || undefined };
+    const s: DriveStep = { turn, action: act.action, detail, thumb: await shot(), note: note || undefined, refusal };
     steps.push(s);
     emit(s);
-    lastUrl = page.url();
-    void lastUrl;
   }
   return { reached: await isFormReady().catch(() => false), turns: budget, reason: "budget-exhausted", steps };
 }

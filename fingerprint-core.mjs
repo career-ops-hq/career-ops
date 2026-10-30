@@ -19,6 +19,7 @@
  */
 
 import { createHash } from 'crypto';
+import { normalizeTextKey } from './tracker-parse.mjs';
 
 /** Descriptions shorter than this (after normalization) carry too little
  * signal to distinguish real matches from boilerplate — skip them. */
@@ -82,6 +83,52 @@ export function fingerprintText(text) {
   return hash.toString(16).padStart(16, '0');
 }
 
+/** A fingerprint is exactly 16 lowercase hex chars; anything else never
+ * matches. Hoisted to module scope so the hot path reuses one compiled regex
+ * rather than re-evaluating a literal on every call. */
+const FINGERPRINT_RE = /^[0-9a-f]{16}$/;
+
+/** Set-bit count for every 16-bit value, built once at module load (64 KB).
+ * A 64-bit Hamming distance then costs four table lookups instead of the 64
+ * BigInt shift/mask iterations this module used to run per comparison, and
+ * findCrossListings compares offers × history rows, so that per-pair cost is
+ * multiplied by the product of both list lengths (#2381). */
+const POPCOUNT16 = (() => {
+  const table = new Uint8Array(1 << 16);
+  for (let i = 1; i < table.length; i++) table[i] = table[i >> 1] + (i & 1);
+  return table;
+})();
+
+/**
+ * Number of set bits in a 32-bit word.
+ *
+ * Sign is irrelevant: both masks yield a non-negative 0..65535 index, so a
+ * negative int32 (which `^` produces whenever the top bit is set) indexes the
+ * table just as correctly as a positive one.
+ *
+ * @param {number} x - Any 32-bit integer.
+ * @returns {number} 0..32.
+ */
+function popcount32(x) {
+  return POPCOUNT16[x & 0xffff] + POPCOUNT16[(x >>> 16) & 0xffff];
+}
+
+/**
+ * Split a fingerprint that has already passed FINGERPRINT_RE into its two
+ * 32-bit halves.
+ *
+ * JS bitwise operators are 32-bit, so the 64-bit value is carried as a pair.
+ * A single Number would lose precision above 2^53, and a BigInt allocates on
+ * every operation — the exact cost this rewrite removes.
+ *
+ * @param {string} fp - Validated 16-hex-char fingerprint.
+ * @returns {{hi: number, lo: number}} Upper and lower 32 bits, as int32.
+ */
+function splitFingerprint(fp) {
+  const s = String(fp);
+  return { hi: parseInt(s.slice(0, 8), 16) | 0, lo: parseInt(s.slice(8, 16), 16) | 0 };
+}
+
 /**
  * Similarity of two fingerprints: 1 − hammingDistance/64. Empty or malformed
  * fingerprints never match (returns 0).
@@ -91,20 +138,51 @@ export function fingerprintText(text) {
  * @returns {number} 0..1.
  */
 export function similarity(a, b) {
-  if (!/^[0-9a-f]{16}$/.test(a || '') || !/^[0-9a-f]{16}$/.test(b || '')) return 0;
-  let x = BigInt('0x' + a) ^ BigInt('0x' + b);
-  let dist = 0;
-  while (x) {
-    dist += Number(x & 1n);
-    x >>= 1n;
-  }
-  return 1 - dist / 64;
+  if (!FINGERPRINT_RE.test(a || '') || !FINGERPRINT_RE.test(b || '')) return 0;
+  const x = splitFingerprint(a);
+  const y = splitFingerprint(b);
+  return 1 - (popcount32(x.hi ^ y.hi) + popcount32(x.lo ^ y.lo)) / 64;
 }
 
-/** Company key for "different employer" checks — same normalization family as
- * the tracker tooling (lowercase alphanumerics). */
+/**
+ * Largest Hamming distance (0..64) that still scores at or above `threshold`,
+ * or -1 when no distance does.
+ *
+ * Derived by evaluating the SAME `1 - d / 64 >= threshold` comparison the
+ * per-pair path used to run, not by rounding `64 * (1 - threshold)`. For
+ * integer d, `d / 64` is exact in binary floating point, so the sequence is
+ * exactly monotonic and this search reproduces the old accept/reject decision
+ * at every threshold — including one landing exactly on a bit boundary, where a
+ * floor()/ceil() derivation is off by one in one direction. The negated
+ * comparison also makes a NaN threshold return -1 (reject everything), matching
+ * what `score >= NaN` did before.
+ *
+ * @param {number} threshold - Minimum similarity, normally 0..1.
+ * @returns {number} Maximum accepted bit distance, or -1 when none qualifies.
+ */
+function maxDistanceFor(threshold) {
+  for (let d = 0; d <= 64; d++) {
+    if (!(1 - d / 64 >= threshold)) return d - 1;
+  }
+  return 64;
+}
+
+/**
+ * Company key for "different employer" checks.
+ *
+ * Delegates to the shared normalizeTextKey() (#2393/#2445) rather than the
+ * `[a-z0-9]` strip it used to carry. That strip DELETED every non-Latin name,
+ * so アクメ株式会社, グロベックス合同会社 and Яндекс all keyed to '' and compared
+ * equal — and because findCrossListings() SKIPS same-key pairs as re-posts,
+ * an identical posting shared between two genuinely different non-Latin
+ * employers was silently never reported as a cross-listing. The Latin
+ * equivalent was reported normally (#2500).
+ *
+ * The key keeps combining marks, so Devanagari/Arabic names differing only in
+ * matras stay distinct rather than collapsing into one "employer".
+ */
 function companyKey(name) {
-  return String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalizeTextKey(String(name ?? ''));
 }
 
 /**
@@ -113,6 +191,15 @@ function companyKey(name) {
  * re-posts (detect-reposts.mjs territory), not cross-listings — skipped here.
  *
  * Pure function: pass the offers and pre-parsed history rows in.
+ *
+ * This is O(offers × recentHistory), so everything that depends on only one
+ * side of a pair is hoisted out of the inner loop: each row's companyKey and
+ * fingerprint halves are computed once when `recent` is built, each offer's
+ * once per offer, and the threshold is converted once into a maximum bit
+ * distance. The inner loop is then two integer compares plus four table
+ * lookups. Results are byte-identical to the per-pair similarity() version —
+ * see tests/fingerprint-core.test.mjs, which differentially tests this against
+ * a reference copy of the old implementation.
  *
  * @param {Array<{url: string, company: string, title: string, fingerprint?: string}>} offers
  * @param {Array<{url: string, dateStr: string, company: string, title: string, fingerprint?: string}>} historyRows
@@ -124,22 +211,51 @@ export function findCrossListings(offers, historyRows, opts = {}) {
   const windowDays = opts.windowDays ?? CROSSLIST_WINDOW_DAYS;
   const today = opts.today ? new Date(opts.today) : new Date();
   const cutoff = today.getTime() - windowDays * 86400000;
+  const maxDist = maxDistanceFor(threshold);
+  // A malformed (or absent) fingerprint on either side scores 0, exactly as
+  // similarity()'s regex guard did. 0 is still a match for a caller passing
+  // threshold <= 0, so the zero-score branch is kept rather than dropped.
+  const zeroScores = 0 >= threshold;
 
-  const recent = historyRows.filter((r) => {
-    if (!r.fingerprint) return false;
-    const t = Date.parse(r.dateStr);
-    return !Number.isNaN(t) && t >= cutoff;
-  });
+  // One pass over history: the date filter, companyKey and fingerprint split
+  // all happen once per row instead of once per (offer, row) pair. Iteration
+  // order is preserved so the pre-sort match order is unchanged.
+  const recent = [];
+  for (const row of historyRows) {
+    if (!row.fingerprint) continue;
+    const t = Date.parse(row.dateStr);
+    if (Number.isNaN(t) || t < cutoff) continue;
+    const valid = FINGERPRINT_RE.test(row.fingerprint);
+    const half = valid ? splitFingerprint(row.fingerprint) : null;
+    recent.push({ row, key: companyKey(row.company), url: row.url, valid, hi: half ? half.hi : 0, lo: half ? half.lo : 0 });
+  }
 
   const matches = [];
   for (const offer of offers) {
     if (!offer.fingerprint) continue;
     const offerCompany = companyKey(offer.company);
-    for (const row of recent) {
-      if (companyKey(row.company) === offerCompany) continue; // re-post, not cross-listing
-      if (row.url === offer.url) continue;
-      const score = similarity(offer.fingerprint, row.fingerprint);
-      if (score >= threshold) matches.push({ offer, row, score });
+    const offerValid = FINGERPRINT_RE.test(offer.fingerprint);
+    // Nothing an invalid offer fingerprint is compared against can score above
+    // 0, so when 0 is below the threshold the whole inner loop is dead.
+    if (!offerValid && !zeroScores) continue;
+    const half = offerValid ? splitFingerprint(offer.fingerprint) : null;
+    const offerHi = half ? half.hi : 0;
+    const offerLo = half ? half.lo : 0;
+    for (const cand of recent) {
+      if (cand.key === offerCompany) continue; // re-post, not cross-listing
+      if (cand.url === offer.url) continue;
+      let score;
+      if (offerValid && cand.valid) {
+        const dist = popcount32(offerHi ^ cand.hi) + popcount32(offerLo ^ cand.lo);
+        // `dist > maxDist` is exactly `1 - dist / 64 < threshold` by the
+        // construction of maxDistanceFor() — no float compare in the hot path.
+        if (dist > maxDist) continue;
+        score = 1 - dist / 64;
+      } else {
+        if (!zeroScores) continue;
+        score = 0;
+      }
+      matches.push({ offer, row: cand.row, score });
     }
   }
   return matches.sort((a, b) => b.score - a.score);

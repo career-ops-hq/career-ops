@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+
 // JibeApply provider — hits the /api/jobs endpoint on the same hostname.
 // Auto-detects from careers_url pattern `https://<slug>.jibeapply.com`.
 // iCIMS acquired Jibe in 2019; some tenants run it on a branded custom
@@ -65,9 +67,14 @@ export function parseJibeapplyResponse(json, entry) {
       const title = String(d.title || '').trim();
       const slug = d.slug || d.req_id;
       if (!title || !slug) return null;
+      // A lone surrogate in slug throws URIError out of encodeURIComponent and
+      // aborts the whole page's .map(); drop just this job (the trailing
+      // .filter(Boolean) removes the null).
+      const encodedSlug = safeEncodeURIComponent(slug);
+      if (encodedSlug === null) return null;
       return {
         title,
-        url: `${origin}/jobs/${encodeURIComponent(slug)}`,
+        url: `${origin}/jobs/${encodedSlug}`,
         company: String(d.hiring_organization || entry.name || '').trim(),
         location: d.full_location || [d.city, d.country].filter(Boolean).join(', '),
       };
@@ -102,6 +109,9 @@ export default {
     // set `count` to the total rather than the per-page count.
     const pageSize = first.jobs?.length || first.count || DEFAULT_PAGE_SIZE;
     const allJobs = [...(first.jobs ?? [])];
+    // Set when the board is cut short (page cap or a failed page), so a caller can tell a
+    // partial board from a complete one without reading stderr (the workdayTruncated convention).
+    let truncated = false;
 
     if (total > pageSize && pageSize > 0) {
       const maxPages = resolveMaxPages(entry);
@@ -119,6 +129,7 @@ export default {
           json = await ctx.fetchJson(u2.toString(), { redirect: 'error' });
         } catch (err) {
           console.error(`⚠️  jibeapply: ${entry.name} page ${page} fetch failed — ${err.message} (returning ${allJobs.length} jobs fetched so far)`);
+          truncated = true;
           break;
         }
         allJobs.push(...(json.jobs ?? []));
@@ -129,6 +140,7 @@ export default {
       // otherwise the user has no way to notice postings are missing from
       // their scan.
       if (Math.ceil(total / pageSize) > maxPages) {
+        truncated = true;
         console.error(
           `⚠️  jibeapply: ${entry.name} has more postings than max_pages allows ` +
           `(fetched ${allJobs.length} of ${total}) — ` +
@@ -137,6 +149,8 @@ export default {
       }
     }
 
-    return parseJibeapplyResponse({ jobs: allJobs }, entry);
+    const result = parseJibeapplyResponse({ jobs: allJobs }, entry);
+    if (truncated) /** @type {any} */ (result).jibeapplyTruncated = true;
+    return result;
   },
 };

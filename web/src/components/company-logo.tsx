@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { companyDomain, companyInitials, monogramHue } from "@/lib/company";
+import { companyInitials, monogramHue } from "@/lib/company";
 import { cn } from "@/lib/cn";
-
-const CONFIG_KEY = "career-ops:config";
+import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
 // A small company mark: the real favicon on a white tile when logos are enabled
 // and resolvable, otherwise a deterministic colored monogram. The monogram is
@@ -25,19 +24,25 @@ export function CompanyLogo({
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CONFIG_KEY);
-      const v = raw ? JSON.parse(raw) : null;
-      setEnabled(v?.logos !== false); // default ON unless explicitly disabled
-    } catch {
-      setEnabled(true);
+    function read() {
+      try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        const v = raw ? JSON.parse(raw) : null;
+        setEnabled(v?.logos !== false); // default ON unless explicitly disabled
+      } catch {
+        setEnabled(true);
+      }
     }
+    read();
+    return subscribeConfig(window, read);
   }, []);
 
-  const domain = companyDomain(name);
   const hue = monogramHue(name);
   const radius = Math.max(4, Math.round(size * 0.28));
-  const showImg = enabled && !!domain && !failed;
+  // Resolve by NAME, not by a single client-guessed domain: ATS postings carry
+  // legal entity names ("Amazon.com Services LLC") that one slug rule cannot
+  // resolve, and /api/logo already tries several candidates per name.
+  const showImg = enabled && !!name?.trim() && !failed;
 
   return (
     <span
@@ -58,7 +63,7 @@ export function CompanyLogo({
       {showImg && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`/api/logo?domain=${encodeURIComponent(domain!)}`}
+          src={`/api/logo?company=${encodeURIComponent(name)}`}
           alt=""
           width={size}
           height={size}

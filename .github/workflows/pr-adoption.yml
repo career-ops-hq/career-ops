@@ -1,0 +1,89 @@
+name: 'PR adoption ladder (labels)'
+
+# The adoption ladder (CONTRIBUTING.md -> "Adopting an abandoned PR") is run by
+# maintainers: the check-ins and the close are posted under a maintainer's own
+# name, one PR at a time, and the project's bot keeps to its single
+# acknowledgment. This workflow only keeps the ladder labels honest: when the
+# author of a PR on the ladder comments, reviews or pushes after the last
+# ladder step, it removes every adoption/* label so the ladder starts over.
+# Only the author's activity counts: a maintainer bringing main into the branch
+# does not restart it.
+# It never comments, never closes a PR and never adds a label.
+
+on:
+  schedule:
+    - cron: '47 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const LADDER = ['adoption/track', 'adoption/pinged', 'adoption/warned', 'adoption/ready'];
+
+            // Every open PR carrying any ladder label (the labels filter is an AND, so one query per label).
+            let failures = 0;
+            const onLadder = new Map();
+            for (const name of LADDER) {
+              const items = await github.paginate(github.rest.issues.listForRepo, {
+                owner, repo, state: 'open', labels: name, per_page: 100,
+              });
+              for (const i of items) if (i.pull_request) onLadder.set(i.number, i);
+            }
+
+            for (const [n, issue] of onLadder) {
+              const author = issue.user.login;
+              const labels = issue.labels.map(l => l.name).filter(l => l.startsWith('adoption/'));
+
+              // Anchor = the most recent adoption/* label event: author activity only counts after the last step.
+              const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                owner, repo, issue_number: n, per_page: 100,
+              });
+              const labelEvents = timeline.filter(e =>
+                e.event === 'labeled' && e.label && e.label.name.startsWith('adoption/'));
+              if (labelEvents.length === 0) continue;
+              const anchor = new Date(labelEvents[labelEvents.length - 1].created_at);
+
+              // Only the author's own activity after the anchor counts. Our pushes to their branch (bringing main in)
+              // must not keep a dead PR alive, edits to old comments are not new activity, and a rebased commit keeps
+              // its old date, so a force push by the author counts by the time of the push. Each identity goes with its own
+              // date: our rebase keeps the author's login and old author date, with us as committer and a new committer date.
+              const after = (iso) => iso && new Date(iso) > anchor;
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: n, since: anchor.toISOString(), per_page: 100,
+              });
+              const reviewComments = await github.paginate(github.rest.pulls.listReviewComments, {
+                owner, repo, pull_number: n, since: anchor.toISOString(), per_page: 100,
+              });
+              const commits = await github.paginate(github.rest.pulls.listCommits, {
+                owner, repo, pull_number: n, per_page: 100,
+              });
+              const byAuthor = (u) => u && u.login === author;
+              const active = comments.some(c => byAuthor(c.user) && after(c.created_at))
+                || reviewComments.some(c => byAuthor(c.user) && after(c.created_at))
+                || commits.some(c => (byAuthor(c.author) && after(c.commit.author.date)) || (byAuthor(c.committer) && after(c.commit.committer.date)))
+                || timeline.some(e => e.event === 'head_ref_force_pushed' && byAuthor(e.actor) && after(e.created_at));
+              if (!active) continue;
+
+              let failed = false;
+              for (const name of labels) {
+                try {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: n, name });
+                } catch (e) {
+                  if (e.status === 404) continue; // already removed
+                  failed = true;
+                  core.warning(`#${n}: could not remove ${name} (${e.status || e.message})`);
+                }
+              }
+              if (failed) { failures++; continue; }
+              core.info(`#${n}: author active again, ladder reset`);
+            }
+            if (failures) core.setFailed(`${failures} PR(s) could not be reset: see the warnings above`);

@@ -11,8 +11,10 @@ Opt-in mode for candidates who already maintain a hand-tuned `.tex` CV. **Does n
 
 | Family | Detection | Editable prose |
 |--------|-----------|----------------|
-| `resumeSubheading` | `\resumeSubheading` + `\resumeItem` | `\resumeItem{...}` bullets; `\textbf{Category}{: items}` skill values |
+| `resumeSubheading` | `\resumeSubheading` + `\resumeItem`/`\resumeItemWithoutTitle`/`\resumeSubItem` | `\resumeItem{...}` and `\resumeItemWithoutTitle{}{...}` bullets; `\textbf{Category}{: items}` and `\resumeSubItem{Category}{items}` skill values |
 | `tabularx-itemize` | `tabularx` + `itemize`, no resume macros | `\item` body text in the document body |
+
+Extraction only reads the document body (preamble macro definitions are skipped) and ignores commented-out macro calls — old bullets kept as `%` comments never become editable slots.
 
 Any other layout → stop with the script error and suggest `/career-ops latex` (cv.md → career-ops template).
 
@@ -31,6 +33,8 @@ latex:
 ```
 
 ## Pipeline
+
+**Locked Sections:** If `cv.locked_sections` is defined in `profile.yml`, NEVER remove, shorten, or paraphrase those sections during CV generation or tailoring. They must appear verbatim. (Note: Programmatic validation of locked sections is enforced in the HTML/PDF pipeline; it is not yet covered in the LaTeX pipeline.)
 
 1. Resolve source `.tex` path (see above)
 2. Run: `node extract-latex-content.mjs <source.tex> --out /tmp/cv-slots-{company}.json`
@@ -53,10 +57,11 @@ latex:
 ```
 
 7. Run: `node patch-latex-content.mjs <source.tex> /tmp/cv-patches-{company}.json output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex`
-8. Run: `node generate-latex.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --compile-only`
+8. Run: `node generate-latex.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --compile-only --source <source.tex>`
+   - This runs the CV fact gate on the patched `.tex` before compiling, when `cv.md` exists. `--source <source.tex>` counts the user's own hand-tuned `.tex` as evidence alongside `cv.md` and `article-digest.md`, since it is user-authored. A blocked document is not compiled; the JSON report carries `factCheck.verdict: "block"` and the unsupported claims. Fix the patch text and re-run steps 7–8. Never pass `--skip-fact-check` unless the user explicitly asks for it.
 9. Report: family, slot count, patched count, `.tex` path, `.pdf` path (or compile error)
 
-**Requires:** `tectonic` or `pdflatex` on PATH (same as `latex` mode).
+**Requires:** `tectonic` or `pdflatex` (same as `latex` mode). If step 8's report carries `installHint`, follow the "No engine installed?" step in `modes/latex.md` — ask first, then `node install-latex-engine.mjs` and retry.
 
 ## Ethical rules (mandatory)
 

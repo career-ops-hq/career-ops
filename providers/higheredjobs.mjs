@@ -1,4 +1,5 @@
 // @ts-check
+import { decodeEntities } from './_html-entities.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // HigherEdJobs.com RSS category feed provider.
@@ -42,37 +43,30 @@ export default {
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // cleanUrl below it keeps the request pinned to www.higheredjobs.com.
     const text = await ctx.fetchText(feedUrl, { redirect: 'error' });
+    assertRssFeed(text);
     return parseHigherEdJobsFeed(text, fallbackCompany(entry));
   },
 };
 
-function fromCodePoint(cp) {
-  try {
-    return String.fromCodePoint(cp);
-  } catch {
-    return '';
+// The RSS endpoint sits behind an Incapsula bot wall on some networks, and the
+// wall answers 200 with a small HTML challenge page. Parsed as a feed that is
+// zero <item>s, so the board read as "0 jobs" with no hint that nothing was
+// fetched (#3637). A feed with no items is still a valid, empty board; only a
+// body that is not a feed at all is an error. Solving the challenge is out of
+// scope: providers are fetch-only.
+function assertRssFeed(text) {
+  if (typeof text === 'string' && /<(?:rss|channel)\b/i.test(text)) return;
+  if (typeof text === 'string' && /<html\b/i.test(text)) {
+    throw new Error('higheredjobs: RSS endpoint answered a challenge page, not a feed');
   }
-}
-
-// Decode the XML entities that appear in RSS text: numeric (&#38; / &#x27;)
-// and the named five. Numeric forms are decoded first; &amp; is decoded LAST
-// so a literal "&amp;lt;" yields "&lt;" rather than over-decoding to "<".
-function decodeXmlEntities(s) {
-  return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => fromCodePoint(parseInt(d, 10)))
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
+  throw new Error('higheredjobs: RSS endpoint answered no feed');
 }
 
 // Resolve a tag's inner text: unwrap a CDATA section, else decode entities.
 function extractText(inner) {
   const cdata = inner.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
   if (cdata) return cdata[1].trim();
-  return decodeXmlEntities(inner).trim();
+  return decodeEntities(inner).trim();
 }
 
 // Extract the text of the first <tag>...</tag> in a block. Returns '' when absent.

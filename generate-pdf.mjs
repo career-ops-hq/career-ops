@@ -4,7 +4,15 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
+ *
+ * --batch renders every document in a JSON manifest (an array of
+ * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
+ * relaunching per document. One failing document is isolated and recorded; the
+ * rest still render. Results are written to <manifest>.results.json and the
+ * process exits non-zero if any document failed (#2384). Relative input and
+ * output paths resolve against the manifest's folder, not process.cwd().
  *
  * --report links the generated PDF to its tracker/report number and records
  * the linkage in data/pdf-index.tsv so downstream tools (e.g. the TUI
@@ -17,6 +25,12 @@
  * role) rather than accidentally scrambled by an agent. Without this flag,
  * any divergence from cv.md's section order still fails generation.
  *
+ * --allow-nonchronological downgrades the work-experience ordering guard from
+ * a thrown error to a console warning. By default a CV whose experience entries
+ * are not newest-first fails generation: promoting "the most relevant role" to
+ * the top is a functional-resume technique that buries the candidate's most
+ * recent senior title and reads as concealment to ATS parsers and recruiters.
+ *
  * --max-pages=N sets the preferred rendered CV length (default: 2 pages).
  * The actual page count is checked after Chromium writes the PDF; overflow
  * warns with trimming guidance by default. --strict-pages turns that warning
@@ -26,18 +40,146 @@
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
  */
 
-import { chromium } from 'playwright';
-import { resolve, dirname, relative, sep, isAbsolute } from 'path';
+import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
+import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections } from './theme-style.mjs';
+import { validateCvExperienceOrder } from './cv-experience-order.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
+import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, pageFormatForCountry, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const trackerPath = resolveTrackerPath(getCareerOpsRoot());
+// Derive the workspace root from the uncanonicalized tracker path (#3169): a
+// repo that symlinks only its data/ out (the #524 workaround) must still resolve
+// cv.md, config/ and output/ inside the repo, not follow data/ to the symlink
+// target. resolveWorkspaceRootFor canonicalizes the derived root itself, so the
+// spelling the rest of the module compares against stays canonical as before.
+const workspaceRoot = resolveWorkspaceRootFor(getCareerOpsRoot());
 const PDF_PAGE_MARGIN = '0.6in';
 
+/**
+ * The profile a render reads. An explicit root is the workspace the caller
+ * named, so the environment does not redirect it. Otherwise CAREER_OPS_PROFILE
+ * names the file outright, and without it the profile sits in the workspace
+ * (which CAREER_OPS_TRACKER can move off the data root, #2471).
+ */
+function workspaceProfilePath(explicitRoot) {
+  if (explicitRoot) return getProfilePath(explicitRoot);
+  return hasProfileOverride() ? getProfilePath() : getProfilePath(workspaceRoot);
+}
+
+// Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
+// /var -> /private/var) is compared like-for-like by assertInsideWorkspace.
+// When CAREER_OPS_TRACKER points at another workspace, that workspace—not the
+// installed script directory—is the safe boundary for input and output.
+//
+// Derived at USE time, not frozen at import (#3162, root-caused occurrence 6):
+// the root reads CAREER_OPS_TRACKER, and a sibling test that legitimately sets
+// that variable for its own fixture — and correctly restores it afterwards —
+// still poisoned this module for the whole process if the import happened to
+// land inside that window. A `const` cannot un-read an env var, so the guard
+// then compared perfectly valid repo paths against another test's temp dir and
+// refused to write, intermittently and only under the full suite. Memoized on
+// the variable's own value: same cost as the const while nothing changes, and
+// self-correcting the moment it does. Same defect class as #3159.
+let __rootCache = { key: null, root: null, canonical: null };
+function refreshRootCache() {
+  // Derive the root on EVERY call and key the cache on the resolved value.
+  //
+  // The root can move three ways: CAREER_OPS_TRACKER, CAREER_OPS_ROOT /
+  // CAREER_OPS_DATA_DIR, and the .career-ops-data marker file. Keying on the
+  // environment alone misses the marker, which is a file on disk and can change
+  // while the environment does not, so the cache would keep serving a stale
+  // workspace. The resolved root is the one value that captures all three, and
+  // what is memoised is only realpathSync(), the syscall worth avoiding.
+  //
+  // getCareerOpsRoot(), not __dirname: the data root is the env vars, then a
+  // .career-ops-data marker, then the repo, and only the last of those is the
+  // script's own directory. With the user layer outside the checkout this
+  // derived the workspace from the CODE directory, so every path under the
+  // real data root read as an escape and the PDF was refused (#4389). Line 49
+  // already used getCareerOpsRoot(), so the two disagreed inside one module.
+  //
+  // Same #3169 derivation as the import-time const: resolveWorkspaceRootFor works
+  // from the uncanonicalized tracker so a symlinked data/ stays in the repo.
+  const root = resolveWorkspaceRootFor(getCareerOpsRoot());
+  if (__rootCache.key !== root) {
+    __rootCache = { key: root, root, canonical: realpathSync(root) };
+  }
+  return __rootCache;
+}
+
+// Two accessors on purpose, so each call site keeps the exact semantics it had:
+// the containment guard compares canonical forms (a symlinked ancestor must not
+// read as an escape), while the manifest/output helpers work in the lexical form
+// the rest of the module and its callers use.
+function currentWorkspaceRoot() { return refreshRootCache().root; }
+function canonicalWorkspaceRoot() { return refreshRootCache().canonical; }
+
+/**
+ * Assert that an already-resolved absolute path stays inside the tracker workspace,
+ * resolving symlinks first.
+ *
+ * A lexical relative(workspaceRoot, p) check accepts a path that stays lexically
+ * inside the repo but whose ancestor is a symlink escaping it. This canonicalizes
+ * p through realpath — the path itself when it exists, otherwise its nearest
+ * existing ancestor with the not-yet-created tail re-appended (the output PDF and
+ * its directory may not exist yet) — then checks containment against the
+ * realpathed workspace root (mirrors canonicalizeTrackerPath in tracker-utils.mjs).
+ *
+ * @param {string} absPath - Already-resolved absolute candidate path.
+ * @param {string} label - 'input' | 'output', used in the thrown message.
+ * @returns {string} absPath unchanged when contained.
+ * @throws {Error} when the canonical path escapes the tracker workspace.
+ */
+function assertInsideWorkspace(absPath, label) {
+  let probe = absPath;
+  const tail = [];
+  while (!existsSync(probe)) {
+    tail.unshift(basename(probe));
+    const parent = dirname(probe);
+    if (parent === probe) break; // reached the filesystem root
+    probe = parent;
+  }
+  let canonical;
+  try {
+    canonical = existsSync(probe) ? resolve(realpathSync(probe), ...tail) : absPath;
+  } catch (err) {
+    // Canonicalization failed (realpath raced away, permission error): containment
+    // is unprovable, so fail closed rather than fall back to a lexical form that a
+    // symlinked ancestor could slip past. Named as its own failure, not as an
+    // escape: an intermittent CI-only hit of this guard (#3162) was undiagnosable
+    // while both branches threw the same message — "escapes" points a reader at
+    // the path, when the actual event was realpath failing underneath it.
+    throw new Error(
+      `${label} could not be canonicalized against the tracker workspace`
+      + ` (${/** @type {any} */ (err)?.code || 'realpath failed'} on ${probe}): ${absPath}`,
+    );
+  }
+  const workspace = canonicalWorkspaceRoot();
+  const rel = relative(workspace, canonical);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    // #3162: an intermittent macOS-CI-only hit of this branch happens on paths
+    // that are lexically inside the sandbox, and canonicalization SUCCEEDS
+    // before it. Print both sides so the next occurrence names the disagreeing
+    // ancestor outright instead of asking a reader to reconstruct it.
+    throw new Error(
+      `${label} escapes the tracker workspace: ${absPath}`
+      + ` (workspaceRoot=${workspace} canonical=${canonical} rel=${rel})`,
+    );
+  }
+  return absPath;
+}
+
 // Ensure output directory exists (fresh setup)
-mkdirSync(resolve(__dirname, 'output'), { recursive: true });
+mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
 
 /**
  * Normalize text for ATS compatibility by converting problematic Unicode.
@@ -48,7 +190,29 @@ mkdirSync(resolve(__dirname, 'output'), { recursive: true });
  *
  * Only touches body text — preserves CSS, JS, tag attributes, and URLs.
  * Returns { html, replacements } so the caller can log what was changed.
+ *
+ * In body text it also keeps each hyphenated word on one line (#4908).
+ * Chromium may break a line after a hard hyphen, and no CSS turns that off,
+ * so "go-to-market" lands in the PDF text layer as "go-" and "to-market" on
+ * separate lines: some extractors join the halves without the hyphen, others
+ * keep the line break, and either way the term an ATS matches on is gone. A
+ * white-space:nowrap span changes the line breaking only, never the text.
+ * The span covers the whole whitespace-delimited run ("30-40%", "$1-2M"), so
+ * its edges sit where the text already breaks: the fact gate turns tags into
+ * spaces, and a span around "30-40" alone would read as "40 %". CJK text has
+ * no spaces, so a run there is a whole clause: only the hyphenated Latin word
+ * inside it is wrapped, and CJK characters, which may break anywhere, never
+ * count as part of one.
  */
+const WORD_CHAR = String.raw`[[\p{L}\p{N}]--[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]]`;
+const HYPHENATED_WORD_SOURCE = String.raw`(?<![${WORD_CHAR}\-])${WORD_CHAR}+(?:-${WORD_CHAR}+)+(?![${WORD_CHAR}\-])`;
+const HYPHENATED_WORD = new RegExp(HYPHENATED_WORD_SOURCE, 'v');
+const HYPHENATED_WORDS = new RegExp(HYPHENATED_WORD_SOURCE, 'gv');
+const CJK = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u;
+// Longer runs (an identifier, a pasted slug) stay breakable rather than risk
+// overflowing a narrow column.
+const HYPHENATED_RUN_MAX = 40;
+
 function normalizeTextForATS(html) {
   const replacements = {};
   const bump = (key, n) => { replacements[key] = (replacements[key] || 0) + n; };
@@ -63,15 +227,35 @@ function normalizeTextForATS(html) {
     }
   );
 
+  // The nowrap span is markup, so it must not land where text is plain
+  // (<title>, <textarea>, <option>, the raw-text elements) or foreign
+  // (<svg>, <math>).
+  let plainUntil = null;
+  const text = (t) => (plainUntil ? sanitizeText(t) : keepHyphenatedWordsWhole(sanitizeText(t)));
+  // A real tag ends at the first `>` outside a quoted attribute value, so a
+  // `title="a > b"` is not split into a tag and a run of "text". A quote
+  // opens a value only right after `=` (`title=don't` is unquoted), and
+  // comments and declarations are matched whole first. Each alternative
+  // starts differently, so a tag left open never backtracks.
+  const TAG = /<!--[\s\S]*?-->|<![^>]*>|<\/?[A-Za-z](?:[^>=]|=\s*"[^"]*"|=\s*'[^']*'|=(?!\s*["']))*>/y;
   let out = '';
   let i = 0;
   while (i < masked.length) {
     const lt = masked.indexOf('<', i);
-    if (lt === -1) { out += sanitizeText(masked.slice(i)); break; }
-    out += sanitizeText(masked.slice(i, lt));
-    const gt = masked.indexOf('>', lt);
+    if (lt === -1) { out += text(masked.slice(i)); break; }
+    out += text(masked.slice(i, lt));
+    TAG.lastIndex = lt;
+    const gt = TAG.test(masked) ? TAG.lastIndex - 1 : masked.indexOf('>', lt);
     if (gt === -1) { out += masked.slice(lt); break; }
-    out += masked.slice(lt, gt + 1);
+    const tag = masked.slice(lt, gt + 1);
+    const name = /^<\/?([A-Za-z][\w:-]*)/.exec(tag)?.[1].toLowerCase();
+    // An <option> holds only text and its end tag is optional, so any tag
+    // after it closes it.
+    if (plainUntil && (plainUntil === 'option' || (tag[1] === '/' && name === plainUntil))) plainUntil = null;
+    if (!plainUntil && tag[1] !== '/' && !tag.endsWith('/>') && /^(?:title|textarea|option|svg|math|xmp|plaintext|noembed|noframes|iframe|noscript)$/.test(name || '')) {
+      plainUntil = name;
+    }
+    out += tag;
     i = gt + 1;
   }
 
@@ -94,7 +278,12 @@ function normalizeTextForATS(html) {
     t = t.replace(/\s*\u2190\s*/g, () => { bump('left-arrow', 1); return ' from '; });
     t = t.replace(/\s*[\u2191\u2193]\s*/g, () => { bump('vert-arrow', 1); return ' '; });
     // Middle dot and bullet glyphs garble in some extractors \u2014 replace with pipe.
-    t = t.replace(/\s*\u00B7\s*/g, () => { bump('middot', 1); return ' | '; });
+    // Catalan l·l is a letter pair inside a word (intel·ligència), not a separator.
+    t = t.replace(/\s*\u00B7\s*/g, (m, at, all) => {
+      if (m === '\u00B7' && /[lL]/.test(all[at - 1] ?? '') && /[lL]/.test(all[at + 1] ?? '')) return m;
+      bump('middot', 1);
+      return ' | ';
+    });
     t = t.replace(/\s*\u2022\s*/g, () => { bump('bullet', 1); return ' | '; });
     // Currency symbols sometimes stripped by font-subsetted PDFs \u2014 spell out
     // the unambiguous ones. \u00A5 is intentionally NOT converted: it maps to both
@@ -107,11 +296,65 @@ function normalizeTextForATS(html) {
       bump('markdown-bold', 1);
       return `<strong>${inner}</strong>`;
     });
+    // Markdown italic, as cv.md writes titles (_Game Title_). Both underscores
+    // must sit on a word boundary, and a path separator is not one, so
+    // snake_case, a_b and docs/_draft_/cv.md stay literal. Text-only elements
+    // (<title>, <textarea>, ...) would show <em> as literal text, so skip them.
+    if (!plainUntil) {
+      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (_, inner) => {
+        bump('markdown-italic', 1);
+        return `<em>${inner}</em>`;
+      });
+    }
     return t;
+  }
+
+  function keepHyphenatedWordsWhole(text) {
+    if (!text || !text.includes('-')) return text;
+    const wrap = (s) => {
+      bump('hyphen-nowrap', 1);
+      return `<span style="white-space:nowrap">${s}</span>`;
+    };
+    // sanitizeText may have inserted <strong> markup, and a masked <script> or
+    // <style> is a placeholder token; only wrap the text runs between them.
+    return text.split(/(<[^>]*>|\u0000MASK\d+\u0000)/).map((part, n) => (n % 2 ? part : part.replace(/\S+/g, (run) => {
+      if (!HYPHENATED_WORD.test(run)) return run;
+      if (CJK.test(run)) return run.replace(HYPHENATED_WORDS, (w) => (w.length > HYPHENATED_RUN_MAX ? w : wrap(w)));
+      return run.length > HYPHENATED_RUN_MAX ? run : wrap(run);
+    }))).join('');
   }
 }
 
+/**
+ * Strip diacritics so a heading is recognized regardless of how it was typed.
+ *
+ * Rendered Polish headings are not always spelled with their diacritics —
+ * "Wykształcenie" and "Wyksztalcenie" both occur in already-generated CVs.
+ * NFD splits most Polish letters into a base plus a combining mark we drop;
+ * ł (U+0142) has no canonical decomposition, so it needs its own pass.
+ *
+ * Only used for alias lookup — display titles keep their diacritics.
+ */
+function foldDiacritics(text) {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ł/g, 'l');
+}
+
+/**
+ * Heading spelling -> canonical section key.
+ *
+ * Polish (modes/pl) and Chinese (modes/zh-TW, modes/zh) are here because without
+ * these aliases the rendered non-English titles match nothing derived from the
+ * English cv.md: validateCvSectionOrder() finds fewer than two comparable
+ * sections and silently returns, leaving the section-order guard disabled on
+ * every CV rendered in those modes, and cv.sections resolves no block at all.
+ *
+ * Keys are folded on construction so authored diacritics match stripped input.
+ */
 const SECTION_ALIASES = new Map([
+  // English — cv.md is the source of truth and is written in English.
   ['summary', 'summary'],
   ['professional summary', 'summary'],
   ['competencies', 'competencies'],
@@ -125,9 +368,146 @@ const SECTION_ALIASES = new Map([
   ['education', 'education'],
   ['education & certifications', 'education'],
   ['certifications', 'certifications'],
+  ['awards', 'awards'],
+  ['honors', 'awards'],
+  ['honours', 'awards'],
+  ['awards & honors', 'awards'],
+  ['awards and honors', 'awards'],
+  ['honors & awards', 'awards'],
+  ['awards & honours', 'awards'],
   ['skills', 'skills'],
   ['technical skills', 'skills'],
-]);
+  ['interests', 'interests'],
+  // Polish — the vocabulary documented in modes/pl/README.md, plus the word-order
+  // variants that turn up in practice (both "Kompetencje kluczowe" and
+  // "Kluczowe kompetencje" are used for the same section).
+  ['podsumowanie', 'summary'],
+  ['podsumowanie zawodowe', 'summary'],
+  ['profil zawodowy', 'summary'],
+  ['kompetencje', 'competencies'],
+  ['kompetencje kluczowe', 'competencies'],
+  ['kluczowe kompetencje', 'competencies'],
+  ['doświadczenie', 'experience'],
+  ['doświadczenie zawodowe', 'experience'],
+  ['przebieg kariery', 'experience'],
+  ['projekty', 'projects'],
+  ['kluczowe projekty', 'projects'],
+  ['wybrane projekty', 'projects'],
+  ['wykształcenie', 'education'],
+  ['edukacja', 'education'],
+  ['wykształcenie i certyfikaty', 'education'],
+  ['certyfikaty', 'certifications'],
+  ['certyfikaty i szkolenia', 'certifications'],
+  ['szkolenia i certyfikaty', 'certifications'],
+  ['nagrody', 'awards'],
+  ['wyróżnienia', 'awards'],
+  ['nagrody i wyróżnienia', 'awards'],
+  ['umiejętności', 'skills'],
+  ['umiejętności techniczne', 'skills'],
+  // Spanish — the same failure again: with no entries here, a Spanish CV
+  // rendered in the documented modes/pdf.md order (Experiencia before Formación)
+  // was rejected against a cv.md listing Formación first, and --allow-reorder was
+  // the only way through. The vocabulary is what generated Spanish CVs render
+  // (Perfil Profesional, Competencias Clave, Experiencia Profesional, Formación,
+  // Certificaciones, Habilidades) plus each section's everyday synonyms. Keys are
+  // folded through foldDiacritics below, so accented and unaccented spellings
+  // both resolve.
+  ['perfil', 'summary'],
+  ['perfil profesional', 'summary'],
+  ['resumen', 'summary'],
+  ['resumen profesional', 'summary'],
+  ['competencias', 'competencies'],
+  ['competencias clave', 'competencies'],
+  ['competencias principales', 'competencies'],
+  ['experiencia', 'experience'],
+  ['experiencia profesional', 'experience'],
+  ['experiencia laboral', 'experience'],
+  ['trayectoria profesional', 'experience'],
+  ['proyectos', 'projects'],
+  ['proyectos destacados', 'projects'],
+  ['proyectos personales', 'projects'],
+  ['proyectos y laboratorios', 'projects'],
+  ['formación', 'education'],
+  ['formación académica', 'education'],
+  ['educación', 'education'],
+  ['estudios', 'education'],
+  ['certificaciones', 'certifications'],
+  ['certificados', 'certifications'],
+  ['premios', 'awards'],
+  ['reconocimientos', 'awards'],
+  ['premios y reconocimientos', 'awards'],
+  ['habilidades', 'skills'],
+  ['habilidades técnicas', 'skills'],
+  ['conocimientos técnicos', 'skills'],
+  ['herramientas e idiomas', 'skills'],
+  ['intereses', 'interests'],
+  // Chinese — the same failure the Polish block above fixes, for the two Chinese
+  // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
+  // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
+  // scripts are listed against every key because a CV written in either renders
+  // through this one alias table. The vocabulary is the repo's own: the
+  // `sections` payload in tests/zh-minimal-template.test.mjs (个人简介, 核心能力,
+  // 工作经历, 精选项目, 教育经历, 认证, 技术栈) and the modes' wording
+  // (e.g. "專業摘要" in modes/zh-TW/oferta.md), plus the everyday synonyms of
+  // each — the titles have no single canonical spelling because they come from
+  // a user-supplied `sections` override, not from DEFAULT_SECTION_TITLES.
+  ['專業摘要', 'summary'],
+  ['专业摘要', 'summary'],
+  ['摘要', 'summary'],
+  ['個人簡介', 'summary'],
+  ['个人简介', 'summary'],
+  ['簡介', 'summary'],
+  ['简介', 'summary'],
+  ['核心能力', 'competencies'],
+  ['核心競爭力', 'competencies'],
+  ['核心竞争力', 'competencies'],
+  ['工作經歷', 'experience'],
+  ['工作经历', 'experience'],
+  ['工作經驗', 'experience'],
+  ['工作经验', 'experience'],
+  ['專業經歷', 'experience'],
+  ['专业经历', 'experience'],
+  ['專案', 'projects'],
+  ['项目', 'projects'],
+  ['專案經驗', 'projects'],
+  ['项目经验', 'projects'],
+  ['專案經歷', 'projects'],
+  ['项目经历', 'projects'],
+  ['專案成就', 'projects'],
+  ['项目成就', 'projects'],
+  ['精選專案', 'projects'],
+  ['精选项目', 'projects'],
+  ['學歷', 'education'],
+  ['学历', 'education'],
+  ['教育背景', 'education'],
+  ['教育經歷', 'education'],
+  ['教育经历', 'education'],
+  ['證照', 'certifications'],
+  ['证照', 'certifications'],
+  ['證書', 'certifications'],
+  ['证书', 'certifications'],
+  ['專業證照', 'certifications'],
+  ['专业证书', 'certifications'],
+  ['認證', 'certifications'],
+  ['认证', 'certifications'],
+  ['資格認證', 'certifications'],
+  ['资格认证', 'certifications'],
+  ['獲獎', 'awards'],
+  ['获奖', 'awards'],
+  ['獎項', 'awards'],
+  ['奖项', 'awards'],
+  ['榮譽', 'awards'],
+  ['荣誉', 'awards'],
+  ['技能', 'skills'],
+  ['專長', 'skills'],
+  ['专长', 'skills'],
+  ['技術能力', 'skills'],
+  ['技术能力', 'skills'],
+  ['技術棧', 'skills'],
+  ['技术栈', 'skills'],
+  ['興趣', 'interests'],
+  ['兴趣', 'interests'],
+].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
   return text
@@ -141,7 +521,7 @@ function normalizeSectionTitle(text) {
 }
 
 function sectionKey(text) {
-  const normalized = normalizeSectionTitle(text);
+  const normalized = foldDiacritics(normalizeSectionTitle(text));
   return SECTION_ALIASES.get(normalized) ?? normalized;
 }
 
@@ -173,6 +553,46 @@ function extractSourceSectionOrder(markdown) {
 }
 
 /**
+ * The section order `modes/pdf.md` documents under "Section order (optimized
+ * '6-second recruiter scan')" — Header, Professional Summary, Core
+ * Competencies, Work Experience, Projects, Education & Certifications,
+ * Skills — mapped through sectionKey()/SECTION_ALIASES the same way a
+ * rendered heading or a cv.md heading is. "Education & Certifications" is
+ * that document's own heading text and already folds to 'education' via the
+ * alias table (line above: `['education & certifications', 'education']`),
+ * so no separate normalization is needed for it. `certifications`, `awards`
+ * and `interests` are not named by modes/pdf.md's list — they are optional
+ * sections the shipped template (templates/cv-template.html) renders between
+ * Education and Skills — so they are included here in that template's own
+ * position to keep a real generated CV (which renders Education and
+ * Certifications as separate section-title elements) fully comparable
+ * against this order rather than only against the six pdf.md names it
+ * explicitly lists. See #3640.
+ */
+const CANONICAL_TAILORED_ORDER = [
+  'summary', 'competencies', 'experience', 'projects',
+  'education', 'certifications', 'awards', 'interests', 'skills',
+];
+const CANONICAL_TAILORED_POSITIONS = new Map(
+  CANONICAL_TAILORED_ORDER.map((key, index) => [key, index]),
+);
+
+/**
+ * First index in `comparableSections` whose key sits earlier in `positions`
+ * than the section right before it — i.e. the first place the rendered order
+ * violates the relative order `positions` encodes. -1 if no such index exists
+ * (the rendered order is consistent with `positions`).
+ */
+function findOrderDivergence(comparableSections, positions) {
+  for (let i = 1; i < comparableSections.length; i++) {
+    const previous = comparableSections[i - 1];
+    const current = comparableSections[i];
+    if (positions.get(current.key) < positions.get(previous.key)) return i;
+  }
+  return -1;
+}
+
+/**
  * @param {string} html
  * @param {string} cvMarkdown
  * @param {{ allowReorder?: boolean }} [options] - `allowReorder` downgrades a
@@ -180,6 +600,14 @@ function extractSourceSectionOrder(markdown) {
  *   where the section order was deliberately tailored (e.g. Projects moved
  *   ahead of Education for a technical-heavy role) rather than accidentally
  *   scrambled by an agent. See #1646.
+ *
+ *   A rendered order is accepted whenever it preserves the relative order of
+ *   EITHER cv.md's own headings OR the canonical modes/pdf.md tailoring order
+ *   above — the documented default workflow always moves Education after
+ *   Experience/Projects, which diverges from a typical cv.md on every
+ *   standard-compliant generation, so cv.md's order alone can't be the only
+ *   accepted target without making `allowReorder` mandatory rather than an
+ *   opt-in for genuine edge cases. See #3640.
  */
 export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false } = {}) {
   const rendered = extractRenderedSectionOrder(html);
@@ -190,23 +618,683 @@ export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false 
   const renderedComparable = rendered.filter(section => sourcePositions.has(section.key));
   if (renderedComparable.length < 2) return;
 
-  for (let i = 1; i < renderedComparable.length; i++) {
-    const previous = renderedComparable[i - 1];
-    const current = renderedComparable[i];
-    if (sourcePositions.get(current.key) < sourcePositions.get(previous.key)) {
-      const renderedOrder = renderedComparable.map(section => section.title).join(' -> ');
-      const sourceOrder = source
-        .filter(section => renderedComparable.some(renderedSection => renderedSection.key === section.key))
-        .map(section => section.title)
-        .join(' -> ');
-      const message = `CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`;
-      if (allowReorder) {
-        console.warn(`⚠️  ${message} (proceeding — --allow-reorder set)`);
-        return;
-      }
-      throw new Error(message);
+  if (findOrderDivergence(renderedComparable, sourcePositions) === -1) return;
+
+  // Diverges from cv.md — but that alone isn't damning: it's also what every
+  // CV tailored per modes/pdf.md's documented order looks like. Only treat it
+  // as a real problem if it ALSO fails to match that canonical order.
+  const canonicalComparable = rendered.filter(section => CANONICAL_TAILORED_POSITIONS.has(section.key));
+  if (canonicalComparable.length >= 2
+      && findOrderDivergence(canonicalComparable, CANONICAL_TAILORED_POSITIONS) === -1) {
+    return;
+  }
+
+  const renderedOrder = renderedComparable.map(section => section.title).join(' -> ');
+  const sourceOrder = source
+    .filter(section => renderedComparable.some(renderedSection => renderedSection.key === section.key))
+    .map(section => section.title)
+    .join(' -> ');
+  const message = `CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`;
+  if (allowReorder) {
+    console.warn(`⚠️  ${message} (proceeding — --allow-reorder set)`);
+    return;
+  }
+  throw new Error(message);
+}
+
+function normalizeForComparison(text) {
+  if (!text) return '';
+  return text
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#?[a-z0-9]+;/gi, ' ')
+    .replace(/[#*`_~|•·]/g, ' ') // Strip markdown and bullet chars
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ') // Strip punctuation to be safe against ATS transformations
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Validate that sections marked as locked in config/profile.yml are identical
+ * (ignoring formatting) between the source cv.md and the rendered HTML.
+ * @param {string} html 
+ * @param {string} cvMarkdown 
+ * @param {string[]} lockedKeys 
+ */
+export function validateLockedSections(html, cvMarkdown, lockedKeys) {
+  if (!lockedKeys || lockedKeys.length === 0) return;
+
+  const htmlSections = html.matchAll(/<[^>]+class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi);
+  const renderedMap = new Map();
+  let lastKey = null;
+  let lastIndex = 0;
+  for (const match of htmlSections) {
+    if (lastKey) {
+      renderedMap.set(lastKey, html.substring(lastIndex, match.index));
+    }
+    lastKey = sectionKey(match[1]);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastKey) {
+    renderedMap.set(lastKey, html.substring(lastIndex));
+  }
+
+  // Each heading's section runs to the next heading of the same or a higher
+  // level, measured from that heading itself: a cv.md that opens with a
+  // `# Name` title must not swallow the `##` sections below it. When two
+  // headings fold to the same key, the shallower (then the first) one wins.
+  const sourceLines = cvMarkdown.split(/\r?\n/);
+  const headings = [];
+  sourceLines.forEach((line, index) => {
+    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (heading) headings.push({ index, level: heading[1].length, key: sectionKey(heading[2]) });
+  });
+  const sourceMap = new Map();
+  const sourceLevels = new Map();
+  headings.forEach((heading, i) => {
+    if (sourceLevels.has(heading.key) && sourceLevels.get(heading.key) <= heading.level) return;
+    const next = headings.slice(i + 1).find(other => other.level <= heading.level);
+    const end = next ? next.index : sourceLines.length;
+    const body = sourceLines.slice(heading.index + 1, end);
+    sourceMap.set(heading.key, body.length ? body.join('\n') + '\n' : '');
+    sourceLevels.set(heading.key, heading.level);
+  });
+
+  for (const key of lockedKeys) {
+    if (!sourceMap.has(key)) {
+      const availableKeys = Array.from(sourceMap.keys()).map(k => `'${k}'`).join(', ');
+      throw new Error(`Configured locked_section '${key}' not found in cv.md. Available sections: ${availableKeys}`);
+    }
+    const sourceNorm = normalizeForComparison(sourceMap.get(key));
+    const renderedRaw = renderedMap.get(key) || '';
+    const renderedNorm = normalizeForComparison(renderedRaw);
+
+    if (sourceNorm !== renderedNorm) {
+      throw new Error(`Locked section '${key}' was modified during tailoring.\nExpected (normalized): ${sourceNorm}\nFound (normalized): ${renderedNorm}`);
     }
   }
+}
+
+/**
+ * Every canonical section key the alias table can produce, in template order.
+ * Derived from the table rather than restated so the two cannot drift.
+ */
+export const CV_SECTION_KEYS = [...new Set(SECTION_ALIASES.values())];
+
+// The all-caps comments the templates use to delimit sections, matched exactly
+// as cv-sections-core.mjs matches them when stripping empty sections.
+const SECTION_MARKER_RE = /<!--\s+[A-Z][A-Z ]*-->/g;
+const SECTION_TITLE_RE = /class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi;
+
+const DISPLAY_TITLE_MAX = 60;
+
+/**
+ * A rendered section title, made safe to quote back in a console warning.
+ *
+ * The title comes out of the CV, and a warning goes to a terminal or a log, so
+ * it is untrusted output rather than untrusted input: C0/C1 controls are
+ * dropped (an ANSI escape here would let a CV repaint the operator's console or
+ * forge a line of output), and the result is truncated, since nothing stops a
+ * heading being thousands of characters long.
+ *
+ * @param {string} raw - Inner markup of the title element.
+ * @returns {string}
+ */
+function displayTitle(raw) {
+  const text = raw
+    .replace(/<[^>]+>/g, ' ')
+    // C0/C1 controls, then the bidi overrides and isolates. Both let text
+    // rewrite a terminal line rather than merely occupy it: an escape repaints
+    // it, and U+202E reverses what follows, so a title can appear to be output
+    // the tool produced. Stripped rather than escaped — a section heading has
+    // no legitimate use for either.
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Truncate by code point, not UTF-16 unit, so the cap can't end on half a
+  // surrogate pair; then step back off any trailing combining marks so it
+  // can't end on a mark whose base character was just removed. Marks *within*
+  // the cap are left alone — they are ordinary in many scripts, and the length
+  // bound is what keeps a stacked run from running away.
+  const points = [...text];
+  if (points.length <= DISPLAY_TITLE_MAX) return text;
+  const kept = points.slice(0, DISPLAY_TITLE_MAX - 1);
+  while (kept.length > 0 && /\p{M}/u.test(kept[kept.length - 1])) kept.pop();
+  return `${kept.join('')}…`;
+}
+
+// Application portals reported to reject longer values (#5629). Advisory only.
+const PORTAL_LENGTH_LIMIT = 64;
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '…', ndash: '–', mdash: '—' };
+
+// Plain text of the first <div> whose class list holds the whole token
+// `header-title`, in any attribute order. Tags inside it are skipped by a
+// character scan and entities are decoded in one pass, so no text is rebuilt
+// by repeated pattern replacement.
+function headlineText(html) {
+  for (const m of html.matchAll(/<div\b([^>]*)>/gi)) {
+    const cls = /(?:^|\s)class\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(m[1]);
+    const tokens = (cls?.[1] ?? cls?.[2] ?? '').split(/\s+/);
+    if (!tokens.includes('header-title')) continue;
+    const start = m.index + m[0].length;
+    // The matching </div>: count nested <div> opens and closes from here.
+    let depth = 1;
+    let end = html.length;
+    for (const t of html.slice(start).matchAll(/<(\/?)div\b[^>]*>/gi)) {
+      depth += t[1] ? -1 : 1;
+      if (depth === 0) { end = start + t.index; break; }
+    }
+    const inner = html.slice(start, end);
+    let text = '';
+    let inTag = false;
+    for (const ch of inner) {
+      if (ch === '<') inTag = true;
+      else if (ch === '>' && inTag) inTag = false;
+      else if (!inTag) text += ch;
+    }
+    return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, ref) => {
+      if (ref[0] === '#') {
+        const code = ref[1].toLowerCase() === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+      }
+      return NAMED_ENTITIES[ref.toLowerCase()] ?? whole;
+    }).trim();
+  }
+  return '';
+}
+
+/**
+ * Warn, never fail, when the CV headline or the output PDF filename is longer
+ * than some application portals accept (#5629). Reads the headline from the
+ * rendered header-title element, so it judges what actually prints.
+ *
+ * @param {string} html - The CV HTML about to be rendered.
+ * @param {string} outputPath - Destination PDF path (only the basename counts).
+ * @param {number} [limit] - Length above which a warning is printed.
+ * @returns {string[]} The warning messages printed (empty when none).
+ */
+export function warnLongPortalFields(html, outputPath, limit = PORTAL_LENGTH_LIMIT) {
+  const warnings = [];
+  const plain = headlineText(html);
+  if (plain) {
+    const len = [...plain].length;
+    if (len > limit) {
+      warnings.push(`CV headline is ${len} characters (limit ${limit}): "${displayTitle(plain)}". Some application portals reject longer values; aim for a job title plus two or three keywords.`);
+    }
+  }
+  const name = basename(outputPath || '');
+  const nameLen = [...name].length;
+  if (nameLen > limit) {
+    warnings.push(`Output filename is ${nameLen} characters (limit ${limit}): "${displayTitle(name)}". Some application portals reject longer file names; use a shorter name.`);
+  }
+  for (const w of warnings) console.warn(`⚠️  ${w}`);
+  return warnings;
+}
+
+/**
+ * The text of the first real section title in html[start, end), skipping any
+ * that sits in raw text (a heading quoted inside a script names nothing).
+ *
+ * @param {string} html
+ * @param {number} start
+ * @param {number} end
+ * @param {[number, number][]} inert
+ * @returns {string|null}
+ */
+function findSectionTitle(html, start, end, inert) {
+  // Matched against the slice, not the whole document: a marker with no title
+  // under it would otherwise send the engine looking as far as the next title
+  // anywhere in the file, which is quadratic across many markers. The slices
+  // partition the document, so this is linear overall.
+  const within = html.slice(start, end);
+  SECTION_TITLE_RE.lastIndex = 0;
+  let match;
+  while ((match = SECTION_TITLE_RE.exec(within)) !== null) {
+    if (!isInRanges(inert, start + match.index)) return match[1];
+  }
+  return null;
+}
+
+// Elements that never have a closing tag, so they must not open a nesting level.
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+// Elements whose content is text, not markup. `<style>.x { content: "</div>" }`
+// closes nothing, and counting that as a close tag would end a section early.
+// The legacy entries (xmp, plaintext, noembed, noframes) and iframe are here
+// because a parser doesn't build elements from their contents either; leaving
+// one out means markup-shaped text inside it is mistaken for structure.
+const RAW_TEXT_ELEMENTS = new Set([
+  'script', 'style', 'textarea', 'title',
+  'xmp', 'plaintext', 'iframe', 'noembed', 'noframes',
+]);
+
+/**
+ * Index of the `>` that ends the tag opening at `from`, or -1.
+ *
+ * Quote-aware, because `>` is legal inside an attribute value:
+ * `<span data-x="> <div>">` is one tag, not a tag plus a stray `<div>`. Reading
+ * it as the latter miscounts the depth — and since a forged count can be made
+ * to balance, it would let a section pass validation and then be moved into
+ * markup it doesn't belong to.
+ *
+ * @param {string} html
+ * @param {number} from - Index of the `<`.
+ * @returns {number}
+ */
+function tagEnd(html, from) {
+  let quote = null;
+  for (let i = from + 1; i < html.length; i++) {
+    const char = html[i];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '>') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Ranges of html holding raw text rather than markup — the contents of
+ * `<script>`, `<style>`, `<textarea>` and `<title>`.
+ *
+ * Needed from the start of the document, not from a section: a marker comment
+ * quoted inside a script string (`const fixture = '<!-- SKILLS -->…'`) is text,
+ * but a search that begins at that marker has no way to know it. Treating it as
+ * a section would move part of a script body around the document.
+ *
+ * @param {string} html
+ * @returns {[number, number][]}
+ */
+function rawTextRanges(html) {
+  const ranges = [];
+  let index = 0;
+
+  while (index < html.length) {
+    const open = html.indexOf('<', index);
+    if (open === -1) break;
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      index = close === -1 ? html.length : close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1) break;
+    const inner = html.slice(open + 1, close);
+    index = close + 1;
+    if (inner.startsWith('/')) continue;
+
+    // No self-closing check: `<script/>` opens raw text, it does not stand alone.
+    const name = /^([a-zA-Z][\w:-]*)/.exec(inner);
+    if (!name || !RAW_TEXT_ELEMENTS.has(name[1].toLowerCase())) continue;
+
+    // <plaintext> has no end tag at all: everything after it is text to the end
+    // of the document, so a literal `</plaintext>` closes nothing.
+    if (name[1].toLowerCase() === 'plaintext') {
+      ranges.push([index, html.length]);
+      break;
+    }
+
+    const closeTag = new RegExp(`</${name[1]}\\s*>`, 'gi');
+    closeTag.lastIndex = index;
+    const end = closeTag.exec(html);
+    ranges.push([index, end ? end.index : html.length]);
+    index = end ? end.index + end[0].length : html.length;
+  }
+
+  return ranges;
+}
+
+/**
+ * Whether `position` falls inside one of the ranges, which are ascending and
+ * disjoint by construction. Binary search rather than a scan: this is asked
+ * once per marker and once per candidate title, and a linear answer makes the
+ * pair quadratic on a document with many of both.
+ *
+ * @param {[number, number][]} ranges
+ * @param {number} position
+ * @returns {boolean}
+ */
+function isInRanges(ranges, position) {
+  let low = 0;
+  let high = ranges.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (position < ranges[mid][0]) high = mid - 1;
+    else if (position >= ranges[mid][1]) low = mid + 1;
+    else return true;
+  }
+  return false;
+}
+
+/**
+ * Walk html[from, to) and report what it does to the nesting depth.
+ *
+ * A forward scan built on indexOf rather than a regex tokenizer: a pattern like
+ * `<!--[\s\S]*?-->` restarts its search from every `<!--`, which is quadratic on
+ * a run of unterminated comments (measured 728ms for 32k of them) and
+ * exponential when nested inside a repetition. Every step here consumes input.
+ *
+ * @param {string} html
+ * @param {number} from
+ * @param {number} to
+ * @returns {{depth: number, exitAt: number}|null} `depth` is the net change at
+ *   `to`; `exitAt` is where a close tag first tried to rise above the starting
+ *   level, or -1. null means the markup could not be read at all (an
+ *   unterminated comment, tag or raw-text element), which callers treat as
+ *   "don't touch this".
+ */
+function scanNesting(html, from, to) {
+  let index = from;
+  let depth = 0;
+
+  while (index < to) {
+    const open = html.indexOf('<', index);
+    if (open === -1 || open >= to) break;
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      if (close === -1 || close + 3 > to) return null;
+      index = close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1 || close >= to) return null;
+    const inner = html.slice(open + 1, close);
+    index = close + 1;
+
+    if (inner.startsWith('/')) {
+      if (!/^\/[a-zA-Z][\w:-]*\s*$/.test(inner)) continue; // not a close tag
+      if (depth === 0) return { depth, exitAt: open };
+      depth--;
+      continue;
+    }
+
+    const name = /^([a-zA-Z][\w:-]*)/.exec(inner);
+    if (!name) continue; // <!DOCTYPE …>, <?xml …>, or a stray '<'
+    const tag = name[1].toLowerCase();
+
+    // Checked before the self-closing branch: trailing-slash syntax has no
+    // effect on an HTML element, so `<script/>` opens raw text rather than
+    // standing alone, and treating it as self-closing would read the script
+    // body as markup.
+    if (RAW_TEXT_ELEMENTS.has(tag)) {
+      // <plaintext> never ends, so a slice containing one can't be read as
+      // markup at all — refuse rather than guess where it stops.
+      if (tag === 'plaintext') return null;
+      const closeTag = new RegExp(`</${tag}\\s*>`, 'gi');
+      closeTag.lastIndex = index;
+      const end = closeTag.exec(html);
+      if (!end || end.index + end[0].length > to) return null;
+      index = end.index + end[0].length; // consumed whole, depth unchanged
+      continue;
+    }
+
+    if (inner.endsWith('/') || VOID_ELEMENTS.has(tag)) continue;
+
+    depth++;
+  }
+
+  return { depth, exitAt: -1 };
+}
+
+/**
+ * True when html[from, to) is only whitespace, comments and closing tags —
+ * the shape of a document tail (`</div></body></html>`) and of nothing else.
+ *
+ * @param {string} html
+ * @param {number} from
+ * @returns {boolean}
+ */
+function isStructuralTail(html, from) {
+  let index = from;
+
+  while (index < html.length) {
+    const open = html.indexOf('<', index);
+    if (open === -1) break;
+    if (html.slice(index, open).trim() !== '') return false; // stray text
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      if (close === -1) return false;
+      index = close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1) return false;
+    if (!/^\/[a-zA-Z][\w:-]*\s*$/.test(html.slice(open + 1, close))) return false;
+    index = close + 1;
+  }
+
+  return html.slice(index).trim() === '';
+}
+
+/**
+ * Locate each CV section in a rendered document as a [start, end) slice.
+ *
+ * A section runs from its marker comment to the next one — the extent comes
+ * from the markers, never from matching tags. That matters more than it looks:
+ * when extent is derived by pairing tags, any markup the scanner reads wrongly
+ * yields a *plausible but wrong* extent, and moving it truncates the CV. Here a
+ * misread can only make a section fail the balance check below, and a section
+ * that fails is left alone. Mistakes cost the feature, not the document.
+ *
+ * It also means a section is whatever sits between two markers, so a template
+ * that marks sections with a bare heading —
+ *
+ *   <!-- EDUCATION -->
+ *   <h2 class="section-title">Education</h2>
+ *   <div class="edu-item">BSc</div>
+ *
+ * — moves its heading and body together, rather than being refused.
+ *
+ * Each slice must be balanced: as many elements closed as opened, never rising
+ * above the level it started at. That single check does double duty. It rejects
+ * a slice that would leave markup unclosed, and it establishes that every
+ * accepted section sits at the same nesting level as its neighbours, so filling
+ * one section's place with another can't move it into a container of its own
+ * (`<div class="education-layout"><!-- EDUCATION -->…</div>` fails, because its
+ * slice closes a div it never opened).
+ *
+ * Identity comes from the rendered section title, resolved through the same
+ * alias table validateCvSectionOrder() uses, so the reorder and the guard
+ * cannot disagree about what a section is. A marker with no `.section-title`
+ * under it (`<!-- HEADER -->`) is not a section — which is also what leaves a
+ * cover letter untouched.
+ *
+ * @param {string} html
+ * @returns {{
+ *   blocks: {key: string, start: number, end: number, title: string}[],
+ *   ambiguous: Set<string>,
+ *   unrecognized: Map<string, string>,
+ * }} `blocks` are the movable sections, each carrying its title as rendered (see
+ *   displayTitle). `ambiguous` holds keys whose extent could not be established.
+ *   `unrecognized` maps key -> title for sections the alias table cannot name,
+ *   which are movable but can never match a configured name.
+ */
+function extractSectionBlocks(html) {
+  // A marker quoted inside a script or style is text, not a section boundary.
+  const inert = rawTextRanges(html);
+  const markers = [...html.matchAll(SECTION_MARKER_RE)]
+    .filter(marker => !isInRanges(inert, marker.index));
+  const blocks = [];
+  const ambiguous = new Set();
+
+  for (let i = 0; i < markers.length; i++) {
+    const start = markers[i].index;
+    const next = i + 1 < markers.length ? markers[i + 1].index : html.length;
+
+    // A title quoted inside a script is text too, so it cannot name a section:
+    // taking it would label this block from markup that only looks like a
+    // heading, and apply the user's ordering to the wrong section.
+    const title = findSectionTitle(html, start, next, inert);
+    if (!title) continue;
+    const text = normalizeSectionTitle(title);
+    if (!text) continue;
+    const key = sectionKey(text);
+
+    const scan = scanNesting(html, start, next);
+    if (!scan) {
+      ambiguous.add(key);
+      continue;
+    }
+
+    // The last section has no following marker to bound it, so it ends where
+    // its content first tries to close an element it doesn't own — the parent's
+    // closing tag. Everything after that must be document tail: anything else
+    // means the scan stopped in the wrong place (raw text it misread, say), and
+    // trusting it would move a fragment.
+    const end = scan.exitAt === -1 ? next : scan.exitAt;
+    const bounded = scan.exitAt === -1 ? scan : scanNesting(html, start, end);
+    if (!bounded || bounded.depth !== 0 || (end !== next && !isStructuralTail(html, end))) {
+      ambiguous.add(key);
+      continue;
+    }
+
+    blocks.push({ key, start, end, title: displayTitle(title) });
+  }
+
+  // Titles the alias table doesn't cover. sectionKey() falls back to the
+  // normalized title, so such a block is real and movable but can never match a
+  // configured name — and without this, a CV rendered with titles outside
+  // SECTION_ALIASES makes cv.sections do nothing at all, silently.
+  const unrecognized = new Map();
+  for (const block of blocks) {
+    if (!CV_SECTION_KEYS.includes(block.key)) unrecognized.set(block.key, block.title);
+  }
+
+  return { blocks, ambiguous, unrecognized };
+}
+
+/**
+ * Render the CV's sections in the order declared by `cv.sections` in
+ * config/profile.yml (#2533).
+ *
+ * The named sections are permuted among the slots they already occupy;
+ * everything else stays exactly where the template put it. So a list is a local
+ * statement ("these sections, in this order") rather than a full table of
+ * contents the user has to keep in sync — a section added by a later release
+ * lands where upstream put it instead of breaking the config. Moving a section
+ * past its neighbours is therefore a rotation: name the sections it displaces
+ * too, in the order they should end up in.
+ *
+ * Runs before validateCvSectionOrder(), so the guard still judges what will
+ * actually be printed — this satisfies the guard rather than bypassing it, which
+ * is what separates it from --allow-reorder.
+ *
+ * No `cv.sections` → the input string is returned unchanged.
+ *
+ * @param {string} html
+ * @param {string[]} order - Canonical section keys, e.g. ['skills', 'education'].
+ * @returns {string}
+ */
+export function reorderCvSections(html, order) {
+  if (!Array.isArray(order) || order.length === 0) return html;
+  if (order.length < 2) {
+    // Not an error, but not a no-op worth staying quiet about either: one name
+    // states no relationship, so there is nothing to apply and the user would
+    // otherwise be left thinking the setting took effect.
+    console.warn(`⚠️  config/profile.yml cv.sections lists only "${displayTitle(order[0])}". An order needs at least two sections — one name states no relationship, so nothing was changed.`);
+    return html;
+  }
+
+  // No early return on an empty block list: a CV whose sections are all
+  // ambiguous produces none, and silently doing nothing is the failure mode
+  // this feature exists to remove. The per-name loop below reports first.
+  const { blocks, ambiguous, unrecognized } = extractSectionBlocks(html);
+
+  const byKey = new Map();
+  for (const block of blocks) {
+    if (!byKey.has(block.key)) byKey.set(block.key, block);
+  }
+
+  const chosen = [];
+  const unresolved = [];
+  const seen = new Set();
+  for (const name of order) {
+    // `name` comes from a config file and is quoted straight into console
+    // output, so it gets the same treatment as a rendered title: displayTitle()
+    // strips C0/C1 controls and bidi overrides (either can repaint a terminal
+    // line so a warning appears to say something the tool never printed) and
+    // bounds the length so one long entry cannot bury the message.
+    const shown = displayTitle(name);
+    if (seen.has(name)) {
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}" more than once — keeping its first position.`);
+      continue;
+    }
+    seen.add(name);
+    if (!CV_SECTION_KEYS.includes(name)) {
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}", which is not a CV section — ignoring it. Recognized: ${CV_SECTION_KEYS.join(', ')}.`);
+      continue;
+    }
+    const block = byKey.get(name);
+    if (block) {
+      chosen.push(block);
+    } else if (ambiguous.has(name)) {
+      // Present, but its markup doesn't stand on its own — it opens or closes
+      // elements outside itself, so moving it would leave tags unbalanced.
+      // Reported rather than skipped quietly: the section stays where the
+      // template put it, and the user would otherwise see a setting that
+      // silently does nothing.
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}", but this CV's markup does not enclose that section on its own — leaving it in place, because moving it would leave tags unbalanced.`);
+    } else {
+      // Recognized and unambiguous but with no block. Ordinarily that just means
+      // the section isn't in this CV (an optional one with no entries is
+      // stripped before the PDF step), which is not worth a warning on its own.
+      unresolved.push(name);
+    }
+  }
+
+  // It is worth one when the CV also renders titles the alias table can't name,
+  // because then "not in this CV" may be a misreading: the section could be
+  // sitting right there under a heading nothing could identify.
+  //
+  // Whether that is what happened is not knowable here — an unresolved name may
+  // equally be an optional section with no entries. So the report states only
+  // what is checkable (this name matched nothing; these titles are unidentified)
+  // and leaves the conclusion to the reader. Deliberately not conditioned on
+  // whether the document changed: a name that did nothing did nothing, whether
+  // or not its neighbours moved, and treating "output identical" as the failure
+  // signal misreads an order that was already satisfied.
+  const reportUnresolved = () => {
+    if (unresolved.length === 0 || unrecognized.size === 0) return;
+    const names = unresolved.map(name => `"${displayTitle(name)}"`).join(', ');
+    const titles = [...unrecognized.values()].map(title => `"${title}"`).join(', ');
+    console.warn(`⚠️  config/profile.yml cv.sections names ${names}, which matched no section in this CV. The CV also renders ${unrecognized.size} section title(s) the section-order alias table doesn't recognize (${titles}) — if one of those is the section you meant, its title needs an entry in SECTION_ALIASES in generate-pdf.mjs. Otherwise the name has no effect and can be dropped.`);
+  };
+  if (chosen.length < 2) {
+    reportUnresolved();
+    return html;
+  }
+
+  // The slots are the named sections' own positions, in document order; the
+  // sections fill them in the configured order. No separate sibling check is
+  // needed: every accepted block is balanced, so they all sit at the same
+  // nesting level by construction.
+  const slots = [...chosen].sort((a, b) => a.start - b.start);
+
+  let out = '';
+  let cursor = 0;
+  for (let i = 0; i < slots.length; i++) {
+    out += html.slice(cursor, slots[i].start);
+    out += html.slice(chosen[i].start, chosen[i].end);
+    cursor = slots[i].end;
+  }
+
+  const reordered = out + html.slice(cursor);
+  reportUnresolved();
+  return reordered;
 }
 
 /**
@@ -277,26 +1365,87 @@ function countRenderedPdfPages(pdfBuffer) {
 }
 
 /**
- * Convert a path to a repo-relative manifest entry, or blank if it is unknown
- * or outside the career-ops repository.
+ * Convert a path to a workspace-relative manifest entry, or blank if it is
+ * unknown or outside the tracker-owned workspace.
  *
  * @param {string} pathValue - Absolute or cwd-relative filesystem path.
- * @returns {string} Repo-relative path using forward slashes, or an empty string.
+ * @param {string} [rootDir] - Workspace root used as the manifest base.
+ * @returns {string} Workspace-relative path using forward slashes, or an empty string.
  */
-export function repoRelativeManifestPath(pathValue) {
+export function workspaceRelativeManifestPath(pathValue, rootDir = currentWorkspaceRoot()) {
   if (!pathValue) return '';
-  const rel = relative(__dirname, resolve(pathValue));
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
+  const rel = relative(rootDir, resolve(pathValue));
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return '';
   return rel.split(sep).join('/');
 }
 
-export function injectPrintPageCss(html, format = 'a4') {
-  const normalizedFormat = String(format || 'a4').toLowerCase();
-  const pageSize = normalizedFormat === 'letter' ? 'Letter' : 'A4';
-  const pageStyle = `<style id="career-ops-page-setup">\n@page { size: ${pageSize}; margin: ${PDF_PAGE_MARGIN}; }\n</style>`;
+/** @deprecated Use workspaceRelativeManifestPath. */
+export function repoRelativeManifestPath(pathValue, rootDir = currentWorkspaceRoot()) {
+  return workspaceRelativeManifestPath(pathValue, rootDir);
+}
+
+function nearestExistingPath(pathValue) {
+  let candidate = pathValue;
+  while (true) {
+    try {
+      lstatSync(candidate);
+      return candidate;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const parent = dirname(candidate);
+      if (parent === candidate) throw error;
+      candidate = parent;
+    }
+  }
+}
+
+/**
+ * Confirm a PDF destination is lexically and canonically inside its workspace.
+ * Resolving the nearest existing ancestor catches output directories that are
+ * symlinks to another location before Chromium writes through them.
+ */
+export function isWorkspaceOutputPath(pathValue, rootDir = currentWorkspaceRoot()) {
+  const root = resolve(rootDir);
+  const candidate = resolve(pathValue);
+  const lexical = relative(root, candidate);
+  if (lexical === '' || lexical === '..' || lexical.startsWith(`..${sep}`) || isAbsolute(lexical)) {
+    return false;
+  }
+
+  try {
+    const canonicalRoot = realpathSync(root);
+    const canonicalAnchor = realpathSync(nearestExistingPath(candidate));
+    const canonical = relative(canonicalRoot, canonicalAnchor);
+    return canonical === '' || (canonical !== '..' && !canonical.startsWith(`..${sep}`) && !isAbsolute(canonical));
+  } catch {
+    return false;
+  }
+}
+
+export function injectPrintPageCss(html, format, country) {
+  // The only place the sheet size is set: page.pdf() below runs with
+  // preferCSSPageSize, so this @page rule IS the paper. It resolves through
+  // lib/page-format.mjs so a caller that passes nothing gets the user's
+  // configured size instead of a fallback private to this file.
+  const pageSize = PAGE_CSS_SIZE[resolvePageFormat(format, {
+    profilePath: workspaceProfilePath(),
+    country,
+  })];
+  // Read --page-margin (set by the template's own :root default, and overridden
+  // by injectThemeStyle's block when style.margin is configured) instead of
+  // hardcoding PDF_PAGE_MARGIN outright — this @page rule is injected last, so a
+  // hardcoded value would silently win the cascade and make style.margin
+  // ineffective (#1837 review). PDF_PAGE_MARGIN is only the fallback for a
+  // template that never declares --page-margin at all.
+  const pageStyle = `<style id="career-ops-page-setup">\n@page { size: ${pageSize}; margin: var(--page-margin, ${PDF_PAGE_MARGIN}); }\n</style>`;
 
   if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${pageStyle}\n</head>`);
+    // Replacer function, matching the <html> branch just below. `pageStyle`
+    // interpolates only internal constants today, so this is hardening rather
+    // than a live bug — but the two branches sat in one function disagreeing
+    // about it, and the safe spelling is the one that stays correct if a
+    // configurable value is ever interpolated here (#2596).
+    return html.replace(/<\/head>/i, () => `${pageStyle}\n</head>`);
   }
 
   if (/<html\b[^>]*>/i.test(html)) {
@@ -306,46 +1455,215 @@ export function injectPrintPageCss(html, format = 'a4') {
   return `${pageStyle}\n${html}`;
 }
 
+/** The artifact kinds data/pdf-index.tsv keys on, alongside the report number. */
+export const ARTIFACT_KINDS = ['cv', 'cover'];
+
+/**
+ * Decide which artifact a render produces, for the manifest's `kind` column.
+ *
+ * Resolved here rather than in the CLI because every path converges on
+ * renderInPage(): the CLI, the --batch manifest, generate-cover-letter.mjs, and
+ * the ad-hoc scripts that call the exported renderHtmlToPdf() directly. A
+ * caller that forgets to declare a cover letter is the normal case, not the
+ * exceptional one, so the default has to be derived rather than assumed to be
+ * a CV (#3887).
+ *
+ * Precedence, most specific first:
+ *   1. An explicit kind (the --kind flag, a batch entry's `kind`, opts.kind).
+ *   2. A `cv-` prefix, the CV convention every generator writes. It wins over
+ *      the cover check so a company whose own name starts with "Cover" keeps
+ *      its CV filed as a CV.
+ *   3. `cover` as the leading or trailing token: both real conventions, the
+ *      `cover-...` prefix and the `{company}-{role}-cover.pdf` suffix that
+ *      generate-cover-letter.mjs writes.
+ *   4. 'cv', the overwhelmingly common render.
+ *
+ * Anchored to the ends of the name on purpose: an unanchored "cover" would read
+ * a company or role carrying the word mid-name as a cover letter, and --kind is
+ * the escape hatch for a name that signals nothing either way.
+ *
+ * @param {string|undefined} explicit - A caller-declared kind, if any.
+ * @param {string} [outputPath] - Destination PDF path, used for inference.
+ * @returns {{kind: 'cv'|'cover'|null, source: 'declared'|'name'|'default'}}
+ *   `kind` is null when `explicit` is not a recognized kind, so the caller can
+ *   reject it rather than silently rendering something else.
+ */
+export function resolveArtifactKind(explicit, outputPath) {
+  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== '') {
+    const declared = String(explicit).trim().toLowerCase();
+    return ARTIFACT_KINDS.includes(declared)
+      ? { kind: declared, source: 'declared' }
+      : { kind: null, source: 'declared' };
+  }
+
+  const name = basename(outputPath || '').toLowerCase().replace(/\.[^.]*$/, '');
+  if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };
+  if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) {
+    return { kind: 'cover', source: 'name' };
+  }
+  return { kind: 'cv', source: 'default' };
+}
+
+/**
+ * Merge one generated-PDF row into the manifest's existing data lines.
+ *
+ * The manifest holds one row per report number AND artifact kind, so a CV and
+ * a cover letter for the same application coexist (#3887). Superseding on the
+ * report number alone meant whichever document was generated last deleted the
+ * other, and readers that resolve "the PDF for report N" then returned a cover
+ * letter as the CV.
+ *
+ * @param {string[]} existingLines - Current manifest lines, comments included.
+ * @param {{reportNum: string, pdf: string, html: string, format: string, date: string, kind?: 'cv'|'cover'}} row
+ * @returns {string[]} Data lines to write, the incoming row last.
+ */
+export function applyManifestRow(existingLines, row) {
+  // "008" and "8" are the same report - zero-padded report-link form vs
+  // unpadded tracker-# form. Normalize so replacement rows match.
+  const normKey = (s) => (s || '').trim().replace(/^0+(?=\d)/, '');
+  const incomingKind = row.kind === 'cover' ? 'cover' : 'cv';
+
+  const kept = existingLines.filter((line) => {
+    if (!line.trim() || line.startsWith('#')) return false;
+    const fields = line.split('\t');
+    if (fields[1] === row.pdf) return false;
+    if (!row.reportNum || normKey(fields[0]) !== normKey(row.reportNum)) return true;
+    // Same report: the incoming row supersedes only its own kind's slot. A
+    // legacy row carries no kind, so an incoming CV claims it (the manifest
+    // must not grow a duplicate every time an untagged row's CV is
+    // regenerated) while an incoming cover letter leaves it alone rather than
+    // guessing that an unmarked row was a cover.
+    const existingKind = (fields[5] || '').trim();
+    return incomingKind === 'cover'
+      ? existingKind !== 'cover'
+      : existingKind === 'cover';
+  });
+
+  kept.push([row.reportNum || '', row.pdf, row.html, row.format, row.date, incomingKind].join('\t'));
+  return kept;
+}
+
 /**
  * Record a generated PDF in data/pdf-index.tsv so tools can map a tracker
  * report number to the exact PDF (and its source HTML for regeneration).
  *
- * Columns: report \t pdf \t html \t format \t date — paths relative to the
- * career-ops root with forward slashes. One row per PDF path; when a report
- * number is given, older rows for that report are dropped too (regenerated
- * CVs supersede stale entries). The file is gitignored: it references
- * gitignored output/ artifacts and is meaningless on another machine.
+ * Columns: report \t pdf \t html \t format \t date \t kind - paths relative to
+ * the tracker workspace with forward slashes. One row per PDF path, and one row
+ * per (report number, kind) so a report's CV and its cover letter coexist while
+ * a regenerated document still supersedes its own stale entry. kind is appended
+ * last because find.mjs, outcome.mjs and the web reader all parse this file
+ * positionally; a reordered header would break them silently. The file is
+ * gitignored: it references gitignored output/ artifacts and is meaningless on
+ * another machine.
  */
-function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
-  const manifestPath = resolve(__dirname, 'data', 'pdf-index.tsv');
-  const toRel = (p) => relative(__dirname, p).split(sep).join('/');
+async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
+  const manifestPath = resolvePdfIndexPath(trackerPath);
+  const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
-  const relHTML = repoRelativeManifestPath(htmlPath);
+  const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
   const date = new Date().toISOString().slice(0, 10);
-  // "008" and "8" are the same report — zero-padded report-link form vs
-  // unpadded tracker-# form. Normalize so replacement rows match.
-  const normKey = (s) => (s || '').trim().replace(/^0+(?=\d)/, '');
-
-  let lines = [];
-  if (existsSync(manifestPath)) {
-    lines = readFileSync(manifestPath, 'utf-8').split('\n').filter((line) => {
-      if (!line.trim() || line.startsWith('#')) return false;
-      const fields = line.split('\t');
-      if (fields[1] === relPDF) return false;
-      if (reportNum && normKey(fields[0]) === normKey(reportNum)) return false;
-      return true;
-    });
-  }
-
-  lines.push([reportNum || '', relPDF, relHTML, format, date].join('\t'));
 
   mkdirSync(dirname(manifestPath), { recursive: true });
-  writeFileSync(
-    manifestPath,
-    '# report\tpdf\thtml\tformat\tdate — written by generate-pdf.mjs, do not edit\n' +
-      lines.join('\n') + '\n'
-  );
-  return relPDF;
+  // Read, supersede and write under one lock, and publish atomically. Every
+  // render is its own process (batch-runner.sh --parallel N starts N workers,
+  // each running generate-pdf.mjs), and this is a read-modify-write of one
+  // shared file: two renders that read the same manifest each wrote back their
+  // own row plus the old rows, so whichever wrote last erased the other's row.
+  return withPipelineLock(manifestPath, () => {
+    const existing = existsSync(manifestPath)
+      ? readFileSync(manifestPath, 'utf-8').split('\n')
+      : [];
+    const lines = applyManifestRow(existing, {
+      reportNum,
+      pdf: relPDF,
+      html: relHTML,
+      format,
+      date,
+      kind,
+    });
+
+    writeFileAtomic(
+      manifestPath,
+      '# report\tpdf\thtml\tformat\tdate\tkind - written by generate-pdf.mjs, do not edit\n' +
+        lines.join('\n') + '\n'
+    );
+    return relPDF;
+  });
+}
+
+/**
+ * Fact gate shared by the single-file and --batch paths.
+ *
+ * generate-cover-letter.mjs already blocks on assertFacts before importing
+ * Playwright, on the reasoning that a failed gate must not leave a misleading
+ * artifact behind. A tailored CV is the same class of document and carries the
+ * numbers a reader acts on, but the CV path enforced the gate only as an
+ * instructed step in the mode prompts — so a programmatic caller (a bridge, a
+ * script, a batch run) rendered inflated metrics in silence. One function for
+ * both paths, because the batch run is exactly that caller and for a while it
+ * was the path with no gate at all.
+ *
+ * Callers pass the normalized HTML and skip the call when --skip-fact-check is
+ * set or the workspace has no cv.md to check against.
+ *
+ * @param {string} html - Normalized HTML, as it will be printed.
+ * @param {string} label - Document name for the error and warning lines.
+ * @returns {Promise<void>} Resolves when the document passes or only warns.
+ * @throws {Error} When a metric, fact or forbidden phrase blocks the document.
+ */
+async function runFactGate(html, label) {
+  // Imported lazily, by the callers' guard. A static import is resolved at module
+  // load whether or not the gate runs, and the page-budget/batch suites copy
+  // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
+  // that isn't copied made every one of those suites die with
+  // ERR_MODULE_NOT_FOUND before reaching the behaviour under test. Those
+  // fixtures also ship no cv.md, so the gate is never entered there. If the
+  // module is genuinely missing in a real workspace this throws and the render
+  // fails, which is the correct direction to fail for a fact gate.
+  const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
+  const factCheck = assertFacts(html, { label, ...factGateInputs() });
+  // Ahead of the verdict, because it qualifies it: with no config the phrase
+  // lists are empty, so a "passed" below covers metrics and facts only.
+  if (factCheck.configMissing) {
+    console.warn('⚠️  No config/cv-facts.json — forbidden/advisory phrase checks did not run.');
+  }
+  if (factCheck.verdict === 'warn') {
+    console.warn(`⚠️  CV fact check warning: ${label}`);
+    printFactWarnings(factCheck, console.warn);
+  } else {
+    console.log(`✅ Fact check passed: ${label}`);
+  }
+}
+
+/**
+ * The files the fact gate checks a CV against, from the same workspace this
+ * render reads cv.md and the profile from.
+ *
+ * verify-cv-facts defaults to the DATA root's cv.md, article-digest.md and
+ * config/cv-facts.json. This module reads cv.md (the probe that decides
+ * whether the gate runs, and the section-order and locked-section guards) and
+ * config/profile.yml from workspaceRoot, which is a different directory
+ * whenever CAREER_OPS_TRACKER points outside the data root (#2471, #3169). With
+ * the defaults one render read two cv.md files: the guards and the run-or-skip
+ * decision used the workspace's, the fact check the data root's, so a number
+ * absent from the CV this render validated could still pass.
+ *
+ * @returns {{sourcePaths: string[], configPath: string}}
+ */
+function factGateInputs() {
+  return {
+    sourcePaths: [resolve(workspaceRoot, 'cv.md'), resolve(workspaceRoot, 'article-digest.md')],
+    configPath: resolve(workspaceRoot, 'config', 'cv-facts.json'),
+  };
+}
+
+/**
+ * Say that the fact gate did not run, rather than letting a render with no
+ * "Fact check" line read like one that passed. `--skip-fact-check` is the
+ * explicit opt-out and stays quiet.
+ */
+function warnFactGateNotRun() {
+  console.warn(`⚠️  Fact check did not run: no cv.md at ${resolve(workspaceRoot, 'cv.md')} — this CV was not checked against your sources.`);
 }
 
 /**
@@ -356,23 +1674,62 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
  */
 async function generatePDF() {
   const args = process.argv.slice(2);
+  let skipFactCheck = false;
 
   // Parse arguments
-  let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
-  let maxPages = 2, maxPagesInput = '2', strictPages = false;
+  // Empty, not 'cv': an omitted --kind must fall through to inference from the
+  // output filename rather than pinning every render to a CV.
+  // Supplied and value are separate questions: `--kind=` yields '', which is
+  // falsy, so a guard reading the value alone waves the flag through.
+  let kindFlag = '', kindSupplied = false, reportSupplied = false;
+  // No flag seen yet: null, not a paper size. The default belongs to
+  // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
+  let inputPath, outputPath, format = null, country = null, reportNum = '', allowReorder = false, allowNonChronological = false;
+  let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
+    } else if (arg.startsWith('--country=')) {
+      country = arg.slice('--country='.length);
+    } else if (arg === '--country') {
+      // A flag missing its operand, not an absent flag: left alone it falls through
+      // to the positional arms and the render succeeds on the default sheet.
+      country = '';
     } else if (arg.startsWith('--report=')) {
+      reportSupplied = true;
       reportNum = arg.split('=')[1].trim();
+    } else if (arg === '--report') {
+      // Same missing-operand case as --kind below. Swallowed, the render writes
+      // no manifest row for the report the caller named. The value is CLEARED as
+      // well as marked supplied: the last occurrence of a flag is the caller's
+      // final intent, and this one carries no operand, so `--report=7 --report`
+      // must not keep the 7.
+      reportSupplied = true;
+      reportNum = '';
+    } else if (arg === '--kind') {
+      // A flag missing its operand, not an absent flag. Left unhandled it falls
+      // through to the positional arms below and is dropped silently, so the
+      // render infers a kind the caller never asked for. Marked supplied AND
+      // cleared, so `--kind=cover --kind` cannot reuse the earlier operand.
+      kindSupplied = true;
+      kindFlag = '';
+    } else if (arg.startsWith('--kind=')) {
+      kindSupplied = true;
+      kindFlag = arg.slice('--kind='.length).trim();
+    } else if (arg.startsWith('--batch=')) {
+      batchManifestPath = arg.slice('--batch='.length);
     } else if (arg.startsWith('--max-pages=')) {
       maxPagesInput = arg.slice('--max-pages='.length);
       maxPages = Number(maxPagesInput);
     } else if (arg === '--allow-reorder') {
       allowReorder = true;
+    } else if (arg === '--allow-nonchronological') {
+      allowNonChronological = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
+    } else if (arg === '--skip-fact-check') {
+      skipFactCheck = true;
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -380,8 +1737,92 @@ async function generatePDF() {
     }
   }
 
+  // A --kind that was passed and is unusable is a hard error: silently filing a
+  // cover letter as a CV is the failure the flag exists to prevent. Checked
+  // before any rendering work starts.
+  // resolveArtifactKind treats an empty value as "not supplied" and falls back
+  // to filename inference, which is what the per-entry batch path needs. So an
+  // empty value cannot be caught by its return, and the CLI has to reject it
+  // here: the caller typed the flag, and silently inferring instead is the
+  // substitution the flag exists to prevent.
+  if (reportSupplied && !reportNum) {
+    console.error('Invalid --report "". Use a numeric report number, e.g. --report=42.');
+    process.exit(1);
+  }
+
+  if (kindSupplied && (!kindFlag || !resolveArtifactKind(kindFlag).kind)) {
+    console.error(`Invalid --kind "${kindFlag}". Use: ${ARTIFACT_KINDS.join(', ')}`);
+    process.exit(1);
+  }
+
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
+    process.exit(1);
+  }
+
+  // Resolve the format before the batch branch, so a batch and a single render
+  // inherit the same configured size and a bad --format fails the same way in
+  // both. An explicit flag is still rejected loudly: falling through to the
+  // profile would print a typo on whatever size happened to be configured.
+  if (format !== null) {
+    const normalized = normalizePageFormat(format);
+    if (!normalized) {
+      console.error(`Invalid format "${format}". Use: ${[...PAGE_FORMATS].join(', ')}`);
+      process.exit(1);
+    }
+    format = normalized;
+  }
+  // --country only matters under `page_format: auto`. It is validated like
+  // --format, because a typo that quietly fell back to the default would print a
+  // German employer's CV on Letter.
+  if (country !== null) {
+    const sheet = pageFormatForCountry(country);
+    if (!sheet) {
+      console.error(`Invalid country "${country}". Use a two-letter ISO 3166-1 code, e.g. --country=DE.`);
+      process.exit(1);
+    }
+    country = country.trim().toUpperCase();
+  }
+  // The pre-resolution flag travels to the batch so an entry's own country can
+  // still steer `auto`; the resolved size below would already have settled it.
+  const flagFormat = format;
+  format = resolvePageFormat(format, { profilePath: workspaceProfilePath(), country });
+
+  // Batch mode (#2384): render every document in the manifest through one
+  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
+  // --allow-nonchronological to all entries; each entry supplies its own
+  // input/output and may override format/reportNum. Takes no positional
+  // input/output.
+  if (batchManifestPath) {
+    // --report keys a single PDF to one tracker row; a batch renders N distinct
+    // CVs, so one global --report would mislabel them all. Per-entry "reportNum"
+    // in the manifest is the correct channel — reject the global flag here rather
+    // than silently ignore it (fails before the batch path returns).
+    if (reportNum) {
+      console.error('--report is not valid with --batch. Set "reportNum" per entry in the manifest instead.');
+      process.exit(1);
+    }
+    // Same reasoning for --kind, and the same consequence if it is ignored
+    // instead. runBatchFromManifest is not given the flag, so a global
+    // --kind=cover leaves every entry on filename inference; one whose name is
+    // not cover-shaped is filed as a CV and its row supersedes the report's real
+    // CV slot in pdf-index.tsv. Per-entry "kind" is the channel that works.
+    if (kindSupplied) {
+      console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
+      process.exit(1);
+    }
+    return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, maxPages, strictPages, allowReorder, allowNonChronological, skipFactCheck });
+  }
+
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]');
+    console.error('');
+    console.error('Batch mode renders every document in the JSON manifest (an array of');
+    console.error('{input, output, format?, country?, reportNum?, kind?}) through one shared Chromium and writes');
+    console.error('<manifest>.results.json; it exits non-zero if any document fails.');
+    console.error('Relative input and output paths in the manifest resolve against the');
+    console.error("manifest's own folder, not the current directory.");
     console.error('');
     console.error('This script only converts an already-built HTML file to PDF.');
     console.error('The input HTML is produced by the pdf mode: the agent fills cv-template.html');
@@ -396,29 +1837,22 @@ async function generatePDF() {
     process.exit(1);
   }
 
-  if (!Number.isInteger(maxPages) || maxPages < 1) {
-    console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
-    process.exit(1);
-  }
-
   inputPath = resolve(inputPath);
   outputPath = resolve(outputPath);
 
-  // Path-traversal guard: keep the PDF write inside the project directory so a
-  // crafted output argument (e.g. "../../etc/cron.d/x") can't escape the repo.
-  // Anchored to the repo root (__dirname), not process.cwd(): running the script
+  // Path-traversal guard: keep the PDF write inside the tracker-owned workspace
+  // so a crafted output argument cannot escape into another user's directory.
+  // Anchored to the workspace root, not process.cwd(): running the script
   // from outside the repo used to falsely refuse in-repo outputs — and, worse,
   // would have allowed writes anywhere under an arbitrary cwd.
-  const relOut = relative(__dirname, outputPath);
-  if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
-    console.error(`Refusing to write the PDF outside the project directory: ${outputPath}`);
+  try {
+    assertInsideWorkspace(inputPath, 'input');
+  } catch (err) {
+    console.error(`Refusing to write the PDF outside the tracker workspace: ${err.message}`);
     process.exit(1);
   }
-
-  // Validate format
-  const validFormats = ['a4', 'letter'];
-  if (!validFormats.includes(format)) {
-    console.error(`Invalid format "${format}". Use: ${validFormats.join(', ')}`);
+  if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
+    console.error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
     process.exit(1);
   }
 
@@ -430,29 +1864,260 @@ async function generatePDF() {
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
   try {
-    cvMarkdown = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+    cvMarkdown = await readFile(resolve(workspaceRoot, 'cv.md'), 'utf-8');
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Drop the optional sections that came in as a bare header — a title with
+  // nothing under it (#3986). The builders already strip these from the payload
+  // side, but neither builder is on every path here: the web pdf flow has the
+  // agent emit finished HTML, which reaches this script with the empty wrappers
+  // still in place. Deciding from the rendered content covers both, and running
+  // it before the reorder and the guard means they judge the document that will
+  // actually be printed. A CV with nothing empty comes through unchanged.
+  html = stripEmptyRenderedSections(html);
+
+  // Apply the user's declared section order (config/profile.yml `cv.sections`)
+  // before the guard runs, so the guard judges the document that will be
+  // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
+  // the same file from workspaceRoot, and cv.md is read from there too, so an
+  // __dirname anchor made CAREER_OPS_TRACKER split one logical profile across
+  // two files — style from the workspace, section order from the checkout —
+  // and validated the workspace's CV against the checkout's declared order.
+  html = reorderCvSections(html, readCvSectionOrder(workspaceProfilePath()));
+
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
+  validateCvExperienceOrder(html, { allowNonChronological });
+  validateLockedSections(html, cvMarkdown, readLockedSections(workspaceProfilePath(), sectionKey));
 
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
   html = normalized.html;
+  // After normalization, so the length is that of the text that prints.
+  warnLongPortalFields(html, outputPath);
   const totalReplacements = Object.values(normalized.replacements).reduce((a, b) => a + b, 0);
   if (totalReplacements > 0) {
     const breakdown = Object.entries(normalized.replacements).map(([k, v]) => `${k}=${v}`).join(', ');
     console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
   }
 
+  // Fact gate, on the normalized HTML: the document that actually prints.
+  if (!skipFactCheck) {
+    if (cvMarkdown) await runFactGate(html, basename(inputPath));
+    else warnFactGateNotRun();
+  }
+
   return renderHtmlToPdf(html, outputPath, {
     format,
     baseDir: dirname(inputPath),
     reportNum,
+    kind: kindFlag,
     inputPath,
     maxPages,
     strictPages,
+    styleTokens: readStyleTokens(workspaceProfilePath()),
   });
+}
+
+/**
+ * Drive batch mode (#2384) from a JSON manifest.
+ *
+ * The manifest is a JSON array of {input, output, format?, reportNum?}. Each
+ * entry is validated and its HTML read + ATS-normalized independently: a bad
+ * entry (missing file, bad format, escaping output path, scrambled section
+ * order, a metric or fact the sources do not back) is recorded as a failure and
+ * skipped so it can never sink the rest of
+ * the batch. Surviving entries render through one shared Chromium (renderBatch).
+ *
+ * A results manifest is always written next to the input manifest as
+ * `<manifest>.results.json` — an ordered array mirroring the input, each item
+ * `{outputPath, ok, ...}`. The process exits non-zero if ANY entry failed (or
+ * the browser died), so cron/batch-tailor callers never mistake a partial run
+ * for success; it exits zero only when every document rendered.
+ *
+ * @param {string} manifestPath - Path to the JSON manifest.
+ * @param {{format: string, flagFormat?: string|null, country?: string|null, maxPages: number, strictPages: boolean, allowReorder: boolean, allowNonChronological: boolean, skipFactCheck: boolean}} globals
+ * @returns {Promise<{ok: number, failed: number, results: Array}>}
+ */
+async function runBatchFromManifest(manifestPath, globals) {
+  const resolvedManifest = resolve(manifestPath);
+  const manifestDir = dirname(resolvedManifest);
+
+  // Contain the manifest itself before any filesystem access: batch manifests are
+  // machine-generated workspace-internal artifacts, so a --batch path pointing outside
+  // the project marks a malformed/tampered invocation. Reject before reading the
+  // manifest or writing its <manifest>.results.json sibling below.
+  try {
+    assertInsideWorkspace(resolvedManifest, 'batch manifest');
+  } catch (err) {
+    console.error(`❌ ${err.message}`);
+    process.exit(1);
+  }
+
+  let raw;
+  try {
+    raw = await readFile(resolvedManifest, 'utf-8');
+  } catch (err) {
+    console.error(`❌ Cannot read batch manifest: ${resolvedManifest} (${err.message})`);
+    process.exit(1);
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(raw);
+  } catch (err) {
+    console.error(`❌ Batch manifest is not valid JSON: ${err.message}`);
+    process.exit(1);
+  }
+
+  if (!Array.isArray(manifest) || manifest.length === 0) {
+    console.error('❌ Batch manifest must be a non-empty JSON array of {input, output, format?, reportNum?}.');
+    process.exit(1);
+  }
+
+  const results = new Array(manifest.length).fill(null);
+  const entries = [];
+
+  // Prepare each entry. Preserve input order in the results by carrying the
+  // manifest index through renderBatch; prep failures land at their own index.
+  let cvMarkdown = '';
+  try {
+    cvMarkdown = await readFile(resolve(workspaceRoot, 'cv.md'), 'utf-8');
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  // Once for the batch, not once per entry.
+  if (!globals.skipFactCheck && !cvMarkdown) warnFactGateNotRun();
+  // Read one workspace profile for the batch. The working directory must not
+  // choose a different theme from the single-document render.
+  const profilePath = workspaceProfilePath();
+  const cvSectionOrder = readCvSectionOrder(profilePath);
+  const styleTokens = readStyleTokens(profilePath);
+  const lockedKeys = readLockedSections(profilePath, sectionKey);
+
+  for (let i = 0; i < manifest.length; i++) {
+    const spec = manifest[i];
+    try {
+      if (!spec || typeof spec.input !== 'string' || typeof spec.output !== 'string') {
+        throw new Error('each entry needs a string "input" and "output"');
+      }
+
+      if (spec.format && !normalizePageFormat(spec.format)) {
+        throw new Error(`invalid format "${spec.format}" (use: ${[...PAGE_FORMATS].join(', ')})`);
+      }
+      if (spec.country != null && !pageFormatForCountry(spec.country)) {
+        throw new Error(`invalid country "${spec.country}" (use a two-letter ISO 3166-1 code)`);
+      }
+      const entryFormat = resolvePageFormat(spec.format || globals.flagFormat, {
+        profilePath,
+        country: spec.country ?? globals.country,
+      });
+
+      // An OMITTED kind falls through to inference from the entry's output name.
+      // A kind that is present but empty is a different thing: the manifest
+      // author asked for one, and inferring instead can file a cover letter as a
+      // CV and replace the report's CV row. Same distinction the --kind flag
+      // draws above, on the path that actually renders the batch.
+      const entryKindSupplied = Object.prototype.hasOwnProperty.call(spec, 'kind');
+      const entryKind = (spec.kind ?? '').toString().trim();
+      if (entryKindSupplied && (!entryKind || !resolveArtifactKind(entryKind).kind)) {
+        throw new Error(`invalid kind "${entryKind}" (use: ${ARTIFACT_KINDS.join(', ')})`);
+      }
+
+      // Present but empty is a supplied value, same as kind above: reportNum is
+      // what keys the manifest row, so accepting '' writes the render nowhere.
+      const entryReportSupplied = Object.prototype.hasOwnProperty.call(spec, 'reportNum');
+      const entryReport = (spec.reportNum ?? '').toString().trim();
+      if (entryReportSupplied && (!entryReport || !/^\d+$/.test(entryReport))) {
+        throw new Error(`invalid reportNum "${entryReport}" (use the numeric report number)`);
+      }
+
+      // Resolve manifest-supplied input/output relative to the manifest's own
+      // directory, not process.cwd(), so a manifest renders identically wherever
+      // the batch is launched from. Absolute paths in the manifest still win
+      // (resolve() ignores the base when the tail is absolute).
+      const entryInput = resolve(manifestDir, spec.input);
+      const entryOutput = resolve(manifestDir, spec.output);
+
+      // Path-containment guards (realpath-based): keep the read and write inside
+      // the tracker workspace even through a symlinked ancestor. A batch
+      // manifest that escapes the workspace is malformed/tampered and is
+      // recorded as a per-entry failure rather than read or written.
+      assertInsideWorkspace(entryInput, 'input');
+      if (!isWorkspaceOutputPath(entryOutput, workspaceRoot)) {
+        throw new Error(`output escapes the tracker workspace: ${entryOutput}`);
+      }
+
+      let html = await readFile(entryInput, 'utf-8');
+      // Same order as the single render: strip the bare-header sections, then
+      // reorder, so the guard judges the document that will actually be
+      // printed. Without this the batch path rendered N CVs with cv.sections
+      // silently inert.
+      html = stripEmptyRenderedSections(html);
+      html = reorderCvSections(html, cvSectionOrder);
+      validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
+      validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
+      validateLockedSections(html, cvMarkdown, lockedKeys);
+      html = normalizeTextForATS(html).html;
+      warnLongPortalFields(html, entryOutput);
+      // Same gate, same guard and same place as the single render. A blocked
+      // entry throws into the catch below: it is recorded as failed and never
+      // reaches Chromium, and the rest of the batch still renders.
+      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput));
+
+      entries.push({
+        _idx: i,
+        html,
+        outputPath: entryOutput,
+        format: entryFormat,
+        baseDir: dirname(entryInput),
+        reportNum: entryReport,
+        kind: entryKind,
+        inputPath: entryInput,
+        maxPages: globals.maxPages,
+        strictPages: globals.strictPages,
+        styleTokens,
+      });
+    } catch (err) {
+      console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
+      // Record outputPath with the same manifest-dir-resolved absolute convention
+      // successful entries use, so consumers see one path shape across ok/failed
+      // results; null stays null when the entry named no output.
+      const failedOutput = spec && typeof spec.output === 'string' ? resolve(manifestDir, spec.output) : null;
+      results[i] = { outputPath: failedOutput, ok: false, error: err.message };
+    }
+  }
+
+  if (entries.length > 0) {
+    console.log(`📦 Batch: rendering ${entries.length} document(s) in one Chromium…`);
+    const rendered = await renderBatch(entries);
+    rendered.forEach((r, k) => { results[entries[k]._idx] = r; });
+  }
+
+  const ok = results.filter((r) => r && r.ok).length;
+  const failed = results.length - ok;
+
+  const resultsPath = `${resolvedManifest}.results.json`;
+  try {
+    // resolvedManifest is already contained, so this sibling is too; assert
+    // explicitly so the write can never land outside the workspace.
+    assertInsideWorkspace(resultsPath, 'batch results');
+    writeFileSync(resultsPath, JSON.stringify(results, null, 2) + '\n');
+    console.log(`🔗 Batch results: ${resultsPath}`);
+  } catch (err) {
+    console.error(`⚠️  Could not write batch results manifest: ${err.message}`);
+    // A failed results write is itself a batch failure: consumers rely on the
+    // manifest, so exit non-zero even when every entry rendered fine.
+    process.exitCode = 1;
+  }
+
+  console.log(`📦 Batch complete: ${ok} ok, ${failed} failed`);
+  // Signal failure via exitCode, not process.exit(1): the latter can truncate
+  // buffered stdout (the summary + results-path logs above) before it flushes.
+  // Returning normally lets in-process callers read the full breakdown and the
+  // process still exits non-zero once the event loop drains.
+  if (failed > 0) process.exitCode = 1;
+  return { ok, failed, results };
 }
 
 /**
@@ -465,9 +2130,27 @@ async function generatePDF() {
  *
  * Missing font files keep their original reference and log a warning.
  *
+ * Encoded font data: URLs are memoized across calls (keyed by resolved absolute
+ * path, not name — two fonts can share a display name but not a path) so a
+ * batch render does not re-read and re-base64 the same font once per document.
+ * The cache holds only successful encodings; a missing font is re-checked each
+ * call so a font added mid-run is picked up. The bytes are deterministic, so a
+ * cache hit returns the exact same data: URL — output stays byte-identical.
+ *
+ * Cache lifetime and invalidation: the cache lives only for the duration of a
+ * single CLI run (a module-level Map, never persisted). It is keyed by path and
+ * is deliberately NOT invalidated when a font file changes or is deleted mid-run
+ * — once a path is cached, that path serves the first-read bytes for the rest of
+ * the run even if the file is later edited or removed on disk (no mtime/size
+ * stat check). This is intentional: a batch renders from a fixed set of fonts and
+ * relies on the stale-on-deletion behavior to stay byte-identical; the next CLI
+ * run starts with an empty cache and re-reads from disk.
+ *
  * @param {string} html - HTML that may reference url('./fonts/<file>').
  * @returns {Promise<string>} HTML with local font references inlined.
  */
+const _fontDataUrlCache = new Map();
+
 export async function inlineLocalFonts(html) {
   const FONT_REF = /url\(\s*(['"]?)\.\/fonts\/([^'")\s]+)\1\s*\)/g;
   const MIME = { woff2: 'font/woff2', woff: 'font/woff', otf: 'font/otf', ttf: 'font/ttf' };
@@ -483,16 +2166,27 @@ export async function inlineLocalFonts(html) {
       console.warn(`⚠️  Font reference escapes fonts/, keeping original reference: ${name}`);
       continue;
     }
+    if (_fontDataUrlCache.has(fontPath)) {
+      dataUrls.set(name, _fontDataUrlCache.get(fontPath));
+      continue;
+    }
     try {
       const buf = await readFile(fontPath);
       const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
-      dataUrls.set(name, `url('data:${MIME[ext] || 'application/octet-stream'};base64,${buf.toString('base64')}')`);
+      const dataUrl = `url('data:${MIME[ext] || 'application/octet-stream'};base64,${buf.toString('base64')}')`;
+      _fontDataUrlCache.set(fontPath, dataUrl);
+      dataUrls.set(name, dataUrl);
     } catch (err) {
       if (err?.code !== 'ENOENT') throw err;
       console.warn(`⚠️  Font file not found, keeping original reference: fonts/${name}`);
     }
   }
   return html.replace(FONT_REF, (match, _quote, name) => dataUrls.get(name) || match);
+}
+
+async function launchChromium(options) {
+  const { chromium } = await import('playwright');
+  return chromium.launch(options);
 }
 
 /**
@@ -513,6 +2207,7 @@ export async function inlineLocalFonts(html) {
  *   baseDir?: string,
  *   reportNum?: string,
  *   inputPath?: string,
+ *   workspaceRoot?: string,
  *   maxPages?: number,
  *   strictPages?: boolean,
  *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
@@ -520,14 +2215,116 @@ export async function inlineLocalFonts(html) {
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
-  const format = opts.format || 'a4';
-  const baseDir = opts.baseDir || process.cwd();
+  // A passed launchBrowser is a test double and always paints in this process.
+  // The shared painter is only for the batch, which opts in with the env var,
+  // and the painter process itself must not dial its own socket.
+  if (!opts.launchBrowser
+    && process.env.CAREER_OPS_PDF_SHARED === '1'
+    && process.env.CAREER_OPS_PDF_SERVER_PROCESS !== '1') {
+    try {
+      const { renderViaSharedPdfServer } = await import('./lib/pdf-server.mjs');
+      const result = await renderViaSharedPdfServer(
+        html,
+        outputPath,
+        { ...opts, workspaceRoot: opts.workspaceRoot || workspaceRoot },
+        fileURLToPath(import.meta.url),
+      );
+      console.log(`✅ PDF generated: ${result.outputPath}`);
+      console.log(`📊 Pages: ${result.pageCount}`);
+      // The painter's own warning goes nowhere, so repeat it here. A strict
+      // overflow already came back as an error.
+      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false });
+      console.log(`📦 Size: ${(result.size / 1024).toFixed(1)} KB`);
+      return result;
+    } catch (err) {
+      if (err?.code !== 'PDF_SERVER_UNAVAILABLE') throw err;
+      console.warn(`⚠️  Shared PDF browser unavailable, painting locally: ${err.message}`);
+    }
+  }
+  const launchBrowser = opts.launchBrowser || launchChromium;
+  let browser = null;
+  try {
+    browser = await launchBrowser({ headless: true });
+    return await renderInPage(browser, html, outputPath, opts);
+  } finally {
+    if (browser) {
+      await browser.close().catch((err) => {
+        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+      });
+    }
+  }
+}
+
+/**
+ * Render one already-normalized HTML document to a PDF on an already-launched
+ * browser. This is the page-level half of the render — it owns the per-document
+ * work (theme/print/font injection, temp file, page, PDF, page-budget, manifest)
+ * but NOT the browser lifecycle. Both the single-CV path (renderHtmlToPdf) and
+ * the batch path (renderBatch) call this exact function, which is what keeps a
+ * single-CV render byte-identical whether it runs alone or inside a batch (#2384).
+ *
+ * The page and the temp HTML file are always cleaned up in a finally, so a
+ * throw here (e.g. a strict page-budget overflow) never leaks a page into the
+ * shared browser — the caller's remaining documents keep their own fresh pages.
+ *
+ * @param {import('playwright').Browser} browser - An open browser to render on.
+ * @param {string} html - Full HTML document to render.
+ * @param {string} outputPath - Absolute path to write the PDF to.
+ * @param {{
+ *   format?: 'a4'|'letter',
+ *   baseDir?: string,
+ *   reportNum?: string,
+ *   inputPath?: string,
+ *   maxPages?: number,
+ *   strictPages?: boolean,
+ *   styleTokens?: object
+ * }} [opts]
+ * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
+ */
+async function renderInPage(browser, html, outputPath, opts = {}) {
+  const outputRoot = opts.workspaceRoot || workspaceRoot;
+  const format = resolvePageFormat(opts.format, { profilePath: workspaceProfilePath(opts.workspaceRoot), country: opts.country });
+  const requestedBaseDir = resolve(opts.baseDir || outputRoot);
+  // Temporary HTML is an output too: never let an external input path or
+  // caller-supplied baseDir choose an arbitrary directory. If the requested
+  // directory is outside the tracker workspace (or escapes through a symlink),
+  // keep the render workspace-owned while still allowing the input itself to
+  // be read.
+  const baseDir = isWorkspaceOutputPath(
+    resolve(requestedBaseDir, '.career-ops-render-anchor'),
+    outputRoot,
+  ) ? requestedBaseDir : resolve(outputRoot);
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
+  // Every render path converges here, so the manifest's kind is decided here
+  // too rather than in each caller (#3887). A null kind means the caller
+  // declared one this manifest cannot key on: the CLI and the batch loop
+  // validate before rendering, but a direct renderHtmlToPdf() caller has
+  // nothing else in front of it, and applyManifestRow() reads null as 'cv' —
+  // so an unrecognized kind would evict the report's real CV row and hand the
+  // apply flow the wrong document. Rejected here, before the page renders, so
+  // a mislabelled artifact never reaches disk either.
+  const { kind: artifactKind } = resolveArtifactKind(opts.kind, outputPath);
+  if (!artifactKind) {
+    throw new Error(`Invalid artifact kind "${opts.kind}". Use: ${ARTIFACT_KINDS.join(', ')}`);
+  }
+
+  // Reject an escaping destination before creating directories, launching
+  // Chromium, or writing any renderer temporary files (#2844).
+  if (!isWorkspaceOutputPath(outputPath, outputRoot)) {
+    throw new Error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
+  }
 
   mkdirSync(dirname(outputPath), { recursive: true });
 
-  html = injectPrintPageCss(html, format);
+  // Inject the user's theme tokens (config/profile.yml `style:`) as CSS custom
+  // properties so the templates' var(--x, <default>) reads pick them up (#1837).
+  // No `style:` block → no tokens → byte-identical output. Both the CV path and
+  // the cover-letter path flow through here, so both are themed from one place.
+  const styleTokens = opts.styleTokens ?? readStyleTokens(workspaceProfilePath(opts.workspaceRoot));
+  html = injectThemeStyle(html, styleTokens);
+
+  html = injectPrintPageCss(html, format, opts.country);
   html = await inlineLocalFonts(html);
 
   // Write HTML to a temp file in baseDir so page.goto() gives a file://
@@ -536,11 +2333,33 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const { writeFile, unlink } = await import('fs/promises');
   await writeFile(tmpHtmlPath, html, 'utf-8');
 
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
-  let browser = null;
+  let page = null;
+  let context = null;
   try {
-    browser = await launchBrowser({ headless: true });
-    const page = await browser.newPage();
+    // A CV is static markup, so the renderer needs neither scripts nor the network.
+    // Both are denied because this HTML is not fully trusted: it is built from
+    // cv.md, the job posting and the evaluation report, and postings are untrusted
+    // input (AGENTS.md). With JS off an injected <script> cannot run; with
+    // non-local requests aborted an injected <img src="https://…"> cannot beacon
+    // out. file:/data: subresources still load, which is all a template needs.
+    //
+    // newContext(), not newPage(): javaScriptEnabled is a Playwright context
+    // option with no per-page equivalent, and a fresh context per document also
+    // keeps each render isolated from its siblings within one shared browser
+    // (#2384). Guarded so an injected test double that only implements newPage()
+    // still works.
+    context = browser.newContext
+      ? await browser.newContext({ javaScriptEnabled: false })
+      : null;
+    page = context ? await context.newPage() : await browser.newPage();
+    if (page.route) {
+      await page.route('**/*', (route) => {
+        const url = route.request().url();
+        return url.startsWith('file:') || url.startsWith('data:')
+          ? route.continue()
+          : route.abort();
+      });
+    }
 
     // Load from file:// so the page origin allows local subresources
     await page.goto(pathToFileURL(tmpHtmlPath).href, {
@@ -562,8 +2381,10 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
       preferCSSPageSize: true,
     });
 
-    // Write PDF
-    await writeFile(outputPath, pdfBuffer);
+    // Write PDF only after rendering has completed. Renderer cleanup still runs
+    // if an injected browser fails before producing a buffer. The atomic write
+    // keeps the previous PDF intact if this write fails partway.
+    writeFileAtomic(outputPath, pdfBuffer);
 
     // Read the root page-tree count so page-like text in streams is ignored.
     const pageCount = countRenderedPdfPages(pdfBuffer);
@@ -580,7 +2401,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
     console.log(`📦 Size: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
 
     try {
-      updatePDFManifest(reportNum, outputPath, inputPath, format);
+      await updatePDFManifest(reportNum, outputPath, inputPath, format, artifactKind);
       console.log(`🔗 Manifest: data/pdf-index.tsv updated${reportNum ? ` (report ${reportNum})` : ' (no --report given)'}`);
     } catch (err) {
       // The PDF itself succeeded — never fail the run over manifest bookkeeping.
@@ -589,9 +2410,19 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
     return { outputPath, pageCount, size: pdfBuffer.length };
   } finally {
-    if (browser) {
-      await browser.close().catch((err) => {
-        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+    // Close the page so a batch does not accumulate pages into the shared
+    // browser (leak → OOM). Optional-chained: the single path's browser.close()
+    // already reclaims the page, and minimal test doubles may omit close().
+    if (page && typeof page.close === 'function') {
+      await page.close().catch((err) => {
+        console.warn(`⚠️  Page cleanup failed: ${err.message}`);
+      });
+    }
+    // Close the per-document context too, so the JS-disabled context created
+    // above does not accumulate in the shared browser across a batch (#2384).
+    if (context && typeof context.close === 'function') {
+      await context.close().catch((err) => {
+        console.warn(`⚠️  Context cleanup failed: ${err.message}`);
       });
     }
     // Clean up temp file
@@ -603,12 +2434,95 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   }
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
-if (isMain) {
+/**
+ * Render many already-normalized HTML documents through ONE shared Chromium.
+ *
+ * Maintainer conditions (#2384): the browser is launched once via the same
+ * opts.launchBrowser seam the single path uses, and closed in a finally at the
+ * batch boundary — it never outlives the batch and is torn down even if a
+ * document throws. Each entry renders on its own page (renderInPage), and a
+ * failing entry is captured as `{ok:false, error}` without stopping the rest.
+ *
+ * The browser is owned here: renderBatch closes whatever launchBrowser returns.
+ * launchBrowser is a launch *factory*, not a caller-owned handle, so this does
+ * not break test injection — the stub returns a fresh browser to be closed.
+ *
+ * Rendering is intentionally serial: a shared module-level font cache and one
+ * long-lived browser make parallel rendering a determinism/memory hazard that
+ * this change does not take on.
+ *
+ * @param {Array<{html: string, outputPath: string, format?: string, baseDir?: string,
+ *   reportNum?: string, inputPath?: string, maxPages?: number, strictPages?: boolean}>} entries
+ * @param {{launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>}} [opts]
+ * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, error?: string}>>}
+ */
+export async function renderBatch(entries, opts = {}) {
+  const launchBrowser = opts.launchBrowser || launchChromium;
+  const results = [];
+  let browser = null;
+  try {
+    try {
+      browser = await launchBrowser({ headless: true });
+    } catch (err) {
+      // A shared-browser launch failure is fatal to every document, but it must
+      // NOT escape as an uncaught throw: record a failed result for each entry so
+      // runBatchFromManifest still writes a complete results manifest and takes
+      // the existing non-zero exit path, instead of crashing before either (#2384).
+      console.error(`❌ Batch browser launch failed: ${err.message}`);
+      for (const entry of entries) {
+        results.push({ outputPath: entry.outputPath, ok: false, error: `browser launch failed: ${err.message}` });
+      }
+      return results;
+    }
+    for (const entry of entries) {
+      try {
+        const r = await renderInPage(browser, entry.html, entry.outputPath, entry);
+        results.push({ outputPath: entry.outputPath, ok: true, pageCount: r.pageCount, size: r.size });
+      } catch (err) {
+        console.error(`❌ Batch entry failed (${entry.outputPath}): ${err.message}`);
+        results.push({ outputPath: entry.outputPath, ok: false, error: err.message });
+      }
+    }
+    return results;
+  } finally {
+    if (browser) {
+      await browser.close().catch((err) => {
+        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+      });
+    }
+  }
+}
+
+async function runPdfServer() {
+  const { startPdfServer } = await import('./lib/pdf-server.mjs');
+  const server = await startPdfServer({
+    rootDir: __dirname,
+    launchBrowser: launchChromium,
+    render: (browser, html, outputPath, opts) => renderInPage(browser, html, outputPath, opts),
+  });
+  if (server.alreadyRunning) return;
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    server.close().then(() => process.exit(0), () => process.exit(0));
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+  await server.closed;
+}
+
+const isMain = isMainModule(import.meta.url);
+if (isMain && process.argv[2] === '--pdf-server') {
+  runPdfServer().then(() => process.exit(0), (err) => {
+    console.error(`❌ PDF browser failed: ${err.message}`);
+    process.exit(1);
+  });
+} else if (isMain) {
   generatePDF().catch((err) => {
     console.error('❌ PDF generation failed:', err.message);
     process.exit(1);
   });
 }
 
-export { normalizeTextForATS };
+export { normalizeTextForATS, sectionKey };

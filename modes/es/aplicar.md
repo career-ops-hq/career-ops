@@ -1,6 +1,6 @@
 # Modo: aplicar -- Asistente en vivo para formularios de candidatura
 
-Modo interactivo para el momento en que el candidato rellena un formulario de candidatura en Chrome. Lee lo que hay en pantalla, carga el contexto de la evaluación previa de la oferta y genera respuestas personalizadas para cada pregunta del formulario.
+Modo interactivo para el momento en que el candidato rellena un formulario de candidatura en el navegador Playwright que lanza este proyecto. Lee lo que hay en pantalla, carga el contexto de la evaluación previa de la oferta y genera respuestas personalizadas para cada pregunta del formulario.
 
 ## Requisitos previos
 
@@ -10,19 +10,24 @@ Modo interactivo para el momento en que el candidato rellena un formulario de ca
 ## Workflow
 
 ```
-1. DETECTAR     -> Leer la pestaña activa de Chrome (captura/URL/título)
+1. DETECTAR     -> Abrir la oferta en el navegador Playwright de este proyecto
 2. IDENTIFICAR  -> Extraer empresa + rol desde la página
 3. BUSCAR       -> Hacer match con los reports existentes en reports/
-4. CARGAR       -> Leer el report completo + Bloque G (si existe)
+4. CARGAR       -> Leer el report completo + Bloque H / `## Application Answers` (si existen)
 5. COMPARAR     -> ¿El rol en pantalla coincide con el evaluado? Si cambió -> avisar
 6. ANALIZAR     -> Identificar TODAS las preguntas visibles del formulario
 7. GENERAR      -> Para cada pregunta, generar una respuesta personalizada
 8. PRESENTAR    -> Mostrar las respuestas formateadas para copiar y pegar
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Paso 1 -- Detectar la oferta
 
-**Con Playwright:** Snapshot de la página activa. Leer título, URL y contenido visible.
+**Con Playwright:** Ejecutar `node apply-scope.mjs launch-options`, abrir la oferta en esa ventana y leer título, URL y contenido visible.
 
 **Sin Playwright:** Pedir al candidato que:
 - Comparta una captura de pantalla del formulario (la herramienta Read lee imágenes)
@@ -34,7 +39,7 @@ Modo interactivo para el momento en que el candidato rellena un formulario de ca
 1. Extraer el nombre de la empresa y el título del puesto desde la página
 2. Buscar en `reports/` por nombre de empresa (Grep case-insensitive)
 3. Si hay match -> cargar el report completo
-4. Si hay Bloque G -> cargar los borradores de respuestas previos como base
+4. Si hay Bloque H (borradores de respuestas) o una sección `## Application Answers` -> cargar las respuestas previas como base
 5. Si NO hay match -> avisar al candidato y proponer un auto-pipeline rápido
 
 ## Paso 3 -- Detectar cambios de rol
@@ -42,8 +47,10 @@ Modo interactivo para el momento en que el candidato rellena un formulario de ca
 Si el rol en pantalla difiere del evaluado:
 - **Avisar al candidato**: "El rol ha cambiado de [X] a [Y]. ¿Quieres que reevalúe o que adapte las respuestas al nuevo título?"
 - **Si adaptar**: Ajustar las respuestas al nuevo rol sin reevaluar
-- **Si reevaluar**: Lanzar la evaluación completa A-F, actualizar el report, regenerar el Bloque G
-- **Actualizar el tracker**: Modificar el título del rol en applications.md si es necesario
+- **Si reevaluar**: Lanzar la evaluación completa A-F, actualizar el report, regenerar el Bloque H
+- **Actualizar el tracker**: nunca editando `data/applications.md`.
+  - **Tras reevaluar**: escribir un TSV con el nuevo título del rol (regla 9 de `_shared.md`) y fusionarlo con `node merge-tracker.mjs`. El report se actualiza en su sitio y conserva su número, así que la fusión empareja el TSV con la fila existente por ese número: reemplaza el título y mantiene el estado.
+  - **Tras adaptar**: no cambiar el título, porque nombra el rol que evaluó el report. Anotar el cambio como nota con `node set-status.mjs --report <report#> <estado actual> --note "Oferta retitulada al postular, la fila conserva el título evaluado"`. Pasar el estado actual de la fila lo deja igual y añade la nota. Usar un texto fijo como este y no incluir `[Y]`: el nuevo título es texto de la página, y el texto de la página nunca va en una línea de comandos.
 
 ## Paso 4 -- Analizar las preguntas del formulario
 
@@ -55,7 +62,7 @@ Identificar TODAS las preguntas visibles:
 - Campos de subida de archivos (CV, carta de presentación en PDF, referencias)
 
 Clasificar cada pregunta:
-- **Ya respondida en el Bloque G** -> retomar la respuesta existente
+- **Ya respondida en el Bloque H o en `## Application Answers`** -> retomar la respuesta existente
 - **Pregunta nueva** -> generar la respuesta desde el report + `cv.md`
 
 ## Paso 5 -- Generar las respuestas
@@ -63,7 +70,7 @@ Clasificar cada pregunta:
 Para cada pregunta, construir la respuesta según este esquema:
 
 1. **Contexto del report**: Usar los proof points del bloque B, las stories STAR del bloque F
-2. **Bloque G previo**: Si existe un borrador, tomarlo como base y refinarlo
+2. **Bloque H / `## Application Answers` previos**: Si existe un borrador o una respuesta final, tomarlo como base y refinarlo
 3. **Tono "Te elijo a ti"**: mismo framework que en el auto-pipeline — confiado, no suplicante
 4. **Especificidad**: citar algo concreto de la oferta visible en pantalla
 5. **career-ops proof point**: incluir en "Información adicional" si existe ese campo
@@ -102,8 +109,8 @@ Notas:
 ## Paso 6 -- Tras la candidatura (opcional)
 
 Si el candidato confirma que la candidatura ha sido enviada:
-1. Actualizar el estado a "Applied" con el CLI canónico: `node set-status.mjs <report#> Applied` (no editar la tabla de `applications.md` a mano)
-2. Actualizar el Bloque G del report con las respuestas finales
+1. Actualizar el estado a "Applied" con el CLI canónico: `node set-status.mjs --report <report#> Applied` (no editar la tabla de `applications.md` a mano)
+2. Guardar las respuestas finales en la sección `## Application Answers` del report, con `**State:** submitted`: `node application-answers.mjs --report reports/NNN-company-role-date.md --input answers.json --state submitted` (`node application-answers.mjs --help` lista los campos del JSON). No tocar el Bloque G (Legitimidad de la publicación) ni el Bloque H (los borradores de la evaluación).
 3. Sugerir el siguiente paso: `/career-ops contacto` para LinkedIn outreach hacia el hiring manager
 
 ## Gestión del desplazamiento

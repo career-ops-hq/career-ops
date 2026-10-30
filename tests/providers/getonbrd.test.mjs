@@ -146,6 +146,85 @@ try {
     pass('getonbrd.fetch() respects the max_pages override (stops after 1 page)');
   else fail(`getonbrd.fetch() max_pages=1 made ${capCalls.length} page calls`);
 
+  // -- Category selection (category: / categories:) --
+  const { resolveCategories } = getonbrdModule;
+
+  if (JSON.stringify(resolveCategories({})) === '["programming"]'
+      && JSON.stringify(resolveCategories({ category: undefined })) === '["programming"]')
+    pass('resolveCategories() defaults to ["programming"] when unconfigured');
+  else fail(`resolveCategories() default = ${JSON.stringify(resolveCategories({}))}`);
+
+  if (JSON.stringify(resolveCategories({ category: '  machine-learning-ai  ' })) === '["machine-learning-ai"]')
+    pass('resolveCategories() accepts a single category: string and trims it');
+  else fail(`resolveCategories() single = ${JSON.stringify(resolveCategories({ category: 'machine-learning-ai' }))}`);
+
+  if (JSON.stringify(resolveCategories({ categories: ['programming', 'hr', 'programming'] })) === '["programming","hr"]')
+    pass('resolveCategories() keeps categories: order and drops duplicates');
+  else fail(`resolveCategories() array = ${JSON.stringify(resolveCategories({ categories: ['programming', 'hr', 'programming'] }))}`);
+
+  if (JSON.stringify(resolveCategories({ category: 'hr', categories: ['sales'] })) === '["sales"]')
+    pass('resolveCategories() lets categories: win over category:');
+  else fail(`resolveCategories() precedence = ${JSON.stringify(resolveCategories({ category: 'hr', categories: ['sales'] }))}`);
+
+  // A bare `category:` key in YAML parses as null — that means "unset", not an
+  // error, so it falls back to the default rather than throwing.
+  if (JSON.stringify(resolveCategories({ category: null })) === '["programming"]')
+    pass('resolveCategories() treats a null category (bare YAML key) as unset');
+  else fail(`resolveCategories({category:null}) = ${JSON.stringify(resolveCategories({ category: null }))}`);
+
+  // Path-injection / malformed slugs must throw rather than reach the network.
+  const badCategories = ['../../admin', 'Programming', 'a//b', 'foo?x=1', '', 'foo-', 42];
+  const accepted = badCategories.filter((c) => {
+    try { resolveCategories({ category: c }); return true; } catch { return false; }
+  });
+  if (accepted.length === 0)
+    pass('resolveCategories() rejects path-injection and malformed category slugs');
+  else fail(`resolveCategories() accepted ${JSON.stringify(accepted)}`);
+
+  let emptyThrew = false;
+  try { resolveCategories({ categories: [] }); } catch { emptyThrew = true; }
+  if (emptyThrew) pass('resolveCategories() throws on an empty categories list');
+  else fail('resolveCategories() should throw when categories: is []');
+
+  let overCapThrew = false;
+  try { resolveCategories({ categories: Array.from({ length: 13 }, (_, i) => `cat-${i}`) }); } catch { overCapThrew = true; }
+  if (overCapThrew) pass('resolveCategories() throws above the 12-category cap');
+  else fail('resolveCategories() should throw when more than 12 categories are configured');
+
+  // fetch() walks each configured category and dedups shared postings by URL.
+  const multiCalls = [];
+  const shared = { attributes: { title: 'Shared Role', remote: true }, links: { public_url: 'https://www.getonbrd.com/jobs/shared' } };
+  const multi = await getonbrd.fetch(
+    { name: 'GOB', categories: ['programming', 'machine-learning-ai'], max_pages: 1 },
+    {
+      fetchJson: async (url) => {
+        multiCalls.push(url);
+        return multiCalls.length === 1
+          ? { data: [shared, mkJob(1)] }
+          : { data: [shared, mkJob(2)] };
+      },
+    },
+  );
+
+  if (multiCalls.length === 2
+      && multiCalls[0].startsWith('https://www.getonbrd.com/api/v0/categories/programming/jobs?')
+      && multiCalls[1].startsWith('https://www.getonbrd.com/api/v0/categories/machine-learning-ai/jobs?'))
+    pass('getonbrd.fetch() requests one feed per configured category, in order');
+  else fail(`getonbrd.fetch() multi-category URLs = ${JSON.stringify(multiCalls)}`);
+
+  if (multi.length === 3 && multi.filter((j) => j.url.endsWith('/shared')).length === 1)
+    pass('getonbrd.fetch() dedups a posting listed under two categories');
+  else fail(`getonbrd.fetch() multi-category rows = ${JSON.stringify(multi.map((j) => j.url))}`);
+
+  let badCategoryThrew = false;
+  try {
+    await getonbrd.fetch({ name: 'GOB', category: '../secrets' }, { fetchJson: async () => { throw new Error('network reached'); } });
+  } catch (e) {
+    badCategoryThrew = /invalid category/.test(e.message);
+  }
+  if (badCategoryThrew) pass('getonbrd.fetch() rejects a bad category before any network call');
+  else fail('getonbrd.fetch() should throw "invalid category" without fetching');
+
 } catch (e) {
   fail(`getonbrd provider tests crashed: ${e.message}`);
 }

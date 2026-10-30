@@ -4,10 +4,19 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flakelight.url = "github:nix-community/flakelight";
+
+    # Pi (see docs/SUPPORTED_CLIS.md) needs its own nixpkgs: the CLI gained the
+    # `x-opencode-session` routing header OpenCode's API requires partway
+    # through its 0.8x line, and the nixpkgs this flake pins for the toolchain
+    # still carries 0.64, which the OpenCode Go endpoint rejects with
+    # "Request is missing x-opencode-session". A second input keeps Pi working
+    # without forcing a whole-nixpkgs bump (Node, Playwright browsers) on every
+    # contributor. Drop it once the pin above passes 0.85.
+    nixpkgs-pi.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
   outputs =
-    { flakelight, nixpkgs, ... }:
+    { flakelight, nixpkgs, nixpkgs-pi, ... }:
     flakelight ./. {
 
       inputs.nixpkgs = nixpkgs;
@@ -24,30 +33,59 @@
       ];
 
       devShell.packages =
-        pkgs: with pkgs; [
+        pkgs:
+        with pkgs; [
 
           nodejs
           bun
+
+          # Pi coding agent host (docs/SUPPORTED_CLIS.md), in the shell so the
+          # integration runs without a global npm install:
+          #   pi            interactive
+          #   pi -p "…"     headless worker
+          # Taken from `nixpkgs-pi` (see the input comment): the toolchain pin
+          # carries 0.64, which the OpenCode Go endpoint rejects.
+          nixpkgs-pi.legacyPackages.${pkgs.stdenv.hostPlatform.system}.pi-coding-agent
 
           coreutils
 
           playwright-driver.browsers
 
+          # Playwright MCP server, built against the same nixpkgs browsers. The
+          # npm `@playwright/mcp` bundles its own Playwright and looks for a
+          # browser revision this shell does not have. Point the MCP config at
+          # `mcp-server-playwright` instead (docs/NIXOS.md).
+          playwright-mcp
+
+          # pdftotext / pdftoppm, for reading a PDF CV during onboarding.
+          poppler-utils
+
         ];
 
+      # No PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: the nixpkgs browsers are
+      # patched, so host validation passes on its own, and with the variable
+      # set Playwright writes a notice to stderr on every launch.
+      # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD also makes the package.json postinstall
+      # skip `playwright install`, which cannot write to the Nix store.
       devShell.env = pkgs: {
         PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
-        PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
         PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
       };
 
+      # nixpkgs builds one Playwright browser revision, and each npm Playwright
+      # release looks for exactly one revision, so the npm package must match
+      # playwright-driver. package.json pins a newer one, and every
+      # `npm install` puts it back, so the pin runs on every shell entry.
+      # After `npm install`, re-enter the shell (`direnv reload`, or exit and
+      # `nix develop` again).
       devShell.shellHook = pkgs: ''
-        # Pin npm playwright to match nixpkgs browser binaries
         EXPECTED="${pkgs.playwright-driver.version}"
         CURRENT=$(node -e "try{console.log(require('playwright-core/package.json').version)}catch{}" 2>/dev/null)
         if [ "$CURRENT" != "$EXPECTED" ]; then
           echo "Pinning playwright to $EXPECTED to match Nix-provided browsers..."
-          npm install --no-save "playwright@$EXPECTED" >/dev/null 2>&1
+          if ! npm install --no-save --ignore-scripts --no-audit --no-fund "playwright@$EXPECTED" >/dev/null; then
+            echo "warning: could not pin playwright@$EXPECTED; browser launches will fail until it is pinned." >&2
+          fi
         fi
       '';
 

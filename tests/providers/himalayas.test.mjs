@@ -14,7 +14,7 @@ try {
   else fail(`himalayas.id is ${JSON.stringify(himalayas.id)}`);
 
   const hit = himalayas.detect({ name: 'Himalayas', provider: 'himalayas' });
-  if (hit && hit.url === 'https://himalayas.app/jobs/api?limit=50') {
+  if (hit && hit.url === 'https://himalayas.app/jobs/api?limit=20') {
     pass('himalayas.detect() claims explicit provider config');
   } else {
     fail(`himalayas.detect() returned ${JSON.stringify(hit)}`);
@@ -125,7 +125,7 @@ try {
     { fetchJson: async (url, opts) => { capturedUrl = url; capturedOpts = opts; return sample; } },
   );
 
-  if (capturedUrl === 'https://himalayas.app/jobs/api?limit=50') {
+  if (capturedUrl === 'https://himalayas.app/jobs/api?limit=20') {
     pass('himalayas.fetch() requests the pinned API URL');
   } else {
     fail(`himalayas.fetch() requested ${JSON.stringify(capturedUrl)}`);

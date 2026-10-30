@@ -20,14 +20,25 @@
  * this CLI, and any tool (a dashboard, a script, cron) can append to it. The
  * protocol an agent follows is documented in modes/agent-inbox.md.
  *
+ * Item numbers are *file positions*, not positions in the pending list: `add`
+ * only ever appends, so a number never changes meaning once printed. `list`
+ * therefore shows gaps as items get resolved (2, 4, 5) — the gaps are the
+ * receipt that something was already handled, and a whole batch of resolves can
+ * be read off a single `list` without drifting.
+ *
  * Usage:
  *   node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"
  *   node agent-inbox.mjs list [--all]                 # pending only, or every item
- *   node agent-inbox.mjs resolve 1 [--result "scored 4.3 — report 012"]
+ *   node agent-inbox.mjs resolve 1 [--expect "Acme"] [--result "scored 4.3 — report 012"]
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import {
+  readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync,
+  openSync, fstatSync, readSync, closeSync, realpathSync, statSync,
+} from 'fs';
 import { dirname } from 'path';
+import { withPipelineLock } from './pipeline-lock.mjs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 
 const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
 
@@ -66,20 +77,65 @@ function oneLine(s) {
   return String(s ?? '').replace(/\s*\n\s*/g, ' ').trim();
 }
 
+// MUST be called with the queue lock held — see add(). Creating the file is
+// only half of it; the file is not usable until the header is IN it, and that
+// is two syscalls, not one.
 function ensureFile() {
   if (existsSync(PATH)) return;
   ensureGitignored();
   mkdirSync(dirname(PATH), { recursive: true });
-  writeFileSync(PATH, HEADER);
+  // 'wx': atomic create-exclusive. Two concurrent first-time `add` calls can
+  // both pass the existsSync check above before either writes; without an
+  // exclusive flag, the second writeFileSync (default 'w', which truncates)
+  // lands after the first has already appended its item and wipes it back to
+  // just the header. 'wx' makes only one of them win the create — the loser
+  // gets EEXIST and does nothing, same as if it had seen existsSync === true.
+  //
+  // 'wx' settles the two-creator case and nothing else. It makes the CREATE
+  // atomic, not the INITIALISATION: writeFileSync is open() then write(), and
+  // between those two syscalls the file EXISTS and is ZERO BYTES. Measured on
+  // Windows, a second process polling existsSync and stat-ing the moment the
+  // file appeared saw it at 0 bytes in 303 of 400 rounds.
+  //
+  // So there is a third participant the exclusive flag cannot see: a writer
+  // that arrives INSIDE that window, finds existsSync === true, skips creation,
+  // and appends — into a file this call is about to overwrite from offset 0.
+  // Its item is gone, with no error anywhere; the write below simply lands on
+  // top of it. That is why the caller holds the lock across this function
+  // rather than around the append alone.
+  try {
+    writeFileSync(PATH, HEADER, { flag: 'wx' });
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+  }
 }
 
-// Parse the checklist into items, in file order.
+// Whether appending to `path` needs a leading newline first, i.e. the file is
+// non-empty and doesn't already end in one. Reads only the last byte instead
+// of the whole file — the full-file read this replaced was only ever used to
+// check one byte.
+function needsLeadingNewline(path) {
+  const fd = openSync(path, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    if (size === 0) return false;
+    const buf = Buffer.alloc(1);
+    readSync(fd, buf, 0, 1, size - 1);
+    return buf[0] !== 0x0a; // '\n'
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// Parse the checklist into items, in file order. `num` is the stable 1-based
+// item number used by `list` and `resolve` — it is the position in the FULL
+// list, so resolving an item never renumbers the others.
 function parseItems() {
   if (!existsSync(PATH)) return [];
   const items = [];
   readFileSync(PATH, 'utf8').split('\n').forEach((line, i) => {
     const m = /^- \[([ xX])\]\s*(.*)$/.exec(line.trim());
-    if (m) items.push({ line: i, done: m[1].toLowerCase() === 'x', text: m[2] });
+    if (m) items.push({ num: items.length + 1, line: i, done: m[1].toLowerCase() === 'x', text: m[2] });
   });
   return items;
 }
@@ -91,38 +147,152 @@ function opt(name, def = '') {
   return v && !v.startsWith('--') ? v : def;
 }
 
-function add() {
+// Every value given for a repeatable flag, in argv order. An occurrence with no
+// value yields '' rather than being dropped, so the caller can reject it:
+// opt() reads only the first occurrence and would never see a later bare one.
+function optAll(name) {
+  const values = [];
+  process.argv.forEach((arg, i) => {
+    if (arg !== '--' + name) return;
+    const v = process.argv[i + 1];
+    values.push(v && !v.startsWith('--') ? v : '');
+  });
+  return values;
+}
+
+async function add() {
   const text = oneLine(process.argv.slice(3).join(' '));
   if (!text) fail('add needs a request, e.g. node agent-inbox.mjs add "evaluate https://..."');
-  ensureFile();
-  const body = readFileSync(PATH, 'utf8').replace(/\s+$/, '');
-  writeFileSync(PATH, `${body}\n- [ ] ${stamp()} — ${text}\n`);
+  // Append rather than rewrite. This is the queue's concurrent path — anything
+  // running in the background can drop an item in — and a read-whole-file /
+  // write-whole-file cycle loses every request that lands between the two. With
+  // 30 concurrent `add` calls, half the queue vanished silently.
+  //
+  // POSIX guarantees an O_APPEND write is atomic below PIPE_BUF, and one
+  // checklist line is far under it, so concurrent appends interleave instead of
+  // clobbering. WINDOWS IS NOT POSIX, and that is the whole reason for the lock
+  // below: with 30 concurrent adds on windows-latest this dropped exactly one
+  // item (#2777), silently, which is the same failure this function exists to
+  // remove — it just moved to the one platform the guarantee does not cover.
+  //
+  // The lock is the repo's existing one rather than a second mechanism: the
+  // same `withPipelineLock` that scan.mjs uses for scan-history appends. Two
+  // lock implementations would drift, and the append is short enough that
+  // serializing it costs nothing next to spawning the process that calls it.
+  //
+  // Checking the last byte still happens INSIDE the lock: it decides whether a
+  // separating newline is needed, and reading it outside would race with
+  // another writer's append between the check and the write.
+  //
+  // timeoutMs is raised from the shared 8s default because this queue's whole
+  // point is bursty concurrent writers (a dashboard, a script, cron all drop
+  // items at once), and lock acquisition is a retry lottery, not a fair queue.
+  // Serving N herded waiters is the coupon-collector problem: ~N·H(N) rounds,
+  // so 30 concurrent adds need ~120 rounds while 8000/80 = 100 only affords
+  // ~100. On the slow, contended windows-latest runner that shortfall makes one
+  // waiter time out and its item is LOST, the exact #2777 drop, reappearing as
+  // a loud LockTimeoutError instead of a silent overwrite. Jitter in
+  // pipeline-lock.mjs cuts the collision rate ~6x but is explicitly "not a
+  // cure"; the fit-for-purpose budget for a burst-write queue is the contained
+  // fix. 30s gives ~375 rounds of headroom, well past the herd's worst case,
+  // while the critical section itself is a single sub-millisecond append.
+  //
+  // ensureFile() is INSIDE the lock, not before it. Seeding the file is a
+  // check-create-initialise sequence, and run unlocked it loses items the same
+  // way the unlocked append did: a writer that observes the file between the
+  // creator's open() and its write() sees a zero-byte file, appends into it,
+  // and has its line overwritten when the header lands at offset 0. Every
+  // writer exits 0 and the queue is left perfectly well-formed, one item
+  // shorter — the silent drop the lock was added to end, one step earlier in
+  // the same function.
+  //
+  // Holding the lock across the seed makes the window unreachable rather than
+  // narrow: no writer can observe the file until the creator has released, and
+  // the creator writes the header before it releases. 'wx' above stays as the
+  // guard against writers that are not this function.
+  await withPipelineLock(PATH, () => {
+    ensureFile();
+    const separator = needsLeadingNewline(PATH) ? '\n' : '';
+    appendFileSync(PATH, `${separator}- [ ] ${stamp()} — ${text}\n`);
+  }, { timeoutMs: 30_000 });
   process.stdout.write(`Queued: ${text}\n`);
 }
 
 function list() {
   const all = process.argv.includes('--all');
-  const items = parseItems().filter((it) => all || !it.done);
+  const parsed = parseItems();
+  const items = parsed.filter((it) => all || !it.done);
   if (!items.length) return process.stdout.write(all ? 'Inbox is empty.\n' : 'No pending items.\n');
-  items.forEach((it, n) => {
-    process.stdout.write(`${String(n + 1).padStart(2)}. [${it.done ? 'x' : ' '}] ${it.text}\n`);
+  items.forEach((it) => {
+    process.stdout.write(`${String(it.num).padStart(2)}. [${it.done ? 'x' : ' '}] ${it.text}\n`);
   });
+  // Explain the gaps rather than let them read as a display bug.
+  if (items.length < parsed.length) {
+    process.stdout.write(
+      `\n(${parsed.length - items.length} resolved item(s) hidden — numbers are stable file positions, so gaps are expected. \`list --all\` shows everything.)\n`,
+    );
+  }
 }
 
-function resolve() {
+async function resolve() {
   const n = Number(process.argv[3]);
   if (!Number.isInteger(n) || n < 1) fail('resolve needs a 1-based item number (see `list`)');
-  // Number against the pending view, so `list` then `resolve N` line up.
-  const pending = parseItems().filter((it) => !it.done);
-  const target = pending[n - 1];
-  if (!target) fail(`no pending item #${n} (${pending.length} pending)`);
-  const result = oneLine(opt('result'));
-  const lines = readFileSync(PATH, 'utf8').split('\n');
-  let updated = lines[target.line].replace('[ ]', '[x]');
-  if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
-  lines[target.line] = updated;
-  writeFileSync(PATH, lines.join('\n'));
-  process.stdout.write(`Resolved #${n}: ${target.text}\n`);
+  const outcome = await withPipelineLock(PATH, () => {
+    // The item snapshot, line lookup, and rewrite are one transaction. An
+    // add between the old read and write was acknowledged, then overwritten by
+    // this stale snapshot even though add itself correctly held this same lock.
+    // Number inside the critical section too, so the selected item and the
+    // rewritten line always come from one locked view.
+    //
+    // Number against the FULL item list, not the pending subset. `add` only ever
+    // appends, so an item's position is stable for the life of the file and a
+    // batch of resolves read off one `list` stays correct. Numbering against the
+    // pending view instead made each resolve shift every higher number down by
+    // one — silently stamping later results onto the wrong items.
+    const items = parseItems();
+    const target = items[n - 1];
+    if (!target) {
+      const pending = items.filter((it) => !it.done).length;
+      return { error: `no item #${n} — inbox has ${items.length} item(s), ${pending} pending. Run \`list --all\`.` };
+    }
+    // Already-resolved is an error, not a silent re-stamp: it is what a stale
+    // number from an older `list` most often lands on.
+    if (target.done) return { error: `item #${n} is already resolved — refusing to overwrite it:\n  #${n}: ${target.text}` };
+    // Optional caller-side guard: abort unless the target says what the caller
+    // thinks it says. Catches "right command, wrong target" generally.
+    // Every --expect given must hold, and every one must carry a value: a bare
+    // --expect anywhere on the line is a guard the caller meant to set and did
+    // not, so it fails instead of being skipped behind an earlier valid one.
+    const expects = optAll('expect');
+    if (expects.includes('')) return { error: '--expect needs a substring, e.g. --expect "Dana-Farber"' };
+    const missing = expects.find((expect) => !target.text.toLowerCase().includes(expect.toLowerCase()));
+    if (missing !== undefined) {
+      return { error: `item #${n} does not contain --expect ${JSON.stringify(missing)} — refusing to resolve:\n  #${n}: ${target.text}` };
+    }
+    const result = oneLine(opt('result'));
+    const lines = readFileSync(PATH, 'utf8').split('\n');
+    let updated = lines[target.line].replace('[ ]', '[x]');
+    if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
+    lines[target.line] = updated;
+    // Replace, don't rewrite in place. The lock serialises writers, but `list`
+    // and anything reading the file by hand do not take it, and writeFileSync
+    // truncates before it writes: a reader in that window, or a crash inside
+    // it, sees a queue with items missing. A same-directory temp file renamed
+    // over the original is the repo's existing helper for exactly this.
+    //
+    // A rename replaces the directory entry it is given and installs a new
+    // file, so two things the in-place write got for free have to be asked
+    // for: write THROUGH a symlinked inbox (rename over the link would swap it
+    // for a regular file and leave its target stale), and keep the queue's
+    // permissions (a 0600 inbox must not come back 0644 under the umask).
+    const real = realpathSync(PATH);
+    writeFileAtomic(real, lines.join('\n'), { mode: statSync(real).mode & 0o7777 });
+    return { target };
+  }, { timeoutMs: 30_000 });
+  // Fail only after withPipelineLock has released. process.exit() inside the
+  // callback would bypass the lock's finally block and strand the directory.
+  if (outcome.error) fail(outcome.error);
+  process.stdout.write(`Resolved #${n}: ${outcome.target.text}\n`);
 }
 
 function fail(msg) {
@@ -131,14 +301,18 @@ function fail(msg) {
 }
 
 const cmd = process.argv[2];
-if (cmd === 'add') add();
+if (cmd === 'add') await add();
 else if (cmd === 'list') list();
-else if (cmd === 'resolve') resolve();
+else if (cmd === 'resolve') await resolve();
 else {
   process.stdout.write(
     'Usage:\n' +
     '  node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"\n' +
     '  node agent-inbox.mjs list [--all]\n' +
-    '  node agent-inbox.mjs resolve <n> [--result "..."]\n',
+    '  node agent-inbox.mjs resolve <n> [--expect "substring"] [--result "..."]\n' +
+    '\n' +
+    'Numbers are stable file positions: `list` shows gaps once items are\n' +
+    'resolved, and a batch of resolves read off one `list` stays correct.\n' +
+    '--expect aborts unless the target item contains that substring.\n',
   );
 }

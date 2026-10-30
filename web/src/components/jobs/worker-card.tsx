@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
+import { workerIdentity, workerState } from "@/lib/worker-feedback.mjs";
+import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
+import { isFencingNotice } from "@/lib/cli-fencing.mjs";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
@@ -22,12 +25,17 @@ const STEP_LABELS: Record<string, string> = {
 };
 const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
 
-// Auth/sign-in failures are the most common real error — detect them so we can give
-// a concrete next step instead of a dead end (#8).
-function isAuthError(job: Job): boolean {
-  if (job.status !== "error") return false;
-  const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
-  return /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated/.test(hay);
+// The unfenced-runtime notice is emitted as the run's FIRST step, before the CLI
+// produces any output — and this card renders only the newest step, so it would be
+// displaced within a second of the run starting. Scan the whole list instead, and
+// render it in the sticky slot below, the same shape jobErrorHint already uses.
+// Returns the notice ITSELF, not a boolean. There are two shapes — a runtime that
+// cannot be restricted at all, and one only partly restricted — and a card that
+// matched either then printed one hardcoded sentence told a sandboxed Codex run it
+// "ran with its default access", which is false. Rendering what the route emitted
+// keeps one source for the wording and cannot misdescribe a level (#2507).
+function fencingNotice(job: Job): string | undefined {
+  return job.steps.find((s) => isFencingNotice(s.label))?.label;
 }
 
 const fmtElapsed = (ms: number): string => {
@@ -85,14 +93,15 @@ export function WorkerCard({
   const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
-  const authError = isAuthError(job);
+  const errorHint = jobErrorHint(job);
+  const fencing = fencingNotice(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
-    <div className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
+    <div role="group" aria-label={workerIdentity(job)} className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
       <div className="flex items-center gap-2">
         {job.status === "running" ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-brand" />
+          <Loader2 className="size-3 shrink-0 animate-spin text-brand-text" />
         ) : job.status === "error" ? (
           <AlertTriangle className={cn("size-3 shrink-0", tone.icon)} />
         ) : (
@@ -114,6 +123,9 @@ export function WorkerCard({
           <span className={cn("shrink-0", hasScore ? "ml-1" : "ml-auto")}>{trailing}</span>
         )}
       </div>
+      <div className={cn("mt-1 text-muted", inline ? "text-xs" : "text-[10px]")}>
+        {job.subtitle && <span>{job.subtitle} · </span>}{workerState(job.status)}
+      </div>
       <div className={cn("mt-1.5 w-full overflow-hidden rounded-full bg-surface-hover", inline ? "h-1.5" : "h-1")}>
         {job.status === "running" ? (
           <div className="job-indeterminate h-full w-full" />
@@ -126,9 +138,14 @@ export function WorkerCard({
           {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
         </div>
       )}
-      {authError && (
+      {errorHint && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
-          Sign your CLI in from Config, then re-run.
+          {errorHint.text}
+        </div>
+      )}
+      {fencing && (
+        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+          {fencing}
         </div>
       )}
       {tokens > 0 && (

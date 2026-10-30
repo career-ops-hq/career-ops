@@ -24,11 +24,13 @@
  * all reuse it with no prod-vs-test drift.
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
-import { readLock, writeLockEntry, diffPlugin, hashPluginTree, consentSurface } from './_lock.mjs';
+import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
+import { readLock, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
 import { loadRegistry } from './_registry.mjs';
 
 /** The complete, closed set of hook kinds. Anything else (apply/submit/…) is rejected. */
@@ -50,7 +52,7 @@ export const RESERVED_ENV = new Set([
   'PATH', 'HOME', 'NODE_OPTIONS', 'LD_PRELOAD', 'NODE_EXTRA_CA_CERTS',
 ]);
 
-const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+export const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_HOOK_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
 
@@ -110,12 +112,46 @@ export async function loadPluginConfig(root) {
   const file = pluginsConfigPath(root);
   if (!existsSync(file)) return {};
   try {
-    const yaml = (await import('js-yaml')).default;
-    const parsed = yaml.load(readFileSync(file, 'utf8'));
+    const { loadYaml } = await import('../lib/yaml-document.mjs');
+    const parsed = loadYaml(readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
     warnSkip('config/plugins.yml', `unreadable, ignoring — ${err.message}`);
     return {};
+  }
+}
+
+/**
+ * The user-layer files the plugin layer reads from the data root. Until it did,
+ * plugins.yml was read from (and `plugins.mjs enable` wrote it to) the code
+ * folder and .env came from the working directory, so an older split checkout
+ * can still have both beside the code.
+ */
+// .env is also read beside the code by the eval scripts and direnv, so for it the
+// hint is to copy the plugin keys, not to move the file.
+const USER_CONFIG_FILES = [
+  { name: 'config/plugins.yml', hint: (left, target) => `move ${left} to ${target}` },
+  { name: '.env', hint: (left, target) => `copy the keys your plugins use from ${left} to ${target}` },
+];
+
+/**
+ * One ⚠️ line (stderr) per user config file that is in the code folder but not
+ * in the data folder. Without it a plugins.yml left beside the code reads as
+ * "no plugins configured" and every plugin goes quiet with no explanation.
+ * Checks existence only (.env is never opened here) and is not a fallback: the
+ * data root stays the only place these files are read from. Silent when both
+ * roots are the same folder.
+ * @param {string} root       Code root (where plugins/ lives).
+ * @param {string} dataRoot   Data root (getCareerOpsRoot()).
+ */
+export function warnConfigLeftInCodeRoot(root, dataRoot) {
+  if (path.resolve(root) === path.resolve(dataRoot)) return;
+  for (const { name, hint } of USER_CONFIG_FILES) {
+    const left = path.join(root, name);
+    const target = path.join(dataRoot, name);
+    if (existsSync(left) && !existsSync(target)) {
+      console.warn(`⚠️  ${name} is in the code folder, not the data folder, so plugins do not read it: ${hint(left, target)}`);
+    }
   }
 }
 
@@ -182,6 +218,13 @@ export function validateManifest(m, dir, dirName) {
     if (isLoopback && !allowsLocalhost) { warnSkip(label, `allowedHosts contains a loopback host without allowsLocalhost: ${h}`); return null; }
   }
 
+  // Optional: the plugin's ingest/search results are job postings, so they get
+  // the scanner's discovery filters (data/blacklist.md, title_filter,
+  // location_filter) and a scan-history row. Absent means the results may be
+  // something else — an interview event, an enrichment record — and only the
+  // tracker/pipeline/scan-history dedup applies (#5478).
+  if (m.jobPostings !== undefined && typeof m.jobPostings !== 'boolean') { warnSkip(label, 'jobPostings must be true or false'); return null; }
+
   const entry = typeof m.entry === 'string' && m.entry.trim() ? m.entry : 'index.mjs';
   if (!entry.endsWith('.mjs')) { warnSkip(label, `entry "${entry}" must be a .mjs file`); return null; }
   const entryAbs = path.resolve(dir, entry);
@@ -199,6 +242,7 @@ export function validateManifest(m, dir, dirName) {
     skill = m.skill;
   }
 
+
   return {
     id: m.id,
     apiVersion: 1,
@@ -211,6 +255,7 @@ export function validateManifest(m, dir, dirName) {
     entry,
     skill,
     humanInTheLoop: true,
+    jobPostings: m.jobPostings === true,
     name: typeof m.name === 'string' ? m.name : undefined,
     version: typeof m.version === 'string' ? m.version : undefined,
     homepage: typeof m.homepage === 'string' ? m.homepage : undefined,
@@ -248,8 +293,24 @@ export function discoverPlugins(roots, overrideIds = new Set()) {
       warnSkip(root, `unreadable — ${err.message}`);
       continue;
     }
+    // A symlink to a plugin repo is a directory for our purposes: plugins.local/
+    // exists so a developer can work on a plugin from its own checkout, and
+    // linking it in is the natural way to do that. Dirent.isDirectory() is false
+    // for a symlink, so those were silently skipped -- no warning, the plugin
+    // simply never appeared in `plugins.mjs list`. statSync resolves the link;
+    // a broken one throws and is treated as not-a-directory rather than crashing
+    // discovery for every other plugin.
+    const isDirLike = (e) => {
+      if (e.isDirectory()) return true;
+      if (!e.isSymbolicLink()) return false;
+      try {
+        return statSync(path.join(root, e.name)).isDirectory();
+      } catch {
+        return false;
+      }
+    };
     const dirs = entries
-      .filter(e => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
+      .filter(e => isDirLike(e) && !e.name.startsWith('_') && !e.name.startsWith('.'))
       .map(e => e.name)
       .sort();
     for (const name of dirs) {
@@ -420,7 +481,7 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
  * CONVENIENCE (process.env is still globally reachable from any module) — the
  * real boundary is code review + trust.
  * @param {PluginManifestNormalized} manifest
- * @param {{ dryRun?: boolean, settings?: object }} [opts]
+ * @param {{ dryRun?: boolean, settings?: object, dataRoot?: string }} [opts]
  * @returns {PluginContext}
  */
 export function buildCtx(manifest, opts = {}) {
@@ -455,6 +516,22 @@ export function buildCtx(manifest, opts = {}) {
     settings: Object.freeze({ ...(opts.settings || {}) }),
     log,
     dryRun: opts.dryRun === true,
+    // Where the user layer lives. A plugin that keeps a file of its own (a
+    // cursor, a JD capture) resolves it from here: a bare relative path lands in
+    // the working directory, which is the data root only when the two coincide.
+    // The engine's callers pass the root they resolved; a ctx built without one
+    // gets the same answer from the resolver they use.
+    dataRoot: path.resolve(opts.dataRoot ?? getCareerOpsRoot()),
+    // The canonical posting-URL key, so a plugin can deduplicate the postings it
+    // returns the way the tracker and scanner do. Reaching it through ctx keeps
+    // plugin and core callers equivalent without a repository-relative import or
+    // a copied body, which is the whole point of the capability (#4218).
+    normalizePostingUrl: normalizeUrl,
+    // The requisition id an aggregator URL carries (LinkedIn's job id, Indeed's
+    // `jk`). normalizePostingUrl keeps the path, so two spellings of one posting
+    // on an aggregator — a `/comm/` tracking link and the canonical view — key
+    // apart; the id is what they share. Same function the tracker's merge uses.
+    aggregatorPostingId,
   });
 }
 
@@ -563,7 +640,7 @@ export function lockGate(manifest, root) {
     case 'legit-update': repin(); return { load: true };        // version bumped → honest update, re-pin quietly
     case 'drift-nobump':
       if (source === 'bundled') { repin(); return { load: true }; } // reviewed-by-construction (branch-protected checkout) → re-pin
-      warnSkip(manifest.id, `files changed since you trusted it without a version bump — possible tampering (${d.changedFiles.slice(0, 5).join(', ')}). Review, then \`node plugins.mjs trust ${manifest.id}\``);
+      warnSkip(manifest.id, `files changed since you trusted it without a version bump — possible tampering (${describeDrift(d)}). Review, then \`node plugins.mjs trust ${manifest.id}\``);
       return { load: false };
     case 'surface-widened':
       warnSkip(manifest.id, `capability surface expanded since you consented (${[...d.addedHosts, ...d.addedEnv].join(', ')}${manifest.allowsLocalhost ? ', localhost' : ''}) — re-consent: \`node plugins.mjs enable ${manifest.id}\``);
@@ -572,28 +649,32 @@ export function lockGate(manifest, root) {
   }
 }
 
-export async function loadPlugins(kind, { root, dryRun = false }) {
-  const cfg = await loadPluginConfig(root);
-  const manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+export async function loadPlugins(kind, { root, dataRoot = root, dryRun = false, pluginId = null }) {
+  const cfg = await loadPluginConfig(dataRoot);
+  let manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  if (pluginId) manifests = manifests.filter(m => m.id === pluginId);
   const out = [];
   for (const manifest of manifests) {
     if (!pluginStatus(manifest, cfg).enabled) continue;
     if (!lockGate(manifest, root).load) continue;
     const hook = await importHook(manifest, kind);
     if (!hook) continue;
-    out.push({ id: manifest.id, manifest, hook, ctx: buildCtx(manifest, { dryRun, settings: pluginSettings(manifest.id, cfg) }) });
+    out.push({ id: manifest.id, manifest, hook, ctx: buildCtx(manifest, { dryRun, dataRoot, settings: pluginSettings(manifest.id, cfg) }) });
   }
   return out;
 }
 
 /** Lazily load dotenv exactly once (mirrors gemini-eval.mjs). Idempotent. */
 let dotenvLoaded = false;
-export async function loadDotenvOnce() {
+export async function loadDotenvOnce(root = null) {
   if (dotenvLoaded) return;
   dotenvLoaded = true;
   try {
     const { config } = await import('dotenv');
-    config();
+    // A split checkout keeps secrets with the user layer, not beside system
+    // code. Callers that know the data root pass it explicitly; the default
+    // preserves the historical process.cwd() lookup for third-party callers.
+    config(root ? { path: path.join(root, '.env'), quiet: true } : { quiet: true });
   } catch {
     // dotenv optional — fall back to ambient process.env (CI, exported vars).
   }
@@ -609,12 +690,12 @@ export async function loadDotenvOnce() {
  *
  * @param {string} kind
  * @param {*} payload   For provider this is unused; for ingest none; search a query; export a snapshot; notify a payload.
- * @param {{ root: string, dryRun?: boolean, timeoutMs?: number }} opts
+ * @param {{ root: string, dataRoot?: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string }} opts
  * @returns {Promise<Array<{ id: string, ok: boolean, result?: any, error?: string }>>}
  */
-export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS }) {
-  await loadDotenvOnce();
-  const loaded = await loadPlugins(kind, { root, dryRun });
+export async function runHook(kind, payload, { root, dataRoot = root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null }) {
+  await loadDotenvOnce(dataRoot);
+  const loaded = await loadPlugins(kind, { root, dataRoot, dryRun, pluginId });
   const results = [];
   for (const { id, hook, ctx } of loaded) {
     const invoke = kind === 'search'
@@ -637,12 +718,19 @@ export async function runHook(kind, payload, { root, dryRun = false, timeoutMs =
   return results;
 }
 
+export function filterResultsForId(results, id) {
+  return results.filter(r => r.id === id);
+}
+
 /**
  * Merge enabled provider-plugins into the core providers Map. THE one hot-path
  * hook (scan.mjs calls this right after loadProviders). Critical guarantees:
  *
  *  1. BYTE-IDENTICAL when opted out: returns IMMEDIATELY if config/plugins.yml
- *     is absent — no discovery, no dotenv, no process.env mutation.
+ *     is absent — no discovery, no dotenv, no process.env mutation. The one
+ *     exception is a split checkout with plugins.yml or .env in the code folder
+ *     and not in the data folder: warnConfigLeftInCodeRoot names each one
+ *     first, so a stale location is never a silent opt-out.
  *  2. dotenv is loaded LAZILY and only after at least one enabled provider
  *     plugin is found, so a present-but-provider-less plugins.yml still touches
  *     no env.
@@ -656,7 +744,7 @@ export async function runHook(kind, payload, { root, dryRun = false, timeoutMs =
  *     the plugin off yields a helpful error, not a confusing "unknown provider".
  *
  * @param {Map<string, any>} providersMap   The Map returned by scan.mjs loadProviders.
- * @param {{ root: string }} opts
+ * @param {{ root: string, dataRoot?: string }} opts
  */
 // A detect-exempt provider whose fetch throws an actionable message — used when
 // a known provider plugin is inactive (disabled / missing key / failed import)
@@ -664,19 +752,23 @@ export async function runHook(kind, payload, { root, dryRun = false, timeoutMs =
 function inactiveProviderStub(id, reason) {
   return {
     id,
+    // Read by tools that diagnose without fetching (coverage-check.mjs), so
+    // they can say why the board is never scanned instead of calling it live.
+    inactiveReason: reason,
     detect: () => null,
     fetch: async () => { throw new Error(`plugin "${id}" inactive: ${reason}. Run \`node doctor.mjs\` for setup.`); },
   };
 }
 
-export async function mergeProviderPlugins(providersMap, { root }) {
-  if (!existsSync(pluginsConfigPath(root))) return; // (1) opted out → inert (no work, no env read)
+export async function mergeProviderPlugins(providersMap, { root, dataRoot = root }) {
+  warnConfigLeftInCodeRoot(root, dataRoot);
+  if (!existsSync(pluginsConfigPath(dataRoot))) return; // (1) opted out → inert (no work, no env read)
 
   // Everything past the opt-out gate is wrapped so an UNANTICIPATED throw
   // (a callee regression) degrades to a ⚠️ and leaves the core providers Map
   // untouched — fail-open is enforced structurally here, not just emergently.
   try {
-    const cfg = await loadPluginConfig(root);
+    const cfg = await loadPluginConfig(dataRoot);
     const providerManifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes('provider'));
     if (providerManifests.length === 0) return;
 
@@ -684,7 +776,7 @@ export async function mergeProviderPlugins(providersMap, { root }) {
     const configuredOn = providerManifests.filter(m => cfg?.plugins?.[m.id]?.enabled === true);
     if (configuredOn.length === 0) return;
 
-    await loadDotenvOnce(); // (2) lazy, only now that an enabled provider plugin exists
+    await loadDotenvOnce(dataRoot); // (2) lazy, only now that an enabled provider plugin exists
 
     for (const manifest of configuredOn) {
       if (providersMap.has(manifest.id)) {
@@ -707,7 +799,7 @@ export async function mergeProviderPlugins(providersMap, { root }) {
         providersMap.set(manifest.id, inactiveProviderStub(manifest.id, 'failed to load — see ⚠️ above'));
         continue;
       }
-      const ctx = buildCtx(manifest, { settings: pluginSettings(manifest.id, cfg) });
+      const ctx = buildCtx(manifest, { dataRoot, settings: pluginSettings(manifest.id, cfg) });
       providersMap.set(manifest.id, {
         id: manifest.id,
         detect: () => null, // (4) keyed providers never auto-detect

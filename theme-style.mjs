@@ -1,0 +1,214 @@
+#!/usr/bin/env node
+/**
+ * theme-style.mjs — presentation settings read from config/profile.yml for the
+ * PDF pipeline: dynamic CV/cover-letter theming (#1837) and CV section order
+ * (#2533).
+ *
+ * Users declare a `style:` block in config/profile.yml:
+ *
+ *   style:
+ *     accent_color:     "#2563eb"
+ *     secondary_color:  "#111827"
+ *     tag_color:        "#0e7490"   # competency-tag text
+ *     tag_bg:           "#ecfeff"   # competency-tag and project-tech fill
+ *     tag_border:       "#a5f3fc"   # competency-tag border
+ *     font_family:      "Outfit, Inter, sans-serif"
+ *     font_size:        "10pt"
+ *     margin:           "0.5in"
+ *     job_break_inside: "avoid"
+ *
+ * These are injected as CSS custom properties into the rendered HTML before it
+ * hits the PDF pipeline. The templates read them via `var(--x, <default>)`, so a
+ * profile with no `style:` block produces byte-identical output — this only ever
+ * *overrides* the template defaults, never changes the baseline.
+ *
+ * `cv.sections` declares the order the CV's sections render in. Both live here
+ * for the same reason: config/profile.yml is a user-layer file, so a setting
+ * that lives in it survives `update-system.mjs apply`, while the same
+ * customization made in templates/cv-template.html (a SYSTEM_PATHS file) is
+ * reverted by every release.
+ *
+ * Pure + dependency-light (js-yaml only) so it's unit-testable without Playwright.
+ */
+import { readFileSync, existsSync } from 'fs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { getProfilePath } from './path-resolver.mjs';
+
+// Recognized style tokens → the CSS custom property each maps to. Anything not
+// listed here is ignored, so a typo or an unrelated `style:` key is inert.
+export const STYLE_VAR_MAP = {
+  accent_color:     '--accent-color',
+  secondary_color:  '--secondary-color',
+  tag_color:        '--tag-color',
+  tag_bg:           '--tag-bg',
+  tag_border:       '--tag-border',
+  font_family:      '--font-family',
+  font_size:        '--font-size',
+  margin:           '--page-margin',
+  // #3242: whether a Work Experience entry may split across a page break.
+  // Each template keeps its OWN current behavior as the default (its :root
+  // token default, or the .job var() fallback where it declares none), so
+  // this is purely additive — no shipped template's default pagination
+  // changes for anyone who doesn't set this. A break-inside keyword, normally
+  // "avoid" or "auto", same contract as the other tokens. Trade-off worth
+  // knowing: "avoid" cannot help an entry taller than a full page — it still
+  // splits, just after leaving a bottom gap on the page before it.
+  job_break_inside: '--job-break-inside',
+  // Whether a Projects entry may split across a page break. Same opt-in shape
+  // as job_break_inside above, and every shipped template keeps its current
+  // behavior (auto — a project may split) as the default, so this changes
+  // nobody's layout unless they set it.
+  //
+  // What "avoid" buys: `.project-tech { break-before: avoid }` keeps a tech
+  // line attached to its description, and when the break would land there
+  // Chromium satisfies that by moving the description's LAST LINE over too.
+  // A description ending in one short word therefore opens the next page as a
+  // lone word above the tech line, with the project title left behind. Keeping
+  // the whole entry together removes that, at the cost of a bottom gap on the
+  // page before it — and on a CV already near its page budget, that gap can
+  // cost a page. That trade is why this is opt-in rather than a new default.
+  project_break_inside: '--project-break-inside',
+};
+
+/**
+ * Read the recognized `style:` tokens from a profile file into a
+ * { '--css-var': 'value' } map. Missing file / absent block / bad YAML → {}.
+ * @param {string} [profilePath]
+ * @returns {Record<string,string>}
+ */
+export function readStyleTokens(profilePath = getProfilePath()) {
+  try {
+    if (!existsSync(profilePath)) return {};
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+    return styleTokensFrom(raw?.style);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Read the `cv.locked_sections` array from a profile file, folding them into
+ * canonical section keys. Missing file or absent/null section → []. File-read,
+ * YAML-parse, and type errors propagate so invalid configurations fail loudly.
+ * @param {string} [profilePath]
+ * @param {Function} [foldKey] - Optional function to fold keys, defaults to lowercase
+ * @returns {string[]}
+ */
+export function readLockedSections(profilePath = getProfilePath(), foldKey = (s) => s.toLowerCase()) {
+  if (!existsSync(profilePath)) return [];
+  const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const locked = raw?.cv?.locked_sections;
+  if (locked === undefined || locked === null) return [];
+  if (typeof locked === 'string') {
+    const trimmed = locked.trim();
+    if (!trimmed) {
+      throw new TypeError(`Invalid cv.locked_sections in ${profilePath}: string cannot be empty`);
+    }
+    return [foldKey(trimmed)];
+  }
+  if (Array.isArray(locked)) {
+    return locked.map((item, idx) => {
+      if (typeof item !== 'string' || !item.trim()) {
+        throw new TypeError(`Invalid cv.locked_sections[${idx}] in ${profilePath}: expected a non-empty string, got ${typeof item === 'string' ? 'empty string' : typeof item}`);
+      }
+      return foldKey(item.trim());
+    });
+  }
+  throw new TypeError(`Invalid cv.locked_sections in ${profilePath}: expected a string or array of strings, got ${typeof locked}`);
+}
+
+/**
+ * Map a parsed `style:` object to { '--css-var': value }, keeping only the
+ * recognized string tokens. Exported for tests.
+ * @param {unknown} style
+ * @returns {Record<string,string>}
+ */
+export function styleTokensFrom(style) {
+  const out = {};
+  if (!style || typeof style !== 'object' || Array.isArray(style)) return out;
+  for (const [key, cssVar] of Object.entries(STYLE_VAR_MAP)) {
+    const v = style[key];
+    if (typeof v === 'string' && v.trim()) out[cssVar] = v.trim();
+  }
+  return out;
+}
+
+/**
+ * Read the declared CV section order from a profile file (#2533):
+ *
+ *   cv:
+ *     sections: [skills, education]
+ *
+ * Missing file / absent block / bad YAML → []. Same defensive contract as
+ * readStyleTokens: an unreadable profile must never stop a CV rendering.
+ * @param {string} [profilePath]
+ * @returns {string[]}
+ */
+export function readCvSectionOrder(profilePath = getProfilePath()) {
+  try {
+    if (!existsSync(profilePath)) return [];
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+    return cvSectionOrderFrom(raw?.cv);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Map a parsed `cv:` block to a list of section names. Only the syntax is
+ * checked here — whether a name is a real section, and whether this CV even has
+ * it, is decided at render time by generate-pdf.mjs, which owns the section
+ * vocabulary. Exported for tests.
+ * @param {unknown} cv
+ * @returns {string[]}
+ */
+export function cvSectionOrderFrom(cv) {
+  if (!cv || typeof cv !== 'object' || Array.isArray(cv)) return [];
+  const sections = cv.sections;
+  if (!Array.isArray(sections)) return [];
+  return sections
+    .filter(v => typeof v === 'string')
+    .map(v => v.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Build a `<style>` block declaring the custom properties on :root, or '' when
+ * there is nothing to declare. Values containing CSS/HTML control characters
+ * (`; { } < >`) are dropped — a custom-property value can't legitimately contain
+ * them, and allowing them would let a profile break out of the rule or the tag.
+ * @param {Record<string,string>} tokens
+ * @returns {string}
+ */
+export function buildThemeStyleBlock(tokens) {
+  const decls = Object.entries(tokens || {})
+    .filter(([, v]) => typeof v === 'string' && v.trim() && !/[;{}<>]/.test(v))
+    .map(([cssVar, v]) => `${cssVar}: ${v.trim()};`)
+    .join(' ');
+  if (!decls) return '';
+  return `<style id="career-ops-dynamic-theme">:root { ${decls} }</style>`;
+}
+
+/**
+ * Inject the theme block into an HTML string so it overrides the template's own
+ * :root defaults (later declaration wins for custom properties). Inserted just
+ * before </head>, or prepended when there is no head. A no-op when there are no
+ * tokens, so callers can pass it unconditionally.
+ * @param {string} html
+ * @param {Record<string,string>} tokens
+ * @returns {string}
+ */
+export function injectThemeStyle(html, tokens) {
+  const block = buildThemeStyleBlock(tokens);
+  if (!block) return html;
+  // Replacer FUNCTION, not a string: `block` carries values straight from the
+  // user's config/profile.yml `style:` block, and a string replacement argument
+  // is scanned by JS for $-patterns. A font_family of `A$'B` makes `$'` mean
+  // "everything after the match", splicing the entire document body INTO the
+  // <head> inside the style element — silently, with a valid-looking exit 0.
+  // The sanitizer drops `; { } < >` but has no reason to drop `$`, which is
+  // legal in a CSS value. Same class as #2588 fixed in the CV builders.
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, () => `${block}\n</head>`);
+  return `${block}\n${html}`;
+}

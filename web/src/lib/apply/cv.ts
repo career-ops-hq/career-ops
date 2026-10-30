@@ -1,35 +1,73 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, findApplication, pdfPathStatusForReport } from "@/lib/career-ops";
+import { companySlug } from "@/lib/company-slug.mjs";
+import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
+import { reportNumberFromCell } from "./cv-selection.mjs";
 
 /**
- * Locate the tailored CV PDF the real `pdf` mode wrote to output/ for a given
- * company (newest match wins). STRICT company match — never returns a CV tailored
- * for a different company (we'd rather attach nothing than the wrong CV). Mirrors
- * the matching in /api/cv-pdf so the "View tailored CV" link and the apply
- * file-upload always resolve to the SAME file. Returns an absolute path or null.
+ * Locate the tailored CV PDF for an application. When the tracker application
+ * number is known, the report -> PDF manifest (via pdfPathStatusForReport, the
+ * same resolver /api/cv-pdf uses for its own "n" lookups) is authoritative, so
+ * an older role cannot accidentally receive the company's newest CV. Company
+ * matching remains as a fallback for manually pasted URLs. Returns an absolute
+ * path or null.
  */
-export function resolveTailoredCv(company?: string): string | null {
+export async function resolveTailoredCv(company?: string, applicationNumber?: string): Promise<string | null> {
+  const root = careerOpsRoot();
+  if (applicationNumber?.trim()) {
+    const app = findApplication(applicationNumber.trim());
+    const reportNumber = reportNumberFromCell(app?.report);
+    if (!reportNumber) return null;
+    const result = await pdfPathStatusForReport(String(reportNumber));
+    return result.status === "found" ? result.path : null;
+  }
+
   const c = (company ?? "").trim();
   if (!c) return null;
-  const dir = path.join(careerOpsRoot(), "output");
+  const dir = path.join(root, "output");
   let files: string[];
   try {
     files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".pdf"));
   } catch {
     return null;
   }
-  // Token-extract instead of replace-then-trim: same slug, and no `-+$`-style
-  // pattern that backtracks polynomially on adversarial input (CodeQL).
-  const slug = (c.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
-  const first = slug.split("-")[0];
-  const matches = files.filter((f) => {
-    const l = f.toLowerCase();
-    return l.includes(slug) || (first.length > 2 && l.includes(first));
-  });
+  // No usable key means this company cannot be identified from a filename, so
+  // find nothing. The old empty-string slug was a substring of every name in
+  // output/, which resolved the newest unrelated CV instead (#2352).
+  const key = companySlug(c);
+  if (!key) return null;
+  const { slug } = key;
+  // `key.first` is deliberately NOT used as a fallback: matching a company by
+  // its first token alone made "Acme" resolve an unrelated "Acme Bank" file,
+  // and matchesTailoredCv already requires the cv- prefix AND a token boundary.
+  const matches = files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug));
   if (!matches.length) return null;
-  matches.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
-  return path.join(dir, matches[0]);
+  const sorted = sortNewestFirst(dir, matches);
+  if (!sorted.length) return null;
+  return path.join(dir, sorted[0]);
+}
+
+/**
+ * The tailored CV for one apply session, resolved once for both halves of it.
+ *
+ * /api/apply/fill uploads this PDF and /api/apply/prefill drafts the answers
+ * typed into the same form, so the two must agree on which document this
+ * application is. They disagreed while prefill resolved nothing at all and sent
+ * the planner to master cv.md: bullets are reselected per offer, role framing is
+ * rewritten toward the employer's domain, and engagements are regrouped, so the
+ * reviewer read a resume and a set of answers describing different careers.
+ *
+ * Both routes call this. Two copies of the same three-way expression, one per
+ * route, is how they drift apart again.
+ */
+export async function resolveSessionCv(opts: { company?: string; application?: string; title?: string }): Promise<string | null> {
+  const direct = await resolveTailoredCv(opts.company, opts.application);
+  if (direct) return direct;
+  // An application number that resolved nothing means THIS role has no tailored
+  // CV. Guessing a company off the page title would attach a sibling role's.
+  if (opts.application) return null;
+  return resolveTailoredCv(companyFromTitle(opts.title));
 }
 
 /**

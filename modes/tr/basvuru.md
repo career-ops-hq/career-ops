@@ -13,7 +13,7 @@ Aday bir başvuru formunu doldururken çalışan etkileşimli mod. Ekrandakileri
 1. TESPİT ET      → Aktif sekmeyi oku (ekran görüntüsü / URL / sayfa başlığı)
 2. TANI KOY       → Sayfadan şirket adını ve rolü çıkar
 3. RAPORU BUL     → reports/ klasöründe bu ilana ait raporu ara
-4. YÜKLE          → Tam raporu oku (önceki değerlendirme + Blok G varsa)
+4. YÜKLE          → Tam raporu oku (önceki değerlendirme + varsa Blok H / `## Application Answers`)
 5. KARŞILAŞTIR    → Ekrandaki rol raporla eşleşiyor mu? Farklıysa adayı uyar
 6. FORMU ANALİZ ET → Görünen tüm alanları ve soruları tespit et
 7. YANIT ÜRET     → Her alan için kişiselleştirilmiş yanıt oluştur
@@ -34,7 +34,7 @@ Aday bir başvuru formunu doldururken çalışan etkileşimli mod. Ekrandakileri
 1. Sayfadan şirket adını ve rol başlığını çıkar
 2. `reports/` klasöründe şirket adına göre Grep yap (büyük/küçük harf duyarsız)
 3. Eşleşme bulunursa → tam raporu yükle
-4. Blok G varsa → önceki taslak yanıtları temel olarak al
+4. Blok H (taslak yanıtlar) veya `## Application Answers` varsa → önceki yanıtları temel olarak al
 5. Eşleşme bulunamazsa → adayı bilgilendirip hızlı auto-pipeline öner
 
 ## Adım 3 — Rol Değişikliğini Tespit Et
@@ -42,8 +42,10 @@ Aday bir başvuru formunu doldururken çalışan etkileşimli mod. Ekrandakileri
 Ekrandaki rol önceki değerlendirmedekinden farklıysa:
 - **Adayı uyar:** "Rol [X]'den [Y]'ye değişmiş görünüyor. Yeniden değerlendireyim mi, yoksa yanıtları yeni başlığa uyarlayayım mı?"
 - **Uyarlama:** Yeniden değerlendirmeden yanıtları yeni role göre ayarla
-- **Yeniden değerlendirme:** Tam A-F değerlendirmesi yap, raporu güncelle, Blok G'yi yeniden üret
-- **Takipçiyi güncelle:** Gerekirse `applications.md`'deki rol başlığını düzelt
+- **Yeniden değerlendirme:** Tam A-F değerlendirmesi yap, raporu güncelle, Blok H'yi yeniden üret
+- **Takipçiyi güncelle:** asla `data/applications.md` dosyasını düzenleyerek değil.
+  - **Yeniden değerlendirmeden sonra:** yeni rol başlığını içeren bir TSV'yi `batch/tracker-additions/` altına yaz ve `node merge-tracker.mjs` ile birleştir. Rapor yerinde güncellenir ve numarasını korur; birleştirme TSV'yi bu numarayla mevcut satırla eşleştirir: başlık değişir, durum korunur.
+  - **Uyarlamadan sonra:** başlığı değiştirme, çünkü raporun değerlendirdiği rolü adlandırır. Değişikliği not olarak kaydet: `node set-status.mjs --report <report#> <mevcut durum> --note "İlan başlığı başvuru sırasında değişmişti, satır değerlendirilen başlığı korur"`. Satırın mevcut durumunu vermek durumu değiştirmez, notu ekler. Bunun gibi sabit bir metin kullan ve `[Y]`'yi nota koyma: yeni başlık sayfadan gelen metindir ve sayfadan gelen metin asla komut satırına yazılmaz.
 
 ## Adım 4 — Form Alanlarını Analiz Et
 
@@ -55,7 +57,7 @@ Görünen tüm alanları tespit et:
 - Dosya yükleme alanları (CV, ön yazı PDF'i)
 
 Her soruyu sınıflandır:
-- **Blok G'de zaten yanıtlanmış** → mevcut yanıtı uyarla
+- **Blok H'de veya `## Application Answers` bölümünde zaten yanıtlanmış** → mevcut yanıtı uyarla
 - **Yeni soru** → rapor + `cv.md`'den yanıt üret
 
 ## Adım 5 — Yanıtları Üret
@@ -63,7 +65,7 @@ Her soruyu sınıflandır:
 Her soru için yanıtı şu şemaya göre oluştur:
 
 1. **Rapor bağlamı:** Blok B'deki kanıt noktalarını ve Blok F'teki STAR hikayelerini kullan
-2. **Önceki Blok G:** Taslak yanıt varsa temel al ve geliştir
+2. **Önceki Blok H / `## Application Answers`:** Taslak veya final yanıt varsa temel al ve geliştir
 3. **"Sizi seçiyorum" tonu:** Özgüvenli, yalvaran değil
 4. **Özgüllük:** Ekrandaki ilandan somut bir şeye doğrudan değin
 5. **Kanıt URL'si:** "Ek bilgi" alanı varsa demo/proje linkini ekle
@@ -103,8 +105,8 @@ Notlar:
 ## Adım 6 — Başvuru Sonrası (isteğe bağlı)
 
 Aday başvuruyu gönderdiğini onaylarsa:
-1. Durumu kanonik CLI ile `Applied` yap: `node set-status.mjs <report#> Applied` (`applications.md` tablosunu elle düzenleme)
-2. Blok G'yi final yanıtlarla güncelle
+1. Durumu kanonik CLI ile `Applied` yap: `node set-status.mjs --report <report#> Applied` (`applications.md` tablosunu elle düzenleme)
+2. Final yanıtları raporun `## Application Answers` bölümüne `**State:** submitted` ile yaz: `node application-answers.mjs --report reports/NNN-company-role-date.md --input answers.json --state submitted` (JSON alanları için `node application-answers.mjs --help`). Blok G'ye (İlan Meşruiyeti) ve Blok H'ye (değerlendirmenin taslakları) dokunma.
 3. Sonraki adımı öner: İşe alım sorumlusuna LinkedIn erişimi için `/career-ops contacto`
 
 ## Scroll Yönetimi

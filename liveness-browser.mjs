@@ -5,10 +5,86 @@
  * Returns the same shape as classifyLiveness: { result, reason }.
  */
 
-import { classifyLiveness } from './liveness-core.mjs';
+import { classifyLiveness, jobIdToken, JOB_ID_PATTERN } from './liveness-core.mjs';
+import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
+import { SINKHOLE_ADDRESSES } from './providers/_ip-guard.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
-const HYDRATION_WAIT_MS = 2_000;
+// Single-page-app ATS render the posting after domcontentloaded, so the page
+// is read repeatedly until the verdict stops being a "not rendered yet" code;
+// a single early read would call a live posting insufficient_content.
+// Measured over 386 loads of 188 posting URLs: the first decisive verdict
+// arrived at p50 1785ms, p95 3071ms and at most 3308ms outside iCIMS (whose
+// frames have their own poll below); 17 reads 250ms apart cover 4000ms. Bounded by a count rather than a clock so a
+// page double whose waitForTimeout returns at once still terminates.
+// Once a read is decisive no later read flipped a live posting to closed, so
+// stopping at the first decisive read is safe. Stopping when the text stops
+// changing is NOT: a spinner holds the text constant on live pages.
+const HYDRATION_POLL_MS = 250;
+const HYDRATION_MAX_POLLS = 16;
+const HYDRATING_CODES = new Set(['insufficient_content', 'no_apply_control']);
+// Upper bound on the extra wait for same-origin child frames to populate, and
+// the poll interval inside it. Only spent when the page poll ends undecided
+// while such a frame is present.
+const FRAME_CONTENT_TIMEOUT_MS = 6_000;
+const FRAME_CONTENT_POLL_MS = 500;
+// A failed navigation is not over when page.goto rejects: Chromium commits its
+// error page (chrome-error://chromewebdata/) just after, 1-69 ms later over 36
+// failed loads (a host with no address, four kinds of TLS failure). Playwright
+// reports a goto that is still waiting when that commit lands as "interrupted
+// by another navigation" (microsoft/playwright#35944), and Chromium goes on
+// loading the URL that goto asked for, whose late commit then interrupts the
+// goto after it. On the one page that check-liveness and scan --verify share,
+// one such failure turned the checks after it into navigation_errors. So a
+// check whose navigation failed waits for that commit before it returns, up to
+// this long. A goto that timed out has nothing to wait for: no error page
+// commits, and the next goto cancels it.
+const FAILED_NAVIGATION_COMMIT_MS = 2_000;
+
+// The query parameters that carry a posting's own id, from the providers that
+// put it there: UltiPro's opportunityId, SchoolSpring's and Deutsche Bahn's
+// jobId, Tencent's postId, AppliTrack's AppliTrackJobId, Meituan's jobUnionId,
+// and gh_jid on a careers page that embeds Greenhouse. Any other query value,
+// such as a campaign or tracking number, is not the posting's id.
+const POSTING_ID_PARAMS = new Set(['opportunityid', 'jobid', 'postid', 'applitrackjobid', 'jobunionid', 'gh_jid']);
+
+// BambooHR's client bundle can throw during first paint — a failed
+// /globals/locale request followed by an uncaught TypeError reading
+// `hasPasskey` on null — which halts the SPA on its bare loading spinner for
+// the whole hydration poll, so a live posting reads as insufficient_content. The
+// posting itself is untouched; a reload clears it. This is a shared
+// front-end bug across every *.bamboohr.com tenant (not one company's
+// board) and common enough to matter: rerun checkUrlLiveness in a loop
+// against any live *.bamboohr.com posting URL with this branch disabled to
+// see the current failure rate.
+//
+// Scoped to this one host on purpose, not a generic "flaky ATS" mechanism: no
+// other provider has shown this failure signature, and retrying every
+// insufficient-content verdict on every host would pay an extra page load on
+// every genuinely dead posting for no evidence of benefit elsewhere. If a
+// second ATS turns up the same symptom, generalize then.
+const BAMBOOHR_HOSTS = [/(^|\.)bamboohr\.com$/];
+
+function isBambooHrHost(hostname) {
+  return BAMBOOHR_HOSTS.some((pattern) => pattern.test(hostname));
+}
+
+/**
+ * Same-origin test used to decide whether a child frame is part of the posting
+ * or somebody else's widget. Deliberately strict: about:blank, data: frames,
+ * tag managers and ad iframes all fail it, so only the ATS's own embedded
+ * document contributes text and apply controls.
+ */
+export function sameOrigin(frameUrl, pageUrl) {
+  try {
+    const a = new URL(frameUrl);
+    const b = new URL(pageUrl);
+    if (a.protocol !== 'http:' && a.protocol !== 'https:') return false;
+    return a.origin === b.origin;
+  } catch {
+    return false;
+  }
+}
 
 // The default Playwright headless UA contains "HeadlessChrome", which Cloudflare
 // and similar WAFs flag — portals like pracuj.pl then serve a 403 challenge page
@@ -16,8 +92,7 @@ const HYDRATION_WAIT_MS = 2_000;
 // headlessly (the scan parser scripts/parsers/pracuj-jobs.mjs relies on the same
 // trick), so the common case never needs the slower headed-browser fallback.
 export const LIVENESS_CONTEXT_OPTIONS = {
-  userAgent:
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  userAgent: BROWSER_LIKE_USER_AGENT,
   locale: 'en-US',
 };
 
@@ -40,6 +115,33 @@ export function jitteredDelayMs(baseMs) {
   return baseMs + Math.floor(Math.random() * baseMs);
 }
 
+// Per-host spacing for a browser batch. A WAF rate limit is per site, so a run
+// across many sites only needs to space out repeat visits to the SAME host
+// (exact hostname, `www.` ignored; careers.x.com and jobs.x.com count as two):
+// the gap since that host's last browser check ended counts toward its
+// jittered delay, and a host seen for the first time waits nothing. With a global gap, 641 URLs
+// over ~40 hosts cost 5-10 s each (~1.5 h); per host, only same-site runs wait.
+const hostKey = (url) => {
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return String(url); }
+};
+
+export function createHostSpacer(baseMs, { now = Date.now, delay = jitteredDelayMs } = {}) {
+  const lastVisit = new Map();
+  return {
+    /** Milliseconds to wait before a browser check of `url`. */
+    waitBefore(url) {
+      if (!baseMs || baseMs <= 0) return 0;
+      const last = lastVisit.get(hostKey(url));
+      if (last == null) return 0;
+      return Math.max(0, delay(baseMs) - (now() - last));
+    },
+    /** Record that `url`'s host was just visited by the browser. */
+    visited(url) {
+      lastVisit.set(hostKey(url), now());
+    },
+  };
+}
+
 // Defensive guards: URLs come from ATS feeds (mostly trusted) but a misconfigured
 // portals.yml entry or a hijacked feed shouldn't be able to point Playwright at
 // internal infrastructure. Only allow http(s) and reject loopback/private/link-local.
@@ -56,6 +158,9 @@ export function jitteredDelayMs(baseMs) {
 //      also be matched against the IPv4 block list.
 // `0.0.0.0` and the all-zeros IPv6 `::` both reach loopback on Linux and need
 // explicit entries; the original list omitted them.
+//
+// IPv6 ULA is fc00::/7 (RFC 4193): both fc00::/8 and fd00::/8. IPv6
+// link-local is fe80::/10 (RFC 4291): fe80–febf, not only the fe80: prefix.
 const PRIVATE_HOST_PATTERNS = [
   /^localhost$/,
   /^localhost\.localdomain$/,
@@ -67,8 +172,8 @@ const PRIVATE_HOST_PATTERNS = [
   /^169\.254\./,
   /^::1$/,
   /^::$/,
-  /^fc[0-9a-f]{2}:/,
-  /^fe80:/,
+  /^f[cd][0-9a-f]{2}:/,
+  /^fe[89ab][0-9a-f]:/,
 ];
 
 // Lowercase, strip IPv6 brackets, strip FQDN trailing dot. The `hostname`
@@ -125,29 +230,316 @@ export function rejectPrivateOrInvalid(url) {
   return null;
 }
 
-export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
+const dnsCache = new Map();
+// Hold failures for 30 s, the same TTL as providers/_dns-cache.mjs, so an outage
+// is not pinned for the whole process. Unlike that cache, this includes NXDOMAIN:
+// resolveViaDns turns all lookup failures into an empty answer.
+const DNS_NEGATIVE_TTL_MS = 30_000;
+
+// Real DNS: resolve4 + resolve6 + lookup, each tolerant of its own failure, so a
+// host that only answers on one of the three still yields an address list.
+async function resolveViaDns(hostname) {
+  const dns = await import('dns/promises');
+  const [ipv4, ipv6, lookupList] = await Promise.all([
+    dns.resolve4(hostname).catch(() => []),
+    dns.resolve6(hostname).catch(() => []),
+    dns.lookup(hostname, { all: true }).catch(() => [])
+  ]);
+  return Array.from(new Set([
+    ...ipv4,
+    ...ipv6,
+    ...lookupList.map(item => item.address)
+  ]));
+}
+
+let hostResolver = resolveViaDns;
+
+/**
+ * Swap the resolver the egress guard uses, returning a restore function.
+ *
+ * `dns/promises` is imported dynamically and the guard calls the ESM namespace
+ * bindings, which are immutable — monkey-patching the module object has no
+ * effect on them (#2386). Without this seam a test can only ever reach the
+ * "host resolved to nothing" branch: the real resolver returns an empty list
+ * for the synthetic hostname, the guard blocks on that, and the loopback
+ * rejection the test exists to cover never runs. The memo cache is cleared on
+ * every swap, in both directions, so a verdict computed under one resolver can
+ * never be served to the next.
+ *
+ * @param {((hostname: string) => Promise<string[]>)|null} resolver - Resolver to
+ *   install, or null to restore the real DNS one.
+ * @returns {() => void} Restores the resolver in place before this call.
+ */
+export function setHostResolver(resolver) {
+  const previous = hostResolver;
+  hostResolver = resolver ?? resolveViaDns;
+  dnsCache.clear();
+  return () => {
+    hostResolver = previous;
+    dnsCache.clear();
+  };
+}
+
+async function resolveDnsCached(hostname) {
+  if (dnsCache.has(hostname)) {
+    const cached = dnsCache.get(hostname);
+    if (Array.isArray(cached)) return cached;
+    if (Date.now() < cached.expiresAt) throw cached.error;
+    dnsCache.delete(hostname);
+  }
+  try {
+    const addresses = await hostResolver(hostname);
+    if (addresses.length === 0) {
+      // Tagged so the route guard can tell "this host does not exist" apart from
+      // "this host resolves into private space". The first is a dead third-party
+      // script, the second is an egress-guard hit. Only the second says anything
+      // about the page being checked.
+      const missing = new Error(`DNS resolution returned no addresses for ${hostname}`);
+      missing.livenessCode = 'dns_no_addresses';
+      throw missing;
+    }
+    dnsCache.set(hostname, addresses);
+    return addresses;
+  } catch (err) {
+    if (!Array.isArray(dnsCache.get(hostname))) {
+      dnsCache.set(hostname, { error: err, expiresAt: Date.now() + DNS_NEGATIVE_TTL_MS });
+    }
+    throw err;
+  }
+}
+
+// Second layer of the egress guard: `rejectPrivateOrInvalid` only sees the
+// literal host, so a public hostname that *resolves* to private space still
+// gets through it. Resolve and re-check every address before the request is
+// allowed out. Exported so other Playwright callers (archive-posting.mjs) wire
+// up the same two-layer guard instead of growing a second implementation.
+export async function validateUrlSecurity(urlString) {
+  const url = new URL(urlString.endsWith('.') ? urlString.slice(0, -1) : urlString);
+  const hostname = url.hostname;
+  const host = normalizeHost(hostname);
+  const addresses = await resolveDnsCached(host);
+  // Every private address, not only the first: whether a DNS filter gave the
+  // answer depends on all of them.
+  const blocked = [];
+  for (const ip of addresses) {
+    const norm = normalizeHost(ip);
+    const mapped = extractMappedIPv4(norm);
+    const candidates = mapped ? [norm, mapped] : [norm];
+    const hit = candidates.find((candidate) => PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(candidate)));
+    if (hit) blocked.push({ ip, hit });
+  }
+  if (blocked.length > 0) {
+    const denied = new Error(`Access denied: Egress guard blocked private target IP ${blocked[0].ip}`);
+    if (blocked.every(({ hit }) => SINKHOLE_ADDRESSES.has(hit))) denied.livenessCode = 'dns_sinkhole';
+    throw denied;
+  }
+}
+
+// Rediscovery can navigate a newly created page before its first liveness
+// check. Install the same URL/DNS guards before that search as well.
+let suppressedSubresourceBlocks = 0;
+
+/** How many subresource requests were aborted for having no usable address since the last call (then resets). */
+export function takeSuppressedBlockCount() {
+  const n = suppressedSubresourceBlocks;
+  suppressedSubresourceBlocks = 0;
+  return n;
+}
+
+export async function installLivenessRouteGuard(page) {
+  if (page && typeof page.route === 'function' && !page._routeInterceptorRegistered) {
+    page._routeInterceptorRegistered = true;
+    await page.route('**/*', async (route) => {
+      const requestUrl = route.request().url();
+      const errGuard = rejectPrivateOrInvalid(requestUrl);
+      if (errGuard) {
+        console.warn(`Blocked request to restricted destination: ${requestUrl}`);
+        page._blockedByGuard = errGuard;
+        return route.abort('blockedbyclient');
+      }
+      try {
+        await validateUrlSecurity(requestUrl);
+        return route.continue();
+      } catch (err) {
+        // A host that resolves to nothing is a DEAD THIRD-PARTY SCRIPT, not a
+        // statement about the posting. Measured 2026-08-14 over a 217-URL
+        // recheck: 78 live postings were returned as `uncertain` because an
+        // analytics or ad host on the page no longer exists — 53 on
+        // personalisation.visitorqueue.com, 17 on s7.addthis.com (AddThis was
+        // shut down in 2023), the rest on fluidads and cloudfront. One was
+        // opened by hand to confirm: 11,178 characters of live posting and a
+        // working apply control, called uncertain because of a dead tracker.
+        //
+        // A tracker the user's own DNS filter blocks says nothing about the
+        // posting either. validateUrlSecurity tags that answer `dns_sinkhole`.
+        // Measured 2026-10-11 over 35 postings on 19 boards, with Control D
+        // as the resolver: 20 read blocked_host because of Google Analytics,
+        // DoubleClick, Cloudflare Insights, LinkedIn's scripts and the like, and
+        // 11 of the 20 had a visible apply control. AdGuard DNS: 12 blocked_host.
+        //
+        // The request is still aborted either way, so the egress guard loses
+        // nothing. Only the VERDICT stops being poisoned, and only for a
+        // subresource: if the main document itself has no usable address, that is a
+        // real finding about the posting and still counts.
+        //
+        // It counts as `uncertain` under its DNS tag, though, not as `blocked_host`.
+        // That code says the URL points into private space, and `scan --verify`
+        // records it as skipped_blocked_host, for good. No usable address can just
+        // as well be a DNS outage or the user's own filter, which say nothing lasting
+        // about the URL. The catch in checkUrlLiveness treats a DNS failure as
+        // transient for the same reason, and `--verify` keeps this verdict as it
+        // keeps a navigation_error.
+        //
+        // Whether this was the main document or a subresource can only be asked
+        // of a real Playwright request. Callers may pass a lighter route double
+        // (the test suite does, with request() returning just a url()), and for
+        // those the answer is unknowable — so default to TRUE, which keeps the
+        // pre-existing behaviour of poisoning the verdict. The relaxation only
+        // applies where we can positively establish it was a subresource.
+        const request = typeof route?.request === 'function' ? route.request() : null;
+        const canTell =
+          typeof request?.isNavigationRequest === 'function' &&
+          typeof request?.frame === 'function' &&
+          typeof page?.mainFrame === 'function';
+        const isMainDocument = canTell
+          ? request.isNavigationRequest() && request.frame() === page.mainFrame()
+          : true;
+        const noUsableAddress = err?.livenessCode === 'dns_no_addresses' || err?.livenessCode === 'dns_sinkhole';
+        // A subresource with no usable address is counted, not logged: with a DNS
+        // filter on, every page logged a line per tracker request (440 lines over
+        // 142 postings on 2026-10-16) and buried the verdicts. Everything that
+        // bears on a verdict — the main document, a private address — still logs.
+        if (noUsableAddress && !isMainDocument) suppressedSubresourceBlocks++;
+        else console.warn(`Blocked request to restricted destination (DNS): ${requestUrl} - ${err.message}`);
+        if (!noUsableAddress) {
+          page._blockedByGuard = { code: 'blocked_host', reason: err.message };
+        } else if (isMainDocument) {
+          page._blockedByGuard = { code: err.livenessCode, reason: err.message };
+        }
+        return route.abort('blockedbyclient');
+      }
+    });
+  }
+}
+
+// One navigation of the page (a goto or a reload). If it fails, wait for the
+// main frame to commit Chromium's error page, so the page is settled for
+// whatever navigates it next (see FAILED_NAVIGATION_COMMIT_MS). No other
+// navigation ends the wait: a child frame's, or the old page changing its own
+// URL (a fragment or history change fires framenavigated too), would let the
+// next goto start before the error page commits and interrupts it. A lighter
+// page double without waitForEvent skips the wait.
+async function navigateSettled(page, navigate) {
+  try {
+    return await navigate();
+  } catch (err) {
+    const canWait = typeof page.waitForEvent === 'function' && typeof page.mainFrame === 'function';
+    if (canWait && err?.name !== 'TimeoutError') {
+      await page
+        .waitForEvent('framenavigated', {
+          predicate: (frame) => frame === page.mainFrame() && frame.url().startsWith('chrome-error:'),
+          timeout: FAILED_NAVIGATION_COMMIT_MS,
+        })
+        .catch(() => {});
+    }
+    throw err;
+  }
+}
+
+// A navigation that times out is retried once with a longer budget. A slow
+// careers page (block.xyz took >15 s on a cold load) is live but was answered
+// `uncertain` and stayed unresolved in the queue. Only a timeout earns the retry:
+// a refused connection, a DNS failure or a guard block fails exactly the same way
+// the second time, and the guard verdict must win as before.
+export const NAVIGATE_RETRY_TIMEOUT_MS = 30_000;
+
+export async function gotoWithTimeoutRetry(page, url, {
+  timeoutMs = NAVIGATE_TIMEOUT_MS,
+  retryTimeoutMs = NAVIGATE_RETRY_TIMEOUT_MS,
+} = {}) {
+  const go = (timeout) => navigateSettled(page, () => page.goto(url, { waitUntil: 'domcontentloaded', timeout }));
+  try {
+    return await go(timeoutMs);
+  } catch (err) {
+    if (err?.name !== 'TimeoutError' || page?._blockedByGuard || !(retryTimeoutMs > timeoutMs)) throw err;
+    return go(retryTimeoutMs);
+  }
+}
+
+export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRetry = true } = {}) {
   const guardError = rejectPrivateOrInvalid(url);
   if (guardError) {
     return { result: 'uncertain', code: guardError.code, reason: guardError.reason };
   }
+  if (page) {
+    page._blockedByGuard = null;
+  }
+  await installLivenessRouteGuard(page);
   try {
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
+    const response = await gotoWithTimeoutRetry(page, url, timeoutRetry ? {} : { retryTimeoutMs: 0 });
     const status = response?.status() ?? 0;
 
-    // Give SPAs (Ashby, Lever, Workday) time to hydrate. extraSettleMs adds slack
-    // for the headed retry, where a JS anti-bot interstitial needs a moment to clear.
-    await page.waitForTimeout(HYDRATION_WAIT_MS + extraSettleMs);
+    // extraSettleMs is slack for the headed retry, where a JS anti-bot
+    // interstitial needs a moment to clear before the first read.
+    if (extraSettleMs > 0) await page.waitForTimeout(extraSettleMs);
 
-    const finalUrl = page.url();
-    const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
-    const applyControls = await page.evaluate(() => {
+    const extractApplyControls = ({ postingId, postingSegment, pageUrl, idPattern }) => {
+      // Page chrome (nav, header, footer) is skipped because its links are the
+      // site's own: Jobs, Careers, Sign in. A link to this posting's own page,
+      // on the page's own origin, is not chrome, wherever it sits; a link to
+      // another site says nothing about this page's posting, even with its id
+      // in the path. Tech in Asia puts its only Apply control,
+      // "APPLY FOR JOB" -> /jobs/<id>/apply, in the page header: measured
+      // 2026-10-22, 20 of 20 live postings read no_apply_control without this,
+      // and 40 of 40 closed ones answer "Job not found" with no such link. Only
+      // the path counts, so a sign-in link that carries the posting in its
+      // return address (?returnUrl=/jobs/<id>) is still chrome, and so is a
+      // link back into this page under another query, fragment or trailing
+      // slash, such as a skip link to #main-content. A sign-in or sign-up page
+      // is chrome even under the posting's own path (/jobs/<id>/login): it is
+      // the site's sign-in, not the posting. In a frame, the page the
+      // frame sits in is this page too; its address is passed in, because a
+      // frame sandboxed without allow-same-origin cannot read window.top. The
+      // id has to be the link's own: its last path segment that carries an id,
+      // whole, so posting 12345 claims neither /jobs/123456/apply nor
+      // /jobs/job-12345/apply, nor /jobs/12345/related/67890/apply, whose own
+      // posting is 67890. A posting whose own segment carries the id with more
+      // around it claims that whole segment too: posting job-12345 claims
+      // /jobs/job-12345/apply.
+      const idBearing = new RegExp(idPattern, 'i');
+      const signIn = /^(?:log-?in|sign[-_]?(?:in|up)|register)(?:\.\w+)?$/;
+      const linksToPosting = (element) => {
+        const href = postingId && element.getAttribute('href');
+        if (!href) return false;
+        try {
+          const target = new URL(href, document.baseURI);
+          const pageKey = (u) => u.origin + u.pathname.replace(/\/+$/, '');
+          const thisPage = [location.href, pageUrl].map((u) => pageKey(new URL(u)));
+          if (thisPage.includes(pageKey(target))) return false;
+          if (target.origin !== new URL(pageUrl).origin) return false;
+          const segments = target.pathname.toLowerCase().split('/');
+          if (segments.some((s) => signIn.test(s))) return false;
+          const own = segments.filter((s) => idBearing.test(s)).pop();
+          return own === postingId || own === postingSegment;
+        } catch {
+          return false;
+        }
+      };
+
+      // A design-system button is a custom element: UKG Pro (UltiPro) renders
+      // Apply as <ukg-button>Apply now</ukg-button>, with no role on it. The
+      // native <button> inside its shadow root has no text of its own (the
+      // label is slotted in), so the element itself is the control to read.
+      // No selector matches a tag-name suffix, hence the filter.
+      const customButtons = Array.from(document.querySelectorAll('*'))
+        .filter((element) => element.localName.endsWith('-button'));
       const candidates = Array.from(
         document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
-      );
+      ).concat(customButtons);
 
       return candidates
         .filter((element) => {
-          if (element.closest('nav, header, footer')) return false;
+          if (element.closest('nav, header, footer') && !linksToPosting(element)) return false;
           if (element.closest('[aria-hidden="true"]')) return false;
 
           const style = window.getComputedStyle(element);
@@ -171,10 +563,223 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
           return label;
         })
         .filter(Boolean);
-    });
+    };
 
-    return classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
+    // Frame aggregation is an enhancement, never a requirement. Callers may pass
+    // a lightweight page object that only implements goto/url/evaluate — the
+    // test doubles in test-all.mjs do — and such a caller must keep getting the
+    // top-level verdict rather than a navigation_error.
+    const supportsFrames = typeof page?.frames === 'function' && typeof page?.mainFrame === 'function';
+
+    const childFrames = (topUrl) =>
+      !supportsFrames
+        ? []
+        : page.frames().filter((frame) => {
+            if (frame === page.mainFrame()) return false;
+            try {
+              return sameOrigin(frame.url() || '', topUrl); // excludes about:blank, ads, tag managers
+            } catch {
+              return false;
+            }
+          });
+
+    // The posting's id, from the address of the page being read, so a posting
+    // reached through a redirect (/jobs/senior-engineer to /jobs/12345) is
+    // matched by the address it landed on. A page whose address lost the
+    // requested URL's id reads as off the posting whatever its controls (the
+    // redirect guard), and one whose own id is another posting's claims
+    // nothing in the chrome: /jobs/12345 that lands on
+    // /jobs/67890?returnUrl=/jobs/12345 passes the guard, but the page is
+    // posting 67890. The id in the last path segment, so a number in the
+    // query (?campaign=123456) is not taken for it. When that segment has
+    // none, the id in a query parameter that names the posting, and only then
+    // the last id in the path: on UltiPro,
+    // /JobBoard/{board}/OpportunityDetail?opportunityId={posting}, the path's
+    // only id is the board's, and every link under the board's path has it.
+    // The segment itself is kept only when the id came from it, so a generic
+    // last segment (/jobs/12345/details) claims nothing.
+    const postingIdentity = (address) => {
+      const postingUrl = new URL(address);
+      const lastSegment = postingUrl.pathname.split('/').filter(Boolean).pop() ?? '';
+      const queryId = [...postingUrl.searchParams]
+        .filter(([name]) => POSTING_ID_PARAMS.has(name.toLowerCase()))
+        .map(([, value]) => jobIdToken(value))
+        .find(Boolean);
+      return {
+        postingId: jobIdToken(lastSegment) ?? queryId ?? jobIdToken(postingUrl.pathname),
+        postingSegment: jobIdToken(lastSegment) ? lastSegment.toLowerCase() : null,
+      };
+    };
+    const requested = postingIdentity(url);
+
+    // One reading of the page: the top-level document plus every same-origin
+    // child frame, so a posting rendered inside a frame and one rendered inline
+    // are judged the same way. A top-level read that throws propagates; a frame
+    // that detaches or turns cross-origin mid-read is skipped.
+    const readPage = async () => {
+      const finalUrl = page.url();
+      const landed = postingIdentity(finalUrl);
+      const anotherPosting = requested.postingId && landed.postingId !== requested.postingId;
+      const walkArgs = {
+        ...(anotherPosting ? { postingId: null, postingSegment: null } : landed),
+        pageUrl: finalUrl,
+        idPattern: JOB_ID_PATTERN,
+      };
+      let bodyText = await page.evaluate(() => document.body?.innerText ?? '');
+      let applyControls = await page.evaluate(extractApplyControls, walkArgs);
+      for (const frame of childFrames(finalUrl)) {
+        try {
+          const text = await frame.evaluate(() => document.body?.innerText ?? '');
+          if (text && text.trim()) bodyText += '\n' + text;
+          applyControls = applyControls.concat(await frame.evaluate(extractApplyControls, walkArgs));
+        } catch {
+          // detached or cross-origin mid-read; the rest of the reading still stands
+        }
+      }
+      return { finalUrl, bodyText, applyControls };
+    };
+
+    // Read the page until the verdict is decisive, the request guard has
+    // already decided it, or HYDRATION_MAX_POLLS waits have passed. A frame
+    // appearing does not end the poll: it may be a sign-in, chat or consent
+    // widget rather than the posting, and the posting can still render on the
+    // top level. A read that throws (the SPA rebuilding its DOM) is retried. If
+    // the poll ends on a failed read while the last good reading still looked
+    // unrendered, that reading is stale evidence, so the error propagates and
+    // becomes a navigation_error instead of an expired verdict; the same
+    // happens when no read succeeded at all.
+    const pollPage = async (pageStatus) => {
+      let reading = null;
+      let hydrating = true;
+      let lastError = null;
+      for (let poll = 0; ; poll += 1) {
+        try {
+          reading = await readPage();
+          lastError = null;
+          const { code } = classifyLiveness({ status: pageStatus, requestedUrl: url, ...reading });
+          hydrating = HYDRATING_CODES.has(code);
+          if (!hydrating) break;
+        } catch (err) {
+          lastError = err;
+        }
+        if (page._blockedByGuard || poll >= HYDRATION_MAX_POLLS) break;
+        await page.waitForTimeout(HYDRATION_POLL_MS);
+      }
+      if (lastError && hydrating) throw lastError;
+      if (hydrating && childFrames(reading.finalUrl).length > 0) {
+        await waitForFramesToFill(reading.finalUrl);
+        reading = await readPage();
+      }
+      return reading;
+    };
+
+    // Some ATS render the whole posting inside a same-origin iframe and leave the
+    // top-level document as an empty shell. iCIMS is the reference case: measured
+    // 2026-08-14, the outer document of a LIVE posting held 13 characters and no
+    // apply control, so classifyLiveness reached `insufficient_content` and called
+    // it expired. 92 live postings were closed that way in one sweep, and a false
+    // `expired` is the expensive direction — it is written to scan-history as
+    // skipped_expired and dedup-filters the job out of every later scan.
+    //
+    // Reading same-origin child frames cannot resurrect a dead posting: a removed
+    // iCIMS job answers HTTP 410 at the top level (verified on two fabricated job
+    // ids and one genuinely dead posting), so it short-circuits on status long
+    // before any content check, and its error frame carries zero apply controls.
+    // The frame ATTACHES fast but FILLS late. Measured on iCIMS 2026-08-14: the
+    // same-origin child frame is present at 2000ms with 0 characters and only
+    // populates between 3000 and 4000ms, so reading it as soon as it attaches
+    // gets an empty document and changes nothing. The page poll reads the frame
+    // on every pass, so a frame that fills within the poll is caught there; a
+    // poll that ends still undecided with a same-origin frame present waits for
+    // the frames to fill, bounded, then takes one fresh reading. The cost is
+    // only paid on pages that actually have a same-origin child frame, so the
+    // ATS that render inline are unaffected.
+    //
+    // A 404/410 is decided on the first read: classifyLiveness checks the status
+    // before any content, so the poll stops there and no frame wait is paid.
+    const waitForFramesToFill = async (topUrl) => {
+      const deadline = Date.now() + FRAME_CONTENT_TIMEOUT_MS;
+      // Wait for EVERY qualifying frame, not merely the first one to fill: with
+      // two same-origin frames the posting could otherwise be read while still
+      // empty. Measured across five iCIMS tenants there is exactly one
+      // qualifying frame per page, so in practice this is the same loop.
+      for (;;) {
+        let anyEmpty = false;
+        for (const frame of childFrames(topUrl)) {
+          try {
+            const probe = await frame.evaluate(() => document.body?.innerText ?? '');
+            if (!probe.trim()) anyEmpty = true;
+          } catch {
+            // detached mid-poll; try again on the next tick
+          }
+        }
+        if (!anyEmpty || Date.now() >= deadline) break;
+        await page.waitForTimeout(FRAME_CONTENT_POLL_MS);
+      }
+    };
+
+    const reading = await pollPage(status);
+    const { finalUrl } = reading;
+    let verdict = classifyLiveness({ status, requestedUrl: url, ...reading });
+
+    // See BAMBOOHR_HOSTS above. Only fires on the specific verdict this
+    // render race produces (a short/empty body, not an explicit closure
+    // banner or a 404/410, both of which are trusted as-is).
+    if (verdict.code === 'insufficient_content' && typeof page.reload === 'function') {
+      let host = '';
+      try { host = new URL(finalUrl || url).hostname; } catch { /* leave empty, retry test below just fails closed */ }
+      if (isBambooHrHost(host)) {
+        try {
+          const reloadResponse = await navigateSettled(page, () =>
+            page.reload({ waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS }));
+          const reloadStatus = reloadResponse?.status() ?? status;
+          const reloaded = await pollPage(reloadStatus);
+          const reloadVerdict = classifyLiveness({ status: reloadStatus, requestedUrl: url, ...reloaded });
+          const stillNotFound = reloadVerdict.code === 'insufficient_content' || reloadVerdict.code === 'listing_page';
+          verdict = !stillNotFound
+            ? { ...reloadVerdict, reason: `${reloadVerdict.reason} (after BambooHR reload retry)` }
+            : {
+                result: 'uncertain',
+                code: 'bamboohr_render_retry_failed',
+                reason: 'BambooHR page did not render content even after a reload retry — not trusted as evidence of removal',
+              };
+        } catch (err) {
+          // Reload itself failed — still never let this surface as `expired`.
+          verdict = {
+            result: 'uncertain',
+            code: 'bamboohr_render_retry_failed',
+            reason: `BambooHR reload retry failed: ${err.message.split('\n')[0]}`,
+          };
+        }
+      }
+    }
+
+    // A page still empty when the poll gives up (after the frame wait, if a
+    // same-origin frame is present) has shown nothing: no posting, no closure
+    // notice, no error page. AGENTS.md calls a loading placeholder unconfirmed,
+    // not closed, and a false `expired` is the expensive direction (see the
+    // iCIMS note above). Measured over 218 loads on 17 ATS: 18 were still empty
+    // when the poll ended, 16 of them live postings. Only a body with no text at
+    // all qualifies: a short page ("Page not found", a header and footer) keeps
+    // insufficient_content, also `uncertain` but with a code that says the page
+    // did render something.
+    if (verdict.code === 'insufficient_content' && !reading.bodyText.trim()) {
+      verdict = {
+        result: 'uncertain',
+        code: 'empty_page',
+        reason: 'page still empty when the poll ended — not trusted as evidence of removal',
+      };
+    }
+
+    if (page && page._blockedByGuard) {
+      return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
+    }
+
+    return verdict;
   } catch (err) {
+    if (page && page._blockedByGuard) {
+      return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
+    }
     // Transient failures (timeout, DNS, TLS, 5xx) shouldn't be treated as expired —
     // doing so would cause scan --verify to drop the URL and write it to scan-history,
     // permanently filtering it out on subsequent scans.
@@ -202,8 +807,36 @@ export function createHeadedPageProvider(chromium) {
   let browser = null;
   let page = null;
   let launchFailed = false;
+  // A cached page is only reusable while its browser is still up. If the headed
+  // Chromium goes away mid-run (the user closes the window, the process dies),
+  // the cached handle stays non-null, so every later get() hands back a dead
+  // page and each anti-bot retry fails with "Target page, context or browser has
+  // been closed" instead of a real verdict. Guarded defensively because the
+  // provider is handed a chromium in tests, not necessarily a real Playwright one.
+  const isCachedPageUsable = () => {
+    if (!page) return false;
+    if (typeof page.isClosed === 'function' && page.isClosed()) return false;
+    if (browser && typeof browser.isConnected === 'function' && !browser.isConnected()) return false;
+    return true;
+  };
+
   return {
     async get() {
+      if (page && !isCachedPageUsable()) {
+        // Drop the dead handles and fall through to a fresh launch below. If the
+        // page went away but its Chromium is still up, tear that browser down
+        // first: close() only knows the current handle, so a replacement launch
+        // would otherwise leave the stale process running until exit.
+        if (browser && (typeof browser.isConnected !== 'function' || browser.isConnected())) {
+          try {
+            await browser.close();
+          } catch {
+            // best-effort teardown
+          }
+        }
+        page = null;
+        browser = null;
+      }
       if (page) return page;
       if (launchFailed) return null;
       try {
@@ -245,7 +878,9 @@ export async function checkUrlLivenessWithFallback(page, url, { getHeadedPage } 
   if (!headedPage) {
     return first;
   }
-  const second = await checkUrlLiveness(headedPage, url, { extraSettleMs: 3_000 });
+  // The headed retry is for an anti-bot wall, which loaded; it does not also
+  // earn the slow-page retry, which would push one URL past a minute.
+  const second = await checkUrlLiveness(headedPage, url, { extraSettleMs: 3_000, timeoutRetry: false });
   if (isChallengeResult(second)) {
     return { ...second, reason: `${second.reason} (headed retry also blocked)` };
   }

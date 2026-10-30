@@ -2,6 +2,7 @@ package screens
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,6 +40,15 @@ type PipelineOpenPDFMsg struct {
 	Path string
 }
 
+// PipelineOpenFailedMsg reports that an external open (job URL, manifesto or
+// CV PDF) failed. The dashboard runs under an alt-screen, so the failure has to
+// travel back to the pipeline screen as a flash: anything written to stderr is
+// never seen. Target is the URL or path that could not be opened.
+type PipelineOpenFailedMsg struct {
+	Target string
+	Err    string
+}
+
 // PipelineGeneratePDFMsg requests a PDF regeneration via generate-pdf.mjs
 // from the application's recorded source HTML. Paths are relative to
 // CareerOpsPath (as recorded in the manifest).
@@ -70,6 +80,12 @@ type PipelineUpdateStatusMsg struct {
 	NewStatus     string
 }
 
+// StatusUpdateFailedMsg exposes a failed tracker write in the active screen.
+// Stderr is hidden while the dashboard occupies the terminal's alt-screen.
+type StatusUpdateFailedMsg struct {
+	Err string
+}
+
 // PipelineUpdateStatusAndNotesMsg requests an atomic status + notes update.
 // Used by the discard reason picker (Issue 1380) to commit both changes in a
 // single tracker write.
@@ -89,9 +105,30 @@ type PipelineDiscardReasonsLoadedMsg struct {
 // PipelineRefreshMsg requests a full tracker reload from disk.
 type PipelineRefreshMsg struct{}
 
+// PipelineHistoryFailedMsg reports that progress still uses the previous data.
+type PipelineHistoryFailedMsg struct {
+	Err string
+}
+
+// PipelineTrackerFailedMsg reports that the tracker could not be read and the
+// screen is still showing the previous applications.
+//
+// Sibling of PipelineHistoryFailedMsg, for the more consequential of the two
+// files: rebuilding the pipeline from a failed tracker read empties it, and
+// ComputeProgressMetrics then reports every rate as 0% — an empty pipeline and
+// a search that looks like it is failing, because a file could not be opened.
+type PipelineTrackerFailedMsg struct {
+	Err string
+}
+
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
 
+// PipelineOpenStatsMsg is emitted when the stats (dimension breakdown) screen should open.
+type PipelineOpenStatsMsg struct{}
+
+// Mirrors the ids in templates/discard-reasons.yml, in order.
+// tests/discard-reasons-vocabulary.test.mjs fails when the two drift.
 var canonicalDiscardReasons = []string{
 	"salary_too_low",
 	"hybrid_required",
@@ -109,7 +146,7 @@ type reportSummary struct {
 	comp      string
 }
 
-const storyTemplateURL = "https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml"
+const storyTemplateURL = "https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml"
 
 // Sort modes
 const (
@@ -120,6 +157,7 @@ const (
 	sortLocation = "location"
 	sortPay      = "pay"
 	sortLast     = "last"
+	sortPosted   = "posted"
 )
 
 // Filter modes
@@ -129,6 +167,8 @@ const (
 	filterSpeculative = "speculative"
 	filterApplied     = "applied"
 	filterInterview   = "interview"
+	filterResponded   = "responded"
+	filterAssessment  = "assessment"
 	filterSkip        = "skip"
 	filterRejected    = "rejected"
 	filterDiscarded   = "discarded"
@@ -145,8 +185,10 @@ func getPipelineTabs() []pipelineTab {
 		{filterAll, i18n.Current.TabAll},
 		{filterEvaluated, i18n.Current.TabEvaluated},
 		{filterSpeculative, i18n.Current.TabSpeculative},
-		{filterApplied, i18n.Current.TabApplied},
 		{filterInterview, i18n.Current.TabInterview},
+		{filterAssessment, i18n.Current.TabAssessment},
+		{filterResponded, i18n.Current.TabResponded},
+		{filterApplied, i18n.Current.TabApplied},
 		{filterTop, i18n.Current.TabTop},
 		{filterSkip, i18n.Current.TabSkip},
 		{filterRejected, i18n.Current.TabRejected},
@@ -154,19 +196,20 @@ func getPipelineTabs() []pipelineTab {
 	}
 }
 
-var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast}
+var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast, sortPosted}
 
 // ColumnID identifies an optional table column in the pipeline view.
 type ColumnID int
 
 const (
 	// Optional columns — user-toggleable via the column picker (C key).
-	ColDate        ColumnID = iota // APPLIED date
+	ColDate        ColumnID = iota // DATE: latest status change (ledger), else the tracker's evaluation date
 	ColLocation                    // LOCATION city+state
 	ColPay                         // PAY range
 	ColHasReport                   // RPT: ✓/—
 	ColHasPDF                      // PDF: ✓/—
 	ColLastContact                 // LAST contact date
+	ColPosted                      // POSTED: how long the req has been open
 )
 
 // colDef describes one optional column for the picker UI.
@@ -180,12 +223,13 @@ type colDef struct {
 
 func getOptionalCols() []colDef {
 	return []colDef{
-		{ColDate, i18n.Current.ColApplied, "", 10, true},
+		{ColDate, i18n.Current.ColDate, "", 10, true},
 		{ColLocation, i18n.Current.ColLocation, "", 20, true},
 		{ColPay, i18n.Current.ColPay, "", 16, true},
 		{ColHasReport, i18n.Current.ColReport, "✓/—", 4, false},
 		{ColHasPDF, i18n.Current.ColPDF, "✓/—", 4, false},
 		{ColLastContact, i18n.Current.ColLast, "", 10, false},
+		{ColPosted, i18n.Current.ColPosted, "", 10, false},
 	}
 }
 
@@ -194,12 +238,18 @@ type StatusPair struct {
 	Canonical string
 }
 
-func getStatusPairs() []StatusPair {
-	return []StatusPair{
+// getStatusPairs returns the status-change picker's options in their static
+// display order. When currentNormalized is non-empty and matches one of the
+// entries (compared via data.NormalizeStatus), that entry is pulled to the
+// front so the row's own current status always leads the list, with the
+// remaining options kept in their original relative order behind it.
+func getStatusPairs(currentNormalized string) []StatusPair {
+	base := []StatusPair{
 		{i18n.Current.StatusEvaluated, "Evaluated"},
 		{i18n.Current.StatusSpeculative, "Speculative"},
 		{i18n.Current.StatusApplied, "Applied"},
 		{i18n.Current.StatusResponded, "Responded"},
+		{i18n.Current.StatusAssessment, "Assessment"},
 		{i18n.Current.StatusInterview, "Interview"},
 		{i18n.Current.StatusOffer, "Offer"},
 		{i18n.Current.StatusHired, "Hired"},
@@ -207,13 +257,48 @@ func getStatusPairs() []StatusPair {
 		{i18n.Current.StatusDiscarded, "Discarded"},
 		{i18n.Current.StatusSkip, "Skip"},
 	}
+
+	if currentNormalized == "" {
+		return base
+	}
+
+	var current *StatusPair
+	rest := make([]StatusPair, 0, len(base))
+	for _, pair := range base {
+		if current == nil && data.NormalizeStatus(pair.Canonical) == currentNormalized {
+			p := pair
+			current = &p
+			continue
+		}
+		rest = append(rest, pair)
+	}
+
+	if current == nil {
+		// Unrecognized/unmapped status -- fall back to the static order.
+		return base
+	}
+
+	ordered := make([]StatusPair, 0, len(base))
+	ordered = append(ordered, *current)
+	ordered = append(ordered, rest...)
+	return ordered
+}
+
+// currentStatusPairs resolves the status-change picker options for whichever
+// application is currently selected in the main list, so the picker reflects
+// that row's own status rather than always assuming "Evaluated".
+func (m PipelineModel) currentStatusPairs() []StatusPair {
+	if app, ok := m.CurrentApp(); ok {
+		return getStatusPairs(data.NormalizeStatus(app.Status))
+	}
+	return getStatusPairs("")
 }
 
 // statusGroupOrder defines display order for grouped view.
 // speculative sits just after evaluated: a gambit pitch is pre-application, so
 // it outranks nothing that has actually been sent, but it is live work and
 // belongs above skip/rejected/discarded.
-var statusGroupOrder = []string{"hired", "interview", "offer", "responded", "applied", "evaluated", "speculative", "skip", "rejected", "discarded"}
+var statusGroupOrder = []string{"hired", "interview", "offer", "assessment", "responded", "applied", "evaluated", "speculative", "skip", "rejected", "discarded"}
 
 // PipelineModel implements the career pipeline dashboard screen.
 type PipelineModel struct {
@@ -349,6 +434,21 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	reloaded.searchInput = m.searchInput
 	// Preserve user's column visibility choices across refresh.
 	reloaded.visibleCols = m.visibleCols
+	// Preserve in-progress interactive flows. The viewer status path starts
+	// the hired celebration / discard reason picker on the pipeline model and
+	// then immediately triggers a data reload; rebuilding the model here used
+	// to wipe that state, so picking Discarded/SKIP from the report viewer
+	// silently never asked for a reason and never wrote the status.
+	reloaded.hiredApp = m.hiredApp
+	reloaded.hiredStep = m.hiredStep
+	reloaded.discardPicker = m.discardPicker
+	reloaded.discardCursor = m.discardCursor
+	reloaded.discardOptions = m.discardOptions
+	reloaded.discardCustomInput = m.discardCustomInput
+	reloaded.discardCustomText = m.discardCustomText
+	reloaded.discardPendingApp = m.discardPendingApp
+	reloaded.discardPendingStatus = m.discardPendingStatus
+	reloaded.discardPredictedCount = m.discardPredictedCount
 	reloaded.applyFilterAndSort()
 	reloaded.CopyReportCache(&m)
 
@@ -422,6 +522,17 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		} else {
 			m.flash = "PDF regenerated and opened: " + filepath.Base(msg.Path)
 		}
+		return m, nil
+	case PipelineOpenFailedMsg:
+		m.flash = "Could not open " + msg.Target + ": " + msg.Err
+		return m, nil
+	case StatusUpdateFailedMsg:
+		m.flash = "Could not update status: " + msg.Err
+	case PipelineHistoryFailedMsg:
+		m.flash = "Status history unavailable; progress uses previous data: " + msg.Err
+		return m, nil
+	case PipelineTrackerFailedMsg:
+		m.flash = "Tracker unavailable; showing previous applications: " + msg.Err
 		return m, nil
 	case pipelineStartDiscardPickerMsg:
 		// Issue 1380: initialise the discard reason picker state.
@@ -547,7 +658,11 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 		}
 
 	case "o":
-		if app, ok := m.CurrentApp(); ok && app.JobURL != "" {
+		if app, ok := m.CurrentApp(); ok {
+			if app.JobURL == "" {
+				m.flash = "No URL found for this application"
+				break
+			}
 			return m, func() tea.Msg {
 				return PipelineOpenURLMsg{URL: app.JobURL}
 			}
@@ -561,7 +676,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	case "d":
 		if app, ok := m.CurrentApp(); ok {
 			manifest := data.LoadPDFManifest(m.careerOpsPath)
-			candidates := data.ResolvePDFs(m.careerOpsPath, app, manifest)
+			candidates := data.ResolvePDFs(data.PDFWorkspaceRoot(m.careerOpsPath), app, manifest)
 			if len(candidates) == 0 {
 				m.flash = "No CV PDF found for this application — generate one with /career-ops pdf"
 			} else {
@@ -571,13 +686,14 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "D":
 		if app, ok := m.CurrentApp(); ok {
+			workspaceRoot := data.PDFWorkspaceRoot(m.careerOpsPath)
 			manifest := data.LoadPDFManifest(m.careerOpsPath)
 			entry, found := manifest.Lookup(app)
 			// Manifest lookup requires a report number; fall back to PDF-path
 			// index when the manifest was written without --report (common case).
 			if !found || entry.HTMLPath == "" {
 				byPath := data.LoadPDFEntriesByPath(m.careerOpsPath)
-				candidates := data.ResolvePDFs(m.careerOpsPath, app, manifest)
+				candidates := data.ResolvePDFs(workspaceRoot, app, manifest)
 				for _, c := range candidates {
 					if e, ok := byPath[c]; ok && e.HTMLPath != "" {
 						entry = e
@@ -590,12 +706,12 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 				m.flash = "No source HTML found for this application — run /career-ops pdf first"
 				return m, nil
 			}
-			if _, err := os.Stat(filepath.Join(m.careerOpsPath, filepath.FromSlash(entry.HTMLPath))); err != nil {
+			if _, err := os.Stat(filepath.Join(workspaceRoot, filepath.FromSlash(entry.HTMLPath))); err != nil {
 				m.flash = "Source HTML missing: " + entry.HTMLPath
 				return m, nil
 			}
 			m.flash = "Regenerating PDF via generate-pdf.mjs — this takes a few seconds..."
-			path, report := m.careerOpsPath, entry.ReportNumber
+			path, report := workspaceRoot, entry.ReportNumber
 			html, pdf, format := entry.HTMLPath, entry.PDFPath, entry.Format
 			return m, func() tea.Msg {
 				return PipelineGeneratePDFMsg{
@@ -610,6 +726,9 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "p":
 		return m, func() tea.Msg { return PipelineOpenProgressMsg{} }
+
+	case "S":
+		return m, func() tea.Msg { return PipelineOpenStatsMsg{} }
 
 	case "r":
 		return m, func() tea.Msg { return PipelineRefreshMsg{} }
@@ -735,8 +854,8 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 
 	case "down", "j":
 		m.statusCursor++
-		if m.statusCursor >= len(getStatusPairs()) {
-			m.statusCursor = len(getStatusPairs()) - 1
+		if m.statusCursor >= len(m.currentStatusPairs()) {
+			m.statusCursor = len(m.currentStatusPairs()) - 1
 		}
 
 	case "up", "k":
@@ -748,19 +867,8 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 	case "enter":
 		m.statusPicker = false
 		if app, ok := m.CurrentApp(); ok {
-			newStatus := getStatusPairs()[m.statusCursor].Canonical
+			newStatus := m.currentStatusPairs()[m.statusCursor].Canonical
 			norm := data.NormalizeStatus(newStatus)
-			if norm == "hired" {
-				m.hiredApp = app
-				m.hiredStep = 1
-				return m, func() tea.Msg {
-					return PipelineUpdateStatusMsg{
-						CareerOpsPath: m.careerOpsPath,
-						App:           app,
-						NewStatus:     newStatus,
-					}
-				}
-			}
 			if norm == "discarded" || norm == "skip" {
 				return m, func() tea.Msg {
 					return m.startDiscardFlow(app, newStatus)
@@ -1035,7 +1143,7 @@ func (m PipelineModel) handleColPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) 
 
 // openPDFCmd emits a PipelineOpenPDFMsg for a root-relative PDF path.
 func (m PipelineModel) openPDFCmd(relPath string) tea.Cmd {
-	fullPath := filepath.Join(m.careerOpsPath, filepath.FromSlash(relPath))
+	fullPath := filepath.Join(data.PDFWorkspaceRoot(m.careerOpsPath), filepath.FromSlash(relPath))
 	return func() tea.Msg {
 		return PipelineOpenPDFMsg{Path: fullPath}
 	}
@@ -1122,12 +1230,24 @@ func (m *PipelineModel) applyFilterAndSort() {
 	m.filtered = filtered
 }
 
+// effectiveDate is what the DATE column shows and what the date sort orders
+// by: the row's latest status transition from status-log.tsv when it has one,
+// otherwise the tracker's own Date cell (the evaluation date). Other readers
+// of app.Date — the hired-flow weeks math, the LAST column's "same as date"
+// elision — mean the evaluation date on purpose and do not go through here.
+func effectiveDate(app model.CareerApplication) string {
+	if app.StatusDate != "" {
+		return app.StatusDate
+	}
+	return app.Date
+}
+
 // sortLess returns the comparator for the active sort mode. Shared by the flat
 // sort and the within-group tiebreaker in grouped view.
 func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 	switch m.sortMode {
 	case sortDate:
-		return func(a, b model.CareerApplication) bool { return a.Date > b.Date }
+		return func(a, b model.CareerApplication) bool { return effectiveDate(a) > effectiveDate(b) }
 	case sortCompany:
 		return func(a, b model.CareerApplication) bool {
 			return strings.ToLower(a.Company) < strings.ToLower(b.Company)
@@ -1151,8 +1271,26 @@ func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 	case sortLast:
 		// Most recent contact first; empty dates sink to the bottom.
 		return func(a, b model.CareerApplication) bool { return a.LastContact > b.LastContact }
+	case sortPosted:
+		// Freshest requisition first; rows with no posted date sink to the bottom.
+		return func(a, b model.CareerApplication) bool {
+			if (a.PostedOn == "") != (b.PostedOn == "") {
+				return a.PostedOn != ""
+			}
+			return a.PostedOn > b.PostedOn
+		}
 	default: // sortScore
-		return func(a, b model.CareerApplication) bool { return a.Score > b.Score }
+		// Unevaluated rows float to the TOP, not the bottom. Their Score is
+		// Go's zero value, so a plain `a.Score > b.Score` ranks them below the
+		// worst-scoring role in the pipeline — which reads as "these are the
+		// weakest" when it means "these have not been looked at yet".
+		// "Needs evaluating" is more actionable than "scored badly".
+		return func(a, b model.CareerApplication) bool {
+			if a.HasScore != b.HasScore {
+				return !a.HasScore
+			}
+			return a.Score > b.Score
+		}
 	}
 }
 
@@ -1243,15 +1381,8 @@ func (m PipelineModel) View() string {
 	metricsBar := m.renderMetrics()
 	sortBar := m.renderSortBar()
 	searchBar := m.renderSearchBar()
-	body := m.renderBody()
 	preview := m.renderPreview()
 	help := m.renderHelp()
-
-	// Apply scroll to body
-	bodyLines := strings.Split(body, "\n")
-	if m.scrollOffset > 0 && m.scrollOffset < len(bodyLines) {
-		bodyLines = bodyLines[m.scrollOffset:]
-	}
 
 	// Calculate available height for body
 	previewLines := strings.Count(preview, "\n") + 1
@@ -1259,10 +1390,14 @@ func (m PipelineModel) View() string {
 	if availHeight < 3 {
 		availHeight = 3
 	}
-	if len(bodyLines) > availHeight {
-		bodyLines = bodyLines[:availHeight]
+
+	// Render only the rows that will be shown. An offset past the end shows the
+	// body from the top, as slicing the fully rendered body used to.
+	bodyLines := m.renderBodyWindow(m.scrollOffset, availHeight)
+	if len(bodyLines) == 0 {
+		bodyLines = m.renderBodyWindow(0, availHeight)
 	}
-	body = strings.Join(bodyLines, "\n")
+	body := strings.Join(bodyLines, "\n")
 
 	// Column picker overlay
 	if m.colPicker {
@@ -1327,6 +1462,18 @@ func (m PipelineModel) renderSearchBar() string {
 	return style.Render(prompt + " " + display + matchInfo + hint)
 }
 
+// avgScoreLabel is the header's average score, or "—" when no row has a
+// score. AvgScore is averaged over scored rows only and every score is above
+// zero, so it is positive exactly when there is one; printed as "0.0" it read
+// as a pipeline that had been scored and scored nothing, a mean taken over no
+// values.
+func avgScoreLabel(avg float64) string {
+	if avg > 0 {
+		return fmt.Sprintf("%.1f", avg)
+	}
+	return "—"
+}
+
 func (m PipelineModel) renderHeader() string {
 	style := lipgloss.NewStyle().
 		Bold(true).
@@ -1336,8 +1483,7 @@ func (m PipelineModel) renderHeader() string {
 		Padding(0, 2)
 
 	right := lipgloss.NewStyle().Foreground(m.theme.Subtext)
-	avg := fmt.Sprintf("%.1f", m.metrics.AvgScore)
-	info := right.Render(fmt.Sprintf(i18n.Current.OffersSummary, m.metrics.Total, avg))
+	info := right.Render(fmt.Sprintf(i18n.Current.OffersSummary, m.metrics.Total, avgScoreLabel(m.metrics.AvgScore)))
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render(i18n.Current.AppTitle)
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
@@ -1436,14 +1582,40 @@ func (m PipelineModel) renderSortBar() string {
 }
 
 func (m PipelineModel) renderBody() string {
+	return strings.Join(m.renderBodyWindow(0, math.MaxInt), "\n")
+}
+
+// renderBodyWindow returns the body's display lines from line `start`, at most
+// `height` of them: the same lines as rendering the whole body and slicing it,
+// without rendering the rows outside the window. View used to render every
+// filtered row on each keypress and then keep a screenful.
+//
+// A row or group header that is not rendered counts as one line. That holds for
+// both: every cell is truncated to its column and neither sets a width that
+// could wrap. The selected row is the exception, since it is padded to the
+// screen width and can wrap on a narrow terminal, so it is always rendered and
+// counted by its real line count.
+func (m PipelineModel) renderBodyWindow(start, height int) []string {
+	lines := make([]string, 0, min(height, len(m.filtered)+8))
+	line := 0 // index of the next display line
+	emit := func(s string) bool {
+		for _, l := range strings.Split(s, "\n") {
+			if line >= start && len(lines) < height {
+				lines = append(lines, l)
+			}
+			line++
+		}
+		return len(lines) < height
+	}
+
 	if len(m.filtered) == 0 {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(m.theme.Subtext).
 			Padding(1, 2)
-		return emptyStyle.Render(i18n.Current.NoOffersMatch)
+		emit(emptyStyle.Render(i18n.Current.NoOffersMatch))
+		return lines
 	}
 
-	var lines []string
 	prevStatus := ""
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
 
@@ -1452,31 +1624,42 @@ func (m PipelineModel) renderBody() string {
 
 		// Group header in grouped mode
 		if m.viewMode == "grouped" && norm != prevStatus {
-			count := m.countByNormStatus(norm)
-			headerStyle := lipgloss.NewStyle().
-				Bold(true).
-				Foreground(m.theme.Subtext)
-			lines = append(lines, padStyle.Render(
-				headerStyle.Render(fmt.Sprintf("── %s (%d) %s",
-					strings.ToUpper(statusLabel(norm)), count,
-					strings.Repeat("─", max(0, m.width-30-len(statusLabel(norm)))))),
-			))
 			prevStatus = norm
+			if line < start {
+				line++
+			} else {
+				count := m.countByNormStatus(norm)
+				headerStyle := lipgloss.NewStyle().
+					Bold(true).
+					Foreground(m.theme.Subtext)
+				if !emit(padStyle.Render(
+					headerStyle.Render(fmt.Sprintf("── %s (%d) %s",
+						strings.ToUpper(statusLabel(norm)), count,
+						strings.Repeat("─", max(0, m.width-30-len(statusLabel(norm)))))),
+				)) {
+					break
+				}
+			}
 		}
 
 		selected := i == m.cursor
-		line := m.renderAppLine(app, selected)
-		lines = append(lines, line)
+		if line < start && !selected {
+			line++
+			continue
+		}
+		if !emit(m.renderAppLine(app, selected)) {
+			break
+		}
 	}
 
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // colWidths holds per-column rune budgets for the table.
 type colWidths struct {
 	num, score, company, status, role int
 	// optional columns — 0 means the column is hidden
-	date, loc, pay, rpt, pdf, last int
+	date, loc, pay, rpt, pdf, last, posted int
 }
 
 func (m PipelineModel) colVisible(id ColumnID) bool {
@@ -1512,12 +1695,46 @@ func (m PipelineModel) columnWidths() colWidths {
 	if m.colVisible(ColLastContact) {
 		c.last = 10
 	}
-	fixed := c.num + c.score + c.date + c.company + c.status + c.loc + c.pay + c.rpt + c.pdf + c.last
-	c.role = m.width - fixed - 14 // separators + outer padding
+	if m.colVisible(ColPosted) {
+		c.posted = 10
+	}
+	fixed := c.num + c.score + c.date + c.company + c.status + c.loc + c.pay + c.rpt + c.pdf + c.last + c.posted
+	c.role = m.width - fixed - m.rowOverhead(c)
 	if c.role < 15 {
 		c.role = 15
 	}
 	return c
+}
+
+// rowOverhead is everything a rendered row costs beyond the column widths
+// themselves. It is NOT a constant: renderAppLine and renderColumnHeader join
+// the segments with one space each, so the cost grows by one for every optional
+// column turned on.
+//
+// It used to be a fixed 14, which is the value for all seven optional columns
+// visible — so the full layout landed exactly on the terminal edge while every
+// narrower layout was left up to 7 runes short of the width it had been given.
+// Deriving it from the visible segments keeps the row the same width in every
+// combination, and keeps a future eighth column from silently taking it over.
+func (m PipelineModel) rowOverhead(c colWidths) int {
+	segments := 5 // #, score, company, role, status — always rendered
+	for _, w := range []int{c.date, c.loc, c.pay, c.rpt, c.pdf, c.last, c.posted} {
+		if w > 0 {
+			segments++
+		}
+	}
+	const (
+		leadingSpace = 1 // the " " prefixed before the join
+		outerPadding = 4 // lipgloss Padding(0, 2) — two runes on each side
+		// The score segment is budgeted c.score above but rendered unpadded, so
+		// the budget gets the difference back. Measured against the DATA row,
+		// where the score is always fmt.Sprintf("%.1f") — three runes. The
+		// header uses the ColFit label instead, which is wider in some locales
+		// ("UYUM", "AJUSTE"); that pre-existing header/row drift is not
+		// something the role width can fix for both at once.
+		renderedScoreWidth = 3
+	)
+	return (segments - 1) + leadingSpace + outerPadding - (c.score - renderedScoreWidth)
 }
 
 func (m PipelineModel) workModeColor(mode string) lipgloss.Color {
@@ -1536,7 +1753,7 @@ func (m PipelineModel) workModeColor(mode string) lipgloss.Color {
 }
 
 func (m PipelineModel) renderLocCell(app model.CareerApplication, width int) string {
-	text := app.WorkMode
+	text := i18n.Current.WorkModeLabel(app.WorkMode)
 	if app.Location != "" {
 		if text != "" {
 			text += " · " + app.Location
@@ -1558,6 +1775,56 @@ func (m PipelineModel) renderCheckCell(yes bool, width int) string {
 		color = m.theme.Green
 	}
 	return lipgloss.NewStyle().Foreground(color).Width(width).Render(text)
+}
+
+// postedAgeThresholds bound the POSTED column's colour bands, in days since the
+// requisition went live. A req posted this week is plausibly still being worked;
+// one open past a quarter is often a pipeline-filler or an abandoned listing.
+const (
+	postedFreshDays = 7
+	postedWarmDays  = 30
+	postedStaleDays = 90
+)
+
+// renderPostedCell shows how long a requisition has been open, colour-coded by
+// age: green within a week, yellow within a month, peach within a quarter, red
+// beyond. Rows whose notes carry no "posted <date>" render a subtle dash.
+func (m PipelineModel) renderPostedCell(app model.CareerApplication, width int) string {
+	if app.PostedOn == "" {
+		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
+	}
+	// Local calendar days against the dashboard's own clock, the way
+	// FormatTimeAgo counts them for the label in this same cell. time.Parse
+	// read the date as UTC midnight and compared it with the real time.Now(),
+	// so east of UTC a posting dated today was "in the future" until the UTC
+	// date caught up, and got the dash meant for bad data, while its label
+	// would have said "today".
+	posted, err := time.ParseInLocation("2006-01-02", app.PostedOn, time.Local)
+	if err != nil {
+		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
+	}
+	now := i18n.NowFunc()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	// A requisition cannot have gone live in the future. Such a date is bad data
+	// (a typo, or a provider field that isn't the posting date at all), and it
+	// would otherwise read as the freshest possible req: a negative age lands in
+	// the first case below and paints it green — the one colour that says "act
+	// on this now".
+	if posted.After(today) {
+		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
+	}
+	days := int(math.Round(today.Sub(posted).Hours() / 24))
+	color := m.theme.Red
+	switch {
+	case days <= postedFreshDays:
+		color = m.theme.Green
+	case days <= postedWarmDays:
+		color = m.theme.Yellow
+	case days <= postedStaleDays:
+		color = m.theme.Peach
+	}
+	return lipgloss.NewStyle().Foreground(color).Width(width).
+		Render(truncateRunes(formatTimeAgo(app.PostedOn), width-1))
 }
 
 // renderPayCell prefers the pay range parsed from notes and falls back to the
@@ -1593,7 +1860,7 @@ func (m PipelineModel) renderColumnHeader() string {
 		h.Render(i18n.Current.ColFit), // score cell is unpadded, always 3 runes wide
 	}
 	if cw.date != 0 {
-		segments = append(segments, cell(i18n.Current.ColApplied, cw.date))
+		segments = append(segments, cell(i18n.Current.ColDate, cw.date))
 	}
 	segments = append(segments, cell(i18n.Current.ColCompany, cw.company))
 	segments = append(segments, cell(i18n.Current.ColRole, cw.role))
@@ -1613,6 +1880,9 @@ func (m PipelineModel) renderColumnHeader() string {
 	if cw.last > 0 {
 		segments = append(segments, cell(i18n.Current.ColLast, cw.last))
 	}
+	if cw.posted > 0 {
+		segments = append(segments, cell(i18n.Current.ColPosted, cw.posted))
+	}
 
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
 	return padStyle.Render(" " + strings.Join(segments, " "))
@@ -1629,16 +1899,30 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	}
 	numStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true).Width(cw.num)
 
-	// Score with color
+	// Score with color. An unevaluated row carries no number: print the
+	// sentinel rather than %.1f of a zero value, which reads as a 0.0 fit.
 	scoreStyle := m.scoreStyle(app.Score)
-	score := scoreStyle.Render(fmt.Sprintf("%.1f", app.Score))
+	scoreText := fmt.Sprintf("%.1f", app.Score)
+	if !app.HasScore {
+		// Show the tracker's own sentinel (— / N/A / -). Fall back to an em
+		// dash when the cell is empty or too wide for the score column.
+		scoreStyle = lipgloss.NewStyle().Foreground(m.theme.Subtext)
+		scoreText = strings.TrimSpace(app.ScoreRaw)
+		if scoreText == "" || lipgloss.Width(scoreText) > 3 {
+			scoreText = "\u2014"
+		}
+	}
+	// Width(3) so the sentinel occupies the same column as "4.2" and the
+	// row keeps its measured width.
+	score := scoreStyle.Width(3).Render(scoreText)
 
 	// Company (truncate)
 	company := truncateRunes(app.Company, cw.company)
 	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(cw.company)
 
-	// Date (fixed width)
-	dateText := app.Date
+	// Date (fixed width): latest status change when the ledger has one, else
+	// the tracker's own (evaluation) date.
+	dateText := effectiveDate(app)
 	if dateText == "" {
 		dateText = "—"
 	}
@@ -1688,6 +1972,9 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 		}
 		segments = append(segments, lastStyle.Render(truncateRunes(lastText, cw.last)))
 	}
+	if cw.posted > 0 {
+		segments = append(segments, m.renderPostedCell(app, cw.posted))
+	}
 
 	line := " " + strings.Join(segments, " ")
 
@@ -1720,7 +2007,7 @@ func (m PipelineModel) renderPreview() string {
 	// and the only place narrow terminals see location/pay/last-contact.
 	var facts []string
 	if app.WorkMode != "" || app.Location != "" {
-		loc := app.WorkMode
+		loc := i18n.Current.WorkModeLabel(app.WorkMode)
 		if app.Location != "" {
 			if loc != "" {
 				loc += " · " + app.Location
@@ -1802,6 +2089,44 @@ func previewOutcome(app model.CareerApplication) string {
 	return outcome
 }
 
+// sanitizeFlash neutralizes control characters in the flash line.
+//
+// Every flash reaches the terminal through the single lipgloss.Render below,
+// and lipgloss wraps the string it is given without escaping it. Most of what
+// the flash line carries is not the program's own words: a tracker URL or a
+// manifest path read out of a file, or the last line a failed child process
+// printed. A control byte in any of those reaches the terminal as an
+// instruction rather than as text, which is how a cell that renders correctly
+// everywhere else can still move the cursor or repaint the help bar.
+//
+// The range is the one tracker-utils.mjs strips at the tracker write path
+// (CONTROL_CHARS, #3892): C0, DEL and C1. It differs deliberately in one
+// respect. cell() keeps \t, \r and \n because it has already folded them to a
+// space and dropping them there would glue words together; the help bar is a
+// single line, so they are folded to a space here instead of being kept.
+//
+// Stripping at the write path stops new bytes entering the tracker. It cannot
+// speak for a report header, a scan TSV, or a child process's stderr, none of
+// which pass through cell() -- and the flash renders all three.
+//
+// Text from those sources need not be valid UTF-8. strings.Map hands the
+// mapping function utf8.RuneError for a byte it cannot decode and writes
+// U+FFFD, so a raw 0x9b -- the byte an 8-bit terminal reads as CSI -- is
+// replaced rather than passed through. That is the property the guard needs;
+// it shows as a replacement character rather than disappearing, which is the
+// honest rendering of a byte nothing can decode.
+func sanitizeFlash(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			return ' '
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func (m PipelineModel) renderHelp() string {
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Subtext).
@@ -1818,7 +2143,7 @@ func (m PipelineModel) renderHelp() string {
 			Background(m.theme.Surface).
 			Width(m.width).
 			Padding(0, 1)
-		return flashStyle.Render(m.flash)
+		return flashStyle.Render(sanitizeFlash(m.flash))
 	}
 
 	if m.colPicker {
@@ -1863,6 +2188,7 @@ func (m PipelineModel) renderHelp() string {
 		keyStyle.Render("C") + descStyle.Render(i18n.Current.HelpColumns) +
 		keyStyle.Render("v") + descStyle.Render(i18n.Current.HelpView) +
 		keyStyle.Render("p") + descStyle.Render(i18n.Current.HelpProgress) +
+		keyStyle.Render("S") + descStyle.Render(i18n.Current.HelpStats) +
 		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) +
 		keyStyle.Render("m") + descStyle.Render(i18n.Current.HelpManifesto) +
 		keyStyle.Render("q") + descStyle.Render(i18n.Current.HelpQuit)
@@ -1888,7 +2214,7 @@ func (m PipelineModel) overlayStatusPicker(body string) string {
 	var picker []string
 	picker = append(picker, padStyle.Render(borderStyle.Render(i18n.Current.PickerChangeStatus)))
 
-	for i, pair := range getStatusPairs() {
+	for i, pair := range m.currentStatusPairs() {
 		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
 		if i == m.statusCursor {
 			style = style.Background(m.theme.Overlay).Bold(true)
@@ -2041,10 +2367,12 @@ func (m PipelineModel) scoreStyle(score float64) lipgloss.Style {
 
 func (m PipelineModel) statusColorMap() map[string]lipgloss.Color {
 	return map[string]lipgloss.Color{
+		"hired":       m.theme.Green, // terminal success — never uncoloured (default) like an unknown status
 		"interview":   m.theme.Green,
 		"offer":       m.theme.Green,
 		"applied":     m.theme.Sky,
 		"responded":   m.theme.Blue,
+		"assessment":  m.theme.Mauve,
 		"evaluated":   m.theme.Text,
 		"speculative": m.theme.Mauve,
 		"skip":        m.theme.Red,

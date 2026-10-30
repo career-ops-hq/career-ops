@@ -6,20 +6,18 @@ import { ChevronDown, Coins, Settings, Sparkles, X } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { cn } from "@/lib/cn";
+import { formatRunCostEstimate } from "@/lib/run-cost-estimate.mjs";
+import { EvaluationOptions } from "@/components/evaluation-options";
 
 export type ShortItem = { url: string; company: string; role: string };
-
-function fmtTokens(t: number): string {
-  if (t >= 1_000_000) return `${(t / 1_000_000).toFixed(1)}M`;
-  if (t >= 1_000) return `${Math.round(t / 1_000)}k`;
-  return `${t}`;
-}
 
 // The persistent shortlist tray — bottom-sheet on mobile (thumb-zone), floating card
 // on desktop. "Score shortlist" is the ONLY token spend in the whole inbox: cost is
 // shown BEFORE the click and gated behind an explicit confirm (never spend by surprise).
 export function ShortlistTray({
   items,
+  sections,
+  onSectionsChange,
   estimate,
   hasCli,
   onRemove,
@@ -27,6 +25,8 @@ export function ShortlistTray({
   onScore,
 }: {
   items: ShortItem[];
+  sections: string[];
+  onSectionsChange: (next: string[]) => void;
   estimate: { tokens?: number; usd?: number };
   hasCli: boolean;
   onRemove: (url: string) => void;
@@ -38,14 +38,17 @@ export function ShortlistTray({
   if (items.length === 0) return null;
 
   const n = items.length;
-  const costText = estimate.tokens
-    ? `≈ ${fmtTokens(estimate.tokens)} tokens${estimate.usd != null ? ` · ≈ $${estimate.usd.toFixed(2)}` : ""}`
-    : "uses your tokens";
+  const costText = formatRunCostEstimate(estimate, "No estimate for this selection yet");
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-30 sm:bottom-4">
       <div className="mx-auto max-w-3xl sm:px-6">
         <div className="border-t border-border bg-surface shadow-lg shadow-black/10 sm:rounded-2xl sm:border">
+          {confirming && (
+            <div className="max-h-[55vh] overflow-y-auto border-b border-border px-3 py-3 sm:px-4">
+              <EvaluationOptions sections={sections} onChange={onSectionsChange} />
+            </div>
+          )}
           {/* expandable saved-items list */}
           {open && (
             <ul className="max-h-64 divide-y divide-border overflow-y-auto px-3 py-1">
@@ -130,7 +133,7 @@ function ConfirmScore({
     return (
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted">No AI configured.</span>
-        <Link href="/config" className="inline-flex items-center gap-1 rounded-full border border-brand/40 bg-brand-soft px-3 py-1.5 font-medium text-brand max-sm:min-h-[44px]">
+        <Link href="/config" className="inline-flex items-center gap-1 rounded-full border border-brand/40 bg-brand-soft px-3 py-1.5 font-medium text-brand-text max-sm:min-h-[44px]">
           <Settings className="size-3.5" /> Set up
         </Link>
         <button type="button" onClick={onCancel} className="text-faint hover:text-foreground max-sm:min-h-[44px]">
@@ -142,7 +145,7 @@ function ConfirmScore({
   return (
     <div className="flex items-center gap-2">
       <span className="hidden items-center gap-1 text-[11px] text-muted sm:inline-flex">
-        <Coins className="size-3.5 text-brand" /> {costText}
+        <Coins className="size-3.5 text-brand-text" /> {costText}
       </span>
       <button
         type="button"

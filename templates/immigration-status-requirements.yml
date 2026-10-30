@@ -1,0 +1,172 @@
+# Immigration-Status Requirement Overreach Table (#2033)
+#
+# Immigration-status requirements that go beyond what the candidate's
+# jurisdiction allows employers to demand — "US citizens only," "must be a
+# Canadian citizen or permanent resident," "must be permanently authorized to
+# work." Keyed by the candidate's jurisdiction. Consumed prompt-level by:
+#   - modes/oferta.md — Block G "Immigration-Status Requirement Overreach"
+#     signal (JD text)
+#   - modes/apply.md  — Step 5d form-question warning (application forms)
+#
+# No script reads this file at runtime. Matching is agent-judged against each
+# entry's pattern guidance — never naive keyword/regex matching.
+#
+# THE LINE THIS TABLE ENCODES (the whole signal hinges on it):
+# asking about WORK AUTHORIZATION is lawful; demanding a PARTICULAR IMMIGRATION
+# STATUS is the problem. DOJ IER's technical-assistance letters bless "Are you
+# authorized to work in the United States?" and "Will you now or in the future
+# require sponsorship for employment visa status?" — those questions, and their
+# equivalents in other jurisdictions, must NEVER fire this signal. That is why
+# `lawful_screening_contrast` is MANDATORY on every row: an entry without it is
+# invalid, because without the contrast the signal cannot encode the
+# authorization-vs-status line and would misfire on lawful screening.
+#
+# CONTRIBUTION RULE (mandatory): no entry without a citable legal source AND an
+# as_of date. The bar is "lawyer-bulletin-grade source required" — a
+# statute/regulation/tribunal citation plus at least one law-firm client
+# bulletin or official government/regulator source. AND every row MUST carry a
+# non-empty `lawful_screening_contrast` (see above). "Heard it somewhere" does
+# not qualify; the candidate's trust in this signal depends on the seed data
+# being right.
+#
+# Schema per entry:
+#   jurisdiction:        key formatted {ISO 3166-1 alpha-2 country} or
+#                        {country}-{region code}, e.g. US (US federal),
+#                        CA-ON (Ontario, Canada)
+#   jurisdiction_name:   human-readable jurisdiction name
+#   prohibited_requirement_patterns:
+#                        list of status-demand formulations that fire the
+#                        signal (agent-judged, with per-pattern guidance)
+#   lawful_screening_contrast:
+#                        MANDATORY — what employers MAY lawfully ask
+#                        (authorization/sponsorship questions); these never
+#                        fire the signal
+#   exceptions:          statutory situations where a status requirement is
+#                        lawful — when the posting names one, the output names
+#                        it instead of flagging cleanly
+#   legal_basis:         the statute/regulation/case law (cited verbatim in
+#                        output)
+#   enforcement_notes:   evidence that regulators act on this surface
+#   sources:             official/regulator sources + law-firm bulletins
+#   as_of:               YYYY-MM-DD the entry was last verified (quoted string)
+
+entries:
+  - jurisdiction: US
+    jurisdiction_name: "United States (federal)"
+    prohibited_requirement_patterns:
+      - pattern: "US citizens only"
+        guidance: >-
+          Fires when the posting or form restricts eligibility to US citizens
+          (or citizens/nationals) with no statutory hook named. Also covers
+          "citizenship required" and "must hold US citizenship."
+      - pattern: "citizens or green-card holders only"
+        guidance: >-
+          Fires when eligibility is restricted to citizens plus lawful
+          permanent residents — this is still a status restriction, and it is
+          the exact pattern in the IER college-recruitment-platform settlements.
+      - pattern: "must be US citizen or permanent resident"
+        guidance: >-
+          Fires when a specific status (citizen and/or permanent resident) is
+          demanded absent a named law, regulation, executive order, or
+          government contract requiring it for the position.
+    lawful_screening_contrast: >-
+      DOJ IER's technical-assistance letters approve asking every applicant:
+      "Are you authorized to work in the United States?" and "Will you now or
+      in the future require sponsorship for employment visa status?" These
+      authorization/sponsorship questions are lawful screening and must never
+      fire this signal. An employer may also lawfully decline to sponsor.
+    exceptions: >-
+      Per 8 U.S.C. section 1324b(a)(2)(C), a citizenship requirement is lawful
+      when it is imposed by law, regulation, executive order, or a federal,
+      state, or local government contract for the specific position. When the
+      posting names such a hook (e.g. a government contract or a
+      security-clearance requirement that itself demands citizenship), the
+      output names the claimed hook instead of flagging cleanly. NOTE on
+      export controls: EAR/ITAR "US person" (15 CFR 772.1 / 22 CFR 120.15)
+      matches section 1324b(a)(3)'s protected-individual list — citizens AND
+      lawful permanent residents, refugees, and asylees — so "ITAR requires
+      citizens-only" is generally an employer error, not a valid hook for a
+      citizens-only restriction.
+    legal_basis: >-
+      8 U.S.C. section 1324b (INA anti-discrimination provision); 28 C.F.R.
+      Part 44; enforced by the DOJ Civil Rights Division's Immigrant and
+      Employee Rights Section (IER). Protects "protected individuals" (US
+      citizens/nationals, recent lawful permanent residents, refugees,
+      asylees) against citizenship-status discrimination in hiring,
+      recruitment, and referral for a fee — including the posting text
+      itself; applies to employers with 4 or more employees.
+    enforcement_notes: >-
+      Actively enforced against posting text: 19 IER settlements over
+      discriminatory job postings since May 2022, including a 16-employer
+      sweep over college-recruitment-platform ads restricted to
+      citizens/green-card holders ($832,944 in civil penalties); United
+      States v. Facebook (OCAHO 2021) on PERM-recruitment discrimination.
+    sources:
+      - "8 U.S.C. section 1324b statute text via govinfo.gov"
+      - "DOJ Immigrant and Employee Rights Section guidance documents and technical-assistance letters"
+      - "Baker McKenzie Employer Report on IER job-posting enforcement"
+    as_of: "2026-07-18"
+
+  - jurisdiction: CA-ON
+    jurisdiction_name: "Ontario, Canada"
+    prohibited_requirement_patterns:
+      - pattern: "must be a Canadian citizen"
+        guidance: >-
+          Fires when the posting or form requires Canadian citizenship with no
+          Code s.16 exception named.
+      - pattern: "citizen or permanent resident required"
+        guidance: >-
+          Fires when eligibility is restricted to citizens and/or permanent
+          residents — still a citizenship-ground restriction under s.5(1).
+      - pattern: "must be legally authorized to work in Canada permanently"
+        guidance: >-
+          The Haseeb proxy pattern. Fires when the posting or a screening
+          question demands PERMANENT work authorization — the permanence
+          requirement is what Haseeb v. Imperial Oil (HRTO) struck down; the
+          complainant was an international-student engineering graduate on a
+          post-graduation open work permit who was fully authorized to work,
+          just not permanently. The word "permanently" (or "on an ongoing/
+          indefinite basis" as status proxy) attached to an otherwise-lawful
+          authorization question is exactly what converts it into a status
+          demand.
+    lawful_screening_contrast: >-
+      "Are you legally authorized to work in Canada?" — for the duration of
+      the employment — is lawful and never fires this signal. Littler's case
+      commentary on Haseeb explicitly notes employers can and should still
+      require that candidates be authorized to work in Canada for the
+      duration of the employment; the OHRC's guidance is that employers
+      "should only be concerned with whether a person has legal status to
+      work in Canada."
+    exceptions: >-
+      Ontario Human Rights Code s.16 allows citizenship requirements in
+      exactly three situations: (1) a requirement imposed or authorized by
+      law; (2) a requirement adopted to foster participation in cultural,
+      educational, trade-union, or athletic activities by citizens or
+      permanent residents; (3) citizenship or lawful-residence preferences
+      for chief or senior executives. When the posting names one of these,
+      the output names the claimed s.16 category instead of flagging cleanly.
+    legal_basis: >-
+      Ontario Human Rights Code s.5(1) — citizenship is a protected ground in
+      employment; s.16 exceptions; Haseeb v. Imperial Oil (HRTO) struck down
+      a permanence requirement screened via the proxy question "are you
+      legally authorized to work in Canada permanently?"
+    enforcement_notes: >-
+      Haseeb v. Imperial Oil is the landmark HRTO decision on the permanence
+      proxy; OHRC guidance addresses job requirements and the citizenship
+      ground directly.
+    sources:
+      - "OHRC guidance on the citizenship ground and on job requirements (employers should only be concerned with whether a person has legal status to work in Canada)"
+      - "Emond Harnden case commentary on Haseeb v. Imperial Oil"
+      - "Littler case commentary on Haseeb v. Imperial Oil"
+    as_of: "2026-07-18"
+
+# Known candidate rows for contributors — NOT entries yet. Each needs its own
+# verified statute citation, as_of date, AND a lawful_screening_contrast
+# (mandatory — see the contribution rule) before being promoted to an entry:
+#   - UK: right-to-work checks under the Home Office code of practice —
+#     employers must check authorization without discriminating on
+#     nationality; a citizens-only demand vs. a right-to-work check is the
+#     same authorization-vs-status line.
+#   - EU: free-movement rules — nationality requirements against EU/EEA
+#     citizens in member-state postings (Regulation 492/2011), with
+#     public-service exceptions that vary by member state.

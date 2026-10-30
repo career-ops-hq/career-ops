@@ -1,0 +1,281 @@
+import test from 'node:test';
+import assert from 'node:assert';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { extractWithAI } from '../scan-hn.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
+
+test('Hacker News AI Extraction Logic', async (t) => {
+  const mockModel = {
+    generateContent: async (prompt) => {
+      if (prompt.includes('Stripe')) {
+        return { response: { text: () => 'company: Stripe\ntitle: Engineer\nlocation: Remote' } };
+      }
+      if (prompt.includes('MISSING_KEYS')) {
+        return { response: { text: () => 'company: null' } }; 
+      }
+      if (prompt.includes('MALFORMED')) {
+        return { response: { text: () => 'company: { [ malformed : yaml }' } };
+      }
+      return { response: { text: () => 'null' } };
+    }
+  };
+
+  await t.test('should extract valid data from a standard HN post', async () => {
+    const res = await extractWithAI('Stripe post', mockModel);
+    assert.strictEqual(res.company, 'Stripe');
+    assert.strictEqual(res.title, 'Engineer');
+  });
+
+  await t.test('should return null for malformed YAML output', async () => {
+    const res = await extractWithAI('MALFORMED data', mockModel);
+    assert.strictEqual(res, null);
+  });
+
+  await t.test('should return null for non-job related text', async () => {
+    const res = await extractWithAI('Random text', mockModel);
+    assert.strictEqual(res, null);
+  });
+
+  await t.test('should let a failed API call reach the caller instead of returning null', async () => {
+    // An invalid key, exhausted quota or retired model makes generateContent
+    // throw. Returning null for that is indistinguishable from "no match".
+    const failingModel = {
+      generateContent: async () => { throw new Error('[404 Not Found] models/gemini-1.5-flash is not found'); },
+    };
+    await assert.rejects(() => extractWithAI('Stripe post', failingModel), /404 Not Found/);
+  });
+
+  await t.test('should handle objects missing required keys gracefully', async () => {
+    const res = await extractWithAI('MISSING_KEYS', mockModel);
+    assert.strictEqual(res.company, '');
+    assert.strictEqual(res.title, '');
+    assert.strictEqual(res.location, 'Remote/Unknown');
+  });
+});
+
+// Offline fetch fixture for runs of the real scanner. HN is served from canned
+// responses, Gemini fails the way an invalid key does, and any other request is
+// recorded in `unexpected` and refused. With `serveHn: false` every request is
+// refused, for runs that must not reach the network at all.
+function writeFetchFixture(dir, { serveHn = true, children = null, geminiAnswers = false } = {}) {
+  const unexpected = join(dir, 'unexpected-requests');
+  const preload = join(dir, 'fetch-fixture.cjs');
+  writeFileSync(preload, `
+    const { appendFileSync } = require('node:fs');
+    const json = (body, status = 200) => new Response(JSON.stringify(body), {
+      status, headers: { 'content-type': 'application/json' },
+    });
+    const serveHn = ${serveHn};
+    globalThis.fetch = async function (input) {
+      const url = String(input?.url ?? input);
+      if (serveHn && url.includes('hn.algolia.com/api/v1/search_by_date')) {
+        return json({ hits: [{ objectID: '424242', title: 'Ask HN: Who is hiring? (September 2026)' }] });
+      }
+      if (serveHn && url.includes('hn.algolia.com/api/v1/items/424242')) {
+        return json({ children: ${JSON.stringify(children)} || [
+          { text: 'Stripe | Software Engineer | Remote | https://stripe.com/jobs/1' },
+          { text: 'Acme | Software Engineer | Berlin | https://acme.example/jobs/2' },
+        ] });
+      }
+      if (serveHn && url.includes('generativelanguage.googleapis.com')) {
+        if (${geminiAnswers}) {
+          // Answers like a working key: extract "Company | Role | Location" from
+          // the post's header line, whatever the post is. Each call is logged so
+          // a test can count how many posts were sent.
+          const body = JSON.parse(input?.body ?? arguments[1]?.body ?? '{}');
+          const text = body.contents?.[0]?.parts?.[0]?.text ?? '';
+          const header = (text.split('--- BEGIN UNTRUSTED DATA ---\\n')[1] || '').split('\\n')[0];
+          const [company = '', title = '', location = ''] = header.split('|').map(p => p.trim());
+          appendFileSync(${JSON.stringify(join(dir, 'gemini-calls'))}, company + '\\n');
+          return json({ candidates: [{ content: { role: 'model', parts: [{ text: 'company: ' + company + '\\ntitle: ' + title + '\\nlocation: ' + location }] }, finishReason: 'STOP', index: 0 }] });
+        }
+        return json({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }, 400);
+      }
+      appendFileSync(${JSON.stringify(unexpected)}, url + '\\n');
+      throw new Error('network forbidden in test: ' + url);
+    };
+  `);
+  return { preload, unexpected };
+}
+
+function runScanHn(dir, preload, args, envOverrides = {}) {
+  const env = { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', ...envOverrides };
+  delete env.CAREER_OPS_PORTALS;
+  delete env.GEMINI_MODEL;
+  return spawnSync(process.execPath, [
+    '--require', preload,
+    fileURLToPath(new URL('../scan-hn.mjs', import.meta.url)),
+    ...args,
+  ], { cwd: dir, encoding: 'utf8', timeout: 30000, env });
+}
+
+// The test above proves extractWithAI rethrows. This one runs the real scanner,
+// so a regression in the caller (the summary line or the exit code) fails here
+// too. Every Gemini call fails the way an invalid key does; HN is served from a
+// fixture, and any other request is refused.
+test('scan-hn reports AI errors and exits non-zero when every Gemini call fails', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-scanhn-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    const { preload, unexpected } = writeFetchFixture(dir);
+
+    const r = runScanHn(dir, preload, [], { GEMINI_API_KEY: 'invalid-test-key' });
+
+    assert.equal(r.error, undefined, `scan-hn failed to spawn: ${r.error?.message}`);
+    assert.equal(existsSync(unexpected), false, 'scan-hn made a request outside the fixture');
+    assert.match(r.stdout, /Postings fetched:\s+2/);
+    assert.match(r.stdout, /New offers:\s+0/);
+    assert.match(r.stdout, /AI errors:\s+2 of 2/, `summary line missing:\n${r.stdout}`);
+    assert.match(r.stderr, /2 of 2 Gemini extractions failed/);
+    assert.match(r.stderr, /API key not valid/);
+    assert.equal(r.status, 1, describeSpawn(r, `expected exit 1 when every Gemini call fails, got ${r.status}\n`));
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// --help used to run the live scan, and so did any flag this script never had
+// (#4598). Both must stop before the first fetch: nothing served, nothing
+// written.
+test('scan-hn --help prints usage and an unknown flag is refused, neither runs the scan', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-scanhn-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    const { preload, unexpected } = writeFetchFixture(dir, { serveHn: false });
+
+    const help = runScanHn(dir, preload, ['--help']);
+    assert.equal(help.error, undefined, `scan-hn failed to spawn: ${help.error?.message}`);
+    assert.equal(help.status, 0, describeSpawn(help, `expected --help to exit 0, got ${help.status}\n`));
+    assert.match(help.stdout, /Usage:\n\s+node scan-hn\.mjs/);
+    assert.match(help.stdout, /data\/pipeline\.md/, 'usage should say what the scan writes');
+
+    const bogus = runScanHn(dir, preload, ['--dry-run']);
+    assert.equal(bogus.status, 1, describeSpawn(bogus, `expected an unknown flag to exit 1, got ${bogus.status}\n`));
+    assert.match(bogus.stderr, /unrecognized flag\(s\): --dry-run/);
+
+    assert.equal(existsSync(unexpected), false, 'a flag-only run reached the network');
+    assert.equal(existsSync(join(dir, 'data', 'pipeline.md')), false, 'a flag-only run wrote data/pipeline.md');
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// A portals.yml that exists but does not parse used to be swallowed, and the
+// scan ran on the default "Software Engineer" instead of the user's
+// hn_hiring.keywords (#4921). The fixture thread only carries Software Engineer
+// postings, so the valid file is the control: its keywords are read and match
+// nothing. The broken one must stop before the first fetch, as scan.mjs does.
+test('scan-hn refuses a portals.yml that does not parse instead of scanning with the default keyword', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-scanhn-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    const portals = join(dir, 'portals.yml');
+    const keywords = 'hn_hiring:\n  keywords:\n    - Registered Nurse\n';
+
+    const served = writeFetchFixture(dir);
+    writeFileSync(portals, keywords);
+    const valid = runScanHn(dir, served.preload, [], { GEMINI_API_KEY: '' });
+    assert.equal(valid.error, undefined, `scan-hn failed to spawn: ${valid.error?.message}`);
+    assert.equal(valid.status, 0, describeSpawn(valid, `expected a valid portals.yml to exit 0, got ${valid.status}\n`));
+    assert.match(valid.stdout, /Postings fetched:\s+2/);
+    assert.match(valid.stdout, /New offers:\s+0/, 'hn_hiring.keywords should replace the default');
+
+    const refused = writeFetchFixture(dir, { serveHn: false });
+    writeFileSync(portals, `${keywords}title_filter:\n  positive: ["unclosed\n`);
+    const broken = runScanHn(dir, refused.preload, [], { GEMINI_API_KEY: '' });
+    assert.equal(broken.status, 1, describeSpawn(broken, `expected a parse error to exit 1, got ${broken.status}\n`));
+    assert.match(broken.stderr, /Error: failed to parse .*portals\.yml: /);
+    assert.doesNotMatch(broken.stdout, /Match:/);
+    assert.equal(existsSync(refused.unexpected), false, 'a run with an unparseable portals.yml reached the network');
+    assert.equal(existsSync(join(dir, 'data', 'pipeline.md')), false, 'a run with an unparseable portals.yml wrote data/pipeline.md');
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// The seen set holds each URL in the form normalizeUrlForDedup() gives it (path
+// lowercased, trailing slash and tracking parameters dropped), and the scanner
+// used to look a posting up by its raw URL. A posting written with a trailing
+// slash, a capital in its path or a utm parameter was therefore new again on
+// every run, and landed in pipeline.md and scan-history a second time.
+test('scan-hn does not add a posting again when its URL is not already in normalized form', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-scanhn-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    const { preload, unexpected } = writeFetchFixture(dir, { children: [
+      { text: 'Acme | Software Engineer | Remote | https://acme.example/Careers/Senior-Engineer/' },
+      { text: 'Beta | Software Engineer | Berlin | https://beta.example/jobs/42?utm_source=hn' },
+    ] });
+
+    const first = runScanHn(dir, preload, [], { GEMINI_API_KEY: '' });
+    assert.equal(first.status, 0, describeSpawn(first, `first run failed\n`));
+    assert.match(first.stdout, /New offers:\s+2/);
+
+    const second = runScanHn(dir, preload, [], { GEMINI_API_KEY: '' });
+    assert.equal(second.status, 0, describeSpawn(second, `second run failed\n`));
+    assert.match(second.stdout, /Postings fetched:\s+2/);
+    assert.match(second.stdout, /New offers:\s+0/, `the second run re-added postings it had already recorded:\n${second.stdout}`);
+
+    const pipeline = readFileSync(join(dir, 'data', 'pipeline.md'), 'utf8');
+    assert.equal((pipeline.match(/^- \[ \] /gm) || []).length, 2, `pipeline.md should list each posting once:\n${pipeline}`);
+    assert.equal(existsSync(unexpected), false, 'scan-hn made a request outside the fixture');
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// With GEMINI_API_KEY set, every post Gemini could extract used to be admitted:
+// hn_hiring.keywords appeared only in the prompt, and neither branch read the
+// blacklist, the title_filter negatives or location_filter (#5478). Gemini here
+// extracts whatever it is sent, so only the scanner's own gate can drop a post.
+test('scan-hn AI mode admits only keyword matches that pass the blacklist and filters', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-scanhn-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(join(dir, 'portals.yml'), [
+      'hn_hiring:',
+      '  keywords: [Software Engineer]',
+      'title_filter:',
+      '  negative: [word:Intern]',
+      'location_filter:',
+      '  allow: [Remote, Berlin]',
+      '',
+    ].join('\n'));
+    writeFileSync(join(dir, 'data', 'blacklist.md'), '| Company | Since | Scope | Reason |\n|---|---|---|---|\n| Initech | 2026-01-01 | | |\n');
+    const { preload, unexpected } = writeFetchFixture(dir, { geminiAnswers: true, children: [
+      { text: 'Stripe | Software Engineer | Remote | https://stripe.example/jobs/1' },
+      { text: 'Bakery | Pastry Chef | Remote | https://bakery.example/jobs/2' },
+      { text: 'Initech | Software Engineer | Remote | https://initech.example/jobs/3' },
+      { text: 'Acme | Software Engineer | Tokyo | https://acme.example/jobs/4' },
+      { text: 'Globex | Software Engineer Intern | Berlin | https://globex.example/jobs/5' },
+    ] });
+
+    const r = runScanHn(dir, preload, [], { GEMINI_API_KEY: 'test-key' });
+    assert.equal(r.status, 0, describeSpawn(r, `scan failed\n`));
+    assert.equal(existsSync(unexpected), false, 'scan-hn made a request outside the fixture');
+    assert.match(r.stdout, /New offers:\s+1\b/, r.stdout);
+    assert.match(r.stdout, /Skipped:\s+1 blacklisted, 2 title filter, 1 location filter/, r.stdout);
+
+    const pipeline = readFileSync(join(dir, 'data', 'pipeline.md'), 'utf8');
+    assert.deepEqual(pipeline.match(/^- \[ \] \S+/gm), ['- [ ] https://stripe.example/jobs/1']);
+    // The keywords are checked before Gemini is called, so the pastry chef and
+    // the intern are never sent; the blacklist and location need the extraction.
+    const calls = readFileSync(join(dir, 'gemini-calls'), 'utf8').trim().split('\n');
+    assert.deepEqual(calls.sort(), ['Acme', 'Initech', 'Stripe']);
+
+    // A second run counts the queued post as already seen, as the no-key
+    // branch does, and does not send it to Gemini again.
+    const again = runScanHn(dir, preload, [], { GEMINI_API_KEY: 'test-key' });
+    assert.equal(again.status, 0, describeSpawn(again, `second scan failed\n`));
+    assert.match(again.stdout, /New offers:\s+0\b/, again.stdout);
+    assert.match(again.stdout, /Skipped:\s+1 already seen, 1 blacklisted, 2 title filter, 1 location filter/, again.stdout);
+    const callsAgain = readFileSync(join(dir, 'gemini-calls'), 'utf8').trim().split('\n');
+    assert.equal(callsAgain.filter(c => c === 'Stripe').length, 1, 'the seen post was sent to Gemini again');
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});

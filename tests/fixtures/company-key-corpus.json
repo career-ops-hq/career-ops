@@ -1,0 +1,27 @@
+{
+  "_why": "Shared corpus for the company/role matching key (#2666). The core's normalizeTextKey (tracker-parse.mjs) is the source of truth; web/src/lib/core/normalize-text-key.mjs is a declared copy that exists because the browser cannot reach the user's checkout. This file is the single list both sides are checked against — two lists would drift, which is the whole failure this corpus guards.",
+  "_separator": " ",
+  "_note": "Expected values are NOT hand-written: the assertion derives them from the core and compares the mirror against that. The strings below are the cases; the core decides the answers.",
+  "cases": [
+    { "input": "Nestlé", "why": "accented Latin — the plain case the ASCII-only key destroyed (nestl)" },
+    { "input": "Nestlé", "why": "same name in NFD (macOS stores filenames decomposed) — must key identically to the NFC form" },
+    { "input": "Zürich Re", "why": "umlaut plus a second word" },
+    { "input": "Škoda", "why": "the collision that started this: the old key made it 'koda', matching a different company called Koda and hiding a real opening" },
+    { "input": "Ação", "why": "Portuguese cedilla and tilde" },
+    { "input": "日本電産", "why": "CJK — the old key emptied it, so it never matched and duplicated forever" },
+    { "input": "Koda", "why": "the counterpart of the collision: must stay DISTINCT from Škoda" },
+    { "input": "Żubr", "why": "Polish z with a dot ABOVE, precomposed. The dot is a letter the user typed, so this must stay DISTINCT from 'Zubr' — and it is the case that was missing when the Turkish fix landed: an NFD-then-strip implementation decomposed it and collapsed the two. Structural protection: NFKC keeps ż as ONE code point the dot-strip cannot reach, unlike i + U+0307, which has no precomposed form." },
+    { "input": "Zubr", "why": "the counterpart: must stay DISTINCT from Żubr" },
+    { "input": "Ėmė", "why": "Lithuanian e with a dot above, same class as Żubr and same reason: two dotted letters the user typed, not a casing artifact. Must stay DISTINCT from 'Eme'." },
+    { "input": "Eme", "why": "the counterpart: must stay DISTINCT from Ėmė" },
+    { "input": "Ġenerali", "why": "Maltese g with a dot above. Must stay DISTINCT from 'Generali', which is a different (and real) company — the collision this class would cause is not hypothetical." },
+    { "input": "Generali", "why": "the counterpart: must stay DISTINCT from Ġenerali" },
+    { "input": "ＡＣＭＥ", "why": "fullwidth Latin, routine in Japanese-sourced data — NFKC folds it to acme" },
+    { "input": "ﬁnance", "why": "fi ligature — NFKC decomposes it" },
+    { "input": "İstanbul Tekstil", "why": "Turkish dotted capital I. toLowerCase yields i + U+0307, and that combining mark used to survive into the key, so this did NOT match 'Istanbul Tekstil' even though the two read identically on screen. Decision reversed 12-ago-2026 after the same artifact turned up in a third surface and, worse, inside verify-pipeline's duplicate check, where it produced a false green. The targeted fix now strips U+0307 after lowercasing, so İstanbul/Istanbul match. It is scoped to the artifact CASING CREATES: Škoda != Skoda, Nestlé != Nestle, Zürich != Zurich and İŞ BANKASI != Is Bankasi all still hold, because those marks are letters the user typed. This key is a frozen contract surface the web derives from, so the mirror in web/src/lib/core/normalize-text-key.mjs changed in the same commit and test-all §55.7 compares them." },
+    { "input": "Acme Corp", "why": "plain ASCII control — must be unaffected by any of the above" },
+    { "input": null, "why": "nullish must key to empty string, not the literal 'null' (which made null and undefined match each other)" },
+    { "input": "", "why": "empty stays empty" },
+    { "input": "  Acme  ,  Inc.  ", "why": "runs of separators and surrounding whitespace collapse and trim" }
+  ]
+}

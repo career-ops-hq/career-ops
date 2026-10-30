@@ -21,11 +21,17 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import { basename, resolve, dirname, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { flagValue } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 const ALLOWED_HOSTS = new Set([
   'boards.greenhouse.io',
+  'job-boards.greenhouse.io',
+  'job-boards.eu.greenhouse.io',
   'greenhouse.io',
   'jobs.ashbyhq.com',
   'ashbyhq.com',
@@ -37,7 +43,7 @@ const ALLOWED_HOSTS = new Set([
 // ── CLI args ─────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
-const get = (flag) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : null; };
+const get = (flag) => flagValue(args, flag);
 
 const applyUrl  = get('--url');
 const pdfPath   = get('--pdf');
@@ -50,8 +56,8 @@ if (!applyUrl || !pdfPath) {
 
 // ── PDF validation ────────────────────────────────────────────────────
 
-const outputDir = resolve(ROOT, 'output');
-const absPdf    = resolve(ROOT, pdfPath);
+const outputDir = resolve(DATA_ROOT, 'output');
+const absPdf    = resolve(DATA_ROOT, pdfPath);
 
 const relPdf = relative(outputDir, absPdf);
 if (relPdf === '' || relPdf.startsWith('..') || isAbsolute(relPdf)) {
@@ -98,7 +104,7 @@ const SAFE_SLUG = /^[a-zA-Z0-9._-]+$/;
  */
 function detectAts(url) {
   const path = url.pathname;
-  const GH  = new Set(['boards.greenhouse.io', 'greenhouse.io']);
+  const GH  = new Set(['boards.greenhouse.io', 'job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io', 'greenhouse.io']);
   const ASH = new Set(['jobs.ashbyhq.com', 'ashbyhq.com']);
   const LEV = new Set(['jobs.lever.co', 'jobs.eu.lever.co', 'lever.co']);
 
@@ -128,13 +134,24 @@ function detectAts(url) {
 // ── Profile reader ────────────────────────────────────────────────────
 
 function readProfile() {
-  const profilePath = resolve(ROOT, 'config/profile.yml');
+  const profilePath = getProfilePath();
   if (!existsSync(profilePath)) return {};
-  const raw = readFileSync(profilePath, 'utf-8');
-
-  const pick = (key) => {
-    const m = raw.match(new RegExp(`^\\s*${key}:\\s*["']?([^"'\\n]+?)["']?\\s*$`, 'm'));
-    return m ? m[1].trim() : '';
+  let profile;
+  try {
+    profile = loadYaml(readFileSync(profilePath, 'utf-8')) ?? {};
+    if (typeof profile !== 'object' || Array.isArray(profile)) throw new Error('expected a mapping');
+  } catch (err) {
+    console.error(`Error: invalid profile YAML at ${profilePath}: ${err.message}`);
+    process.exit(1);
+  }
+  const pick = key => {
+    const value = profile[key];
+    if (value == null) return '';
+    if (typeof value === 'object') {
+      console.error(`Error: profile field "${key}" in ${profilePath} must be a scalar value`);
+      process.exit(1);
+    }
+    return String(value).trim();
   };
 
   const fullName = pick('full_name');
@@ -154,7 +171,7 @@ function readProfile() {
 
 function readCover() {
   if (!coverPath) return null;
-  const abs = resolve(ROOT, coverPath);
+  const abs = resolve(DATA_ROOT, coverPath);
   if (!existsSync(abs)) {
     console.error(`Warning: cover letter not found at ${coverPath} — skipping`);
     return null;

@@ -4,10 +4,26 @@
  * tracker.mjs — SQLite derived index for the applications tracker (RFC #918, phase 1).
  *
  * data/applications.md stays the source of truth. The SQLite DB is a derived
- * index, built and rebuilt from the markdown — safe to delete at any time, it
- * regenerates on the next sync. Tools and agents READ through the index for
- * schema-validated, model-independent results; all writes keep going to the
- * markdown exactly as today (merge-tracker.mjs, hand edits).
+ * index, built and rebuilt from the markdown and from status-log.tsv. Tools and
+ * agents READ through the index for schema-validated, model-independent
+ * results; all writes keep going to the markdown exactly as today
+ * (merge-tracker.mjs, set-status.mjs, hand edits).
+ *
+ * Status history (`status_events`, read by `history`) and the transition
+ * ledger (status-log.tsv, the sibling of the tracker file that set-status.mjs
+ * appends to) are one record, not two (#5555; ADR #1754 rule 4). Every sync
+ * rebuilds a row's events from the ledger, folded through funnel-velocity.mjs's
+ * foldObservations() so `correction` and retraction lines apply. The ledger is
+ * authoritative; the table is derived from it, with one exception: a status
+ * the ledger does not explain — one changed by hand in applications.md, which
+ * writes no ledger row — is recorded as an event the sync observed, dated with
+ * the day of that sync. Nothing else holds such an event, so it is the one
+ * thing the index adds to the ledger.
+ *
+ * Safe to delete at any time: the next sync rebuilds every row and every
+ * ledger-derived event exactly. The only thing lost is the status changes no
+ * ledger row explains (the hand edits above). A row with no ledger rows then
+ * starts its history again from its current status, dated with its Date column.
  *
  * Why: at hundreds of rows, a markdown table degrades structurally — encoding
  * corruption propagates, columns drift, a `|` inside a cell shifts every
@@ -19,48 +35,137 @@
  * Phase 2 of #918 (DB becomes source of truth, markdown becomes a rendered
  * view) is a separate, explicit per-user opt-in — not implemented here.
  *
- * Zero new dependencies — uses node:sqlite (built into Node >= 22.5).
+ * Zero new dependencies — uses node:sqlite (built into Node; unflagged from 22.13).
  *
  * Usage:
  *   node tracker.mjs sync [--check]             # (re)build applications.db from applications.md
  *                                               # --check: diagnose only, no write; exit 1 if issues found
- *   node tracker.mjs query [--status Applied] [--company acme] [--role designer]
- *                          [--since 2026-01-01] [--id N] [--limit 20] [--json]
- *   node tracker.mjs history --id N             # status transition log observed across syncs
- *   node tracker.mjs export [--out FILE]        # inverse: applications.db → canonical markdown (stdout by default)
+ *   node tracker.mjs query [--status Applied] [--company acme] [--role designer] [--csv]
+ *                          [--since 2026-01-01] [--min-score 4] [--id N] [--limit 20] [--json]
+ *   node tracker.mjs history --id N             # status transitions: the ledger's, plus changes only a sync saw
+ *   node tracker.mjs history N                  # same read; one bare tracker number
+ *   node tracker.mjs export [--out FILE] [--force]  # inverse: applications.db → markdown (stdout by default)
+ *                                               # --force: write even when columns would be dropped
  *   node tracker.mjs delete --num N [--dry-run] # remove one application row from applications.md + reindex
  *
- * query/history auto-resync when applications.md changed since the last sync,
- * so the index can never serve stale reads.
+ * query/history auto-resync when applications.md or status-log.tsv changed
+ * since the last sync, so the index can never serve stale reads.
  */
 
 import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, resolve, join } from 'path';
-import { pathToFileURL } from 'url';
-import yaml from 'js-yaml';
-import { resolveColumns } from './tracker-parse.mjs';
+import { dirname, resolve, join, basename } from 'path';
+import { pathToFileURL, fileURLToPath } from 'url';
+import { format } from 'util';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
 import {
-  canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
+  resolveColumns, detectColumns, isHeaderRow, isSeparatorRow, LEGACY_COLMAP, firstLinkTarget,
+} from './tracker-parse.mjs';
+import {
+  canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic, loadCanonicalStates,
 } from './tracker-utils.mjs';
+import { parseStatusLog, foldObservations } from './funnel-velocity.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 
-const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
-const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
-  || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
-
-// SQLite must never open the source of truth itself (an explicit
-// CAREER_OPS_TRACKER_DB could point both names at the same file).
-if (resolve(MD_PATH) === resolve(DB_PATH)) {
-  console.error(`Error: DB path must differ from the markdown path (${MD_PATH}).`);
-  process.exit(1);
+/**
+ * Where the derived SQLite index lives for a given tracker.
+ *
+ * Resolved per call, never at module scope. A module-scope path is the right
+ * shape for a CLI — one process, one invocation, env fixed before node starts —
+ * and the wrong one the moment the module is IMPORTED: the first importer in a
+ * process froze the path for every later one, so a subsequent
+ * `process.env.CAREER_OPS_TRACKER_DB = ...` was silently ignored (#3506). The
+ * tracker path went the same way for the same reason (#4758): runTracker() now
+ * takes both from its caller, and only the CLI branch reads the environment.
+ *
+ * @param {string} mdPath - The markdown tracker (the source of truth).
+ * @param {string} [override] - Explicit index path (CAREER_OPS_TRACKER_DB on the CLI).
+ * @returns {string} Absolute or relative path to the derived index.
+ */
+function resolveDbPath(mdPath, override) {
+  return override || (mdPath.endsWith('.md') ? mdPath.slice(0, -3) + '.db' : mdPath + '.db');
 }
-const STATES_PATH = 'templates/states.yml';
+
+/**
+ * Where the transition ledger lives for a given tracker: the sibling of the
+ * tracker file, the same rule set-status.mjs writes by and funnel-velocity.mjs,
+ * stats.mjs and followup-cadence.mjs read by. A CAREER_OPS_TRACKER redirect
+ * therefore moves the ledger with the tracker.
+ *
+ * @param {string} mdPath - The markdown tracker.
+ * @returns {string} Path to status-log.tsv.
+ */
+function resolveLedgerPath(mdPath) {
+  return join(dirname(mdPath), 'status-log.tsv');
+}
+
+/**
+ * The index path an importer gets from openDb() with no explicit path: the
+ * documented env override, else the db beside the resolved tracker. Read at
+ * call time, so an override set after import still holds (#3506).
+ */
+function defaultDbPath() {
+  return resolveDbPath(resolveTrackerPath(getCareerOpsRoot()), process.env.CAREER_OPS_TRACKER_DB);
+}
+
+/**
+ * How a command stops with a non-zero status. Commands used to call
+ * process.exit(), which an importer cannot survive and which skips every
+ * `finally` (a held tracker lock included); runTracker() turns this into its
+ * return value instead.
+ */
+class TrackerExit extends Error {
+  constructor(code) {
+    super(`tracker.mjs exited with ${code}`);
+    this.exitCode = code;
+  }
+}
+
+// templates/states.yml ships with the code, so it is resolved from this module's
+// own directory. It used to be a bare relative path, i.e. resolved against
+// process.cwd(), which made every tracker.mjs command fail from anywhere but the
+// repo root — including the shape the data-root mechanism invites, where you cd
+// to your data directory and run the tool out of the checkout (#3508). Third
+// variant of #3500: that one looked for this file under the data root, this one
+// looked for it under whatever directory the shell happened to be in.
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+const STATES_PATH = join(CODEBASE_ROOT, 'templates/states.yml');
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
 const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
 
+// The nine fields the index stores as real columns, keyed by the field name
+// tracker-parse.mjs's column map uses. Everything else a header declares
+// (Location, Via, URL, a user's own column) is carried through the round-trip
+// by POSITION in `applications.extras` instead of being widened into the
+// schema — see the export section (#3703).
+const SCHEMA_FIELDS = {
+  num: 'id', date: 'date', company: 'company', role: 'role', score: 'score',
+  status: 'status', pdf: 'pdf', report: 'report', notes: 'notes',
+};
+
+// Bumped whenever the derived index gains data an older sync did not record.
+// ensureFresh() rebuilds on a mismatch, so a db written before `extras` and
+// the stored header existed cannot serve an export that would silently drop
+// the columns it never captured. 3: status_events are rebuilt from the
+// ledger and carry a `source` (#5555).
+const SCHEMA_VERSION = '3';
+
+// Where a status_events row came from. Only 'ledger' rows are derived; the
+// other two exist because a sync saw them and nothing else recorded them.
+//   ledger  — from status-log.tsv; rebuilt on every sync
+//   tracker — the status the first sync saw on a row the ledger has nothing
+//             for, dated with the row's Date column
+//   sync    — a status change no ledger row explains (a hand edit in
+//             applications.md), dated with the day of the sync that saw it
+const EVENT_SOURCES = { ledger: 'ledger', tracker: 'tracker', sync: 'sync' };
+
 // ── node:sqlite loading ─────────────────────────────────────────────
 
-async function loadSqlite() {
+async function loadSqlite(ctx) {
   // node:sqlite is stable in behavior but still flagged experimental in some
   // Node lines — silence only that one warning, leave everything else alone.
   const origEmit = process.emitWarning;
@@ -73,56 +178,95 @@ async function loadSqlite() {
     const { DatabaseSync } = await import('node:sqlite');
     return DatabaseSync;
   } catch {
-    console.error('Error: node:sqlite is not available. tracker.mjs needs Node >= 22.5 (you are on ' + process.version + ').');
-    console.error('The markdown tracker keeps working without it — the index is optional.');
-    process.exit(1);
+    ctx.error('Error: node:sqlite is not available. tracker.mjs needs Node >= 22.13 (you are on ' + process.version + ').');
+    ctx.error('The markdown tracker keeps working without it — the index is optional.');
+    throw new TrackerExit(1);
   } finally {
     process.emitWarning = origEmit; // the warning fires at import time — safe to restore here
   }
 }
 
-function openDb(DatabaseSync) {
-  mkdirSync(dirname(DB_PATH) || '.', { recursive: true });
-  const db = new DatabaseSync(DB_PATH);
-  db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS applications (
-      id      INTEGER PRIMARY KEY,
-      pos     INTEGER NOT NULL,
-      date    TEXT NOT NULL,
-      company TEXT NOT NULL,
-      role    TEXT NOT NULL,
-      score   TEXT NOT NULL DEFAULT '—',
-      status  TEXT NOT NULL,
-      pdf     TEXT NOT NULL DEFAULT '❌',
-      report  TEXT NOT NULL DEFAULT '—',
-      notes   TEXT NOT NULL DEFAULT ''
-    );
-    CREATE TABLE IF NOT EXISTS status_events (
-      id     INTEGER PRIMARY KEY AUTOINCREMENT,
-      app_id INTEGER NOT NULL REFERENCES applications(id),
-      status TEXT NOT NULL,
-      date   TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS meta (
-      key   TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(status);
-    CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
-    CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
-  `);
+export function openDb(DatabaseSync, path = defaultDbPath()) {
+  mkdirSync(dirname(path) || '.', { recursive: true });
+  const db = new DatabaseSync(path);
+  // A schema step can throw against a db some other version or tool left
+  // behind (an `applications` table without `status` fails the index below).
+  // The caller never receives the handle then, so close it here: in-process,
+  // an open handle outlives the failure, and on Windows it also keeps the
+  // file from being deleted.
+  try {
+    // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
+    // contention. The index is read by concurrent callers — a CLI query, a
+    // `set-status` write and the Go TUI dashboard can all hit the same db at
+    // once — and the default busy_timeout of 0 makes any overlap fail instantly.
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS applications (
+        id      INTEGER PRIMARY KEY,
+        pos     INTEGER NOT NULL,
+        date    TEXT NOT NULL,
+        company TEXT NOT NULL,
+        role    TEXT NOT NULL,
+        score   TEXT NOT NULL DEFAULT '—',
+        status  TEXT NOT NULL,
+        pdf     TEXT NOT NULL DEFAULT '❌',
+        report  TEXT NOT NULL DEFAULT '—',
+        notes   TEXT NOT NULL DEFAULT '',
+        -- Cells of columns the schema has no field for, keyed by their index in
+        -- the source row's split by pipe. JSON object, '{}' when the layout is
+        -- the canonical nine columns.
+        extras  TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE TABLE IF NOT EXISTS status_events (
+        id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL REFERENCES applications(id),
+        status TEXT NOT NULL,
+        date   TEXT NOT NULL,
+        -- ledger | tracker | sync, see EVENT_SOURCES.
+        source TEXT NOT NULL DEFAULT 'sync'
+      );
+      CREATE TABLE IF NOT EXISTS meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(status);
+      CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
+      CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
+    `);
+    // CREATE TABLE IF NOT EXISTS leaves a db built by an older version alone, so
+    // a column added after the fact has to be migrated in explicitly. Cheap and
+    // idempotent; the rows are refilled by the next sync either way.
+    const columns = db.prepare('PRAGMA table_info(applications)').all().map(c => c.name);
+    if (!columns.includes('extras')) {
+      db.exec("ALTER TABLE applications ADD COLUMN extras TEXT NOT NULL DEFAULT '{}'");
+    }
+    // Before #5555 every event was an observation: the first one per row the
+    // status the first sync saw, each later one a change a sync saw. Labelled
+    // that way, the next sync replaces the ones the ledger explains and keeps
+    // the rest, which are the only record of a hand edit.
+    const eventColumns = db.prepare('PRAGMA table_info(status_events)').all().map(c => c.name);
+    if (!eventColumns.includes('source')) {
+      db.exec("ALTER TABLE status_events ADD COLUMN source TEXT NOT NULL DEFAULT 'sync'");
+      db.exec("UPDATE status_events SET source = 'tracker' WHERE id IN (SELECT MIN(id) FROM status_events GROUP BY app_id)");
+    }
+  } catch (err) {
+    db.close();
+    throw err;
+  }
   return db;
 }
 
 // ── Canonical states (templates/states.yml is the source of truth) ──
 
-function loadStates() {
+function loadStates(ctx) {
   if (!existsSync(STATES_PATH)) {
-    console.error(`Error: ${STATES_PATH} not found — cannot validate statuses. Run from the career-ops root.`);
-    process.exit(1);
+    // No longer "run from the career-ops root" advice: the path is anchored to
+    // the module, so a miss here is a broken install, not a wrong cwd.
+    ctx.error(`Error: ${STATES_PATH} not found — cannot validate statuses (broken install: templates/states.yml ships with career-ops).`);
+    throw new TrackerExit(1);
   }
-  const doc = yaml.load(readFileSync(STATES_PATH, 'utf-8'));
+  const doc = loadYaml(readFileSync(STATES_PATH, 'utf-8'));
   const byKey = new Map(); // lowercased label/alias → canonical label
   const labels = [];
   for (const s of doc?.states || []) {
@@ -132,7 +276,8 @@ function loadStates() {
     if (s.id) byKey.set(String(s.id).toLowerCase(), s.label);
     for (const alias of s.aliases || []) byKey.set(String(alias).toLowerCase(), s.label);
   }
-  return { byKey, labels };
+  // The shape parseStatusLog() resolves ledger states against.
+  return { byKey, labels, canonical: loadCanonicalStates(STATES_PATH) };
 }
 
 // Strip markdown bold, trailing dates, and surrounding noise, then resolve
@@ -150,6 +295,13 @@ function normalizeStatus(raw, states) {
 const SCORE_RE = /^\*{0,2}(\d+(?:\.\d+)?\/5)\*{0,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+function parseApplicationId(raw) {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const id = Number(text);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 // Mojibake left by a UTF-8 → GBK → UTF-8 round trip: an em-dash cell becomes
 // "鈥?" / "鈥�" variants. Only short placeholder cells are repaired — free-text
 // notes are preserved as-is rather than risk corrupting real content.
@@ -160,30 +312,184 @@ function repairPlaceholder(cell) {
 
 // ── Markdown parsing ────────────────────────────────────────────────
 
+/**
+ * Locate the tracker's header and separator lines, and the labels they declare.
+ *
+ * Recorded so `export` can rebuild the table it READ rather than the table it
+ * assumes. Before #3703 the read side mapped columns by name and the write side
+ * emitted nine fixed ones, so a Location/Via/URL column survived every query and
+ * vanished on export — silently, over the user's own tracker with `--out`.
+ *
+ * TWO detection passes, and the second one matters. `isHeaderRow` only fires
+ * when the alias table resolves the FULL schema, so a header career-ops cannot
+ * name — a Spanish `| # | Fecha | Empresa | Puesto | Puntuación | Estado | … |`,
+ * where `puntuación` and `estado` are absent from tracker-aliases.json — records
+ * no layout at all and exports as the English default (PR #3794 review). Falling
+ * back to the markdown SHAPE (the line above the first separator row) records
+ * the header verbatim whether or not its labels can be resolved; field placement
+ * still comes from `detectColumns`/LEGACY_COLMAP, exactly as the read side does,
+ * so an unresolvable header round-trips as text without ever being trusted as a
+ * column map.
+ *
+ * @param {string[]} lines - All lines of the tracker markdown, pre-trimmed.
+ * @returns {{header: string, separator: string|null, labels: string[],
+ *   headerIndex: number, separatorIndex: number|null}|null}
+ *   null when the file holds no table at all.
+ */
+function detectLayout(lines) {
+  const at = (i) => {
+    const separatorIndex = isSeparatorRow(lines[i + 1] ?? '') ? i + 1 : null;
+    return {
+      header: lines[i],
+      separator: separatorIndex === null ? null : lines[separatorIndex],
+      labels: headerLabels(lines[i]),
+      headerIndex: i,
+      separatorIndex,
+    };
+  };
+  for (let i = 0; i < lines.length; i++) if (isHeaderRow(lines[i])) return at(i);
+  for (let i = 1; i < lines.length; i++) {
+    if (isSeparatorRow(lines[i]) && lines[i - 1].startsWith('|')) return at(i - 1);
+  }
+  return null;
+}
+
+/**
+ * Column labels of a table row, in `split('|')` order minus the padding cells.
+ * Index 0 of the returned array is column index 1, matching the column maps.
+ *
+ * @param {string} row - A trimmed markdown table row.
+ * @returns {string[]}
+ */
+function headerLabels(row) {
+  const parts = row.split('|').map(c => c.trim());
+  const cells = parts.slice(1);
+  if (cells.length && cells[cells.length - 1] === '' && row.endsWith('|')) cells.pop();
+  return cells;
+}
+
 function parseMarkdownRows(text, diag) {
-  const lines = text.split('\n');
+  // Line endings are part of the file, not of the table: splitting on '\n' and
+  // joining the export back with '\n' silently rewrote a CRLF tracker to LF
+  // (PR #3794 review). Remember the dominant ending and restore it on export.
+  const eol = /\r\n/.test(text) ? '\r\n' : '\n';
+  // TWO views of the same file, and the split is deliberate.
+  //
+  // `lines` is trimmed and drives DETECTION and parsing: resolveColumns needs a
+  // line that starts with '|' and detectLayout used to trim on its own, so an
+  // indented table gave the legacy map on READ and the real map on WRITE —
+  // cells landed a column off (Berlin in Role, Applied in PDF) on a layout the
+  // reader had never accepted in the first place.
+  //
+  // `raw` keeps the file's own whitespace and drives what is REPLAYED. The
+  // prologue and epilogue are prose the export copies rather than renders, so
+  // trimming them dropped a user's indentation and trailing spaces — a quiet
+  // edit, since nothing in the loss list could see it (PR #3794 review).
+  const raw = text.split('\n').map(l => l.replace(/\r$/, ''));
+  const lines = raw.map(l => l.trim());
   // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
   // (e.g. an inserted Location column) can't shift Score into Status. Falls back
   // to the legacy fixed 9-column layout when no header row is found.
   const colmap = resolveColumns(lines);
-  // Expected `split('|')` width: highest mapped index + the trailing empty cell.
-  const width = Math.max(...Object.values(colmap)) + 2;
+  const layout = detectLayout(lines);
+  // Expected `split('|')` width: leading empty cell + one per column + the
+  // trailing empty cell. Taken from the HEADER when there is one, not from the
+  // highest mapped index: a header whose last column is one no field claims
+  // (a user's own `| … | Notes | Priority |`) makes every row look one cell too
+  // wide, and the stray-pipe fold below then swallows that column into notes.
+  const width = layout ? layout.labels.length + 2 : Math.max(...Object.values(colmap)) + 2;
+  // Column indices the nine schema fields occupy; everything else in a row is
+  // carried through the round-trip positionally (see SCHEMA_FIELDS).
+  const schemaIndices = new Set(Object.keys(SCHEMA_FIELDS).map(k => colmap[k]).filter(i => i != null));
   const rows = [];
-  for (const line of lines) {
-    const t = line.trim();
+  // Every line index the rebuilt table accounts for: the header, the separator,
+  // and each row that became an indexed application. What is left INSIDE the
+  // table's span is content export cannot place (see collectStructure).
+  const consumed = new Set();
+  if (layout) {
+    consumed.add(layout.headerIndex);
+    if (layout.separatorIndex !== null) consumed.add(layout.separatorIndex);
+  }
+  // Where a SECOND table begins. Markdown cannot start one without a fresh
+  // separator row, so that (or a second header row) is the precise signal —
+  // blank lines and prose between rows do not change the columns and must not
+  // trip it. Rows below that point were indexed against the FIRST table's
+  // header, so a forced export re-emitted an archived row under the active
+  // table's columns, inventing an empty URL cell for it (PR #3794 review).
+  // They stay in the index; they are reported rather than rebuilt.
+  let secondaryFrom = null;
+  for (let index = 0; index < lines.length; index++) {
+    const t = lines[index];
     if (!t.startsWith('|')) continue;
     let parts = t.split('|').map(c => c.trim());
     if (parts.length < 3) continue; // needs at least one real cell
-    if ((parts[colmap.num] ?? '') === '#' || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
+    const isStructure = index === layout?.headerIndex || isHeaderRow(t) || isSeparatorRow(t);
+    if (isStructure && layout && index > (layout.separatorIndex ?? layout.headerIndex)
+        && secondaryFrom === null) {
+      secondaryFrom = rows.length;
+    }
+    if (index === layout?.headerIndex) continue;
+    if ((parts[colmap.num] ?? '') === '#' || isHeaderRow(t) || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
     if (parts.length > width && colmap.notes === width - 2) {
       // Stray pipes inside the trailing free-text column → fold back into notes.
       parts = [...parts.slice(0, colmap.notes), parts.slice(colmap.notes, parts.length - 1).join(' | '), ''];
       if (diag) diag.strayPipes++;
     }
     const at = (k) => (colmap[k] != null ? (parts[colmap[k]] ?? '') : '');
-    rows.push([at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')]);
+    // Last index holding a real cell: the trailing empty part only exists when
+    // the row ends with a pipe — a hand-edited row without one ends in data.
+    const lastCell = t.endsWith('|') ? parts.length - 2 : parts.length - 1;
+    const extras = {};
+    for (let i = 1; i <= lastCell; i++) {
+      if (schemaIndices.has(i)) continue;
+      if (parts[i]) extras[i] = parts[i]; // empty cells re-materialize as '' on export
+    }
+    consumed.add(index);
+    rows.push({
+      cells: [at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')],
+      extras,
+    });
   }
-  return rows;
+  return {
+    rows,
+    layout: layout && { ...layout, ...collectStructure(raw, consumed), eol, secondaryFrom },
+  };
+}
+
+/**
+ * Split the file around the table export rebuilds.
+ *
+ * `export` used to emit a fixed skeleton — the literal title `# Applications
+ * Tracker`, the header, the separator, the rows — so `--out data/applications.md`
+ * deleted a localized title, any legend or preamble, an `## Archive` section and
+ * any trailing note, and the drop gate never saw it because it only counted
+ * cells past the header width (PR #3794 review).
+ *
+ * Everything BEFORE the table and everything AFTER it is recorded verbatim and
+ * replayed on export. Everything left INSIDE the table's span — a heading
+ * between two tables, a second table's header and separator — is content the
+ * rebuilt single table genuinely cannot hold: it is reported as a drop and
+ * gated behind `--force`, rather than being replayed into a layout it does not
+ * belong to (the second table's rows are indexed against the FIRST table's
+ * columns, so re-emitting its structure would frame a shifted row as intact).
+ *
+ * @param {string[]} lines - RAW lines of the tracker (whitespace intact): these
+ *   are replayed verbatim, not re-rendered.
+ * @param {Set<number>} consumed - Line indices the rebuilt table reproduces.
+ * @returns {{prologue: string[], epilogue: string[], interior: string[]}}
+ */
+function collectStructure(lines, consumed) {
+  const indices = [...consumed].sort((a, b) => a - b);
+  if (indices.length === 0) return { prologue: [], epilogue: [], interior: [] };
+  const first = indices[0];
+  const last = indices[indices.length - 1];
+  // Blank lines count too. Excluding them would put a "silently dropped" line
+  // back into a function written to end silent drops — the blank line that
+  // separates a tracker from a section below it is exactly the kind of
+  // structure a user notices missing.
+  const interior = [];
+  for (let i = first + 1; i < last; i++) if (!consumed.has(i)) interior.push(lines[i]);
+  return { prologue: lines.slice(0, first), epilogue: lines.slice(last + 1), interior };
 }
 
 // Remove every table row whose first cell (the application number) equals `num`,
@@ -197,7 +503,11 @@ export function removeRowByNum(content, num) {
   const lines = content.split('\n');
   // Header-aware report-column lookup (#954) — fixed index 7 read the wrong
   // cell on customized layouts (e.g. with a Location column).
-  const colmap = resolveColumns(lines);
+  // Trimmed for detection, raw for output: resolveColumns needs a line that
+  // starts with '|', so an indented table resolved to the legacy map here while
+  // the filter below matched on the trimmed line — the read/write split fixed in
+  // parseMarkdownRows (PR #3794 review). Lines are still emitted byte-for-byte.
+  const colmap = resolveColumns(lines.map(l => l.trim()));
   let removedCount = 0;
   let report = null;
   const kept = lines.filter((line) => {
@@ -220,15 +530,15 @@ export function removeRowByNum(content, num) {
 // never modified — normalization lives only in the derived index, and the
 // diagnostics tell the user what to fix at the source (normalize-statuses.mjs,
 // dedup-tracker.mjs).
-function parseTracker(states) {
+function parseTracker(states, ctx) {
   const diag = { mojibake: 0, scoreInStatus: 0, unknownStatus: 0, badId: 0, badDate: 0, strayPipes: 0 };
-  const rows = parseMarkdownRows(readFileSync(MD_PATH, 'utf-8'), diag);
+  const { rows, layout } = parseMarkdownRows(readFileSync(ctx.mdPath, 'utf-8'), diag);
 
   const usedIds = new Set();
   let maxId = 0;
   const apps = [];
 
-  for (const cells of rows) {
+  for (const { cells, extras } of rows) {
     let [idRaw, date, company, role, score, status, pdf, report, notes] = cells;
 
     const before = [score, pdf, report].join('|');
@@ -254,8 +564,8 @@ function parseTracker(states) {
       status = canonical;
     }
 
-    let id = parseInt(idRaw, 10);
-    if (!Number.isInteger(id) || id <= 0 || usedIds.has(id)) {
+    let id = parseApplicationId(idRaw);
+    if (id === null || usedIds.has(id)) {
       id = 0; // assign after the pass, once maxId is known
       diag.badId++;
     } else {
@@ -265,102 +575,246 @@ function parseTracker(states) {
 
     if (!DATE_RE.test(date)) diag.badDate++; // kept as-is — flagged, not destroyed
 
-    apps.push({ id, pos: apps.length, date, company, role, score: score || '—', status, pdf: pdf || '❌', report: report || '—', notes });
+    apps.push({
+      id, pos: apps.length, date, company, role, score: score || '—', status,
+      pdf: pdf || '❌', report: report || '—', notes, extras: JSON.stringify(extras),
+      // Ledger rows name a row by the number in its # cell. A number the index
+      // assigned is not that, so such a row never claims ledger history.
+      ledgerKey: id !== 0,
+    });
   }
   for (const app of apps) if (app.id === 0) app.id = ++maxId;
 
-  return { apps, diag };
+  return { apps, diag, layout };
 }
 
-function mdHash() {
-  return createHash('sha256').update(readFileSync(MD_PATH)).digest('hex');
+function mdHash(ctx) {
+  return createHash('sha256').update(readFileSync(ctx.mdPath)).digest('hex');
+}
+
+/**
+ * The transition ledger, parsed. A tracker without one is normal (set-status
+ * has never run, or the user edits by hand only): every list comes back empty.
+ *
+ * @returns {{hash: string, observations: object[], unparseable: object[]}}
+ *   `hash` is '' when there is no ledger, so ensureFresh() sees one appear.
+ */
+function readLedger(states, ctx) {
+  const path = ctx.ledgerPath();
+  if (!existsSync(path)) return { hash: '', observations: [], unparseable: [] };
+  const content = readFileSync(path, 'utf-8');
+  const { observations, unparseable } = parseStatusLog(content, states.canonical);
+  return { hash: createHash('sha256').update(content).digest('hex'), observations, unparseable };
+}
+
+const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+/**
+ * One row's status history: the events the ledger derives, merged with the
+ * observations only a sync made (#5555).
+ *
+ * - Ledger events are the row's folded timeline (foldObservations(), so
+ *   corrections and retractions apply), preceded by the state the earliest
+ *   ledger line moved FROM, dated with the row's Date column. That start event
+ *   is what a first sync records for the row, so deleting the index and syncing
+ *   again gives the same history.
+ * - Every stored observation is merged in by date. Where two neighbouring
+ *   events carry the same status they are one state, so the run collapses to
+ *   one event, the ledger's when it has one: a pre-#5555 event the sync dated
+ *   after its ledger line is replaced by that line. An observation with no
+ *   same-status neighbour stays, including a hand edit that reverts to a state
+ *   the ledger reached earlier (Interview → Offer by hand → Interview by hand).
+ * - When the tracker's status is not the last event, nothing explains it: it
+ *   is recorded as an observation, dated `today` (or, on a row with no events
+ *   yet, with its Date column). Dated today, it sorts after the events it
+ *   followed on every later sync, so it is written once and keeps its date.
+ *
+ * @param {{date: string, status: string}} app - The indexed row.
+ * @param {object[]} observations - This row's parseStatusLog() observations.
+ * @param {{to: string, date: string}[]} timeline - This row's foldObservations() timeline.
+ * @param {{status: string, date: string, source: string}[]} observed - This row's
+ *   stored 'tracker'/'sync' events, oldest first.
+ * @param {string} today - Local YYYY-MM-DD (#3070).
+ * @returns {{status: string, date: string, source: string}[]} Events, oldest first.
+ */
+function buildStatusHistory(app, observations, timeline, observed, today) {
+  const rowDate = DATE_RE.test(app.date) ? app.date : null;
+  // Sorted the way foldObservations() sorts, so "earliest" means the same thing.
+  const first = [...observations].sort(byDate)[0];
+  const start = first?.from ?? null;
+
+  // Each event sorts by date, then `rank`; stable otherwise. On one day: the
+  // first status a sync saw, the ledger's start, transitions, then changes a
+  // sync saw — except one a same-day ledger line moved away FROM, which
+  // happened before that line and sorts just ahead of it.
+  const ranked = [];
+  // A change a sync saw TO the start state precedes the ledger and carries the
+  // day it was seen; the row's Date column would misdate it.
+  if (start && !observed.some(e => e.source === EVENT_SOURCES.sync && e.status === start)) {
+    const date = rowDate && rowDate <= first.date ? rowDate : first.date;
+    ranked.push({ status: start, date, source: EVENT_SOURCES.ledger, rank: 1 });
+  }
+  for (const t of timeline) ranked.push({ status: t.to, date: t.date, source: EVENT_SOURCES.ledger, rank: 3 });
+  for (const e of observed) {
+    if (e.source === EVENT_SOURCES.tracker) { ranked.push({ ...e, rank: 0 }); continue; }
+    const leftSameDay = observations.some(o => o.from === e.status && o.date === e.date);
+    ranked.push({ ...e, rank: leftSameDay ? 2 : 4 });
+  }
+  ranked.sort((a, b) => byDate(a, b) || a.rank - b.rank);
+
+  // Collapse runs of one status, keeping the ledger's event (else the first).
+  const events = [];
+  for (const { status, date, source } of ranked) {
+    const prev = events[events.length - 1];
+    if (prev?.status !== status) events.push({ status, date, source });
+    else if (prev.source !== EVENT_SOURCES.ledger && source === EVENT_SOURCES.ledger) {
+      events[events.length - 1] = { status, date, source };
+    }
+  }
+
+  const last = events.length ? events[events.length - 1].status : null;
+  if (app.status !== last) {
+    events.push(events.length === 0
+      ? { status: app.status, date: rowDate ?? today, source: EVENT_SOURCES.tracker }
+      : { status: app.status, date: today, source: EVENT_SOURCES.sync });
+  }
+  return events;
 }
 
 // ── Sync (markdown → derived index) ─────────────────────────────────
 
-function reportDiagnostics(diag) {
+function reportDiagnostics(diag, ctx) {
   const total = Object.values(diag).reduce((a, b) => a + b, 0);
   if (total === 0) {
-    console.error('No corruption detected — index matches the markdown cleanly.');
+    ctx.error('No corruption detected — index matches the markdown cleanly.');
     return 0;
   }
-  console.error(`Corruption detected in ${MD_PATH} (normalized in the index only — the markdown is untouched):`);
-  if (diag.mojibake) console.error(`  ${diag.mojibake} mojibake placeholder cell(s)`);
-  if (diag.scoreInStatus) console.error(`  ${diag.scoreInStatus} score(s) sitting in the status column`);
-  if (diag.unknownStatus) console.error(`  ${diag.unknownStatus} non-canonical status(es), indexed as Evaluated (original kept in notes)`);
-  if (diag.badId) console.error(`  ${diag.badId} missing/duplicate id(s), reassigned in the index`);
-  if (diag.badDate) console.error(`  ${diag.badDate} malformed date(s), kept as-is`);
-  if (diag.strayPipes) console.error(`  ${diag.strayPipes} row(s) with stray pipes, folded into notes`);
-  console.error('Fix at the source with `node normalize-statuses.mjs` / `node dedup-tracker.mjs`, then re-sync.');
+  ctx.error(`Corruption detected in ${ctx.mdPath} (normalized in the index only — the markdown is untouched):`);
+  if (diag.mojibake) ctx.error(`  ${diag.mojibake} mojibake placeholder cell(s)`);
+  if (diag.scoreInStatus) ctx.error(`  ${diag.scoreInStatus} score(s) sitting in the status column`);
+  if (diag.unknownStatus) ctx.error(`  ${diag.unknownStatus} non-canonical status(es), indexed as Evaluated (original kept in notes)`);
+  if (diag.badId) ctx.error(`  ${diag.badId} missing/malformed/duplicate id(s), reassigned in the index`);
+  if (diag.badDate) ctx.error(`  ${diag.badDate} malformed date(s), kept as-is`);
+  if (diag.strayPipes) ctx.error(`  ${diag.strayPipes} row(s) with stray pipes, folded into notes`);
+  ctx.error('Fix at the source with `node normalize-statuses.mjs` / `node dedup-tracker.mjs`, then re-sync.');
   return total;
 }
 
-function syncIndex(db, states) {
-  const { apps, diag } = parseTracker(states);
-  const today = new Date().toISOString().slice(0, 10);
+function syncIndex(db, states, ctx) {
+  const { apps, diag, layout } = parseTracker(states, ctx);
+  const ledger = readLedger(states, ctx);
+  const timelines = foldObservations(ledger.observations);
+  const observationsByNum = new Map();
+  for (const obs of ledger.observations) {
+    if (!observationsByNum.has(obs.num)) observationsByNum.set(obs.num, []);
+    observationsByNum.get(obs.num).push(obs);
+  }
+  // LOCAL calendar day (#3070). This dates a status change no ledger row
+  // explains, and such an event is the one part of the index a resync does NOT
+  // rebuild — it persists across syncs, keyed by id, so a wrong day is written
+  // once and then sticks.
+  const today = localToday();
 
   db.exec('BEGIN');
   db.exec('PRAGMA defer_foreign_keys = ON'); // full rebuild — FKs settle at commit
   try {
     db.exec('DELETE FROM applications');
-    const insertApp = db.prepare('INSERT INTO applications (id, pos, date, company, role, score, status, pdf, report, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const a of apps) insertApp.run(a.id, a.pos, a.date, a.company, a.role, a.score, a.status, a.pdf, a.report, a.notes);
+    const insertApp = db.prepare('INSERT INTO applications (id, pos, date, company, role, score, status, pdf, report, notes, extras) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const a of apps) insertApp.run(a.id, a.pos, a.date, a.company, a.role, a.score, a.status, a.pdf, a.report, a.notes, a.extras);
 
-    // Status history: events persist across rebuilds, keyed by id. An app whose
-    // status changed since the last sync gets a new event; rows that left the
-    // markdown lose their events (the index never outlives its source).
+    // Status history, rebuilt per row from the ledger plus the observations
+    // only a sync made (see buildStatusHistory). Rows that left the markdown
+    // lose their events (the index never outlives its source).
     db.exec('DELETE FROM status_events WHERE app_id NOT IN (SELECT id FROM applications)');
-    const latestEvent = db.prepare('SELECT status FROM status_events WHERE app_id = ? ORDER BY id DESC LIMIT 1');
-    const insertEvent = db.prepare('INSERT INTO status_events (app_id, status, date) VALUES (?, ?, ?)');
+    const observedEvents = db.prepare("SELECT status, date, source FROM status_events WHERE app_id = ? AND source <> 'ledger' ORDER BY id");
+    const clearEvents = db.prepare('DELETE FROM status_events WHERE app_id = ?');
+    const insertEvent = db.prepare('INSERT INTO status_events (app_id, status, date, source) VALUES (?, ?, ?, ?)');
     for (const a of apps) {
-      const last = latestEvent.get(a.id);
-      if (!last) insertEvent.run(a.id, a.status, DATE_RE.test(a.date) ? a.date : today);
-      else if (last.status !== a.status) insertEvent.run(a.id, a.status, today);
+      const events = buildStatusHistory(
+        a,
+        a.ledgerKey ? observationsByNum.get(a.id) ?? [] : [],
+        a.ledgerKey ? timelines.get(a.id) ?? [] : [],
+        observedEvents.all(a.id),
+        today,
+      );
+      clearEvents.run(a.id);
+      for (const e of events) insertEvent.run(a.id, e.status, e.date, e.source);
     }
 
-    db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-      .run('md_sha256', mdHash());
+    const setMeta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    setMeta.run('md_sha256', mdHash(ctx));
+    setMeta.run('ledger_sha256', ledger.hash);
+    setMeta.run('schema_version', SCHEMA_VERSION);
+    // The source layout, so export rebuilds this FILE rather than the default
+    // skeleton: the header and separator it read, the lines around the table,
+    // the lines inside it that no rebuilt table can hold, and the line ending.
+    // Empty strings mean "no table in the source", which exports as the
+    // canonical nine columns under the default title.
+    setMeta.run('md_header', layout?.header ?? '');
+    setMeta.run('md_separator', layout?.separator ?? '');
+    setMeta.run('md_prologue', JSON.stringify(layout?.prologue ?? []));
+    setMeta.run('md_epilogue', JSON.stringify(layout?.epilogue ?? []));
+    setMeta.run('md_interior', JSON.stringify(layout?.interior ?? []));
+    setMeta.run('md_eol', layout?.eol ?? '\n');
+    // pos of the first indexed row that belongs to a LATER table, or '' when
+    // every row belongs to the one export rebuilds.
+    setMeta.run('md_secondary_from', layout?.secondaryFrom == null ? '' : String(layout.secondaryFrom));
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
   }
-  return { apps, diag };
+  return { apps, diag, ledger };
 }
 
-async function sync(args) {
-  if (!existsSync(MD_PATH)) {
-    console.error(`Error: ${MD_PATH} not found — nothing to index.`);
-    process.exit(1);
+async function sync(args, ctx) {
+  if (!existsSync(ctx.mdPath)) {
+    ctx.error(`Error: ${ctx.mdPath} not found — nothing to index.`);
+    throw new TrackerExit(1);
   }
-  const states = loadStates();
+  const states = loadStates(ctx);
 
   if (args.includes('--check')) {
-    const { apps, diag } = parseTracker(states);
-    console.error(`Parsed ${apps.length} data rows from ${MD_PATH}`);
-    const issues = reportDiagnostics(diag);
-    console.error('(--check — no index written)');
-    process.exit(issues > 0 ? 1 : 0);
+    const { apps, diag } = parseTracker(states, ctx);
+    ctx.error(`Parsed ${apps.length} data rows from ${ctx.mdPath}`);
+    const issues = reportDiagnostics(diag, ctx);
+    ctx.error('(--check — no index written)');
+    return issues > 0 ? 1 : 0;
   }
 
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  const { apps, diag } = syncIndex(db, states);
-  console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${DB_PATH}`);
-  reportDiagnostics(diag);
+  const DatabaseSync = await loadSqlite(ctx);
+  const db = ctx.openDb(DatabaseSync);
+  const { apps, diag, ledger } = syncIndex(db, states, ctx);
+  ctx.error(`Indexed ${apps.length} applications from ${ctx.mdPath} into ${ctx.dbPath()}`);
+  if (ledger.unparseable.length) {
+    // Not corruption in the tracker, so not part of reportDiagnostics() and
+    // not a --check failure; but the history of those rows is short of them.
+    ctx.error(`Warning: ${ledger.unparseable.length} line(s) of ${ctx.ledgerPath()} could not be parsed and are not in any row's history:`);
+    for (const u of ledger.unparseable) ctx.error(`  line ${u.line}: ${u.reason}`);
+  }
+  reportDiagnostics(diag, ctx);
 }
 
-// query/history must never serve stale reads: if the markdown changed since
-// the last sync (or was never synced), rebuild the index first.
-function ensureFresh(db, states) {
-  if (!existsSync(MD_PATH)) {
-    console.error(`Error: ${MD_PATH} not found — the index has no source of truth to read from.`);
-    process.exit(1);
+// query/history must never serve stale reads: if the markdown or the ledger
+// changed since the last sync (or was never synced), rebuild the index first.
+// The ledger counts on its own: a `correction` line changes a row's history
+// without touching applications.md.
+function ensureFresh(db, states, ctx) {
+  if (!existsSync(ctx.mdPath)) {
+    ctx.error(`Error: ${ctx.mdPath} not found — the index has no source of truth to read from.`);
+    throw new TrackerExit(1);
   }
   const synced = db.prepare('SELECT value FROM meta WHERE key = ?').get('md_sha256');
-  if (synced && synced.value === mdHash()) return;
-  console.error(`(index stale — resyncing from ${MD_PATH})`);
-  syncIndex(db, states);
+  // The schema version is part of freshness, not just the content hash: a db
+  // written before `extras`/`md_header` existed matches the hash while missing
+  // the columns an export needs, which is exactly the silent drop #3703 is
+  // about. A version mismatch forces the rebuild that fills them in.
+  const version = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version');
+  const ledger = db.prepare('SELECT value FROM meta WHERE key = ?').get('ledger_sha256');
+  if (synced && synced.value === mdHash(ctx) && version?.value === SCHEMA_VERSION
+      && ledger?.value === readLedger(states, ctx).hash) return;
+  ctx.error(`(index stale — resyncing from ${ctx.mdPath})`);
+  syncIndex(db, states, ctx);
 }
 
 // ── Query helpers ───────────────────────────────────────────────────
@@ -372,23 +826,63 @@ function flagValue(args, flag) {
   return kv ? kv.split('=').slice(1).join('=') : null;
 }
 
+// A pipe inside a cell would split the row; a newline would end it.
+const cleanCell = (v) => String(v ?? '').replace(/\|/g, '│').replace(/\r?\n/g, ' ');
+
 function rowToMarkdown(r) {
-  const clean = (v) => String(v ?? '').replace(/\|/g, '│').replace(/\r?\n/g, ' ');
-  return `| ${r.id} | ${clean(r.date)} | ${clean(r.company)} | ${clean(r.role)} | ${clean(r.score)} | ${clean(r.status)} | ${clean(r.pdf)} | ${clean(r.report)} | ${clean(r.notes)} |`;
+  return `| ${r.id} | ${cleanCell(r.date)} | ${cleanCell(r.company)} | ${cleanCell(r.role)} | ${cleanCell(r.score)} | ${cleanCell(r.status)} | ${cleanCell(r.pdf)} | ${cleanCell(r.report)} | ${cleanCell(r.notes)} |`;
 }
 
-async function query(args) {
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  const states = loadStates();
-  ensureFresh(db, states);
+// A spreadsheet sorts and filters on values, so `query --csv` parses the score,
+// PDF and report cells out of their markdown.
+const CSV_COLUMNS = [
+  ['id', (r) => r.id],
+  ['date', (r) => r.date],
+  ['company', (r) => r.company],
+  ['role', (r) => r.role],
+  ['score', (r) => csvScore(r.score)],
+  ['status', (r) => r.status],
+  ['pdf', (r) => (String(r.pdf ?? '').includes('✅') ? 'yes' : 'no')],
+  ['report', (r) => csvReport(r.report)],
+  ['notes', (r) => r.notes],
+];
+
+function csvScore(cell) {
+  const m = String(cell ?? '').replace(/\*\*/g, '').trim().match(/^(\d+(?:[.,]\d+)?)(?:\/5)?(?:\s.*)?$/);
+  return m ? Number(m[1].replace(',', '.')) : '';
+}
+
+function csvReport(cell) {
+  const text = String(cell ?? '').trim();
+  return firstLinkTarget(text) ?? (text === '—' || text === '-' ? '' : text);
+}
+
+function csvField(value) {
+  const cell = escapeFormulaCell(value);
+  return /[",\r\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+}
+
+function rowToCsv(r) {
+  return CSV_COLUMNS.map(([, read]) => csvField(read(r))).join(',');
+}
+
+async function query(args, ctx) {
+  if (args.includes('--csv') && args.includes('--json')) {
+    ctx.error('Error: --csv and --json are two output formats; pass one');
+    throw new TrackerExit(1);
+  }
+
+  const DatabaseSync = await loadSqlite(ctx);
+  const db = ctx.openDb(DatabaseSync);
+  const states = loadStates(ctx);
+  ensureFresh(db, states, ctx);
 
   const where = [];
   const params = [];
   const status = flagValue(args, '--status');
   if (status) {
     const canonical = normalizeStatus(status, states);
-    if (!canonical) { console.error(`Error: unknown status "${status}". Canonical: ${states.labels.join(', ')}`); process.exit(1); }
+    if (!canonical) { ctx.error(`Error: unknown status "${status}". Canonical: ${states.labels.join(', ')}`); throw new TrackerExit(1); }
     where.push('status = ?'); params.push(canonical);
   }
   const company = flagValue(args, '--company');
@@ -397,11 +891,22 @@ async function query(args) {
   if (role) { where.push('role LIKE ?'); params.push(`%${role}%`); }
   const since = flagValue(args, '--since');
   if (since) {
-    if (!DATE_RE.test(since)) { console.error('Error: --since must be YYYY-MM-DD'); process.exit(1); }
+    if (!DATE_RE.test(since)) { ctx.error('Error: --since must be YYYY-MM-DD'); throw new TrackerExit(1); }
     where.push('date >= ?'); params.push(since);
   }
-  const id = flagValue(args, '--id');
-  if (id) { where.push('id = ?'); params.push(parseInt(id, 10)); }
+  if (args.some(arg => arg === '--min-score' || arg.startsWith('--min-score='))) {
+    const raw = flagValue(args, '--min-score') ?? '';
+    const minScore = raw.trim() === '' ? NaN : Number(raw);
+    if (!(minScore >= 0 && minScore <= 5)) { ctx.error('Error: --min-score must be a number from 0 to 5'); throw new TrackerExit(1); }
+    const scoreText = "REPLACE(TRIM(score, '*'), ',', '.')";
+    where.push(`${scoreText} GLOB '[0-9]*' AND CAST(${scoreText} AS REAL) >= ?`); params.push(minScore);
+  }
+  const idRaw = flagValue(args, '--id');
+  if (args.some(arg => arg === '--id' || arg.startsWith('--id='))) {
+    const id = parseApplicationId(idRaw);
+    if (id === null) { ctx.error('Error: --id must be a positive integer'); throw new TrackerExit(1); }
+    where.push('id = ?'); params.push(id);
+  }
 
   let sql = 'SELECT id, date, company, role, score, status, pdf, report, notes FROM applications'
     + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
@@ -410,43 +915,204 @@ async function query(args) {
 
   const rows = db.prepare(sql).all(...params);
   if (args.includes('--json')) {
-    console.log(JSON.stringify(rows, null, 2));
+    ctx.log(JSON.stringify(rows, null, 2));
+  } else if (args.includes('--csv')) {
+    ctx.log(CSV_COLUMNS.map(([name]) => name).join(','));
+    for (const r of rows) ctx.log(rowToCsv(r));
   } else {
-    console.log(HEADER);
-    console.log(SEPARATOR);
-    for (const r of rows) console.log(rowToMarkdown(r));
-    console.error(`\n${rows.length} row(s)`); // stderr so stdout stays pipeable
+    ctx.log(HEADER);
+    ctx.log(SEPARATOR);
+    for (const r of rows) ctx.log(rowToMarkdown(r));
+    ctx.error(`\n${rows.length} row(s)`); // stderr so stdout stays pipeable
   }
 }
 
-async function history(args) {
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  ensureFresh(db, loadStates());
-  const id = parseInt(flagValue(args, '--id') || '', 10);
-  if (!Number.isInteger(id)) { console.error('Error: history requires --id N'); process.exit(1); }
+// One tracker number: `--id N`, `--id=N`, or a single bare number. find.mjs and
+// set-status.mjs already take the bare form. A second token, or a number next
+// to --id, is a usage error so the wrong row is never printed.
+function historyId(args, ctx) {
+  const positional = [];
+  let hasIdFlag = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (typeof arg !== 'string' || arg === '') continue;
+    if (arg === '--id') {
+      hasIdFlag = true;
+      // The operand is not a second selector. A missing one falls through to
+      // the positive-integer check (the CLI already rejects it).
+      if (args[i + 1] !== undefined && !String(args[i + 1]).startsWith('--')) i += 1;
+      continue;
+    }
+    if (arg.startsWith('--id=')) {
+      hasIdFlag = true;
+      continue;
+    }
+    if (arg.startsWith('-')) continue;
+    positional.push(arg);
+  }
+  if (hasIdFlag && positional.length > 0) {
+    ctx.error(`Error: history takes either --id N or one tracker number, not both (${positional.join(' ')})`);
+    throw new TrackerExit(1);
+  }
+  if (!hasIdFlag && positional.length > 1) {
+    ctx.error(`Error: history takes one tracker number, got ${positional.join(' ')}. Example: node tracker.mjs history --id 318`);
+    throw new TrackerExit(1);
+  }
+  const idRaw = hasIdFlag ? flagValue(args, '--id') : positional[0];
+  const id = parseApplicationId(idRaw);
+  if (id === null) {
+    const got = idRaw == null ? '' : ` Got "${idRaw}".`;
+    ctx.error(`Error: history requires --id N (a positive integer).${got} Example: node tracker.mjs history 318`);
+    throw new TrackerExit(1);
+  }
+  return id;
+}
+
+async function history(args, ctx) {
+  const id = historyId(args, ctx);
+  const DatabaseSync = await loadSqlite(ctx);
+  const db = ctx.openDb(DatabaseSync);
+  ensureFresh(db, loadStates(ctx), ctx);
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-  if (!app) { console.error(`Error: no application with id ${id}`); process.exit(1); }
-  console.log(`#${app.id} ${app.company} — ${app.role}`);
-  for (const e of db.prepare('SELECT status, date FROM status_events WHERE app_id = ? ORDER BY id').all(id)) {
-    console.log(`  ${e.date}  ${e.status}`);
+  if (!app) { ctx.error(`Error: no application with id ${id}`); throw new TrackerExit(1); }
+  ctx.log(`#${app.id} ${app.company} — ${app.role}`);
+  const events = db.prepare('SELECT status, date, source FROM status_events WHERE app_id = ? ORDER BY id').all(id);
+  const width = Math.max(0, ...events.map(e => e.status.length));
+  for (const e of events) {
+    // A change only a sync saw is named as such: nothing in the ledger backs
+    // its date, which is the day of the sync, not the day of the change.
+    ctx.log(e.source === EVENT_SOURCES.sync
+      ? `  ${e.date}  ${e.status.padEnd(width)}  (no ledger row; observed at sync)`
+      : `  ${e.date}  ${e.status}`);
   }
 }
 
 // ── Export (index → canonical markdown) ─────────────────────────────
-// The inverse of sync: regenerates the canonical table from the index. Used by
-// the round-trip tests (md → db → md must be lossless for clean input), and as
-// a repaired copy the user can review and adopt by hand. It never touches
-// applications.md unless explicitly asked to via --out.
+// The inverse of sync: regenerates the table from the index. Used by the
+// round-trip tests (md → db → md must be lossless), and as a repaired copy the
+// user can review and adopt by hand. It never touches applications.md unless
+// explicitly asked to via --out.
+//
+// "Lossless" means the LAYOUT too, not only the values (#3703). The read side
+// maps columns by header name, so a tracker with Location/Via/URL — or a user's
+// own column — indexes perfectly; the write side used to emit nine fixed
+// columns in a fixed order, so adopting the export cost the user those columns
+// with no warning, and `sync` had just said the index matched cleanly. Export
+// now rebuilds the header it read and re-materializes unmapped cells from
+// `applications.extras` by position, and refuses to write over an existing
+// tracker at all when something genuinely cannot be placed.
 
-async function exportMd(args) {
-  const outPath = flagValue(args, '--out');
-  if (outPath && existsSync(outPath) && statSync(outPath).isDirectory()) {
-    console.error(`Error: --out ${outPath} is a directory — pass a file path.`);
-    process.exit(1);
+/** @param {string} raw - the `extras` JSON column. @returns {Object<number,string>} */
+function parseExtras(raw) {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {}; // a hand-corrupted index cell must not abort the export
+  }
+}
+
+/**
+ * Rebuild the markdown table from indexed rows and the recorded source layout.
+ *
+ * @param {object[]} rows - `applications` rows, ordered by pos.
+ * @param {{header: string, separator: string}} layout - Recorded source layout;
+ *   empty header means the source had no header row (legacy positional table).
+ * @returns {{header: string, separator: string, body: string[], dropped: string[]}}
+ *   `dropped` names every column carrying content this export cannot place —
+ *   empty for every layout career-ops can reproduce.
+ */
+/**
+ * The recorded source layout, decoded from `meta` with safe defaults.
+ *
+ * An index written before these keys existed (or one whose meta was edited by
+ * hand) yields the canonical skeleton, which is what the export emitted for
+ * every tracker before #3703.
+ *
+ * @param {Object<string,string>} meta - The `meta` table as a plain object.
+ * @returns {{header: string, separator: string, prologue: string[],
+ *   epilogue: string[], interior: string[], eol: string}}
+ */
+function readLayout(meta) {
+  const list = (raw, fallback) => {
+    try {
+      const parsed = JSON.parse(raw ?? '');
+      return Array.isArray(parsed) ? parsed.map(String) : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    header: meta.md_header || '',
+    separator: meta.md_separator || '',
+    prologue: list(meta.md_prologue, ['# Applications Tracker', '']),
+    epilogue: list(meta.md_epilogue, ['']),
+    interior: list(meta.md_interior, []),
+    eol: meta.md_eol === '\r\n' ? '\r\n' : '\n',
+    secondaryFrom: /^\d+$/.test(meta.md_secondary_from ?? '') ? Number(meta.md_secondary_from) : null,
+  };
+}
+
+function renderTable(rows, layout) {
+  const header = layout.header || HEADER;
+  const labels = layout.header ? headerLabels(layout.header) : headerLabels(HEADER);
+  const colmap = (layout.header ? detectColumns([layout.header]) : null) || LEGACY_COLMAP;
+
+  // Column index → the indexed field that owns it. Everything else is filled
+  // from the row's extras, so a Location/Via/URL/custom column comes back in
+  // its own place with its own value.
+  const fieldAt = new Map();
+  for (const [field, dbField] of Object.entries(SCHEMA_FIELDS)) {
+    if (colmap[field] != null) fieldAt.set(colmap[field], dbField);
   }
 
-  const trackerPath = canonicalizeTrackerPath(MD_PATH);
+  const width = labels.length;
+  const unplaceable = new Set();
+  const sanitized = [];
+  const body = rows.map((r) => {
+    const extras = parseExtras(r.extras);
+    for (const key of Object.keys(extras)) {
+      if (Number(key) > width) unplaceable.add(Number(key));
+    }
+    const cells = [];
+    for (let i = 1; i <= width; i++) {
+      const field = fieldAt.get(i);
+      const value = field ? r[field] : extras[i] ?? '';
+      const rendered = cleanCell(value);
+      // A cell that had to be rewritten to survive as a table cell — a stray
+      // pipe folded into notes comes back as '│'. The VALUE changed, so a
+      // silent `--out` would edit the tracker; it belongs in the loss list
+      // like any other thing export cannot reproduce (PR #3794 review).
+      if (rendered !== String(value ?? '')) {
+        sanitized.push(`row #${r.id}, column ${i}${labels[i - 1] ? ` (${labels[i - 1]})` : ''}: "${value}" → "${rendered}"`);
+      }
+      cells.push(rendered);
+    }
+    return `| ${cells.join(' | ')} |`;
+  });
+
+  const separator = layout.separator
+    || (layout.header
+      ? `|${labels.map(l => '-'.repeat(Math.max(3, l.length + 2))).join('|')}|`
+      : SEPARATOR);
+
+  const dropped = [
+    ...[...unplaceable].sort((a, b) => a - b)
+      .map(i => `column ${i}${labels[i - 1] ? ` (${labels[i - 1]})` : ''}`),
+    ...sanitized,
+  ];
+  return { header, separator, body, dropped };
+}
+
+async function exportMd(args, ctx) {
+  const outPath = flagValue(args, '--out');
+  const force = args.includes('--force');
+  if (outPath && existsSync(outPath) && statSync(outPath).isDirectory()) {
+    ctx.error(`Error: --out ${outPath} is a directory — pass a file path.`);
+    throw new TrackerExit(1);
+  }
+
+  const trackerPath = canonicalizeTrackerPath(ctx.mdPath);
   const writesTracker = outPath
     ? canonicalizeTrackerPath(outPath) === trackerPath
     : false;
@@ -455,33 +1121,62 @@ async function exportMd(args) {
     : null;
 
   try {
-    const DatabaseSync = await loadSqlite();
-    const db = openDb(DatabaseSync);
-    ensureFresh(db, loadStates());
+    const DatabaseSync = await loadSqlite(ctx);
+    const db = ctx.openDb(DatabaseSync);
+    ensureFresh(db, loadStates(ctx), ctx);
     const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
-    const out = [
-      '# Applications Tracker',
-      '',
-      HEADER,
-      SEPARATOR,
-      ...rows.map(rowToMarkdown),
-      '',
-    ].join('\n');
+    const meta = db.prepare('SELECT key, value FROM meta').all()
+      .reduce((acc, m) => Object.assign(acc, { [m.key]: m.value }), {});
+    const layout = readLayout(meta);
+    // Rows below a second table's header were indexed against the FIRST
+    // table's columns, so rebuilding them here would move archived data into
+    // the active table under a header it never had. They are named instead.
+    const primary = layout.secondaryFrom == null ? rows : rows.slice(0, layout.secondaryFrom);
+    const secondary = layout.secondaryFrom == null ? [] : rows.slice(layout.secondaryFrom);
+    const { header, separator, body, dropped } = renderTable(primary, layout);
+    // The lines around the table are replayed verbatim; the ones inside it that
+    // no single rebuilt table can hold are reported instead, never invented.
+    const out = [...layout.prologue, header, separator, ...body, ...layout.epilogue]
+      .join(layout.eol);
+
+    const losses = [
+      ...dropped,
+      ...layout.interior.map(line => `line between table rows: ${line === '' ? '(blank)' : `"${line}"`}`),
+      ...secondary.map(r => `row #${r.id} (${r.company} — ${r.role}) belongs to a later table; the rebuilt one has no place for it`),
+    ];
+    // Never lose anything quietly. Worth reporting even though the rebuild above
+    // leaves `losses` empty for every file career-ops itself produces: it is
+    // what turns data loss into a decision the user makes.
+    if (losses.length) {
+      ctx.error(`Warning: ${losses.length} item(s) in ${ctx.mdPath} cannot be reproduced by export and will be dropped:`);
+      for (const d of losses) ctx.error(`  ${d}`);
+      ctx.error('Cells outside the declared header, and content between the first and last table row, have nowhere to go in a single rebuilt table.');
+    }
 
     if (!outPath) {
-      process.stdout.write(out);
+      ctx.stdout.write(out);
       return;
     }
     mkdirSync(dirname(outPath) || '.', { recursive: true });
-    // Never silently clobber — whatever was there is backed up first.
     const writeTarget = writesTracker ? trackerPath : outPath;
+    // Overwriting an existing file with a table known to be missing columns is
+    // the failure mode of #3703 — the .bak below makes it recoverable, but only
+    // for a user who was told there was something to recover.
+    if (losses.length && existsSync(writeTarget) && !force) {
+      ctx.error(`Refusing to overwrite ${outPath} — that would drop the item(s) listed above.`);
+      ctx.error('Re-run with --force if you have read the list and want the export anyway.');
+      // A return, never an exit: exiting here would skip the finally below and
+      // leave the tracker lock dir held until it goes stale.
+      return 1;
+    }
+    // Never silently clobber — whatever was there is backed up first.
     if (existsSync(writeTarget)) {
       copyFileSync(writeTarget, writeTarget + '.bak');
-      console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+      ctx.error(`Existing ${outPath} backed up to ${outPath}.bak`);
     }
     if (trackerTransaction) trackerTransaction.replace(out);
     else writeFileAtomic(outPath, out);
-    console.error(`Exported ${rows.length} applications to ${outPath}`);
+    ctx.error(`Exported ${body.length} applications to ${outPath}`);
   } finally {
     trackerTransaction?.close();
   }
@@ -493,37 +1188,46 @@ async function exportMd(args) {
 // the derived index. The markdown stays the source of truth: callers (incl. the
 // web) orchestrate this script rather than editing applications.md directly.
 // The read and atomic replacement share merge-tracker's cross-process lock.
-async function deleteApp(args) {
+async function deleteApp(args, ctx) {
   const num = flagValue(args, '--num');
   if (!num) {
-    console.error('Usage: node tracker.mjs delete --num <N> [--dry-run]   (remove one application row by its number)');
-    process.exit(1);
+    ctx.error('Usage: node tracker.mjs delete --num <N> [--dry-run]   (remove one application row by its number)');
+    throw new TrackerExit(1);
   }
-  if (!existsSync(MD_PATH)) {
-    console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
-    process.exit(1);
+  if (!existsSync(ctx.mdPath)) {
+    ctx.error(`Error: ${ctx.mdPath} not found — nothing to delete.`);
+    throw new TrackerExit(1);
   }
   if (args.includes('--dry-run')) {
-    const { removed, removedCount, report } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
+    const { removed, removedCount, report } = removeRowByNum(readFileSync(ctx.mdPath, 'utf-8'), num);
     if (!removed) {
-      console.error(`No application numbered ${num} in ${MD_PATH}.`);
-      process.exit(1);
+      ctx.error(`No application numbered ${num} in ${ctx.mdPath}.`);
+      throw new TrackerExit(1);
     }
-    console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
-    if (report) console.error(`(report file would be orphaned: ${report})`);
+    ctx.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${ctx.mdPath}.`);
+    if (report) ctx.error(`(report file would be orphaned: ${report})`);
     return;
   }
 
-  const trackerTransaction = await openTrackerTransaction(MD_PATH);
+  const trackerTransaction = await openTrackerTransaction(ctx.mdPath);
 
   let removal;
+  // Beside the transaction's canonical path, not ctx.mdPath: a tracker reached
+  // through a symlink keeps its backup next to the real file.
+  const backupPath = `${trackerTransaction.path}.bak`;
   try {
-    removal = removeRowByNum(trackerTransaction.read(), num);
+    const before = trackerTransaction.read();
+    removal = removeRowByNum(before, num);
     if (!removal.removed) {
-      console.error(`No application numbered ${num} in ${MD_PATH}.`);
-      process.exitCode = 1;
-      return;
+      ctx.error(`No application numbered ${num} in ${ctx.mdPath}.`);
+      return 1;
     }
+    // Backup first, from the bytes read inside the lock, like every other
+    // tracker writer (and this script's own `export`). A delete takes the
+    // row's status, report link and notes with it, and nothing else on disk
+    // holds them. If the backup cannot be written this throws and the row is
+    // not removed.
+    writeFileAtomic(backupPath, before);
     trackerTransaction.replace(removal.newContent);
   } finally {
     trackerTransaction.close();
@@ -532,33 +1236,168 @@ async function deleteApp(args) {
   const { removedCount, report } = removal;
   // Rebuild the derived SQLite index from the now-updated markdown.
   try {
-    const states = loadStates();
-    const DatabaseSync = await loadSqlite();
-    const db = openDb(DatabaseSync);
-    syncIndex(db, states);
+    const states = loadStates(ctx);
+    const DatabaseSync = await loadSqlite(ctx);
+    const db = ctx.openDb(DatabaseSync);
+    syncIndex(db, states, ctx);
   } catch (e) {
-    console.error(`(row removed; index resync skipped: ${e.message})`);
+    // A command that has already said why it stops (no node:sqlite, no
+    // states.yml, a db path equal to the tracker) still stops with status 1,
+    // as it did when it called process.exit() from in here.
+    if (e instanceof TrackerExit) throw e;
+    ctx.error(`(row removed; index resync skipped: ${e.message})`);
   }
-  console.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH} and reindexed.`);
-  if (report) console.error(`Note: report file may now be orphaned — ${report}`);
+  ctx.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${ctx.mdPath} and reindexed.`);
+  ctx.error(`Tracker as it was before the delete: ${backupPath}`);
+  if (report) ctx.error(`Note: report file may now be orphaned — ${report}`);
 }
 
 const COMMANDS = { sync, query, history, export: exportMd, delete: deleteApp };
 
-async function main() {
-  const [command, ...args] = process.argv.slice(2);
+// Every flag each subcommand accepts, from the header comment (lines 24-32).
+// #4602: unvalidated flags let a mistyped `--dryrun` (missing the hyphen)
+// fall through `delete`'s `args.includes('--dry-run')` check unseen, so the
+// row was removed for real instead of failing fast. validateFlags() rejects
+// an unrecognized flag before the subcommand ever sees args, and also
+// answers `--help`/`-h` per subcommand — assessment-log.mjs picks its valid
+// flags by subcommand the same way.
+const SUBCOMMAND_FLAGS = {
+  sync: {
+    known: ['--check', '--help', '-h'],
+    valueFlags: [],
+    usage: 'Usage: node tracker.mjs sync [--check]\n'
+      + '  (re)build applications.db from applications.md\n'
+      + '  --check: diagnose only, no write; exit 1 if issues found',
+  },
+  query: {
+    known: ['--status', '--company', '--role', '--since', '--min-score', '--id', '--limit', '--json', '--csv', '--help', '-h'],
+    valueFlags: ['--status', '--company', '--role', '--since', '--min-score', '--id', '--limit'],
+    usage: 'Usage: node tracker.mjs query [--status Applied] [--company acme] [--role designer]\n'
+      + '                              [--since 2026-01-01] [--min-score 4] [--id N] [--limit 20] [--json | --csv]\n'
+      + '  --csv: one spreadsheet row per application (numeric score, yes/no pdf, report path)',
+  },
+  history: {
+    known: ['--id', '--help', '-h'],
+    valueFlags: ['--id'],
+    usage: 'Usage: node tracker.mjs history --id N\n'
+      + '  a bare number is the same read: node tracker.mjs history N\n'
+      + '  status transitions from status-log.tsv, plus changes only a sync saw',
+  },
+  export: {
+    known: ['--out', '--force', '--help', '-h'],
+    valueFlags: ['--out'],
+    usage: 'Usage: node tracker.mjs export [--out FILE] [--force]\n'
+      + '  inverse: applications.db → markdown (stdout by default)\n'
+      + '  --force: write even when columns would be dropped',
+  },
+  delete: {
+    known: ['--num', '--dry-run', '--help', '-h'],
+    valueFlags: ['--num'],
+    usage: 'Usage: node tracker.mjs delete --num N [--dry-run]\n'
+      + '  remove one application row from applications.md + reindex',
+  },
+};
+
+const TOP_LEVEL_USAGE = [
+  'Usage: node tracker.mjs <sync|query|history|export|delete> [flags]',
+  ...Object.values(SUBCOMMAND_FLAGS).map(({ usage }) => usage),
+  'node tracker.mjs <command> --help prints one command. More examples: docs/SCRIPTS.md.',
+].join('\n\n');
+
+/**
+ * Run one tracker.mjs command against the paths given, in-process.
+ *
+ * The CLI branch below is the only caller that reads the environment; it
+ * resolves the tracker and index paths and calls this. Anything else — a test,
+ * another script — passes its own, so two calls in one process can target two
+ * trackers (#4758; see resolveDbPath for why that was not possible before).
+ *
+ * @param {string} command - sync | query | history | export | delete.
+ * @param {string[]} [args] - The command's flags, as on the command line.
+ * @param {object} options
+ * @param {string} options.mdPath - The markdown tracker (source of truth).
+ * @param {string} [options.dbPath] - Derived index; defaults to the .db beside mdPath.
+ * @param {string} [options.ledgerPath] - Transition ledger; defaults to the
+ *   status-log.tsv beside mdPath, where set-status.mjs writes it.
+ * @param {{write: Function}} [options.stdout=process.stdout] - Command output.
+ * @param {{write: Function}} [options.stderr=process.stderr] - Diagnostics.
+ * @returns {Promise<number>} The exit status the CLI exits with.
+ */
+export async function runTracker(command, args = [], options = {}) {
+  const { mdPath, stdout = process.stdout, stderr = process.stderr } = options;
+  if (!mdPath) throw new TypeError('runTracker: options.mdPath is required');
+  const line = (stream) => (...parts) => { stream.write(`${format(...parts)}\n`); };
+  const opened = [];
+  const ctx = {
+    mdPath,
+    stdout,
+    log: line(stdout),
+    error: line(stderr),
+    // Every index a command opens is closed when runTracker returns. A CLI
+    // could leave that to process exit; an in-process caller cannot, and on
+    // Windows an open handle also keeps the file from being deleted.
+    openDb(DatabaseSync) {
+      const db = openDb(DatabaseSync, ctx.dbPath());
+      opened.push(db);
+      return db;
+    },
+    dbPath() {
+      const path = resolveDbPath(mdPath, options.dbPath);
+      // SQLite must never open the source of truth itself (an explicit
+      // CAREER_OPS_TRACKER_DB could point both names at the same file). Checked
+      // where the path is used rather than up front, so a command that never
+      // opens the index is not refused over it.
+      if (resolve(mdPath) === resolve(path)) {
+        ctx.error(`Error: DB path must differ from the markdown path (${mdPath}).`);
+        throw new TrackerExit(1);
+      }
+      return path;
+    },
+    ledgerPath() {
+      return options.ledgerPath || resolveLedgerPath(mdPath);
+    },
+  };
+  // A bare top-level `--help`/`-h` is a request for usage, not an unknown
+  // command: it prints the same text and succeeds.
+  if (command === '--help' || command === '-h') {
+    ctx.log(TOP_LEVEL_USAGE);
+    return 0;
+  }
   const fn = COMMANDS[command];
   if (!fn) {
-    console.log('Usage: node tracker.mjs <sync|query|history|export|delete> [flags]');
-    console.log('See the header comment of this file for examples, or docs/SCRIPTS.md.');
-    process.exit(command ? 1 : 0);
+    ctx.log(TOP_LEVEL_USAGE);
+    return command ? 1 : 0;
   }
-  await fn(args);
+  try {
+    return (await fn(args, ctx)) ?? 0;
+  } catch (err) {
+    if (err instanceof TrackerExit) return err.exitCode;
+    throw err;
+  } finally {
+    for (const db of opened) db.close();
+  }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  main().catch(err => {
-    console.error('Fatal:', err.message);
-    process.exit(1);
-  });
+if (isMainModule(import.meta.url)) {
+  const [command, ...args] = process.argv.slice(2);
+  // #4602: flags are validated here, at the CLI boundary, before runTracker
+  // sees them. validateFlags() prints and calls process.exit(), which is right
+  // for a command line and wrong inside runTracker, whose contract is to
+  // return the exit status and write only to the streams it was given.
+  if (Object.hasOwn(SUBCOMMAND_FLAGS, command)) {
+    const { known, valueFlags, usage } = SUBCOMMAND_FLAGS[command];
+    // requireOperand: `query --company --json` must be a usage error, not an
+    // unfiltered listing — no subcommand has a richer check of its own.
+    validateFlags(args, known, usage, { valueFlags, requireOperand: true });
+  }
+  runTracker(command, args, {
+    mdPath: resolveTrackerPath(getCareerOpsRoot()),
+    dbPath: process.env.CAREER_OPS_TRACKER_DB,
+  }).then(
+    (code) => { process.exitCode = code; },
+    (err) => {
+      console.error('Fatal:', err.message);
+      process.exitCode = 1;
+    },
+  );
 }

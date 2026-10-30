@@ -1,0 +1,23 @@
+<!--
+  awards.html — section partial for Awards & Honors (#2220).
+
+  Field placeholders filled per entry:
+    TITLE      — award name (e.g. "Gold Medal, International Olympiad in Informatics")
+    ORG_BLOCK  — conditional: award-org span with the issuing body when present;
+                 falls back to empty award-org span (ORG_EMPTY) for table-cell alignment
+    YEAR_BLOCK — conditional: award-year span with year text when present;
+                 falls back to empty award-year span (YEAR_EMPTY) for alignment
+
+  Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
+-->
+<!--ENTRY-->
+<div class="award-item">
+  <span class="award-title">{{TITLE}}</span>
+  {{ORG_BLOCK}}
+  {{YEAR_BLOCK}}
+</div>
+<!--ORG_BLOCK--><span class="award-org">{{ORG}}</span><!--/ORG_BLOCK-->
+<!--ORG_EMPTY--><span class="award-org"></span><!--/ORG_EMPTY-->
+<!--YEAR_BLOCK--><span class="award-year">{{YEAR}}</span><!--/YEAR_BLOCK-->
+<!--YEAR_EMPTY--><span class="award-year"></span><!--/YEAR_EMPTY-->
+<!--/ENTRY-->
