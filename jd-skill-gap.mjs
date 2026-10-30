@@ -105,6 +105,30 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
   ].join('|') + ')s?\\b|(?:' + [
+    // Spanish (es-419 / es-ES) requirement headers. A Spanish-language
+    // posting's requirements block is invisible to the English list above, so
+    // every Spanish JD read as "no-requirements-section" — the same gap the
+    // zh-TW / zh-CN entries below close for Chinese postings. `modes/es/`
+    // makes the Spanish market a supported one.
+    'requisitos',
+    'requisitos?\\s+(?:del\\s+puesto|de\\s+la\\s+empresa|del\\s+equipo|principales|m\\u00ednimos)',
+    'requerimientos',
+    'requerimientos?\\s+(?:del\\s+puesto|espec\\u00edficos|generales)',
+    'calificaciones',
+    'calificaciones?\\s+(?:requeridas|necesarias)',
+    'qu[eé]\\s+buscamos',
+    'lo\\s+que\\s+buscamos',
+    'lo\\s+que\\s+necesitas',
+    'lo\\s+que\\s+esperamos',
+    'perfil\\s+(?:del\\s+cargo|de\\s+la\\s+empresa|requerido|ideal)',
+    'conocimientos',
+    'conocimientos?\\s+(?:requeridos|necesarios)',
+    'habilidades',
+    'habilidades?\\s+(?:requeridas|necesarias)',
+    'competencias',
+    'competencias?\\s+(?:requeridas|necesarias)',
+    'para\\s+el\\s+puesto',
+  ].join('|') + ')\\b|(?:' + [
     // zh-TW / zh-CN requirement headers.
     // 104 / 1111 / CakeResume / Yourator all use variants of these headings.
     '\u61C9\u5FB5\u689D\u4EF6',   // 應徵條件
@@ -158,6 +182,14 @@ const NON_REQUIREMENT_HEADER_RE = new RegExp(
     'equal\\s+opportunity', 'eeo', 'diversity',
     'interview\\s+process', 'how\\s+to\\s+apply', 'to\\s+apply',
     'our\\s+(?:stack|process|values|mission)',
+    // Spanish (es-419 / es-ES) closing headers. Without them a Spanish
+    // posting's "Beneficios" block stays open and its perks are scored as
+    // required skills — the same failure the English closers prevent.
+    'beneficios?', 'funciones?', 'responsabilidades?',
+    'lo\\s+que\\s+ofrecemos', 'qu[eé]\\s+ofrecemos', 'nuestro\\s+ofrecimiento',
+    'acerca\\s+de\\s+nosotros', 'acerca\\s+de\\s+la\\s+empresa',
+    'c[oó]mo\\s+postular', 'postulaci[oó]n', 'proceso\\s+de\\s+selecci[oó]n',
+    'etapas\\s+del\\s+proceso',
   ].join('|') + ')\\b|(?:' + [
     // zh-TW / zh-CN closing headers — drops \b for the same CJK reason.
     '\u5DE5\u4F5C\u5167\u5BB9',   // 工作內容
@@ -512,7 +544,12 @@ const ANY_HEADING_RE = /^#{1,6}\s/;
 // level-1 or level-2 heading: at level 3 they would also match an employer
 // such as "### Acme Technologies — Remote" and promote that job's prose into
 // named skills.
-const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies))\b/i;
+//
+// The Spanish words are the ones a Spanish cv.md actually uses: "Aptitudes y
+// Habilidades" and "Competencias Técnicas". Without them a Spanish cv.md had
+// no named-skills section at all, so every skill it listed was reported as a
+// gap — the check's own "already in Skills section" bucket stayed empty.
+const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies)|aptitudes|habilidades|competencias)\b/i;
 const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b/i;
 
 function isSkillsHeading(line) {
