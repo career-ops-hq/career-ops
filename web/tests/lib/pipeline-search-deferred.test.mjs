@@ -27,3 +27,11 @@ test("the row filter reads the deferred search value, not the keystroke value", 
   assert.doesNotMatch(memo, /\bq\.trim\(\)|\bq\.toLowerCase\(\)/, "the filter still reads q directly");
   assert.match(memo, /\[visibleApplications, tab, deferredQ, sort, minFilter\]/);
 });
+
+test("opening a row reads the current search without passing it into every row", () => {
+  assert.match(src, /const detailQuery = pipelineQuery\(params\.toString\(\), deferredQ\)/);
+  assert.match(src, /trackerDetailHref\(n, paramsRef\.current, qRef\.current\)/);
+  assert.doesNotMatch(src, /pipelineQuery\(params\.toString\(\), q\)/);
+  const handler = src.slice(src.indexOf("const followDetail = useCallback("), src.indexOf("const onStatusSaved"));
+  assert.match(handler, /\[\]\);/);
+});

@@ -17,7 +17,7 @@ import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
-import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/lib/pipeline-navigation.mjs";
+import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
@@ -107,8 +107,26 @@ export function PipelineView({
   // runs at low priority, and React drops a stale render when the next
   // keystroke arrives, so typing no longer waits on the whole table.
   const deferredQ = useDeferredValue(q);
-  // Typing stays local, so include it explicitly when leaving the list.
+  // The rendered link keeps the deferred search, so a keystroke does not
+  // re-render every row. A click reads the box as it is now.
+  const qRef = useRef(q);
+  const paramsRef = useRef(params.toString());
+  const routerRef = useRef(router);
+  qRef.current = q;
+  paramsRef.current = params.toString();
+  routerRef.current = router;
   const detailQuery = pipelineQuery(params.toString(), deferredQ);
+  const followDetail = useCallback((event: React.MouseEvent<HTMLAnchorElement>, n: string) => {
+    const href = trackerDetailHref(n, paramsRef.current, qRef.current);
+    event.currentTarget.href = href;
+    const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1;
+    if (modified) return;
+    event.preventDefault();
+    routerRef.current.push(href);
+  }, []);
+  const stampDetail = useCallback((event: React.PointerEvent<HTMLAnchorElement>, n: string) => {
+    event.currentTarget.href = trackerDetailHref(n, paramsRef.current, qRef.current);
+  }, []);
 
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
@@ -380,6 +398,8 @@ export function PipelineView({
                   detailQuery={detailQuery}
                   onToggle={toggleRow}
                   onSaved={onStatusSaved}
+                  onOpen={followDetail}
+                  onArm={stampDetail}
                 />
               ))}
             </tbody>
@@ -403,17 +423,23 @@ const TrackerRow = memo(function TrackerRow({
   detailQuery,
   onToggle,
   onSaved,
+  onOpen,
+  onArm,
 }: {
   r: Application;
   selected: boolean;
   detailQuery: string;
   onToggle: (key: string) => void;
   onSaved: (r: Application, status: string, restoreFocus: boolean) => void;
+  onOpen: (event: React.MouseEvent<HTMLAnchorElement>, n: string) => void;
+  onArm: (event: React.PointerEvent<HTMLAnchorElement>, n: string) => void;
 }) {
   const company = companyPresentation(r);
   const key = applicationKey(r);
   const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
   const posting = postingHref(r.url);
+  const open = (event: React.MouseEvent<HTMLAnchorElement>) => onOpen(event, r.n);
+  const arm = (event: React.PointerEvent<HTMLAnchorElement>) => onArm(event, r.n);
   return (
     <tr data-application-key={key} className="group transition-colors hover:bg-surface/40">
       <td className="w-8 px-3 py-3">
@@ -425,19 +451,19 @@ const TrackerRow = memo(function TrackerRow({
         />
       </td>
       <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
-        <Link href={detailHref} tabIndex={-1} className="transition-colors group-hover:text-brand-text">
+        <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="transition-colors group-hover:text-brand-text">
           #{r.n}
         </Link>
       </td>
       <td className="px-4 py-3 font-medium">
-        <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
+        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
           <CompanyLogo name={company.logoName} size={20} />
           {company.label}
         </Link>
       </td>
       <td className="px-4 py-3 text-muted">
         <div className="flex items-center gap-2">
-          <Link href={detailHref} tabIndex={-1}>{r.role}</Link>
+          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open}>{r.role}</Link>
           {posting && (
             <a
               href={posting}
