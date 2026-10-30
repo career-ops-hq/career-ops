@@ -54,7 +54,7 @@ language:
 | 檔名 | 對應原檔 | 用途 |
 |---|---|---|
 | `_shared.md` | `modes/_shared.md` | 共用脈絡、個人檔案偵測、全域規則，以及台灣市場特性 |
-| `oferta.md` | `modes/oferta.md` | 完整職缺評估（Block A–F ＋ G 真實性查核） |
+| `oferta.md` | `modes/oferta.md` | 完整職缺評估（Block A–H） |
 | `apply.md` | `modes/apply.md` | 網頁表單填寫的即時助理 |
 | `pipeline.md` | `modes/pipeline.md` | URL 收件匣／職缺蒐集的第二大腦 |
 
