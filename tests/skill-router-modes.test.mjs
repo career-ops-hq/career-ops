@@ -98,9 +98,15 @@ const routingRows = routingSection.split('\n').filter((line) => line.startsWith(
 const parsedRows = routingRows.map((row) => row.match(/^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|$/));
 const unparsedRows = routingRows.filter((row, i) => !parsedRows[i] && !/^\|\s*(\(empty|JD text)/.test(row));
 const routeInputs = new Map(parsedRows.filter(Boolean).map((m) => [m[1], m[2]]));
+// A Map keeps one mode per input, so a second row for the same input would
+// drop a mode from the comparison below without a word.
+const duplicateInputs = [...new Set(parsedRows.filter(Boolean).map((m) => m[1])
+  .filter((input, i, all) => all.indexOf(input) !== i))];
 
 if (menuInputs.length < 20 || routeInputs.size < 20 || unparsedRows.length) {
   fail(`could not read the discovery menu (${menuInputs.length} entries) or routing table (${routeInputs.size} inputs${unparsedRows.length ? `; unparsed rows: ${unparsedRows.join(' ')}` : ''})`);
+} else if (duplicateInputs.length) {
+  fail(`routing table routes the same input more than once: ${duplicateInputs.join(', ')}`);
 } else {
   // An alias such as `inbox` → `agent-inbox` needs no line of its own while
   // another input for the same mode is listed.
