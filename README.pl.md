@@ -285,9 +285,9 @@ Wklej adres URL lub opis oferty do swojego CLI z AI. career-ops sprawdza, czy of
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor lub dowolne inne CLI | Zwykły język: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor lub dowolne inne obsługiwane CLI | Zwykły język: "Run the career-ops scan mode" |
 
-`/career-ops` bez niczego po nim pokazuje menu komend w CLI, które go używają. Zwykły język działa w każdym CLI. Jako wtyczka Claude Code komenda to `/career-ops:career-ops`.
+`/career-ops` bez niczego po nim pokazuje menu komend w CLI, które go używają. Zwykły język działa w każdym obsługiwanym CLI. Jako wtyczka Claude Code komenda to `/career-ops:career-ops`.
 
 Wszystkie korzystają z jednego routera, `.agents/skills/career-ops/SKILL.md`, i tych samych plików `modes/*.md`, więc tryb działa tak samo w każdym CLI. Komendy slash nie są gwarantowane w Codex: poproś zwykłym językiem albo uruchom jeden prompt w trybie headless przez `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Jak uruchomić career-ops w każdym obsługiwanym CLI, komendy headless tam, gdzie CLI je ma, oraz uwagi konfiguracyjne dla poszczególnych CLI są w [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
