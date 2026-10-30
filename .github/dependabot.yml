@@ -6,6 +6,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
 
+  # web/ has its own package.json and lockfile; the "/" entry above does not
+  # reach it.
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
   - package-ecosystem: "gomod"
     directory: "/dashboard"
     schedule:
