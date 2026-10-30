@@ -183,19 +183,6 @@ export function loadContext(mode = 'full') {
   if (mode === 'match' || mode === 'single-pass') {
     console.log('📂 Loading context for single-pass CV-match mode...');
     const cvContent = readFile(PATHS.cv, 'cv.md');
-    // Same profile files as the full mode and as batch/batch-prompt-match.md,
-    // which the runner's match workers read: the archetypes, the targets and
-    // language.output. Without them a Gemini match report ignores the user's
-    // output language and archetype names.
-    const profileContent = readFile(PATHS.profile, '_profile.md');
-    const profileYml     = readFile(PATHS.profileYml, 'profile.yml');
-    const customContent  = existsSync(PATHS.custom) ? readFileSync(PATHS.custom, 'utf-8').trim() : '';
-    const customSection  = customContent ? `
-═══════════════════════════════════════════════════════
-USER HOUSE RULES & SCORING RULES (_custom.md)
-═══════════════════════════════════════════════════════
-${customContent}
-` : '';
 
     systemPromptTemplate = `You are career-ops, an AI job search assistant evaluating a job offer in single-pass CV match mode.
 Your objective is to extract candidate CV facts and evaluate candidate alignment with the Job Description in a single, fast inference call to minimize token overhead, bypassing the multi-step reasoning chain (Blocks A through G).
@@ -204,24 +191,6 @@ Your objective is to extract candidate CV facts and evaluate candidate alignment
 CANDIDATE RESUME (cv.md)
 ═══════════════════════════════════════════════════════
 ${cvContent}
-
-═══════════════════════════════════════════════════════
-CANDIDATE PROFILE & TARGETS (config/profile.yml)
-═══════════════════════════════════════════════════════
-${profileYml}
-
-═══════════════════════════════════════════════════════
-USER ARCHETYPES & NARRATIVE (_profile.md)
-═══════════════════════════════════════════════════════
-${profileContent}
-${customSection}
-═══════════════════════════════════════════════════════
-LANGUAGE RULE
-═══════════════════════════════════════════════════════
-Resolve language.output from config/profile.yml above (default: en when the key is absent).
-Write all human-facing output (report prose and headings) in language.output, whatever the
-language of the job description. Keep the SCORE_SUMMARY field names and the LEGITIMACY labels
-exactly as specified below, in English.
 
 ═══════════════════════════════════════════════════════
 INSTRUCTIONS (CONDENSED SINGLE-PASS EVALUATION)
