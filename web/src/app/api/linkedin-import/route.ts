@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
@@ -24,7 +25,7 @@ function runImport(text: string): Promise<ImportPayload> {
   const script = rootScript("linkedin-import");
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [script, "--json"], {
-      cwd: careerOpsRoot(),
+      cwd: resolveCodeRoot(process.cwd(), process.env),
       env: process.env,
       windowsHide: true,
     });
