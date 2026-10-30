@@ -285,9 +285,9 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor или любой другой CLI | Обычным языком: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor или любой другой поддерживаемый CLI | Обычным языком: "Run the career-ops scan mode" |
 
-`/career-ops` без продолжения показывает меню команд в CLI, которые его используют. Обычный язык работает в любом CLI. Как плагин Claude Code команда выглядит так: `/career-ops:career-ops`.
+`/career-ops` без продолжения показывает меню команд в CLI, которые его используют. Обычный язык работает в любом поддерживаемом CLI. Как плагин Claude Code команда выглядит так: `/career-ops:career-ops`.
 
 У всех них один общий роутер, `.agents/skills/career-ops/SKILL.md`, и одни и те же файлы `modes/*.md`, поэтому режим работает одинаково в любом CLI. Slash-команды в Codex не гарантированы: просите обычным языком или запустите один промпт в headless-режиме через `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Как запускать career-ops в каждом поддерживаемом CLI, headless-команды там, где они есть, и заметки по настройке отдельных CLI — в [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
