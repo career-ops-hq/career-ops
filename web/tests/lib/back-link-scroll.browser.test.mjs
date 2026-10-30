@@ -54,5 +54,8 @@ test("The in-page back link returns to the list where it was left", { skip: live
   await page.getByRole("link", { name: "Compare", exact: true }).click();
   await page.getByRole("heading", { name: "Compare" }).waitFor();
   assert.equal(await back().getAttribute("href"), "/pipeline?tab=ALL&sort=company&dir=1");
+  await back().click();
+  await page.waitForURL((u) => u.pathname === "/pipeline" && u.search === "?tab=ALL&sort=company&dir=1");
+  assert.equal(new URL(page.url()).search, "?tab=ALL&sort=company&dir=1");
   assert.deepEqual(errors, []);
 });
