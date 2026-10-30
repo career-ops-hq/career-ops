@@ -37,7 +37,7 @@ import { localToday } from './lib/local-today.mjs';
 import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, isNumericToken, validateFlags } from './lib/cli-flags.mjs';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
@@ -57,8 +57,8 @@ const KNOWN_FLAGS = [
 ];
 
 /**
- * A positive finite millisecond count, shared by the equals form and the
- * space form. `1e3` is 1000 in both. Anything else is not an operand.
+ * A positive finite millisecond count, shared by both forms. `1e3` is 1000.
+ * Zero, a negative, and a non-finite token are not a wait.
  *
  * @param {unknown} token
  * @returns {number|undefined}
@@ -69,27 +69,39 @@ function positiveThrottleMs(token) {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+const THROTTLE_ERROR = 'Error: --throttle needs a positive number of milliseconds';
+
 /**
- * `--throttle` alone means the 5000ms default. `--throttle 1000` and
- * `--throttle=1000` both mean 1000. A token that is not a positive finite
- * number stays off the operand, so the space form does not swallow a URL,
- * and the base stays on the default.
+ * Bare `--throttle`, and a following token that is not a number, mean 5000.
+ * That token stays a URL. A positive number in either form is that wait.
+ * `0`, a negative, `--throttle=foo`, and an empty `--throttle=` are usage
+ * errors. The space form must not check `0` as a URL, and the equals form
+ * must not keep the default.
  *
  * @param {string[]} args
- * @returns {number}
+ * @returns {{ms: number}|{error: string}}
  */
-function throttleBaseMsFrom(args) {
-  if (!hasFlag(args, '--throttle')) return 0;
-  const eq = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
-  if (eq !== undefined) return positiveThrottleMs(eq.slice('--throttle='.length)) ?? 5000;
+function readThrottle(args) {
+  if (!hasFlag(args, '--throttle')) return { ms: 0 };
+  const equals = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
+  if (equals !== undefined) {
+    const ms = positiveThrottleMs(equals.slice('--throttle='.length));
+    return ms === undefined ? { error: THROTTLE_ERROR } : { ms };
+  }
   const idx = args.indexOf('--throttle');
-  return positiveThrottleMs(idx === -1 ? undefined : args[idx + 1]) ?? 5000;
+  const next = idx === -1 ? undefined : args[idx + 1];
+  if (isNumericToken(next)) {
+    const ms = positiveThrottleMs(next);
+    return ms === undefined ? { error: THROTTLE_ERROR } : { ms };
+  }
+  return { ms: 5000 };
 }
 
 /**
  * Tokens that are not flags and not a flag's operand. Those are the URLs.
  * `--dry-run` is not a flag this script accepts, so it never reaches here:
- * validateFlags rejects it first. A numeric `--throttle` operand is not a URL.
+ * validateFlags rejects it first. A numeric `--throttle` operand, including
+ * `0`, is not a URL. A non-positive number is a usage error before this.
  *
  * @param {string[]} args
  * @returns {string[]}
@@ -110,7 +122,7 @@ function urlPositionals(args) {
     }
     if (a === '--throttle') {
       skip.add(i);
-      if (positiveThrottleMs(args[i + 1]) !== undefined) skip.add(i + 1);
+      if (isNumericToken(args[i + 1])) skip.add(i + 1);
       continue;
     }
     if (a === '-h' || a.startsWith('--')) skip.add(i);
@@ -230,12 +242,14 @@ async function main() {
   // checked three strings and never opened the file, and `--help` ran before
   // that filter so `--help --bogus` exited 0. validateFlags rejects the unknown
   // flag first, then a missing --file path, then prints help. --throttle stays
-  // optional (bare `--throttle` is the 5000ms default) and --status keeps the
-  // message the status-flag test locks, so those two stay out of requireOperand.
-  // A whitespace-only --file path is still rejected below.
+  // optional (bare `--throttle` is the 5000ms default). Its space-form operand
+  // is only a number, so `-no-record` is an unknown flag instead of a wait.
+  // --status keeps the message the status-flag test locks, so those two stay
+  // out of requireOperand. A whitespace-only --file path is still rejected below.
   // See tests/validate-flags-value-operand.test.mjs.
   validateFlags(args, KNOWN_FLAGS, USAGE, {
     valueFlags: ['--file', '--status', '--throttle'],
+    numericFlags: ['--throttle'],
     // --file must have a path before --help can exit 0. --throttle stays
     // optional, and --status keeps its own message below.
     requiredFlags: ['--file'],
@@ -257,9 +271,14 @@ async function main() {
   // (jittered) between browser checks of the same host (createHostSpacer in
   // liveness-browser.mjs) to stay under rate-based WAF limits. pracuj.pl's
   // Cloudflare flags the session after ~2 rapid hits, so a bulk run needs
-  // spacing. Bare --throttle uses a 5000ms base. The space form used to be
-  // ignored (the number was checked as a URL) and the base stayed 5000.
-  const throttleBaseMs = throttleBaseMsFrom(args);
+  // spacing. Bare --throttle uses a 5000ms base. A non-positive number is a
+  // usage error here, before any URL is checked.
+  const throttle = readThrottle(args);
+  if (throttle.error) {
+    console.error(throttle.error);
+    process.exit(1);
+  }
+  const throttleBaseMs = throttle.ms;
   const record = recordingEnabled(args);
   // `--status Rejected` as well as `--status=Rejected`. Only the `=` form was
   // read, so the space form, and any `--status` with no value, fell back to

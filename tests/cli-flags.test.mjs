@@ -193,6 +193,26 @@ try {
       fail(`requiredFlags case => missing=${missing.status} ${missing.stderr} bare=${bare.status} unknown=${unknown.status} ${unknown.stderr}`);
     }
   }
+  {
+    const opts = { valueFlags: ['--throttle', '--since'], numericFlags: ['--throttle'] };
+    const known = ['--throttle', '--since', '--no-record', '--help', '-h'];
+    const short = runValidate(['--throttle', '-no-record'], known, 'USAGE-TEXT', opts);
+    const zero = runValidate(['--throttle', '0'], known, 'USAGE-TEXT', opts);
+    const sci = runValidate(['--throttle', '1e3'], known, 'USAGE-TEXT', opts);
+    const neg = runValidate(['--throttle', '-5'], known, 'USAGE-TEXT', opts);
+    const eq = runValidate(['--throttle=1000'], known, 'USAGE-TEXT', opts);
+    const since = runValidate(['--since', '-5'], known, 'USAGE-TEXT', opts);
+    if (short.status === 1 && /unrecognized flag\(s\): -no-record/.test(short.stderr || '')
+      && zero.status === 0 && /REACHED-END/.test(zero.stdout || '')
+      && sci.status === 0 && /REACHED-END/.test(sci.stdout || '')
+      && neg.status === 0 && /REACHED-END/.test(neg.stdout || '')
+      && eq.status === 0 && /REACHED-END/.test(eq.stdout || '')
+      && since.status === 0 && /REACHED-END/.test(since.stdout || '')) {
+      pass('numericFlags consumes only a number, so a short flag stays unrecognized and --since -5 still passes');
+    } else {
+      fail(`numericFlags case => short=${short.status} ${(short.stderr || '').trim()} zero=${zero.status} sci=${sci.status} neg=${neg.status} eq=${eq.status} since=${since.status} ${(since.stderr || '').trim()}`);
+    }
+  }
 
   {
     const opts = { valueFlags: ['--since'], requireOperand: true };

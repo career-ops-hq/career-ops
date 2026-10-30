@@ -139,6 +139,84 @@ test('--throttle 1e3 is the same wait as 1000, not a URL', () => {
   assert.doesNotMatch(text, /1e3/);
 });
 
+test('--throttle 0 is a usage error, not a URL', () => {
+  const result = run(['--throttle', '0', '--no-record', '--no-fallback', 'not-a-url']);
+  const text = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(text, /--throttle needs a positive number of milliseconds/);
+  assert.doesNotMatch(text, /Checking /);
+  assert.doesNotMatch(text, /not-a-url/);
+});
+
+test('--throttle=0 is the same usage error, not the default wait', () => {
+  const result = run(['--throttle=0', '--no-record', '--no-fallback', 'not-a-url']);
+  const text = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(text, /--throttle needs a positive number of milliseconds/);
+  assert.doesNotMatch(text, /Checking /);
+  assert.doesNotMatch(text, /throttle ~/);
+  assert.doesNotMatch(text, /not-a-url/);
+});
+
+test('an empty or non-numeric --throttle= value is a usage error', () => {
+  const result = run(['--throttle=', '--no-record', '--no-fallback', 'not-a-url']);
+  const empty = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(empty, /--throttle needs a positive number of milliseconds/);
+  assert.doesNotMatch(empty, /Checking /);
+
+  const bad = run(['--throttle=foo', '--no-record', '--no-fallback', 'not-a-url']);
+  const text = out(bad);
+  assert.equal(bad.status, 1, describeSpawn(bad));
+  assert.match(text, /--throttle needs a positive number of milliseconds/);
+  assert.doesNotMatch(text, /Checking /);
+  assert.doesNotMatch(text, /not-a-url/);
+});
+
+test('--throttle -5 is a bad wait, not an unknown flag and not a URL', () => {
+  const result = run(['--throttle', '-5', '--no-record', '--no-fallback', 'not-a-url']);
+  const text = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(text, /--throttle needs a positive number of milliseconds/);
+  assert.doesNotMatch(text, /unrecognized flag/);
+  assert.doesNotMatch(text, /Checking /);
+});
+
+test('a URL after --throttle stays a URL and the wait stays 5000', () => {
+  const result = run(['--throttle', 'not-a-url', '--no-record', '--no-fallback']);
+  const text = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(text, /Checking 1 URL/);
+  assert.match(text, /throttle ~5-10s/);
+  assert.match(text, /not-a-url/);
+});
+
+test('--throttle --no-record keeps the default wait and does not record', () => {
+  const result = run(['--throttle', '--no-record', '--no-fallback', 'not-a-url']);
+  const text = out(result);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(text, /Checking 1 URL/);
+  assert.match(text, /throttle ~5-10s/);
+  assert.match(text, /no-record/);
+});
+
+test('--throttle -no-record is an unknown flag, so the run does not record', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'liveness-throttle-'));
+  const file = join(dir, 'urls.txt');
+  writeFileSync(file, 'not-a-url\n');
+  try {
+    const result = run(['--throttle', '-no-record', '--file', file]);
+    const text = out(result);
+    assert.equal(result.status, 1, describeSpawn(result));
+    assert.match(text, /unrecognized flag/);
+    assert.match(text, /-no-record/);
+    assert.doesNotMatch(text, /Checking /);
+    assert.doesNotMatch(text, /not-a-url/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('--file --help reports the missing path instead of exiting 0', () => {
   const result = run(['--file', '--help']);
   const text = out(result);

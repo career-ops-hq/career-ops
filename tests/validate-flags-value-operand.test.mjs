@@ -164,6 +164,7 @@ const OWN_GUARD = new Map([
     'a hand-rolled --file check BEFORE validateFlags, covering more than requireOperand does: `--file=` (empty) and `--file -h` (single-dash next token) are rejected too.'],
   ['check-liveness.mjs',
     '--throttle takes an OPTIONAL operand: bare `--throttle` is the 5000ms default, so requireOperand would reject a call the usage documents. ' +
+    'numericFlags only treats a number literal as that operand, so `-no-record` stays an unknown flag. A number that is not positive is rejected in this file before it is checked as a URL. ' +
     '--status keeps its own message ("--status needs a value"), locked by tests/check-liveness-status-flag.test.mjs. ' +
     '--file is rejected beside those, before any token is checked as a URL, and requiredFlags checks it before --help can exit 0.'],
 ]);
