@@ -10,7 +10,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pickAwaitingDecision } from "../../src/lib/home/awaiting.mjs";
+import { pickAwaitingDecision, groupAwaiting } from "../../src/lib/home/awaiting.mjs";
 
 // The real parser is lib/format.ts's scoreNum, which a .mjs test cannot import.
 // This stub must stay behaviourally identical for the cases below: a leading
@@ -37,31 +37,27 @@ test("the status match is a case-insensitive prefix, so a dated or lowercase Eva
   assert.equal(pickAwaitingDecision(rows, scoreOf).length, 2);
 });
 
-test("newest first, whatever order the tracker file happens to be in", () => {
-  // Deliberately supplied oldest-first: this is the case #3529 can reshuffle.
-  const rows = [row("2026-08-01", "3.0/5"), row("2026-08-30", "3.0/5"), row("2026-08-15", "3.0/5")];
+test("best score first, whatever order the tracker file happens to be in", () => {
+  const rows = [row("2026-08-30", "2.4/5"), row("2026-08-01", "4.9/5"), row("2026-08-15", "3.9/5")];
+  assert.deepEqual(
+    pickAwaitingDecision(rows, scoreOf).map((r) => r.score),
+    ["4.9/5", "3.9/5", "2.4/5"],
+  );
+});
+
+test("the newer row leads a score tie and an undated row goes last", () => {
+  const rows = [row("", "4.0/5"), row("2026-08-01", "4.0/5"), row("2026-08-20", "4.0/5")];
   assert.deepEqual(
     pickAwaitingDecision(rows, scoreOf).map((r) => r.date),
-    ["2026-08-30", "2026-08-15", "2026-08-01"],
+    ["2026-08-20", "2026-08-01", ""],
   );
 });
 
-test("the score breaks a same-day tie so the better offer leads", () => {
-  const rows = [row("2026-08-20", "3.0/5"), row("2026-08-20", "4.7/5"), row("2026-08-20", "4.1/5")];
+test("an unscored row sorts after every scored row", () => {
+  const rows = [row("2026-08-30", ""), row("2026-08-01", "1.0/5")];
   assert.deepEqual(
-    pickAwaitingDecision(rows, scoreOf).map((r) => r.score),
-    ["4.7/5", "4.1/5", "3.0/5"],
-  );
-});
-
-test("an undated row sorts last even with the highest score", () => {
-  // Two negations deep: "" compares LESS than any date, and the comparison is
-  // descending, so least lands at the end. Getting this backwards would put
-  // every malformed row at the top of the user's action queue, silently.
-  const rows = [row("2026-08-01", "1.0/5"), row("", "5.0/5")];
-  assert.deepEqual(
-    pickAwaitingDecision(rows, scoreOf).map((r) => r.score),
-    ["1.0/5", "5.0/5"],
+    pickAwaitingDecision(rows, scoreOf).map((r) => r.date),
+    ["2026-08-01", "2026-08-30"],
   );
 });
 
@@ -121,4 +117,47 @@ test("a terminal status is still excluded, and prefix-matching is not the reason
     row("2026-08-02", "4.0/5", "Evaluated"),
   ];
   assert.deepEqual(pickAwaitingDecision(rows, scoreOf).map((r) => r.date), ["2026-08-02"]);
+});
+
+test("an unscored row gets its own group, not Below the apply line", () => {
+  const rows = [row("2026-08-04", "4.2/5"), row("2026-08-03", "3.1/5"), row("2026-08-02", ""), row("2026-08-01", "n/a")];
+  assert.deepEqual(
+    groupAwaiting(pickAwaitingDecision(rows, scoreOf)).map(([label, group]) => [label, group.map((r) => r.date)]),
+    [
+      ["Recommended", ["2026-08-04"]],
+      ["Below the apply line", ["2026-08-03"]],
+      ["Not scored yet", ["2026-08-02", "2026-08-01"]],
+    ],
+  );
+});
+
+test("an empty group is left out", () => {
+  assert.deepEqual(
+    groupAwaiting([row("2026-08-01", "")]).map(([label]) => label),
+    ["Not scored yet"],
+  );
+});
+
+// #5300: the report page passes the posting's legitimacy to applyLineLabel, so
+// a flagged 4.5 reads "Check the posting first" there. Today has to agree, and
+// the row must stay on Today under that label rather than drop out because the
+// label is not one of the groups.
+test("a flagged posting above the line is not Recommended", () => {
+  const rows = [row("2026-08-04", "4.5/5"), row("2026-08-03", "4.5/5"), row("2026-08-02", "3.1/5")];
+  const legitimacy = { "2026-08-04": "Proceed with Caution", "2026-08-03": "High Confidence", "2026-08-02": "Suspicious" };
+  assert.deepEqual(
+    groupAwaiting(pickAwaitingDecision(rows, scoreOf), (r) => legitimacy[r.date]).map(([label, group]) => [label, group.map((r) => r.date)]),
+    [
+      ["Recommended", ["2026-08-03"]],
+      ["Check the posting first", ["2026-08-04"]],
+      ["Below the apply line", ["2026-08-02"]],
+    ],
+  );
+});
+
+test("without legitimacy, grouping is by score alone", () => {
+  assert.deepEqual(
+    groupAwaiting([row("2026-08-01", "4.5/5")]).map(([label]) => label),
+    ["Recommended"],
+  );
 });

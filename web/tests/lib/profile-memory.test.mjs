@@ -1,0 +1,210 @@
+// Tests for readProfileMemory(): what modes/_profile.md actually contributes to
+// a prompt (#4003).
+//
+// The failure this file exists to stop is a silent one: when the read returns
+// "", buildPrompt() drops the whole "Durable notes about the user" section
+// rather than emitting an empty one, so a run with no guardrails is
+// byte-indistinguishable from a run that never had any. Nothing errors, nothing
+// is logged, and the output looks exactly like correctly constrained output.
+// That is why the last test here asserts on the built PROMPT and not only on
+// this function's return value.
+//
+// Run:  node --test tests/lib/profile-memory.test.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { readProfileMemory, NOTES_START, NOTES_END } from "../../src/lib/profile-memory.mjs";
+import { buildPrompt } from "../../src/lib/run-prompts.mjs";
+
+// Synthetic, and deliberately of the KIND users really put in this file: the
+// rules that keep generated CVs and form answers honest.
+const HANDWRITTEN = `# Profile customization
+
+## Archetypes
+- Staff platform engineer at a mid-size SaaS company
+
+## Never claim
+- I contributed to the billing migration, I did not lead it.
+- The 40% latency figure covers one service, not the whole platform.
+`;
+
+const ROOTS = [];
+
+function makeRoot({ profile, legacy } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "co-profile-mem-"));
+  ROOTS.push(root);
+  if (profile !== undefined) {
+    mkdirSync(join(root, "modes"), { recursive: true });
+    writeFileSync(join(root, "modes", "_profile.md"), profile);
+  }
+  if (legacy !== undefined) {
+    mkdirSync(join(root, ".career-ops-web"), { recursive: true });
+    writeFileSync(join(root, ".career-ops-web", "memory.md"), legacy);
+  }
+  return root;
+}
+
+test.after(() => {
+  for (const r of ROOTS) rmSync(r, { recursive: true, force: true });
+});
+
+test("a profile with no managed block still reaches the prompt", () => {
+  // Given: the DEFAULT state of an install. modes/_profile.template.md ships
+  // with no co-web-notes markers, doctor.mjs auto-copies it, and rememberFact()
+  // is the only thing that ever creates the block, so until the web assistant
+  // happens to remember something, every personalized profile looks like this.
+  const root = makeRoot({ profile: HANDWRITTEN });
+
+  const memory = readProfileMemory(root);
+
+  assert.match(memory, /I contributed to the billing migration/);
+  assert.match(memory, /Staff platform engineer/);
+});
+
+test("a managed block does not displace the content around it", () => {
+  // Given: the state after the assistant has remembered one fact. The block now
+  // exists, and the marker slice used to return ONLY its bullets, silently
+  // dropping everything the user hand-wrote in the same file.
+  const root = makeRoot({
+    profile: `${HANDWRITTEN}
+## Notes from the web assistant
+${NOTES_START}
+- Prefers fully remote roles.
+${NOTES_END}
+`,
+  });
+
+  const memory = readProfileMemory(root);
+
+  assert.match(memory, /Prefers fully remote roles/);
+  assert.match(memory, /I contributed to the billing migration/);
+});
+
+test("the legacy .career-ops-web/memory.md is still read when there is no profile", () => {
+  // Given: an install that predates modes/_profile.md as the memory store.
+  // Deleting the second fs read in readProfileMemory() is what fails this.
+  const root = makeRoot({ legacy: "- Wants roles in the EU only.\n" });
+
+  assert.equal(readProfileMemory(root), "- Wants roles in the EU only.");
+});
+
+test("an empty profile falls through to the legacy store rather than shadowing it", () => {
+  // Given: doctor.mjs created modes/_profile.md but nothing has been written to
+  // it. An existing file must not win over a legacy store that has content.
+  const root = makeRoot({ profile: "\n\n  \n", legacy: "- Wants roles in the EU only.\n" });
+
+  assert.equal(readProfileMemory(root), "- Wants roles in the EU only.");
+});
+
+test("an install with content in BOTH stores keeps both, all the way into the prompt", () => {
+  // Given: someone who used the web assistant before the move to
+  // modes/_profile.md, then hand-wrote profile rules after it. Returning the
+  // profile the moment it has content makes the legacy read below unreachable
+  // for exactly this person, and the notes they accumulated first disappear.
+  //
+  // Asserted on the built PROMPT, not on the return value, for the reason at the
+  // top of this file: buildPrompt() omits the notes section for an empty memory,
+  // so a half-dropped memory is invisible in the output either way.
+  const root = makeRoot({ profile: HANDWRITTEN, legacy: "- Wants roles in the EU only.\n" });
+
+  const memory = readProfileMemory(root);
+  const prompt = buildPrompt({
+    kind: "evaluate",
+    input: "https://example.com/jobs/1",
+    memory,
+    today: "2026-09-07",
+  });
+
+  assert.match(prompt, /I contributed to the billing migration, I did not lead it\./,
+    "the hand-written profile rule must reach the prompt");
+  assert.match(prompt, /Wants roles in the EU only\./,
+    "the legacy note must reach the prompt too, not be shadowed by the profile");
+  // Order is part of the contract: the canonical store leads, so a legacy note
+  // that contradicts a current rule reads as the older of the two.
+  assert.ok(memory.indexOf("Staff platform engineer") < memory.indexOf("Wants roles in the EU only"),
+    "modes/_profile.md must come first, ahead of the legacy store");
+});
+
+test("nothing on disk reads as no memory, not as an error", () => {
+  assert.equal(readProfileMemory(makeRoot()), "");
+});
+
+test("a file where modes/ belongs is an error, not silence", () => {
+  // `modes` as a FILE throws ENOTDIR. An earlier version of this file folded that
+  // into absent, reasoning that nobody had written a profile either way. That was
+  // wrong: `modes/` SHIPS with the repo (175 tracked files), so in a default
+  // install the directory always exists, and with a separate CAREER_OPS_ROOT an
+  // absent one reports ENOENT. A file standing where the directory belongs is a
+  // broken path, never a fresh install, and silence there costs the guardrails.
+  const root = mkdtempSync(join(tmpdir(), "co-profile-mem-"));
+  ROOTS.push(root);
+  writeFileSync(join(root, "modes"), "not a directory");
+
+  // POSIX reports ENOTDIR for a non-directory path component. Windows reports
+  // ERROR_PATH_NOT_FOUND, which libuv maps to ENOENT — the same code an absent
+  // file gives, and readProfileMemory must keep reading ENOENT as silence. So
+  // on Windows this condition is genuinely indistinguishable from "nobody wrote
+  // one", and asserting a throw there pins a promise the platform cannot keep.
+  //
+  // The errno is probed rather than a platform list pinned, so the assertion
+  // stays live wherever the distinction exists and degrades honestly where it
+  // does not.
+  let probe = null;
+  try {
+    readFileSync(join(root, "modes", "_profile.md"), "utf8");
+  } catch (err) {
+    probe = err?.code ?? null;
+  }
+
+  // The fixture is only meaningful while the read actually fails. If it ever
+  // succeeds, `probe` stays null and the branch below would assert against null,
+  // failing for a reason that has nothing to do with the behaviour under test.
+  assert.notEqual(probe, null, "the fixture must make the read fail: a file occupies modes/");
+
+  if (probe === "ENOENT") {
+    assert.equal(
+      readProfileMemory(root),
+      "",
+      "where the platform cannot tell a broken path from an absent one, silence is the documented behaviour",
+    );
+  } else {
+    assert.throws(
+      () => readProfileMemory(root),
+      (err) => err.code === probe,
+      `a file standing where modes/ belongs is a broken path, not a fresh install (expected ${probe})`,
+    );
+  }
+});
+
+test("a profile that exists and cannot be read is an error, not silence", () => {
+  // Given: modes/_profile.md is a DIRECTORY, so the read throws EISDIR. The file
+  // IS there; it just cannot be read.
+  const root = mkdtempSync(join(tmpdir(), "co-profile-mem-"));
+  ROOTS.push(root);
+  mkdirSync(join(root, "modes", "_profile.md"), { recursive: true });
+
+  // Returning "" here would be the #4003 failure one layer down. buildPrompt()
+  // omits the notes section for an empty memory, so guardrails that exist and
+  // could not be read would look exactly like guardrails nobody ever wrote.
+  assert.throws(() => readProfileMemory(root), (err) => err.code === "EISDIR");
+});
+
+test("the profile lands in the prompt buildPrompt() actually sends", () => {
+  // The whole point. buildPrompt() omits the notes section entirely for an empty
+  // memory, so asserting on readProfileMemory()'s return value alone would not
+  // catch a break between the two.
+  const root = makeRoot({ profile: HANDWRITTEN });
+
+  const prompt = buildPrompt({
+    kind: "evaluate",
+    input: "https://example.com/jobs/1",
+    memory: readProfileMemory(root),
+    today: "2026-09-07",
+  });
+
+  assert.match(prompt, /Durable notes about the user/);
+  assert.match(prompt, /I contributed to the billing migration, I did not lead it\./);
+});

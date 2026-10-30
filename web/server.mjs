@@ -92,8 +92,12 @@ try {
 // spawnSync because the child runs until Ctrl-C and this process has nothing to
 // do meanwhile. The terminal delivers SIGINT to the whole foreground group, so
 // next shuts itself down; re-signalling it from here would only double up.
+//
+// NEXT_TELEMETRY_DISABLED in the env, not next.config.mjs alone: `next dev`'s
+// parent CLI process records its session event without ever loading the config.
 const result = spawnSync(process.execPath, [nextEntry, ...plan.argv], {
   cwd: dirname(fileURLToPath(import.meta.url)),
+  env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
   stdio: "inherit",
 });
 

@@ -7,13 +7,18 @@
 // test can load it and assert it still covers templates/states.yml (#2917);
 // a hand-maintained copy is what drifted in #2249 and again after #2705.
 import { canonStatus } from "@/lib/status-alias.mjs";
+import { readReport } from "./report-header.mjs";
+// Block-G legitimacy tier → tone. Lives in report-sections.mjs, beside the
+// apply-line classifier, so a `node --test` unit test can assert it.
+import { legitimacyTone } from "./report-sections.mjs";
 
-export { canonStatus };
+export { canonStatus, legitimacyTone };
 
 export const CANONICAL_STATES = [
   "Evaluated",
   "Applied",
   "Responded",
+  "Assessment",
   "Interview",
   "Offer",
   "Hired",
@@ -23,12 +28,12 @@ export const CANONICAL_STATES = [
 ] as const;
 
 /** Status dot colour, mirroring the Go TUI: green hired/interview/offer, sky
- *  applied/responded, red skip/rejected, gray discarded, neutral evaluated. */
+ *  applied/responded/assessment, red skip/rejected, gray discarded, neutral evaluated. */
 export function statusDot(status: string): string {
   const c = canonStatus(status);
   // Hired is the terminal win — the best outcome, never a neutral gray dot.
   if (c.includes("HIRED") || c.includes("INTERVIEW") || c.includes("OFFER")) return "bg-emerald-400";
-  if (c.includes("APPLIED") || c.includes("RESPONDED")) return "bg-sky-400";
+  if (c.includes("APPLIED") || c.includes("RESPONDED") || c.includes("ASSESSMENT")) return "bg-sky-400";
   if (c.includes("REJECTED") || c.includes("SKIP")) return "bg-red-400";
   if (c.includes("DISCARDED")) return "bg-zinc-600";
   return "bg-zinc-500"; // Evaluated / unknown
@@ -58,15 +63,6 @@ export function scoreTone(score: string): "good" | "warn" | "bad" | "muted" {
   return "muted";
 }
 
-/** Block-G legitimacy tier → tone. */
-export function legitimacyTone(l: string): "good" | "warn" | "bad" | "muted" {
-  const s = l.toLowerCase();
-  if (s.includes("high") || s.includes("confian") || s.includes("legit")) return "good";
-  if (s.includes("caution") || s.includes("precau") || s.includes("caut")) return "warn";
-  if (s.includes("suspic") || s.includes("sospech") || s.includes("scam") || s.includes("fake")) return "bad";
-  return "muted";
-}
-
 export type ReportMeta = {
   title: string | null;
   fields: { label: string; value: string }[];
@@ -74,54 +70,12 @@ export type ReportMeta = {
   body: string;
 };
 
-const FIELD_KEYS: Record<string, string> = {
-  date: "Date",
-  fecha: "Date",
-  url: "URL",
-  archetype: "Archetype",
-  arquetipo: "Archetype",
-  score: "Score",
-  decision: "Decision",
-  legitimacy: "Legitimacy",
-  legitimidad: "Legitimacy",
-  pdf: "PDF",
-};
-
 /**
  * Tolerant report parser (per maintainer: adapt the render, don't migrate the
  * old data). Extracts the bold key/value header fields (Date/URL/Archetype/
- * Score/Legitimacy/PDF) when present and returns the body without the header
- * block. Degrades gracefully on legacy reports that lack some fields.
+ * Score/Decision/Legitimacy/PDF) when present and returns the body without
+ * the header block. Degrades gracefully on legacy reports that lack some fields.
  */
 export function parseReport(md: string): ReportMeta {
-  const lines = md.split("\n");
-  // Header runs until the first `---` or the first `## ` section.
-  let cut = lines.findIndex((l, i) => i > 0 && (/^\s*-{3,}\s*$/.test(l) || /^##\s/.test(l)));
-  if (cut === -1) cut = Math.min(lines.length, 10);
-
-  const headerLines = lines.slice(0, cut);
-  let bodyStart = cut;
-  if (/^\s*-{3,}\s*$/.test(lines[cut] ?? "")) bodyStart = cut + 1;
-  const body = lines.slice(bodyStart).join("\n").trim();
-
-  let title: string | null = null;
-  let legitimacy: string | null = null;
-  const fields: { label: string; value: string }[] = [];
-
-  for (const l of headerLines) {
-    const h = l.match(/^#\s+(.+)/);
-    if (h) {
-      title = h[1].replace(/^Evaluat?i[oó]n:?\s*/i, "").trim();
-      continue;
-    }
-    const m = l.match(/^\s*\*\*(.+?):\*\*\s*(.*)$/);
-    if (!m) continue;
-    const label = FIELD_KEYS[m[1].trim().toLowerCase()];
-    const value = m[2].trim();
-    if (!label || !value) continue;
-    if (label === "Legitimacy") legitimacy = value;
-    fields.push({ label, value });
-  }
-
-  return { title, fields, legitimacy, body: body || md };
+  return readReport(md);
 }

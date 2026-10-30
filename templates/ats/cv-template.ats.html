@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!-- career-ops-template
 name: ATS Friendly
-version: 1.0.0
+version: 1.1.0
+sections: all
 -->
 <html lang="{{LANG}}">
 <head>
@@ -15,6 +16,12 @@ version: 1.0.0
     --page-margin: 0.6in;
     /* #3242: unchanged default — this template has always kept a role whole. */
     --job-break-inside: avoid;
+    /* Whether a Projects entry may split across a page break. Unchanged
+       default — a project may still split, keeping the CV compact. Override via
+       config/profile.yml `style.project_break_inside: avoid` for "a project is
+       one unit, never split", which removes the one-word widow a description
+       can leave above its tech line, at the cost of a bottom gap. */
+    --project-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -88,10 +95,6 @@ version: 1.0.0
   .contact-row a {
     color: #555;
     text-decoration: none;
-  }
-
-  .contact-row .separator {
-    display: none;
   }
 
   /* SECTIONS */
@@ -338,6 +341,12 @@ version: 1.0.0
   .job {
     page-break-inside: var(--job-break-inside, avoid);
     break-inside: var(--job-break-inside, avoid);
+  }
+
+  /* Opt-in — see the --project-break-inside default above. */
+  .project {
+    page-break-inside: var(--project-break-inside, auto);
+    break-inside: var(--project-break-inside, auto);
   }
 
   .section-title,

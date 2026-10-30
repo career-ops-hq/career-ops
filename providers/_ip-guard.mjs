@@ -9,10 +9,13 @@
 // WHY THE CHECK IS SCOPED, NOT GLOBAL. _dns-cache.mjs patches `dns.lookup` on
 // the node:dns module object, which is process-wide. Rejecting private ranges
 // there unconditionally would reject every loopback connection anything in the
-// process makes — measured, Node calls dns.lookup even for a numeric host:
+// process makes by name (`localhost`).
 //
-//     fetch('http://127.0.0.1:PORT')  -> dns.lookup calls: 1
-//     fetch('http://localhost:PORT')  -> dns.lookup calls: 2
+// A NUMERIC host does not reach dns.lookup at all (measured on Node 20.15,
+// 22.3 and 26: fetch('http://127.0.0.1:PORT') makes zero lookup calls), so
+// this lookup-time check never sees a literal IP. providers/_http.mjs checks
+// the literal itself before dialling; an earlier version of this comment
+// claimed the opposite and the direct path shipped without that check.
 //
 // In this repo that is already 10+ test files that stand up a local HTTP
 // server and fetch it. An env opt-out would have fixed the suite by disabling
@@ -142,6 +145,15 @@ export function isBlockedAddress(address) {
   return false;
 }
 
+// What a DNS filter answers for a name it blocks: 0.0.0.0 and ::. That is
+// Pi-hole's default, and what AdGuard DNS and Control D answered for the
+// trackers they blocked on 2026-10-11; hosts-file blocklists map names to
+// 0.0.0.0 too, and so do sandboxed agent environments that filter egress at
+// DNS. No site is published at either address, so an answer whose only
+// private addresses are these is a filter at work, not a host resolving into
+// private space.
+export const SINKHOLE_ADDRESSES = new Set(['0.0.0.0', '::']);
+
 /**
  * The error a blocked lookup fails with.
  *
@@ -151,13 +163,28 @@ export function isBlockedAddress(address) {
  * negative-cached as resolver health nor counted toward a resolver-outage
  * signal.
  *
+ * When the name resolved only to sinkhole addresses, the message says so: a
+ * sandbox or DNS filter blocking every board host otherwise reads like this
+ * guard misfiring or a broken portals.yml entry.
+ *
  * @param {string} hostname - The name that resolved.
  * @param {string} address - The address it resolved to.
+ * @param {string[]} [addresses] - Every address it resolved to, when known.
  * @returns {Error}
  */
-export function blockedAddressError(hostname, address) {
+export function blockedAddressError(hostname, address, addresses = [address]) {
+  // Only the private addresses decide, as for liveness-browser.mjs's
+  // dns_sinkhole code: a filter that rewrites A records and passes AAAA
+  // through answers 0.0.0.0 alongside a public address. A literal 0.0.0.0 in
+  // a URL is not a filter's answer, so only a name gets the hint.
+  const blocked = addresses.filter((a) => isBlockedAddress(a));
+  const sinkholed = hostname !== address && blocked.length > 0
+    && blocked.every((a) => SINKHOLE_ADDRESSES.has(String(a).toLowerCase()));
+  const hint = sinkholed
+    ? ' (likely a DNS filter or sandbox blocking this host; see docs/SCRIPTS.md#liveness)'
+    : '';
   const err = new Error(
-    `Refusing to connect to ${hostname}: resolves to non-public address ${address}`,
+    `Refusing to connect to ${hostname}: resolves to non-public address ${address}${hint}`,
   );
   /** @type {any} */ (err).code = 'ECAREEROPS_BLOCKED_ADDRESS';
   /** @type {any} */ (err).hostname = hostname;

@@ -209,6 +209,14 @@ async function main() {
   if (args.includes('--help') || args.includes('-h')) { console.log(USAGE); return; }
   const bad = validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   if (bad) { process.exitCode = 1; return; }
+  // Writing is opt-in: a bare run (or one with only modifiers such as
+  // --fetch-avatars) would otherwise fall through to the rebuild below and
+  // rewrite three tracked files, bumping updatedAt to today (#4896).
+  if (!hasFlag(args, '--rebuild') && !hasFlag(args, '--add')) {
+    console.error(`hired-wall-build: pass --rebuild or --add; nothing was written.\n\n${USAGE}`);
+    process.exitCode = 1;
+    return;
+  }
 
   const root = flagValue(args, '--root') || HERE;
   const wallPath = join(root, 'HIRED.md');

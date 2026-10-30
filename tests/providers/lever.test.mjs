@@ -1,7 +1,7 @@
 // tests/providers/lever.test.mjs — direct provider-contract tests (#1499).
 // Covers the id/detect/fetch contract scan.mjs calls: hostname-anchored
 // detection for both jobs.lever.co and jobs.eu.lever.co, normalization from
-// the v0 postings shape (including the free descriptionPlain for
+// the v0 postings shape (including the free description text for
 // content_filter), and malformed-input tolerance.
 // (Indirect coverage elsewhere: tests/providers/ats-ssrf-hardening.test.mjs
 // asserts the redirect:'error' guard per instance; liveness tests cover URL
@@ -115,6 +115,7 @@ try {
   // postings shape: [{ text, hostedUrl, categories: {location}, descriptionPlain, createdAt }].
   const sample = [
     {
+      id: 'lever-posting-1111',
       text: 'Staff Platform Engineer',
       hostedUrl: 'https://jobs.lever.co/acme/1111-staff-platform-engineer',
       categories: { location: 'Remote — Europe', team: 'Platform', commitment: 'Full-time' },
@@ -190,10 +191,13 @@ try {
   if (fetched[0]?.title === 'Staff Platform Engineer'
       && fetched[0]?.url === 'https://jobs.lever.co/acme/1111-staff-platform-engineer'
       && fetched[0]?.company === 'Acme'
+      && fetched[0]?.listingIdentity?.ats_provider === 'lever'
+      && fetched[0]?.listingIdentity?.board_slug === 'acme'
+      && fetched[0]?.listingIdentity?.posting_id === 'lever-posting-1111'
       && fetched[0]?.location === 'Remote — Europe'
       && fetched[0]?.description === 'Build the platform that powers everything.'
       && fetched[0]?.postedAt === 1751328000000)
-    pass('lever.fetch() maps text/hostedUrl/entry.name/categories.location/descriptionPlain/createdAt');
+    pass('lever.fetch() maps ATS identity, title/URL/company/location/body/date');
   else fail(`lever.fetch() row 0 = ${JSON.stringify(fetched[0])}`);
 
   if (fetched[1]?.description === '' && fetched[1]?.postedAt === undefined)
@@ -204,6 +208,39 @@ try {
       && fetched[2]?.company === 'Acme' && fetched[2]?.description === '' && fetched[2]?.postedAt === undefined)
     pass('lever.fetch() maps an empty posting object to empty-string fields without crashing');
   else fail(`lever.fetch() row 2 = ${JSON.stringify(fetched[2])}`);
+
+  // description = intro + labeled lists + additional, in page order. The
+  // content filters only see what lands here, and on a real board the
+  // requirements in `lists` are most of the posting.
+  const full = leverModule.leverDescription({
+    descriptionPlain: 'Build the vaults.',
+    lists: [
+      { text: 'Requirements', content: '&lt;li&gt;Solidity&lt;/li&gt;&lt;li&gt;Foundry&lt;/li&gt;' },
+      { text: 'Nice to have', content: '<li>Rust</li>' },
+      { text: '', content: '' },
+    ],
+    additionalPlain: 'Remote across Europe.',
+  });
+  const at = (needle) => full.indexOf(needle);
+  if (at('Build the vaults.') === 0 && at('Requirements') > 0 && at('Solidity') > at('Requirements')
+      && at('Nice to have') > at('Foundry') && at('Rust') > at('Nice to have') && at('Remote across Europe.') > at('Rust'))
+    pass('leverDescription appends the labeled lists and additionalPlain after the intro, in page order');
+  else fail(`leverDescription => ${JSON.stringify(full)}`);
+
+  // Lever leaves descriptionPlain empty on some boards while description holds
+  // the HTML; an empty intro would let every posting pass a positive content gate.
+  const htmlOnly = leverModule.leverDescription({ descriptionPlain: '', description: '<div><b>On-chain</b> lending &amp; vaults</div>' });
+  if (htmlOnly === 'On-chain lending & vaults')
+    pass('leverDescription falls back to the description HTML when descriptionPlain is empty');
+  else fail(`leverDescription html fallback => ${JSON.stringify(htmlOnly)}`);
+
+  const [viaFetch] = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    { fetchJson: async () => [{ text: 'X', hostedUrl: 'https://jobs.lever.co/acme/6', descriptionPlain: 'Intro.', lists: [{ text: 'Requirements', content: '<li>EVM</li>' }] }] },
+  );
+  if (viaFetch?.description === 'Intro.\n\nRequirements\nEVM')
+    pass('lever.fetch() puts the full posting text in description');
+  else fail(`lever.fetch() description => ${JSON.stringify(viaFetch?.description)}`);
 
   // categories.allLocations — the multi-location fix. Lever puts a single
   // primary city in `location`; reading only that hides every other eligible

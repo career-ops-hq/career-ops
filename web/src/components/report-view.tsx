@@ -10,18 +10,25 @@ import {
   cleanHeading,
   isLeadSection,
   isVerdictHeading,
+  sectionPreview,
   splitSections,
   verdictReason,
 } from "@/lib/report-sections.mjs";
-import { isStarTableHeader, parsePipeTable } from "@/lib/report-tables.mjs";
 import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
+import { ScoreLevers } from "@/components/score-levers";
+import { PrepPack } from "@/components/prep-pack";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
+import { CoverDraftButton } from "@/components/cover-draft-button";
 import { ApplyButton } from "@/components/apply-button";
+import { MarkPdfReadyButton } from "@/components/mark-pdf-ready-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { ReportMarkdown } from "@/components/report-markdown";
+import { KeywordCoverage } from "@/components/keyword-coverage";
+import { CompanyEvidence } from "@/components/company-evidence";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
+import { PageFrame } from "@/components/page-frame";
 
 // Progressive disclosure of the report. Current oferta.md writes letter F as
 // Interview Plan (STAR+R), not a verdict — never promote by letter (#3416).
@@ -38,29 +45,17 @@ function httpUrl(url?: string | null): string | undefined {
   return /^https?:\/\//i.test(url) ? url : undefined;
 }
 
-function preview(md: string): string {
-  const table = parsePipeTable(md);
-  if (table && isStarTableHeader(table.header)) {
-    const n = table.rows.length;
-    return `${n} interview stor${n === 1 ? "y" : "ies"}`;
-  }
-  const text = md
-    .replace(/^#+\s.*$/gm, "")
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/[*_`>#|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const sentence = text.split(/(?<=[.!?])\s/)[0] ?? text;
-  return sentence.length > 96 ? sentence.slice(0, 96).trimEnd() + "…" : sentence;
-}
-
 export function ReportView({
   id,
   app,
   report,
   canDelete = false,
-  pdfReadyFromIndex = false,
+  pdfFileReady = false,
+  trackerMarkedPdf = false,
   coverReady = false,
+  backHref = "/pipeline",
+  applyHref,
+  reportNum = null,
 }: {
   id: string;
   app: Application | null;
@@ -69,11 +64,17 @@ export function ReportView({
    *  the raw .md filename is a dev artifact, not header content. */
   file?: string | null;
   canDelete?: boolean;
-  pdfReadyFromIndex?: boolean;
+  /** A tailored CV file is on disk (index or a matching cv-* name). Not the tracker mark. */
+  pdfFileReady?: boolean;
+  /** The tracker cell has a PDF mark. That mark can exist with no file. */
+  trackerMarkedPdf?: boolean;
   /** A tailored cover letter for THIS application exists in output/ (resolved by
-   *  the page, see resolveTailoredCover). View only — covers are never generated
-   *  from here. */
+   *  the page, see resolveTailoredCover). The page drafts letters through the
+   *  cover run but does not render them, so this link only finds CLI PDFs. */
   coverReady?: boolean;
+  backHref?: string;
+  applyHref?: string;
+  reportNum?: number | null;
 }) {
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
@@ -82,19 +83,20 @@ export function ReportView({
   const archetype = field("Archetype");
   const url = field("URL");
   const decision = field("Decision");
-  const line = applyLineLabel(score ?? "");
+  const line = applyLineLabel(score ?? "", meta?.legitimacy);
   const recommended = line === "Recommended";
   const quietApply = applyCtaQuiet({ score, legitimacy: meta?.legitimacy });
   const applyUrl = httpUrl(url);
-  const pdfReady = (app?.pdf ?? "").includes("✅") || pdfReadyFromIndex;
+  const pdfReady = pdfFileReady;
+  const pdfMarkedWithoutFile = trackerMarkedPdf && !pdfFileReady;
   const company = app ? companyPresentation(app) : null;
   const companyName = company?.label ?? app?.company ?? meta?.title ?? id;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8 xl:max-w-5xl 2xl:max-w-[1600px]">
+    <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
       <Link
-        href="/pipeline"
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        href={backHref}
+        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text"
       >
         <ArrowLeft className="size-4" /> Pipeline
       </Link>
@@ -108,10 +110,28 @@ export function ReportView({
           </h1>
         </div>
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}
+        {meta?.fields.find((field) => field.label === "Evaluation scope") && (
+          <p className="mt-2 text-xs text-muted">{meta.fields.find((field) => field.label === "Evaluation scope")?.value}</p>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
           {app && <StatusSelect n={id} current={app.status} />}
-          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          <GeneratePdfButton n={id} company={app?.company || meta?.title || id} pdfReady={pdfReady} />
+          {app && report && <CoverDraftButton n={id} company={companyName} />}
+          {applyHref && (
+            <Link
+              href={applyHref}
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
+            >
+              Apply checklist
+            </Link>
+          )}
+          <MarkPdfReadyButton reportNum={reportNum} ready={pdfFileReady || trackerMarkedPdf} />
+          {pdfMarkedWithoutFile && (
+            <p className="basis-full text-sm text-muted">
+              The tracker marks a tailored CV, but there is no file in output/. Choose Generate tailored CV.
+            </p>
+          )}
           {coverReady && (
             <a
               href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}
@@ -139,7 +159,7 @@ export function ReportView({
                 href={applyUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
+                className="inline-flex items-center justify-center gap-1 text-brand-text hover:underline max-sm:min-h-[44px]"
               >
                 posting <ExternalLink className="size-3" />
               </a>
@@ -177,7 +197,7 @@ export function ReportView({
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {score && <Badge tone={scoreTone(score)}>{score}</Badge>}
-                  {line && <Badge tone={recommended ? "good" : "muted"}>{line}</Badge>}
+                  {line && <Badge tone={recommended ? "good" : line === "Below the apply line" ? "muted" : "warn"}>{line}</Badge>}
                   {decision && <Badge tone="info">{decision}</Badge>}
                   {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
                 </div>
@@ -195,8 +215,9 @@ export function ReportView({
             );
             if (sections.length === 0) {
               return (
-                <div className="mt-8">
+                <div className="mt-8 max-w-4xl">
                   {callout}
+                  <ScoreLevers report={report} />
                   <article className="report-prose mt-6">
                     <ReportMarkdown>{meta?.body ?? report}</ReportMarkdown>
                   </article>
@@ -204,8 +225,9 @@ export function ReportView({
               );
             }
             return (
-              <div className="mt-8">
+              <div className="mt-8 max-w-4xl">
                 {callout}
+                <ScoreLevers report={report} />
 
                 {mainSections.map((s, i) => {
                   const expanded = isLeadSection(s);
@@ -221,7 +243,7 @@ export function ReportView({
                     <details key={i} className="group mt-3 overflow-hidden rounded-xl border border-border bg-surface/30">
                       <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-hover">
                         <span className="text-sm font-medium">{cleanHeading(s.heading)}</span>
-                        <span className="hidden truncate text-xs text-faint sm:inline">{preview(s.content)}</span>
+                        <span className="hidden truncate text-xs text-faint sm:inline">{sectionPreview(s.content)}</span>
                         <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
                       </summary>
                       <div className="report-prose border-t border-border px-4 py-3">
@@ -230,6 +252,7 @@ export function ReportView({
                     </details>
                   );
                 })}
+                <PrepPack report={report} company={companyName} />
 
                 {machine.length > 0 && (
                   <>
@@ -254,6 +277,15 @@ export function ReportView({
               </div>
             );
           })()}
+          {/* After the report body: the reader has just decided whether the
+              offer is worth applying to, and this answers the next question —
+              whether the CV they would send reads as a match for it. */}
+          <KeywordCoverage reportId={id} />
+          {/* Then the company itself. Only with a tracker row: the card is keyed
+              on a company name, and a report with no row has none to look up —
+              guessing one from the report would surface another company's
+              history. */}
+          {app?.company && <CompanyEvidence company={app.company} />}
           <ScoreMethodology />
         </>
       ) : (
@@ -262,6 +294,6 @@ export function ReportView({
           No report file found for #{id} in <code className="text-foreground">reports/</code>.
         </div>
       )}
-    </div>
+    </PageFrame>
   );
 }

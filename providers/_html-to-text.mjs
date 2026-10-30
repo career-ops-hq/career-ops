@@ -14,7 +14,15 @@ export const DESCRIPTION_CAP = 4000;
 // so the common `<[^>]+>` shortcut can stop midway through a tag and expose
 // the remaining attributes as description text. Requiring content between the
 // brackets preserves a literal `<>`, as the old matcher did.
-const HTML_TAG_RE = /<(?:[^>"']|"[^"]*"|'[^']*')+>/g;
+//
+// A tag also has to START like one: `<` followed by a letter, `/`, `!` or `?`,
+// the only openers an HTML tokenizer reads as markup. Without that, every
+// strip after a decode read prose as a tag: a JD saying `teams of &lt;10
+// engineers` decoded to `<10 engineers`, and everything from there to the
+// next `>` (a `&gt;150k` paragraphs later) was deleted, sponsorship sentence
+// included. `<script`, `</p`, `<!--` still match, so double-encoded active
+// markup stays inert.
+const HTML_TAG_RE = /<(?=[a-z/!?])(?:[^>"']|"[^"]*"|'[^']*')+>/gi;
 const HTML_MEDIA_RE = /<(script|style)\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1\s*>/gi;
 
 /** @param {string} content */
@@ -35,9 +43,12 @@ function stripMarkup(content) {
  * Exported for tests.
  *
  * @param {unknown} content
+ * @param {{cap?: number}} [options] - `cap`: maximum length of the result,
+ *   DESCRIPTION_CAP by default. A provider that has always passed a JD
+ *   through whole passes `Infinity`.
  * @returns {string}
  */
-export function htmlToText(content) {
+export function htmlToText(content, { cap = DESCRIPTION_CAP } = {}) {
   if (typeof content !== 'string' || !content) return '';
   // Strip literal markup before decoding: quote entities inside a quoted
   // attribute are data, and decoding them first would turn them into false
@@ -51,5 +62,24 @@ export function htmlToText(content) {
     .replace(/<(?=\/?[a-z!?])/gi, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, DESCRIPTION_CAP);
+    .slice(0, cap);
 }
+
+/**
+ * Collapse a markup fragment to its visible text.
+ * Comments are stripped FIRST: the anchor bodies carry `<!-- d ico postulez -->`
+ * between the title and a spacer image, and a naive tag strip would leave the
+ * comment body sitting inside the title.
+ * @param {string} fragment
+ * @returns {string}
+ */
+export function visibleText(fragment) {
+  return decodeEntities(
+    String(fragment ?? '')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' '),
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+

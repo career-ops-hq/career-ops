@@ -29,7 +29,7 @@ func TestFunnelHistoryTerminalAchievements(t *testing.T) {
 	}
 	log += "21junk\t2026-09-01\tOffer\tHired\n21\t\tOffer\tHired\n"
 	pm := ComputeProgressMetrics(apps, parseFunnelHistory(log))
-	for i, want := range []int{29, 29, 19, 5, 0} {
+	for i, want := range []int{29, 29, 19, 5, 5, 0} {
 		if pm.FunnelStages[i].Count != want {
 			t.Errorf("stage %d = %d, want %d", i, pm.FunnelStages[i].Count, want)
 		}
@@ -47,7 +47,7 @@ func TestFunnelHistoryTrackerOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	pm := ComputeProgressMetrics([]model.CareerApplication{{Number: 1, Status: "Discarded"}}, history)
-	if pm.FunnelStages[4].Count != 1 || pm.TotalOffers != 1 {
+	if stageCount(pm, "Offer") != 1 || pm.TotalOffers != 1 {
 		t.Fatal("discarded offer lost from overridden tracker ledger")
 	}
 }
@@ -88,8 +88,8 @@ func TestBackfilledDisplayNumberDoesNotJoinHistory(t *testing.T) {
 		{Number: 1, Status: "Applied", TrackerNumberMissing: true},
 		{Number: 1, Status: "Rejected"},
 	}
-	pm := ComputeProgressMetrics(apps, map[int]int{1: 3})
-	if pm.FunnelStages[1].Count != 2 || pm.FunnelStages[3].Count != 1 {
+	pm := ComputeProgressMetrics(apps, map[int]int{1: funnelRank("Interview")})
+	if stageCount(pm, "Applied") != 2 || stageCount(pm, "Interview") != 1 {
 		t.Fatal("synthetic display number joined another row's history")
 	}
 }
@@ -110,8 +110,8 @@ func TestFunnelHistoryDuplicateRanksAndSkip(t *testing.T) {
 				apps[i], apps[j] = apps[j], apps[i]
 			}
 		}
-		pm := ComputeProgressMetrics(apps, map[int]int{7: 2, 8: 4, 9: 3, 10: 3, 11: 4, 12: 4})
-		for i, want := range []int{7, 2, 2, 2, 1} {
+		pm := ComputeProgressMetrics(apps, map[int]int{7: 2, 8: 5, 9: 4, 10: 4, 11: 5, 12: 5})
+		for i, want := range []int{7, 2, 2, 2, 2, 1} {
 			if pm.FunnelStages[i].Count != want {
 				t.Errorf("reverse=%v stage %d: got %d want %d", reverse, i, pm.FunnelStages[i].Count, want)
 			}

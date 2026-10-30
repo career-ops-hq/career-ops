@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT } from './helpers.mjs';
+import { SCRATCH_PREFIX } from '../lib/scratch-dirs.mjs';
 
 console.log('\nstates — canonical load from states.yml');
 
@@ -45,7 +46,7 @@ const STATES_FILE = join(ROOT, 'templates/states.yml');
 
 // A custom states.yml with an extra state is parsed correctly.
 {
-  const tmp = join(ROOT, '.tmp-states-test-' + process.pid);
+  const tmp = join(ROOT, `${SCRATCH_PREFIX}states-test-${process.pid}`);
   mkdirSync(tmp, { recursive: true });
   try {
     writeFileSync(join(tmp, 'custom-states.yml'), `
@@ -80,7 +81,7 @@ states:
 
 // Malformed file throws rather than silently returning empty/wrong data.
 {
-  const tmp = join(ROOT, '.tmp-states-bad-' + process.pid);
+  const tmp = join(ROOT, `${SCRATCH_PREFIX}states-bad-${process.pid}`);
   mkdirSync(tmp, { recursive: true });
   try {
     writeFileSync(join(tmp, 'bad.yml'), 'not_states: true\n');

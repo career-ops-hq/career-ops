@@ -202,7 +202,7 @@ Dans les offres et negociations francophones, certains termes n'existent pas sur
 3. Citer des lignes exactes du CV lors du matching
 4. Utiliser WebSearch pour les donnees de remuneration et d'entreprise
 5. Enregistrer dans le tracker apres chaque evaluation
-6. Generer le contenu dans la langue de l'offre (francais si l'offre est en francais, anglais sinon)
+6. Generer le contenu destine a l'utilisateur en `{language.output}` de `config/profile.yml` (anglais si non defini), quelle que soit la langue de l'offre. Garder les termes de ce marche et les expliquer dans cette langue si besoin
 7. Etre direct et concret -- pas de blabla
 8. Francais tech naturel pour les textes generes. Phrases courtes, verbes d'action, eviter le passif. Ne pas traduire de force les termes techniques (stack, pipeline, deployment, embedding)
 8b. **URLs de case studies dans le Professional Summary du PDF :** Si le PDF mentionne des case studies ou demos, les URLs DOIVENT apparaitre dans le premier paragraphe (Professional Summary). Les recruteurs ne lisent souvent que le summary. Toutes les URLs en HTML avec `white-space: nowrap`
@@ -217,6 +217,6 @@ Dans les offres et negociations francophones, certains termes n'existent pas sur
 | WebFetch | Fallback pour extraire les offres depuis des pages statiques |
 | Playwright | Verifier si les offres sont actives (browser_navigate + browser_snapshot), extraire les offres depuis des SPAs. **CRITIQUE : JAMAIS 2+ agents en parallele avec Playwright -- ils partagent la meme instance navigateur** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | HTML temporaire pour PDF, applications.md, reports .md |
-| Edit | Mettre a jour le tracker |
-| Bash | `node generate-pdf.mjs` |
+| Write | HTML temporaire pour PDF, reports .md, fichiers TSV d'ajout au tracker dans `batch/tracker-additions/` (jamais `applications.md` directement) |
+| Edit | Corrections dans les reports et autres contenus generes. Jamais le tableau du tracker : les nouvelles lignes passent par un TSV fusionne avec `node merge-tracker.mjs`, les changements de statut et de notes par `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

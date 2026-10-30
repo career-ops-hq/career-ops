@@ -205,7 +205,7 @@ Profile को **"Demonstrable practice वाले Technical Builder"** के
 3. Matching करते समय CV की exact lines quote करें
 4. Compensation और company data के लिए WebSearch उपयोग करें
 5. हर evaluation के बाद tracker में record करें
-6. Content offer की language में generate करें (Hindi offer के लिए Hindi, English के लिए English)
+6. User के लिए content `config/profile.yml` के `{language.output}` में generate करें (set न हो तो English), offer की language चाहे जो हो। इस market के terms रखें और ज़रूरत हो तो उसी language में समझाएँ
 7. Direct और concrete रहें — बकवास नहीं
 8. Natural Hindi tech language use करें। Short sentences, action verbs, passive avoid करें। Technical terms force-translate न करें (stack, pipeline, deployment, embedding)
 8b. **PDF में case study URLs:** यदि PDF में case studies या demos mention हों, URLs Professional Summary के पहले paragraph में होने चाहिए। Recruiters अक्सर सिर्फ summary पढ़ते हैं। सभी URLs HTML में `white-space: nowrap` के साथ
@@ -220,6 +220,6 @@ Profile को **"Demonstrable practice वाले Technical Builder"** के
 | WebFetch | Static pages से offers extract करने के लिए fallback |
 | Playwright | Verify if offers are active (browser_navigate + browser_snapshot), SPAs से offers extract करें। **Critical: कभी 2+ agents Playwright के साथ parallel में नहीं — वे same browser instance share करते हैं** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | PDF के लिए temporary HTML, applications.md, reports .md |
-| Edit | Tracker update करें |
-| Bash | `node generate-pdf.mjs` |
+| Write | PDF के लिए temporary HTML, reports .md, `batch/tracker-additions/` में tracker की TSV files (`applications.md` को सीधे कभी नहीं) |
+| Edit | Reports और अन्य generated content में सुधार। Tracker table को सीधे कभी edit न करें: नई rows TSV के रूप में जोड़ें और `node merge-tracker.mjs` से merge करें, status और notes के बदलाव `node set-status.mjs` से करें |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

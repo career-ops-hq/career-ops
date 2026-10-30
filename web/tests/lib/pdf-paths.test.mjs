@@ -6,10 +6,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { basename, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { slugify, resolvePdfPaths } from "../../src/lib/pdf-paths.mjs";
+import { matchesTailoredCv } from "../../src/lib/apply/cv-match.mjs";
+import { pdfPathForReport } from "../../src/lib/apply/cv-selection.mjs";
 
 test("slugify: lowercases and hyphenates", () => {
   assert.equal(slugify("Jane Q. Smith"), "jane-q-smith");
@@ -39,8 +41,66 @@ test("resolvePdfPaths: happy path builds html + finalPdf from report + profile",
 
     // Then it returns deterministic scratch + final paths using the candidate/company slugs
     assert.equal(result.ok, true);
+    assert.equal(result.paths.reportNum, "018");
     assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-acme-2026-07-26.pdf"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-018-acme-2026-07-26.pdf"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolvePdfPaths: two reports at one company on the same day keep separate CVs", () => {
+  const root = makeRoot();
+  const findReportFile = (input) => join(root, "reports", `${input}-acme-2026-07-01.md`);
+  try {
+    const first = resolvePdfPaths("018", "2026-07-26", root, findReportFile);
+    const second = resolvePdfPaths("019", "2026-07-26", root, findReportFile);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.notEqual(first.paths.html, second.paths.html);
+    assert.notEqual(first.paths.finalPdf, second.paths.finalPdf);
+
+    mkdirSync(join(root, "output"));
+    writeFileSync(first.paths.finalPdf, "CV tailored for the first role");
+    writeFileSync(second.paths.finalPdf, "CV tailored for the second role");
+    assert.equal(readFileSync(first.paths.finalPdf, "utf8"), "CV tailored for the first role");
+    assert.equal(readFileSync(second.paths.finalPdf, "utf8"), "CV tailored for the second role");
+
+    const index = [first, second].map(({ paths }) =>
+      `${paths.reportNum}\t${relative(root, paths.finalPdf)}\t${relative(root, paths.html)}\tletter\t2026-07-26`
+    ).join("\n");
+    assert.equal(pdfPathForReport(index, 18), relative(root, first.paths.finalPdf));
+    assert.equal(pdfPathForReport(index, 19), relative(root, second.paths.finalPdf));
+    assert.equal(matchesTailoredCv(basename(first.paths.finalPdf), "acme"), true);
+    assert.equal(matchesTailoredCv(basename(second.paths.finalPdf), "acme"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolvePdfPaths: padded and unpadded selectors use the same resolved report identity", () => {
+  const root = makeRoot();
+  const findReportFile = () => join(root, "reports", "018-acme-2026-07-01.md");
+  try {
+    const padded = resolvePdfPaths("018", "2026-07-26", root, findReportFile);
+    const unpadded = resolvePdfPaths("18", "2026-07-26", root, findReportFile);
+    assert.equal(padded.ok, true);
+    assert.equal(unpadded.ok, true);
+    assert.deepEqual(padded.paths, unpadded.paths);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolvePdfPaths: a tracker selector uses its linked report number for paths and manifest", () => {
+  const root = makeRoot();
+  const findReportFile = () => join(root, "reports", "018-acme-2026-07-01.md");
+  try {
+    const result = resolvePdfPaths("309", "2026-07-26", root, findReportFile);
+    assert.equal(result.ok, true);
+    assert.equal(result.paths.reportNum, "018");
+    assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-018-acme-2026-07-26.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -92,7 +152,8 @@ test("resolvePdfPaths: missing profile.yml falls back to the default candidate s
 
     // Then it still succeeds, using the "candidate" fallback slug
     assert.equal(result.ok, true);
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-globex-2026-07-26.pdf"));
+    assert.equal(result.paths.reportNum, "005");
+    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-005-globex-2026-07-26.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -108,7 +169,7 @@ test("resolvePdfPaths: malformed profile.yml falls back to the default candidate
 
     // Then it still succeeds, using the "candidate" fallback slug rather than throwing
     assert.equal(result.ok, true);
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-globex-2026-07-26.pdf"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-005-globex-2026-07-26.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -124,7 +185,7 @@ test("resolvePdfPaths: report filename that doesn't match the expected pattern f
 
     // Then it still succeeds, using the "company" fallback slug
     assert.equal(result.ok, true);
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-company-2026-07-26.pdf"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-007-company-2026-07-26.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -140,7 +201,7 @@ test("resolvePdfPaths: profile.yml present but candidate.full_name empty falls b
 
     // Then it still succeeds, using the "candidate" fallback slug
     assert.equal(result.ok, true);
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-globex-2026-07-26.pdf"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-005-globex-2026-07-26.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

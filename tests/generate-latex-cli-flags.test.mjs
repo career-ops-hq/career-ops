@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'generate-latex.mjs');
@@ -34,7 +35,7 @@ test('generate-latex help prints usage instead of reading a file named --help', 
   for (const flag of ['--help', '-h']) {
     const result = runLatex(flag);
 
-    assert.equal(result.status, 0, `${flag} exited ${result.status}, want 0`);
+    assert.equal(result.status, 0, describeSpawn(result, `${flag} exited ${result.status}, want 0`));
     assert.match(result.stdout, /Usage:/i, `${flag} printed no usage block`);
     assert.match(result.stdout, /node generate-latex\.mjs/, `${flag} did not identify the command`);
     assert.doesNotMatch(result.all, /Error reading/i, `${flag} was still treated as an input path`);
@@ -45,7 +46,7 @@ test('generate-latex help prints usage instead of reading a file named --help', 
 test('generate-latex rejects an unrecognized flag and lists the valid flags', () => {
   const result = runLatex('cv.tex', '--no-such-flag');
 
-  assert.equal(result.status, 1, `exited ${result.status}, want 1`);
+  assert.equal(result.status, 1, describeSpawn(result, `exited ${result.status}, want 1`));
   assert.match(result.all, /unrecognized flag\(s\): --no-such-flag/i);
   for (const flag of VALID_FLAGS) {
     assert.ok(result.all.includes(flag), `valid flag ${flag} was not listed`);
@@ -55,14 +56,14 @@ test('generate-latex rejects an unrecognized flag and lists the valid flags', ()
 test('generate-latex rejects a mistyped --compile-only rather than using it as the output path', () => {
   const result = runLatex('cv.tex', '--compileonly');
 
-  assert.equal(result.status, 1, `exited ${result.status}, want 1`);
+  assert.equal(result.status, 1, describeSpawn(result, `exited ${result.status}, want 1`));
   assert.match(result.all, /unrecognized flag\(s\): --compileonly/i);
 });
 
 test('generate-latex rejects an unrecognized flag before handling help', () => {
   const result = runLatex('--help', '--no-such-flag');
 
-  assert.equal(result.status, 1, `exited ${result.status}, want 1`);
+  assert.equal(result.status, 1, describeSpawn(result, `exited ${result.status}, want 1`));
   assert.match(result.all, /unrecognized flag\(s\): --no-such-flag/i);
   assert.doesNotMatch(result.stdout, /Usage:/i, 'help hid the unrecognized flag error');
 });
@@ -70,7 +71,7 @@ test('generate-latex rejects an unrecognized flag before handling help', () => {
 test('generate-latex prints the usage block when no input path is given', () => {
   const result = runLatex();
 
-  assert.equal(result.status, 1, `exited ${result.status}, want 1`);
+  assert.equal(result.status, 1, describeSpawn(result, `exited ${result.status}, want 1`));
   assert.match(result.all, /Usage:/i, 'missing-input error printed no usage block');
   assert.match(result.all, /--compile-only/, 'missing-input usage omitted the real flag');
 });
@@ -81,7 +82,7 @@ test('generate-latex still accepts --compile-only', () => {
   // Exactly 1, not merely nonzero: the missing-file path reports 1 today, and a
   // test that accepts any nonzero status would not notice it changing (CodeRabbit,
   // PR #4446).
-  assert.equal(result.status, 1, `exited ${result.status}, want 1`);
+  assert.equal(result.status, 1, describeSpawn(result, `exited ${result.status}, want 1`));
   assert.doesNotMatch(result.all, /unrecognized flag/i, '--compile-only was rejected as unknown');
   assert.match(result.all, /Error reading/i, 'expected the missing input file to be reported');
 });

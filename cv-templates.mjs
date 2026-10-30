@@ -7,17 +7,32 @@
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getProfilePath, getCareerOpsRoot } from './path-resolver.mjs';
+import {
+  parseMeta, PARTIAL_SECTIONS, declaredSections, checkDeclaredSections,
+} from './lib/template-manifest.mjs';
+
+// The manifest block and the section vocabulary live in lib/template-manifest.mjs
+// so build-cv-html.mjs can share them without importing this module (and the
+// js-yaml it pulls in for profile defaults). Re-exported here because this is
+// where callers have always found parseMeta.
+export { parseMeta, PARTIAL_SECTIONS, declaredSections, checkDeclaredSections };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // templates/ is System Layer (code root); config/profile.yml is User Layer and
 // follows the data root. CAREER_OPS_PROFILE still wins over both.
-const DEFAULT_TEMPLATES_DIR = resolve(__dirname, 'templates');
-const DEFAULT_PROFILE_PATH =
-  process.env.CAREER_OPS_PROFILE || resolve(getCareerOpsRoot(), 'config', 'profile.yml');
+export const DEFAULT_TEMPLATES_DIR = resolve(__dirname, 'templates');
+const DEFAULT_PROFILE_PATH = getProfilePath();
+
+// The user layer: templates the user made or customized live under the data root,
+// where the updater never looks. Read per call, not at load, so the data root a
+// caller sets is the one searched.
+export function DEFAULT_USER_TEMPLATES_DIR() {
+  return resolve(getCareerOpsRoot(), 'data', 'templates');
+}
 
 export const KINDS = {
   cv: {
@@ -66,25 +81,8 @@ function parseFilename(prefix, file) {
   return { name: m[1] || 'standard', format: m[2] };
 }
 
-export function parseMeta(path) {
-  let text;
-  try {
-    text = readFileSync(path, 'utf-8');
-  } catch {
-    return {};
-  }
-  const block = text.match(/<!--\s*career-ops-template\s*([\s\S]*?)-->/);
-  if (!block) return {};
-  const meta = {};
-  for (const line of block[1].split(/\r?\n/)) {
-    const kv = line.match(/^\s*([a-zA-Z_]+)\s*:\s*(.+?)\s*$/);
-    if (kv) meta[kv[1].toLowerCase()] = kv[2];
-  }
-  return meta;
-}
-
 // Build the entry a discovered template file contributes.
-function entryFor(parsed, path, pack) {
+function entryFor(parsed, path, pack, layer) {
   const meta = parseMeta(path);
   return {
     name: parsed.name,
@@ -93,6 +91,7 @@ function entryFor(parsed, path, pack) {
     format: parsed.format,
     meta,
     pack,
+    layer,
   };
 }
 
@@ -137,7 +136,7 @@ function entryFor(parsed, path, pack) {
 // collisions.
 //
 // Returns Map<name, entry>. A name claimed twice throws — see assertNoCollision.
-function discover(kind, { dir, format }) {
+function discoverIn(kind, { dir, format }, layer) {
   const cfg = KINDS[kind];
   const found = new Map();
   if (!existsSync(dir)) return found;
@@ -146,7 +145,7 @@ function discover(kind, { dir, format }) {
     if (parsed.format !== format) return;
     const prior = found.get(parsed.name);
     if (prior) assertNoCollision(parsed.name, prior.path, path, dir);
-    found.set(parsed.name, entryFor(parsed, path, pack));
+    found.set(parsed.name, entryFor(parsed, path, pack, layer));
   };
 
   // One listing serves both passes. Reading twice would let the flat pass and
@@ -189,6 +188,18 @@ function discover(kind, { dir, format }) {
   return found;
 }
 
+// System templates plus the user's own. A name in both layers resolves to the
+// user's file: that is the point of a user layer (a customized copy of a shipped
+// name), and the two layers are separate directories, so unlike a clash inside
+// one directory there is no ambiguity about which the user meant. A name claimed
+// twice inside a single layer still throws.
+function discover(kind, { dir, format, userDir = null }) {
+  const found = discoverIn(kind, { dir, format }, 'system');
+  if (!userDir || resolve(userDir) === resolve(dir)) return found;
+  for (const [name, entry] of discoverIn(kind, { dir: userDir, format }, 'user')) found.set(name, entry);
+  return found;
+}
+
 // A template name resolves to exactly one file, enforced when it is discovered
 // rather than settled by a precedence rule.
 //
@@ -206,11 +217,20 @@ function assertNoCollision(name, a, b, dir) {
   );
 }
 
-export function listTemplates(kind, { dir = DEFAULT_TEMPLATES_DIR, format = 'html' } = {}) {
+// The user layer is searched when `dir` is left at its default, or when `userDir`
+// is named. Naming only `dir` keeps that directory the whole registry, so a
+// caller pointing at a fixture is not mixed with whatever the data root holds.
+function userDirFor(dir, userDir) {
+  if (userDir !== undefined) return userDir;
+  return dir === undefined ? DEFAULT_USER_TEMPLATES_DIR() : null;
+}
+
+export function listTemplates(kind, { dir, format = 'html', userDir } = {}) {
   const cfg = KINDS[kind];
   if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
   assertFormat(format);
-  return [...discover(kind, { dir, format }).values()].sort((a, b) => a.name.localeCompare(b.name));
+  const user = userDirFor(dir, userDir);
+  return [...discover(kind, { dir: dir ?? DEFAULT_TEMPLATES_DIR, format, userDir: user }).values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function validateTemplate(path, kind) {
@@ -239,8 +259,14 @@ export function validateTemplate(path, kind) {
 
 const DEFAULT_ATS_RULES_PATH = resolve(__dirname, 'templates', 'ats-rules.yml');
 
+// Whether a rule can be judged on an unrendered template (#4798). `structural`
+// rules read markup and styling, which a template carries. `content` rules need
+// what the render payload fills in, so on a template they have no answer: they
+// are reported under `skipped`, never run, and never read as a pass.
+const ATS_RULE_SCOPES = ['structural', 'content'];
+
 export function loadAtsRules(path = DEFAULT_ATS_RULES_PATH) {
-  const doc = yaml.load(readFileSync(path, 'utf-8')) || {};
+  const doc = loadYaml(readFileSync(path, 'utf-8')) || {};
   // A missing `rules:` key, a wrongly-typed one and an empty list used to
   // coerce to [], and atsLint then walked zero rules and reported ok. Every
   // other way of breaking this file already fails loudly, so a config that
@@ -271,6 +297,13 @@ export function loadAtsRules(path = DEFAULT_ATS_RULES_PATH) {
     }
     if (!Array.isArray(rule.source) || rule.source.length === 0) {
       throw new Error(`${at} (${rule.id}): needs at least one source quote`);
+    }
+    // Own properties only, as for `detect` below: `scope: toString` is not a scope.
+    if (!ATS_RULE_SCOPES.some((scope) => scope === rule.scope)) {
+      throw new Error(
+        `${at} (${rule.id}): scope must be one of ${ATS_RULE_SCOPES.join(', ')}; got ${JSON.stringify(rule.scope)}. `
+          + 'A rule that does not say whether it needs rendered output cannot be dispatched honestly.'
+      );
     }
     if (!rule.must_not_flag) {
       throw new Error(`${at} (${rule.id}): needs must_not_flag, the half that decides whether the rule is worth having`);
@@ -559,10 +592,25 @@ export function atsLint(path, kind, opts = {}) {
           result.skipped.push({
             id: rule.id,
             rule: rule.rule,
+            scope: rule.scope,
             reason: `document language is "${lang}"; the accepted-header list is English only`,
           });
           continue;
         }
+      }
+
+      // A path handed to atsLint is a template, never rendered output, so a
+      // content rule has nothing to read. Skipped before its detector is even
+      // looked up: a clean result here would be a pass that checked nothing.
+      if (rule.scope === 'content') {
+        result.skipped.push({
+          id: rule.id,
+          rule: rule.rule,
+          scope: rule.scope,
+          reason: 'content-dependent: needs rendered output, and this is an unrendered template'
+            + (rule.unimplemented_because ? `. Also unimplemented: ${rule.unimplemented_because}` : ''),
+        });
+        continue;
       }
 
       const detector = rule.detect ? ATS_DETECTORS[rule.detect] : null;
@@ -570,6 +618,7 @@ export function atsLint(path, kind, opts = {}) {
         result.skipped.push({
           id: rule.id,
           rule: rule.rule,
+          scope: rule.scope,
           reason: rule.detect
             ? `no detector registered for "${rule.detect}"`
             : rule.unimplemented_because || 'no detector yet',
@@ -581,6 +630,7 @@ export function atsLint(path, kind, opts = {}) {
           id: rule.id,
           rule: rule.rule,
           severity: rule.severity || 'warning',
+          scope: rule.scope,
           detail,
           source: rule.source || [],
         });
@@ -593,13 +643,85 @@ export function atsLint(path, kind, opts = {}) {
   return result;
 }
 
+// ---- User template audit (#5777) ----
+
+const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
+
+function placeholdersOf(path) {
+  return new Set((readFileSync(path, 'utf-8').match(PLACEHOLDER_RE) || []).map((t) => t.slice(2, -2)));
+}
+
+// The slots the shipped templates of one kind all keep: those in the base template
+// that every shipped named variant also carries. A slot a shipped variant drops
+// (INTERESTS, say) is optional by the project's own example, so a user copy
+// dropping it is not drift. With no shipped variant there is nothing to tell
+// optional from core, so nothing is judged (null) rather than every slot flagged.
+function coreSlots(system) {
+  const base = system.get('standard');
+  const variants = [...system.values()].filter((e) => e.name !== 'standard');
+  if (!base || variants.length === 0) return null;
+  let core = placeholdersOf(base.path);
+  for (const v of variants) {
+    const have = placeholdersOf(v.path);
+    core = new Set([...core].filter((slot) => have.has(slot)));
+  }
+  return core;
+}
+
+/**
+ * Advisory audit of the user's own templates (those under data/templates/).
+ * Returns one finding per template that has a problem, and [] when all is well:
+ *   - invalid: it does not resolve (missing required placeholders, or a declared
+ *     section with no partial). The message is the resolver's own.
+ *   - name: its file name is not in the normalized form the resolver looks for, so
+ *     no name selects it.
+ *   - drifted: it lacks a slot every shipped variant of its kind keeps.
+ * Never throws for a template problem and never blocks a render; callers decide
+ * how loudly to report.
+ */
+export function auditUserTemplates({ dir = DEFAULT_TEMPLATES_DIR, userDir = DEFAULT_USER_TEMPLATES_DIR(), format = 'html' } = {}) {
+  assertFormat(format);
+  const findings = [];
+  for (const kind of Object.keys(KINDS)) {
+    const system = discoverIn(kind, { dir, format }, 'system');
+    const core = coreSlots(system);
+    for (const entry of discoverIn(kind, { dir: userDir, format }, 'user').values()) {
+      const problems = [];
+      // resolveTemplate() normalizes every name it is given (kebab), and discovery
+      // accepts the raw file name, so a file such as cv-template.a--b.html lists as
+      // "a--b" yet no name selects it: both "a--b" and "a-b" look for cv-template.a-b.html.
+      // Say that, and the name to use, instead of the resolver's "not found".
+      const usable = kebab(entry.name);
+      if (usable !== entry.name) {
+        problems.push({
+          type: 'name',
+          detail: `no name selects this file: names are normalized to "${usable}". Rename it to ${KINDS[kind].prefix}.${usable}.${format}`,
+        });
+      } else {
+        try {
+          resolveTemplate(kind, entry.name, { dir, userDir, format });
+        } catch (err) {
+          problems.push({ type: 'invalid', detail: err.message });
+        }
+      }
+      if (core) {
+        const have = placeholdersOf(entry.path);
+        const missing = [...core].filter((slot) => !have.has(slot)).sort();
+        if (missing.length) problems.push({ type: 'drifted', missing });
+      }
+      if (problems.length) findings.push({ kind, name: entry.name, path: entry.path, problems });
+    }
+  }
+  return findings;
+}
+
 export function loadProfileDefault(kind, { profilePath = DEFAULT_PROFILE_PATH, strict = false } = {}) {
   const cfg = KINDS[kind];
   if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
   if (!existsSync(profilePath)) return null;
   let doc;
   try {
-    doc = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    doc = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
   } catch (err) {
     if (strict) {
       throw new Error(
@@ -618,7 +740,8 @@ export function resolveTemplate(kind, name, opts = {}) {
   const cfg = KINDS[kind];
   if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
   const {
-    dir = DEFAULT_TEMPLATES_DIR,
+    dir,
+    userDir,
     format = 'html',
     profilePath = DEFAULT_PROFILE_PATH,
     fallback = false,
@@ -634,7 +757,7 @@ export function resolveTemplate(kind, name, opts = {}) {
   // would find flat templates only: a pack would list fine and then throw here,
   // which is the failure mode that passes review because the demo path works.
   // Every by-name caller lands here — build-cv-latex.mjs, generate-cover-letter.mjs.
-  const found = discover(kind, { dir, format });
+  const found = discover(kind, { dir: dir ?? DEFAULT_TEMPLATES_DIR, format, userDir: userDirFor(dir, userDir) });
 
   let entry = found.get(chosen);
   if (!entry && fallback && chosen !== 'standard') {
@@ -646,13 +769,30 @@ export function resolveTemplate(kind, name, opts = {}) {
   }
   const path = entry.path;
   if (format === 'html') {
+    // Name the file that is actually short, not the flat filename it would
+    // have had. For a pack these differ, and the flat name points at nothing.
+    const where = entry.pack ? `${entry.pack}/${fileFor(chosen)}` : fileFor(chosen);
     const v = validateTemplate(path, kind);
     if (!v.ok) {
-      // Name the file that is actually short, not the flat filename it would
-      // have had. For a pack these differ, and the flat name points at nothing.
-      const where = entry.pack ? `${entry.pack}/${fileFor(chosen)}` : fileFor(chosen);
       throw new Error(
         `Template ${where} missing required placeholders: ${v.missing.map((m) => `{{${m}}}`).join(', ')}`
+      );
+    }
+    // A template that declares its sections must ship them (#3852). Checked
+    // at resolve for the same reason the placeholders are: every by-name
+    // caller lands here, and a name that resolves and then fails to render is
+    // the failure that passes review because the demo path works.
+    let sections;
+    try {
+      sections = checkDeclaredSections(path);
+    } catch (err) {
+      throw new Error(`Template ${where}: ${err.message}`);
+    }
+    if (sections.missing.length) {
+      throw new Error(
+        `Template ${where} declares sections it does not ship: `
+          + sections.missing.map((n) => `sections/${n}.html`).join(', ')
+          + '. A declared section must have a partial — add the file, or drop it from the manifest\'s "sections" list.'
       );
     }
   }

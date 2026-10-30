@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
+import { workerIdentity, workerState } from "@/lib/worker-feedback.mjs";
 import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
 import { isFencingNotice } from "@/lib/cli-fencing.mjs";
@@ -97,10 +98,10 @@ export function WorkerCard({
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
-    <div className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
+    <div role="group" aria-label={workerIdentity(job)} className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
       <div className="flex items-center gap-2">
         {job.status === "running" ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-brand" />
+          <Loader2 className="size-3 shrink-0 animate-spin text-brand-text" />
         ) : job.status === "error" ? (
           <AlertTriangle className={cn("size-3 shrink-0", tone.icon)} />
         ) : (
@@ -121,6 +122,9 @@ export function WorkerCard({
         {trailing != null && (
           <span className={cn("shrink-0", hasScore ? "ml-1" : "ml-auto")}>{trailing}</span>
         )}
+      </div>
+      <div className={cn("mt-1 text-muted", inline ? "text-xs" : "text-[10px]")}>
+        {job.subtitle && <span>{job.subtitle} · </span>}{workerState(job.status)}
       </div>
       <div className={cn("mt-1.5 w-full overflow-hidden rounded-full bg-surface-hover", inline ? "h-1.5" : "h-1")}>
         {job.status === "running" ? (

@@ -15,7 +15,7 @@
  * false positive as #3149, from a third independent cause (after the SHA-vs-
  * content bug of #2630 and the ignore-rule route of #2756).
  *
- * These tests drive the REAL manifest — read out of update-system.mjs with
+ * These tests drive the REAL manifest — read out of lib/update-manifest.mjs with
  * extractArrayFromSource, never a hard-coded copy — against throwaway repos
  * through the same ctx.git seam production uses. Hard-coding the path list
  * here would pin the fixture instead of the shipped behaviour, and the
@@ -39,7 +39,7 @@ const CONTROL = 'MANIFESTO.md';
 const USER_PATH = 'data/applications.md';
 
 const realSystemPaths = extractArrayFromSource(
-  readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8'),
+  readFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), 'utf-8'),
   'SYSTEM_PATHS',
 );
 
@@ -56,6 +56,7 @@ function makeOrigin() {
   g('config', 'user.name', 'Test');
   g('config', 'core.autocrlf', 'false');
   g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
   seed(dir, SIGNATURES, '# Signatures\n\n- @first\n');
   seed(dir, CONTROL, '# Manifesto\n\nv1\n');
   seed(dir, USER_PATH, '| base | Acme | Intern |\n');
@@ -72,6 +73,7 @@ function cloneInstall(originDir) {
   g('config', 'user.name', 'Test');
   g('config', 'core.autocrlf', 'false');
   g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
   return { dir, g };
 }
 
@@ -85,9 +87,9 @@ console.log('\n🧪 Testing signature-ledger drift (#4062)...');
 // The two tests below are only meaningful if the real manifest is what it
 // claims to be: non-empty, and still shipping the control file.
 if (realSystemPaths.length > 0 && realSystemPaths.includes(CONTROL)) {
-  pass(`real SYSTEM_PATHS read from update-system.mjs (${realSystemPaths.length} entries, includes ${CONTROL})`);
+  pass(`real SYSTEM_PATHS read from lib/update-manifest.mjs (${realSystemPaths.length} entries, includes ${CONTROL})`);
 } else {
-  fail(`could not read a usable SYSTEM_PATHS from update-system.mjs (${realSystemPaths.length} entries)`);
+  fail(`could not read a usable SYSTEM_PATHS from lib/update-manifest.mjs (${realSystemPaths.length} entries)`);
 }
 
 // ── 1. THE REGRESSION ───────────────────────────────────────────────────────

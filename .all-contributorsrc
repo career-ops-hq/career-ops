@@ -2052,6 +2052,41 @@
         "code",
         "test"
       ]
+    },
+    {
+      "login": "pmgwee",
+      "name": "Gwee Per Ming",
+      "avatar_url": "https://avatars.githubusercontent.com/u/91836754?v=4",
+      "profile": "https://www.linkedin.com/in/gweeperming/",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "kalilurrahman",
+      "name": "Kalilur Rahman",
+      "avatar_url": "https://avatars.githubusercontent.com/u/54368215?v=4",
+      "profile": "https://www.linkedin.com/in/kalilurrahman/",
+      "contributions": [
+        "bug",
+        "ideas"
+      ]
+    },
+    {
+      "login": "vliggio",
+      "name": "Vince Liggio",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2916193?v=4",
+      "profile": "https://github.com/vliggio",
+      "contributions": [
+        "code",
+        "test",
+        "doc",
+        "bug",
+        "ideas",
+        "infra",
+        "plugin"
+      ]
     }
   ]
 }

@@ -19,12 +19,14 @@
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
-  <a href="README.tr.md">Türkçe</a>
+  <a href="README.tr.md">Türkçe</a> |
+  <a href="README.vi.md">Tiếng Việt</a> |
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;作成者: <a href="https://github.com/santifer"><strong>@santifer</strong></a>、&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ja.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ja.md#builders">700+ のコントリビューター</a>と共に</p>
 
 <p align="center">
 <strong>何か月も履歴書を送り続けて、返&#8288;事&#8288;は&#8288;沈&#8288;黙。</strong><br>
@@ -120,7 +122,13 @@ npx @santifer/career-ops init
 
 <br>
 
-採用は勝手には直らない。それをくぐり抜けている人たちなら直せる。そして彼らはもう同じ部屋にいて、メモを見せ合い、互いのセットアップを直している。[修正はここで書かれる](CONTRIBUTING.md)。クラブではなく、部屋。**一緒に作ろう。**
+採用は勝手には直らない。それをくぐり抜けている人たちなら直せる。そして彼らはもう同じ部屋にいて、メモを見せ合い、互いのセットアップを直している。
+
+<a id="builders"></a>
+
+<p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ja" alt="コントリビューターの GitHub アバターが 2026年4月 から参加順に埋まっていくアニメーションの壁。次のマスは空けてある。" width="100%"></a></p>
+
+[修正はここで書かれる](CONTRIBUTING.md)。クラブではなく、部屋。**一緒に作ろう。**
 
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord：career-ops サーバーのメンバー数（ライブ）"></a></p>
 
@@ -180,7 +188,7 @@ career-ops は求職者にとって永久に無料。以下の企業がこのプ
 | **面接ストーリーバンク** | 評価をまたいで STAR+Reflection のストーリーを蓄積：実際に受ける行動面接の質問に合わせて調整できる 5〜10 本のマスターストーリー                            |
 | **交渉スクリプト**       | 給与交渉のフレームワーク、地域差による減額への反論、競合オファーの活用                                                                     |
 | **応募メールの下書き**   | レポートまたは貼り付けた求人票から、リクルーター向け・紹介向け・コールド応募向けの正式なメールを作成。件名、添付チェックリスト、根拠付きの適合ポイント、プロフィール由来の連絡先ブロック付き。下書きのみ：career-ops は決して送信・提出・クリックしません。 |
-| **ポータルスキャナー**   | 100 社以上を事前設定（Anthropic、OpenAI、ElevenLabs、Retool、n8n…）+ Ashby、Greenhouse、Lever、Wellfound を横断するカスタムクエリ         |
+| **ポータルスキャナー**   | 100 社以上を事前設定（Anthropic、OpenAI、ElevenLabs、Retool、n8n…）+ Ashby、Greenhouse、Lever、Wellfound を横断するカスタム Web 検索クエリ |
 | **資金調達企業の発見**   | レビュー優先の `company:funded` コマンドが、構造化された公開フィードから最近資金調達した企業とソース診断を表示。あなたのデータは編集しません |
 | **バッチ処理**           | ヘッドレス CLI ワーカー（`claude -p` / `opencode run`）による並列評価                                                                     |
 | **ダッシュボード TUI**   | パイプラインを閲覧・フィルタ・ソートするターミナル UI                                                                                     |
@@ -202,7 +210,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` は [Node.js](https://nodejs.org) に同梱されています：グローバルに何もインストールせず、
 > インストーラーを 1 回だけ実行します。Node がまだ？ 先にインストールしてください。
-> （すでに Claude Code / Gemini / Codex の CLI を使っている？ ならもう入っています。）
+> （すでに Claude Code / Codex の CLI を使っている？ ならもう入っています。）
 
 これで最新リリースが `./career-ops` にクローンされ、依存関係がインストールされます。次に：
 
@@ -225,17 +233,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -244,7 +243,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -262,11 +261,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-これで `career-ops` バイナリがグローバルにインストールされ、`npx` を経由せず直接実行できます。プロジェクトディレクトリを用意する `npx @santifer/career-ops init` と違い、グローバルインストールではターミナルのどこからでも使える永続的な `career-ops` コマンドが手に入ります。
+これで `career-ops` バイナリがグローバルにインストールされ、`npx` なしで `career-ops init [folder]` を実行できます。`init` が唯一のコマンドです。ワークスペースを用意するだけで、その後の作業はすべてこのバイナリではなく AI コーディング CLI の中で行います（下の「使い方」を参照）。
 
 **どちらを使うべき？**
 - `npx @santifer/career-ops init`：初回利用に最適。専用のプロジェクトフォルダを作ります。
-- `npm i -g @santifer/career-ops`：プロジェクトフォルダがすでにあり、career-ops のコマンドを直接実行したいときに最適。
+- `npm i -g @santifer/career-ops`：`npx` 形式より `career-ops init` と打ちたい場合に。ほかのコマンドは増えません。
 
 > **このシステムは、あなたの AI コーディング CLI 自身がカスタマイズするように設計されています。** モード、アーキタイプ、スコアの重み、交渉スクリプト：変えてほしいと頼むだけです。CLI は自分が使っているファイルをそのまま読むので、何を編集すべきか正確に分かっています。
 
@@ -325,25 +324,7 @@ Codex ではスラッシュコマンドは保証されません。代わりに�
 
 ## 仕組み
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI 連携
 
@@ -366,7 +347,7 @@ agy
 /career-ops tracker
 ```
 
-スキルはオープン標準に従って `.agents/skills/career-ops/SKILL.md` に定義され、サポートされる各 CLI（例：`.claude/`、`.cursor/`、`.qwen/`、`.antigravitycli/`、`.grok/`）にシンボリックリンクまたは参照されています。
+スキルはオープン標準に従って `.agents/skills/career-ops/SKILL.md` に定義され、サポートされる各 CLI（例：`.claude/`、`.qwen/`、`.antigravitycli/`、`.grok/`）にシンボリックリンクまたは参照されています。 Cursor は `.agents/skills/` 内の共有スキルを自動的に検出します。
 
 ## Codex 連携
 
@@ -500,7 +481,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-機能：6 つのフィルタータブ、4 種類のソートモード、グループ表示／フラット表示、遅延読み込みのプレビュー、インラインでのステータス変更。
+機能：10 個のフィルタータブ、8 種類のソートモード、グループ表示／フラット表示、遅延読み込みのプレビュー、インラインでのステータス変更。
 
 **実験的な Web UI** もあります（アルファ版かつオプトイン：自分で起動しない限り何も動きません）：[`web/README.md`](web/README.md) を参照してください。
 
@@ -620,7 +601,7 @@ Go のダッシュボード TUI、Node.js スクリプト、AI エージェン�
 career-ops（[career-ops.org](https://career-ops.org)、別名 **careerops**） は、あなたの AI コーディング CLI（Claude Code、Codex、OpenCode など）の中でローカルで動くオープンソースの AI 求職ツールで、すべての判断をあなたに委ねます。求人を CV と照らして評価し、ATS 向けに調整した PDF を生成し、連絡すべき相手を見つけ、すべてを一か所で追跡します：最終判断は常にあなたのものです。[CareerOps マニフェスト](https://career-ops.org/manifesto)の最初のリファレンス実装です。
 
 **カスタマイズされた履歴書が事実をでっち上げることはありますか？**
-あってはならず、プロンプトにもそう書いてあります：言い換えはしても、でっち上げはしない。`generate-pdf` は、あなたの情報源にない数字や事実を含む CV をブロックします（`--skip-fact-check` を渡した場合を除く）。職名のチェックや言い換えの判断はまだしません。2 つのオープンな issue がそれを追跡しています：[#2677](https://github.com/career-ops-hq/career-ops/issues/2677)（職名は cv.md と一致させる）と [#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不一致なら止める忠実性チェック）。マージされるまでは、送る前にすべての履歴書を読んでください。[免責事項](LEGAL_DISCLAIMER.md) にも同じことがより長く書いてあります。
+あってはならず、プロンプトにもそう書いてあります：言い換えはしても、でっち上げはしない。`generate-pdf` は、あなたの情報源にない数字や事実を含む CV をブロックします（`--skip-fact-check` を渡した場合を除く）。`pdf` モードは `cv-title-check.mjs` も実行します。これはカスタマイズした CV の各職名を、cv.md に書かれた同じ職歴（会社と期間で照合）の職名と比べ、違いがあれば残すか元に戻すかをあなたに確認します。職名の言い回しを変えるのはあなたの判断であることもあるため、警告するだけでブロックはしません。言い換えの判断はまだ何もしません：[#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不一致なら止める忠実性チェック）がそれを追跡しています。それまでは、送る前にすべての履歴書を読んでください。[免責事項](LEGAL_DISCLAIMER.md) にも同じことがより長く書いてあります。
 
 **career-ops を無料で、あるいはより安価なモデルやローカルモデルで動かせますか？**
 はい。career-ops は CLI に依存せず、無料モデルやローカルモデル（OpenRouter の無料モデル、Ollama、または OpenAI 互換のエンドポイント）で動くので、有料サブスクリプションに縛られません。完全なセットアップは [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) を参照してください。

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -74,19 +74,26 @@ test('gmail plugin gates saveProcessedIds behind !ctx.dryRun (#2354)', async () 
     log: () => {},
   };
   
-  // Create a known state file with a non-empty cursor
-  const statePath = join(ROOT, 'data', 'gmail-state.json');
-  const oldState = existsSync(statePath) ? readFileSync(statePath) : null;
-  mkdirSync(join(ROOT, 'data'), { recursive: true });
+  // The plugin keeps its cursor at data/gmail-state.json under ctx.dataRoot, and
+  // reads one under the working directory when the data root has none. Give it
+  // one scratch directory as both, so neither path can reach the checkout's live
+  // data/gmail-state.json. node:test runs this file in its own process, which
+  // makes the chdir private to it. This used to overwrite that file and put it
+  // back in `finally`, which an interrupted run never reaches (#5113).
+  const workDir = mkdtempSync(join(tmpdir(), 'co-gmail-dryrun-'));
+  const statePath = join(workDir, 'data', 'gmail-state.json');
+  mkdirSync(join(workDir, 'data'));
   const preTestContent = JSON.stringify(['existing-123']);
   writeFileSync(statePath, preTestContent);
-  
+
   const origWarn = console.warn;
+  const origCwd = process.cwd();
   try {
+    process.chdir(workDir);
     // Run the ingest logic (suppress expected spoof warning)
     console.warn = () => {};
-    await gmailMod.default.ingest(mockCtx);
-    
+    await gmailMod.default.ingest({ ...mockCtx, dataRoot: workDir });
+
     const newState = readFileSync(statePath, 'utf8');
     if (newState === preTestContent) {
       pass('gmail plugin gates saveProcessedIds behind !ctx.dryRun — dry-run stays dry (#2354)');
@@ -95,9 +102,8 @@ test('gmail plugin gates saveProcessedIds behind !ctx.dryRun (#2354)', async () 
       assert.fail('gmail plugin calls saveProcessedIds unconditionally — dry-run mutates cursor state (#2354)');
     }
   } finally {
-    // Always restore console and file state
     console.warn = origWarn;
-    if (oldState !== null) writeFileSync(statePath, oldState);
-    else rmSync(statePath, { force: true });
+    process.chdir(origCwd);
+    try { rmSync(workDir, { recursive: true, force: true }); } catch {}
   }
 });

@@ -201,7 +201,7 @@
 3. matching 시 CV의 정확한 문장을 인용합니다.
 4. 보상/회사 데이터에는 WebSearch를 사용합니다.
 5. 매 평가 후 tracker에 기록합니다.
-6. 생성 콘텐츠는 공고 언어에 맞춥니다(한국어 공고면 한국어, 영어 공고면 영어).
+6. 사용자에게 보여 줄 콘텐츠는 공고 언어와 관계없이 `config/profile.yml`의 `{language.output}`로 생성합니다(설정이 없으면 영어). 이 시장의 용어는 유지하고 필요하면 그 언어로 설명합니다.
 7. 직접적이고 구체적으로 씁니다. 불필요한 말은 줄입니다.
 8. 한국 테크 채용 문맥에 맞는 자연스러운 한국어를 사용합니다. 짧은 문장, 동사 중심, 수동태 회피. stack, pipeline, deployment, embedding 같은 현장 용어는 억지로 번역하지 않습니다.
 8b. **PDF Professional Summary의 case study URL:** PDF가 case study나 demo를 언급하면 URL은 반드시 첫 문단(Professional Summary)에 들어갑니다. recruiter는 summary만 읽는 경우가 많습니다. HTML에서는 모든 URL에 `white-space: nowrap` 적용.
@@ -216,6 +216,6 @@
 | WebFetch | 정적 페이지의 공고 추출 fallback |
 | Playwright | 공고 활성 여부 확인(browser_navigate + browser_snapshot), SPA에서 공고 추출. **중요: Playwright를 쓰는 agent를 2개 이상 병렬로 띄우지 않습니다 -- 같은 browser instance를 공유합니다** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | PDF용 임시 HTML, applications.md, reports .md |
-| Edit | tracker 업데이트 |
-| Bash | `node generate-pdf.mjs` |
+| Write | PDF용 임시 HTML, reports .md, `batch/tracker-additions/`의 tracker 추가용 TSV (`applications.md`는 직접 쓰지 않음) |
+| Edit | report 등 생성된 콘텐츠 수정. tracker 표는 직접 편집하지 않음: 새 행은 TSV로 추가해 `node merge-tracker.mjs`로 병합하고, status와 notes 변경은 `node set-status.mjs`로 처리 |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

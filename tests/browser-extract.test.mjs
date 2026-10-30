@@ -4,7 +4,7 @@
 import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nbrowser-extract.mjs (config + normalizers)');
@@ -16,7 +16,7 @@ try {
     resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
     workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
-    fetchJdViaKnownApi, JD_FETCHERS,
+    normalizeZohoJob, fetchJdViaKnownApi, JD_FETCHERS,
   } = mod;
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
@@ -395,6 +395,37 @@ try {
   if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
   else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
 
+  // normalizeZohoJob — Zoho Recruit has no JSON API; the posting page embeds
+  // the record as a JS string literal, and its Job_Description is HTML.
+  const zohoFixture = (name) => readFileSync(join(ROOT, 'tests', 'fixtures', name), 'utf8');
+  const ZOHO_URL = 'https://exampleco.zohorecruit.com/jobs/Careers/100000000001853029';
+  const zoho = normalizeZohoJob(zohoFixture('zoho-recruit-detail.html'), '100000000001853029', ZOHO_URL);
+  if (zoho
+      && zoho.url === ZOHO_URL
+      && zoho.title === 'Senior DevOps Engineer / Ruby'
+      && zoho.text.startsWith('Work model: Remote\nJob type: Full time\nSalary: 65.000 EUR-75.000 EUR\nPosted: 2026-05-14\n\n')
+      && zoho.text.includes('Senior DevOps Engineer / Ruby & Rails')
+      && zoho.text.includes("What you'll do")
+      && !zoho.text.includes('<')) {
+    pass('normalizeZohoJob reads the embedded record: HTML description to text, plus work model, salary and date');
+  } else {
+    fail(`normalizeZohoJob => ${JSON.stringify(zoho)}`);
+  }
+  const zohoLocked = normalizeZohoJob(zohoFixture('zoho-recruit-detail-locked.html'), '100000000009803001', ZOHO_URL);
+  if (zohoLocked?.text.includes('Location: New Britain, United States')
+      && zohoLocked.text.includes('Applications closed (the career site shows the posting as filled)')) {
+    pass('normalizeZohoJob surfaces a filled posting as closed');
+  } else {
+    fail(`normalizeZohoJob locked => ${JSON.stringify(zohoLocked)}`);
+  }
+  const zohoNulls = [
+    normalizeZohoJob(zohoFixture('zoho-recruit-detail.html'), '999', ZOHO_URL),
+    normalizeZohoJob(zohoFixture('zoho-recruit-detail-gone.html'), '100000000001853029', ZOHO_URL),
+    normalizeZohoJob(null, '1', ZOHO_URL),
+  ];
+  if (zohoNulls.every((v) => v === null)) pass('normalizeZohoJob returns null for another id, a removed posting, or no body');
+  else fail(`normalizeZohoJob nulls => ${JSON.stringify(zohoNulls)}`);
+
   // normalizeLeverJob — `lists` carries the labeled sections (Requirements,
   // etc.) as separate HTML blocks; dropping them loses half the JD.
   const lever = normalizeLeverJob(
@@ -439,6 +470,17 @@ try {
     pass('normalizeLeverJob appends the additional plain text after the labeled lists.');
   } else {
     fail(`normalizeLeverJob  => ${JSON.stringify(lever)}`);
+  }
+
+  const leverHtmlIntro = normalizeLeverJob(
+    { text: 'X', descriptionPlain: '', description: '<div>This position is listed on behalf of a partner.</div>', lists: [{ text: 'Requirements', content: '<li>Go</li>' }] },
+    'https://jobs.lever.co/acme/1',
+  );
+  if (leverHtmlIntro && leverHtmlIntro.text.indexOf('listed on behalf of a partner') >= 0
+      && leverHtmlIntro.text.indexOf('listed on behalf of a partner') < leverHtmlIntro.text.indexOf('Requirements')) {
+    pass('normalizeLeverJob falls back to the description HTML when descriptionPlain is empty');
+  } else {
+    fail(`normalizeLeverJob html intro => ${JSON.stringify(leverHtmlIntro)}`);
   }
 
   const leverNulls = [
@@ -533,6 +575,7 @@ try {
     ['workday', 'https://acme.wd5.myworkdayjobs.com/External/job/Seattle-WA/Engineer_R1234'],
     ['greenhouse-embedded', 'https://www.acme.com/careers/job?gh_jid=12345'],
     ['smartrecruiters', 'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer'],
+    ['zoho-recruit', 'https://acme.zohorecruit.com/jobs/Careers/100000000001853029/Senior-Engineer'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);
@@ -566,6 +609,46 @@ try {
     pass('resolveAtsApi populates parts.jobId for an Ashby posting (fetchAshbyJd selects on it)');
   } else {
     fail(`resolveAtsApi ashby parts => ${JSON.stringify(ashbyParts)}`);
+  }
+
+  // An Ashby org slug can contain a space. The posting URL carries it as %20
+  // (the URL parser encodes a raw space the same way), and the board API
+  // answers with the %20 kept in its path. The encoded slash beside it is the
+  // same URL shape, so its null comes from the charset guard and nothing else.
+  const spacedApi = 'https://api.ashbyhq.com/posting-api/job-board/Acme%20Corp';
+  const spaced = resolveAtsApi('https://jobs.ashbyhq.com/Acme%20Corp/ABC-123');
+  const rawSpace = resolveAtsApi('https://jobs.ashbyhq.com/Acme Corp/ABC-123');
+  const encodedSlash = resolveAtsApi('https://jobs.ashbyhq.com/acme%2Fprivate/ABC-123');
+  if (spaced?.ats === 'ashby' && spaced.apiUrl === spacedApi && spaced.parts.jobId === 'ABC-123'
+      && rawSpace?.apiUrl === spacedApi
+      && encodedSlash === null) {
+    pass('resolveAtsApi keeps a %20 in an Ashby org slug and still rejects an encoded slash');
+  } else {
+    fail(`resolveAtsApi ashby spaced slug => ${JSON.stringify({ spaced, rawSpace, encodedSlash })}`);
+  }
+
+  // The same posting end to end through fetchJdViaKnownApi, the call
+  // fetch-jd.mjs makes. fetch is stubbed, so nothing here touches the network.
+  /** @type {string[]} */
+  const spacedCalls = [];
+  let spacedJd = null;
+  try {
+    globalThis.fetch = async (/** @type {any} */ url) => {
+      spacedCalls.push(String(url));
+      return /** @type {any} */ ({
+        ok: true,
+        json: async () => ({ jobs: [{ id: 'ABC-123', title: 'Staff Engineer', descriptionPlain: 'Build the platform.' }] }),
+      });
+    };
+    spacedJd = await fetchJdViaKnownApi('https://jobs.ashbyhq.com/Acme%20Corp/ABC-123');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  if (spacedJd?.ats === 'ashby' && spacedJd.text.includes('Build the platform.')
+      && spacedCalls.length === 1 && spacedCalls[0] === spacedApi) {
+    pass('fetchJdViaKnownApi reads the JD for an Ashby org slug with a space');
+  } else {
+    fail(`fetchJdViaKnownApi ashby spaced slug => ${JSON.stringify({ spacedJd, spacedCalls })}`);
   }
 
   // A Lever list block with no heading still contributes its content: the

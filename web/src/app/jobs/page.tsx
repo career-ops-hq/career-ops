@@ -22,7 +22,7 @@ export default function JobsHistory() {
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">Workers</h1>
           <p className="mt-1 text-sm text-muted">
-            Every evaluation you ran — a persistent log. <span className="tabular-nums">{jobs.length}</span> total.
+            AI runs started from this dashboard, kept in this browser. <span className="tabular-nums">{jobs.length}</span> total.
           </p>
         </div>
         {jobs.some((j) => j.status !== "running") && (
@@ -37,7 +37,14 @@ export default function JobsHistory() {
 
       {jobs.length === 0 ? (
         <div className="mt-8 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center text-sm text-muted">
-          No workers yet. Hit <span className="text-foreground">Evaluate</span> on an inbox posting to spin one up.
+          No workers yet. Hit <span className="text-foreground">Evaluate</span> on an inbox posting to start one.
+          <span className="mt-2 block">
+            Ran an evaluation from your AI CLI? It shows up in{" "}
+            <Link href="/pipeline?tab=ALL" className="text-foreground underline-offset-2 hover:underline">
+              Pipeline
+            </Link>
+            , not here.
+          </span>
         </div>
       ) : (
         <ul className="mt-6 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
@@ -47,7 +54,7 @@ export default function JobsHistory() {
               <li key={j.id}>
                 <Link href={`/jobs/${j.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
                   {j.status === "running" ? (
-                    <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
+                    <Loader2 className="size-4 shrink-0 animate-spin text-brand-text" />
                   ) : j.status === "error" ? (
                     <AlertTriangle className="size-4 shrink-0 text-red-400" />
                   ) : (

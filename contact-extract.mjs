@@ -62,12 +62,14 @@ import readline from 'node:readline';
 import { resolveTrackerPath, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseFileInput, collectInteractive } from './paste-reply.mjs';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { escapeFormulaCell, unescapeFormulaCell } from './contacts.mjs';
+import { parseFollowups } from './followup-cadence.mjs';
+import { escapeFormulaCell, unescapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
 const CONTACTS_PATH = path.join(DATA_ROOT, 'data', 'contacts.tsv');
@@ -77,7 +79,7 @@ const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
 // Kept in sync by hand with contacts.mjs's own VALID_TYPES — both are small,
 // stable enums describing the same TSV column, and contacts.mjs does not
 // export its copy. internal-referral (#4691) added to both at the same time.
-const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'internal-referral', 'other']);
+export const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'internal-referral', 'other']);
 
 const KNOWN_FLAGS = ['--file', '--yes', '--company', '--tracker', '--type', '--help', '-h'];
 const USAGE = `Usage:
@@ -166,7 +168,7 @@ export async function appendContact(contact, contactsPath = CONTACTS_PATH) {
     const key = (name, company) => `${identityPart(name)}\0${identityPart(company)}`;
     const storedKey = (name, company) => `${identityPart(name, true)}\0${identityPart(company, true)}`;
     const incomingKey = key(contact.name, contact.company);
-    const existingIndex = lines.findIndex((line) => {
+    const existingIndex = lines.findLastIndex((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
       const cells = line.split('\t');
@@ -205,22 +207,7 @@ function loadTrackerApps(appsFile = APPS_FILE) {
 
 function loadFollowups(followupsFile = FOLLOWUPS_FILE) {
   if (!fs.existsSync(followupsFile)) return [];
-  const content = fs.readFileSync(followupsFile, 'utf-8');
-  const lines = content.split('\n');
-  const followups = [];
-  for (const line of lines) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map((s) => s.trim());
-    if (parts.length < 8) continue;
-    const num = parseInt(parts[1], 10);
-    const appNum = parseInt(parts[2], 10);
-    if (Number.isNaN(num) || Number.isNaN(appNum)) continue;
-    followups.push({
-      num, appNum, date: parts[3], company: parts[4], role: parts[5],
-      channel: parts[6], contact: parts[7], notes: parts[8] || '',
-    });
-  }
-  return followups;
+  return parseFollowups(fs.readFileSync(followupsFile, 'utf-8'));
 }
 
 function askYesNo(query) {
@@ -363,7 +350,9 @@ async function main() {
   const contactType = typeOverride || inferContactType(`${candidate.subject} ${candidate.body_snippet}`);
 
   const replyType = classifyReply(candidate).type;
-  const today = new Date().toISOString().slice(0, 10);
+  // The local day: this lands in the user's contacts.tsv, and the UTC day is
+  // tomorrow all evening west of Greenwich (#3070).
+  const today = localToday();
   const contact = {
     name,
     company,

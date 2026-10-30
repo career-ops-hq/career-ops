@@ -25,6 +25,12 @@
       "matchManagers": ["npm"],
       "groupName": "npm dependencies",
       "automerge": false
+    },
+    {
+      "description": "test.yml pins the project's Node floor (lib/node-floor.mjs) for the syntax check; bumping it silently drops the floor from CI, as 647ab019 did. Raise it by hand together with NODE_MIN.",
+      "matchFileNames": [".github/workflows/test.yml"],
+      "matchDatasources": ["node-version"],
+      "enabled": false
     }
   ]
 }

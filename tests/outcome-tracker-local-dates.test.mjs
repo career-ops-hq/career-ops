@@ -9,10 +9,12 @@
 //
 //   outcome.mjs:62    the `## Entry:` header and `**Date**:` in data/outcomes/,
 //                     which calibrate.mjs and funnel-velocity.mjs then read
-//   tracker.mjs:552   the date on a row in the SQLite status_events table
+//   tracker.mjs       the date on a row in the SQLite status_events table
 //
-// The tracker one sticks: the index is derived and rebuildable, but its own
-// comment says events "persist across rebuilds, keyed by id", so a wrong day is
+// The tracker one sticks: the index is derived and rebuildable, and since
+// #5555 so are the events the transition ledger explains, but a status change
+// no ledger row explains (the hand edit this test makes) is dated by the sync
+// that saw it and persists across syncs, keyed by id, so a wrong day is
 // written once and never corrected by a resync.
 //
 // FROZEN INSTANT, not the wall clock — the same discipline as the gate file, and
@@ -29,6 +31,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -125,7 +128,7 @@ test('outcome.mjs journals the local day', () => {
 });
 
 test('tracker.mjs dates its status events with the local day', async () => {
-  // node:sqlite needs Node >= 22.5; skip rather than fail on an older runtime,
+  // node:sqlite needs Node >= 22.13 (no flag); skip rather than fail on an older runtime,
   // the way test-all does for the tracker index suites. Probed in-process, so
   // this file contains no process.exit literal — tests/main-guard-convention
   // greps discovered suites for one and does not care that it is inside a
@@ -155,7 +158,7 @@ test('tracker.mjs dates its status events with the local day', async () => {
       const rows = db.prepare('SELECT date FROM status_events').all();
       process.stdout.write(JSON.stringify(rows.map(r => r.date)));
     `], { encoding: 'utf-8', timeout: 30_000 });
-    assert.equal(q.status, 0, `could not read status_events: ${q.stderr}`);
+    assert.equal(q.status, 0, describeSpawn(q, `could not read status_events`));
     const dates = JSON.parse(q.stdout);
     assert.ok(
       !dates.includes(UTC_DAY),

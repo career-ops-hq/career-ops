@@ -137,6 +137,220 @@ chineseSubmit.result === 'active' && chineseSubmit.code === 'apply_control_visib
   ? pass('exact “投递” button marks a Feishu posting active')
   : fail(`exact “投递” button classified ${chineseSubmit.result}/${chineseSubmit.code}, expected active/apply_control_visible`);
 
+console.log('\nliveness-core — Dutch apply controls, and the VDAB banner that outranks them');
+
+// VDAB labels Apply "Solliciteer nu"; Recruitee career sites in Dutch label it
+// "Solliciteren". Without a Dutch label, every live posting on those pages
+// read no_apply_control and scan --verify dropped it for good (#4832).
+const dutchBody = 'Functieomschrijving\nJe komt terecht in een afwisselende functie waarbij je zowel operationeel als projectmatig aan de slag gaat.\n'.repeat(4);
+for (const label of ['Solliciteer nu', 'Solliciteren']) {
+  const dutchApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://www.vdab.be/vindeenjob/vacatures/74748133',
+    finalUrl: 'https://www.vdab.be/vindeenjob/vacatures/74748133',
+    bodyText: dutchBody,
+    applyControls: ['Bewaar', label],
+  });
+  dutchApply.result === 'active' && dutchApply.code === 'apply_control_visible'
+    ? pass(`"${label}" marks a Dutch posting active`)
+    : fail(`"${label}" classified ${dutchApply.result}/${dutchApply.code}, expected active/apply_control_visible`);
+}
+
+// The pattern reads the verb. The noun, "sollicitatie", turns up in contact
+// addresses, which are links but not Apply controls.
+const dutchContact = classifyLiveness({
+  status: 200,
+  requestedUrl: 'https://werkenbij.example.nl/o/projectleider',
+  finalUrl: 'https://werkenbij.example.nl/o/projectleider',
+  bodyText: dutchBody,
+  applyControls: ['Deel vacature', 'sollicitatie@example.nl'],
+});
+dutchContact.result === 'uncertain' && dutchContact.code === 'no_apply_control'
+  ? pass('a "sollicitatie@" contact address is not an Apply control')
+  : fail(`a "sollicitatie@" address alone classified ${dutchContact.result}/${dutchContact.code}, expected uncertain/no_apply_control`);
+
+// A closed VDAB vacancy keeps its whole page, "Solliciteer nu" included, and
+// says it is closed only in this banner. The banner is a hard pattern, read
+// before the apply control, so the button cannot make the vacancy active.
+const closedVdab = classifyLiveness({
+  status: 200,
+  requestedUrl: 'https://www.vdab.be/vindeenjob/vacatures/72975331',
+  finalUrl: 'https://www.vdab.be/vindeenjob/vacatures/72975331',
+  bodyText: `Terug naar Vind een job\nInfo\nDeze vacature is niet meer gepubliceerd\nVerkoper tuincentrum\nSolliciteer nu\nBewaar\n${dutchBody}`,
+  applyControls: ['Terug naar Vind een job', 'Solliciteer nu', 'Bewaar'],
+});
+closedVdab.result === 'expired' && closedVdab.code === 'expired_body'
+  ? pass('VDAB "Deze vacature is niet meer gepubliceerd" -> expired, despite its "Solliciteer nu"')
+  : fail(`closed VDAB vacancy classified ${closedVdab.result}/${closedVdab.code}, expected expired/expired_body`);
+
+console.log('\nliveness-core — Polish closure banners (pracuj.pl) beat the "Aplikuj" control');
+
+// pracuj.pl keeps an archived offer's full page, "Aplikuj" button included,
+// and marks it closed only in a banner. Before these patterns the visible
+// apply control won and every archived offer read as active.
+const pracujUrl = 'https://www.pracuj.pl/praca/dyrektor-operacyjny-warszawa,oferta,1004567890';
+const polishBody = 'Twój zakres obowiązków\nZarządzanie operacjami w regionie, odpowiedzialność za budżet i zespół.\n'.repeat(4);
+const pracuj = (banner) => classifyLiveness({
+  status: 200,
+  requestedUrl: pracujUrl,
+  finalUrl: pracujUrl,
+  bodyText: `${banner}Dyrektor operacyjny\nWarszawa\n${polishBody}`,
+  applyControls: ['Aplikuj'],
+});
+for (const banner of [
+  'Ogłoszenie wygasło',
+  'OGLOSZENIE WYGASLO',
+  'Pracodawca zakończył zbieranie zgłoszeń na tę ofertę',
+  'Oferta jest nieaktualna',
+  'Oferta archiwalna',
+  'Kandydaci nie są już akceptowani',
+]) {
+  const r = pracuj(`${banner}\n`);
+  r.result === 'expired' && r.code === 'expired_body'
+    ? pass(`pracuj.pl "${banner}" -> expired, despite its "Aplikuj"`)
+    : fail(`pracuj.pl "${banner}" classified ${r.result}/${r.code}, expected expired/expired_body`);
+}
+
+// The same page without a banner is a live offer and must stay active.
+const livePracuj = pracuj('');
+livePracuj.result === 'active'
+  ? pass('pracuj.pl offer without a closure banner stays active')
+  : fail(`live pracuj.pl offer classified ${livePracuj.result}/${livePracuj.code}, expected active`);
+
+console.log('\nliveness-core — the getManfred Apply control, and the date a closed posting shows');
+
+// getManfred labels Apply "¡Apúntame!" ("sign me up"); the walk reads the
+// control as "¡APÚNTAME! ¡Apúntame!". With no pattern for it, a live posting
+// read no_apply_control and scan --verify dropped it (#4832).
+const manfredUrl = 'https://www.getmanfred.com/ofertas-empleo/8510/renta-4-lead-oracle-backend-developer-oct26';
+const manfredBody = '¿Qué harás?\nDiseñarás y mantendrás los servicios backend de la plataforma de inversión.\n'.repeat(4);
+const manfredApply = classifyLiveness({
+  status: 200,
+  requestedUrl: manfredUrl,
+  finalUrl: manfredUrl,
+  bodyText: manfredBody,
+  applyControls: ['¿Puedo aplicar si vivo fuera de España?', 'COMPARTIR Compartir', '¡APÚNTAME! ¡Apúntame!'],
+});
+manfredApply.result === 'active' && manfredApply.code === 'apply_control_visible'
+  ? pass('"¡Apúntame!" marks a getManfred posting active')
+  : fail(`"¡Apúntame!" classified ${manfredApply.result}/${manfredApply.code}, expected active/apply_control_visible`);
+
+// Most getManfred postings, closed ones too, have an FAQ button such as
+// "¿Puedo aplicar si vivo fuera de España?". The pattern reads "apúntame", not
+// the verb "aplicar", so that button alone is not an Apply control.
+const manfredFaq = classifyLiveness({
+  status: 200,
+  requestedUrl: manfredUrl,
+  finalUrl: manfredUrl,
+  bodyText: manfredBody,
+  applyControls: ['¿Puedo aplicar si vivo fuera de España?', 'OTRAS OFERTAS Otras ofertas'],
+});
+manfredFaq.result === 'uncertain' && manfredFaq.code === 'no_apply_control'
+  ? pass('the "¿Puedo aplicar...?" FAQ button is not an Apply control')
+  : fail(`the FAQ button alone classified ${manfredFaq.result}/${manfredFaq.code}, expected uncertain/no_apply_control`);
+
+// A closed getManfred posting stays up without its Apply button, and says
+// above the title when it closed. It read no_apply_control, so check-liveness
+// reported it uncertain instead of expired.
+const closedManfredUrl = 'https://www.getmanfred.com/ofertas-empleo/2649/cabify-principal-software-engineer-oct23';
+const closedManfred = classifyLiveness({
+  status: 200,
+  requestedUrl: closedManfredUrl,
+  finalUrl: closedManfredUrl,
+  bodyText: `Oferta cerrada el 26/12/2023\nPrincipal Software Engineer\n${manfredBody}Oferta cerrada\nEsta oferta ya está cerrada, ¡pero tenemos muchas más!\nVER OTRAS OFERTAS`,
+  applyControls: ['¿Puedo aplicar si vivo fuera de España?', 'OTRAS OFERTAS Otras ofertas'],
+});
+closedManfred.result === 'expired' && closedManfred.code === 'expired_body'
+  ? pass('getManfred "Oferta cerrada el 26/12/2023" -> expired')
+  : fail(`closed getManfred posting classified ${closedManfred.result}/${closedManfred.code}, expected expired/expired_body`);
+
+// A posting written in English has its FAQ in English, and "Can I apply
+// regardless of where I live?" reads as an Apply control. Closed postings like
+// this one read active on the first poll, before the "Esta oferta ya está
+// cerrada" box near the end of the page had rendered. The date above the title
+// was already there, and a hard pattern is read before the Apply control.
+const closedEnglishUrl = 'https://www.getmanfred.com/ofertas-empleo/1922/grayhair-software-senior-java-developer-jun23';
+const closedEnglish = classifyLiveness({
+  status: 200,
+  requestedUrl: closedEnglishUrl,
+  finalUrl: closedEnglishUrl,
+  bodyText: `Oferta sólo disponible en Inglés\nOferta cerrada el 27/07/2023\nSenior Java Developer\n${'What will you do?\nYou will build and run the Java services behind the platform.\n'.repeat(4)}Can I apply regardless of where I live?\nOferta cerrada`,
+  applyControls: ['Can I apply regardless of where I live?', 'COMPARTIR Compartir'],
+});
+closedEnglish.result === 'expired' && closedEnglish.code === 'expired_body'
+  ? pass('a closed getManfred posting in English -> expired, despite its "Can I apply...?" FAQ button')
+  : fail(`closed getManfred posting in English classified ${closedEnglish.result}/${closedEnglish.code}, expected expired/expired_body`);
+
+console.log('\nliveness-core — the HiringRoom Apply control');
+
+// HiringRoom labels Apply "Postularse", and the walk reads it twice: the button
+// under the title and the one after the description. With no pattern for it, a
+// live posting read no_apply_control and scan --verify dropped it (#4832). The
+// controls below are what the walk returns on a live posting.
+const hiringRoomUrl = 'https://growuphr.hiringroom.com/jobs/get_vacancy/6a2314c34cf88a4172be80c2';
+const hiringRoomBody = 'Descripción del puesto\nNos encontramos en la búsqueda de un Service Desk Manager para liderar una operación global de soporte.\n'.repeat(4);
+const hiringRoomChrome = ['Portal de empleos', 'Compartir', '¿Cómo me postulo?', 'Actualizá tu perfil', 'Contacto con soporte', 'Cancelar', 'Enviar'];
+const hiringRoomApply = classifyLiveness({
+  status: 200,
+  requestedUrl: hiringRoomUrl,
+  finalUrl: hiringRoomUrl,
+  bodyText: hiringRoomBody,
+  applyControls: ['Postularse', 'Postularse', ...hiringRoomChrome],
+});
+hiringRoomApply.result === 'active' && hiringRoomApply.code === 'apply_control_visible'
+  ? pass('"Postularse" marks a HiringRoom posting active')
+  : fail(`"Postularse" classified ${hiringRoomApply.result}/${hiringRoomApply.code}, expected active/apply_control_visible`);
+
+// Every HiringRoom posting also links the help article "¿Cómo me postulo?"
+// ("how do I apply?"). The pattern reads the label, not the verb, so the help
+// link alone is not an Apply control.
+const hiringRoomHelp = classifyLiveness({
+  status: 200,
+  requestedUrl: hiringRoomUrl,
+  finalUrl: hiringRoomUrl,
+  bodyText: hiringRoomBody,
+  applyControls: hiringRoomChrome,
+});
+hiringRoomHelp.result === 'uncertain' && hiringRoomHelp.code === 'no_apply_control'
+  ? pass('the "¿Cómo me postulo?" help link is not an Apply control')
+  : fail(`the help link alone classified ${hiringRoomHelp.result}/${hiringRoomHelp.code}, expected uncertain/no_apply_control`);
+
+console.log('\nliveness-core — Bulgarian apply controls');
+
+// dev.bg and zaplata.bg label Apply "Кандидатствай", wherewework.bg
+// "Кандидатствайте" / "Външно кандидатстване", jobtiger.bg "Кандидатстване".
+// Without them every live posting on those boards read no_apply_control and
+// scan --verify dropped it for good, as in #4832.
+const bulgarianBody = 'Описание на позицията\nТърсим опитен PHP разработчик, който да се присъедини към екипа ни и да работи по уеб приложения.\n'.repeat(4);
+for (const label of ['Кандидатствай', 'Кандидатствайте сега', 'КАНДИДАТСТВАЙ', 'Кандидатстване', 'Външно кандидатстване']) {
+  const bulgarianApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://www.wherewework.bg/bg/obiavi/backend-developer-php/115000',
+    finalUrl: 'https://www.wherewework.bg/bg/obiavi/backend-developer-php/115000',
+    bodyText: bulgarianBody,
+    applyControls: ['Запазете', label],
+  });
+  bulgarianApply.result === 'active' && bulgarianApply.code === 'apply_control_visible'
+    ? pass(`"${label}" marks a Bulgarian posting active`)
+    : fail(`"${label}" classified ${bulgarianApply.result}/${bulgarianApply.code}, expected active/apply_control_visible`);
+}
+
+// The noun counts only when it opens the label. jobtiger.bg's advice links end
+// with it, and "кандидати" (candidates) and "кандидатствахте" (you applied)
+// share the stem.
+for (const label of ['Мотивационното писмо Как да напишем добро писмо за кандидатстване', 'F.A.Q. Кандидати', 'Вече кандидатствахте']) {
+  const bulgarianNotApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://www.jobtiger.bg/obiavi-za-rabota/back-end-developer-330211-2',
+    finalUrl: 'https://www.jobtiger.bg/obiavi-za-rabota/back-end-developer-330211-2',
+    bodyText: bulgarianBody,
+    applyControls: [label],
+  });
+  bulgarianNotApply.result === 'uncertain' && bulgarianNotApply.code === 'no_apply_control'
+    ? pass(`"${label}" is not an Apply control`)
+    : fail(`"${label}" classified ${bulgarianNotApply.result}/${bulgarianNotApply.code}, expected uncertain/no_apply_control`);
+}
+
 console.log('\nliveness-core — role/position "is closed" and bare "Job Expired" banners classify as expired');
 
 // Reported on agentic-engineering-jobs.com (111 of 111 uncertain postings
@@ -369,4 +583,301 @@ for (const { text, label } of [
   verdict.result === 'expired' && verdict.code === 'expired_body'
     ? pass(`${label} -> expired/expired_body`)
     : fail(`${label} classified ${verdict.result}/${verdict.code}, expected expired/expired_body`);
+}
+
+console.log('\nliveness-core — a banner on its own line is not read as part of the line above');
+
+// Page chrome above a banner often ends in a clause of its own, with no
+// punctuation, and its "if", "when" or "before" is within ten words of the
+// banner's end. With the lines joined, that word opened the banner's clause
+// and a closed posting with an Apply control on the page read as active.
+for (const { text, label } of [
+  {
+    text: 'Sign in if you have an account\nThis job has been filled.',
+    label: 'a filled banner under "Sign in if you have an account"',
+  },
+  {
+    text: 'Get notified when new jobs are posted\nNo longer accepting applications',
+    label: '"No longer accepting applications" under "Get notified when new jobs are posted"',
+  },
+  {
+    text: 'Please read the full posting before you apply\nThis position is no longer available.',
+    label: '"This position is no longer available" under a line ending "before you apply"',
+  },
+  {
+    // A line break inside the banner does not stop the pattern: patterns
+    // still match on the joined text.
+    text: 'We are no longer accepting\napplications for this role.',
+    label: 'a banner broken over two lines',
+  },
+]) {
+  const verdict = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: `${jdBody}\n${text}`,
+    applyControls: ['Apply'],
+  });
+  verdict.result === 'expired' && verdict.code === 'expired_body'
+    ? pass(`${label} -> expired/expired_body`)
+    : fail(`${label} classified ${verdict.result}/${verdict.code}, expected expired/expired_body`);
+}
+
+// A closing line on a line of its own is still one clause.
+for (const { text, label } of [
+  {
+    text: 'Salary: $80,000\nApplications will be accepted until the position has been filled.\nBenefits',
+    label: '"accepted until the position has been filled" between two other lines',
+  },
+  {
+    text: 'How to apply\nYou will receive final notification via email when this vacancy has been filled.',
+    label: '"when this vacancy has been filled" under a heading',
+  },
+]) {
+  const verdict = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: `${jdBody}\n${text}`,
+    applyControls: ['Apply'],
+  });
+  verdict.result === 'active' && verdict.code === 'apply_control_visible'
+    ? pass(`${label} -> active/apply_control_visible`)
+    : fail(`${label} classified ${verdict.result}/${verdict.code}, expected active/apply_control_visible`);
+}
+
+// ---------------------------------------------------------------------------
+// #5000 defect 3: a closure page whose whole content is one sentence.
+// ---------------------------------------------------------------------------
+console.log('\nliveness-core — the "can\'t view this job" closure sentence classifies as expired');
+
+const closureVerdict = (bodyText, applyControls = []) =>
+  classifyLiveness({
+    status: 200,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText,
+    applyControls,
+  });
+
+// The reported page: HTTP 200, the sentence is the only content, no apply control.
+closureVerdict("You can't view this job because it's not available at this time.").result === 'expired'
+  ? pass('the closure sentence -> expired')
+  : fail('the closure sentence was not classified expired');
+
+// The same sentence with typographic apostrophes (U+2019) must match too;
+// normalizeForMatch is what makes that true.
+closureVerdict('You can’t view this job because it’s not available at this time.').result === 'expired'
+  ? pass('the closure sentence with U+2019 apostrophes -> expired')
+  : fail('the closure sentence with U+2019 apostrophes was not classified expired');
+
+// Hard tier: the sentence is a statement about THIS posting, so it wins over a
+// stray generic apply control.
+closureVerdict("You can't view this job because it's not available at this time.", ['Apply']).result === 'expired'
+  ? pass('the closure sentence wins over a generic apply control')
+  : fail('the closure sentence did not win over a generic apply control');
+
+// Negative control: a live posting that merely mentions availability stays active.
+closureVerdict('Salary data is not available at this time. Apply now.', ['Apply now']).result === 'active'
+  ? pass('an availability mention on a live posting stays active')
+  : fail('the new pattern over-triggered on a live posting');
+
+console.log('\nliveness-core — CareerViet: Vietnamese Apply label, and the deadline that closes a posting (#4832)');
+
+// A CareerViet page as the browser reads it: the info block carries the
+// deadline, and the Apply button is there whether or not the posting is open.
+const careerviet = (deadline, applyControls = ['NỘP ĐƠN ỨNG TUYỂN'], finalUrl = 'https://careerviet.vn/vi/tim-viec-lam/brand-executive.35C50000.html') =>
+  classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://careerviet.vn/vi/tim-viec-lam/brand-executive.35C50000.html',
+    finalUrl,
+    bodyText: `Brand Executive\nCông ty ABC\nCấp bậc\nNhân viên\nHết hạn nộp\n${deadline}\nPhúc lợi\nLaptop\n${'Mô tả công việc. '.repeat(30)}`,
+    applyControls,
+    now: new Date('2026-10-17T05:00:00Z'),
+  });
+
+careerviet('30/11/2026').result === 'active'
+  ? pass('open CareerViet posting with NỘP ĐƠN ỨNG TUYỂN -> active (was: uncertain/no_apply_control)')
+  : fail(`open CareerViet posting not active: ${JSON.stringify(careerviet('30/11/2026'))}`);
+
+{
+  const v = careerviet('29/09/2025');
+  v.result === 'expired' && v.code === 'deadline_passed'
+    ? pass('past deadline wins over the intact Apply button -> expired')
+    : fail(`past deadline not expired: ${JSON.stringify(v)}`);
+}
+
+careerviet('17/10/2026').result === 'active'
+  ? pass('the deadline day itself is still open')
+  : fail('the deadline day was read as closed');
+
+careerviet('16/10/2026').result === 'expired'
+  ? pass('the day after the deadline is closed')
+  : fail('the day after the deadline was read as open');
+
+// Vietnam is UTC+7: 18:00 UTC on 17/10 is already 18/10 there.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careerviet.vn/vi/tim-viec-lam/x.35C50000.html',
+  bodyText: `Hết hạn nộp 17/10/2026 ${'Mô tả công việc. '.repeat(30)}`,
+  applyControls: ['NỘP ĐƠN ỨNG TUYỂN'],
+  now: new Date('2026-10-17T18:00:00Z'),
+}).result === 'expired'
+  ? pass('the deadline is judged in Vietnam time (UTC+7)')
+  : fail('the deadline was judged in UTC');
+
+// Today's date must not depend on how a locale orders a formatted date: with
+// format() rendering MM/DD/YYYY, both sides of the deadline still read right.
+{
+  const format = Object.getOwnPropertyDescriptor(Intl.DateTimeFormat.prototype, 'format');
+  Object.defineProperty(Intl.DateTimeFormat.prototype, 'format', { configurable: true, get: () => () => '10/17/2026' });
+  let past, ahead;
+  try {
+    past = careerviet('16/10/2026').result;
+    ahead = careerviet('30/03/2027').result;
+  } finally {
+    Object.defineProperty(Intl.DateTimeFormat.prototype, 'format', format);
+  }
+  past === 'expired' && ahead === 'active'
+    ? pass('the deadline comparison does not depend on the locale date format')
+    : fail(`with an MM/DD/YYYY format: past=${past}, ahead=${ahead}`);
+}
+
+careerviet('31/02/2026').result === 'active'
+  ? pass('an impossible date is not read as a closure')
+  : fail('an impossible date closed the posting');
+
+// Only the first deadline counts: a related-jobs card must not close the posting.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careerviet.vn/vi/tim-viec-lam/x.35C89ABA.html',
+  bodyText: `Hết hạn nộp\n30/11/2026\n${'Mô tả công việc. '.repeat(30)}\nViệc làm tương tự\nHết hạn nộp 01/01/2024`,
+  applyControls: ['NỘP ĐƠN ỨNG TUYỂN'],
+  now: new Date('2026-10-17T05:00:00Z'),
+}).result === 'active'
+  ? pass('a later deadline in a related-jobs card does not close the posting')
+  : fail('a related-jobs deadline closed the posting');
+
+// A dead permalink that redirects to a listing page must not be closed by
+// another job's deadline on that page (review of #5367).
+{
+  const v = careerviet('29/09/2025', ['NỘP ĐƠN ỨNG TUYỂN'], 'https://careerviet.vn/vi/tim-viec-lam/ket-qua');
+  v.result === 'uncertain' && v.code === 'redirected_off_posting'
+    ? pass('redirect off the posting + past deadline -> uncertain, not expired')
+    : fail(`redirected listing read as ${JSON.stringify(v)}`);
+}
+
+// A missing CareerViet id lands on the all-jobs page, and 35C89ABA (the usual
+// id shape, with no five digits in a row) is not one the redirect guard
+// recognises. The page's cards print "Hạn nộp: dd-mm-yyyy", not the posting's
+// "Hết hạn nộp dd/mm/yyyy", and its "ỨNG TUYỂN NGAY" is not the posting's
+// button, so the page cannot close the posting or keep it alive, even with a
+// card dated in the past first (the real page had none on 2026-10-18).
+{
+  const v = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://careerviet.vn/vi/tim-viec-lam/brand-executive.35C89ABA.html',
+    finalUrl: 'https://careerviet.vn/viec-lam/tat-ca-viec-lam-vi.html',
+    bodyText: `Việc làm\nKế toán tổng hợp\nCạnh tranh Hà Nội Hạn nộp: 01-10-2025 Cập nhật: 18-10-2026\nNhân Viên Kinh Doanh B2B\nHạn nộp: 31-10-2026\n${'Mô tả công việc. '.repeat(30)}`,
+    applyControls: ['ỨNG TUYỂN NGAY', 'Lưu việc làm'],
+    now: new Date('2026-10-17T05:00:00Z'),
+  });
+  v.result === 'uncertain'
+    ? pass('the all-jobs page a missing CareerViet id lands on stays uncertain')
+    : fail(`the all-jobs landing page read as ${JSON.stringify(v)}`);
+}
+
+// Without a deadline the Apply label alone still reads active, and the label
+// is not a loose match: "đơn" prose elsewhere does not count.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careerviet.vn/vi/tim-viec-lam/x.35C89ABA.html',
+  bodyText: 'Mô tả công việc. '.repeat(30),
+  applyControls: ['Nộp đơn ứng tuyển'],
+}).result === 'active'
+  ? pass('the label reads as an Apply control in mixed case too')
+  : fail('mixed-case label not recognised');
+
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careerviet.vn/vi/tim-viec-lam/x.35C89ABA.html',
+  bodyText: 'Mô tả công việc. '.repeat(30),
+  applyControls: ['Xem đơn hàng'],
+}).result === 'uncertain'
+  ? pass('an unrelated "đơn" control is not an Apply control')
+  : fail('an unrelated control read as Apply');
+
+// ── isUnreadableVerdict: "body could not be read" is not "closed" (#5408) ────
+import { isUnreadableVerdict } from '../liveness-core.mjs';
+
+const unreadableProbe = classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careers.example.com/job/123',
+  bodyText: 'Home Careers Contact',
+  applyControls: [],
+});
+isUnreadableVerdict(unreadableProbe)
+  ? pass('a nav/footer-only page (insufficient_content) is an unreadable verdict')
+  : fail('a nav/footer-only page was not flagged unreadable');
+
+isUnreadableVerdict({ result: 'expired', code: 'hard_expired' }) === false
+  && isUnreadableVerdict({ result: 'active' }) === false
+  && isUnreadableVerdict({ result: 'uncertain', code: 'bot_challenge' }) === false
+  && isUnreadableVerdict(null) === false
+  && isUnreadableVerdict(undefined) === false
+  ? pass('closed, active, other uncertain and missing verdicts are not unreadable')
+  : fail('isUnreadableVerdict over-matched a non-insufficient_content verdict');
+
+// ── isClosureEvidence: only closure EVIDENCE closes a tracker row ────────────
+//
+// check-liveness.mjs --discard-expired used to take every `expired` verdict and
+// write Discarded to the tracker. An unreadable page is `expired` too, so an
+// Evaluated row whose posting was merely slow to render was closed out with the
+// note "posting closed". The two other callers already excluded it by copying
+// the rule; the destructive one never did. One predicate now serves all three.
+import { isClosureEvidence, discardableExpiredUrls } from '../liveness-core.mjs';
+import { readFileSync as readLivenessSource } from 'node:fs';
+import { fileURLToPath as toLivenessPath } from 'node:url';
+
+// The premise, asserted rather than assumed: a REAL unreadable verdict from the
+// classifier is `uncertain`. An older or hand-built verdict can still carry the
+// same code as `expired`, which is why `expired` alone cannot gate a write.
+unreadableProbe.result === 'uncertain'
+  ? pass('premise: classifyLiveness() reports an unreadable page as uncertain')
+  : fail(`premise failed: an unreadable page classified as ${unreadableProbe.result}, not uncertain`);
+const legacyUnreadable = { result: 'expired', code: 'insufficient_content' };
+
+isClosureEvidence({ result: 'expired', code: 'hard_expired' }) === true
+  && isClosureEvidence(unreadableProbe) === false
+  && isClosureEvidence(legacyUnreadable) === false
+  && isClosureEvidence({ result: 'uncertain', code: 'bot_challenge' }) === false
+  && isClosureEvidence({ result: 'active' }) === false
+  && isClosureEvidence(null) === false
+  ? pass('closure evidence is a real expired verdict, never an unreadable, uncertain or missing one')
+  : fail('isClosureEvidence accepted something that does not prove the posting closed');
+
+{
+  const { closed, unreadable } = discardableExpiredUrls([
+    { url: 'https://jobs.example.com/closed', result: 'expired', code: 'hard_expired' },
+    { ...unreadableProbe, url: 'https://jobs.example.com/still-loading' },
+    { ...legacyUnreadable, url: 'https://jobs.example.com/old-verdict' },
+    { url: 'https://jobs.example.com/live', result: 'active' },
+    { url: 'https://jobs.example.com/wall', result: 'uncertain', code: 'bot_challenge' },
+    { result: 'expired', code: 'hard_expired' },          // no url: nothing to discard
+  ]);
+  JSON.stringify(closed) === JSON.stringify(['https://jobs.example.com/closed'])
+    ? pass('--discard-expired closes only the posting with closure evidence')
+    : fail(`--discard-expired would close ${JSON.stringify(closed)} — an unreadable page must not be among them`);
+  JSON.stringify(unreadable) === JSON.stringify(['https://jobs.example.com/still-loading', 'https://jobs.example.com/old-verdict'])
+    ? pass('unreadable pages are reported, uncertain or expired, not silently dropped')
+    : fail(`unreadable pages not reported correctly: ${JSON.stringify(unreadable)}`);
+}
+
+{
+  // A guard on the CLI itself. Testing the helper proves nothing if
+  // check-liveness.mjs stops calling it, which is the shape this bug took.
+  const cliPath = toLivenessPath(new URL('../check-liveness.mjs', import.meta.url));
+  const cli = readLivenessSource(cliPath, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+  cli.includes('discardableExpiredUrls(')
+    && !/verdicts\.filter\(\s*\(?\s*v\s*\)?\s*=>\s*v\.result\s*===\s*'expired'\s*\)/.test(cli)
+    ? pass('check-liveness.mjs --discard-expired selects URLs through the shared predicate')
+    : fail('check-liveness.mjs builds its discard list without discardableExpiredUrls() — an unreadable page would be closed');
 }

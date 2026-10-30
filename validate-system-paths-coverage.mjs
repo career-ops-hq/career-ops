@@ -22,20 +22,23 @@ import { fileURLToPath } from 'url';
 import { extractArrayFromSource, localUserPaths, LOCAL_PATHS_FILE } from './update-system.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+// SYSTEM_PATHS lives in lib/update-manifest.mjs (#5554); USER_PATHS is still in
+// the updater. Both are read with the updater's own parser, as it reads them.
 const sourcePath = join(ROOT, 'update-system.mjs');
+const manifestPath = join(ROOT, 'lib', 'update-manifest.mjs');
 
-if (!existsSync(sourcePath)) {
-  console.error('FAIL: update-system.mjs not found');
-  process.exit(1);
+for (const path of [sourcePath, manifestPath]) {
+  if (!existsSync(path)) {
+    console.error(`FAIL: ${path} not found`);
+    process.exit(1);
+  }
 }
 
-const source = readFileSync(sourcePath, 'utf-8');
-
-const SYSTEM_PATHS = extractArrayFromSource(source, 'SYSTEM_PATHS');
-const USER_PATHS = extractArrayFromSource(source, 'USER_PATHS');
+const SYSTEM_PATHS = extractArrayFromSource(readFileSync(manifestPath, 'utf-8'), 'SYSTEM_PATHS');
+const USER_PATHS = extractArrayFromSource(readFileSync(sourcePath, 'utf-8'), 'USER_PATHS');
 
 if (SYSTEM_PATHS.length === 0 || USER_PATHS.length === 0) {
-  console.error('FAIL: SYSTEM_PATHS or USER_PATHS not found in update-system.mjs');
+  console.error('FAIL: SYSTEM_PATHS not found in lib/update-manifest.mjs, or USER_PATHS not found in update-system.mjs');
   process.exit(1);
 }
 // Paths a fork declared as its own in the gitignored local file (#2421).
@@ -249,7 +252,7 @@ if (orphans.length > 0) {
   console.error('Coverage gap — tracked files not in SYSTEM_PATHS or USER_PATHS:');
   for (const orphan of orphans) console.error(`  ${orphan}`);
   console.error('');
-  console.error('Add each path to update-system.mjs SYSTEM_PATHS (if system layer)');
+  console.error('Add each path to SYSTEM_PATHS in lib/update-manifest.mjs (if system layer)');
   console.error('or USER_PATHS (if user-owned), then re-run this check.');
   process.exit(1);
 }

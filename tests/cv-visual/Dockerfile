@@ -1,9 +1,10 @@
 # Keep this version aligned with the exact playwright dependency in package.json.
 # The image digest below also pins Chromium, Node, and the base operating system.
-FROM mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d690f6c42fbc8e9e26ddfa95f8e6ef552558d9bbf
 
 # Freeze font files and Poppler (including transitive dependencies) independently
 # of when CI rebuilds the image. Only the Ubuntu archive signing key is trusted.
+# Without --error-on=any a failed snapshot fetch only warns, and the build then fails later with a misleading "Unable to locate package".
 RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/nodesource.list \
     && printf '%s\n' \
       'Types: deb' \
@@ -13,7 +14,11 @@ RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/nodesource.list \
       'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
       'Check-Valid-Until: no' \
       > /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get update \
+    && for attempt in 1 2 3 4 5; do \
+         apt-get update --error-on=any && break; \
+         [ "$attempt" -lt 5 ] || exit 1; \
+         sleep $((attempt * 20)); \
+       done \
     && apt-get install -y --no-install-recommends \
       fonts-liberation fonts-noto-cjk poppler-utils \
     && fc-cache -f \

@@ -28,7 +28,7 @@ func TestScoreSentinelLeavesHasScoreFalse(t *testing.T) {
 		t.Fatalf("write tracker: %v", err)
 	}
 
-	apps := ParseApplications(dir)
+	apps := mustParseApplications(t, dir)
 	if len(apps) != 5 {
 		t.Fatalf("expected 5 rows, got %d", len(apps))
 	}

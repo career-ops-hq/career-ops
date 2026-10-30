@@ -28,7 +28,7 @@ const RETIRED = [
   'set-status-tests.mjs',
 ];
 
-const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+const src = readFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), 'utf-8');
 const block = src.match(/const SYSTEM_PATHS = \[([\s\S]*?)\n\];/);
 const systemPaths = block ? Array.from(block[1].matchAll(/'([^']+)'/g), (m) => m[1]) : [];
 

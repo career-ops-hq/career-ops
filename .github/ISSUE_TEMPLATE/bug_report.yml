@@ -48,7 +48,7 @@ body:
     id: os
     attributes:
       label: OS and Node.js version
-      placeholder: "e.g., macOS 15 / Node 20.11"
+      placeholder: "e.g., macOS 15 / Node 24.11"
   - type: textarea
     id: doctor
     attributes:

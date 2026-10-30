@@ -28,6 +28,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -78,7 +79,7 @@ function runChild(body, f) {
   });
   assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
   const all = `${r.stdout ?? ''}${r.stderr ?? ''}`;
-  assert.equal(r.status, 0, `the child exited ${r.status}:\n${all.slice(0, 800)}`);
+  assert.equal(r.status, 0, describeSpawn(r, `the child exited ${r.status}:\n${all.slice(0, 800)}`));
   const line = (r.stdout ?? '').split('\n').find((l) => l.startsWith('RESULT '));
   assert.ok(line, `the child printed no RESULT line:\n${all.slice(0, 800)}`);
   return JSON.parse(line.slice('RESULT '.length));

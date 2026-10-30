@@ -9,11 +9,11 @@ const entrypoints = [
   '.agents',
   '.antigravitycli',
   '.claude',
-  '.cursor',
   '.grok',
   '.kimi',
   '.opencode',
   '.qwen',
+  'claude-directory',
 ].map(dir => join(dir, 'skills', 'career-ops', 'SKILL.md'));
 
 function findProjectRoot(skillPath) {

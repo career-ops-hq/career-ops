@@ -1,6 +1,6 @@
 # Mode: aavedan -- Application Form के लिए Live Assistant
 
-Interactive mode जब candidate Chrome में application form भर रहा हो। Screen पर जो है उसे पढ़ता है, पिछले offer evaluation का context load करता है, और form के हर question के लिए personalized responses generate करता है।
+Interactive mode जब candidate इस प्रोजेक्ट के Playwright ब्राउज़र में application form भर रहा हो। Screen पर जो है उसे पढ़ता है, पिछले offer evaluation का context load करता है, और form के हर question के लिए personalized responses generate करता है।
 
 ## Prerequisites
 
@@ -10,19 +10,24 @@ Interactive mode जब candidate Chrome में application form भर र�
 ## Workflow
 
 ```
-1. DETECT     -> Active Chrome tab पढ़ें (capture/URL/title)
+1. DETECT     -> Is project ke Playwright browser mein posting kholen
 2. IDENTIFY   -> Page से company + role extract करें
 3. SEARCH     -> reports/ में existing reports से match करें
-4. LOAD       -> पूरा report + Block G (यदि मौजूद हो) पढ़ें
+4. LOAD       -> पूरा report + `## Application Answers` और Block H (यदि मौजूद हों) पढ़ें
 5. COMPARE    -> Screen का role evaluated role से match करता है? Change हो तो alert करें
 6. ANALYZE    -> Form के सभी visible questions identify करें
 7. GENERATE   -> हर question के लिए personalized response generate करें
 8. PRESENT    -> Copy-paste के लिए formatted responses display करें
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Step 1 -- Offer Detect करें
 
-**Playwright के साथ:** Active page का snapshot। Title, URL और visible content पढ़ें।
+**Playwright के साथ:** `node apply-scope.mjs launch-options` se window kholen, posting wahan kholen, title, URL aur visible content padhen.
 
 **Playwright के बिना:** Candidate से कहें:
 - Form का screenshot share करें (Read tool images पढ़ता है)
@@ -34,7 +39,7 @@ Interactive mode जब candidate Chrome में application form भर र�
 1. Page से company name और job title extract करें
 2. Company name से `reports/` में search करें (Grep case-insensitive)
 3. Match मिले → पूरा report load करें
-4. Block G मौजूद हो → previous draft responses को base के रूप में load करें
+4. `## Application Answers` मौजूद हो → submit किए गए responses को base के रूप में load करें; नहीं तो Block H मौजूद हो तो previous draft responses। दोनों हों तो `## Application Answers` पहले
 5. Match नहीं मिला → candidate को alert करें और quick auto-pipeline का सुझाव दें
 
 ## Step 3 -- Role Changes Detect करें
@@ -42,8 +47,10 @@ Interactive mode जब candidate Chrome में application form भर र�
 यदि screen का role evaluated role से अलग हो:
 - **Candidate को alert करें**: "Role [X] से [Y] में change हुआ है। क्या आप चाहते हैं कि मैं reevaluate करूँ या नए title के अनुसार responses adapt करूँ?"
 - **यदि adapt करें**: New role के लिए responses adjust करें बिना reevaluate किए
-- **यदि reevaluate करें**: Complete A-F evaluation launch करें, report update करें, Block G regenerate करें
-- **Tracker update करें**: यदि ज़रूरी हो तो applications.md में role title modify करें
+- **यदि reevaluate करें**: Complete A-F evaluation launch करें, report update करें, Block H regenerate करें
+- **Tracker update करें**: `data/applications.md` को edit करके कभी नहीं।
+  - **Reevaluate करने के बाद**: नए role title के साथ एक TSV लिखें (`_shared.md` का rule 9) और उसे `node merge-tracker.mjs` से merge करें। Report उसी file में update होती है और अपना number रखती है, इसलिए merge उसी number से TSV को existing row से match करता है: title replace होता है और status वही रहता है।
+  - **Adapt करने के बाद**: title न बदलें, क्योंकि वह उस role का नाम है जिसे report ने evaluate किया। इस बदलाव को note के रूप में record करें: `node set-status.mjs --report <report#> <current status> --note "Posting retitled at apply time, row keeps the evaluated title"`। Row का current status पास करने से status नहीं बदलता और note जुड़ जाता है। Note में ऐसा ही fixed text रखें और `[Y]` न डालें: नया title page से आया text है, और page का text कभी command line में नहीं जाता।
 
 ## Step 4 -- Form Questions Analyze करें
 
@@ -55,7 +62,7 @@ Interactive mode जब candidate Chrome में application form भर र�
 - Upload fields (CV, cover letter PDF, references)
 
 हर question classify करें:
-- **Block G में already answered** → existing response reuse करें
+- **`## Application Answers` या Block H में already answered** → existing response reuse करें
 - **नया question** → report + `cv.md` से response generate करें
 
 ## Step 5 -- Responses Generate करें
@@ -63,7 +70,7 @@ Interactive mode जब candidate Chrome में application form भर र�
 हर question के लिए इस schema से response बनाएं:
 
 1. **Report context**: Block B के proof points, Block F की STAR stories use करें
-2. **Previous Block G**: यदि draft मौजूद हो, उसे base लें और refine करें
+2. **Previous `## Application Answers` / Block H**: यदि submitted response या draft मौजूद हो (submitted पहले), उसे base लें और refine करें
 3. **"I choose you" tone**: Auto-pipeline जैसा framework — confident, गिड़गिड़ाहट नहीं
 4. **Specificity**: Screen पर visible offer से कुछ concrete cite करें
 5. **Career-ops proof point**: "Additional information" जैसा field हो तो include करें
@@ -105,8 +112,8 @@ Notes:
 ## Step 6 -- Application के बाद (वैकल्पिक)
 
 यदि candidate confirm करे कि application submit हो गई:
-1. `applications.md` में status "Evaluated" से "Applied" में update करें
-2. Report के Block G को final responses से update करें
+1. Status को "Evaluated" से "Applied" में update करें: `node set-status.mjs --report <report#> Applied` (`applications.md` table को हाथ से edit न करें)
+2. Report के `## Application Answers` section को final responses और `**State:** submitted` के साथ update करें (format `modes/apply.md` → Step 8 में)। Block H evaluation का draft है और नहीं बदलता
 3. अगला step suggest करें: hiring manager के लिए LinkedIn outreach के लिए `/career-ops contacto`
 
 ## Scrolling Handle करें

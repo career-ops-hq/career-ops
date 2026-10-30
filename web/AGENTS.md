@@ -19,6 +19,8 @@ before changing anything under `web/`.
 
 3. **Nothing is ever submitted automatically.** The apply flow fills in and previews;
    a human presses send. There is no exception, no flag, and no "just for testing".
+   The browser is the Playwright session from `apply-scope.mjs`. Do not attach to
+   the user's open Chrome, read `DevToolsActivePort`, or pass a remote-debugging port.
 
 ## A missing file is not a malformed file
 

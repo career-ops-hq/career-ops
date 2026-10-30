@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { findStaleScanQueries } from '../audit-portals.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const entry = (scan_query, extra = {}) => ({ name: 'Example', scan_method: 'websearch', scan_query, ...extra });
 
@@ -85,12 +86,12 @@ test('CLI is offline, advisory, data-root aware, filterable and read-only', () =
       fileURLToPath(new URL('../audit-portals.mjs', import.meta.url)), '--queries', ...args,
     ], { cwd: tmpdir(), encoding: 'utf8', timeout: 10000, env });
     const result = run('--json', '--strict');
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.equal(JSON.parse(result.stdout).warnings[0].name, 'Old Target');
     const alternate = join(dir, 'alternate.yml');
     writeFileSync(alternate, content.replace('Current Target', 'Alternate Target'));
     const filtered = run('--file', alternate, '--company', 'Alternate', '--json');
-    assert.equal(filtered.status, 0, filtered.stderr);
+    assert.equal(filtered.status, 0, describeSpawn(filtered));
     assert.deepEqual(JSON.parse(filtered.stdout), { warnings: [] });
     assert.match(run('--summary').stdout, /possibly stale/);
     assert.equal(run('--company', 'missing').status, 1);

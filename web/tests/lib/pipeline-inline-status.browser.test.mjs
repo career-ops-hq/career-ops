@@ -9,11 +9,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.PIPELINE_STATUS_TEST_URL;
 const root = process.env.PIPELINE_STATUS_TEST_ROOT;
 
-test("inline Pipeline status browser flow (disposable data only)", { skip: !url || !root, timeout: 120_000 }, async (t) => {
+test("inline Pipeline status browser flow (disposable data only)", { skip: liveServerSkip("PIPELINE_STATUS_TEST_URL", "PIPELINE_STATUS_TEST_ROOT"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const relative = path.relative(os.tmpdir(), fs.realpathSync(root));
@@ -143,7 +144,9 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
     await select(13).selectOption("Interview");
     const search = page.getByPlaceholder("Search company or role…");
     await search.fill("Fixture Beta");
-    assert.equal(await row(13).count(), 0);
+    // The table filters on a deferred copy of the search (#5504), so the row
+    // leaves on a later render, not on the keystroke.
+    await until(() => row(13).count().then((count) => count === 0));
     release();
     await until(() => fs.readFileSync(tracker, "utf8").includes("3.6/5 | Interview"));
     await page.unroute("**/api/status");
@@ -167,7 +170,12 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
     await until(() => row(13).innerText().then((text) => text.includes("Rejected")));
     assert.equal(await select(12).isDisabled(), true);
     release();
-    await until(() => fs.readFileSync(tracker, "utf8").includes("3.8/5 | Offer"));
+    // Both writes, not just the gated one: a reload while #13's save is still
+    // in flight drops it, and the row then reads its old status.
+    await until(() => {
+      const text = fs.readFileSync(tracker, "utf8");
+      return text.includes("3.8/5 | Offer") && text.includes("3.6/5 | Rejected");
+    });
     await page.unrouteAll({ behavior: "wait" });
     await page.reload();
     assert.match(await row(12).innerText(), /Offer/);

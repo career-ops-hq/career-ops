@@ -42,7 +42,7 @@ Questa prima iterazione copre le quattro modalità a più alto impatto:
 | File | Tradotto da | Ruolo |
 |------|-------------|-------|
 | `_shared.md` | `modes/_shared.md` (EN) | Contesto condiviso, archetipi, regole globali, specificità del mercato italiano |
-| `annuncio.md` | `modes/oferta.md` (ES) | Valutazione completa di un annuncio di lavoro (Blocchi A-F) |
+| `annuncio.md` | `modes/oferta.md` (ES) | Valutazione completa di un annuncio di lavoro (Blocchi A-H) |
 | `candidarsi.md` | `modes/apply.md` (EN) | Assistente live per compilare i moduli di candidatura |
 | `pipeline.md` | `modes/pipeline.md` (ES) | Inbox di URL / Second Brain per gli annunci raccolti |
 
@@ -101,5 +101,5 @@ Per migliorare una traduzione o aggiungere una modalità:
 1. Apri una Issue con la tua proposta (vedi `CONTRIBUTING.md`)
 2. Rispetta il lessico indicato sopra per mantenere un tono coerente
 3. Traduci in modo idiomatico -- evita traduzioni letterali o da traduttore automatico
-4. Conserva gli elementi strutturali (Blocchi A-F, tabelle, blocchi di codice, istruzioni strumenti) esattamente come nell'originale
+4. Conserva gli elementi strutturali (Blocchi A-H, tabelle, blocchi di codice, istruzioni strumenti) esattamente come nell'originale
 5. Esegui un test con un vero annuncio in italiano prima di inviare la PR

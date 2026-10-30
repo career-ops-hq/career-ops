@@ -1,6 +1,6 @@
 # 모드: jiwon -- 지원서 작성 live assistant
 
-후보자가 Chrome에서 지원서 폼을 작성하는 순간 사용하는 interactive mode입니다. 화면에 보이는 내용을 읽고, 이전에 평가한 채용 공고의 context를 불러온 뒤, 폼의 각 질문에 맞는 개인화 답변을 생성합니다.
+후보자가 이 프로젝트가 띄운 Playwright 브라우저에서 지원서 폼을 작성하는 순간 사용하는 interactive mode입니다. 화면에 보이는 내용을 읽고, 이전에 평가한 채용 공고의 context를 불러온 뒤, 폼의 각 질문에 맞는 개인화 답변을 생성합니다.
 
 ## 사전 조건
 
@@ -10,19 +10,24 @@
 ## Workflow
 
 ```text
-1. DETECT      -> 활성 Chrome 탭 읽기 (스크린샷/URL/title)
+1. DETECT      -> 이 프로젝트의 Playwright 브라우저에서 공고 열기
 2. IDENTIFY    -> 페이지에서 회사 + 역할 추출
 3. SEARCH      -> reports/ 안의 기존 report와 매칭
-4. LOAD        -> 전체 report + 블록 G(있다면) 읽기
+4. LOAD        -> 전체 report + `## Application Answers`와 블록 H(있다면) 읽기
 5. COMPARE     -> 화면의 역할이 평가한 역할과 같은지 확인. 바뀌었다면 알림
 6. ANALYZE     -> 화면에 보이는 모든 지원서 질문 식별
 7. GENERATE    -> 각 질문에 대해 개인화 답변 생성
 8. PRESENT     -> 복사/붙여넣기 가능한 형식으로 답변 표시
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Step 1 -- 공고 감지
 
-**Playwright 사용 시:** 활성 페이지 snapshot을 뜹니다. title, URL, 보이는 내용을 읽습니다.
+**Playwright 사용 시:** `node apply-scope.mjs launch-options`로 연 창에서 공고를 열고 title, URL, 보이는 내용을 읽습니다.
 
 **Playwright 없이 진행 시:** 후보자에게 다음 중 하나를 요청합니다.
 - 지원서 폼 스크린샷 공유 (Read tool이 이미지를 읽을 수 있음)
@@ -34,7 +39,7 @@
 1. 페이지에서 회사명과 역할명을 추출합니다.
 2. `reports/`에서 회사명으로 검색합니다 (case-insensitive grep).
 3. 매칭되는 report가 있으면 전체 report를 불러옵니다.
-4. 블록 G가 있으면 이전 답변 초안을 base로 불러옵니다.
+4. `## Application Answers`가 있으면 제출한 답변을 base로 불러옵니다. 없고 블록 H가 있으면 이전 답변 초안을 불러옵니다. 둘 다 있으면 `## Application Answers`를 우선합니다.
 5. 매칭되는 report가 없으면 후보자에게 알리고 빠른 auto-pipeline 실행을 제안합니다.
 
 ## Step 3 -- 역할 변경 감지
@@ -42,8 +47,10 @@
 화면의 역할이 평가한 역할과 다르면:
 - **후보자에게 알림**: "역할이 [X]에서 [Y]로 바뀐 것 같습니다. 새 역할로 다시 평가할까요, 아니면 새 title에 맞춰 답변만 조정할까요?"
 - **조정 선택 시**: 재평가 없이 새 역할에 맞춰 답변을 조정합니다.
-- **재평가 선택 시**: 전체 A-F 평가를 실행하고, report를 업데이트하고, 블록 G를 다시 생성합니다.
-- **tracker 업데이트**: 필요한 경우 `applications.md`의 역할명을 수정합니다.
+- **재평가 선택 시**: 전체 A-F 평가를 실행하고, report를 업데이트하고, 블록 H를 다시 생성합니다.
+- **tracker 업데이트**: `data/applications.md`를 직접 수정하지 않습니다.
+  - **재평가한 경우**: 새 역할명을 담은 TSV를 `batch/tracker-additions/`에 쓰고 `node merge-tracker.mjs`로 병합합니다. report는 같은 파일에서 업데이트되어 번호가 유지되므로, 병합은 그 번호로 TSV를 기존 row와 매칭합니다: 역할명은 교체되고 status는 유지됩니다.
+  - **조정한 경우**: 역할명을 바꾸지 않습니다. 역할명은 report가 평가한 역할을 가리키기 때문입니다. 변경 사실은 note로 기록합니다: `node set-status.mjs --report <report#> <현재 status> --note "지원 시점에 공고 제목이 변경됨, row는 평가한 역할명을 유지"`. row의 현재 status를 그대로 전달하면 status는 바뀌지 않고 note만 추가됩니다. note는 이처럼 고정된 문구로 쓰고 `[Y]`는 넣지 않습니다. 새 역할명은 페이지에서 온 텍스트이며, 페이지의 텍스트는 command line에 넣지 않습니다.
 
 ## Step 4 -- 지원서 질문 분석
 
@@ -55,7 +62,7 @@
 - 업로드 필드 (CV, 커버레터 PDF, 추천인 등)
 
 각 질문을 분류합니다.
-- **이미 블록 G에서 답변한 질문** -> 기존 답변을 가져와 조정
+- **이미 `## Application Answers` 또는 블록 H에서 답변한 질문** -> 기존 답변을 가져와 조정
 - **새 질문** -> report + `cv.md`를 바탕으로 답변 생성
 
 ## Step 5 -- 답변 생성
@@ -63,7 +70,7 @@
 각 질문에 대해 다음 구조로 답변을 만듭니다.
 
 1. **Report context**: 블록 B의 proof point와 블록 F의 STAR story 사용
-2. **이전 블록 G**: 기존 초안이 있으면 base로 가져와 다듬기
+2. **이전 `## Application Answers` / 블록 H**: 제출한 답변이나 기존 초안이 있으면(제출한 답변 우선) base로 가져와 다듬기
 3. **"제가 귀사를 선택합니다" 톤**: auto-pipeline과 같은 framework 사용 -- 자신감 있게, 애원하지 않게
 4. **구체성**: 화면에 보이는 공고 내용 중 구체적인 요소 언급
 5. **career-ops proof point**: "추가 정보" 같은 필드가 있으면 포함
@@ -103,8 +110,8 @@ Notes:
 ## Step 6 -- 지원 후 처리 (선택)
 
 후보자가 지원서를 제출했다고 확인하면:
-1. tracker status 변경은 `data/applications.md`를 직접 수정하지 않습니다. `batch/tracker-additions/`에 `Applied` 상태의 TSV update를 쓰고 `node merge-tracker.mjs`로 병합합니다.
-2. 최종 답변을 report의 블록 G에 업데이트합니다.
+1. 정식 CLI로 status를 `Applied`로 변경합니다: `node set-status.mjs --report <report#> Applied` (`data/applications.md` 표를 직접 수정하지 않습니다). TSV 병합은 기존 row의 status를 바꾸지 않습니다.
+2. 최종 답변을 report의 `## Application Answers` 섹션에 `**State:** submitted`와 함께 업데이트합니다(형식은 `modes/apply.md` -> Step 8). 블록 H는 평가 단계의 초안이므로 수정하지 않습니다.
 3. 다음 단계로 `/career-ops contacto`를 제안해 hiring manager 또는 recruiter에게 LinkedIn outreach를 할 수 있게 합니다.
 
 ## 스크롤 처리

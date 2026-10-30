@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { findContactsByCompany } from '../contact-lookup.mjs';
 import { parseContacts } from '../contacts.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const CODE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(CODE_ROOT, 'contact-lookup.mjs');
@@ -122,7 +123,7 @@ test('CLI --company: JSON output lists matches at the queried company', () => {
   const dataRoot = seedDataRoot();
   try {
     const result = runLookup(dataRoot, ['--company', 'Northwind Robotics']);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.company, 'Northwind Robotics');
     assert.equal(parsed.total, 2);
@@ -135,7 +136,7 @@ test('CLI --company --summary: human-readable output names the contact and track
   const dataRoot = seedDataRoot();
   try {
     const result = runLookup(dataRoot, ['--company', 'Northwind Robotics', '--summary']);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.match(result.stdout, /SAVED CONTACTS @ Northwind Robotics/);
     assert.match(result.stdout, /Priya Shah/);
     assert.match(result.stdout, /tracker #014/);
@@ -148,7 +149,7 @@ test('CLI --company: no match reports zero results, not an error', () => {
   const dataRoot = seedDataRoot();
   try {
     const result = runLookup(dataRoot, ['--company', 'Initech Holdings']);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.total, 0);
     assert.deepEqual(parsed.matches, []);
@@ -161,7 +162,7 @@ test('CLI: missing --company value is a usage error, not a silent default', () =
   const dataRoot = seedDataRoot();
   try {
     const result = runLookup(dataRoot, ['--company']);
-    assert.equal(result.status, 1);
+    assert.equal(result.status, 1, describeSpawn(result));
     assert.match(result.stderr, /--company requires a value/);
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
@@ -172,7 +173,7 @@ test('CLI: --company omitted entirely is a usage error', () => {
   const dataRoot = seedDataRoot();
   try {
     const result = runLookup(dataRoot, []);
-    assert.equal(result.status, 1);
+    assert.equal(result.status, 1, describeSpawn(result));
     assert.match(result.stderr, /--company is required/);
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
@@ -181,19 +182,19 @@ test('CLI: --company omitted entirely is a usage error', () => {
 
 test('CLI: --self-test exits 0', () => {
   const result = spawnSync(process.execPath, [SCRIPT, '--self-test'], { cwd: CODE_ROOT, encoding: 'utf-8', timeout: 30_000 });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.match(result.stdout, /contact-lookup self-test OK/);
 });
 
 test('CLI: --help exits 0 and prints Usage', () => {
   const result = spawnSync(process.execPath, [SCRIPT, '--help'], { cwd: CODE_ROOT, encoding: 'utf-8', timeout: 30_000 });
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.match(result.stdout, /Usage:/);
 });
 
 test('CLI: unknown flag exits 1 and names the bad flag', () => {
   const result = spawnSync(process.execPath, [SCRIPT, '--bogus'], { cwd: CODE_ROOT, encoding: 'utf-8', timeout: 30_000 });
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.match(result.stderr, /--bogus/);
 });
 
@@ -201,7 +202,7 @@ test('CLI: a company with no saved contacts.tsv at all answers empty, not a cras
   const dataRoot = mkdtempSync(join(tmpdir(), 'career-ops-contact-lookup-empty-'));
   try {
     const result = runLookup(dataRoot, ['--company', 'Anyone']);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.total, 0);
   } finally {

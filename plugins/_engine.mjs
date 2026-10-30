@@ -28,8 +28,9 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'f
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
-import { normalizeUrl } from '../url-key.mjs';
-import { readLock, writeLockEntry, diffPlugin, hashPluginTree, consentSurface } from './_lock.mjs';
+import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
+import { readLock, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
 import { loadRegistry } from './_registry.mjs';
 
 /** The complete, closed set of hook kinds. Anything else (apply/submit/…) is rejected. */
@@ -51,7 +52,7 @@ export const RESERVED_ENV = new Set([
   'PATH', 'HOME', 'NODE_OPTIONS', 'LD_PRELOAD', 'NODE_EXTRA_CA_CERTS',
 ]);
 
-const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+export const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_HOOK_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
 
@@ -111,13 +112,8 @@ export async function loadPluginConfig(root) {
   const file = pluginsConfigPath(root);
   if (!existsSync(file)) return {};
   try {
-    // Named, not `.default`: js-yaml 5 ships a native ESM build with no default
-    // export, so `.default` is undefined there and `yaml.load` throws straight
-    // into the catch below. That catch fails OPEN — it returns {}, so every
-    // configured plugin silently stops loading and the only trace is one ⚠️ line
-    // that reads like a malformed config. The named form resolves on 4.x and 5.x.
-    const { load } = await import('js-yaml');
-    const parsed = load(readFileSync(file, 'utf8'));
+    const { loadYaml } = await import('../lib/yaml-document.mjs');
+    const parsed = loadYaml(readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
     warnSkip('config/plugins.yml', `unreadable, ignoring — ${err.message}`);
@@ -222,6 +218,13 @@ export function validateManifest(m, dir, dirName) {
     if (isLoopback && !allowsLocalhost) { warnSkip(label, `allowedHosts contains a loopback host without allowsLocalhost: ${h}`); return null; }
   }
 
+  // Optional: the plugin's ingest/search results are job postings, so they get
+  // the scanner's discovery filters (data/blacklist.md, title_filter,
+  // location_filter) and a scan-history row. Absent means the results may be
+  // something else — an interview event, an enrichment record — and only the
+  // tracker/pipeline/scan-history dedup applies (#5478).
+  if (m.jobPostings !== undefined && typeof m.jobPostings !== 'boolean') { warnSkip(label, 'jobPostings must be true or false'); return null; }
+
   const entry = typeof m.entry === 'string' && m.entry.trim() ? m.entry : 'index.mjs';
   if (!entry.endsWith('.mjs')) { warnSkip(label, `entry "${entry}" must be a .mjs file`); return null; }
   const entryAbs = path.resolve(dir, entry);
@@ -252,6 +255,7 @@ export function validateManifest(m, dir, dirName) {
     entry,
     skill,
     humanInTheLoop: true,
+    jobPostings: m.jobPostings === true,
     name: typeof m.name === 'string' ? m.name : undefined,
     version: typeof m.version === 'string' ? m.version : undefined,
     homepage: typeof m.homepage === 'string' ? m.homepage : undefined,
@@ -477,7 +481,7 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
  * CONVENIENCE (process.env is still globally reachable from any module) — the
  * real boundary is code review + trust.
  * @param {PluginManifestNormalized} manifest
- * @param {{ dryRun?: boolean, settings?: object }} [opts]
+ * @param {{ dryRun?: boolean, settings?: object, dataRoot?: string }} [opts]
  * @returns {PluginContext}
  */
 export function buildCtx(manifest, opts = {}) {
@@ -512,11 +516,22 @@ export function buildCtx(manifest, opts = {}) {
     settings: Object.freeze({ ...(opts.settings || {}) }),
     log,
     dryRun: opts.dryRun === true,
+    // Where the user layer lives. A plugin that keeps a file of its own (a
+    // cursor, a JD capture) resolves it from here: a bare relative path lands in
+    // the working directory, which is the data root only when the two coincide.
+    // The engine's callers pass the root they resolved; a ctx built without one
+    // gets the same answer from the resolver they use.
+    dataRoot: path.resolve(opts.dataRoot ?? getCareerOpsRoot()),
     // The canonical posting-URL key, so a plugin can deduplicate the postings it
     // returns the way the tracker and scanner do. Reaching it through ctx keeps
     // plugin and core callers equivalent without a repository-relative import or
     // a copied body, which is the whole point of the capability (#4218).
     normalizePostingUrl: normalizeUrl,
+    // The requisition id an aggregator URL carries (LinkedIn's job id, Indeed's
+    // `jk`). normalizePostingUrl keeps the path, so two spellings of one posting
+    // on an aggregator — a `/comm/` tracking link and the canonical view — key
+    // apart; the id is what they share. Same function the tracker's merge uses.
+    aggregatorPostingId,
   });
 }
 
@@ -625,7 +640,7 @@ export function lockGate(manifest, root) {
     case 'legit-update': repin(); return { load: true };        // version bumped → honest update, re-pin quietly
     case 'drift-nobump':
       if (source === 'bundled') { repin(); return { load: true }; } // reviewed-by-construction (branch-protected checkout) → re-pin
-      warnSkip(manifest.id, `files changed since you trusted it without a version bump — possible tampering (${d.changedFiles.slice(0, 5).join(', ')}). Review, then \`node plugins.mjs trust ${manifest.id}\``);
+      warnSkip(manifest.id, `files changed since you trusted it without a version bump — possible tampering (${describeDrift(d)}). Review, then \`node plugins.mjs trust ${manifest.id}\``);
       return { load: false };
     case 'surface-widened':
       warnSkip(manifest.id, `capability surface expanded since you consented (${[...d.addedHosts, ...d.addedEnv].join(', ')}${manifest.allowsLocalhost ? ', localhost' : ''}) — re-consent: \`node plugins.mjs enable ${manifest.id}\``);
@@ -644,7 +659,7 @@ export async function loadPlugins(kind, { root, dataRoot = root, dryRun = false,
     if (!lockGate(manifest, root).load) continue;
     const hook = await importHook(manifest, kind);
     if (!hook) continue;
-    out.push({ id: manifest.id, manifest, hook, ctx: buildCtx(manifest, { dryRun, settings: pluginSettings(manifest.id, cfg) }) });
+    out.push({ id: manifest.id, manifest, hook, ctx: buildCtx(manifest, { dryRun, dataRoot, settings: pluginSettings(manifest.id, cfg) }) });
   }
   return out;
 }
@@ -737,6 +752,9 @@ export function filterResultsForId(results, id) {
 function inactiveProviderStub(id, reason) {
   return {
     id,
+    // Read by tools that diagnose without fetching (coverage-check.mjs), so
+    // they can say why the board is never scanned instead of calling it live.
+    inactiveReason: reason,
     detect: () => null,
     fetch: async () => { throw new Error(`plugin "${id}" inactive: ${reason}. Run \`node doctor.mjs\` for setup.`); },
   };
@@ -781,7 +799,7 @@ export async function mergeProviderPlugins(providersMap, { root, dataRoot = root
         providersMap.set(manifest.id, inactiveProviderStub(manifest.id, 'failed to load — see ⚠️ above'));
         continue;
       }
-      const ctx = buildCtx(manifest, { settings: pluginSettings(manifest.id, cfg) });
+      const ctx = buildCtx(manifest, { dataRoot, settings: pluginSettings(manifest.id, cfg) });
       providersMap.set(manifest.id, {
         id: manifest.id,
         detect: () => null, // (4) keyed providers never auto-detect

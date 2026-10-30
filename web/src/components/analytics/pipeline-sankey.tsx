@@ -111,25 +111,27 @@ export function PipelineSankey({
         </svg>
       </div>
 
-      <table className="sr-only">
-        <caption>Pipeline Sankey flows</caption>
-        <thead>
-          <tr>
-            <th>From</th>
-            <th>To</th>
-            <th>Roles</th>
-          </tr>
-        </thead>
-        <tbody>
-          {graph.links.map((link) => (
-            <tr key={`${link.source}-${link.target}`}>
-              <td>{labelById.get(link.source) ?? link.source}</td>
-              <td>{labelById.get(link.target) ?? link.target}</td>
-              <td>{link.value}</td>
+      <div className="sr-only">
+        <table>
+          <caption>Pipeline Sankey flows</caption>
+          <thead>
+            <tr>
+              <th>From</th>
+              <th>To</th>
+              <th>Roles</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {graph.links.map((link) => (
+              <tr key={`${link.source}-${link.target}`}>
+                <td>{labelById.get(link.source) ?? link.source}</td>
+                <td>{labelById.get(link.target) ?? link.target}</td>
+                <td>{link.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

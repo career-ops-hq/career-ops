@@ -5,9 +5,9 @@
  *
  * Where scan.mjs scans the companies you track in portals.yml, this script
  * inverts the direction: it walks public directories of companies per ATS
- * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR) and surfaces fresh
- * postings that match your portals.yml `title_filter` / `location_filter` —
- * no manual company curation needed.
+ * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com) and
+ * surfaces fresh postings that match your portals.yml `title_filter` /
+ * `location_filter` — no manual company curation needed.
  *
  * Optional `title_filter_full` in portals.yml overrides `title_filter` for
  * THIS scanner only, so the keywords tuned for scan.mjs's curated company
@@ -20,8 +20,16 @@
  * campus-admin postings without loosening the net for everyone else. See
  * scan.mjs's buildTitleFilterOverrides()/buildTitleFilterWithOverrides().
  *
+ * Optional `domain_filter` in portals.yml gates whole BOARDS before any title
+ * is tested (#3105): a board with no domain-bearing posting is not this user's
+ * industry, and is skipped entirely. Absent — the default — every board is
+ * swept exactly as before. Not applied to --seeds: a VC portfolio is already a
+ * curated corpus, so gating it would be redundant.
+ *
  * Company directories come from the public job-board-aggregator dataset
- * (github.com/Feashliaa/job-board-aggregator), cached in data/cache/ for 24h.
+ * (github.com/Feashliaa/job-board-aggregator), except join.com's, which is
+ * read from join.com's own company sitemap. Each is cached in data/cache/ for
+ * 24h.
  *
  * Zero LLM tokens — pure HTTP + JSON, same providers/ modules as scan.mjs.
  * Postings without a usable publish date are skipped: a reverse scan is only
@@ -46,10 +54,11 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSyn
 import { createHash } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
-import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
+import { makeHttpCtx, fetchJson, fetchText, fetchTextHead } from './providers/_http.mjs';
+import { withConnectionScope, withAbortScope } from './providers/_connection-scope.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
@@ -57,16 +66,22 @@ import ashby from './providers/ashby.mjs';
 import workday, { WORKDAY_TRUNCATED_REASON } from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
 import bamboohr from './providers/bamboohr.mjs';
+import paylocity, { boardUrl as paylocityBoardUrl } from './providers/paylocity.mjs';
+import join, { parseCompanySitemap } from './providers/join.mjs';
+import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
 import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { boardKey, loadDeadBoards, recordBoardResult, saveDeadBoards, shouldSkipDeadBoard } from './dead-boards.mjs';
+import { boardKey, loadDeadBoards, recordBoardFailure, recordBoardResult, saveDeadBoards, shouldSkipDeadBoard } from './dead-boards.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { barePrefixDomainKeywords, buildDomainFilter } from './title-keywords.mjs';
 import { KNOWN_ATS_VENDORS } from './ats-vendor.mjs';
 import { loadHistoryAtsSeeds } from './history-ats-seeds.mjs';
+import { classifyUnknownHostSeeds, makeHeadProbe } from './branded-successfactors.mjs';
 import { loadProviders } from './providers/_registry.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -103,6 +118,17 @@ const CONCURRENCY = 20;
 // after a cooldown with no change to the dataset. The boards were never dead —
 // they were refused, and the matches on them were silently missed.
 const SINGLE_HOST_CONCURRENCY = 6;
+// recruiting.paylocity.com is also one host for every board, but throttles far
+// earlier: at SINGLE_HOST_CONCURRENCY a full sweep got HTTP 429 on 9,052 of
+// 10,252 boards. The provider retries a 429 with backoff; this keeps the sweep
+// from provoking one on nearly every board.
+const PAYLOCITY_CONCURRENCY = 2;
+// join.com's job list endpoint holds every client to about ten boards a second
+// across all tenants and answers faster requests with a rate-limit error,
+// which the provider retries with backoff. In sweeps of the same tenants, more
+// than two workers was no faster and, from four, lost boards whose retries ran
+// out.
+const JOIN_CONCURRENCY = 2;
 // A refusing resolver fails every lookup in milliseconds, so a sweep that
 // keeps going just feeds it (#2229). Stop after this many consecutive
 // resolver-level failures — high enough that a handful of unlucky boards
@@ -140,7 +166,9 @@ function validCheckpointCurrent(cur) {
   return typeof cur === 'object'
     && typeof cur.name === 'string'
     && Number.isInteger(cur.resumeAt) && cur.resumeAt >= 0
-    && Number.isInteger(cur.datasetLen) && cur.datasetLen >= 0;
+    && Number.isInteger(cur.datasetLen) && cur.datasetLen >= 0
+    && (cur.deferred === undefined
+      || (Array.isArray(cur.deferred) && cur.deferred.every((i) => Number.isInteger(i) && i >= 0)));
 }
 
 // A checkpoint written under different scan settings must not be resumed —
@@ -152,6 +180,41 @@ export function checkpointCompatible(cp, opts) {
     && JSON.stringify(cp.ats) === JSON.stringify(opts.ats)
     && (cp.limit ?? null) === (opts.limit === Infinity ? null : opts.limit)
     && cp.includeUndated === opts.includeUndated;
+}
+
+// Flags are not the only settings a resume can mix. The portals.yml filters
+// decide which boards and postings the swept part kept, so a filter edited
+// between a run and its --resume leaves the checkpointed matches judged by one
+// configuration and the rest by another. Each filter is fingerprinted under its
+// own key, so the refusal can name what changed. title_filter_full replaces
+// title_filter when present, so the pair is recorded under whichever key the
+// sweep actually read. Keys are sorted before hashing: reordering a YAML
+// mapping changes nothing the sweep does.
+export function filterFingerprints(config) {
+  const titleKey = config?.title_filter_full ? 'title_filter_full' : 'title_filter';
+  const fp = (v) => datasetFingerprint(sortKeys(v ?? null));
+  return {
+    [titleKey]: fp(resolveTitleFilterConfig(config)),
+    title_filter_overrides: fp(config?.title_filter_overrides),
+    location_filter: fp(config?.location_filter),
+    content_filter: fp(config?.content_filter),
+    domain_filter: fp(config?.domain_filter),
+  };
+}
+
+function sortKeys(v) {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v && typeof v === 'object') {
+    return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]));
+  }
+  return v;
+}
+
+// A checkpoint written before filters were recorded carries no fingerprints, so
+// there is nothing to compare and it resumes as it did before.
+export function changedFilterKeys(cp, fingerprints) {
+  if (!cp?.filters) return [];
+  return Object.keys(fingerprints).filter((k) => cp.filters[k] !== fingerprints[k]);
 }
 
 // Never throws: this runs from parallelEach's `finally`, so an escaping error
@@ -181,6 +244,25 @@ function saveDeadBoardsBestEffort(rows) {
   } catch (err) {
     console.error(`\n⚠ dead-board cache write failed (${err.message}) — sweep continues`);
     return false;
+  }
+}
+
+/**
+ * `ctx` with `provider`'s slice of the id cache as ctx.idCache, or `ctx` as is
+ * when there is no store (a caller that does not pass one, tests).
+ */
+export function withIdCache(ctx, idCaches, provider) {
+  return idCaches ? { ...ctx, idCache: idCaches.forProvider(provider?.id) } : ctx;
+}
+
+// Same rule for the provider id cache: a failed write costs later runs a
+// lookup, never this sweep's matches. It never rejects, so a checkpoint can
+// start it without awaiting.
+async function saveProviderIdCacheBestEffort(idCaches) {
+  try {
+    await idCaches.save();
+  } catch (err) {
+    console.error(`\n⚠ provider id cache write failed (${err.message}) — sweep continues`);
   }
 }
 
@@ -237,6 +319,17 @@ export function icimsHostCandidates(slug) {
   return s.includes('careers') ? [asIs, prefixed] : [prefixed, asIs];
 }
 
+// A Paylocity dataset row is a board GUID plus the company name. The dataset
+// stores names HTML-escaped ("A &amp; B"), so they are decoded here. An empty
+// name is kept empty: the provider then names the company from the board's
+// own title.
+export function paylocityEntry(row) {
+  const careersUrl = paylocityBoardUrl(row?.guid);
+  if (!careersUrl) return null;
+  const name = typeof row.name === 'string' ? decodeEntities(row.name).trim() : '';
+  return entryOnHost(name, careersUrl, h => h === 'recruiting.paylocity.com');
+}
+
 // Each source: the provider module that does the fetching, plus how to turn a
 // dataset entry into a synthetic PortalEntry the provider can detect/fetch.
 export const SOURCES = {
@@ -244,6 +337,9 @@ export const SOURCES = {
     provider: greenhouse,
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
+    // One host means one keep-alive pool, so per-board connection scopes would
+    // only add a TLS handshake per board (see boardScope below).
+    singleHost: true,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://job-boards.greenhouse.io/${slug}`, h => h === 'job-boards.greenhouse.io')
@@ -253,6 +349,9 @@ export const SOURCES = {
     provider: lever,
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
+    // One host means one keep-alive pool, so per-board connection scopes would
+    // only add a TLS handshake per board (see boardScope below).
+    singleHost: true,
     dataset: `${DATASET_BASE}/lever_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.lever.co/${slug}`, h => h === 'jobs.lever.co')
@@ -262,6 +361,9 @@ export const SOURCES = {
     provider: ashby,
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
+    // One host means one keep-alive pool, so per-board connection scopes would
+    // only add a TLS handshake per board (see boardScope below).
+    singleHost: true,
     dataset: `${DATASET_BASE}/ashby_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.ashbyhq.com/${slug}`, h => h === 'jobs.ashbyhq.com')
@@ -304,12 +406,38 @@ export const SOURCES = {
       ? entryOnHost(String(slug), `https://${slug}.bamboohr.com/careers`, h => h === `${slug}.bamboohr.com`)
       : null,
   },
+  paylocity: {
+    provider: paylocity,
+    // Whole directory behind one host that throttles early — see PAYLOCITY_CONCURRENCY.
+    concurrency: PAYLOCITY_CONCURRENCY,
+    // One host means one keep-alive pool, so per-board connection scopes would
+    // only add a TLS handshake per board (see boardScope below).
+    singleHost: true,
+    // Entries are { guid, name, jobs } objects, not slugs. `jobs` is the
+    // dataset's count at snapshot time and does not decide whether a board is
+    // scanned: it is out of date by the time the sweep runs.
+    dataset: `${DATASET_BASE}/paylocity_companies_clean.json`,
+    toEntry: (row) => paylocityEntry(row),
+  },
+  join: {
+    provider: join,
+    // Whole directory behind one host that rate-limits — see JOIN_CONCURRENCY.
+    concurrency: JOIN_CONCURRENCY,
+    singleHost: true,
+    // job-board-aggregator has no join file; join.com publishes its own
+    // company directory, listed under `Sitemap:` in its robots.txt.
+    dataset: 'https://join.com/companies/sitemap.xml',
+    parseDataset: parseCompanySitemap,
+    toEntry: (slug) => SLUG_RE.test(String(slug))
+      ? entryOnHost(String(slug), `https://join.com/companies/${slug}`, h => h === 'join.com')
+      : null,
+  },
 };
 
 // ── CLI args ────────────────────────────────────────────────────────
 
 const KNOWN_FLAGS = [
-  '--since', '--limit', '--ats', '--seeds', '--history-seeds', '--dry-run', '--liveness',
+  '--since', '--limit', '--ats', '--seeds', '--history-seeds', '--probe-unknown-hosts', '--dry-run', '--liveness',
   '--verbose', '--md-out', '--json', '--include-undated', '--include-blacklisted',
   '--shuffle', '--resume', '--help', '-h',
 ];
@@ -324,6 +452,7 @@ const USAGE = `Usage:
   node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
   node scan-ats-full.mjs --history-seeds       # also scan boards from local application history
   node scan-ats-full.mjs --history-seeds --ats successfactors # history-derived boards for this ATS
+  node scan-ats-full.mjs --history-seeds --probe-unknown-hosts # also detect branded SuccessFactors hosts (one GET per unknown host)
   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
   node scan-ats-full.mjs --dry-run            # preview without writing files
   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
@@ -403,6 +532,7 @@ export function parseArgs(argv) {
     ats,
     atsExplicit: Boolean(atsArg),
     historySeeds,
+    probeUnknownHosts: args.includes('--probe-unknown-hosts') && historySeeds,
     seeds,
     dryRun: args.includes('--dry-run'),
     liveness: args.includes('--liveness'),
@@ -423,9 +553,13 @@ export function parseArgs(argv) {
 //   'stale' — network fetch failed; falling back to an expired cache
 //   'empty' — no data at all (no cache, fetch failed/non-array)
 // The status lets callers (and --json) distinguish a degraded scan from an empty one.
-async function loadCompanyList(name, url) {
-  mkdirSync(CACHE_DIR, { recursive: true });
-  const cacheFile = path.join(CACHE_DIR, `${name}.json`);
+//
+// A source with `parseDataset(text) → array` publishes its directory in some
+// other format (join: a sitemap). The text is parsed before it is cached, so
+// the cache file always holds the array, like every other source's.
+export async function loadCompanyList(name, url, parseDataset, { cacheDir = CACHE_DIR, fetchJsonFn = fetchJson, fetchTextFn = fetchText } = {}) {
+  mkdirSync(cacheDir, { recursive: true });
+  const cacheFile = path.join(cacheDir, `${name}.json`);
   if (existsSync(cacheFile)) {
     const ageHours = (Date.now() - statSync(cacheFile).mtimeMs) / 3_600_000;
     if (ageHours < CACHE_TTL_HOURS) {
@@ -433,7 +567,9 @@ async function loadCompanyList(name, url) {
     }
   }
   try {
-    const data = await fetchJson(url, { timeoutMs: 30_000 });
+    const data = typeof parseDataset === 'function'
+      ? parseDataset(await fetchTextFn(url, { timeoutMs: 30_000 }))
+      : await fetchJsonFn(url, { timeoutMs: 30_000 });
     if (Array.isArray(data)) {
       writeFileSync(cacheFile, JSON.stringify(data), 'utf-8');
       return { list: data, status: 'ok' };
@@ -456,6 +592,25 @@ export function classifyPostingDate(job, cutoff) {
   if (job.postedAt && job.postedAt < cutoff) return 'stale';
   if (!job.postedAt) return 'undated';
   return 'keep';
+}
+
+// Can this board hold a match? Asked of a provider's cheap listing (titles and
+// dates, no posting bodies) before its full fetch. Only the two checks that
+// need no body run here, the same ones processJobs() starts with, so a board
+// that might match still goes through fetch() and processJobs() unchanged.
+// Undated postings count as possible: processJobs() decides them.
+export function listingMayMatch(listing, { cutoff, titleFilter, companySlug }) {
+  return listing.some(job => job.url && job.title
+    && classifyPostingDate(job, cutoff) !== 'stale'
+    && titleFilter(job.title, companySlug));
+}
+
+// Undated postings on a board the listing ruled out. processJobs() counts
+// these into "Undated dropped" before its title filter, so a skipped board
+// must report them too, or the pre-check would hide the degraded-scan signal.
+export function undatedInListing(listing, cutoff) {
+  return listing.filter(job => job.url && job.title
+    && classifyPostingDate(job, cutoff) === 'undated').length;
 }
 
 // Apply the same user-owned do-not-apply gate as scan.mjs to reverse-scan
@@ -515,6 +670,118 @@ export function filterBlacklistedOffers(offers, blacklist, { includeBlacklisted 
 // returns `title_filter` and behaviour is byte-identical to before.
 export function resolveTitleFilterConfig(config) {
   return config?.title_filter_full ?? config?.title_filter;
+}
+
+// The company-level gate (#3105). `title_filter` runs on the wrong axis for a
+// reverse sweep: it asks the TITLE to answer both "is this the right role" and
+// "is this employer in my industry", and a title cannot answer the second one —
+// "Senior Backend Engineer" is character-for-character identical at a Solana
+// infrastructure company and at a supermarket chain. scan.mjs never had that
+// problem because tracked_companies settles the employer before a title is
+// read; the sweep deletes that premise and hands the whole burden to keywords
+// that were never chosen for it.
+//
+// So ask the cheaper question of the board as a whole first, using data already
+// paid for — the board is fully in memory before filtering starts, so this
+// costs one extra pass over an array and no HTTP request at all.
+//
+// THRESHOLD IS ONE, and that is measured rather than cautious. Over 546
+// postings on 249 boards, raising it does not trade recall for precision, it
+// inverts the gate: at two, twelve boards survive and every genuine crypto
+// employer is gone, because ten of the twelve qualify on `defi` appearing
+// repeatedly inside a Portuguese "Deficiência" or an Ohio "Defiance". A
+// repeated false-positive substring is a property of large boards; the real
+// finds are single openings at small companies — conduit, ethereum-foundation,
+// mesh and ing each had exactly one domain-bearing posting, which is precisely
+// the find the sweep exists for.
+//
+// KNOWN LIMIT: the gate assumes one board is one employer, and an aggregator
+// breaks that premise. `jobgether` carried 25 domain-bearing postings among 93
+// and so passes at every threshold under every matcher, admitting 68 unrelated
+// ones on the strength of its crypto listings. No threshold fixes it — the
+// board is simply not an employer. There the gate degrades to today's
+// behaviour, which is a bounded failure and one of the reasons the whole
+// feature is opt-in.
+export function boardInDomain(jobs, domainFilter) {
+  return jobs.some(job => job?.title && domainFilter(job.title));
+}
+
+/**
+ * Decide what the sweep does with one fetched board, before any title is read.
+ *
+ * Split out from the call site because the truncation rule is the whole point
+ * and an inline `if` hid it: an earlier revision gated a `workdayTruncated`
+ * response on the part that was fetched, "like every other gate here". That
+ * reasoning is wrong for exactly this gate. Every other filter here judges a
+ * posting it has in hand, so a short response costs it the rows it never saw;
+ * this one judges the BOARD from its rows, so a short response can invert the
+ * verdict — the only domain-bearing posting may sit in the tail the sequential
+ * retry is about to fetch, and the board is then dropped into a counter that
+ * reads as "correctly excluded" rather than "not yet known".
+ *
+ * So an unmatched truncated board is deferred, not gated: it stays queued for
+ * the retry and the fuller result decides it. A truncated board that ALREADY
+ * matches needs no deferral — a domain-bearing posting in hand settles the
+ * verdict whatever the retry returns — and processing its partial page keeps
+ * today's behaviour of banking those matches even if the retry later fails.
+ * What the retry then does with each kind is retryGateDecision's job.
+ *
+ * Reachability, since the obvious objection is that a truncated page might be
+ * a ranked prefix and so already carry any domain-bearing posting: it is not.
+ * `workdayTruncated` is set on `fetch-error` (retries exhausted MID-pagination
+ * while other tenants hammered the same uplink), on `splitIncomplete` and on
+ * `budgetExhausted` — see providers/workday.mjs. The cut is wherever the error
+ * or the budget landed, which bears no relation to posting order, so no
+ * ordering argument makes the deferral unnecessary.
+ *
+ * @param {object[]} jobs - Postings as returned by the provider.
+ * @param {((title: string) => boolean)|null} domainFilter - Compiled gate, or null when opt-out.
+ * @returns {'process'|'gate'|'defer'} What the caller should do with the board.
+ */
+export function boardGateDecision(jobs, domainFilter) {
+  if (!domainFilter) return 'process';
+  if (boardInDomain(jobs, domainFilter)) return 'process';
+  // An iCIMS board stopped at the provider's page cap is never retried, so,
+  // like a structural Workday cut, it is admitted ungated rather than judged
+  // on the pages that happened to fit under the cap.
+  if (jobs.icimsTruncated) return 'process';
+  if (!jobs.workdayTruncated) return 'gate';
+  // Only a transient cut is retried. A structural one comes back cut at the
+  // same bound, so there is no fuller fetch to defer to: the board is admitted
+  // ungated now, as the retry admits a board truncated twice.
+  return jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT ? 'defer' : 'process';
+}
+
+/**
+ * Decide what the sequential retry does with a board the sweep queued.
+ *
+ * The retry is where a deferred board gets its verdict, so it needs the same
+ * callable shape as the sweep, plus the one fact only the sweep knows: whether
+ * the board was deferred or already admitted. Two cases hinge on that:
+ *
+ *   1. Already admitted (its truncated page matched). The retry cannot take
+ *      that back: the retry can come back truncated too, cut somewhere else,
+ *      so "the retry returns a superset" does not hold, and a cut that misses
+ *      the domain posting would count a board whose matches are already banked
+ *      as gated. It is processed, whatever the retry shows.
+ *   2. Deferred, and the retry is truncated AGAIN with nothing domain-bearing.
+ *      There is no third fetch to defer to, and the gated counter means
+ *      "correctly excluded", which an incomplete page cannot establish. The
+ *      board is admitted ungated, the same fallback the gate takes whenever it
+ *      cannot judge a board (see the aggregator note on boardInDomain); the
+ *      caller still counts it as an error for staying truncated.
+ *
+ * Only a deferred board whose retry is complete and carries nothing
+ * domain-bearing is gated.
+ *
+ * @param {object[]} jobs - Postings from the retry fetch.
+ * @param {((title: string) => boolean)|null} domainFilter - Compiled gate, or null when opt-out.
+ * @param {boolean} wasDeferred - Whether the sweep deferred this board rather than processing it.
+ * @returns {'process'|'gate'} What the caller should do with the board.
+ */
+export function retryGateDecision(jobs, domainFilter, wasDeferred) {
+  if (!wasDeferred) return 'process';
+  return boardGateDecision(jobs, domainFilter) === 'gate' ? 'gate' : 'process';
 }
 
 // Title/location/content filter chain for one posting, used by runSeedScan().
@@ -634,9 +901,10 @@ const SEED_PROVIDERS = [greenhouse, lever, ashby];
  * @param {object}   ctx         HTTP context from makeHttpCtx().
  * @param {Set}      seenUrls    Shared dedup set (mutated in place).
  * @param {string}   label       Human-readable source label for logs.
+ * @param {object}   [idCaches]  Store from openProviderIdCache(); each provider gets its slice as ctx.idCache.
  * @returns {Promise<object[]>}  New job offers (same shape as ATS scan offers).
  */
-export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
+export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) {
   const source = SEED_SOURCES[seedId];
   if (!source) throw new Error(`runSeedScan: unknown seed "${seedId}"`);
 
@@ -674,7 +942,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
 
     let jobs;
     try {
-      jobs = await provider.fetch(entry, ctx);
+      jobs = await provider.fetch(entry, withIdCache(ctx, idCaches, provider));
     } catch (err) {
       errors++;
       if (opts.verbose) console.error(`  ✗ ${seedId}/${entry.name}: ${err.message}`);
@@ -713,8 +981,10 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
  * Unsupported vendor labels stay in the local seed set but make no network
  * request. Known labels begin feeding the sweep automatically when a provider
  * with the same id is added later, without a tracker migration.
+ * `idCaches` (optional, from openProviderIdCache()) gives each provider its
+ * slice as ctx.idCache.
  */
-export async function runHistorySeedScan(seeds, providers, opts, ctx, processJobs) {
+export async function runHistorySeedScan(seeds, providers, opts, ctx, processJobs, idCaches) {
   const selected = opts.atsExplicit
     ? seeds.filter((seed) => opts.ats.includes(seed.vendor))
     : seeds;
@@ -730,7 +1000,9 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
     if (!provider) continue;
     const entry = { name: seed.company, careers_url: seed.careersUrl, provider: seed.vendor };
     try {
-      if (provider.detect?.(entry)) scannable.push({ seed, provider, entry });
+      // probeConfirmed: the host was verified as SuccessFactors from its page,
+      // equivalent to an explicit `provider:` in portals.yml (bypasses URL detect).
+      if (seed.probeConfirmed || provider.detect?.(entry)) scannable.push({ seed, provider, entry });
     } catch { /* unroutable history is a skipped seed, not a failed network request */ }
   }
   let errors = 0;
@@ -747,7 +1019,12 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
     const hostKey = (() => {
       try { return new URL(entry.careers_url).hostname.toLowerCase(); } catch { return seed.vendor; }
     })();
-    await withHostSlot(hostKey, async () => {
+    await withHostSlot(hostKey, () => {
+      // Give the history board its own abort signal so a timed-out board's
+      // in-flight requests stop (#5570). The operation.active flag below only
+      // gates work BETWEEN fetches; it can't stop the fetch already in flight.
+      const controller = new AbortController();
+      return withConnectionScope(async () => {
       if (quarantinedHosts.has(hostKey)) {
         errors++;
         if (opts.verbose) console.error(`  ✗ ${seed.vendor}-history/${entry.name}: host skipped after an earlier timeout`);
@@ -755,7 +1032,7 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
       }
       const operation = { active: true };
       const operationPromise = (async () => {
-        const jobs = await provider.fetch(entry, ctx);
+        const jobs = await provider.fetch(entry, withIdCache(ctx, idCaches, provider));
         if (!operation.active) return;
         await processJobs(jobs, `${seed.vendor}-history`, provider, entry.name, () => operation.active);
       })();
@@ -764,6 +1041,7 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
         await withTimeout(operationPromise, timeoutMs, `${seed.vendor}-history/${entry.name}`, () => {
           timedOut = true;
           operation.active = false;
+          controller.abort();
         });
       } catch (err) {
         operation.active = false;
@@ -776,6 +1054,7 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
         // quarantining prevents queued work from replacing it.
         operationPromise.catch(() => {});
       }
+      }, { signal: controller.signal });
     });
   });
 
@@ -793,6 +1072,31 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
 // timeouts in _http.mjs, an unforeseen hang (DNS, a provider bug) must cost
 // one company, not freeze a worker slot for the rest of a 12k-company sweep.
 const COMPANY_TIMEOUT_MS = 5 * 60_000;
+
+// Run one board's unit of work. For a source that gives every tenant its own
+// hostname (workday, icims, bamboohr), the board gets a private connection
+// pool that is destroyed when it finishes; without it, the process keeps one
+// idle socket per tenant for the rest of the run, and a full sweep exhausts
+// local connection capacity partway through (see providers/_connection-scope.mjs).
+// Single-host sources share one pool already and run unscoped.
+// The watchdog races the board's work against a timer, and on timeout it
+// aborts the board's AbortController. That signal rides in the connection/abort
+// scope, so every request the board issues folds it into its own timeout: a
+// timed-out board stops issuing requests and retries at once (#5570), instead
+// of paginating on in the background until it finishes on its own — which kept
+// the process alive minutes past its own summary and burned a 4-attempt retry
+// on every abandoned request.
+export function boardScope(source, label, timeoutMs, fn) {
+  const controller = new AbortController();
+  // The signal is handed to `fn` as well as carried in the scope, so a caller
+  // can tell a timed-out board from a failed one and skip any post-timeout
+  // fallback work (e.g. processing a deferred board's partial page outside the
+  // scope, where it would run uncancelled, #5570).
+  const run = () => withTimeout(fn(controller.signal), timeoutMs, label, () => controller.abort());
+  return source.singleHost
+    ? withAbortScope(controller.signal, run)
+    : withConnectionScope(run, { signal: controller.signal });
+}
 
 export function createKeyedLimiter(limit) {
   const states = new Map();
@@ -940,7 +1244,7 @@ async function main() {
     console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
     process.exit(1);
   }
-  const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
+  const config = loadYaml(readFileSync(PORTALS_PATH, 'utf-8'));
   const fullTitleFilterConfig = resolveTitleFilterConfig(config);
   // title_filter_overrides is independent of title_filter_full: it broadens
   // the net for specific companies on top of whichever title filter config
@@ -951,6 +1255,26 @@ async function main() {
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
   const contentFilter = buildContentFilter(config?.content_filter);
+  // Opt-in, and the opt-in IS the key: `domain_filter` does not exist in any
+  // portals.yml written before this feature, so every existing install keeps
+  // its exact behaviour and nobody loses a board without having asked for the
+  // gate. buildDomainFilter returns null for an absent or empty list, which is
+  // why the summary can tell "off" from "on and nothing was skipped".
+  // A bare `word:`/`stem:` would build a gate that matches nothing and drops
+  // every complete board, so refuse to start rather than sweep blind. Checked
+  // here as well as in validate-portals.mjs, which a direct run never calls.
+  const bareDomain = barePrefixDomainKeywords(config?.domain_filter);
+  if (bareDomain.length) {
+    console.error(`Error: portals.yml domain_filter[${bareDomain.join(', ')}]: a word:/stem: prefix needs a term after it.`);
+    process.exit(1);
+  }
+  const domainFilter = buildDomainFilter(config?.domain_filter);
+  const filters = filterFingerprints(config);
+  const changedFilters = changedFilterKeys(checkpoint, filters);
+  if (changedFilters.length) {
+    console.error(`Error: portals.yml ${changedFilters.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, or delete ${CHECKPOINT_PATH} to start fresh.`);
+    process.exit(1);
+  }
   if (!fullTitleFilterConfig?.positive?.length) {
     const key = config?.title_filter_full ? 'title_filter_full' : 'title_filter';
     console.error(`⚠️  portals.yml has no ${key}.positive — every fresh posting on every board will match. Consider adding keywords.`);
@@ -966,15 +1290,22 @@ async function main() {
   // User-layer history is an opt-in additive board directory. It fills vendors
   // that have no public community dataset without changing the tracker schema,
   // but an ordinary reverse scan never reads the user's application history.
-  const historySeeds = opts.historySeeds
+  let historySeeds = opts.historySeeds
     ? loadHistoryAtsSeeds({ dataRoot: DATA_ROOT, scanHistoryPath: SCAN_HISTORY_PATH })
     : [];
+  // Opt-in (#5739): one plain GET per distinct unknown host, verdict cached;
+  // a failed probe leaves the hostname label as it was.
+  if (opts.probeUnknownHosts && historySeeds.length) {
+    historySeeds = await classifyUnknownHostSeeds(historySeeds, {
+      probe: makeHeadProbe(fetchTextHead),
+    });
+  }
 
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
   const historySummary = opts.historySeeds ? 'history seeds' : '';
   const sourcesSummary = [atsSummary, seedsSummary, historySummary].filter(Boolean).join(' | ');
-  log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
+  log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${domainFilter ? ' | domain gate' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
 
   // extraTokensFor: a historical scan-history.tsv row records the URL it was
   // FIRST seen on, so without this a Workday requisition seen last run under
@@ -1008,6 +1339,8 @@ async function main() {
     syntheticEntries: true,
     locationHints: config?.location_filter,
   };
+  // Each directory source hands its provider a slice of this store as ctx.idCache.
+  const idCaches = openProviderIdCache(path.join(DATA_ROOT, PROVIDER_ID_CACHE_DIR));
   // The LOCAL calendar day, not the UTC one. This value lands in
   // scan-history.tsv's first_seen, which shouldDedupScanHistoryRow measures the
   // recheck window against using the local day (#3070). Stamping it in UTC put
@@ -1017,7 +1350,16 @@ async function main() {
   // Same defensive default as completedSources/counters below: a version-1
   // checkpoint that lost its offers array would otherwise set this to undefined
   // and throw on the next line, instead of degrading to an empty resume.
-  const newOffers = checkpoint?.offers || [];
+  //
+  // Minus the matches this data root already holds. A sweep the resolver
+  // breaker stopped saves its matches AND keeps its checkpoint (so --resume can
+  // finish the source), so by the time --resume reads them they are already in
+  // pipeline.md and scan-history: seeding them again appended every one a
+  // second time at this run's persist step. A match from a run that died
+  // before persisting is in neither file, so it is not in seenUrls and stays.
+  // Same token as the reseed below and the sweep's own dedup check.
+  const newOffers = (checkpoint?.offers || [])
+    .filter(o => !seenUrls.has(dedupTokenFor(o, providerForSource(o.source))));
   // Checkpointed matches were already deduped once — without re-seeding, a
   // resumed run re-scanning the in-flight overlap would duplicate them.
   // Reseed with the SAME token a fresh dedup check would produce (provider
@@ -1052,6 +1394,12 @@ async function main() {
   // re-hit the cap — it's reported, not retried, so capped coverage is visible
   // instead of passing for a fully-walked board.
   let cappedBoards = cc.cappedBoards || 0;
+  // Skipped boards are COUNTED, never silent. The gate's real failure mode is a
+  // term missing from the domain list, and a missing term costs a whole board —
+  // so the run has to say how much it declined to look at, and --verbose names
+  // each board so a suspicious skip can be checked by hand.
+  let domainGatedBoards = cc.domainGatedBoards || 0;
+  let domainGatedPostings = cc.domainGatedPostings || 0;
   const datasetStatus = {};
 
   // Graceful stop for the web layer: it SIGTERMs us when its scan budget elapses
@@ -1096,6 +1444,9 @@ async function main() {
           postingsKept: partial.length,
           postingsDroppedNoDate: droppedNoDate,
           unreachableBoards: totalErrors + curErrors,
+          domainFilterActive: Boolean(domainFilter),
+          domainGatedBoards,
+          domainGatedPostings,
           offers: partial,
         }) + '\n', () => process.exit(0));
       } catch {
@@ -1109,6 +1460,7 @@ async function main() {
     totalCompaniesScanned, totalErrors, totalRetiredBoardsSkipped,
     droppedNoDate, droppedContent,
     noDateSkipCompanies, noDateSkipJobs, cappedBoards,
+    domainGatedBoards, domainGatedPostings,
   });
   const checkpointBase = () => ({
     version: 1,
@@ -1116,6 +1468,7 @@ async function main() {
     ats: opts.ats,
     limit: opts.limit === Infinity ? null : opts.limit,
     includeUndated: opts.includeUndated,
+    filters,
     completedSources: [...completedSources],
     offers: newOffers,
     savedAt: new Date().toISOString(),
@@ -1176,7 +1529,7 @@ async function main() {
     // source finished before the checkpoint was written still contributed its
     // companies to the sweep, so it must still count toward the availability /
     // cap figures the final report and --json output show.
-    const { list, status } = await loadCompanyList(name, source.dataset);
+    const { list, status } = await loadCompanyList(name, source.dataset, source.parseDataset);
     datasetStatus[name] = status;
     totalCompaniesAvailable += list.length;
     if (opts.limit < list.length) capHit = true;
@@ -1204,6 +1557,8 @@ async function main() {
     curEntries = entries.length; curDone = 0; curErrors = 0; curDeadSkipped = 0;
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
+    // This source's slice of the provider id cache (provider-id-cache.mjs).
+    const sourceCtx = { ...ctx, idCache: idCaches.forProvider(source.provider.id) };
     let errors = 0;
     let deadBoardsSkipped = 0;
     const deadBoards = loadDeadBoards(DEAD_BOARDS_PATH);
@@ -1219,7 +1574,21 @@ async function main() {
     let lastDone = 0;
     let lastResumeAt = 0;
     const truncated = [];
-    await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry) => {
+    // The subset of `truncated` the gate deferred rather than admitted; the
+    // retry needs to know which, see retryGateDecision. Each keeps its index in
+    // entriesAll, so a checkpoint can carry it past the resume offset, and its
+    // partial page, so a failed retry still has something to process.
+    const deferred = new Map();
+    // A board the interrupted run deferred sits below the resume offset, so
+    // the sweep never revisits it: it goes straight to the retry. Its partial
+    // page died with that run, so a failed retry has nothing to fall back to.
+    for (const index of checkpoint?.current?.name === name ? checkpoint.current.deferred ?? [] : []) {
+      if (index >= startAt || !entriesAll[index]) continue;
+      truncated.push(entriesAll[index]);
+      deferred.set(entriesAll[index], { index, jobs: null });
+    }
+    const deferredIndices = () => [...deferred.values()].map((d) => d.index);
+    await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry, idx) => {
       const deadBoard = boardKey(entry);
       if (shouldSkipDeadBoard(deadBoards, name, deadBoard)) {
         deadBoardsSkipped++;
@@ -1229,27 +1598,62 @@ async function main() {
         // The whole per-company unit — fetch AND processJobs (which may issue
         // per-job detail-page requests via provider.enrichDate) — runs inside
         // one watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
-        await withTimeout((async () => {
-          const jobs = await source.provider.fetch(entry, ctx);
+        await boardScope(source, `${name}/${entry.name}`, COMPANY_TIMEOUT_MS, async () => {
+          // Most boards in a public directory hold nothing the title filter
+          // wants; where the provider can list a board cheaply, find that out
+          // before downloading every posting body.
+          if (typeof source.provider.fetchListing === 'function') {
+            const listing = await source.provider.fetchListing(entry, sourceCtx);
+            if (!listingMayMatch(listing, { cutoff, titleFilter, companySlug: entry.name })) {
+              if (!opts.includeUndated) droppedNoDate += undatedInListing(listing, cutoff);
+              recordBoardResult(deadBoards, name, deadBoard, 200);
+              consecutiveResolverFailures = 0;
+              return;
+            }
+          }
+          const jobs = await source.provider.fetch(entry, sourceCtx);
           recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;
-          // Only 'transient' is worth a sequential retry — 'structural' means
-          // the board hit a fixed bound (facet-split slice/depth/page budget)
-          // that a repeat run reaches again, paying the same expensive split
-          // for the same result.
+          // Queued BEFORE the gate, deliberately: a board the gate cannot yet
+          // judge has to stay in the retry list, and the gate below is what
+          // decides whether it was ever eligible. Only 'transient' is worth a
+          // sequential retry — 'structural' means the board hit a fixed bound
+          // (facet-split slice/depth/page budget) that a repeat run reaches
+          // again, paying the same expensive split for the same result.
           if (jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT) truncated.push(entry);
+          // Ahead of processJobs, deliberately: a gated board is not merely
+          // quieter but CHEAPER, since provider.enrichDate() issues a per-job
+          // detail request for undated providers (icims) and a board dropped
+          // here never pays for one. The one board that does not get decided
+          // here is the truncated one — see boardGateDecision.
+          const decision = boardGateDecision(jobs, domainFilter);
+          if (decision === 'gate') {
+            domainGatedBoards++;
+            domainGatedPostings += jobs.length;
+            if (opts.verbose) console.error(`  ⊘ ${name}/${entry.name}: no domain-bearing posting — board skipped`);
+            return;
+          }
+          // Deferred: the retry below re-fetches the whole board and gates
+          // THAT. Its partial page is not processed here — those rows would
+          // bypass a gate that has not been decided yet, which is the loose
+          // direction this feature exists to close. It is kept, though, for
+          // the case where the retry fetch fails outright.
+          if (decision === 'defer') {
+            deferred.set(entry, { index: startAt + idx, jobs });
+            return;
+          }
           if (jobs.icimsTruncated) {
             cappedBoards++;
             if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
           }
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
           await processJobs(jobs, name, source.provider, entry.name);
-        })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
+        });
       } catch (err) {
         // Mostly defunct boards in the public dataset — expected noise, so the
         // default stays quiet; --verbose surfaces per-board failures.
         errors++;
-        recordBoardResult(deadBoards, name, deadBoard, err?.status);
+        recordBoardFailure(deadBoards, name, deadBoard, err);
         // A dead board and a dead resolver look identical one at a time; only
         // the *consecutive* run tells them apart, so any non-resolver outcome
         // resets the count (#2229).
@@ -1275,9 +1679,11 @@ async function main() {
       }
       if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {
         saveDeadBoardsBestEffort(deadBoards);
+        // So a sweep that dies later keeps the ids it resolved so far.
+        void saveProviderIdCacheBestEffort(idCaches);
         writeCheckpoint({
           ...checkpointBase(),
-          current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash },
+          current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
           counters: {
             ...snapshotCounters(),
             totalRetiredBoardsSkipped: totalRetiredBoardsSkipped + deadBoardsSkipped,
@@ -1300,15 +1706,28 @@ async function main() {
     // quiet line. Re-processing the full board is safe — seenUrls already
     // holds every match from the partial first pass.
     // Skipped entirely under a resolver outage: retrying boards one by one is
-    // more of exactly the traffic the breaker just stopped.
+    // more of exactly the traffic the breaker just stopped. A board deferred by
+    // the gate is then neither processed nor counted here; the checkpoint
+    // carries its index, and the resumed run retries it.
     if (truncated.length && !resolverOutage) {
       log(`\n  ↻ retrying ${truncated.length} truncated board(s) sequentially...`);
       for (const entry of truncated) {
+        let retrySignal;
         try {
-          await withTimeout((async () => {
-            const jobs = await source.provider.fetch(entry, ctx);
+          await boardScope(source, `${name}/${entry.name} (retry)`, COMPANY_TIMEOUT_MS, async (signal) => {
+            retrySignal = signal;
+            const jobs = await source.provider.fetch(entry, sourceCtx);
             recordBoardResult(deadBoards, name, boardKey(entry), 200);
-            await processJobs(jobs, name, source.provider, entry.name);
+            // Where a board deferred by the parallel sweep is actually decided.
+            // A board the sweep already admitted is never gated here, and one
+            // still truncated is admitted rather than counted as gated.
+            if (retryGateDecision(jobs, domainFilter, deferred.has(entry)) === 'gate') {
+              domainGatedBoards++;
+              domainGatedPostings += jobs.length;
+              if (opts.verbose) console.error(`  ⊘ ${name}/${entry.name}: no domain-bearing posting — board skipped`);
+            } else {
+              await processJobs(jobs, name, source.provider, entry.name);
+            }
             if (jobs.workdayTruncated) {
               errors++; // still not fully covered — move on
               // A board pushed here as 'transient' can legitimately come back
@@ -1321,17 +1740,29 @@ async function main() {
                 console.error(`  ✗ ${name}/${entry.name}: ${why} after sequential retry`);
               }
             }
-          })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
+          });
         } catch (err) {
           errors++;
-          recordBoardResult(deadBoards, name, boardKey(entry), err?.status);
+          recordBoardFailure(deadBoards, name, boardKey(entry), err);
           if (opts.verbose) console.error(`  ✗ ${name}/${entry.name} (retry): ${err.message}`);
+          // No fuller fetch is coming, so a deferred board's partial page is
+          // admitted ungated, the fallback the retry takes for a board that
+          // comes back truncated again. Without it, a title match already in
+          // hand would be lost to the retry's failure.
+          // Skip the fallback when the retry timed out: processJobs() can issue
+          // enrichDate detail fetches, and here it would run outside boardScope,
+          // uncancelled — the post-timeout work this fix exists to stop (#5570).
+          const partial = deferred.get(entry)?.jobs;
+          if (partial && !retrySignal?.aborted) await processJobs(partial, name, source.provider, entry.name);
         }
       }
     }
     totalErrors += errors;
     totalRetiredBoardsSkipped += deadBoardsSkipped;
-    if (!opts.dryRun) saveDeadBoardsBestEffort(deadBoards);
+    if (!opts.dryRun) {
+      saveDeadBoardsBestEffort(deadBoards);
+      await saveProviderIdCacheBestEffort(idCaches);
+    }
     if (resolverOutage) {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
@@ -1353,7 +1784,7 @@ async function main() {
       if (!opts.dryRun) {
         checkpointWritten = writeCheckpoint({
           ...checkpointBase(),
-          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash },
+          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
           counters: snapshotCounters(),
         });
       }
@@ -1381,7 +1812,7 @@ async function main() {
   if (historySeeds.length && !stoppedByOutage) {
     const providers = await loadProviders(PROVIDERS_DIR);
     log(`\n🌱 Application history — ${historySeeds.length} unique ATS board(s) derived locally...`);
-    const result = await runHistorySeedScan(historySeeds, providers, opts, ctx, processJobs);
+    const result = await runHistorySeedScan(historySeeds, providers, opts, ctx, processJobs, idCaches);
     totalCompaniesScanned += result.total;
     totalErrors += result.errors;
     log(`  done — ${result.total} board(s) probed, ${result.unsupported} without a scanner provider (${result.errors} errors)`);
@@ -1391,7 +1822,7 @@ async function main() {
   for (const seedId of opts.seeds) {
     const seedSource = SEED_SOURCES[seedId];
     log(`\n🌱 ${seedSource.label} (${seedId}-seed) — fetching portfolio...`);
-    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seedSource.label);
+    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seedSource.label, idCaches);
     if (result && result.offers) {
       totalCompaniesScanned += result.total || 0;
       totalErrors += result.errors || 0;
@@ -1399,6 +1830,9 @@ async function main() {
       log(`  done — ${result.total} companies probed, ${result.offers.length} matches (${result.errors} errors)`);
     }
   }
+  // The history and VC seed passes run after every directory source has
+  // saved, so what they resolved is saved here.
+  if (!opts.dryRun) await saveProviderIdCacheBestEffort(idCaches);
 
   const blacklistResult = filterBlacklistedOffers(newOffers, blacklist, { includeBlacklisted: opts.includeBlacklisted });
   let offers = blacklistResult.offers;
@@ -1409,6 +1843,12 @@ async function main() {
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
   if (cappedBoards) log(`Page-capped boards: ${cappedBoards} (partial coverage — later postings not scanned)`);
+  // Reported whenever the gate RAN, including when it skipped nothing: a zero
+  // there is the useful reading that the domain list admitted every board, and
+  // silence would be indistinguishable from the gate being off.
+  if (domainFilter) {
+    log(`Domain-gated boards: ${domainGatedBoards} skipped, ${domainGatedPostings} posting${domainGatedPostings === 1 ? '' : 's'} never filtered${domainGatedBoards && !opts.verbose ? ' (--verbose names them)' : ''}`);
+  }
   // A paced sweep is slower on purpose. Say so, or the operator reads the
   // wall-clock time as a hang (#2229).
   const pacing = dnsPacingStats();
@@ -1509,6 +1949,12 @@ async function main() {
       unreachableBoards: totalErrors,
       retiredBoardsSkipped: totalRetiredBoardsSkipped,
       cappedBoards,
+      // `domainFilterActive` is not derivable from the two counts: zero skipped
+      // boards is equally what an absent domain_filter and a permissive one
+      // produce, and a caller comparing two sweeps needs to know which.
+      domainFilterActive: Boolean(domainFilter),
+      domainGatedBoards,
+      domainGatedPostings,
       dnsPacing: { delayed: pacing.delayed, waitedMs: Math.round(pacing.waitedMs) },
       saved,
       offers: offers.map(o => ({
@@ -1539,8 +1985,24 @@ async function main() {
 
 // Only run main() when invoked directly, not when imported by tests.
 if (isMainModule(import.meta.url)) {
-  main().catch(err => {
-    console.error('Fatal:', err.message);
-    process.exit(1);
-  });
+  // Exit explicitly once main() returns. The watchdog now cancels a timed-out
+  // board's work, but a keep-alive socket a single-host pool still holds (or a
+  // request aborting just as the summary prints) can otherwise keep the event
+  // loop open for minutes past the summary (#5570). Flush stdout first so a
+  // piped summary is never truncated.
+  const flushAndExit = (code) => {
+    // Exit from a write-completion callback, queued after whatever is already
+    // buffered, so a piped summary flushes first. `writableLength > 0` is not a
+    // reliable "wait for drain" signal — `drain` only fires for a write that
+    // returned false (past the high-water mark), so bytes queued below it would
+    // never drain and the process would hang (the opposite of the intent).
+    process.exitCode = code;
+    process.stdout.write('', () => process.exit(code));
+  };
+  main()
+    .then(() => flushAndExit(0))
+    .catch(err => {
+      console.error('Fatal:', err.message);
+      flushAndExit(1);
+    });
 }

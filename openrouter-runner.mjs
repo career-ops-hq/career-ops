@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { normalizedTrackerScore } from './lib/tracker-addition.mjs';
@@ -32,10 +32,15 @@ import {
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
-import { appendToPipeline, appendToScanHistory } from './scan.mjs';
+import { appendToPipeline, appendToScanHistory, atomicWriteFile } from './scan.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
+import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
+import { locateApplyReport } from './apply-scope.mjs';
+import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -67,7 +72,7 @@ const OPENROUTER_API_URL    = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const MAX_TOKENS            = 8192;
 const RATE_LIMIT_DELAY_MS   = 2500;  // pause between requests on free tier
-const MODEL_TIMEOUT_MS      = 15_000; // abort a single model call after 15 s
+const MODEL_TIMEOUT_MS      = 120_000; // abort a single model call after 120 s
 
 // Provider priority order — models are sorted by provider prefix, not hardcoded names.
 // Add, remove, or reorder providers here; model names are resolved at runtime from the API.
@@ -112,6 +117,7 @@ if (blacklistedModels.size > 0) {
   console.log(`[blacklist] Loaded ${blacklistedModels.size} pre-blacklisted model(s) from disk.`);
 }
 // 429 failure count per model — auto-blacklist after 3 consecutive 429s
+// (a success or any other failure resets the count)
 const rateLimitCounts = {};
 
 // ---------------------------------------------------------------------------
@@ -146,7 +152,13 @@ async function loadFreeModels() {
 
     freeModels = list.sort((a, b) => {
       const diff = priorityOf(a) - priorityOf(b);
-      return diff !== 0 ? diff : a.localeCompare(b);
+      if (diff !== 0) return diff;
+      if (providerOf(a) === 'minimax' && providerOf(b) === 'minimax') {
+        const flash = 'minimax/minimax-m3.1-flash:free';
+        if (a === flash) return b === flash ? 0 : -1;
+        if (b === flash) return 1;
+      }
+      return a.localeCompare(b);
     });
 
     console.log(`[models] ${freeModels.length} free models loaded from OpenRouter API.`);
@@ -182,9 +194,26 @@ async function cmdModels() {
 // env and no .career-ops-data marker, getCareerOpsRoot() returns the same
 // directory __dirname did.
 const DATA_ROOT = getCareerOpsRoot();
+// System-layer files ship with the code and never follow the data root: a data
+// root outside the checkout holds cv.md and modes/_profile.md, but no
+// modes/_shared.md or modes/oferta.md. Read through readFile() those came back
+// null, fell through to '', and the evaluation ran on a system prompt with no
+// shared rules and no evaluation mode (#5115). Same split as ollama-eval.mjs
+// and gemini-eval.mjs.
+const CODE_ROOT = __dirname;
 
 function readFile(relPath) {
   try { return fs.readFileSync(path.join(DATA_ROOT, relPath), 'utf-8'); }
+  catch { return null; }
+}
+
+function readProfile() {
+  try { return fs.readFileSync(getProfilePath(), 'utf-8'); }
+  catch { return null; }
+}
+
+function readSystemFile(relPath) {
+  try { return fs.readFileSync(path.join(CODE_ROOT, relPath), 'utf-8'); }
   catch { return null; }
 }
 
@@ -338,6 +367,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const usage = normalizeOpenAIUsage(data.usage);
 
       modelIndex = (modelIndex + attempt + 1) % active.length;
+      delete rateLimitCounts[model];
       console.log('OK');
       return { content, usage };
 
@@ -363,6 +393,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
           await new Promise(r => setTimeout(r, 800));
         }
       } else {
+        delete rateLimitCounts[model];
         console.log(`FAILED (${msg})`);
         await new Promise(r => setTimeout(r, 800));
       }
@@ -372,24 +403,83 @@ async function callOpenRouter(systemPrompt, userMessage) {
   throw new Error(`All ${active.length} active models failed. Last error: ${lastError?.message}`);
 }
 
+// Exported so tests/openrouter-runner-429-reset.test.mjs can script fetch()
+// against the real rotation and blacklist logic without a network or a CLI run.
+export { callOpenRouter, rateLimitCounts, blacklistedModels, MODEL_TIMEOUT_MS };
+
 // ---------------------------------------------------------------------------
 // Context loading
 // ---------------------------------------------------------------------------
 function loadContext() {
   return {
     cv:          readFile('cv.md')               ?? 'CV not found.',
-    profile:     readFile('config/profile.yml')  ?? '',
-    shared:      readFile('modes/_shared.md')    ?? '',
+    profile:     readProfile()                   ?? '',
+    shared:      readSystemFile('modes/_shared.md') ?? '',
     profileMode: readFile('modes/_profile.md')   ?? '',
   };
 }
 
-export function buildSystemPrompt(modeContent, ctx) {
+// The mode files are written for Claude Code, which has Playwright, WebFetch,
+// Bash and file reads. This runner sends no `tools`, so a model that follows
+// them answers with tool calls and no evaluation (#5809). Say so before them,
+// and drop the parts that tell the model to use tools.
+function noToolsNote(evaluate) {
+  return [
+    'RUNNER NOTE: you have no tools in this run.',
+    // Only evaluate sends a posting; apply sends an evaluation report.
+    evaluate
+      ? 'The job text is in the user message and the CV is below.'
+      : 'Everything you need is in the user message and the CV below.',
+    'Do not navigate, fetch, read files or run commands, and ignore any instruction below to do so.',
+  ].join('\n');
+}
+
+// Matched by heading, not line number, so edits to modes/ don't move them. A
+// section runs to the next heading of the same or a higher level, or to its
+// `until` line. A heading that is gone leaves the text as it was.
+const TOOL_SECTIONS = [
+  '## Liveness gate (URL inputs)',
+  '## Bounded Research Budget',
+  '### Tools',
+  // Stops before the agency-confirmation rule, which the runner keeps.
+  { heading: '### Subagent delegation (cost guardrail)', until: '<!-- guardrail:agency-confirmation -->' },
+  '### Prior-contact FYI (non-scoring)',
+  '### 1b. Embed ATS keyword coverage',
+  '### 2. Record in tracker',
+  '### 3. Salary observations (desired ask only)',
+];
+// Single lines that tell the model to run a command or search, by how they start.
+const TOOL_LINES = [
+  '1b. **First evaluation of each session:** Run `node cv-sync-check.mjs`',
+  '4. Use WebSearch for comp and company data',
+  '- Search: `"{company}"',
+  '- `{###}` = next sequential number',
+];
+const READ_CV_RULE = '**RULE: NEVER hardcode metrics from proof points.**';
+
+export function stripToolInstructions(text) {
+  let lines = text.split('\n');
+  for (const section of TOOL_SECTIONS) {
+    const { heading, until } = typeof section === 'string' ? { heading: section } : section;
+    const start = lines.findIndex(l => l.trimEnd() === heading);
+    if (start === -1) continue;
+    const level = heading.match(/^#+/)[0].length;
+    const next = lines.findIndex((l, i) => i > start
+      && (new RegExp(`^#{1,${level}} `).test(l) || (until !== undefined && l.trimEnd() === until)));
+    lines.splice(start, (next === -1 ? lines.length : next) - start);
+  }
+  lines = lines.filter(l => !TOOL_LINES.some(p => l.startsWith(p)));
+  lines = lines.map(l => (l.startsWith(READ_CV_RULE) ? `${READ_CV_RULE} Take them from the CV below.` : l));
+  return lines.join('\n');
+}
+
+export function buildSystemPrompt(modeContent, ctx, { evaluate = false } = {}) {
   const languageInstruction = outputLanguageInstruction(parseOutputLanguage(ctx.profile));
   return [
-    ctx.shared,
+    noToolsNote(evaluate),
+    stripToolInstructions(ctx.shared),
     ctx.profileMode,
-    modeContent,
+    stripToolInstructions(modeContent),
     '---',
     'CANDIDATE PROFILE (YAML):',
     ctx.profile,
@@ -422,6 +512,26 @@ function assertSafeRemoteUrl(url) {
   return u;
 }
 
+// Verdicts from the liveness check that mean the page is not an open posting
+// that can be read: besides any `expired` one (404, a closed or listing page),
+// a page too short to read (isUnreadableVerdict: nav/footer only, or not
+// rendered yet, which classifyLiveness reports as `uncertain`), a bot wall or
+// a redirect away from the posting.
+const UNREADABLE_PAGE_CODES = new Set(['bot_challenge', 'redirected_off_posting']);
+
+// Why a fetched page holds no job description to evaluate, or null when it
+// does. The runner used to send any page to the model, so a 404, a bot wall or
+// a Workday page that had not rendered yet came back as a report and a done
+// pipeline row for a posting nobody read (#5809).
+export function unreadableJobPage({ status = 0, requestedUrl = '', finalUrl = '', text = '' } = {}) {
+  if (status >= 400) return `HTTP ${status}`;
+  const verdict = classifyLiveness({ status, requestedUrl, finalUrl, bodyText: text });
+  if (verdict.result === 'expired' || isUnreadableVerdict(verdict) || UNREADABLE_PAGE_CODES.has(verdict.code)) {
+    return `${verdict.code}: ${verdict.reason}`;
+  }
+  return null;
+}
+
 async function fetchJobPage(url) {
   assertSafeRemoteUrl(url);
   let chromium;
@@ -433,21 +543,25 @@ async function fetchJobPage(url) {
 
   if (chromium) {
     let browser;
+    let unreadable = null;
     try {
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.waitForTimeout(2000); // wait for SPA render
       const text = await page.evaluate(() => {
         document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
         return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
       });
-      return text.slice(0, 16_000);
+      unreadable = unreadableJobPage({ status: response?.status() ?? 0, requestedUrl: url, finalUrl: page.url(), text });
+      if (!unreadable) return text.slice(0, 16_000);
     } catch (e) {
       console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
     } finally {
       if (browser) await browser.close().catch(() => {});
     }
+    // The browser read the page; a plain fetch would only see less of it.
+    if (unreadable) throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
   }
 
   // Plain HTTP fallback
@@ -457,7 +571,10 @@ async function fetchJobPage(url) {
     });
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const html = await r.text();
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 16_000);
+    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
+    if (unreadable) throw new Error(`no job description (${unreadable})`);
+    return text.slice(0, 16_000);
   } catch (e) {
     throw new Error(`Could not fetch job page: ${e.message}`);
   }
@@ -474,7 +591,7 @@ async function fetchJobPage(url) {
 export function parsePortals(rawOverride) {
   const raw = rawOverride ?? readFile('portals.yml');
   if (!raw) throw new Error('portals.yml not found');
-  const config = yaml.load(raw) || {};
+  const config = loadYaml(raw) || {};
 
   // The shared predicate rather than a second copy of the matching rules. This
   // path kept its own `includes` loop, and the two had drifted three ways: an
@@ -498,7 +615,7 @@ export function parsePortals(rawOverride) {
     .filter(c => c && c.api && c.enabled !== false)
     .map(c => ({ name: String(c.name ?? c.company ?? 'Unknown'), api: String(c.api).trim() }));
 
-  return { companies, titleMatches };
+  return { companies, titleMatches, config };
 }
 
 // ---------------------------------------------------------------------------
@@ -521,14 +638,20 @@ function readPipeline() {
   return pending;
 }
 
-function markPipelineDone(url) {
-  let content = readFile('data/pipeline.md') ?? '';
-  const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  content = content.replace(
-    new RegExp(`^(- \\[ \\] ${escaped}.*)$`, 'm'),
-    (ln) => ln.replace('- [ ]', '- [x]')
-  );
-  writeFile('data/pipeline.md', content);
+// Tick the pending row whose URL is exactly `url`. The previous version matched
+// `- [ ] {url}.*`, so with `.../jobs/12` still pending above `.../jobs/1`,
+// finishing jobs/1 ticked jobs/12. It also rewrote the file with an unlocked,
+// truncating writeFileSync, which erased any row a scanner appended through
+// appendToPipeline in between. The URL is read the way readPipeline reads it.
+export async function markPipelineDone(url, { pipelinePath = path.join(DATA_ROOT, 'data', 'pipeline.md') } = {}) {
+  await withPipelineLock(pipelinePath, async () => {
+    if (!fs.existsSync(pipelinePath)) return;
+    const lines = fs.readFileSync(pipelinePath, 'utf-8').split('\n');
+    const i = lines.findIndex(line => /^- \[ \] /.test(line) && line.slice(6).split(' | ')[0].trim() === url);
+    if (i === -1) return;
+    lines[i] = lines[i].replace('- [ ]', '- [x]');
+    atomicWriteFile(pipelinePath, lines.join('\n'));
+  });
 }
 
 // Both writes go through the shared writers in scan.mjs rather than this
@@ -548,32 +671,16 @@ function markPipelineDone(url) {
 //
 // It also picks up CAREER_OPS_DATA_DIR support for free: the shared paths are
 // DATA_ROOT-anchored, while the __dirname-relative paths here ignored it.
-async function addToPipeline(entries) {
-  const history = readFile('data/scan-history.tsv') ?? 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n';
-  const seenUrls = new Set(history.split('\n').slice(1).map(l => l.split('\t')[0]).filter(Boolean));
-
-  const existingPipeline = readFile('data/pipeline.md') ?? '# Pipeline\n\n## Pending\n';
-  const existingApps     = readFile('data/applications.md') ?? '';
-  // extract URLs already tracked in applications.md (mirrors scan.mjs dedup logic)
-  const appliedUrls = new Set(
-    existingApps.split('\n')
-      .map(l => l.match(/https?:\/\/[^\s|)]+/))
-      .filter(Boolean).map(m => m[0])
-  );
-
-  const newEntries = entries.filter(e => {
-    if (seenUrls.has(e.url)) return false;
-    if (appliedUrls.has(e.url)) return false;
-    // skip if already queued in pipeline
-    if (existingPipeline.includes(e.url)) return false;
-    return true;
-  });
-
-  if (newEntries.length === 0) return 0;
-
+//
+// Admission goes through the shared gate (#5478): the seen set compares
+// normalized URLs across scan-history, the pipeline and the tracker, and the
+// blacklist and location filter apply as they do in scan.mjs. The raw-URL sets
+// this built before re-queued a posting whose URL differed by a tracking
+// parameter, and nothing here read data/blacklist.md.
+export async function addToPipeline(entries, config = {}, gate = createAdmissionGate({ config })) {
   // The shared writers take {url, company, title, location}; this module calls
   // the title `role`.
-  const offers = newEntries.map(e => ({
+  const offers = entries.map(e => ({
     url: e.url,
     company: e.company,
     title: e.role,
@@ -581,9 +688,14 @@ async function addToPipeline(entries) {
     source: 'openrouter scan',
   }));
 
-  await appendToPipeline(offers);
-  await appendToScanHistory(offers, localToday());
-  return newEntries.length;
+  const { admitted } = gate.partition(offers);
+  const skipped = formatSkipCounts(gate.counts);
+  if (skipped) console.log(`Skipped: ${skipped}`);
+  if (admitted.length === 0) return 0;
+
+  await appendToPipeline(admitted);
+  await appendToScanHistory(admitted, localToday());
+  return admitted.length;
 }
 
 function extractCompanySlug(text, url) {
@@ -616,7 +728,7 @@ async function cmdScan() {
   try { portals = parsePortals(); }
   catch (e) { console.error(e.message); return; }
 
-  const { companies, titleMatches } = portals;
+  const { companies, titleMatches, config } = portals;
   console.log(`Greenhouse API companies: ${companies.length}\n`);
 
   const found = [];
@@ -641,7 +753,7 @@ async function cmdScan() {
     }
   }
 
-  const added = await addToPipeline(found);
+  const added = await addToPipeline(found, config);
   console.log(`\n✅ Scan complete. ${found.length} matches, ${added} new entries added to pipeline.md.`);
   if (added > 0) {
     console.log('\n→  node openrouter-runner.mjs pipeline\n   to evaluate pending listings.\n');
@@ -652,9 +764,12 @@ async function cmdScan() {
 async function cmdEvaluate(input, ctx) {
   tracker.recordZeroToken('scan');
   tracker.recordZeroToken('pdf payload');
-  const modeContent = readFile('modes/oferta.md') ?? readFile('modes/auto-pipeline.md') ?? '';
+  const modeContent = readSystemFile('modes/oferta.md') ?? readSystemFile('modes/auto-pipeline.md') ?? '';
 
   let jdText = input;
+  // The posting text alone, for the report's verbatim archive: jdText gains a
+  // `URL:` line for the model when the input is a link.
+  let archiveText = input;
 
   if (!input) {
     // Interactive paste mode
@@ -670,12 +785,14 @@ async function cmdEvaluate(input, ctx) {
       rl.close();
     }
     jdText = lines.join('\n');
+    archiveText = jdText;
     if (!jdText.trim()) { console.log('No input provided.'); return null; }
   } else if (input.startsWith('http')) {
     console.log('Fetching job page...');
     try {
       const content = await fetchJobPage(input);
       jdText = `URL: ${input}\n\n${content}`;
+      archiveText = content;
     } catch (e) {
       console.error(e.message);
       return null;
@@ -683,7 +800,7 @@ async function cmdEvaluate(input, ctx) {
   }
 
   console.log('\nEvaluating...');
-  const systemPrompt = buildSystemPrompt(modeContent, ctx);
+    const systemPrompt = buildSystemPrompt(modeContent, ctx, { evaluate: true });
 
   let resultObj;
   try {
@@ -694,6 +811,14 @@ async function cmdEvaluate(input, ctx) {
   }
   tracker.record('evaluation', resultObj.usage);
   const result = resultObj.content;
+
+  // A model that says it could not evaluate the posting has not evaluated it:
+  // save nothing, so the pipeline leaves the row pending (#5809).
+  const notEvaluated = result.match(/^---DEAD_POSTING---\s*$|^\s*(?:status:\s*)?needs_confirmation\b.*$/m);
+  if (notEvaluated) {
+    console.error(`Not evaluated, nothing saved. The model replied: ${notEvaluated[0].trim()}`);
+    return null;
+  }
 
   let reservedNumbers;
   try {
@@ -717,7 +842,7 @@ async function cmdEvaluate(input, ctx) {
     // Extract Legitimacy from LLM output or fall back to placeholder
     const legitMatch = result.match(/\*\*Legitimacy:\*\*\s*([^\n]+)/);
     const legitLine  = legitMatch ? `**Legitimacy:** ${legitMatch[1].trim()}` : '**Legitimacy:** unconfirmed';
-    writeFile(relPath, `**URL:** ${input || '(pasted)'}\n${legitLine}\n\n${result}`);
+    writeFile(relPath, `**URL:** ${input || '(pasted)'}\n${legitLine}\n\n${withJdArchiveSection(result, archiveText)}`);
 
     // Capture the DENOMINATOR when the model writes one. The old pattern took
     // only the numeric prefix, so `Score: 8/10` yielded `8` and the cell became
@@ -782,7 +907,7 @@ async function cmdPipeline(ctx) {
     console.log(`\n[${i + 1}/${pending.length}] ${item.company} — ${item.role}`);
     try {
       const report = await cmdEvaluate(item.url, ctx);
-      if (report) markPipelineDone(item.url);
+      if (report) await markPipelineDone(item.url);
     } catch (e) {
       console.error(`  Error: ${e.message}`);
     }
@@ -799,21 +924,28 @@ async function cmdApply(ref, ctx) {
   tracker.recordZeroToken('scan');
   tracker.recordZeroToken('evaluation');
   tracker.recordZeroToken('pdf payload');
-  const modeContent = readFile('modes/apply.md') ?? '';
+  const modeContent = readSystemFile('modes/apply.md') ?? '';
 
   let reportContent;
-  if (fileExists(ref)) {
-    reportContent = readFile(ref);
-  } else {
-    const numStr = String(ref).padStart(3, '0');
-    const reportsDir = path.join(DATA_ROOT, 'reports');
-    const dirEntries = fs.existsSync(reportsDir) ? fs.readdirSync(reportsDir) : [];
-    const matches = dirEntries.filter(f => f.startsWith(numStr));
-    if (matches.length === 0) {
+  let reportPath;
+  try {
+    const located = locateApplyReport(DATA_ROOT, ref, {
+      exists: (p) => fs.existsSync(p),
+      list: (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir) : []),
+    });
+    if (!located.ok) {
       console.error(`Report not found: ${ref}`);
       return;
     }
-    reportContent = readFile(`reports/${matches[0]}`);
+    reportPath = located.path;
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    return;
+  }
+  try {
+    reportContent = fs.readFileSync(reportPath, 'utf8');
+  } catch {
+    reportContent = null;
   }
 
   if (!reportContent) { console.error('Could not read report content.'); return; }

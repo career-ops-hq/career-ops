@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check, Loader2 } from "lucide-react";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 import { cn } from "@/lib/cn";
@@ -14,16 +15,19 @@ const FIELDS: { key: ProfileCadenceKey; label: string; hint: string }[] = [
   { key: "applied_subsequent_days", label: "Between follow-ups", hint: "days between nudges while Applied" },
   { key: "applied_max_followups", label: "Max follow-ups", hint: "after this many with no reply the lead goes cold" },
   { key: "responded_initial_days", label: "Reply window", hint: "answer a company response within this many days" },
-  { key: "responded_subsequent_days", label: "Responded cadence", hint: "days between touches while in Responded" },
+  { key: "responded_subsequent_days", label: "Responded / assessment cadence", hint: "days between touches while in Responded or Assessment" },
   { key: "interview_thankyou_days", label: "Thank-you note", hint: "due within this many days of reaching Interview" },
 ];
 
 export function CadenceSettings() {
+  const router = useRouter();
   const [values, setValues] = useState<Record<ProfileCadenceKey, string> | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(true);
+  const [toggling, setToggling] = useState(false);
 
   // On a failed load, do NOT fall back to defaults: the user would see 7/7/2/…
   // with no warning and a Save would overwrite their real profile.yml
@@ -40,6 +44,7 @@ export function CadenceSettings() {
         // the CORE's cadenceDefaults (#2369) — no local defaults table to merge
         // in. A key the core didn't supply renders empty rather than as an
         // invented number.
+        setEnabled(d?.enabled !== false);
         const eff = (d?.effective ?? {}) as Partial<Record<ProfileCadenceKey, number>>;
         setValues(Object.fromEntries(
           PROFILE_CADENCE_KEYS.map((k) => [k, eff[k] === undefined ? "" : String(eff[k])]),
@@ -83,6 +88,30 @@ export function CadenceSettings() {
     setSaving(false);
   };
 
+  const toggle = async (next: boolean) => {
+    setToggling(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/followups/cadence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof j.error === "string" ? j.error : "Could not save.");
+      } else {
+        setEnabled(next);
+        // The nav is rendered on the server from the same setting. A router
+        // refresh re-renders it without unloading running jobs.
+        router.refresh();
+      }
+    } catch {
+      setError("Could not save.");
+    }
+    setToggling(false);
+  };
+
   return (
     <div>
       <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
@@ -113,35 +142,54 @@ export function CadenceSettings() {
           </div>
         ) : (
           <>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {FIELDS.map((f) => (
-                <label key={f.key} className="block">
-                  <span className="block text-sm font-medium text-foreground">{f.label}</span>
-                  <span className="mt-0.5 block text-xs text-faint">{f.hint}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={values[f.key]}
-                    onChange={(e) => setValues((v) => (v ? { ...v, [f.key]: e.target.value } : v))}
-                    className="mt-1.5 w-24 rounded-md border border-border bg-surface/60 px-3 py-1.5 text-sm tabular-nums outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-                  />
-                </label>
-              ))}
-            </div>
+            <label className="mt-3 flex items-center gap-2 text-sm font-medium text-foreground">
+              <input
+                type="checkbox"
+                checked={enabled}
+                disabled={toggling}
+                onChange={(e) => toggle(e.target.checked)}
+                className="size-4 accent-brand"
+              />
+              Track follow-ups
+              {toggling && <Loader2 className="size-3.5 animate-spin" />}
+            </label>
+            <p className="mt-0.5 text-xs text-faint">
+              Off hides the Follow-ups page and stops scheduling follow-up dates. Saved as{" "}
+              <span className="font-mono text-muted">follow_ups.enabled</span>.
+            </p>
+            {enabled && (
+              <>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {FIELDS.map((f) => (
+                    <label key={f.key} className="block">
+                      <span className="block text-sm font-medium text-foreground">{f.label}</span>
+                      <span className="mt-0.5 block text-xs text-faint">{f.hint}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={values[f.key]}
+                        onChange={(e) => setValues((v) => (v ? { ...v, [f.key]: e.target.value } : v))}
+                        className="mt-1.5 w-24 rounded-md border border-border bg-surface/60 px-3 py-1.5 text-sm tabular-nums outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving}
+                  className={cn(
+                    "mt-4 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover",
+                    "disabled:pointer-events-none disabled:opacity-60",
+                  )}
+                >
+                  {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5 text-emerald-400" /> : null}
+                  {saved ? "Saved" : "Save cadence"}
+                </button>
+              </>
+            )}
             {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving}
-              className={cn(
-                "mt-4 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover",
-                "disabled:pointer-events-none disabled:opacity-60",
-              )}
-            >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5 text-emerald-400" /> : null}
-              {saved ? "Saved" : "Save cadence"}
-            </button>
           </>
         )}
       </div>

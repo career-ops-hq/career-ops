@@ -14,10 +14,11 @@
  * Report all possible missing locations instead of inventing a missing name.
  */
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
-import { join, posix } from 'node:path';
+import { basename, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { isNestedCheckout } from './lib/mjs-files.mjs';
+import { walkTree } from './lib/walk-tree.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const LANGUAGE = /^[a-z]{2}(?:-[A-Za-z0-9]{2,8})*$/;
@@ -184,12 +185,16 @@ export function discoverLangs(root = ROOT) {
 }
 
 function markdownFiles(dir) {
+  // The root is vetted here because walkTree deliberately never tests its own
+  // root — a language directory that IS a checkout, or a link, is not ours.
   if (!dir || !existsSync(dir) || !lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink() || isNestedCheckout(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
-    if (entry.name.startsWith('.')) return [];
-    if (entry.isDirectory()) return markdownFiles(join(dir, entry.name)).map(name => `${entry.name}/${name}`);
-    return entry.isFile() && modePath(entry.name) ? [entry.name] : [];
-  }).sort();
+  // Below it, walkTree skips nested checkouts and scratch copies on every
+  // descent, and ignores links by default, as the Dirent-based recursion this
+  // replaced did.
+  return walkTree(dir, { skip: (entry) => entry.name.startsWith('.') })
+    .filter((abs) => modePath(basename(abs)))
+    .map((abs) => relative(dir, abs).split(sep).join('/'))
+    .sort();
 }
 
 /** Compare the shipped subset, plus README-promised files that were deleted. */

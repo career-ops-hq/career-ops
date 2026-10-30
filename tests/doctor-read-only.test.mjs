@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { walkTree } from '../lib/walk-tree.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TARGETS = ['modes/_profile.md', 'modes/_custom.md', 'modes/_brief.md', 'voice-dna.md'];
@@ -26,18 +28,31 @@ function doctor(dir, args = ['--json']) {
 
 function state(dir, args) {
   const result = doctor(dir, args);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(result.stderr, '');
   return JSON.parse(result.stdout);
 }
 
 // Check names, contents and modification times, including unexpected new files.
+//
+// walkTree with every guard that could hide a write turned off: this is a
+// no-write assertion, so a file the walk skipped would be a write it cannot
+// see. `allowNestedCheckouts` keeps a directory doctor marked with `.git` (or
+// named like a scratch copy) in view, and `onDir` records every directory —
+// empty ones included — with its mtime, as the nested form this replaced did.
+// `links: 'reject'`, not 'follow': walkTree's 'follow' silently skips a dangling
+// link, where the statSync form this replaced threw on one. The fixture is
+// built without links, so any link at all is a write, and rejecting it fails
+// the snapshot loudly instead of either form's quieter reading.
 function snapshot(dir) {
-  return readdirSync(dir).sort().map((name) => {
-    const path = join(dir, name);
-    const stat = statSync(path);
-    return [name, stat.mtimeMs, stat.isDirectory() ? snapshot(path) : readFileSync(path).toString('base64')];
+  const entries = [];
+  walkTree(dir, {
+    allowNestedCheckouts: true,
+    links: 'reject',
+    onDir: (abs) => entries.push([relative(dir, abs), statSync(abs).mtimeMs, 'dir']),
+    onFile: (abs) => entries.push([relative(dir, abs), statSync(abs).mtimeMs, readFileSync(abs).toString('base64')]),
   });
+  return entries;
 }
 
 test('--json reports missing prerequisites without copying available templates', (t) => {
@@ -103,7 +118,7 @@ test('explicit initialization supports a separate empty data root and retains pe
 test('--init-templates requires --json and leaves the target untouched on misuse', (t) => {
   const dir = fixture(t);
   const result = doctor(dir, ['--init-templates']);
-  assert.notEqual(result.status, 0);
+  assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
   assert.match(result.stderr, /--init-templates requires --json/);
   assert.deepEqual(readdirSync(dir), []);
 });

@@ -1,8 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  acquireDirLock,
+  lockRecoveryVerdict,
+  readLockOwner,
+  releaseOrWarn,
+  RECOVER_LIVE,
+  RECOVER_STALE,
+  RECOVER_VANISHED,
+} from "./core/dir-lock.mjs";
 
-const OWNERLESS_GRACE_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_RETRY_MS = 80;
 const DEFAULT_STALE_MS = 30_000;
@@ -86,160 +94,44 @@ export function writeScheduledStoreAtomic(storePath, store) {
   }
 }
 
-function readOwner(lockDir) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(lockDir, "owner.json"), "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
-  }
-}
-
 export function readLockStatus(resourcePath, options = {}) {
   const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
   const lockDir = `${resourcePath}.lock`;
-  if (!fs.existsSync(lockDir)) return { exists: false, active: false, stale: false, owner: null };
-  const owner = readOwner(lockDir);
-  if (owner?.pid) {
-    const active = processIsAlive(owner.pid);
-    return { exists: true, active, stale: !active, owner };
-  }
-  try {
-    const stale = Date.now() - fs.statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-    return { exists: true, active: false, stale, owner: null };
-  } catch {
-    return { exists: true, active: false, stale: true, owner: null };
-  }
+  // The protocol's own verdict, so status and recovery cannot disagree about
+  // what "stale" means. Only STALE says the holder is gone; LIVE also covers a
+  // lock we could not inspect, which is not proof that nobody holds it.
+  const verdict = lockRecoveryVerdict(lockDir, staleMs);
+  if (verdict === RECOVER_VANISHED) return { exists: false, active: false, stale: false, owner: null };
+  return { exists: true, active: verdict === RECOVER_LIVE, stale: verdict === RECOVER_STALE, owner: readLockOwner(lockDir).owner };
 }
 
-function takeOverStaleLock(lockDir) {
-  const quarantine = `${lockDir}.recovery-${process.pid}-${randomUUID()}`;
-  try {
-    // Rename is atomic: if another process acquired the lock after our status
-    // read, this fails instead of recursively deleting its live lock.
-    fs.renameSync(lockDir, quarantine);
-  } catch (error) {
-    if (["ENOENT", "EEXIST", "ENOTEMPTY"].includes(error?.code)) return false;
-    throw error;
-  }
-  const movedOwner = readOwner(quarantine);
-  if (movedOwner?.pid && processIsAlive(movedOwner.pid)) {
-    try {
-      fs.renameSync(quarantine, lockDir);
-    } catch {
-      // A newer owner is already at lockDir; never remove it.
-    }
-    return false;
-  }
-  try { fs.rmSync(quarantine, { recursive: true, force: true }); } catch { /* retry next pass */ }
-  return true;
-}
-
-async function withRecoveryGuard(resourcePath, options, fn) {
-  const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const retryMs = options.retryMs ?? DEFAULT_RETRY_MS;
-  const guardDir = `${resourcePath}.recovery.lock`;
-  const token = randomUUID();
-  const deadline = Date.now() + timeoutMs;
-  fs.mkdirSync(path.dirname(guardDir), { recursive: true });
-  for (;;) {
-    let created = false;
-    try {
-      fs.mkdirSync(guardDir);
-      created = true;
-      fs.writeFileSync(path.join(guardDir, "owner.json"), JSON.stringify({ pid: process.pid, token, startedAt: new Date().toISOString() }), "utf8");
-      break;
-    } catch (error) {
-      if (error?.code !== "EEXIST") {
-        if (created) {
-          try { fs.rmSync(guardDir, { recursive: true, force: true }); } catch { /* best effort */ }
-        }
-        throw error;
-      }
-      if (readLockStatus(`${resourcePath}.recovery`, { staleMs }).stale) {
-        takeOverStaleLock(guardDir);
-        continue;
-      }
-      if (Date.now() >= deadline) throw new Error(`scheduled-jobs lock timeout: ${resourcePath}`);
-      await new Promise((resolve) => setTimeout(resolve, retryMs));
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    if (readOwner(guardDir)?.token === token) {
-      try { fs.rmSync(guardDir, { recursive: true, force: true }); } catch { /* stale recovery handles it */ }
-    }
-  }
-}
-
-async function acquireResourceLock(resourcePath, options = {}) {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const retryMs = options.retryMs ?? DEFAULT_RETRY_MS;
-  const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
-  const lockDir = `${resourcePath}.lock`;
-  const token = randomUUID();
-  const deadline = Date.now() + timeoutMs;
-
-  fs.mkdirSync(path.dirname(lockDir), { recursive: true });
-
-  for (;;) {
-    const acquired = await withRecoveryGuard(resourcePath, options, () => {
-      let created = false;
-      try {
-        fs.mkdirSync(lockDir);
-        created = true;
-        fs.writeFileSync(
-          path.join(lockDir, "owner.json"),
-          JSON.stringify({ pid: process.pid, token, startedAt: new Date().toISOString() }, null, 2),
-          "utf8",
-        );
-        return true;
-      } catch (error) {
-        if (error?.code !== "EEXIST") {
-          if (created) {
-            try { fs.rmSync(lockDir, { recursive: true, force: true }); } catch { /* best effort */ }
-          }
-          throw error;
-        }
-        if (readLockStatus(resourcePath, { staleMs }).stale) takeOverStaleLock(lockDir);
-        return false;
-      }
-    });
-    if (acquired) break;
-    if (Date.now() >= deadline) throw new Error(`scheduled-jobs lock timeout: ${resourcePath}`);
-    await new Promise((resolve) => setTimeout(resolve, retryMs));
-  }
-
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    if (readOwner(lockDir)?.token !== token) return;
-    try {
-      fs.rmSync(lockDir, { recursive: true, force: true });
-    } catch {
-      // A future stale-lock recovery can remove it.
-    }
-  };
+// The shared directory-lock protocol (lib/dir-lock.mjs, mirrored into the web
+// because Next bundles with the Turbopack root pinned to web/). This file used
+// to carry its own acquire loop, recovery guard and rename-based takeover; the
+// takeover's rename crashed on Windows EBUSY/EPERM and its release removed the
+// lock on a token match alone, with no check that the directory was still the
+// one it had stamped (#5358).
+function acquireResourceLock(resourcePath, options = {}) {
+  return acquireDirLock(`${resourcePath}.lock`, {
+    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    retryMs: options.retryMs ?? DEFAULT_RETRY_MS,
+    staleMs: options.staleMs ?? DEFAULT_STALE_MS,
+    createParent: true,
+    // The API routes map /lock timeout/ to a 409, so the message keeps that
+    // phrase; the diagnosis names the holder and any non-EEXIST mkdir error.
+    timeoutError: ({ lastMkdirError, diagnosis }) => Object.assign(
+      new Error(`scheduled-jobs lock timeout: ${resourcePath}${diagnosis}`),
+      { code: "LOCK_TIMEOUT", lastMkdirError },
+    ),
+  });
 }
 
 export async function withResourceLock(resourcePath, fn, options = {}) {
-  const release = await acquireResourceLock(resourcePath, options);
+  const lock = await acquireResourceLock(resourcePath, options);
   try {
     return await fn();
   } finally {
-    release();
+    releaseOrWarn(lock);
   }
 }
 

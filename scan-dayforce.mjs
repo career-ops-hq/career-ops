@@ -65,7 +65,7 @@
 import { chromium } from 'playwright';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import {
   appendToPipeline,
   appendToScanHistory,
@@ -88,6 +88,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { htmlToText } from './providers/_html-to-text.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { BOT_CHALLENGE_PATTERNS } from './liveness-core.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -366,7 +367,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
 export function loadConfig(portalsPath = PORTALS_PATH, singleTenant = null) {
   let config = {};
   if (existsSync(portalsPath)) {
-    config = yaml.load(readFileSync(portalsPath, 'utf-8')) || {};
+    config = loadYaml(readFileSync(portalsPath, 'utf-8')) || {};
   }
 
   const rawBoards = Array.isArray(config.dayforce_boards) ? config.dayforce_boards : [];
@@ -725,7 +726,33 @@ async function main() {
 // scan-ats-full.mjs) — merely importing this module must not drive a live
 // browser scan and mutate the user's pipeline/scan history as a side effect
 // of the import (#3510).
+const KNOWN_FLAGS = ['--dry-run', '--debug', '--tenant', '--help', '-h'];
+const USAGE = `Usage:
+  node scan-dayforce.mjs [--tenant NAME] [--dry-run] [--debug]
+
+Scans Dayforce (Ceridian) Recruiting career sites listed under
+dayforce_boards in portals.yml. jobs.dayforcehcm.com is Cloudflare and
+NextAuth CSRF gated with no bare-HTTP-reachable API, so this drives a real
+browser via Playwright.
+
+  --tenant NAME   only this tenant, instead of every enabled board
+  --dry-run       scan and report, write nothing to the pipeline or history
+  --debug         keep the browser visible and log each navigation
+  --help, -h      show this message
+`;
+
 if (isMainModule(import.meta.url)) {
+  // No `valueFlags` for --tenant, deliberately. Declaring it would accept
+  // `--tenant=gnghcm`, and parseArgs() reads the value by `indexOf('--tenant')`
+  // plus the next argv slot — so the `=` form is silently ignored and the run
+  // scans every board instead of the one asked for. A tenant name never starts
+  // with `-`, which is the only case valueFlags exists to protect, so the space
+  // form needs nothing here.
+  //
+  // It also keeps parseArgs()'s own message for a missing value ("--tenant
+  // requires a value, e.g. --tenant gnghcm"), which says more than
+  // requireOperand's generic line — the trade lib/cli-flags.mjs documents.
+  validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE);
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);

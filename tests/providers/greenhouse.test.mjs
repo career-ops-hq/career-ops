@@ -70,6 +70,21 @@ try {
     fail('greenhouse.detect() must not read ?for= from a non-Greenhouse URL');
   }
 
+  // The same for a path slug. The job-boards slug was a regex over the raw
+  // string, so a careers_url that only MENTIONED a board (a redirect wrapper,
+  // a path segment on another site) scanned othercorp's board under this
+  // entry's name. The legacy host was fixed the same way before.
+  const mentions = [
+    'https://careers.acme.com/apply/job-boards.greenhouse.io/othercorp',
+    'https://example.com/?next=https://job-boards.greenhouse.io/othercorp',
+    'https://careers.acme.com/apply/job-boards.eu.greenhouse.io/othercorp',
+  ].filter((careers_url) => greenhouse.detect({ name: 'Acme', careers_url }) !== null);
+  if (mentions.length === 0) {
+    pass('greenhouse.detect() ignores a job-boards.greenhouse.io/<slug> that only appears inside another site\'s URL');
+  } else {
+    fail(`greenhouse.detect() resolved a board from another site's URL: ${JSON.stringify(mentions)}`);
+  }
+
   // detect() — legacy boards[.eu].greenhouse.io host. It still 301s to
   // job-boards[.eu] with the same slug, so an entry written in that form must
   // resolve instead of being silently skipped as "no provider matched".
@@ -208,9 +223,12 @@ try {
   if (fetched[0]?.title === 'Senior Backend Engineer'
       && fetched[0]?.url === 'https://job-boards.greenhouse.io/acme/jobs/101'
       && fetched[0]?.company === 'Acme'
+      && fetched[0]?.listingIdentity?.ats_provider === 'greenhouse'
+      && fetched[0]?.listingIdentity?.board_slug === 'acme'
+      && fetched[0]?.listingIdentity?.posting_id === '101'
       && fetched[0]?.location === 'Berlin, Germany'
       && fetched[0]?.postedAt === Date.parse('2026-07-01T09:30:00-04:00'))
-    pass('greenhouse.fetch() maps title/absolute_url/entry.name/location.name/first_published');
+    pass('greenhouse.fetch() maps ATS identity, title/URL/company/location/date');
   else fail(`greenhouse.fetch() row 0 = ${JSON.stringify(fetched[0])}`);
 
   if (fetched[1]?.title === '' && fetched[1]?.location === '' && fetched[1]?.postedAt === undefined)

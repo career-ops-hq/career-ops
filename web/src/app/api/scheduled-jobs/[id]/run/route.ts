@@ -4,6 +4,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { getScheduledJob } from "@/lib/scheduled-jobs";
 import { isSafeScheduledId } from "@/lib/scheduled-jobs-store.mjs";
+import { stderrCause } from "@/lib/scheduled-scan-error.mjs";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 export const runtime = "nodejs";
@@ -89,7 +90,9 @@ export async function POST(_req: Request, { params }: RouteContext) {
     return NextResponse.json({ error: "Scheduled scan timed out." }, { status: 504 });
   }
   if (result.code !== 0) {
-    const message = result.stderr.split(/\r?\n/).find(Boolean)?.slice(0, 300) || "Scan failed.";
+    // The runner's own error is its last stderr line; anything Node printed
+    // before it (warnings) is not the cause.
+    const message = stderrCause(result.stderr) || "Scan failed.";
     const status = /lock timeout/i.test(message) ? 409 : 500;
     return NextResponse.json({ error: message }, { status });
   }

@@ -13,8 +13,9 @@ import { join, resolve } from 'path';
 import { parseArgs } from 'util';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const DEFAULT_OUTPUT_ROOT = resolve('output');
+const DEFAULT_OUTPUT_ROOT = join(getCareerOpsRoot(), 'output');
 const DECISIONS = new Set(['reuse', 'reuse-with-edits', 'regenerate']);
 
 /** Convert a user-facing label into a safe, readable path segment. */

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveTailoredCover } from "@/lib/apply/cover";
 import { companySlug } from "@/lib/company-slug.mjs";
+import { inlineDisposition } from "@/lib/content-disposition.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="${path.basename(file)}"`,
+        "Content-Disposition": inlineDisposition(path.basename(file)),
         "Cache-Control": "no-store",
       },
     });

@@ -14,8 +14,10 @@ import {
   cleanHeading,
   firstProseParagraph,
   isLeadSection,
+  legitimacyTone,
   isVerdictHeading,
   splitSections,
+  sectionPreview,
   verdictReason,
 } from "../../src/lib/report-sections.mjs";
 
@@ -217,6 +219,17 @@ test("verdictReason reads the header lede above ---", () => {
   );
 });
 
+test("verdictReason drops inline Markdown markers", () => {
+  assert.equal(
+    verdictReason({
+      verdictContent: "**Apply.** The title and `dbt` match; see [the posting](https://example.com/jobs/1) and *one* gap.",
+    }),
+    "Apply. The title and dbt match; see the posting and one gap.",
+  );
+  assert.equal(verdictReason({ verdictContent: "Skip. Pay is 2 * 40k under the floor." }), "Skip. Pay is 2 * 40k under the floor.");
+  assert.equal(verdictReason({ verdictContent: "Use snake_case_names in the dbt models." }), "Use snake_case_names in the dbt models.");
+});
+
 test("applyLineLabel: 4.0 is the apply line", () => {
   assert.equal(APPLY_LINE, 4.0);
   assert.equal(applyLineLabel(4.0), "Recommended");
@@ -225,9 +238,63 @@ test("applyLineLabel: 4.0 is the apply line", () => {
   assert.equal(applyLineLabel(null), null);
 });
 
+test("applyLineLabel: a flagged posting above the line is not Recommended", () => {
+  assert.equal(applyLineLabel("4.9/5", "Proceed with Caution"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "Suspicious"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "High Confidence"), "Recommended");
+  assert.equal(applyLineLabel("3.1/5", "Proceed with Caution"), "Below the apply line");
+});
+
+test("applyLineLabel: Turkish legitimacy tiers flag the posting too", () => {
+  assert.equal(applyLineLabel("4.9/5", "Dikkatli İlerle"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "Şüpheli"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "Güvenilir"), "Recommended");
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "Şüpheli" }), true);
+});
+
+test("applyLineLabel: Chinese legitimacy tiers flag the posting too", () => {
+  // modes/zh/oferta.md (Simplified) and modes/zh-TW/oferta.md (Traditional).
+  assert.equal(applyLineLabel("4.9/5", "谨慎推进"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "疑似虚假"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "高置信度"), "Recommended");
+  assert.equal(applyLineLabel("4.9/5", "審慎推進"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "疑似虛假"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "高信心"), "Recommended");
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "疑似虚假" }), true);
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "審慎推進" }), true);
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "高信心" }), false);
+});
+
+test("legitimacyTone: English, Turkish and Chinese tiers map to good / warn / bad", () => {
+  assert.equal(legitimacyTone("High Confidence"), "good");
+  assert.equal(legitimacyTone("Proceed with Caution"), "warn");
+  assert.equal(legitimacyTone("Suspicious"), "bad");
+  assert.equal(legitimacyTone("Güvenilir"), "good");
+  assert.equal(legitimacyTone("Dikkatli İlerle"), "warn");
+  assert.equal(legitimacyTone("Şüpheli"), "bad");
+  assert.equal(legitimacyTone("高置信度"), "good");
+  assert.equal(legitimacyTone("谨慎推进"), "warn");
+  assert.equal(legitimacyTone("疑似虚假"), "bad");
+  assert.equal(legitimacyTone("高信心"), "good");
+  assert.equal(legitimacyTone("審慎推進"), "warn");
+  assert.equal(legitimacyTone("疑似虛假"), "bad");
+  assert.equal(legitimacyTone("unknown"), "muted");
+});
+
 test("applyCtaQuiet: below the apply line or caution legitimacy", () => {
   assert.equal(applyCtaQuiet({ score: 4.2 }), false);
   assert.equal(applyCtaQuiet({ score: 3.3 }), true);
   assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "Proceed with Caution" }), true);
   assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "Legitimate" }), false);
+});
+
+test("sectionPreview summarizes a field table without markdown residue", () => {
+  const md = "| Field | Value |\n|---|---|\n| **Remote** | Seattle, WA |\n| **Comp** | $238k-$278k |\n| **TL;DR** | Fictional role at Monarch AI |";
+  assert.equal(sectionPreview(md), "Remote: Seattle, WA · Comp: $238k-$278k · TL;DR: Fictional role at Monarch AI");
+});
+
+test("sectionPreview prefers prose next to a table and counts a wide table", () => {
+  assert.equal(sectionPreview("| A | B |\n|---|---|\n| x | y |\n\nStrong fit overall. More detail."), "Strong fit overall.");
+  assert.equal(sectionPreview("| Gap | Severity | Mitigation |\n|---|---|---|\n| SQL | Low | Course |\n| K8s | Mid | Lab |"), "2 rows");
+  assert.equal(sectionPreview("| # | Situation | S | T | A | R | STAR story |\n|---|---|---|---|---|---|---|\n| 1 | a | b | c | d | e | f |"), "1 interview story");
 });

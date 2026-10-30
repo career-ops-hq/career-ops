@@ -99,9 +99,10 @@ function usage() {
  *
  * @param {string} inputPath - Absolute path to the source image.
  * @param {string} outputPath - Absolute path to write the PDF to.
+ * @param {{force?: boolean}} options - Whether an existing PDF may be overwritten.
  * @returns {Promise<{outputPath: string, size: number, width: number, height: number}>}
  */
-export async function convertImageToPdf(inputPath, outputPath) {
+export async function convertImageToPdf(inputPath, outputPath, { force = false } = {}) {
   const mimeType = detectMimeType(inputPath);
   if (!mimeType) {
     throw new Error(`Unsupported image type: ${extname(inputPath) || '(no extension)'}. Supported: ${Object.keys(MIME_TYPES).join(', ')}`);
@@ -135,7 +136,7 @@ export async function convertImageToPdf(inputPath, outputPath) {
       await page.waitForFunction(() => {
         const img = document.getElementById('career-ops-img');
         return !!img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
-      }, { timeout: 10000 });
+      }, undefined, { timeout: 10000 });
     } catch (err) {
       throw new Error(`Image failed to decode within 10s (unreadable or corrupt file?): ${inputPath}`);
     }
@@ -158,7 +159,7 @@ export async function convertImageToPdf(inputPath, outputPath) {
       printBackground: true,
     });
 
-    await writeFile(outputPath, pdfBuffer);
+    await writeFile(outputPath, pdfBuffer, { flag: force ? 'w' : 'wx' });
 
     return { outputPath, size: pdfBuffer.length, width, height };
   } finally {
@@ -243,7 +244,7 @@ async function main() {
   console.log(`📁 Output: ${outputPath}`);
 
   try {
-    const result = await convertImageToPdf(inputPath, outputPath);
+    const result = await convertImageToPdf(inputPath, outputPath, { force: parsed.force });
     console.log(`✅ PDF generated: ${result.outputPath}`);
     console.log(`📐 Page size: ${result.width}x${result.height}px`);
     console.log(`📦 Size: ${(result.size / 1024).toFixed(1)} KB`);

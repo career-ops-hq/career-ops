@@ -201,7 +201,7 @@ W polskich ofertach i negocjacjach pojawiają się terminy, które nie istnieją
 3. Cytuj dokładne wiersze z CV podczas matchingu
 4. Używaj WebSearch do danych o wynagrodzeniach i firmie
 5. Zapisuj w trackerze po każdej ocenie
-6. Generuj treść w języku oferty (polski, jeśli oferta jest po polsku; angielski w przeciwnym razie)
+6. Generuj treść dla użytkownika w `{language.output}` z `config/profile.yml` (angielski, jeśli nie ustawiono), niezależnie od języka oferty. Zachowuj terminy tego rynku i w razie potrzeby wyjaśniaj je w tym języku
 7. Bądź bezpośredni i konkretny -- bez gadania
 8. Naturalny, techniczny język polski dla generowanych tekstów. Krótkie zdania, czasowniki czynności, unikaj strony biernej. Nie tłumacz na siłę terminów technicznych (stack, pipeline, deployment, embedding)
 8b. **URL-e case studies w Professional Summary PDF-a:** Jeśli PDF wspomina case studies lub dema, URL-e MUSZĄ pojawić się w pierwszym akapicie (Professional Summary). Rekruterzy często czytają tylko summary. Wszystkie URL-e w HTML z `white-space: nowrap`
@@ -216,6 +216,6 @@ W polskich ofertach i negocjacjach pojawiają się terminy, które nie istnieją
 | WebFetch | Fallback do ekstrakcji ofert ze stron statycznych |
 | Playwright | Sprawdzenie, czy oferty są aktywne (browser_navigate + browser_snapshot), ekstrakcja ofert ze SPA. **KRYTYCZNE: NIGDY 2+ agentów równolegle z Playwright -- współdzielą tę samą instancję przeglądarki** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | Tymczasowy HTML dla PDF, applications.md, reporty .md |
-| Edit | Aktualizacja trackera |
-| Bash | `node generate-pdf.mjs` |
+| Write | Tymczasowy HTML dla PDF, reporty .md, pliki TSV z wpisami do trackera w `batch/tracker-additions/` (nigdy bezpośrednio `applications.md`) |
+| Edit | Poprawki w reportach i innych wygenerowanych treściach. Nigdy tabela trackera: nowe wiersze trafiają jako TSV scalany przez `node merge-tracker.mjs`, a zmiany statusu i notatek przez `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

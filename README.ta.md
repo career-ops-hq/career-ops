@@ -19,12 +19,14 @@
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
-  <a href="README.tr.md">Türkçe</a>
+  <a href="README.tr.md">Türkçe</a> |
+  <a href="README.vi.md">Tiếng Việt</a> |
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> உருவாக்கியது,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders">700+ பங்களிப்பாளர்களுடன்</a></p>
 
 <p align="center">
 <strong>மாதக்கணக்கில் CV அனுப்பினேன், பதில் மௌனம்&nbsp;மட்டுமே.</strong><br>
@@ -120,7 +122,13 @@ npx @santifer/career-ops init
 
 <br>
 
-பணியமர்த்தல் தானாகச் சரியாகாது. அதைக் கடந்து செல்பவர்களால் முடியும், அவர்கள் ஏற்கனவே அந்த அறையில் இருக்கிறார்கள்: குறிப்புகளை ஒப்பிட்டு, ஒருவருக்கொருவர் அமைப்புகளைச் சரிசெய்கிறார்கள். [சரிசெய்தல் எழுதப்படுவது இங்கேதான்](CONTRIBUTING.md). ஒரு அறை, கிளப் அல்ல. **சேர்ந்து கட்டுவோம்.**
+பணியமர்த்தல் தானாகச் சரியாகாது. அதைக் கடந்து செல்பவர்களால் முடியும், அவர்கள் ஏற்கனவே அந்த அறையில் இருக்கிறார்கள்: குறிப்புகளை ஒப்பிட்டு, ஒருவருக்கொருவர் அமைப்புகளைச் சரிசெய்கிறார்கள்.
+
+<a id="builders"></a>
+
+<p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ta" alt="பங்களிப்பாளர்களின் GitHub அவதார்களால் ஆன அசையும் சுவர்; ஏப்ரல் 2026 முதல் வந்த வரிசையில் நிரம்புகிறது, அடுத்த கட்டம் திறந்தே விடப்பட்டுள்ளது." width="100%"></a></p>
+
+[சரிசெய்தல் எழுதப்படுவது இங்கேதான்](CONTRIBUTING.md). ஒரு அறை, கிளப் அல்ல. **சேர்ந்து கட்டுவோம்.**
 
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: career-ops சர்வரின் உறுப்பினர்களின் நேரடி எண்ணிக்கை"></a></p>
 
@@ -180,7 +188,7 @@ career-ops விண்ணப்பதாரர்களுக்கு எப�
 | **நேர்காணல் கதை வங்கி**  | மதிப்பீடுகள் முழுவதும் STAR+Reflection கதைகளைச் சேகரிக்கிறது: உங்களிடம் கேட்கப்படும் நடத்தை சார்ந்த கேள்விகளுக்கு ஏற்ப நீங்கள் மாற்றியமைக்கக்கூடிய 5-10 முதன்மைக் கதைகள் |
 | **பேச்சுவார்த்தை ஸ்கிரிப்ட்கள்** | சம்பளப் பேச்சுவார்த்தை கட்டமைப்புகள், புவியியல் தள்ளுபடிக்கு எதிர்வாதம், போட்டி வாய்ப்புகளை நெம்புகோலாகப் பயன்படுத்துதல்                  |
 | **விண்ணப்ப மின்னஞ்சல் வரைவுகள்** | அறிக்கை அல்லது ஒட்டப்பட்ட JD-யிலிருந்து ரிக்ரூட்டர்/பரிந்துரை/நேரடி விண்ணப்பத்திற்கான முறையான மின்னஞ்சல்கள்: தலைப்பு, இணைப்புகள் சரிபார்ப்புப் பட்டியல், ஆதாரத்துடன் கூடிய பொருத்தப் புள்ளிகள், சுயவிவர அடிப்படையிலான தொடர்புத் தகவல். வரைவு மட்டுமே: career-ops ஒருபோதும் அனுப்பாது, சமர்ப்பிக்காது, எதையும் கிளிக் செய்யாது. |
-| **தள ஸ்கேனர்**           | 100+ நிறுவனங்கள் முன்கூட்டியே அமைக்கப்பட்டுள்ளன (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + Ashby, Greenhouse, Lever, Wellfound முழுவதும் தனிப்பயன் வினவல்கள் |
+| **தள ஸ்கேனர்**           | 100+ நிறுவனங்கள் முன்கூட்டியே அமைக்கப்பட்டுள்ளன (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + Ashby, Greenhouse, Lever, Wellfound முழுவதும் தனிப்பயன் வலைத் தேடல் வினவல்கள் |
 | **நிதி பெற்ற நிறுவனங்களைக் கண்டறிதல்** | முதலில் மதிப்பாய்வு செய்யும் `company:funded` கட்டளை, கட்டமைக்கப்பட்ட பொது ஊட்டங்களிலிருந்து சமீபத்தில் நிதி பெற்ற நிறுவனங்களையும் மூல நோயறிதல்களையும் உங்கள் தரவைத் திருத்தாமல் காட்டுகிறது |
 | **தொகுப்புச் செயலாக்கம்** | Headless CLI workers (`claude -p` / `opencode run`) மூலம் இணையான மதிப்பீடு                                                                |
 | **Dashboard TUI**        | உங்கள் பைப்லைனை உலாவ, வடிகட்ட, வரிசைப்படுத்த டெர்மினல் UI                                                                                  |
@@ -202,7 +210,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` [Node.js](https://nodejs.org)-உடன் வருகிறது: எதையும் global-ஆக நிறுவாமல்
 > நிறுவியை ஒரு முறை இயக்குகிறது. Node இன்னும் இல்லையா? முதலில் அதை நிறுவுங்கள்.
-> (ஏற்கனவே Claude Code / Gemini / Codex CLI பயன்படுத்துகிறீர்களா? அப்படியானால் ஏற்கனவே உங்களிடம் உள்ளது.)
+> (ஏற்கனவே Claude Code / Codex CLI பயன்படுத்துகிறீர்களா? அப்படியானால் ஏற்கனவே உங்களிடம் உள்ளது.)
 
 இது சமீபத்திய வெளியீட்டை `./career-ops`-இல் clone செய்து dependencies-ஐ நிறுவுகிறது. பிறகு:
 
@@ -225,17 +233,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -244,7 +243,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -262,11 +261,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-இது `career-ops` binary-ஐ global-ஆக நிறுவுகிறது, எனவே `npx` வழியாக அல்லாமல் நேரடியாக இயக்கலாம். ஒரு project directory-ஐ உருவாக்கும் `npx @santifer/career-ops init`-ஐப் போலன்றி, global நிறுவல் உங்கள் டெர்மினலில் எங்கும் கிடைக்கும் நிரந்தர `career-ops` கட்டளையைத் தருகிறது.
+இது `career-ops` binary-ஐ global-ஆக நிறுவுகிறது, எனவே `npx` இல்லாமல் `career-ops init [folder]`-ஐ இயக்கலாம். `init` மட்டுமே அதன் ஒரே கட்டளை: அது ஒரு workspace-ஐ அமைக்கிறது; அதன் பிறகு எல்லா வேலையும் இந்த binary வழியாக அல்ல, உங்கள் AI கோடிங் CLI-க்குள் நடக்கிறது (கீழே Usage பார்க்கவும்).
 
 **எதைப் பயன்படுத்த வேண்டும்?**
 - `npx @santifer/career-ops init`: முதல் பயன்பாட்டிற்கு சிறந்தது; தனி project folder-ஐ உருவாக்குகிறது.
-- `npm i -g @santifer/career-ops`: project folder ஏற்கனவே இருந்து, career-ops கட்டளைகளை நேரடியாக இயக்க விரும்பும்போது சிறந்தது.
+- `npm i -g @santifer/career-ops`: `npx` வடிவத்தை விட `career-ops init` என்று தட்டச்சு செய்ய விரும்பினால். இது வேறு எந்தக் கட்டளையையும் சேர்க்காது.
 
 > **இந்த அமைப்பு உங்கள் AI கோடிங் CLI-யாலேயே தனிப்பயனாக்கப்பட வடிவமைக்கப்பட்டது.** Modes, archetypes, scoring weights, பேச்சுவார்த்தை ஸ்கிரிப்ட்கள்: மாற்றச் சொன்னால் போதும். அது பயன்படுத்தும் அதே கோப்புகளையே படிக்கிறது, எனவே எதைத் திருத்த வேண்டும் என்பது அதற்குச் சரியாகத் தெரியும்.
 
@@ -325,25 +324,7 @@ Codex-இல் slash கட்டளைகள் உத்தரவாதமி
 
 ## எப்படி செயல்படுகிறது
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI Integration
 
@@ -366,7 +347,7 @@ agy
 /career-ops tracker
 ```
 
-இந்த skill திறந்த தரநிலைப்படி `.agents/skills/career-ops/SKILL.md`-இல் வரையறுக்கப்பட்டு, ஆதரிக்கப்படும் ஒவ்வொரு CLI-க்கும் (எ.கா. `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`) symlink அல்லது குறிப்பு செய்யப்பட்டுள்ளது.
+இந்த skill திறந்த தரநிலைப்படி `.agents/skills/career-ops/SKILL.md`-இல் வரையறுக்கப்பட்டு, ஆதரிக்கப்படும் ஒவ்வொரு CLI-க்கும் (எ.கா. `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`) symlink அல்லது குறிப்பு செய்யப்பட்டுள்ளது. Cursor, `.agents/skills/`-இல் உள்ள பகிரப்பட்ட skill-ஐ தானாகக் கண்டறிகிறது.
 
 ## Codex Integration
 
@@ -500,7 +481,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Features: 6 வடிகட்டி tabs, 4 வரிசைப்படுத்தும் முறைகள், grouped/flat view, lazy-loaded previews, inline நிலை மாற்றங்கள்.
+Features: 10 வடிகட்டி tabs, 8 வரிசைப்படுத்தும் முறைகள், grouped/flat view, lazy-loaded previews, inline நிலை மாற்றங்கள்.
 
 **சோதனை web UI**-யும் உள்ளது (alpha மற்றும் opt-in: நீங்கள் தொடங்காதவரை எதுவும் இயங்காது): [`web/README.md`](web/README.md) பார்க்கவும்.
 
@@ -620,7 +601,7 @@ Go dashboard TUI, Node.js ஸ்கிரிப்ட்கள், AI ஏஜெ�
 career-ops ([career-ops.org](https://career-ops.org), **careerops** என்றும் அழைக்கப்படுகிறது) என்பது உங்கள் AI கோடிங் CLI-யில் (Claude Code, Codex, OpenCode மற்றும் பிற) உங்கள் கணினியிலேயே இயங்கும், ஒவ்வொரு முடிவையும் உங்களிடம் விட்டுவிடும் ஓப்பன் சோர்ஸ் AI வேலை தேடல் அமைப்பு. உங்கள் CV-ஐ வைத்து வேலை வாய்ப்புகளை மதிப்பிடுகிறது, ATS-க்கு ஏற்ற PDF-களை உருவாக்குகிறது, தொடர்புகொள்ள வேண்டிய சரியான நபரைக் கண்டறிகிறது, அனைத்தையும் ஒரே இடத்தில் கண்காணிக்கிறது: இறுதி முடிவு எப்போதும் உங்களுடையது. இது [CareerOps அறிக்கையின்](https://career-ops.org/manifesto) முதல் குறிப்பு செயலாக்கம்.
 
 **தனிப்பயனாக்கப்பட்ட CV எதையாவது புனையுமா?**
-புனையக்கூடாது, ப்ராம்ப்ட்களும் அதையே சொல்கின்றன: மறுவடிவமைக்கலாம், ஒருபோதும் புனையக்கூடாது. உங்கள் மூலங்களில் இல்லாத எண்களோ தகவல்களோ கொண்ட CV-ஐ `generate-pdf` தடுக்கிறது, நீங்கள் `--skip-fact-check` கொடுத்தால் தவிர. அது இன்னும் பதவிப் பெயர்களைச் சரிபார்ப்பதில்லை, மாற்றி எழுதியதை மதிப்பிடுவதுமில்லை. இரண்டு திறந்த issues இதைக் கண்காணிக்கின்றன: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (பதவிப் பெயர்கள் cv.md உடன் பொருந்த வேண்டும்) மற்றும் [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (பொருந்தாவிட்டால் தடுக்கும் உண்மைத்தன்மைச் சோதனை). அவை இணைக்கப்படும் வரை, அனுப்பும் முன் ஒவ்வொரு CV-ஐயும் படியுங்கள். [சட்டப்பூர்வ மறுப்பு](LEGAL_DISCLAIMER.md) இதையே அதிக வார்த்தைகளில் சொல்கிறது.
+புனையக்கூடாது, ப்ராம்ப்ட்களும் அதையே சொல்கின்றன: மறுவடிவமைக்கலாம், ஒருபோதும் புனையக்கூடாது. உங்கள் மூலங்களில் இல்லாத எண்களோ தகவல்களோ கொண்ட CV-ஐ `generate-pdf` தடுக்கிறது, நீங்கள் `--skip-fact-check` கொடுத்தால் தவிர. `pdf` பயன்முறை `cv-title-check.mjs`-ஐயும் இயக்குகிறது: தனிப்பயனாக்கிய CV-யில் உள்ள ஒவ்வொரு பதவிப் பெயரையும், அதே வேலைக்கு cv.md தரும் பதவிப் பெயருடன் (நிறுவனம், தேதிகள் மூலம் பொருத்தி) ஒப்பிட்டு, வேறுபடும் ஒவ்வொன்றையும் வைத்துக்கொள்வதா திரும்ப மாற்றுவதா என்று உங்களிடம் கேட்கிறது. பதவிப் பெயரை மாற்றி அமைப்பது சில நேரங்களில் உங்கள் முடிவாக இருக்கலாம் என்பதால், அது எச்சரிக்கை மட்டுமே தருகிறது, தடுப்பதில்லை. மாற்றி எழுதியதை இன்னும் எதுவும் மதிப்பிடுவதில்லை: [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (பொருந்தாவிட்டால் தடுக்கும் உண்மைத்தன்மைச் சோதனை) இதைக் கண்காணிக்கிறது. அதுவரை, அனுப்பும் முன் ஒவ்வொரு CV-ஐயும் படியுங்கள். [சட்டப்பூர்வ மறுப்பு](LEGAL_DISCLAIMER.md) இதையே அதிக வார்த்தைகளில் சொல்கிறது.
 
 **career-ops-ஐ இலவசமாகவோ, மலிவான / லோக்கல் மாடலிலோ இயக்க முடியுமா?**
 ஆம். career-ops CLI-agnostic; இலவச மற்றும் லோக்கல் மாடல்களில் (OpenRouter இலவச மாடல்கள், Ollama, அல்லது எந்த OpenAI-compatible endpoint) இயங்கும், எனவே நீங்கள் கட்டணச் சந்தாவுடன் கட்டுப்படவில்லை. முழு அமைப்பிற்கு [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) பார்க்கவும்.

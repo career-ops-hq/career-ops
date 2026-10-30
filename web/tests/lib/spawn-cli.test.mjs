@@ -6,6 +6,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { spawnHeadlessCli } from "../../src/lib/spawn-cli.mjs";
 import { CAPS } from "../../src/lib/worker-capabilities.mjs";
 
@@ -111,4 +113,40 @@ test("spawnHeadlessCli refuses to spawn without a fencing declaration", () => {
   assert.throws(() => spawnHeadlessCli(...spawnArgs, {}), /without \{cliId, capabilities\}/);
   assert.throws(() => spawnHeadlessCli(...spawnArgs, { cliId: "gemini" }), /without \{cliId, capabilities\}/);
   assert.throws(() => spawnHeadlessCli(...spawnArgs, { capabilities: CAPS.localReadOnly }), /without \{cliId, capabilities\}/);
+});
+
+test("spawnHeadlessCli never lets a child inherit the server's console (windowsHide)", () => {
+  // Given: on Windows a child attaches to the parent's console, and a long-lived
+  // dev server whose console has gone stale makes EVERY such child die at DLL
+  // init with 0xC0000142, in ~20 ms and with no output at all (#3809). The flag
+  // is a no-op on POSIX, so the only observable here is the options spawn() is
+  // handed: record them instead of starting a process. spawn-cli.mjs holds a
+  // live ESM binding to node:child_process, which syncBuiltinESMExports()
+  // repoints at the recorder.
+  const realSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (command, args, options) => {
+    calls.push({ command, args, options });
+    return { stdin: { end() {} } };
+  };
+  syncBuiltinESMExports();
+  try {
+    // When: a caller spawns through the shared spawner, once with no opinion
+    // and once explicitly asking for the console back.
+    const base = { cwd: process.cwd(), env: process.env };
+    spawnHeadlessCli(process.execPath, ["-e", ""], base, PASSTHROUGH);
+    spawnHeadlessCli(process.execPath, ["-e", ""], { ...base, windowsHide: false }, PASSTHROUGH);
+  } finally {
+    childProcess.spawn = realSpawn;
+    syncBuiltinESMExports();
+  }
+
+  // Then: both children are started hidden, and the caller's other options
+  // still reach spawn() untouched.
+  assert.equal(calls.length, 2);
+  for (const { options } of calls) {
+    assert.equal(options.windowsHide, true);
+    assert.equal(options.cwd, process.cwd());
+    assert.equal(options.env, process.env);
+  }
 });

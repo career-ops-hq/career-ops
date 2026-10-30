@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { ROOT, pass, fail, rmSync, getBash } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 console.log('\nDelegated agency confirmation (#4359)');
 const read = (path) => readFileSync(join(ROOT, path), 'utf8').replace(/\r\n/g, '\n');
@@ -52,6 +53,7 @@ append_recovery_record() {
 }
 sleep() { :; }
 ${functionCode('update_state_retrying')}
+${functionCode('has_report_file')}
 release_report_num() { printf '%s' "$1" > released; }
 is_decimal_number() { [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]; }
 handle_result() {
@@ -77,10 +79,19 @@ handle_result
     assert.match(output, /https:\/\/jobs.example.test\/1.*Which agency/);
     assert.doesNotMatch(output, /Completed|Failed/);
   });
+  check('the reservation sentinel alone is not a worker artifact', () => {
+    writeFileSync(join(work, 'reports', '042-RESERVED.md'), '{"pid":1}\n');
+    const { fields, output } = handle({ status: 'needs_confirmation', question: 'Which agency?' });
+    assert.equal(fields[2], 'needs_confirmation');
+    assert.equal(readFileSync(join(work, 'released'), 'utf8'), '042');
+    assert.equal(existsSync(join(work, 'logs/quarantine/1-042-RESERVED.md')), false);
+    assert.match(output, /Needs confirmation:.*Which agency/);
+    rmSync(join(work, 'reports', '042-RESERVED.md'), { force: true });
+  });
   check('confirmation artifacts fail closed, keep the reservation, and quarantine tracker data', () => {
     writeFileSync(join(work, 'tracker-additions/1.tsv'), 'unconfirmed tracker row\n');
     assert.throws(() => handle({ status: 'needs_confirmation', question: 'Which agency?' }), (error) => {
-      assert.equal(error.status, 2);
+      assert.equal(error.status, 2, describeSpawn(error));
       assert.match(error.stderr, /reservation kept and tracker merge skipped/);
       return true;
     });
@@ -94,7 +105,7 @@ handle_result
       writeFileSync(join(work, 'reports', name), `unconfirmed ${name}\n`);
     }
     assert.throws(() => handle({ status: 'needs_confirmation', question: 'Which agency?' }), (error) => {
-      assert.equal(error.status, 2);
+      assert.equal(error.status, 2, describeSpawn(error));
       assert.match(error.stderr, /reservation kept and tracker merge skipped/);
       return true;
     });
@@ -123,7 +134,7 @@ handle_result
     assert.throws(() => handle({ status: 'needs_confirmation', question: 'Which agency?' }, '', {
       TEST_STATE_FAILURE: '1', TEST_RECOVERY_FAILURE: '1',
     }), (error) => {
-      assert.equal(error.status, 2);
+      assert.equal(error.status, 2, describeSpawn(error));
       assert.match(error.stdout, /Needs confirmation:.*Which agency/);
       assert.match(error.stderr, /hold could not be persisted/);
       return true;
@@ -259,9 +270,11 @@ process_offer() {
 }
 merge_tracker() { echo MERGED; }
 print_summary() { echo SUMMARY; }
+report_progress() { echo "PROGRESS:$1/$2"; }
 run() {
   local PARALLEL=2 BATCH_PAUSED=false PAUSE_FILE="$PWD/no-pause"
   local pending_ids=(1 2${count === 3 ? ' 3' : ''})
+  local pending_count=${count}
   local pending_urls=(one two three) pending_sources=(test test test) pending_notes=(note note note)
 ${runner.slice(start, end)}
 }
@@ -270,8 +283,9 @@ run
       assert.throws(() => execFileSync(getBash(), [script], {
         encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
       }), (error) => {
-        assert.equal(error.status, 2);
+        assert.equal(error.status, 2, describeSpawn(error));
         assert.match(error.stdout, /DRAINED:2/, 'in-flight workers are drained');
+        assert.match(error.stdout, new RegExp(`PROGRESS:2/${count}`), 'each finished worker is counted');
         assert.doesNotMatch(error.stdout, /MERGED|SUMMARY|LAUNCHED:3/);
         assert.match(error.stderr, /tracker merge skipped/);
         return true;

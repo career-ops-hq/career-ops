@@ -169,14 +169,8 @@ func (m StatsModel) renderBody() string {
 	archetypes := m.renderArchetypeChart()
 	// showQualityBadge=true for the Fit Quality pie (score metric belongs there),
 	// false for Seniority Mix (the badge would be semantically meaningless).
-	pieChart := m.renderPieChart(i18n.Current.FitQualityDistribution, i18n.Current.QualityBreakdown, m.metrics.ScoreTiers, []lipgloss.Color{
-		m.theme.Green,  // Elite (>=4.5)
-		m.theme.Sky,    // Strong (4.0-4.4)
-		m.theme.Yellow, // Viable (3.5-3.9)
-		m.theme.Peach,  // Moderate (3.0-3.4)
-		m.theme.Red,    // Below Bar (<3.0)
-		m.theme.Mauve,
-	}, true)
+	pieChart := m.renderPieChart(i18n.Current.FitQualityDistribution, i18n.Current.QualityBreakdown, m.metrics.ScoreTiers,
+		scoreTierColors(m.theme, m.metrics.ScoreTiers), true)
 	seniorityPieChart := m.renderPieChart(i18n.Current.SeniorityMix, i18n.Current.SeniorityMix, m.metrics.SeniorityMix, []lipgloss.Color{
 		m.theme.Mauve,
 		m.theme.Peach,
@@ -185,7 +179,12 @@ func (m StatsModel) renderBody() string {
 		m.theme.Yellow,
 		m.theme.Red,
 	}, false)
-	workModes := m.renderLabelCountTable(i18n.Current.WorkModeTitle, m.metrics.WorkModes)
+	modeStats := make([]model.LabelCountStat, len(m.metrics.WorkModes))
+	for i, s := range m.metrics.WorkModes {
+		s.Label = i18n.Current.WorkModeLabel(s.Label)
+		modeStats[i] = s
+	}
+	workModes := m.renderLabelCountTable(i18n.Current.WorkModeTitle, modeStats)
 	locations := m.renderLabelCountTable(i18n.Current.LocationTitle, m.metrics.Locations)
 	pay := m.renderPay()
 
@@ -323,6 +322,30 @@ func (m StatsModel) renderInsights() string {
 	return padStyle.Render(boxStyle.Render(strings.Join(bulletLines, "\n")))
 }
 
+// scoreTierColors returns one colour per tier in tiers, chosen by the tier's
+// label. The palette was positional, but ScoreTiers omits empty tiers, so with
+// only Viable and Below Bar present the Viable wedge took Elite's green and
+// Below Bar took Strong's blue; the yellow and red that say "weak fit" never
+// appeared. An unknown label gets the neutral Mauve.
+func scoreTierColors(t theme.Theme, tiers []model.LabelCountStat) []lipgloss.Color {
+	palette := []lipgloss.Color{t.Green, t.Sky, t.Yellow, t.Peach, t.Red} // in data.ScoreTierLabels order
+	byLabel := make(map[string]lipgloss.Color, len(data.ScoreTierLabels))
+	for i, label := range data.ScoreTierLabels {
+		if i < len(palette) {
+			byLabel[label] = palette[i]
+		}
+	}
+	colors := make([]lipgloss.Color, len(tiers))
+	for i, tier := range tiers {
+		if c, ok := byLabel[tier.Label]; ok {
+			colors[i] = c
+		} else {
+			colors[i] = t.Mauve
+		}
+	}
+	return colors
+}
+
 // renderPieChart draws a high-definition radial terminal pie chart with aspect ratio correction and legend.
 // showQualityBadge controls whether the ">=4.0 quality bar" summary badge is appended to the legend;
 // it should be true only for the Fit Quality Distribution chart (where the metric is meaningful)
@@ -357,7 +380,7 @@ func (m StatsModel) renderPieChart(title, legendHeading string, stats []model.La
 	var pieLines []string
 	for y := -radius; y <= radius; y++ {
 		var row strings.Builder
-		for x := -2 * radius; x <= 2 * radius; x++ {
+		for x := -2 * radius; x <= 2*radius; x++ {
 			nx := float64(x) / 2.0 // correct for 2:1 character aspect ratio
 			ny := float64(y)
 			dist := math.Sqrt(nx*nx + ny*ny)

@@ -1,7 +1,7 @@
 // Every CLI with a documented headless invocation must be selectable in the web UI.
 //
 // This guards the drift that let Grok Build CLI go missing: it was wired into
-// doctor.mjs (VALID_CLIS), the scaffolder, docs/SUPPORTED_CLIS.md, the README
+// lib/agent-cli.mjs (AGENT_CLIS), the scaffolder, docs/SUPPORTED_CLIS.md, the README
 // and .grok/skills/, yet KNOWN in web/src/lib/clis.ts never listed it — so the
 // web UI silently could not run on it. Nothing tied the two lists together.
 //

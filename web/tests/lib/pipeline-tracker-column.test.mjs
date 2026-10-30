@@ -24,7 +24,8 @@ test("sortable Pipeline headers use native keyboard-operable buttons", () => {
 });
 
 test("the visible tracker identifier uses the canonical tracker route", () => {
-  assert.match(source, /<Link href=\{`\/pipeline\/\$\{r\.n\}`\}[^>]*>\s*#\{r\.n\}\s*<\/Link>/);
+  assert.match(source, /const detailHref = `\/pipeline\/\$\{encodeURIComponent\(r\.n\)\}/);
+  assert.match(source, /<Link href=\{detailHref\}[^>]*>\s*#\{r\.n\}\s*<\/Link>/);
 });
 
 test("the lower-priority Date header and cells hide below the large breakpoint", () => {

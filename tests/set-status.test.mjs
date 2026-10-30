@@ -10,8 +10,8 @@
  * codes, and layout tolerance (9-col and 10-col Location trackers).
  *
  * Tests provision a throwaway tracker via the CAREER_OPS_TRACKER /
- * CAREER_OPS_TRACKER_LOCK env overrides (same sandbox pattern as
- * tracker-columns-tests.mjs).
+ * CAREER_OPS_TRACKER_LOCK env overrides (same sandbox pattern as the CLI cases
+ * in tests/tracker-columns.test.mjs).
  *
  * Exit-code contract under test:
  *   0 — success (including no-op re-runs)
@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, utimesSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, existsSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { acquireTrackerLock } from '../tracker-utils.mjs';
@@ -928,6 +928,46 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
     pass('ledger: append failure → exit 0, tracker updated, statusLogged: false');
   } else {
     fail(`ledger: append-failure contract broken (code=${r.code}, logged=${parsed?.statusLogged})\n${r.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// A dashboard retry may repair the ledger after the tracker was saved Applied
+// but status-log.tsv could not be appended on the first attempt. The repair is
+// explicit and idempotent; a second retry must not add another correction.
+{
+  const sb = makeSandbox(TRACKER_9);
+  mkdirSync(join(sb.dir, 'status-log.tsv'));
+  runSetStatus(['2', 'Applied', '--json'], sb);
+  rmSync(join(sb.dir, 'status-log.tsv'), { recursive: true, force: true });
+  writeFileSync(join(sb.dir, 'status-log.tsv'), '2\t2026-06-02\t-\tEvaluated\timport\t\n');
+  const repaired = runSetStatus(['2', 'Applied', '--repair-status-log', '--json'], sb);
+  const parsed = JSON.parse(repaired.stdout);
+  const log = readFileSync(join(sb.dir, 'status-log.tsv'), 'utf8');
+  const retry = runSetStatus(['2', 'Applied', '--repair-status-log', '--json'], sb);
+  const retryLog = readFileSync(join(sb.dir, 'status-log.tsv'), 'utf8');
+  if (repaired.code === 0 && parsed.statusLogRepaired === true
+      && /\t-\tApplied\tcorrection\t/.test(log)
+      && retry.code === 0 && retryLog === log) {
+    pass('ledger: explicit Applied retry repairs a missing observation exactly once');
+  } else {
+    fail(`ledger repair contract broken (code=${repaired.code}, repaired=${parsed.statusLogRepaired})`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// A repair flag on a row with no earlier ledger entry must not invent history.
+{
+  const sb = makeSandbox(TRACKER_9);
+  runSetStatus(['2', 'Applied', '--json'], sb);
+  rmSync(join(sb.dir, 'status-log.tsv'), { force: true });
+  const r = runSetStatus(['2', 'Applied', '--repair-status-log', '--json'], sb);
+  const parsed = JSON.parse(r.stdout);
+  const exists = existsSync(join(sb.dir, 'status-log.tsv'));
+  if (r.code === 0 && !parsed.statusLogRepaired && !exists) {
+    pass('ledger: repair without earlier ledger history appends nothing');
+  } else {
+    fail(`ledger repair invented history (code=${r.code}, exists=${exists})`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }

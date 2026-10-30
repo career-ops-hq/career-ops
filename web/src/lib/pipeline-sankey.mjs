@@ -21,6 +21,7 @@ export const NODE_DEFS = [
   { id: "tracked", label: "Tracked", rank: 0, tone: "neutral" },
   { id: "skip", label: "SKIP", rank: 1, tone: "danger" },
   { id: "evaluated", label: "Still evaluated", rank: 1, tone: "muted" },
+  { id: "other", label: "Other status", rank: 1, tone: "muted" },
   { id: "discardedEarly", label: "Discarded (no application recorded)", rank: 1, tone: "muted" },
   { id: "submitted", label: "Submitted", rank: 1, tone: "info" },
   { id: "waiting", label: "Waiting", rank: 2, tone: "warn" },
@@ -28,6 +29,7 @@ export const NODE_DEFS = [
   { id: "rejectedApply", label: "Rejected (no interview)", rank: 2, tone: "danger" },
   { id: "discarded", label: "Discarded", rank: 2, tone: "muted" },
   { id: "screening", label: "Screening", rank: 3, tone: "info" },
+  { id: "assessment", label: "Assessment", rank: 3, tone: "info" },
   { id: "interview", label: "Interview", rank: 3, tone: "success" },
   { id: "offer", label: "Offer", rank: 3, tone: "success" },
   { id: "hired", label: "Hired", rank: 3, tone: "success" },
@@ -41,14 +43,16 @@ const ADVANCED = new Set(["INTERVIEW", "OFFER", "HIRED"]);
 // submission: the core counts it in neither `submitted` nor `decided`
 // (modes/patterns.md). A Discarded row stays under Submitted only when the
 // status log shows it reached one of these; otherwise it leaves from Tracked.
-const SUBMITTED_OR_LATER = new Set(["APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "HIRED", "REJECTED"]);
+const SUBMITTED_OR_LATER = new Set(["APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED", "REJECTED"]);
 
 const LEAVES = [
   "skip",
   "evaluated",
+  "other",
   "discardedEarly",
   "waiting",
   "screening",
+  "assessment",
   "interview",
   "offer",
   "hired",
@@ -143,6 +147,7 @@ export function classifyLeaf(app, log) {
   if (status === "EVALUATED") return "evaluated";
   if (status === "APPLIED") return "waiting";
   if (status === "RESPONDED") return "screening";
+  if (status === "ASSESSMENT") return "assessment";
   if (status === "INTERVIEW") return "interview";
   if (status === "OFFER") return "offer";
   if (status === "HIRED") return "hired";
@@ -151,7 +156,7 @@ export function classifyLeaf(app, log) {
     if (reachedInterview) return "discardedInterview";
     return logReachedSubmitted(num, log) ? "discarded" : "discardedEarly";
   }
-  return "evaluated";
+  return "other";
 }
 
 /**
@@ -170,6 +175,7 @@ export function buildPipelineSankey(apps, log = []) {
 
   const engaged =
     counts.screening +
+    counts.assessment +
     counts.interview +
     counts.offer +
     counts.hired +
@@ -180,6 +186,7 @@ export function buildPipelineSankey(apps, log = []) {
     tracked: rows.length,
     skip: counts.skip,
     evaluated: counts.evaluated,
+    other: counts.other,
     discardedEarly: counts.discardedEarly,
     submitted,
     waiting: counts.waiting,
@@ -187,6 +194,7 @@ export function buildPipelineSankey(apps, log = []) {
     rejectedApply: counts.rejectedApply,
     discarded: counts.discarded,
     screening: counts.screening,
+    assessment: counts.assessment,
     interview: counts.interview,
     offer: counts.offer,
     hired: counts.hired,
@@ -199,6 +207,7 @@ export function buildPipelineSankey(apps, log = []) {
   const rawLinks = [
     { source: "tracked", target: "skip", value: values.skip },
     { source: "tracked", target: "evaluated", value: values.evaluated },
+    { source: "tracked", target: "other", value: values.other },
     { source: "tracked", target: "discardedEarly", value: values.discardedEarly },
     { source: "tracked", target: "submitted", value: values.submitted },
     { source: "submitted", target: "waiting", value: values.waiting },
@@ -206,6 +215,7 @@ export function buildPipelineSankey(apps, log = []) {
     { source: "submitted", target: "rejectedApply", value: values.rejectedApply },
     { source: "submitted", target: "discarded", value: values.discarded },
     { source: "engaged", target: "screening", value: values.screening },
+    { source: "engaged", target: "assessment", value: values.assessment },
     { source: "engaged", target: "interview", value: values.interview },
     { source: "engaged", target: "offer", value: values.offer },
     { source: "engaged", target: "hired", value: values.hired },

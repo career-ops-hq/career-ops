@@ -14,6 +14,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+import { scanSuccessLabel } from "@/lib/scan-success.mjs";
 import { CreateJobModal } from "./scheduled-scans/create-job-modal";
 import { EditJobModal } from "./scheduled-scans/edit-job-modal";
 import { JobCard } from "./scheduled-scans/job-card";
@@ -36,6 +37,12 @@ function formatTaskTime(value: string | null) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
+
+const OS_SCHEDULERS: Record<string, { title: string; install: string } | undefined> = {
+  win32: { title: "Windows Task Scheduler Integration", install: "web/scripts/install-scan-schedule.ps1" },
+  darwin: { title: "macOS launchd Integration", install: "sh web/scripts/install-scan-schedule.sh" },
+  linux: { title: "Linux cron Integration", install: "sh web/scripts/install-scan-schedule.sh" },
+};
 
 export function ScheduledJobsView() {
   const [store, setStore] = useState<Store>({ jobs: [], runs: [] });
@@ -139,7 +146,9 @@ export function ScheduledJobsView() {
   const successRuns = store.runs.filter((r) => r.state === "success").length;
   const failedRuns = store.runs.filter((r) => r.state === "failed").length;
   const totalRolesFound = store.runs.reduce((acc, r) => acc + (r.rolesFound || 0), 0);
-  const successRate = totalRuns > 0 ? Math.round((successRuns / totalRuns) * 100) : 100;
+  const successRate = scanSuccessLabel(totalRuns, successRuns);
+
+  const osScheduler = scheduler ? OS_SCHEDULERS[scheduler.platform] : undefined;
 
   return (
     <div className="mx-auto max-w-5xl px-5 py-8 md:px-8 space-y-8">
@@ -147,7 +156,7 @@ export function ScheduledJobsView() {
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
         <div>
           <div className="flex items-center gap-2.5">
-            <CalendarClock className="size-6 text-brand" />
+            <CalendarClock className="size-6 text-brand-text" />
             <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Scheduled Scans</h1>
           </div>
           <p className="mt-1.5 max-w-2xl text-sm text-muted">
@@ -169,7 +178,7 @@ export function ScheduledJobsView() {
             onClick={() => setHistoryDrawerOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
           >
-            <History className="size-4 text-brand" />
+            <History className="size-4 text-brand-text" />
             Run Logs ({store.runs.length})
           </button>
           <button
@@ -179,7 +188,7 @@ export function ScheduledJobsView() {
             className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-surface/60 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             title="Refresh list"
           >
-            <RefreshCw className={`size-4 ${loading ? "animate-spin text-brand" : ""}`} />
+            <RefreshCw className={`size-4 ${loading ? "animate-spin text-brand-text" : ""}`} />
           </button>
         </div>
       </div>
@@ -188,9 +197,9 @@ export function ScheduledJobsView() {
       {/* Stats Cards */}
       <div className="grid gap-3.5 sm:grid-cols-4">
         <StatCard label="Active Scans" value={activeJobs.length} subtitle={`${jobsList.length} total jobs`} icon={<Zap className="size-4 text-emerald-500" />} />
-        <StatCard label="Executed Runs" value={totalRuns} subtitle={`${successRuns} successful`} icon={<Layers className="size-4 text-brand" />} />
+        <StatCard label="Executed Runs" value={totalRuns} subtitle={`${successRuns} successful`} icon={<Layers className="size-4 text-brand-text" />} />
         <StatCard label="Roles Discovered" value={totalRolesFound} subtitle="Pushed to pipeline" icon={<Sparkles className="size-4 text-amber-500" />} />
-        <StatCard label="Success Rate" value={`${successRate}%`} subtitle={`${failedRuns} failed runs`} icon={<CheckCircle2 className="size-4 text-emerald-500" />} />
+        <StatCard label="Success Rate" value={successRate} subtitle={`${failedRuns} failed runs`} icon={<CheckCircle2 className="size-4 text-emerald-500" />} />
       </div>
 
       {/* OS Task Scheduler Banner */}
@@ -198,12 +207,12 @@ export function ScheduledJobsView() {
         <div className="co-rise rounded-2xl border border-border bg-surface/40 p-4 shadow-sm backdrop-blur-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="grid size-9 place-items-center rounded-xl bg-surface-hover text-brand">
+              <div className="grid size-9 place-items-center rounded-xl bg-surface-hover text-brand-text">
                 <Clock className="size-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  {scheduler.platform === "win32" ? "Windows Task Scheduler Integration" : "Manual scans"}
+                  {osScheduler?.title ?? "Manual scans"}
                   <span
                     className={
                       scheduler.task.exists && scheduler.task.enabled
@@ -211,7 +220,7 @@ export function ScheduledJobsView() {
                         : "rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
                     }
                   >
-                    {scheduler.platform !== "win32"
+                    {!osScheduler
                       ? "No automatic schedule"
                       : scheduler.task.exists
                         ? scheduler.task.enabled ? "Task enabled" : "Task disabled"
@@ -219,21 +228,21 @@ export function ScheduledJobsView() {
                   </span>
                 </div>
                 <div className="mt-0.5 text-xs text-muted">
-                  {scheduler.platform !== "win32"
-                    ? "On macOS and Linux, saved scans only run when you choose Run now."
+                  {!osScheduler
+                    ? "Automatic scheduling is not available on this platform."
                     : scheduler.task.exists
                       ? "Next OS check: " + formatTaskTime(scheduler.task.nextRun) + " · Last OS check: " + formatTaskTime(scheduler.task.lastRun)
-                      : "Install the Windows task with web/scripts/install-scan-schedule.ps1 to run due jobs automatically."}
+                      : `Install with ${osScheduler.install} to run due jobs automatically.`}
                 </div>
               </div>
             </div>
-            {scheduler.platform === "win32" && <button
+            {osScheduler && <button
               type="button"
               onClick={handleTriggerOsScheduler}
               disabled={osRunning || scheduler.running || !scheduler.available}
               className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover disabled:opacity-50"
             >
-              {osRunning ? <Loader2 className="size-3.5 animate-spin text-brand" /> : <Zap className="size-3.5 text-brand" />}
+              {osRunning ? <Loader2 className="size-3.5 animate-spin text-brand-text" /> : <Zap className="size-3.5 text-brand-text" />}
               {osRunning ? "Checking..." : "Check due jobs now"}
             </button>}
           </div>
@@ -288,7 +297,7 @@ export function ScheduledJobsView() {
       {filteredJobs.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-12 text-center">
           <CalendarClock className="mx-auto size-8 text-faint" />
-          <h3 className="mt-3 text-sm font-semibold text-foreground">No scheduled scans found</h3>
+          <h2 className="mt-3 text-sm font-semibold text-foreground">No scheduled scans found</h2>
           <p className="mt-1 text-xs text-muted">Create a new scan to start automatically discovering matching jobs.</p>
           <button
             type="button"
@@ -354,7 +363,7 @@ function StatCard({
         <div className="mt-1 text-2xl font-bold tracking-tight text-foreground">{value}</div>
         <div className="mt-0.5 text-[11px] text-faint">{subtitle}</div>
       </div>
-      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand">
+      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-text">
         {icon}
       </div>
     </div>

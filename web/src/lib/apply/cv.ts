@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, pdfPathStatusForReport, readApplications } from "@/lib/career-ops";
+import { careerOpsRoot, findApplication, pdfPathStatusForReport } from "@/lib/career-ops";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
 import { reportNumberFromCell } from "./cv-selection.mjs";
@@ -16,7 +16,7 @@ import { reportNumberFromCell } from "./cv-selection.mjs";
 export async function resolveTailoredCv(company?: string, applicationNumber?: string): Promise<string | null> {
   const root = careerOpsRoot();
   if (applicationNumber?.trim()) {
-    const app = readApplications().find((candidate) => candidate.n === applicationNumber.trim());
+    const app = findApplication(applicationNumber.trim());
     const reportNumber = reportNumberFromCell(app?.report);
     if (!reportNumber) return null;
     const result = await pdfPathStatusForReport(String(reportNumber));
@@ -46,6 +46,28 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
   const sorted = sortNewestFirst(dir, matches);
   if (!sorted.length) return null;
   return path.join(dir, sorted[0]);
+}
+
+/**
+ * The tailored CV for one apply session, resolved once for both halves of it.
+ *
+ * /api/apply/fill uploads this PDF and /api/apply/prefill drafts the answers
+ * typed into the same form, so the two must agree on which document this
+ * application is. They disagreed while prefill resolved nothing at all and sent
+ * the planner to master cv.md: bullets are reselected per offer, role framing is
+ * rewritten toward the employer's domain, and engagements are regrouped, so the
+ * reviewer read a resume and a set of answers describing different careers.
+ *
+ * Both routes call this. Two copies of the same three-way expression, one per
+ * route, is how they drift apart again.
+ */
+export async function resolveSessionCv(opts: { company?: string; application?: string; title?: string }): Promise<string | null> {
+  const direct = await resolveTailoredCv(opts.company, opts.application);
+  if (direct) return direct;
+  // An application number that resolved nothing means THIS role has no tailored
+  // CV. Guessing a company off the page title would attach a sibling role's.
+  if (opts.application) return null;
+  return resolveTailoredCv(companyFromTitle(opts.title));
 }
 
 /**

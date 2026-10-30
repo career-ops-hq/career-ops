@@ -14,9 +14,11 @@ try {
 } catch (e) {}
 
 import { readFileSync, existsSync } from 'fs';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { appendToPipeline, appendToScanHistory, loadSeenUrls, PORTALS_PATH } from './scan.mjs';
+import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs';
+import { buildTitleFilter } from './title-keywords.mjs';
+import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
 
 // Import the deterministic provider
@@ -29,10 +31,12 @@ const KNOWN_FLAGS = ['--help', '-h'];
 const USAGE = `Usage:
   node scan-hn.mjs                  # scan the latest "Ask HN: Who is hiring?" thread
 
-Fetches the newest hiring thread from Hacker News and keeps the postings that
-match hn_hiring.keywords in portals.yml (default: "Software Engineer"). With
-GEMINI_API_KEY set, Gemini extracts each posting instead of the keyword match.
-New offers are appended to data/pipeline.md and to the scan history.
+Fetches the newest hiring thread from Hacker News and keeps the postings whose
+header line matches hn_hiring.keywords in portals.yml (default: "Software
+Engineer"). title_filter.negative, location_filter and data/blacklist.md apply
+as they do in scan.mjs. With GEMINI_API_KEY set, Gemini extracts the company,
+title and location of each matching posting. New offers are appended to
+data/pipeline.md and to the scan history.
 
 Flags:
   --help, -h                        # show this help and exit`;
@@ -40,16 +44,43 @@ Flags:
 // ── Configuration ────────────────────────────────────────────────────
 // Imported from scan.mjs so it honors CAREER_OPS_PORTALS and the data root (#3510).
 
-function loadKeywords() {
-  const defaultKeywords = ["Software Engineer"];
-  let configObj = {};
-  if (existsSync(PORTALS_PATH)) {
-    try {
-      configObj = yaml.load(readFileSync(PORTALS_PATH, 'utf-8')) || {};
-    } catch (e) {}
+function loadPortals() {
+  if (!existsSync(PORTALS_PATH)) return {};
+  try {
+    return loadYaml(readFileSync(PORTALS_PATH, 'utf-8')) || {};
+  } catch (err) {
+    // Same message and exit as scan.mjs. Swallowing this ran the scan on the
+    // default keyword, so a user who set hn_hiring.keywords got postings they
+    // never asked for in data/pipeline.md and nothing saying why (#4921).
+    console.error(`Error: failed to parse ${PORTALS_PATH}: ${err.message}`);
+    process.exit(1);
   }
-  return configObj.hn_hiring?.keywords || defaultKeywords;
 }
+
+function loadKeywords(portals) {
+  const keywords = portals?.hn_hiring?.keywords;
+  // One keyword written without list brackets (`keywords: Platform Engineer`)
+  // is a YAML scalar. buildTitleFilter reads only a list and drops anything
+  // else, so the scanner's only positive filter was gone and every HN post
+  // matched. This is scan-hn's own key, with no validator warning behind it
+  // (title_filter's bare-string case gets one in validate-portals), so the
+  // obvious reading is taken: one keyword.
+  if (typeof keywords === 'string' && keywords.trim()) return [keywords];
+  return keywords || ["Software Engineer"];
+}
+
+// hn_hiring.keywords is this scanner's positive list: a post's header line
+// ("Company | Role | Location | URL") is not an ATS title, so title_filter's
+// positives would not fit it. The user's title_filter negatives still apply,
+// through the same compiled matcher scan.mjs uses (word boundaries for short
+// acronyms, `word:` prefixes, accent folding), not a substring test (#5478).
+export function buildHnTitleFilter(keywords, titleFilter = {}) {
+  return buildTitleFilter({ positive: keywords, negative: titleFilter?.negative });
+}
+
+// extractWithAI's placeholder for "the post names no location". It is not a
+// location, so the location filter must not judge it.
+const UNKNOWN_LOCATION = 'Remote/Unknown';
 
 // ── AI Extraction Layer ─────────────────────────────────────────
 export async function extractWithAI(rawText, model) {
@@ -65,7 +96,7 @@ export async function extractWithAI(rawText, model) {
 
     let parsed;
     try {
-      parsed = yaml.load(clean);
+      parsed = loadYaml(clean);
     } catch {
       return null; // Always return null on parse errors
     }
@@ -85,8 +116,16 @@ export async function extractWithAI(rawText, model) {
 
 async function main() {
   const apiKey = process.env.GEMINI_API_KEY;
-  const myKeywords = loadKeywords();
-  const { seen } = loadSeenUrls();
+  const portals = loadPortals();
+  const myKeywords = loadKeywords(portals);
+  // One gate for both branches: the seen set (normalized URLs), the blacklist,
+  // the keywords and title_filter negatives, and location_filter. The AI branch
+  // used to admit every post Gemini could extract, because the keywords only
+  // appeared in its prompt (#5478).
+  const gate = createAdmissionGate({
+    config: portals,
+    titleFilter: buildHnTitleFilter(myKeywords, portals.title_filter),
+  });
 
   console.log(`🔍 Fetching latest HN Hiring data...`);
   
@@ -111,7 +150,12 @@ async function main() {
     });
 
     for (const job of rawJobs) {
-      if (seen.has(job.url)) continue;
+      // Through check(), not a bare continue, so the summary counts it as in
+      // the no-key branch.
+      if (gate.isSeen(job)) { gate.check(job); continue; }
+      // The keywords decide before Gemini is paid to read the post. A post
+      // whose header names none of them is recorded as a title skip here.
+      if (!gate.titleFilter(job.title)) { gate.check(job); continue; }
       
       aiCalls++;
       let extracted;
@@ -120,27 +164,28 @@ async function main() {
       } catch (err) {
         aiFailures++;
         if (!firstAiError) firstAiError = `${modelName}: ${err?.message || err}`;
-        seen.add(job.url);
+        gate.markSeen(job);
         continue;
       }
-      if (extracted && extracted.company && extracted.title) {
-        newOffers.push({ ...job, ...extracted, source: 'hn-hiring', postedAt: Date.now() });
-        console.log(`  ✅ AI Match: ${extracted.company}`);
-      }
-      seen.add(job.url);
+      if (!extracted || !extracted.company || !extracted.title) { gate.markSeen(job); continue; }
+      // The provider's own postedAt (the comment's created_at), never the scan
+      // time: scan-history records it as posted_at, and a guessed date is
+      // worse than an absent one (modes/oferta.md).
+      const offer = { ...job, ...extracted, source: 'hn-hiring', postedAt: job.postedAt };
+      // The blacklist and location filter judge what Gemini extracted; the
+      // title filter reads the header line the keywords already matched.
+      const judged = extracted.location === UNKNOWN_LOCATION ? { ...offer, location: job.location || '' } : offer;
+      if (gate.check(judged, { titleText: job.title })) continue;
+      newOffers.push(offer);
+      console.log(`  ✅ AI Match: ${extracted.company}`);
     }
   } else {
     // STEP 3: Fallback Mode (Deterministic/No-Key)
     console.log(`⚠️ No AI key. Using keyword filtering mode...`);
     for (const job of rawJobs) {
-      if (seen.has(job.url)) continue;
-
-      const matches = myKeywords.some(k => job.title.toLowerCase().includes(k.toLowerCase()));
-      if (matches) {
-        newOffers.push({ ...job, source: 'hn-hiring', postedAt: Date.now() });
-        console.log(`  ✅ Match: ${job.company}`);
-      }
-      seen.add(job.url);
+      if (gate.check(job)) continue;
+      newOffers.push({ ...job, source: 'hn-hiring' });
+      console.log(`  ✅ Match: ${job.company}`);
     }
   }
 
@@ -155,6 +200,8 @@ async function main() {
   printScanSummaryHeader('HN Scan', localToday());
   console.log(`Postings fetched:   ${rawJobs.length}`);
   console.log(`New offers:         ${newOffers.length}`);
+  const skipped = formatSkipCounts(gate.counts);
+  if (skipped) console.log(`Skipped:            ${skipped}`);
   if (aiFailures > 0) {
     console.log(`AI errors:          ${aiFailures} of ${aiCalls}`);
     console.warn(`\n⚠️  ${aiFailures} of ${aiCalls} Gemini extractions failed, so those postings were not checked. First error: ${firstAiError}`);

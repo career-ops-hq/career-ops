@@ -13,9 +13,25 @@ export function cleanMessages(input) {
       if (['text', 'note'].includes(p.type) && typeof p.text === 'string') return [{ type: p.type, text: p.text }];
       if (p.type === 'card' && typeof p.jobId === 'string') return [{ type: p.type, jobId: p.jobId }];
       if (p.type === 'batch' && typeof p.batchId === 'string' && Array.isArray(p.jobIds) && p.jobIds.every(id => typeof id === 'string')) return [{ type: p.type, batchId: p.batchId, jobIds: p.jobIds }];
+      // A status write may outlive the page. Preserve an inert, honest record;
+      // never serialize an executable callback or revive a Retry control.
+      if (p.type === 'confirm' && typeof p.statusChange?.n === 'string' && typeof p.statusChange.status === 'string' && ['saving', 'failed', 'unconfirmed', 'done'].includes(p.state) && typeof p.summary === 'string') {
+        const state = p.state === 'done' ? 'saved' : p.state === 'failed' ? 'failed' : 'unconfirmed';
+        const detail = p.state === 'done' ? '' : `${typeof p.message === 'string' ? `: ${p.message.replace(/\.\s*$/, '')}` : ''}; check current tracker status before a new request`;
+        return [{ type: 'note', text: `${p.summary} (${state}${detail}) [application #${p.statusChange.n} → ${p.statusChange.status}]` }];
+      }
       // Confirm callbacks exist only in the live component; never resurrect them.
       if (p.type === 'confirm' && p.state === 'pending') return [];
       if (p.type === 'confirm' && ['done', 'cancelled'].includes(p.state) && typeof p.summary === 'string') return [{ type: 'note', text: `${p.summary} (${p.state})` }];
+      // A confirmed profile or scan-target write still in flight when the chat
+      // was saved: its outcome is unknown, so it is never recorded as done.
+      if (p.type === 'confirm' && p.state === 'saving' && typeof p.summary === 'string') {
+        return [{ type: 'note', text: `${p.summary} (unconfirmed: the write had not finished)` }];
+      }
+      // A confirmed profile or scan-target write the route refused or failed.
+      if (p.type === 'confirm' && p.state === 'failed' && typeof p.summary === 'string') {
+        return [{ type: 'note', text: `${p.summary} (failed${typeof p.message === 'string' ? `: ${p.message.replace(/\.\s*$/, '')}` : ''})` }];
+      }
       throw new Error('Invalid message part');
     }) };
   });

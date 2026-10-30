@@ -366,6 +366,58 @@ try {
     fail(`feishu-jobs.fetch() must not request an untrusted explicit-provider URL (threw=${untrustedThrew}, calls=${untrusted.calls.length})`);
   }
 
+  let inFlight = 0;
+  let peakInFlight = 0;
+  const parallelCalls = [];
+  const parallelSleeps = [];
+  const parallelJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, {
+    sleep: async (ms) => { parallelSleeps.push(ms); },
+    fetchJson: async (_url, opts) => {
+      const { offset } = JSON.parse(opts.body);
+      parallelCalls.push(offset);
+      inFlight++;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return {
+        code: 0,
+        data: {
+          count: 950,
+          job_post_list: Array.from({ length: Math.min(100, 950 - offset) }, (_, i) => mkJob(String(20_000 + offset + i), `并行岗位${offset + i}`)),
+        },
+      };
+    },
+  });
+  if (parallelJobs.length === 950 && parallelCalls.length === 10 && peakInFlight === 4 && parallelSleeps.length === 3) {
+    pass('feishu-jobs.fetch() fetches the pages after the first four at a time, one pause per batch');
+  } else {
+    fail(`feishu-jobs.fetch() parallel pages: ${parallelJobs.length} jobs, ${parallelCalls.length} requests, peak ${peakInFlight} in flight, ${parallelSleeps.length} sleeps`);
+  }
+  if (parallelJobs[0].title === '并行岗位0' && parallelJobs[949].title === '并行岗位949') {
+    pass('feishu-jobs.fetch() keeps board order when pages arrive in parallel');
+  } else {
+    fail(`feishu-jobs.fetch() parallel order: first=${parallelJobs[0]?.title} last=${parallelJobs[949]?.title}`);
+  }
+
+  const midBatchFail = mkCtx(({ offset }) => {
+    if (offset === 300) throw new Error('HTTP 503');
+    return { code: 0, data: { count: 600, job_post_list: Array.from({ length: 100 }, (_, i) => mkJob(String(30_000 + offset + i), `批次岗位${offset + i}`)) } };
+  });
+  const midBatchWarnings = [];
+  const consoleErrorBeforeMidBatch = console.error;
+  console.error = (...args) => midBatchWarnings.push(args.join(' '));
+  let midBatchJobs;
+  try {
+    midBatchJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, midBatchFail.ctx);
+  } finally {
+    console.error = consoleErrorBeforeMidBatch;
+  }
+  if (midBatchJobs.length === 300 && midBatchWarnings.some((line) => line.includes('page 4 failed'))) {
+    pass('feishu-jobs.fetch() keeps the pages before a failed one in the same batch');
+  } else {
+    fail(`feishu-jobs.fetch() mid-batch failure: ${midBatchJobs.length} jobs, warnings ${JSON.stringify(midBatchWarnings)}`);
+  }
+
   let firstFailThrew = false;
   const dead = mkCtx(() => { throw new Error('HTTP 500'); });
   try {

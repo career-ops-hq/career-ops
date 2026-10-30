@@ -4,7 +4,7 @@
 
 ## 即時工作流程
 
-1. **讀取資料**：分析 `data/pipeline.md`，找出 "Pending" 區塊下所有標記為 `- [ ]` 的待處理項目。
+1. **讀取資料**：分析 `data/pipeline.md` (用 `grep -n -m 20 '^- \[ \] ' data/pipeline.md` 搜尋，每批處理完後再搜尋一次，直到只剩本次留在 Pending 的項目，不要讀取整個檔案)，找出 "Pending" 區塊下所有標記為 `- [ ]` 的待處理項目。
 2. **逐一處理**：對每一個未處理的 URL：
    a. **領取新報告編號**：執行 `node reserve-report-num.mjs` 原子地佔用下一個順序編號作為 `REPORT_NUM`；報告寫入後執行 `node reserve-report-num.mjs --release <num>` 釋放佔位。切勿自行掃描 `reports/` 取最大值加 1 —— 並行時多個 worker 會算出同一個編號（#749）。
    b. **擷取職缺描述 (JD)**：首選 Playwright（透過 `browser_navigate` + `browser_snapshot`）渲染網頁擷取；次選 `WebFetch` 抓取靜態文字；最後以 `WebSearch` 搜尋同名職缺的快照。

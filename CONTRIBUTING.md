@@ -33,13 +33,13 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 
 ## Quick Start
 
-1. Open an issue to discuss your idea
+1. For a new feature, a new mode or command, or an architecture change, open an issue to discuss your idea (see [Before Submitting a PR](#before-submitting-a-pr))
 2. Fork the repo
 3. Create a branch (`git checkout -b feature/my-feature`)
 4. Make your changes
 5. Test with a fresh clone (see [docs/SETUP.md](docs/SETUP.md))
 6. Commit and push
-7. Open a Pull Request referencing the issue
+7. Open a Pull Request, referencing the issue if you opened one
 
 ## What to Contribute
 
@@ -88,7 +88,7 @@ The ladder above is for work that has been **abandoned**. An open PR with an aut
 
 If the conflict came from something **we** merged and resolving it is mechanical, the fix is ours: we rebase the author's own branch (that is what "Allow edits by maintainers" is for), run the suite, and leave their PR and their authorship untouched. If the two changes really collide, only the author can say how theirs should fit, so we ask them to rebase and help on the diff if they want it. Conflicts from anywhere else, the author rebases whenever they're ready. Nobody is on a clock for any of this.
 
-This applies to automation as well. A bot opening replacement PRs on other people's branches is doing the same thing at higher volume, and automated triage posted into someone else's thread ("don't merge both", "treat #X as the primary") reads as a project decision to the person who has been waiting on one. Merge calls are the maintainers' to make. Automated agents may comment only on pull requests their operator authored; automated comments on other people's PRs are minimized as off-topic. Reviews you write yourself, under your own name, are welcome on any PR.
+This applies to automation as well. A bot opening replacement PRs on other people's branches is doing the same thing at higher volume, and automated triage posted into someone else's thread ("don't merge both", "treat #X as the primary") reads as a project decision to the person who has been waiting on one. Merge calls are the maintainers' to make. The `depends-on` check stays inside that line: it reports an order the PR author declared in their own body, and whether that dependency is still open. The ordering stays the author's, and the merge call stays the maintainers'. Automated agents may comment only on pull requests their operator authored; automated comments on other people's PRs are minimized as off-topic. Reviews you write yourself, under your own name, are welcome on any PR.
 
 **The project's own automation is the exception, and it is narrow.** Everything it writes in a thread comes from a bot account, so you can always tell it from a person, and it never decides anything about your PR. It may:
 
@@ -156,6 +156,7 @@ To propose a source (yours or anyone's): [open a source proposal](https://github
 - Keep modes language-agnostic when possible (Claude handles both EN and ES)
 - Scripts should handle missing files gracefully (check `existsSync` before `readFileSync`)
 - Dashboard changes require a build (`npm run build:dashboard`) — test with real data before submitting
+- Changes to `dashboard/` or `templates/states.yml` need `go test ./...` run from `dashboard/`: CI runs it on every pull request, and it is the only check that the dashboard accepts every state in `templates/states.yml`; `node test-all.mjs` does not run it
 - Don't commit personal data (cv.md, profile.yml, applications.md, reports/)
 
 ## What we do NOT accept
@@ -182,12 +183,23 @@ node cv-sync-check.mjs        # Config check
 # Dashboard
 npm run build:dashboard       # go build with platform-correct binary name
 npm run serve:dashboard       # launch the TUI against the repo root
+(cd dashboard && go test ./...)  # Go tests; CI runs them next to test-all
 
 # Tests
 node test-all.mjs             # Full suite — run before pushing/opening a PR
 node test-all.mjs --quick     # Full suite, skipping the dashboard build
 node test-all.mjs --only providers/themuse   # Run just one provider's test(s)
+node test-all.mjs --quick --jobs 4           # Run at most 4 test files at a time
 ```
+
+**The test files under `tests/` run in parallel**, one process each, as many at
+a time as the machine has CPUs, and the inline sections of `test-all.mjs` run
+alongside them in one of those slots. `--jobs N` changes that for one run and
+`CAREER_OPS_TEST_JOBS=N` for a machine; `1` runs everything one after another
+in a single process. The log comes out in the same order either way. If a test
+passes alone and fails in a full run (or the reverse), rerun with `--jobs 1`
+and see "Parallel runs" in [`tests/README.md`](tests/README.md) for what a
+suite may not rely on.
 
 **Any new test belongs in its own file** under `tests/`, not as a numbered
 section inside `test-all.mjs`. Anything matching `tests/**/*.test.mjs` is
@@ -218,6 +230,17 @@ The naming is a convention, not a checked contract.
 section (syntax, scripts, dashboard, data contract, personal data, paths,
 etc.). A green `--only` run is **not** a green suite — always run the full
 `node test-all.mjs` before pushing.
+
+**A test that needs a real Chromium or a TeX engine** skips (or warns) where
+the tool is missing, and the `test` CI job installs neither. Declare the tool so
+that CI still runs it: call `toolRequired('browser')` in a node:test `skip`
+condition (from `tests/required-tools.mjs`), or `toolUnavailable('browser', …)`
+in place of `warn()` (from `tests/helpers.mjs`); `'latex'` for a TeX engine. The
+`tool-suites` CI job runs `node test-all.mjs --needs browser,latex` in the
+cv-visual Docker image, where a missing tool fails the run instead of skipping
+it.
+`tests/required-tools-declared.test.mjs` fails a suite that launches Chromium
+without declaring it.
 
 ### Checking translated mode structure
 

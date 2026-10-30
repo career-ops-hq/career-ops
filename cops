@@ -8,6 +8,7 @@
 #   ./cops scan
 #   ./cops node generate-pdf.mjs cv.html output/cv.pdf
 #   ./cops shell                     # interactive bash
+#   ./cops bash -c 'ls reports'      # bash one-liner
 #   ./cops up | down | rebuild | logs
 #
 # Anything not matching a known subcommand is forwarded to npm run <subcommand>
@@ -40,6 +41,11 @@ case "${1:-}" in
     ;;
   rebuild)
     docker compose build --no-cache
+    # node_modules lives in a named volume, and Docker copies the image's
+    # node_modules into it only when the volume is first created. Remove the
+    # container and that volume so the new image's packages are used; the
+    # bind-mounted project directory is not a volume and is left alone.
+    docker compose down --volumes
     docker compose up -d
     exit 0
     ;;
@@ -48,7 +54,7 @@ case "${1:-}" in
     docker compose logs -f "$@"
     exit 0
     ;;
-  shell|bash)
+  shell)
     ensure_up
     exec docker compose exec -it "$SERVICE" bash
     ;;

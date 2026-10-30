@@ -2,8 +2,10 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import type { DiscoveredOffer } from "./scan";
+import { pipelineWriterResult } from "./pipeline-writer-result.mjs";
 
 /**
  * "Add to pipeline" — appends user-selected discovered offers to data/pipeline.md
@@ -17,6 +19,22 @@ import type { DiscoveredOffer } from "./scan";
  * Discovered-but-not-added offers stay "new" (a dry-run scan writes nothing);
  * only an explicit add records them as seen. No tokens are spent here.
  */
+function toCorePostedAt(value: unknown): number | undefined {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return undefined;
+  }
+
+  const ms = Date.parse(`${value}T00:00:00Z`);
+  if (
+    !Number.isFinite(ms) ||
+    ms <= 0 ||
+    new Date(ms).toISOString().slice(0, 10) !== value
+  ) {
+    return undefined;
+  }
+  return ms;
+}
+
 export type AddResult = { added: number; error?: string };
 
 export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResult> {
@@ -27,6 +45,7 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
       company: o.company || "",
       title: o.title || "",
       location: o.location || "",
+      postedAt: toCorePostedAt(o.postedAt),
       source: o.source || o.ats || "explorer",
       // Preserve the optional per-offer signal so it survives to pipeline.md.
       // The core writer treats an empty note as absent (byte-identical output).
@@ -41,7 +60,7 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
   }
 
   const scanUrl = pathToFileURL(rootScript("scan")).href;
-  const localTodayUrl = pathToFileURL(path.join(careerOpsRoot(), "lib", "local-today.mjs")).href;
+  const localTodayUrl = pathToFileURL(path.join(resolveCodeRoot(process.cwd(), process.env), "lib", "local-today.mjs")).href;
   const code = `
 import { appendToPipeline, appendToScanHistory } from ${JSON.stringify(scanUrl)};
 import { localToday } from ${JSON.stringify(localTodayUrl)};
@@ -66,22 +85,18 @@ process.stdin.on("end", async () => {
 
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
-      cwd: careerOpsRoot(),
+      cwd: resolveCodeRoot(process.cwd(), process.env),
       env: process.env,
+      // windowsHide: see api/doctor/route.ts — a stale inherited console kills
+      // every child with 0xC0000142 on Windows; never inherit one.
+      windowsHide: true,
     });
     let out = "";
     let err = "";
     child.stdout.on("data", (d: Buffer) => (out += d.toString()));
     child.stderr.on("data", (d: Buffer) => (err += d.toString()));
     child.on("error", (e) => resolve({ added: 0, error: e instanceof Error ? e.message : "spawn failed" }));
-    child.on("close", () => {
-      try {
-        const parsed = JSON.parse(out.trim() || "{}") as AddResult;
-        resolve({ added: parsed.added ?? 0, error: parsed.error });
-      } catch {
-        resolve({ added: 0, error: err.trim().slice(0, 200) || "writer returned no result" });
-      }
-    });
+    child.on("close", (code, signal) => resolve(pipelineWriterResult(out, err, { code, signal })));
     child.stdin.write(JSON.stringify(clean));
     child.stdin.end();
   });

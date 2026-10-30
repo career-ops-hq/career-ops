@@ -6,6 +6,8 @@ The purpose of this mode is to conduct a conversational interview to extract ric
 
 ---
 
+**Unattended runs** (`modes/_shared.md` → **Unattended runs**): do not start. This mode asks one question at a time and has no default answers. End with `needs_confirmation: interactive_only interview - run /career-ops interview in a chat session`.
+
 ## Guidelines for the AI Agent
 
 ### 1. Load Baseline Context

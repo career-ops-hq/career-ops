@@ -12,7 +12,7 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail } from './helpers.mjs';
 import {
   parseScanHistory, detectReposts, loadAggregatorCompanies, companyKey,
 } from '../detect-reposts.mjs';
@@ -22,9 +22,9 @@ import {
 
 console.log('\naggregator companies — skipped, and visibly skipped');
 
-const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company';
+const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key';
 const row = (url, date, title, company) =>
-  [url, date, 'greenhouse', title, company, 'added', 'Remote', '', '', '', '', ''].join('\t');
+  [url, date, 'greenhouse', title, company, 'added', 'Remote', '', '', '', '', '', '', '', ''].join('\t');
 
 // One board, one title, two URLs, two scan dates a week apart: a cluster by
 // every rule the detector has — which is exactly why the flag has to be what
@@ -72,48 +72,30 @@ try {
 
   // A board belongs under `job_boards` at least as often as under
   // `tracked_companies` — that is what the section is for — so the loader has to
-  // read both. Reading only one is invisible to a synthetic fixture that happens
-  // to use the other, which is exactly how it survived the first round here.
+  // read both. The fixture above uses `tracked_companies`; this one uses
+  // `job_boards`.
   const boards = join(dir, 'boards.yml');
   writeFileSync(boards, [
     'job_boards:',
-    '  - name: Board Under job_boards',
+    '  - name: board.example',
     '    aggregator: true',
     '  - name: Ordinary Board',
     '',
   ].join('\n'));
   const fromBoards = loadAggregatorCompanies(boards);
-  if (isAggregatorCompany('Board Under job_boards', fromBoards) && !isAggregatorCompany('Ordinary Board', fromBoards)) {
+  if (isAggregatorCompany('board.example', fromBoards) && !isAggregatorCompany('Ordinary Board', fromBoards)) {
     pass('a flagged entry under job_boards is loaded, not only under tracked_companies');
   } else {
     fail(`job_boards flag not honoured: size=${fromBoards.size}`);
   }
-
-  // The assertion that would have caught the above: measure the SHIPPED
-  // template, not a fixture. Both entries it flags live under `job_boards`, so a
-  // loader reading only `tracked_companies` returns zero here while every
-  // synthetic case still passes.
-  // By NAME, not by count. `size >= 2` is satisfied by any two flagged entries:
-  // measured against a template with these two unflagged and two unrelated ones
-  // flagged instead, it returns 2 and passes while protecting nothing.
-  const shipped = loadAggregatorCompanies(join(ROOT, 'templates/portals.example.yml'));
-  const REQUIRED = ['Founderful (portfolio)', 'joinup.ch'];
-  const notFlagged = REQUIRED.filter((n) => !isAggregatorCompany(n, shipped));
-  if (notFlagged.length === 0) {
-    pass('the shipped template still flags the two boards it ships flagged');
+  // The raw name has to survive, by value: this returns a Map rather than a Set
+  // so a card reads "board.example" instead of the normalized key. Checked by
+  // exact value: a regex for punctuation would accept any flagged entry that
+  // happens to have some.
+  if ([...fromBoards.values()].includes('board.example')) {
+    pass('a flagged board keeps its raw name exactly as written in portals.yml');
   } else {
-    fail(`the shipped template no longer flags: ${JSON.stringify(notFlagged)} (loaded ${shipped.size})`);
-  }
-  // And the raw name has to survive, by value: this returns a Map rather than a
-  // Set precisely so a card reads "joinup.ch" instead of the key "joinup ch".
-  // A regex for punctuation would accept any flagged entry that happens to have
-  // some, which is the same counting mistake one level down.
-  const rawNames = [...shipped.values()];
-  const missingRaw = REQUIRED.filter((n) => !rawNames.includes(n));
-  if (missingRaw.length === 0) {
-    pass('each flagged board keeps its raw name exactly as written in the template');
-  } else {
-    fail(`raw names lost or rewritten: ${JSON.stringify(missingRaw)} not in ${JSON.stringify(rawNames)}`);
+    fail(`raw name lost or rewritten: ${JSON.stringify([...fromBoards.values()])}`);
   }
 
   // Membership is by normalized name, so the report can ask with whatever

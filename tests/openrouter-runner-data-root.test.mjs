@@ -165,9 +165,10 @@ function inDataRoot(dir, expr, extraEnv = {}) {
 //
 // With the fix it gets past the lookup and fails later, on the missing key.
 {
+  // No modes/apply.md is planted here: a data root holds no system modes, and
+  // planting one hid the runner reading them from the wrong root (#5115).
+  // tests/split-root.test.mjs asserts where they are read from.
   const dir = makeDataRoot();
-  mkdirSync(join(dir, 'modes'), { recursive: true });
-  writeFileSync(join(dir, 'modes', 'apply.md'), 'apply mode\n');
 
   // spawnSync, not execFileSync: "Report not found" is written with console.error
   // and cmdApply then RETURNS, so the process exits 0. execFileSync hands back only
@@ -295,6 +296,7 @@ for (const dir of cleanup) rmSync(dir, { recursive: true, force: true, maxRetrie
   const ALLOWED = [
     { pattern: /path\.join\(__dirname, '\.env'\)/, why: '.env is process configuration, read beside the script' },
     { pattern: /^const __dirname = /m, why: 'the declaration itself' },
+    { pattern: /^const CODE_ROOT = __dirname;$/, why: 'system-layer modes ship beside the script and never follow the data root (#5115)' },
   ];
 
   // Every line mentioning __dirname, minus comments and the allowed uses.
@@ -305,7 +307,7 @@ for (const dir of cleanup) rmSync(dir, { recursive: true, force: true, maxRetrie
     .filter(({ line }) => !ALLOWED.some(({ pattern }) => pattern.test(line)));
 
   if (offenders.length === 0) {
-    pass('every __dirname use in openrouter-runner.mjs is the declaration or .env');
+    pass('every __dirname use in openrouter-runner.mjs is the declaration, .env or CODE_ROOT');
   } else {
     fail('these lines resolve a path against the script\'s own directory rather than '
       + 'the data root — if one of them is deliberate, add it to ALLOWED in this test '
@@ -320,5 +322,21 @@ for (const dir of cleanup) rmSync(dir, { recursive: true, force: true, maxRetrie
     pass('readFile/writeFile still resolve through DATA_ROOT');
   } else {
     fail('readFile/writeFile no longer resolve through DATA_ROOT');
+  }
+
+  // CODE_ROOT is allowed above for the system layer only. Nothing but the
+  // modes that ship with the code may be read through it, or it becomes the
+  // way a user-layer path gets back onto the script's own directory.
+  const systemReads = [...src.matchAll(/readSystemFile\('([^']+)'\)/g)].map((m) => m[1]);
+  const SYSTEM_MODES = ['modes/_shared.md', 'modes/oferta.md', 'modes/auto-pipeline.md', 'modes/apply.md'];
+  const stray = systemReads.filter((f) => !SYSTEM_MODES.includes(f));
+  const otherUses = src.split('\n').filter((line) => line.includes('CODE_ROOT')
+    && !line.trim().startsWith('//')
+    && !/^const CODE_ROOT = __dirname;$/.test(line.trim())
+    && !/path\.join\(CODE_ROOT, relPath\)/.test(line));
+  if (systemReads.length > 0 && stray.length === 0 && otherUses.length === 0) {
+    pass('CODE_ROOT is reached only through readSystemFile(), and only for system modes');
+  } else {
+    fail(`CODE_ROOT must only serve system modes — stray reads: ${JSON.stringify(stray)}, other uses: ${JSON.stringify(otherUses)}`);
   }
 }

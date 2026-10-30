@@ -163,7 +163,7 @@ Job posting を分析し、real, active opening かどうかを示す signals �
 - **Niche/executive roles:** Staff+、VP、Director、highly specialized roles は months open でも legitimate。Age thresholds を調整。
 - **Startup / pre-revenue:** Early-stage companies は role が genuinely undefined で JD が vague なことがある。Description vagueness の重みを下げる。
 - **No date available:** Posting age が判断できず、他に concerning signals がない場合、limited data の note 付きで default to "Proceed with Caution"。Evidence なしで "Suspicious" にしない。
-- **Recruiter-sourced (no public posting):** Freshness signals unavailable。Active recruiter contact 自体を positive legitimacy signal として note。
+- **Recruiter-sourced（posting link 付きの recruiter outreach も含む）:** Posting snapshot がない場合のみ Freshness signals unavailable。Recruiter が link した posting を確認した場合は date と Apply button state の findings を残す。Recruiter contact だけでは positive legitimacy signal にならない（Neutral）。Tier を決める前に recruiter の身元を確認する：(a) company 自身の careers page / public ATS board にこの role があるか、(b) 既知 brand に付いた未知の名前は別 entity として確認する、(c) recruiter の email domain または independent source が company とつながるか、(d) `"{name}" scam OR "fake recruiter" OR "fake job"` を 1 回だけ検索、(e) 送られた code の clone / install / run、その code を開いた状態での screen share、Telegram / WhatsApp / Discord への移動、何らかの支払いを求めていないか。(a) は lookup 1 回、(d) は検索 1 回まで。(b)、(c)、(e) は新しい検索をせず、pasted text、(a) と (d) の結果、既存の research だけを使う。Evidence がない check は Unknown（Neutral）とし、Concerning にしない。(a) か (d) が Concerning で、さらに 1 つ Concerning があれば "Suspicious"。この check で tier が "Suspicious" になった場合は、短く non-accusatory な recruiter identity note を付ける：Concerning になった check とその source、company 自身の email domain から role を確認すること、recruiter の code を実行しないこと。Recruiter が送った repository、archive、link は絶対に clone / install / open / execute しない。
 
 ---
 
@@ -224,9 +224,29 @@ I am happy to discuss further at your convenience.
 
 ---
 
+## 判定 (lead)
+
+ブロック G の直後、`## Risk Summary` の前に `## 判定 (lead)` ブロックを書く。読者がレポートを開いた唯一の問い、すなわち「応募すべきか」に答えるブロックである。
+
+**派生であり、判断を新たに生まない。** 唯一の情報源は `## Machine Summary` の `final_decision`。本ブロックは同じ判断を人間の一文で言い直すだけで、別の判断を持ち込まない。文とフィールドが食い違う場合はフィールドが正しく、本ブロックが欠陥である。太字の判断はそのフィールドの値、すなわち Apply、Consider、Research first、Skip のいずれか。
+
+**`(lead)` マーカーは機能を担い、意図的に言語非依存である。** Web のレポート表示は、見出し語やブロック文字ではなくこのマーカーによって当該ブロックを冒頭の要点として引き上げる。したがって各言語は自国語の名詞と同じ括弧書きを保つ（`## Verdict (lead)`、`## Вердикт (lead)`）。`(lead)` は翻訳せず、本ブロックに文字も付けない。A–H の系列外である。
+
+**新しい判断を加えない。** ここを書く時点で入力はすべて揃っている。判断と、レポートが既に確立した内容に基づく理由を一つ述べる。再採点も証拠の追加も行わない。
+
+ブロック形式:
+
+```markdown
+## 判定 (lead)
+
+**Apply.** 職務の中核軸で強く一致し、ハードストップなし。ブロック G は High Confidence。
+```
+
+---
+
 ## Risk Summary (ブロック G の後)
 
-レポート本文は、ブロック G の直後・ブロック H の前に `## Risk Summary` ブロックで締めくくります。リスクシグナルごとに1行、順序は固定です。これにより、候補者が実際に知りたいこと（「この会社は入って安全か？」）が、ブロック A・ブロック G・外部ファイルを頭の中で突き合わせることなく、1画面で分かります。
+レポート本文は、ブロック G に続く `## 判定 (lead)` ブロックの直後・ブロック H の前に `## Risk Summary` ブロックで締めくくります。リスクシグナルごとに1行、順序は固定です。これにより、候補者が実際に知りたいこと（「この会社は入って安全か？」）が、ブロック A・ブロック G・外部ファイルを頭の中で突き合わせることなく、1画面で分かります。
 
 **集約のみで、新たな judgment は行いません。** 各行は、元のシグナルがすでに出した判定を引用またはリンクします。サマリーが再採点・再重み付け・上書きを行うことは決してありません。ある行が誤って見える場合、修正すべきは元のシグナル側であり、ここではありません。
 
@@ -277,8 +297,11 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 **URL:**
 **Archetype:** {detected}
 **Score:** {X/5}
+**決定:** {応募する | 検討する | 先に調べる | 見送る}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **PDF:** {path or pending}
+
+{`## 判定 (lead)` の一文をそのまま写す}
 
 ---
 
@@ -303,6 +326,9 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 ## G) Posting Legitimacy
 (full content of block G)
 
+## 判定 (lead)
+(応募可否の判断を一文で — `final_decision` の言い直し、上記の判定セクションを参照)
+
 ## Risk Summary
 (リスクシグナルごとに1行、順序は固定 — 上記の Risk Summary セクションを参照)
 
@@ -313,11 +339,56 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 
 ## Keywords extracted
 (list of 15-20 keywords from the JD for ATS optimization)
+
+## Keyword Coverage
+(`keyword-match.mjs` (1b) が生成 — coverage %、present、thin、missing)
+
+## Job Description (archived verbatim)
+(posting の全文を verbatim で貼る — 下の要件を参照)
+```
+
+**JD archival（必須、#2789）：** すべての report に `## Job Description (archived verbatim)` section を入れ、posting の全文をそのまま貼る。要約・言い換えはしない。見出しは英語のまま：`check-jd-archive.mjs` が名前で探す。`**URL:**` は archive ではない：posting が閉じると link は切れ、元の要件はもう取り戻せない。Section の 1 行目は source に表示されている掲載日（`Posted: {日付または表示どおりの相対表記}`、本当に無いときは `Posted: not visible in source`）で、report file 自体の日時で代用しない。JD が長すぎる、または全文を引用できないときは `archive-posting.mjs` (下の command) で capture し、section には `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` の一文**だけ**を書く。言い換えで代用しない。Rule 全体は `modes/oferta.md` の **JD archival** を参照。
+
+**Command arguments（#5853）：** posting の URL、company slug、report path を command line に直接書かない（引用符で囲んでも不可）。file tool で値を JSON file に書き（`{"url": "…", "company": "{company-slug}", "report": "{num}"}`）、下の command を実行する。この command は各値を検査し（slug は `^[a-z0-9-]+$` に一致すること）、shell を通さずに各値を独立した引数として script に渡す。検査に通らない値は実行を止める：直すのは値であり、検査ではない。Rule 全体は `modes/oferta.md` の **Command arguments** を参照。
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
+
+### 1b. ATS keyword coverage を埋め込む
+
+Report を保存したら `keyword-match.mjs` (下の command) を実行し、`## Keyword Coverage` block を `## Keywords extracted` の下に貼る（見出しは英語のまま）。診断用のみ：keyword は実際の経験を反映する場合だけ追加する。
+
+そのために `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` を JSON file に書き（上の **Command arguments** を参照）、次を実行する：
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
 ```
 
 ### 2. Record in tracker
 
-**ALWAYS** record in `data/applications.md`:
+**ALWAYS** record in the tracker. Write a TSV (rule 9 in `_shared.md`) and merge it with `node merge-tracker.mjs`; never write a row into `data/applications.md` by hand. Fields:
 - Next sequential number
 - Current date
 - Company

@@ -32,6 +32,12 @@ states:
     description: Company has responded (not yet interview)
     dashboard_group: responded
 
+  - id: assessment
+    label: Assessment
+    aliases: [screening, "online assessment", online_assessment, "online screening"]
+    description: Online assessment or asynchronous screening stage
+    dashboard_group: assessment
+
   - id: interview
     label: Interview
     aliases: [entrevista, mülakat, mulakat]

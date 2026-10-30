@@ -25,6 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCvTemplate } from "../../src/lib/core/cv-template.mjs";
 import { BASE_CV_TEMPLATE, buildPrompt } from "../../src/lib/run-prompts.mjs";
+import { linkCorePackage } from "../helpers/core-package.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -51,15 +52,24 @@ function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pac
   // unresolved base would compare two spellings of the same directory.
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cv-template-")));
   fs.copyFileSync(path.join(CORE, "cv-templates.mjs"), path.join(root, "cv-templates.mjs"));
-  // cv-templates.mjs imports ./lib/is-main-module.mjs, ./path-resolver.mjs (its
-  // default profile path follows the data root) and ./providers/_html-entities.mjs
-  // (it decodes entities in a template meta block) relative to itself. A missing
+  // cv-templates.mjs imports ./lib/is-main-module.mjs, ./lib/yaml-document.mjs, ./path-resolver.mjs (its
+  // default profile path follows the data root), ./providers/_html-entities.mjs
+  // (it decodes entities in a template meta block) and ./lib/template-manifest.mjs
+  // (the manifest block and the section vocabulary) relative to itself. A missing
   // one throws at module load and every case below falls back to the base
   // template, which is the same silent pass the js-yaml link below prevents.
   fs.mkdirSync(path.join(root, "lib"), { recursive: true });
   fs.copyFileSync(
     path.join(CORE, "lib", "is-main-module.mjs"),
     path.join(root, "lib", "is-main-module.mjs"),
+  );
+  fs.copyFileSync(
+    path.join(CORE, "lib", "template-manifest.mjs"),
+    path.join(root, "lib", "template-manifest.mjs"),
+  );
+  fs.copyFileSync(
+    path.join(CORE, "lib", "yaml-document.mjs"),
+    path.join(root, "lib", "yaml-document.mjs"),
   );
   fs.copyFileSync(path.join(CORE, "path-resolver.mjs"), path.join(root, "path-resolver.mjs"));
   fs.mkdirSync(path.join(root, "providers"), { recursive: true });
@@ -70,7 +80,10 @@ function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pac
   // js-yaml is a bare specifier: outside the checkout there is no node_modules on
   // the way up, the import throws, and EVERY case below would fall back to the
   // base template — i.e. pass for the reason the fix exists to remove.
-  fs.symlinkSync(path.join(CORE, "node_modules"), path.join(root, "node_modules"), "dir");
+  // Linked from wherever Node resolves it for the core, not from
+  // `<core>/node_modules`: a git worktree has none of its own, so that link was
+  // dangling there and every case failed on the base template.
+  linkCorePackage(root, "js-yaml", CORE);
   // Every template must carry the placeholders validateTemplate() requires, or
   // resolveTemplate throws and the fallback would hide which case we are in.
   const body = "{{NAME}}{{EXPERIENCE}}{{EDUCATION}}";
@@ -87,20 +100,33 @@ function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pac
   return root;
 }
 
-/** Run `fn` as the dashboard does: cwd `<root>/web`, with this CAREER_OPS_PROFILE. */
+/**
+ * Run `fn` as the dashboard does: cwd `<root>/web`, with this CAREER_OPS_PROFILE.
+ *
+ * And with no data-root override. The default profile path follows the data
+ * root, so "the checkout's own config/profile.yml" is only the fake checkout's
+ * while nothing points the root elsewhere — and an inherited CAREER_OPS_ROOT
+ * does: the core suite pins one for every child it spawns, and a developer may
+ * export their own (#5113).
+ */
 async function asDashboard(root, profileEnv, fn) {
   const priorCwd = process.cwd();
-  const priorEnv = process.env.CAREER_OPS_PROFILE;
+  const priorEnv = {};
+  for (const name of ["CAREER_OPS_PROFILE", "CAREER_OPS_ROOT", "CAREER_OPS_DATA_DIR"]) {
+    priorEnv[name] = process.env[name];
+    delete process.env[name];
+  }
   fs.mkdirSync(path.join(root, "web"), { recursive: true });
   process.chdir(path.join(root, "web"));
-  if (profileEnv === undefined) delete process.env.CAREER_OPS_PROFILE;
-  else process.env.CAREER_OPS_PROFILE = profileEnv;
+  if (profileEnv !== undefined) process.env.CAREER_OPS_PROFILE = profileEnv;
   try {
     return await fn();
   } finally {
     process.chdir(priorCwd);
-    if (priorEnv === undefined) delete process.env.CAREER_OPS_PROFILE;
-    else process.env.CAREER_OPS_PROFILE = priorEnv;
+    for (const [name, value] of Object.entries(priorEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 }
 

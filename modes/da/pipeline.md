@@ -4,7 +4,7 @@ Behandler URL'er til opslag, der er samlet i `data/pipeline.md`. Kandidaten tilf
 
 ## Workflow
 
-1. **Læs** `data/pipeline.md` -> find `- [ ]`-elementer i sektionen "Afventer" / "Pending" / "Pendientes"
+1. **Læs** `data/pipeline.md` (søg med `grep -n -m 20 '^- \[ \] ' data/pipeline.md`, og søg igen efter hver omgang, indtil den kun viser elementer, du har ladet stå i Pending i denne kørsel, læs ikke hele filen) -> find `- [ ]`-elementer i sektionen "Afventer" / "Pending" / "Pendientes"
 2. **For hver afventende URL**:
    a. Reservér det næste fortløbende `REPORT_NUM` atomisk ved at køre `node reserve-report-num.mjs` (og frigiv sentinel'en ved at køre `node reserve-report-num.mjs --release <num>`, når rapporten er skrevet)
    b. **Udtræk opslaget** med Playwright (`browser_navigate` + `browser_snapshot`) -> WebFetch -> WebSearch

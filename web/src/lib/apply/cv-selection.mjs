@@ -10,6 +10,45 @@ export function reportNumberFromCell(cell) {
   return match ? Number.parseInt(match[1], 10) : null;
 }
 
+/**
+ * Parse lines from pdf-index.tsv into structured entries.
+ *
+ * Each row consists of tab-separated fields:
+ * [0] report number
+ * [1] relative pdf path
+ * [2] html path (optional)
+ * [3] format (e.g. "letter", "a4")
+ * [4] date (YYYY-MM-DD)
+ * [5] kind ("cv" | "cover" | custom)
+ *
+ * Missing or whitespace-only kind defaults to "cv" to preserve legacy rows (#3959).
+ */
+export function parsePdfManifestRows(indexText) {
+  const rows = [];
+  for (const line of String(indexText ?? "").split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const columns = line.split("\t");
+    const reportId = columns[0]?.trim() ?? "";
+    const pdf = columns[1]?.trim() ?? "";
+    const format = columns[3]?.trim() ?? "";
+    const date = columns[4]?.trim() ?? "";
+    const rawKind = (columns[5] ?? "").trim().toLowerCase();
+
+    let kind = "unknown";
+    if (rawKind === "cover") kind = "cover";
+    else if (rawKind === "cv" || rawKind === "") kind = "cv";
+
+    rows.push({
+      reportId,
+      pdf,
+      format,
+      date,
+      kind,
+    });
+  }
+  return rows;
+}
+
 /** Resolve the exact PDF path recorded for a report in pdf-index.tsv.
  *
  *  `kind` picks which artifact, "cv" (the default) or "cover". #3959 gave the
@@ -26,15 +65,11 @@ export function reportNumberFromCell(cell) {
 export function pdfIndexEntryForReport(indexText, reportNumber, kind = "cv") {
   if (!Number.isInteger(reportNumber)) return { found: false, path: null };
   const wanted = kind === "cover" ? "cover" : "cv";
-  for (const line of String(indexText ?? "").split(/\r?\n/)) {
-    if (!line.trim() || line.startsWith("#")) continue;
-    const columns = line.split("\t");
-    const indexedReport = columns[0]?.trim() ?? "";
-    if (!/^\d+$/.test(indexedReport) || Number(indexedReport) !== reportNumber) continue;
-    const rowKind = (columns[5] ?? "").trim() === "cover" ? "cover" : "cv";
-    if (rowKind !== wanted) continue;
-    const pdf = columns[1]?.trim();
-    return { found: true, path: pdf || null };
+  const rows = parsePdfManifestRows(indexText);
+  for (const row of rows) {
+    if (!/^\d+$/.test(row.reportId) || Number(row.reportId) !== reportNumber) continue;
+    if (row.kind !== wanted) continue;
+    return { found: true, path: row.pdf || null };
   }
   return { found: false, path: null };
 }

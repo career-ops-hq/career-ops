@@ -9,8 +9,10 @@
 // it every Greenhouse board passed those filters blind.
 
 import { htmlToText } from './_html-to-text.mjs';
+import { coerceId } from './_ids.mjs';
 
 const LEGACY_BOARD_HOSTS = new Set(['boards.greenhouse.io', 'boards.eu.greenhouse.io']);
+const JOB_BOARD_HOSTS = new Set(['job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io']);
 
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
@@ -40,21 +42,24 @@ function resolveApiUrl(entry) {
     return entry.api;
   }
   const url = entry.careers_url || '';
-  const match = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
-  let slug = match ? match[1] : null;
-  // Legacy boards[.eu].greenhouse.io/<slug>, which still 301s to job-boards[.eu]
-  // with the same slug. Read from the PARSED url, never a regex over the raw
-  // string: that one also found "boards.greenhouse.io/acme" inside the path of
-  // a boards-api URL and returned acme's board.
-  if (!slug) {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === 'https:' && LEGACY_BOARD_HOSTS.has(parsed.hostname)) {
-        slug = parsed.pathname.split('/').find(Boolean) ?? null;
-      }
-    } catch {
-      // unparseable url: no board to read
-    }
+  // job-boards[.eu].greenhouse.io/<slug>, and the legacy boards[.eu] host that
+  // still 301s there with the same slug. Both are read from the PARSED url,
+  // never a regex over the raw string. That one found
+  // "boards.greenhouse.io/acme" inside the path of a boards-api URL and
+  // returned acme's board, and its job-boards twin did the same for any
+  // careers_url that merely mentioned a board: a redirect wrapper
+  // (`?next=https://job-boards.greenhouse.io/othercorp`) or a path segment on
+  // another site scanned othercorp's board under this entry's name.
+  // http: is still accepted on the job-boards host, as the regex accepted it;
+  // the API call below is https either way.
+  let slug = null;
+  try {
+    const parsed = new URL(url);
+    const boardHost = (JOB_BOARD_HOSTS.has(parsed.hostname) && (parsed.protocol === 'https:' || parsed.protocol === 'http:'))
+      || (LEGACY_BOARD_HOSTS.has(parsed.hostname) && parsed.protocol === 'https:');
+    if (boardHost) slug = parsed.pathname.split('/').find(Boolean) ?? null;
+  } catch {
+    // unparseable url: no board to read
   }
   // Embed boards carry the token in ?for= (e.g. /embed/job_board?for=stripe).
   // The path segment is literally "embed", which resolves to a nonexistent
@@ -179,6 +184,25 @@ export default {
     }
   },
 
+  // Titles, URLs and dates only: the same list without content=true, and no
+  // /offices lookup. A fraction of fetch()'s bytes (5 live boards sampled
+  // 2026-10-07: 99 KB against 1.67 MB). scan-ats-full.mjs uses it to rule a
+  // board out before paying for fetch(); nothing here is filtered on.
+  async fetchListing(entry, ctx) {
+    const apiUrl = resolveApiUrl(entry);
+    if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);
+    assertGreenhouseUrl(apiUrl);
+    // An entry.api that pins content=true must not turn this back into the
+    // expensive request.
+    const listUrl = new URL(apiUrl);
+    listUrl.searchParams.delete('content');
+    const json = /** @type {any} */ (await ctx.fetchJson(assertGreenhouseUrl(listUrl.href), { redirect: 'error' }));
+    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    return jobs
+      .filter(/** @param {any} j */ j => j.absolute_url)
+      .map(/** @param {any} j */ j => ({ title: j.title || '', url: j.absolute_url, postedAt: toEpochMs(j.first_published) }));
+  },
+
   async fetch(entry, ctx) {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);
@@ -196,6 +220,7 @@ export default {
     const json = /** @type {any} */ (await ctx.fetchJson(listHref, { redirect: 'error' }));
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
     const usable = jobs.filter(/** @param {any} j */ j => j.absolute_url);
+    const boardSlug = new URL(apiUrl).pathname.match(/^\/v1\/boards\/([^/]+)\/jobs\/?$/)?.[1] || '';
 
     // Only pay for /offices when this board actually hides its cities there.
     let officeMap = null;
@@ -239,6 +264,14 @@ export default {
         title: j.title || '',
         url: j.absolute_url,
         company: entry.name,
+        listingIdentity: boardSlug && (typeof j.id === 'string' || (typeof j.id === 'number' && Number.isSafeInteger(j.id)))
+          ? { ats_provider: 'greenhouse', board_slug: boardSlug, posting_id: String(j.id) }
+          : undefined,
+        // Native identifiers, captured verbatim at ingest. `requisition_id` is the
+        // employer's own req id and is what survives a repost or an ATS host move
+        // (schema.org/JobPosting `identifier`); `id` is the board-post id.
+        externalId: coerceId(j.id),
+        requisitionId: coerceId(j.requisition_id),
         location,
         // Omitted entirely when the board ships no body — same shape as
         // cryptocurrencyjobs/remotli, so "no signal" stays distinguishable

@@ -2,7 +2,7 @@
 
 > Free-text answers と cover-letter fields には `voice-dna.md`（存在する場合）を適用する。Full guardrail、conversational voice included（Tier 1 + Tier 2）。`_writing.md` → Voice DNA を参照。
 
-候補者が Chrome で応募フォームを入力しているときの interactive mode。画面上の内容を読み、事前評価済みの求人 context を読み込み、フォームの各質問に personalized responses を生成する。
+候補者がこのプロジェクトが起動する Playwright ブラウザで応募フォームを入力しているときの interactive mode。画面上の内容を読み、事前評価済みの求人 context を読み込み、フォームの各質問に personalized responses を生成する。
 
 ## Requirements
 
@@ -12,15 +12,20 @@
 ## Workflow
 
 ```text
-1. DETECT      → Read active Chrome tab (screenshot/URL/title)
+1. DETECT      → このプロジェクトの Playwright ブラウザで求人を開く
 2. IDENTIFY    → Extract company + role from the page
 3. SEARCH      → Match against existing reports in reports/
-4. LOAD        → Read full report + Section G (if it exists)
+4. LOAD        → Read full report + Section H / `## Application Answers` (if they exist)
 5. PREFLIGHT   → Confirm posting liveness + company/role match before drafting
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
 8. PRESENT     → Show formatted responses for copy-paste
 ```
+
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
 
 ## Step 5 -- Preflight gate
 
@@ -38,11 +43,11 @@ Application answers を生成する前に、form が意図した active job を�
 
 この preflight が解決するまで Step 6 に進まない。
 
-**Applying to several roles in one sitting?** この preflight は目の前の単一 form を確認する。Multi-role session の前、特に scanner entries が `**Verification:** unconfirmed (batch mode)` と marked されている場合は、`pipeline` mode の **Liveness sweep** を先に実行する（`node check-liveness.mjs --file <urls>`）。これにより `data/pipeline.md` から dead postings がまとめて落ち、expired role の tab を開かずに済む。
+**Applying to several roles in one sitting?** この preflight は目の前の単一 form を確認する。Multi-role session の前、特に `--verify` なしの scan で追加された未確認の entries がある場合は、`pipeline` mode の **Liveness sweep** を先に実行する（`node check-liveness.mjs --file <urls>`）。これにより `data/pipeline.md` から dead postings がまとめて落ち、expired role の tab を開かずに済む。
 
 ## Step 1 -- Detect the job
 
-**With Playwright:** active page の snapshot を取得する。Title、URL、visible content を読む。
+**With Playwright:** `node apply-scope.mjs launch-options` で起動したウィンドウに求人を開き、title、URL、visible content を読む。
 
 **Without Playwright:** 候補者に以下を依頼する：
 - Form の screenshot を共有（Read tool で画像を読める）
@@ -54,7 +59,7 @@ Application answers を生成する前に、form が意図した active job を�
 1. Page から company name と role title を抽出
 2. `reports/` を company name で検索（case-insensitive grep）
 3. Match があれば full report を load
-4. Section G があれば previous draft answers を base として load
+4. Section H（draft answers）か `## Application Answers` があれば、それを base として load
 5. Match がなければ notify し、quick auto-pipeline の実行を提案
 
 ## Step 3 -- Detect changes in the role
@@ -62,8 +67,10 @@ Application answers を生成する前に、form が意図した active job を�
 画面上の role が evaluation 済みの role と異なる場合：
 - **Notify the candidate:** "The role has changed from [X] to [Y]. Do you want me to re-evaluate or adapt the responses to the new title?"
 - **If adapt:** Candidate が mismatch を明示的に accept した後に限り、re-evaluate せず新しい role に responses を adjust
-- **If re-evaluate:** Full A-F evaluation を実行し、report を update し、Section G を regenerate
-- **Update tracker:** 必要に応じて `applications.md` の role title を変更
+- **If re-evaluate:** Full A-F evaluation を実行し、report を update し、Section H を regenerate
+- **Update tracker:** `data/applications.md` は直接編集しない。
+  - **Re-evaluate した場合:** 新しい role title を入れた TSV を書き（`_shared.md` の rule 9）、`node merge-tracker.mjs` でマージする。Report は同じファイルを update するので番号は変わらず、merge はその番号で TSV を既存の行に対応づける：title は置き換わり、status は維持される。
+  - **Adapt した場合:** title は変更しない。Report が evaluate した role を示すものだから。変更があったことは note として記録する：`node set-status.mjs --report <report#> <現在の status> --note "Posting retitled at apply time, row keeps the evaluated title"`。行の現在の status を渡せば status は変わらず、note だけが追記される。Note はこのような固定の文言にし、`[Y]` は入れない。新しい title はページ由来のテキストであり、ページ由来のテキストは command line に渡さない。
 
 ## Step 6 -- Analyze form questions
 
@@ -75,7 +82,7 @@ Visible questions をすべて特定する：
 - Upload fields（resume、cover letter PDF）
 
 各 question を分類する：
-- **Already answered in Section G** → 既存 response を adapt
+- **Already answered in Section H or `## Application Answers`** → 既存 response を adapt
 - **New question** → report + `cv.md` から response を generate
 
 各 field について、application form contract を preserve する：
@@ -92,7 +99,7 @@ Legal、demographic、work-authorization、visa/sponsorship、salary、disabilit
 各 question について、以下に従って response を生成する：
 
 1. **Report context:** Block B の proof points、Block F の STAR stories を使う
-2. **Previous Section G:** Draft response があれば base として使い refine
+2. **Previous Section H / `## Application Answers`:** Draft か final response があれば base として使い refine
 3. **"I'm choosing you" tone:** Same auto-pipeline framework
 4. **Specificity:** 画面上に見える JD の specific detail を reference
 5. **career-ops proof point:** "Additional info" field があれば含める
@@ -134,8 +141,8 @@ Notes:
 ## Step 8 -- Post-apply (optional)
 
 候補者が application を submitted したと確認した場合：
-1. 正規 CLI で status を "Applied" に update: `node set-status.mjs <report#> Applied`（`applications.md` のテーブルを手動編集しない）
-2. Report の Section G を final responses で update
+1. 正規 CLI で status を "Applied" に update: `node set-status.mjs --report <report#> Applied`（`applications.md` のテーブルを手動編集しない）
+2. Final responses を report の `## Application Answers` section に `**State:** submitted` で記録: `node application-answers.mjs --report reports/NNN-company-role-date.md --input answers.json --state submitted`（JSON の field は `node application-answers.mjs --help` を参照）。Section G（Posting Legitimacy）と Section H（evaluation の draft）は変更しない
 3. Next step として LinkedIn outreach 用の `/career-ops contacto` を提案
 
 ## Scroll handling

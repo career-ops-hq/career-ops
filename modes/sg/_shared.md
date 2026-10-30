@@ -204,7 +204,7 @@ Work passes, benefits, and hiring norms differ materially from the US/EU. Apply 
 3. Cite exact CV lines during matching
 4. Use WebSearch for comp data and company intel
 5. Record in the tracker after every evaluation
-6. Generate content in the posting's language (English for Singapore postings)
+6. Write human-facing content in `{language.output}` from `config/profile.yml` (EN when unset), whatever the language of the posting. Keep Singapore market terms and explain them in that language when needed
 7. Be direct and concrete — no beating around the bush
 8. Natural tech English for generated text. Short sentences, action verbs, avoid the passive. Do not force-translate technical terms.
 8b. **Case-study URLs in the PDF Professional Summary:** If the PDF mentions demos or case studies, their URLs MUST appear in the first paragraph (Professional Summary) — recruiters often read only that. All URLs in HTML with `white-space: nowrap`
@@ -219,6 +219,6 @@ Work passes, benefits, and hiring norms differ materially from the US/EU. Apply 
 | WebFetch | Fallback for extracting postings from static pages |
 | Playwright | Verify postings are live (browser_navigate + browser_snapshot), extract postings from SPAs. **CRITICAL: NEVER run 2+ agents in parallel with Playwright — they share the same browser instance** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | Temporary HTML for PDF, applications.md, .md reports |
-| Edit | Update the tracker |
-| Bash | `node generate-pdf.mjs` |
+| Write | Temporary HTML for PDF, .md reports, tracker-addition TSVs in `batch/tracker-additions/` (never `applications.md` directly) |
+| Edit | Fixes to reports and other generated content. Never the tracker table: new rows go in as a TSV merged by `node merge-tracker.mjs`; status and notes changes go through `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

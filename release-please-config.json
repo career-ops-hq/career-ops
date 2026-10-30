@@ -45,6 +45,23 @@
           "type": "json",
           "path": ".codex-plugin/plugin.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "claude-directory/.claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "claude-directory/skills/career-ops/SKILL.md"
+        },
+        {
+          "type": "generic",
+          "path": "claude-directory/README.md"
+        },
+        {
+          "type": "generic",
+          "path": ".agents/skills/career-ops/SKILL.md"
         }
       ]
     },

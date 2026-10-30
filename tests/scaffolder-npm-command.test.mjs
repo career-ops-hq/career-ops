@@ -51,6 +51,18 @@ for (const bad of ['install & calc', 'a|b', '"x"', '%PATH%', '']) {
   }
 }
 
+// 0. The usage text must name the package that is actually published. It said
+//    `npx career-ops init`, and "career-ops" (unscoped) is not ours on npm: a
+//    user copying the tool's own instruction would run whatever sits there.
+{
+  const pkgName = JSON.parse(readFileSync(join(ROOT, 'scaffolder/package.json'), 'utf-8')).name;
+  const usage = readFileSync(join(ROOT, 'scaffolder/bin/cli.mjs'), 'utf-8');
+  if (usage.includes(`npx ${pkgName} init`)) pass(`usage text says npx ${pkgName} init`);
+  else fail(`usage text does not name the published package (${pkgName})`);
+  if (/npx career-ops\b/.test(usage)) fail('usage text still tells users to run the unscoped `npx career-ops`');
+  else pass('usage text never names the unscoped package');
+}
+
 // 3. The published package must ship every module cli.mjs imports, or
 //    `npx @santifer/career-ops` dies with ERR_MODULE_NOT_FOUND before it starts.
 const pkg = JSON.parse(readFileSync(join(ROOT, 'scaffolder/package.json'), 'utf-8'));

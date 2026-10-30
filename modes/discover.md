@@ -57,6 +57,8 @@ node discover-ats.mjs --in /tmp/new.yml --summary     # preview boards, writes n
 node discover-ats.mjs --in /tmp/new.yml --write       # only after you review
 ```
 
+Companies on `data/blacklist.md` (by name, or a domain-scope host on any of
+their history rows) are subtracted too, and counted as `blacklistedSkipped`.
 It writes only the candidate list; `portals.yml` stays touched exclusively by
 `discover-ats.mjs --write`. Companies are deduped on their canonical name (via
 `buildCompanyCanonicalizer`), so alias drift doesn't resurface a configured
@@ -86,7 +88,15 @@ node discover-ats.mjs Stripe Ramp Mollie          # names as positional args
 node discover-ats.mjs --in companies.yml --summary # human-readable table
 node discover-ats.mjs --in companies.yml --vendors gh,ashby  # restrict probes
 node discover-ats.mjs --in companies.yml --vendors workday   # Workday only
+node discover-ats.mjs --in companies.yml --small-threshold 10 # what counts as a small board
 ```
+
+A resolved board that lists few postings (5 or fewer by default, the same
+threshold `audit-portals.mjs` uses; `--small-threshold 0` turns it off) is still
+resolved, but it is flagged: `smallBoard: true` in the JSON, a
+`[small board — verify ownership]` marker in `--summary`, and a `# verify:`
+comment on the entry `--write` appends. It is a prompt to check the board is the
+company's main one, not an error, and exit codes do not change.
 
 Vendor keywords for `--vendors`: `gh`, `ashby`, `lever`, `workable`,
 `smartrecruiters`, `recruitee`, `bamboohr`, `breezy`, `pinpoint`, `rippling`,
@@ -130,6 +140,10 @@ careers_url) and the unresolved list with reasons. Call out:
 - **camelCase Ashby slugs** (e.g. `DeepL`, `AlephAlpha`): if a company you know
   is on Ashby came back unresolved, its slug is likely mixed-case — re-run with
   an explicit `slug:` in the input file (derived slugs are lowercased).
+- **Blacklisted** (`blacklisted`): companies on `data/blacklist.md` — matched
+  by name or Workday-hint/`website` host before probing, and by `careers_url`
+  host after — are never probed further or written. Report them as skipped; to
+  track one anyway, the user removes it from the blacklist first.
 - **Genuinely unknown**: for a JS-only portal with no ATS API, paste a specific
   JD into `data/pipeline.md` and run `/career-ops pipeline`.
 

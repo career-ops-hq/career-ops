@@ -1,0 +1,131 @@
+# Career-Ops — Vacancy-Status Disclosure Requirements (jurisdiction table) (#5420)
+#
+# Consumed prompt-level by modes/oferta.md Block G ("Vacancy-Status
+# Disclosure" signal, Signal 19). This file is a DATA REFERENCE, not
+# instruction logic: extending it to a new jurisdiction never requires
+# touching the rule text in modes/oferta-signals/. No script reads it — the
+# agent does. Nothing in this system ever fetches or scrapes an official
+# page: the candidate clicks the official link themselves (zero-fetch by
+# design, same as agency-licensing.yml and the AI-screening table).
+# Jurisdiction-compliance-lens umbrella #2026.
+#
+# CONTRIBUTION RULE (mandatory): no entry lands in this table without
+#   1. a regulator-grade citable source (statute, regulation, official
+#      government page, or a reputable law-firm bulletin summarizing it), AND
+#   2. an explicit effective date for the disclosure obligation, AND
+#   3. an `as_of` date recording when the row was last verified, AND
+#   4. an `official_source.url` pointing at the OFFICIAL government/regulator
+#      page (statute text, regulator guide, or public registry) —
+#      never a third-party mirror, aggregator, or law-firm copy of the text.
+# A bill that has passed a legislature but is not signed into law is NOT a
+# seed. Unverified or "I heard that..." rows will be rejected in review.
+# Seed narrow and verified; extend via community PRs — same discipline as the
+# other jurisdiction tables (#2013/#2018/#2019/#2025/#2037/#2892).
+#
+# NEVER-ASSERT RULE (mandatory — mirrored in the Signal 19 file): a posting's
+# silence about vacancy status is NEVER a basis for asserting that an
+# employer broke the rule. Employer size, whether the advertisement is a
+# "publicly advertised job posting" at all, and the exclusions listed in a
+# row cannot be verified from a JD, and aggregators routinely strip
+# compliance statements. The agent states the rule and the posting's own
+# silence, side by side, and stops there. Not legal advice.
+#
+# Schema per entry (key = jurisdiction code, matching the other tables, e.g.
+# CA-ON, US-NY):
+#   jurisdiction_name: string    — human-readable name for report output
+#   law_name: string             — short name of the statute/regulation
+#   applies_to: string           — which postings the obligation covers
+#   effective: YYYY-MM-DD        — date the obligation became mandatory
+#   requires: string             — what the law requires the employer to state
+#   existing_vacancy_definition: string — how the official source defines it
+#   no_duty_to_fill: bool        — whether the source says a stated vacancy
+#                                   need not be filled
+#   employer_size_threshold: string — employers below this are outside the rule
+#   not_covered: list            — postings/employers outside the rule
+#   record_retention: string     — OPTIONAL, employer record-keeping duty
+#   statement_language_examples: list — phrases in posting text that would
+#                                   count as the statement (agent-judged
+#                                   matching, never naive keyword regex)
+#   official_source:
+#     url: string                — OFFICIAL regulator page
+#     what_it_shows: string      — what a candidate finds there
+#   legal_basis: string          — statute/regulation citation
+#   enforcement_notes: string    — OPTIONAL
+#   sources: list                — citable pages backing the row
+#   as_of: YYYY-MM-DD            — date this row was last verified
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (comments only — NOT seeds, not verified
+# as law in force; do NOT add as rows until each has an official source, an
+# in-force effective date, and an as_of date):
+#   - US-NY : New York S8877 / A6292a (would add Labor Law section 219-b).
+#             Per nysenate.gov as of 2026-10-17 the status is "Passed Senate
+#             & Assembly", last action 2026-06-02, with no signature or veto
+#             shown. Not law until signed. As introduced it would apply to
+#             employers with 100+ employees and to third-party job posting
+#             entities, require a bold capitalised statement in one of three
+#             forms (current vacancy to be filled by a date within 90 days;
+#             current vacancy to be filled no sooner than a date; "not for a
+#             current vacancy" with the employer seeking resumes for future
+#             openings), and carry a $2,500 fine. Re-verify before seeding.
+#   - US-NJ, US-CA (AB 1251), US-KY, US-PA : bills of the same kind. Only
+#             secondary summaries have been seen; official bill pages have
+#             NOT been checked. Weaker candidates than New York.
+
+jurisdictions:
+  CA-ON:
+    jurisdiction_name: "Ontario, Canada"
+    law_name: "Employment Standards Act, 2000, Part III.1 (Job Postings) and O. Reg. 476/24 (Rules and Exemptions re Job Postings)"
+    applies_to: >-
+      Publicly advertised job postings posted on or after the effective date
+      by an Ontario employer (including a prospective employer or a person
+      advertising on the employer's behalf). "Publicly advertised job
+      posting" is defined in O. Reg. 476/24 s. 2 (1) as an external job
+      posting advertised to the general public in any manner.
+    effective: "2026-01-01"
+    requires: >-
+      The posting must include a statement disclosing whether it is for an
+      existing vacancy or not (ESA s. 8.5 (1) (a)). The employer is not
+      required to fill the position (per the ministry guide).
+    existing_vacancy_definition: >-
+      "a position that is imminently available for a qualified candidate to
+      fill" (Ministry of Labour guide, quoted from the official source page).
+    no_duty_to_fill: true
+    employer_size_threshold: >-
+      Part III.1 does not apply to an employer with fewer than 25 employees
+      on the day the posting is posted (O. Reg. 476/24 s. 1). Per the guide,
+      employees are counted individually (part-time and casual each count as
+      one), all Ontario locations are included, and related employers are
+      treated as one.
+    not_covered:
+      - "employers with fewer than 25 employees on the day of posting"
+      - "a general recruitment campaign or general help-wanted sign that does not advertise a specific position (O. Reg. 476/24 s. 2 (1), 'publicly advertised job posting' (a), (b))"
+      - "a posting for a position restricted to existing employees of the employer (s. 2 (1) (c))"
+      - "a posting for work performed outside Ontario, or performed outside Ontario and in Ontario where the outside-Ontario work is not a continuation of work performed in Ontario (s. 2 (1) (d))"
+      - "the Crown, Crown agencies and Crown-appointed authorities, boards, commissions and corporations (per the guide; the Crown exclusion was not independently checked against the regulation text)"
+    record_retention: >-
+      Under ESA s. 15 (7.1), an employer must retain (or arrange for another
+      person to retain) copies of every publicly advertised job posting and
+      any associated application form for 3 years after public access to the
+      posting is removed. The ministry guide describes the same duty.
+    statement_language_examples:
+      - "this posting is for an existing vacancy"
+      - "this is an existing vacancy"
+      - "there is a current vacancy for this position"
+      - "this posting is not for an existing vacancy"
+      - "there is no existing vacancy"
+      - "we are building a talent pool / pipeline for future openings (no current vacancy)"
+    official_source:
+      url: "https://www.ontario.ca/document/your-guide-employment-standards-act-0/requirements-related-publicly-advertised-job"
+      what_it_shows: "Ministry of Labour guide section on publicly advertised job postings: the vacancy statement, the definition of existing vacancy, the 25-employee threshold, exclusions and record keeping."
+    legal_basis: "Employment Standards Act, 2000, S.O. 2000, c. 41, s. 8.5 (1) (a) and (2), s. 15 (7.1); O. Reg. 476/24 ss. 1 and 2 (1) (verified on ontario.ca/laws on the as_of date; s. 8.5 in force 2026-01-01 per the e-Laws amendment note)"
+    enforcement_notes: >-
+      Whether an employer has 25 or more employees, whether an advertisement
+      is a "publicly advertised job posting" and whether an exclusion applies
+      are facts a candidate cannot verify from a JD. Aggregators and
+      third-party boards may also drop the statement from a copied posting.
+    sources:
+      - "Ontario Ministry of Labour — Your guide to the Employment Standards Act, section on publicly advertised job postings (ontario.ca)"
+      - "Ontario Ministry of Labour — Your guide to the ESA, Recent changes (ties the 2026 rules to O. Reg. 476/24)"
+      - "e-Laws — Employment Standards Act, 2000, Part III.1, s. 8.5 (ontario.ca/laws/statute/00e41)"
+      - "e-Laws — O. Reg. 476/24 (ontario.ca/laws/regulation/240476)"
+    as_of: "2026-10-18"

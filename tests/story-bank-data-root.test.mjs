@@ -32,6 +32,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { trackedFiles } from '../lib/mjs-files.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -144,26 +146,68 @@ test('--story-bank and --cv still override', () => {
       cwd: f.decoyCwd, encoding: 'utf-8', timeout: 60_000,
       env: { ...process.env, CAREER_OPS_ROOT: f.dataRoot, CAREER_OPS_DATA_DIR: '' },
     });
-    assert.equal(r.status, 0, `explicit paths were not honoured: ${r.stdout}${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `explicit paths were not honoured`));
   } finally {
     cleanup(f);
     rmSync(other, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
+// Structural, in the spirit of #3511's check 6. Two things kept this from
+// covering "the next reader, not just today's three": it walked a hard-coded
+// list of those three files, and its join rule keyed on CAREER_OPS and
+// CODE_ROOT, the name negotiation-roi.mjs used when it had the bug. None of
+// the three declares either name today, so a regression spelled
+// join(__dirname, …), join(ROOT, …) or join(process.cwd(), …) passed unseen.
+
+const isComment = (line) => /^\s*(\/\/|\*|\/\*)/.test(line);
+
+/** The bases that are not the data root: the code root under any name, and the cwd. */
+function offRootBases(src) {
+  const names = new Set(['__dirname', 'import.meta.dirname', 'process.cwd()']);
+  const BINDING = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:(?:path\.)?dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\)|__dirname\b|import\.meta\.dirname\b|process\.cwd\(\))/g;
+  for (const m of src.matchAll(BINDING)) names.add(m[1]);
+  return [...names];
+}
+
+/** Code lines that resolve story-bank.md or cv.md somewhere other than the data root. */
+function offDataRootPaths(src) {
+  const bases = offRootBases(src).map((n) => n.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')).join('|');
+  const ONTO_BASE = new RegExp(`(?:^|[^\\w$.])(?:path\\.)?(?:join|resolve)\\(\\s*(?:${bases})\\s*,`);
+  const CWD_RESOLVE = /(?:^|[^\w$.])(?:path\.)?resolve\(\s*['"`](?:\.\/)?(?:interview-prep|cv\.md)/;
+  const BARE_LITERAL = /=\s*['"`](?:\.\/)?(?:interview-prep|cv\.md)/;
+  return src.split('\n').filter((line) => /story-bank\.md|['"`]cv\.md['"`]/.test(line) && !isComment(line)
+    && (ONTO_BASE.test(line) || CWD_RESOLVE.test(line) || BARE_LITERAL.test(line)));
+}
+
+test('the off-root detector catches each spelling and passes the data root', () => {
+  const flagged = (src) => offDataRootPaths(src).length;
+  assert.equal(flagged("const ROOT = dirname(fileURLToPath(import.meta.url));\nconst P = join(ROOT, 'interview-prep', 'story-bank.md');"), 1);
+  assert.equal(flagged("const P = join(__dirname, 'interview-prep', 'story-bank.md');"), 1);
+  assert.equal(flagged("const P = join(process.cwd(), 'interview-prep', 'story-bank.md');"), 1);
+  assert.equal(flagged("const P = path.resolve('interview-prep/story-bank.md');"), 1);
+  assert.equal(flagged("const P = 'interview-prep/story-bank.md';"), 1);
+  assert.equal(flagged("const CV = join(__dirname, 'cv.md');"), 1);
+  assert.equal(flagged("const P = join(DATA_ROOT, 'interview-prep', 'story-bank.md');"), 0);
+  assert.equal(flagged("const P = join(getCareerOpsRoot(), 'interview-prep', 'story-bank.md');"), 0);
+  assert.equal(flagged("// join(__dirname, 'interview-prep', 'story-bank.md') was the bug"), 0);
+});
+
 test('no reader of story-bank.md resolves it from the code root or the cwd', () => {
-  // Structural, in the spirit of #3511's check 6: the three spellings that
-  // caused this are a bare relative literal and a join onto a __dirname
-  // constant. Covers the next reader, not just today's three.
+  // Readers are found, not listed: any tracked script with story-bank.md as a
+  // string of its own on a code line.
+  const READS = /['"`](?:interview-prep\/)?story-bank\.md['"`]/;
+  const readers = trackedFiles(ROOT, (rel) => rel.endsWith('.mjs') && !rel.startsWith('tests/') && !rel.startsWith('web/tests/') && rel !== 'test-all.mjs')
+    .map((abs) => ({ file: abs.slice(ROOT.length + 1).split('\\').join('/'), src: readFileSync(abs, 'utf-8') }))
+    .filter(({ src }) => src.split('\n').some((line) => !isComment(line) && READS.test(line)));
+  const names = readers.map((r) => r.file);
+  // Premise: discovery still sees the three readers this file was written for.
+  for (const known of ['match-star.mjs', 'story-provenance-check.mjs', 'negotiation-roi.mjs']) {
+    assert.ok(names.includes(known), `reader discovery lost ${known}: found ${names.join(', ')}`);
+  }
   const offenders = [];
-  for (const file of ['match-star.mjs', 'story-provenance-check.mjs', 'negotiation-roi.mjs']) {
-    const src = readFileSync(join(ROOT, file), 'utf-8');
-    for (const line of src.split('\n')) {
-      if (!/story-bank\.md|'cv\.md'/.test(line)) continue;
-      if (/^\s*(\/\/|\*)/.test(line)) continue;                       // comment
-      if (/=\s*'(interview-prep|cv\.md)/.test(line)) offenders.push(`${file}: ${line.trim().slice(0, 76)}`);
-      if (/join\(\s*(CAREER_OPS|CODE_ROOT)\s*,/.test(line)) offenders.push(`${file}: ${line.trim().slice(0, 76)}`);
-    }
+  for (const { file, src } of readers) {
+    for (const line of offDataRootPaths(src)) offenders.push(`${file}: ${line.trim().slice(0, 76)}`);
   }
   assert.deepEqual(offenders, [], `story-bank/cv.md resolved off the data root:\n${offenders.join('\n')}`);
 });

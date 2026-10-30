@@ -5,9 +5,9 @@ import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } fr
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
-import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
+import { CHINA_PRESET } from "@/lib/employer-preset.mjs";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -31,16 +31,16 @@ const CLI_NAMES: Record<string, string> = {
 
 export function ExplorerView({
   seed,
-  inboxSnapshot,
-  appsSnapshot,
+  inboxUrls,
+  evaluated,
   rootExists,
 }: {
   seed: { filters: ExploreFilters; seededFrom: string[] };
-  inboxSnapshot: InboxJob[];
-  appsSnapshot: Application[];
+  inboxUrls: string[];
+  evaluated: { n: string; company: string; role: string }[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, employerOutcome, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const scanNote =
     companiesScanned > 0
       ? `Scanned ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}${partial ? " · some sources were unreachable" : ""}.`
@@ -82,34 +82,33 @@ export function ExplorerView({
       initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
       // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
       // banner (the "matches found from your CV, free" reveal).
-      if (sp.get("run") === "1") {
+      if (sp.get("run") === "1" && sp.get("preset") !== CHINA_PRESET) {
         setFirstRun(true);
         void discover();
       }
     }
   }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
 
-  const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => j.url)), [inboxSnapshot]);
-  const enriched: EnrichedOffer[] = useMemo(
-    () =>
-      offers.map((o) => {
-        const inPipeline = inboxUrls.has(o.url);
-        const c = norm(o.company);
-        const t = norm(o.title);
-        const ev = appsSnapshot.find((a) => {
-          if (norm(a.company) !== c) return false;
-          const ar = norm(a.role);
-          return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
-        });
-        return { ...o, inPipeline, evaluatedN: ev?.n };
-      }),
-    [offers, inboxUrls, appsSnapshot],
-  );
+  const enriched: EnrichedOffer[] = useMemo(() => {
+    const trackedUrls = new Set(inboxUrls);
+    return offers.map((o) => {
+      const inPipeline = trackedUrls.has(o.url);
+      const c = norm(o.company);
+      const t = norm(o.title);
+      const ev = evaluated.find((a) => {
+        if (norm(a.company) !== c) return false;
+        const ar = norm(a.role);
+        return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
+      });
+      return { ...o, inPipeline, evaluatedN: ev?.n };
+    });
+  }, [offers, inboxUrls, evaluated]);
 
   const isAi = mode === "ai";
   const isResults = phase === "results";
-  const canDiscover = filters.ats.length > 0;
-  const scanRunning = running && !isAi;
+  const employer = filters.preset === CHINA_PRESET;
+  const canDiscover = !running && (employer ? (filters.employers?.length ?? 0) > 0 : filters.ats.length > 0);
+  const scanRunning = running && !isAi && !employer;
   // Keep one ResultsList mounted across scanning → revealing → results so
   // filter/sort/scroll and co-rise survive the 850ms reveal handoff.
   const showScanList = !isAi && offers.length > 0 && (scanRunning || isResults);
@@ -118,13 +117,14 @@ export function ExplorerView({
 
   return (
     <div className={scanRunning ? undefined : "mx-auto max-w-5xl px-5 py-8 md:px-8"}>
+      <p role="status" aria-live="polite" aria-atomic="true" className="mb-4 text-sm text-muted">{!isAi && (employerOutcome?.message || (employer && running ? "Scanning selected employers…" : ""))}</p>
       {scanRunning && <DiscoveringState />}
       {!scanRunning && (
         <>
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2.5">
-            <Compass className="size-6 text-brand" />
+            <Compass className="size-6 text-brand-text" />
             <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Explore</h1>
             <span className="rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-text">New</span>
           </div>
@@ -136,7 +136,7 @@ export function ExplorerView({
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
             {isAi
               ? "Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate."
-              : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
+              : employer ? "Scan selected employer sites using your role and location terms, zero tokens. Open an original JD to check its details." : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
           </p>
         )}
       </header>
@@ -175,29 +175,29 @@ export function ExplorerView({
         )
       ) : (
         <>
-          {isResults ? (
+          {isResults && !employer ? (
             <div className="mb-6 rounded-xl border border-border bg-surface/30">
               <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-foreground">
-                <Compass className="size-4 text-brand" /> Refine search
+                <Compass className="size-4 text-brand-text" /> Refine search
                 <ChevronDown className={cn("ml-auto size-4 text-muted transition-transform", refineOpen && "rotate-180")} />
               </button>
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
-                  <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
+                  <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} disabled={running} />
                   <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" filters={filters} />
                 </div>
               )}
             </div>
           ) : (
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
-              <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
+              <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} disabled={running} />
               <div className="mt-5">
                 <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" filters={filters} />
               </div>
             </div>
           )}
 
-          {isResults && firstRun && (
+          {isResults && firstRun && !employerOutcome && (
             <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
               <Sparkles className="mt-0.5 size-4 shrink-0 text-emerald-500" />
               <p className="text-[13px] leading-relaxed text-foreground">
@@ -222,7 +222,7 @@ export function ExplorerView({
 
       {!scanRunning && !isAi && (
         <>
-          {phase === "empty-current" && (
+          {!employerOutcome && phase === "empty-current" && (
             <EmptyState
               tone="good"
               title="You're all caught up."
@@ -235,7 +235,7 @@ export function ExplorerView({
               rerunLabel="Look back 30 days"
             />
           )}
-          {phase === "empty-loose" && (
+          {!employerOutcome && phase === "empty-loose" && (
             <EmptyState
               tone="loose"
               title="No fresh matches — yet."
@@ -248,7 +248,7 @@ export function ExplorerView({
               rerunLabel="Widen to 30 days · clear location"
             />
           )}
-          {phase === "degraded" && (
+          {!employerOutcome && phase === "degraded" && (
             <DegradedCard
               onRetry={() => void discover()}
               companiesScanned={companiesScanned}
@@ -258,7 +258,7 @@ export function ExplorerView({
               partial={partial}
             />
           )}
-          {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discover()} />}
+          {!employerOutcome && phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discover()} />}
         </>
       )}
     </div>
@@ -266,17 +266,20 @@ export function ExplorerView({
 }
 
 function DiscoverBar({ canDiscover, onDiscover, label, filters }: { canDiscover: boolean; onDiscover: () => void; label: string; filters: ExploreFilters }) {
+  const { running } = useExplore();
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button
         type="button"
-        disabled={!canDiscover}
-        onClick={onDiscover}
+        disabled={!canDiscover && !running}
+        aria-disabled={!canDiscover}
+        aria-describedby={filters.preset === CHINA_PRESET ? "employer-selection" : undefined}
+        onClick={() => { if (canDiscover) onDiscover(); }}
         className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50 max-sm:min-h-[44px]"
       >
         <Compass className="size-4" /> {label}
       </button>
-      <ScheduleJobAction filters={filters} />
+      {filters.preset !== CHINA_PRESET && <ScheduleJobAction filters={filters} />}
       <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         Evaluating a role later costs tokens. Discovering never does.
@@ -288,13 +291,13 @@ function DiscoverBar({ canDiscover, onDiscover, label, filters }: { canDiscover:
 function EmptyState({ tone, title, body, note, onRerun, rerunLabel }: { tone: "good" | "loose"; title: string; body: string; note?: string; onRerun: () => void; rerunLabel: string }) {
   return (
     <div className="rounded-2xl border border-border bg-surface/30 px-6 py-12 text-center">
-      <div className={cn("mx-auto grid size-12 place-items-center rounded-full", tone === "good" ? "bg-emerald-500/12 text-emerald-500" : "bg-brand-soft text-brand")}>
+      <div className={cn("mx-auto grid size-12 place-items-center rounded-full", tone === "good" ? "bg-emerald-500/12 text-emerald-500" : "bg-brand-soft text-brand-text")}>
         <Sparkles className="size-6" />
       </div>
       <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>{title}</h2>
       <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">{body}</p>
       {note && <p className="mx-auto mt-1 max-w-md text-[12px] text-faint">{note}</p>}
-      <button onClick={onRerun} className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/50 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:border-brand/40 hover:text-brand">
+      <button onClick={onRerun} className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/50 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:border-brand/40 hover:text-brand-text">
         <RotateCcw className="size-4" /> {rerunLabel}
       </button>
     </div>
@@ -337,7 +340,7 @@ function DegradedCard({
       <AlertTriangle className="mx-auto size-6 text-amber-500" />
       <p className="mt-2 text-sm font-medium text-foreground">{title}</p>
       <p className="mx-auto mt-1 max-w-md text-[13px] text-muted">{body}</p>
-      <button onClick={onRetry} className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand">
+      <button onClick={onRetry} className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand-text">
         <RotateCcw className="size-4" /> Retry the scan
       </button>
     </div>
@@ -353,7 +356,7 @@ function CappedBanner({ companiesScanned, companiesAvailable, onRefine }: { comp
         Showing a capped slice — searched {companiesScanned.toLocaleString()}
         {companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} companies.
       </span>
-      <button onClick={onRefine} className="font-medium text-brand hover:underline">
+      <button onClick={onRefine} className="font-medium text-brand-text hover:underline">
         Raise scan depth to search deeper
       </button>
     </div>
@@ -371,7 +374,7 @@ function FailedCard({ msg, scannerMissing, onRetry }: { msg: string; scannerMiss
   if (scannerMissing) {
     return (
       <div className="rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
-        <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand">
+        <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand-text">
           <Compass className="size-6" />
         </div>
         <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>Discovery needs the full toolkit</h2>
@@ -383,7 +386,7 @@ function FailedCard({ msg, scannerMissing, onRetry }: { msg: string; scannerMiss
           <Link href="/pipeline" className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-brand-foreground transition hover:brightness-110">
             Open pipeline
           </Link>
-          <Link href="/config" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand">
+          <Link href="/config" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand-text">
             Open Config
           </Link>
         </div>
@@ -395,7 +398,7 @@ function FailedCard({ msg, scannerMissing, onRetry }: { msg: string; scannerMiss
       <AlertTriangle className="mx-auto size-6 text-amber-500" />
       <p className="mt-2 text-sm font-medium text-foreground">Couldn’t finish the search.</p>
       <p className="mt-1 text-[13px] text-muted">{msg}</p>
-      <button onClick={onRetry} className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand">
+      <button onClick={onRetry} className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand-text">
         <RotateCcw className="size-4" /> Try again
       </button>
     </div>
@@ -405,7 +408,7 @@ function FailedCard({ msg, scannerMissing, onRetry }: { msg: string; scannerMiss
 function BlockedCard() {
   return (
     <div className="rounded-2xl border border-border bg-surface/30 px-6 py-12 text-center">
-      <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand">
+      <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand-text">
         <Sparkles className="size-6" />
       </div>
       <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>AI search needs a CLI</h2>

@@ -1,5 +1,6 @@
-// tests/scan-filtered-offers-recorded.test.mjs — what `location_filter` and
-// `max_posting_age_days` remove has to leave a trace in scan-history.tsv.
+// tests/scan-filtered-offers-recorded.test.mjs — what `title_filter`,
+// `location_filter` and `max_posting_age_days` remove has to leave a trace in
+// scan-history.tsv.
 //
 // Eleven filters can reject a job inside the scan loop, and exactly one of them
 // - the cooldown - wrote a scan-history row; everything the verify and guard
@@ -22,9 +23,9 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
-import { collectSeenUrls, collectSeenCompanyRoles, unrecordedOffers } from '../scan.mjs';
+import { collectSeenUrls, collectSeenCompanyRoles, unrecordedOffers, shouldDedupScanHistoryRow } from '../scan.mjs';
 
-console.log('\nscan.mjs — location- and age-filtered offers are recorded in scan-history.tsv');
+console.log('\nscan.mjs — title-, location- and age-filtered offers are recorded in scan-history.tsv');
 
 const TRACKER = `# Applications Tracker
 
@@ -58,12 +59,12 @@ const SCANNER_PATH_VARS = [
   'CAREER_OPS_DATA_DIR',
 ];
 
-function makeLane() {
+function makeLane(portalsYaml = PORTALS) {
   const dir = mkdtempSync(join(tmpdir(), 'scan-filtered-record-'));
   mkdirSync(join(dir, 'data'), { recursive: true });
   writeFileSync(join(dir, 'data', 'applications.md'), TRACKER);
   const portals = join(dir, 'portals.yml');
-  writeFileSync(portals, PORTALS);
+  writeFileSync(portals, portalsYaml);
   return { dir, portals };
 }
 
@@ -87,8 +88,8 @@ function historyRows(dir) {
     .slice(1)
     .filter(Boolean)
     .map((line) => {
-      const [url, , , title, , status = 'added'] = line.split('\t');
-      return { url, title, status };
+      const [url, , , title, company, status = 'added'] = line.split('\t');
+      return { url, title, company, status };
     });
 }
 
@@ -185,6 +186,79 @@ const BLOCKED = 'https://boards.example.com/fixture/2002';
   }
 }
 
+// 1d. A skipped_no_apply_control row pins nothing, so a later --verify scan
+// drops the same posting again. That repeat must not append a second row.
+{
+  const header = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\n';
+  const history = header + 'https://a.example.com/4\t2026-09-01\tp\tRole\tCo\tskipped_no_apply_control\n';
+  const droppedAgain = [{ url: 'https://a.example.com/4' }, { url: 'https://a.example.com/5' }];
+  const kept = unrecordedOffers(droppedAgain, 'skipped_no_apply_control', history).map((o) => o.url);
+  if (JSON.stringify(kept) === JSON.stringify(['https://a.example.com/5'])) {
+    pass('a posting dropped again for no Apply control is not recorded twice');
+  } else {
+    fail(`repeat no-apply-control drop kept ${JSON.stringify(kept)}, want only the new URL`);
+  }
+}
+
+// 1e. The title cut (#2695). Same board, but the filter now matches only the
+// Manager title, so the Analyst posting is rejected on title before the
+// location cut ever sees it. It has to be recorded as skipped_title, with the
+// company it came from, and only once across scans.
+{
+  const TITLE_PORTALS = PORTALS.replace('"Strategic Finance"', '"Manager"');
+  const { dir, portals } = makeLane(TITLE_PORTALS);
+  try {
+    runScan(dir, portals);
+    runScan(dir, portals);
+    const rows = historyRows(dir);
+    const rejected = rows.filter((r) => r.url === BLOCKED);
+    if (rejected.length === 1 && rejected[0].status === 'skipped_title') {
+      pass('a title-filtered posting is recorded as skipped_title, once across two scans');
+    } else {
+      fail(`title-filtered posting has ${rejected.length} row(s): ${JSON.stringify(rejected.map((r) => r.status))}`);
+    }
+    if (rejected[0]?.title === 'Strategic Finance Analyst' && rejected[0]?.company === 'Fixture Defense') {
+      pass('the skipped_title row carries the rejected title and its company');
+    } else {
+      fail(`skipped_title row is ${JSON.stringify(rejected[0])}`);
+    }
+    const kept = rows.find((r) => r.url === IN_RANGE);
+    if (kept && kept.status === 'added') {
+      pass('a title the filter passes is still recorded as added');
+    } else {
+      fail(`matching posting recorded as ${kept ? kept.status : 'nothing'}, want added`);
+    }
+  } catch (err) {
+    fail(`scan over the title fixture failed: ${err.message}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// 1f. Widening title_filter hands the posting back: the skipped_title row from
+// the narrow filter must not pin the URL once a keyword matches it.
+{
+  const TITLE_PORTALS = PORTALS.replace('"Strategic Finance"', '"Manager"');
+  const WIDE_PORTALS = PORTALS.replace('"Strategic Finance"', '"Manager"\n    - "Analyst"')
+    .replace('    - "India"\n', '    - "Nowhere"\n');
+  const { dir, portals } = makeLane(TITLE_PORTALS);
+  try {
+    runScan(dir, portals);
+    writeFileSync(portals, WIDE_PORTALS);
+    runScan(dir, portals);
+    const statuses = historyRows(dir).filter((r) => r.url === BLOCKED).map((r) => r.status);
+    if (JSON.stringify(statuses) === JSON.stringify(['skipped_title', 'added'])) {
+      pass('a keyword added to title_filter.positive gets the rejected posting back');
+    } else {
+      fail(`after widening title_filter the posting's rows are ${JSON.stringify(statuses)}, want ["skipped_title","added"]`);
+    }
+  } catch (err) {
+    fail(`widened title-filter scan failed: ${err.message}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // 2. --dry-run writes nothing, the same as every other history write.
 {
   const { dir, portals } = makeLane();
@@ -209,20 +283,30 @@ const BLOCKED = 'https://boards.example.com/fixture/2002';
   const LOC = 'https://boards.example.com/fixture/3001';
   const AGE = 'https://boards.example.com/fixture/3002';
   const DEAD = 'https://boards.example.com/fixture/3003';
+  const NOAPPLY = 'https://boards.example.com/fixture/3004';
+  const TITLE = 'https://boards.example.com/fixture/3005';
   const scanHistoryText = [
     HEADER,
     `${LOC}\t2026-01-01\tlocal-parser\tAnalyst\tFixture\tskipped_location\tBengaluru, India`,
     `${AGE}\t2026-01-01\tlocal-parser\tEngineer\tFixture\tskipped_age\tBerlin, Germany`,
     `${DEAD}\t2026-01-01\tlocal-parser\tManager\tFixture\tskipped_expired\tBerlin, Germany`,
+    `${NOAPPLY}\t2026-01-01\tlocal-parser\tDeveloper\tFixture\tskipped_no_apply_control\tBerlin, Germany`,
+    `${TITLE}\t2026-01-01\tlocal-parser\tRecruiter\tFixture\tskipped_title\tBerlin, Germany`,
     '',
   ].join('\n');
 
   const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText });
 
-  if (!seen.has(LOC) && !seen.has(AGE)) {
-    pass('skipped_location and skipped_age pin nothing — a widened threshold hands the posting back');
+  if (!seen.has(LOC) && !seen.has(AGE) && !seen.has(TITLE)) {
+    pass('skipped_title, skipped_location and skipped_age pin nothing — a widened setting hands the posting back');
   } else {
-    fail(`config-rejected rows pinned their URLs (location: ${seen.has(LOC)}, age: ${seen.has(AGE)})`);
+    fail(`config-rejected rows pinned their URLs (title: ${seen.has(TITLE)}, location: ${seen.has(LOC)}, age: ${seen.has(AGE)})`);
+  }
+
+  if (!seen.has(NOAPPLY) && !shouldDedupScanHistoryRow({ firstSeen: '2026-01-01', status: 'skipped_no_apply_control' })) {
+    pass('skipped_no_apply_control pins nothing — a page the check could not read is verified again');
+  } else {
+    fail('skipped_no_apply_control still pins its URL, so a live posting is dropped for good');
   }
 
   if (seen.has(DEAD)) {

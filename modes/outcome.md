@@ -38,12 +38,12 @@ Record the outcome of an application conversationally, archive per-application a
 Run the helper script:
 
 ```bash
-node outcome.mjs <report#|company> <outcome_type> [--stage "..."] [--feedback "..."] [--note "..."] [--role "..."] [--clean-output]
+node outcome.mjs <tracker#|company> <outcome_type> [--stage "..."] [--feedback "..."] [--note "..."] [--role "..."] [--clean-output]
 ```
 
 ### Script CLI Options
 
-- `<report#|company>`: Application selector (# or company name)
+- `<tracker#|company>`: Application selector: the row's `#` in the tracker or the company name. A bare number is the tracker `#`, not the report number; the two differ once any row has no report, so prefer the company (with `--role`) when you only know the report number
 - `<outcome_type>`: `interview_progress` | `offer_received` | `hired` | `offer_declined` | `rejected` | `no_response` | `interview_only`
 - `--stage "..."`: Specific interview stage reached (e.g. "Tech Screen", "System Design", "Final Round")
 - `--feedback "..."`: Verbatim feedback from recruiter or interviewer (never paraphrased)

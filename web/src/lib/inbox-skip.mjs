@@ -9,35 +9,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { postingUrl } from "./posting-url.mjs";
+import { sectionKind } from "./core/pipeline-sections.mjs";
 
-const MAX_URL_LEN = 2048;
+export { postingUrl };
+
 const CHECKBOX_LINE = /^(\s*-\s*)\[([ xX])\](.*)$/;
-const PENDING_HEADING = /^##\s+(Pending|Pendientes)\s*$/i;
-
-/**
- * Accept only a real http(s) posting URL. Anything else (relative paths,
- * file:/javascript:/data:, newlines) is refused so a Skip cannot be turned
- * into a write outside pipeline.md.
- *
- * @param {unknown} raw
- * @returns {string | null} trimmed URL, or null when it is not a posting URL
- */
-export function postingUrl(raw) {
-  if (typeof raw !== "string") return null;
-  const s = raw.trim();
-  if (!s || s.length > MAX_URL_LEN) return null;
-  if (/[\0\r\n]/.test(s)) return null;
-  let u;
-  try {
-    u = new URL(s);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-  if (!u.hostname) return null;
-  if (u.username || u.password) return null;
-  return s;
-}
 
 /**
  * Job URL on a pipeline checkbox line — the first `|` cell, same rule as
@@ -55,7 +32,7 @@ function pendingRange(lines) {
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
-    if (PENDING_HEADING.test(t)) {
+    if (sectionKind(t) === "pending") {
       start = i + 1;
       continue;
     }

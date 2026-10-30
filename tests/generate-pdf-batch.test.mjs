@@ -25,9 +25,11 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ownRootEnv, ROOT, NODE, SANDBOX_DATA_ROOT } from './helpers.mjs';
 
-const outputRoot = join(ROOT, 'output');
+// Under the suite's own data root, not the checkout's output/: that directory
+// is the developer's, and an interrupted run left this fixture in it (#5113).
+const outputRoot = join(SANDBOX_DATA_ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
 // realpathSync, not the raw mkdtemp path: Node resolves both `import.meta.url`
 // and a module's node_modules walk from a file's REALPATH, while
@@ -63,6 +65,9 @@ copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-m
 // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at module
 // scope, so the copy needs it for the same reason.
 copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+// pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the
@@ -165,7 +170,7 @@ function run(args, { env, cwd } = {}) {
     cwd: cwd || sandbox,
     encoding: 'utf-8',
     timeout: 30_000,
-    env: env ? { ...process.env, ...env } : process.env,
+    env: ownRootEnv(env),
   });
   return { ...result, output: `${result.stdout || ''}${result.stderr || ''}` };
 }
@@ -289,7 +294,7 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     const result = spawnSync(NODE, [directRunner, join(sandbox, 'out', outputName), sandbox,
       ...(tokens === undefined ? [] : [JSON.stringify(tokens)])], {
       cwd: otherCwd, encoding: 'utf-8', timeout: 30_000,
-      env: { ...process.env, ...themedEnv },
+      env: ownRootEnv(themedEnv),
     });
     if (result.status === 0 && accepts(renderedHtml(outputName))) {
       pass(`imported PDF rendering honors ${label} theme selection from a different working directory`);
@@ -472,6 +477,38 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
   } else {
     fail(`--allow-nonchronological did not reach the batch path: status=${allowedOrder.status}\n${allowedOrder.output.trim()}`);
   }
+
+  // --- Test 10: locked sections are enforced in batch mode too. A CV modifying
+  // a locked section fails its own entry while valid entries still render. ---
+  mkdirSync(join(sandbox, 'config'), { recursive: true });
+  writeFileSync(join(sandbox, 'config', 'profile.yml'), 'cv:\n  locked_sections:\n    - Education\n', 'utf-8');
+  writeFileSync(join(sandbox, 'cv.md'), '# Education\n* Bachelor of Science\n\n# Work Experience\n* Software Engineer\n', 'utf-8');
+  writeFileSync(join(sandbox, 'locked-valid.html'), htmlDoc(
+    '<h2 class="section-title">Education</h2><p>Bachelor of Science</p><h2 class="section-title">Work Experience</h2><p>Software Engineer</p>',
+  ), 'utf-8');
+  writeFileSync(join(sandbox, 'locked-modified.html'), htmlDoc(
+    '<h2 class="section-title">Education</h2><p>B.S. altered</p><h2 class="section-title">Work Experience</h2><p>Software Engineer</p>',
+  ), 'utf-8');
+  const lockedBatchManifest = join(sandbox, 'locked-batch.json');
+  writeFileSync(lockedBatchManifest, JSON.stringify([
+    { input: 'locked-valid.html', output: 'out/locked-valid.pdf' },
+    { input: 'locked-modified.html', output: 'out/locked-modified.pdf' },
+  ]), 'utf-8');
+  const lockedBatchRes = run([`--batch=${lockedBatchManifest}`, '--skip-fact-check']);
+  const modifiedLeftNoPdf = !existsSync(join(sandbox, 'out', 'locked-modified.pdf'));
+  if (
+    lockedBatchRes.status === 1 &&
+    modifiedLeftNoPdf &&
+    existsSync(join(sandbox, 'out', 'locked-valid.pdf')) &&
+    /Locked section 'education' was modified during tailoring/.test(lockedBatchRes.output) &&
+    lockedBatchRes.output.includes('1 ok, 1 failed')
+  ) {
+    pass('generate-pdf --batch fails an entry whose locked section was modified and renders the rest');
+  } else {
+    fail(`batch skipped the locked-sections guard: status=${lockedBatchRes.status} pdfWritten=${!modifiedLeftNoPdf}\n${lockedBatchRes.output.trim()}`);
+  }
+  rmSync(join(sandbox, 'config', 'profile.yml'), { force: true });
+  rmSync(join(sandbox, 'cv.md'), { force: true });
 
   // ── A global flag the batch path drops must be refused, not ignored ────────
   //

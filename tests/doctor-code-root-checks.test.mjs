@@ -6,7 +6,7 @@
 // split checkout (CAREER_OPS_ROOT/CAREER_OPS_DATA_DIR, or the .career-ops-data
 // marker) getCareerOpsRoot() resolves to a separate data-only directory that
 // never holds either — jday013/maxmilian's proof on #3867: an empty
-// node_modules/ created inside the data root flips "Dependencies not
+// node_modules/ created inside the data root flipped "Dependencies not
 // installed" to "installed" even though the real code checkout's own
 // node_modules never moved. The inverse held for the tracked-.bak check, and
 // in two places: the human-readable checks array in main() AND the separate
@@ -19,11 +19,14 @@
 // already pins that it keeps checking the targeted directory. Here the split
 // is the ambient one a real installation hits — CAREER_OPS_ROOT set, no
 // --target — so codeRoot must fall back to doctor.mjs's own directory.
-import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync, sealProcessGitEnv } from './helpers.mjs';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\ndoctor.mjs — code-root checks stay on the code checkout under a split root (#3867)');
 
@@ -59,6 +62,7 @@ try {
   git(dataRoot, 'init', '-q');
   git(dataRoot, 'config', 'user.email', 'test@example.com');
   git(dataRoot, 'config', 'user.name', 'Test');
+  git(dataRoot, 'config', 'core.hooksPath', join(dataRoot, 'no-such-hooks'));
   writeFileSync(join(dataRoot, 'stray.md.bak'), 'a data-root backup that is not the code checkout\n', 'utf-8');
   git(dataRoot, 'add', 'stray.md.bak');
   git(dataRoot, 'commit', '-q', '-m', 'tracked backup living in the data root only');
@@ -69,7 +73,7 @@ try {
   if (plain.stderr) {
     fail(`doctor crashed under a split CAREER_OPS_ROOT (plain mode): ${plain.stderr}`);
   } else {
-    if (!/Dependencies not installed/.test(plain.out)) {
+    if (!/Dependencies (missing|could not be checked)/.test(plain.out)) {
       pass("checkDependencies() reads the code checkout's own node_modules, not the split data root");
     } else {
       fail(`checkDependencies() reported the code checkout's real node_modules as missing:\n${plain.out}`);

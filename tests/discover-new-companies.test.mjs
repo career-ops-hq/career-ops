@@ -11,10 +11,12 @@
  * - --help exits 0; missing history/value → nonzero exit; bad --since → nonzero exit
  * - default user-layer inputs resolve through CAREER_OPS_ROOT, independent of cwd
  * - --json subtracts already-tracked companies (canonical-name + alias match,
- *   disabled entries count as tracked)
+ *   disabled entries count as tracked, and a row on a board an entry reads)
  * - --min-rows, --added-only, --since window (undated rows pass)
+ * - skipped_title rows are ignored (#2695)
  * - ranking: 'added'-producing companies rank first
  * - default YAML output is the `companies: [{name}]` shape discover-ats consumes
+ * - --json / --summary output larger than a pipe buffer arrives whole
  *
  * Run: node test-all.mjs --only discover-new-companies
  *      A discovered suite reports through the shared counters; running the file
@@ -23,7 +25,7 @@
  * Issue #4181 — github.com/career-ops-hq/career-ops
  */
 
-import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -55,16 +57,20 @@ function row({ url = 'https://boards.greenhouse.io/acme/jobs/1', seen = today, p
 }
 
 /** Run the script against scratch fixtures; return parsed stdout. */
-function run(historyRows, portalsObj, args, { parse = 'json' } = {}) {
+function run(historyRows, portalsObj, args, { parse = 'json', blacklist = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'discover-new-'));
   try {
     const hist = join(dir, 'scan-history.tsv');
     const portals = join(dir, 'portals.yml');
+    // Always point at a scratch blacklist path (absent unless given) so the
+    // user's real data/blacklist.md never leaks into these fixtures.
+    const blacklistPath = join(dir, 'blacklist.md');
     writeFileSync(hist, HEADER + historyRows.join('\n') + '\n');
     writeFileSync(portals, yaml.dump(portalsObj || {}));
+    if (blacklist !== null) writeFileSync(blacklistPath, blacklist);
     const out = execFileSync('node', [scriptPath, ...args], {
       encoding: 'utf-8', timeout: 20000, cwd: dirname(scriptPath),
-      env: { ...process.env, CAREER_OPS_SCAN_HISTORY: hist, CAREER_OPS_PORTALS: portals },
+      env: { ...process.env, CAREER_OPS_SCAN_HISTORY: hist, CAREER_OPS_PORTALS: portals, CAREER_OPS_BLACKLIST: blacklistPath },
     });
     return parse === 'json' ? JSON.parse(out) : out;
   } finally {
@@ -111,6 +117,64 @@ for (const args of [
     run([row({ company: 'Acme' })], {}, args);
   } catch (e) { duplicateExit = e.status; }
   ok(`${args.join(' ')} rejects a duplicate value option`, duplicateExit !== 0);
+}
+
+// ── 1b. --flag=value form ───────────────────────────────────────────────────
+console.log('\n--- 1b. --flag=value form ---');
+
+{
+  // Each flag gets a row only it can drop: 'Recent' is inside the default
+  // 30-day window but outside --since 7; 'Once' has one row, under the
+  // default --min-rows 2 but kept by --min-rows 1.
+  const fifteenDaysAgo = new Date(Date.now() - 15 * 86_400_000).toISOString().slice(0, 10);
+  const history = [
+    row({ company: 'Acme', status: 'added' }),
+    row({ company: 'Acme' }),
+    row({ company: 'Recent', seen: fifteenDaysAgo }),
+    row({ company: 'Recent', seen: fifteenDaysAgo }),
+    row({ company: 'Once' }),
+  ];
+  const names = (res) => res.companies.map((c) => c.name).sort();
+  const spaced = names(run(history, {}, ['--since', '7', '--min-rows', '1', '--json']));
+  const equals = names(run(history, {}, ['--since=7', '--min-rows=1', '--json']));
+  eq('--since 7 --min-rows 1 returns Acme and Once only', spaced, ['Acme', 'Once']);
+  eq('--since=7 --min-rows=1 returns Acme and Once only', equals, ['Acme', 'Once']);
+  eq('--since=7 --min-rows=1 matches --since 7 --min-rows 1', equals, spaced);
+}
+
+{
+  let exit = 0;
+  try { run([row({ company: 'Acme' })], {}, ['--limit=100', '--json']); }
+  catch (e) { exit = e.status; }
+  ok('--limit=100 works', exit === 0);
+}
+
+{
+  // No --json: with it the script prints JSON and never writes the file.
+  const outDir = mkdtempSync(join(tmpdir(), 'discover-new-out-'));
+  try {
+    const outFile = join(outDir, 'out.yml');
+    run([row({ company: 'Acme' }), row({ company: 'Acme' })], {}, [`--out=${outFile}`], { parse: 'text' });
+    const doc = yaml.load(readFileSync(outFile, 'utf-8'));
+    ok('--out=<file> writes the companies YAML to that file',
+      Array.isArray(doc.companies) && doc.companies[0] && doc.companies[0].name === 'Acme');
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+}
+
+{
+  let exit = 0;
+  try { run([row({ company: 'Acme' })], {}, ['--since=', '--json']); }
+  catch (e) { exit = e.status; }
+  ok('--since= (empty value) exits 1', exit === 1);
+}
+
+{
+  let exit = 0;
+  try { run([row({ company: 'Acme' })], {}, ['--since=abc', '--json']); }
+  catch (e) { exit = e.status; }
+  ok('--since=abc exits 1', exit === 1);
 }
 
 {
@@ -168,7 +232,7 @@ for (const args of [
     rmSync(dataRoot, { recursive: true, force: true });
     rmSync(decoyCwd, { recursive: true, force: true });
   }
-  ok('missing data directory fails cleanly instead of reading cwd', missingDataExit !== 0);
+  ok('missing data directory fails cleanly instead of reading cwd', missingDataExit === 1);
 }
 
 // ── 2. Subtract already-tracked ───────────────────────────────────────────────
@@ -217,6 +281,35 @@ console.log('\n--- 2. Subtract already-tracked companies ---');
   eq('disabled tracked entry counts as tracked', res.companies.length, 0);
 }
 
+{
+  // The reverse sweep names companies by board slug, which no entry name
+  // matches: the board an entry reads must settle it instead.
+  const history = [
+    row({ company: 'injective-labs', url: 'https://jobs.ashbyhq.com/injective-labs/1' }),
+    row({ company: 'injective-labs', url: 'https://jobs.ashbyhq.com/injective-labs/2' }),
+    row({ company: 'ethereum-foundation', url: 'https://jobs.ashbyhq.com/ethereum-foundation/1' }),
+    row({ company: 'ethereum-foundation', url: 'https://jobs.ashbyhq.com/ethereum-foundation/2' }),
+    // One row off the tracked board, one on it: the tracked row decides.
+    row({ company: 'Foundation Co', url: 'https://jobs.example.org/foundation-co/1' }),
+    row({ company: 'Foundation Co', url: 'https://jobs.ashbyhq.com/foundation/9' }),
+    // The tracked-board row is outside the --since window; it still counts.
+    row({ company: 'Old Board Co', url: 'https://jobs.example.org/old-board-co/1' }),
+    row({ company: 'Old Board Co', url: 'https://jobs.lever.co/oldboard/1', seen: old }),
+    row({ company: 'Fresh Co', url: 'https://jobs.ashbyhq.com/fresh/1' }),
+    row({ company: 'Fresh Co', url: 'https://jobs.ashbyhq.com/fresh/2' }),
+  ];
+  const portals = {
+    tracked_companies: [
+      { name: 'Injective Labs', careers_url: 'https://jobs.ashbyhq.com/injective-labs' },
+      { name: 'Ethereum Foundation (EF)', api: 'https://api.ashbyhq.com/posting-api/job-board/ethereum-foundation', careers_url: 'https://jobs.ashbyhq.com/ethereum-foundation' },
+      { name: 'Injective Protocol', careers_url: 'https://jobs.ashbyhq.com/foundation' },
+      { name: 'Renamed Co', careers_url: 'https://jobs.lever.co/oldboard' },
+    ],
+  };
+  const res = run(history, portals, ['--min-rows', '1', '--json']);
+  eq('companies on a tracked board are excluded, whatever their name', res.companies.map((c) => c.name), ['Fresh Co']);
+}
+
 // ── 3. Filters ────────────────────────────────────────────────────────────────
 console.log('\n--- 3. Filters ---');
 
@@ -242,6 +335,24 @@ console.log('\n--- 3. Filters ---');
   const names = res.companies.map((c) => c.name);
   ok('--added-only keeps companies that produced an added row', names.includes('RealHit'));
   ok('--added-only drops never-added companies', !names.includes('FilteredOnly'));
+}
+
+{
+  // #2695: scan.mjs records every title rejection as skipped_title. An
+  // aggregator board carries many employers, so those rows name untracked
+  // companies whose only postings are off-target; they are not candidates.
+  const history = [
+    row({ company: 'OffTarget', status: 'skipped_title' }),
+    row({ company: 'OffTarget', status: 'skipped_title' }),
+    row({ company: 'Mixed', status: 'skipped_title' }),
+    row({ company: 'Mixed', status: 'skipped_location' }),
+    row({ company: 'Mixed', status: 'skipped_location' }),
+  ];
+  const res = run(history, {}, ['--min-rows', '2', '--json']);
+  const names = res.companies.map((c) => c.name);
+  ok('skipped_title rows do not make a company a candidate', !names.includes('OffTarget'));
+  const mixed = res.companies.find((c) => c.name === 'Mixed');
+  ok('skipped_title rows do not count toward --min-rows', mixed?.rows === 2);
 }
 
 {
@@ -287,6 +398,17 @@ console.log('\n--- 5. Output shape ---');
     Array.isArray(doc.companies) && doc.companies[0] && doc.companies[0].name === 'Acme');
 }
 
+{
+  // A pipe takes 64 KiB before the writer must wait for the reader; exiting
+  // straight after console.log dropped the rest of a larger result.
+  const history = Array.from({ length: 600 }, (_, i) => row({ company: `Company ${i}`, title: `Senior Software Engineer, Platform ${i}` }));
+  for (const flag of ['--json', '--summary']) {
+    const text = run(history, {}, ['--min-rows', '1', '--limit', '1000', flag], { parse: 'text' });
+    ok(`${flag} output over 64 KiB reaches a pipe whole (${text.length} bytes)`, text.length > 65536
+      && (flag === '--json' ? JSON.parse(text).companies.length === 600 : text.includes('Company 599') && text.includes('Next: ')));
+  }
+}
+
 // ── 6. Headerless legacy history ──────────────────────────────────────────────
 // Legacy scan-history.tsv files predate the header row and are never rewritten
 // (appendToScanHistory in scan.mjs). An unconditional skip of line 0 would drop
@@ -308,11 +430,32 @@ console.log('\n--- 6. Headerless legacy history ---');
     writeFileSync(portals, '{}\n');
     const out = execFileSync('node', [scriptPath, '--min-rows', '1', '--json'], {
       encoding: 'utf-8', timeout: 20000, cwd: dirname(scriptPath),
-      env: { ...process.env, CAREER_OPS_SCAN_HISTORY: hist, CAREER_OPS_PORTALS: portals },
+      env: { ...process.env, CAREER_OPS_SCAN_HISTORY: hist, CAREER_OPS_PORTALS: portals, CAREER_OPS_BLACKLIST: join(dir, 'blacklist.md') },
     });
     const names = JSON.parse(out).companies.map((c) => c.name).sort();
     eq('headerless file keeps its first company row', names, ['FirstRowCo', 'SecondCo']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// ── 7. Blacklist ────────────────────────────────────────────────────────────
+console.log('\n--- 7. data/blacklist.md is subtracted ---');
+
+{
+  const BL = '| Company | Since | Scope | Reason |\n|---|---|---|---|\n'
+    + '| BannedCo | 2026-01-01 | company | culture |\n'
+    + '| banned-host.example | 2026-01-01 | domain | same |\n';
+  const rows = [
+    row({ company: 'BannedCo' }), row({ company: 'BannedCo' }),
+    // Name not listed, but one row sits on a domain-scope host: the whole company goes.
+    row({ company: 'HostOnlyCo', url: 'https://jobs.banned-host.example/1' }),
+    row({ company: 'HostOnlyCo', url: 'https://boards.greenhouse.io/hostonly/jobs/2' }),
+    row({ company: 'KeptCo' }), row({ company: 'KeptCo' }),
+  ];
+  const out = run(rows, {}, ['--json'], { blacklist: BL });
+  eq('blacklisted companies (name and domain scope) are not emitted', out.companies.map((c) => c.name), ['KeptCo']);
+  eq('metadata.blacklistedSkipped counts them', out.metadata.blacklistedSkipped, 2);
+  const none = run(rows, {}, ['--json']);
+  eq('no blacklist file → nothing skipped', none.metadata.blacklistedSkipped, 0);
 }

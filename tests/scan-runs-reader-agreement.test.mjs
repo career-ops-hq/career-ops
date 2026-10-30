@@ -25,6 +25,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const url = (rel) => JSON.stringify(pathToFileURL(join(ROOT, rel)).href);
@@ -59,7 +60,7 @@ function roundTrip() {
       env: { ...process.env, CAREER_OPS_ROOT: dataRoot, CAREER_OPS_DATA_DIR: '' },
     });
     assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
-    assert.equal(r.status, 0, `child exited ${r.status}: ${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `child exited ${r.status}`));
     return JSON.parse(r.stdout);
   } finally {
     for (const d of [dataRoot, decoyCwd]) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

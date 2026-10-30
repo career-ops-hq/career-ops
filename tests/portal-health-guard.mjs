@@ -26,6 +26,11 @@ import { withPortalHealthLock } from '../portal-health-lock.mjs';
  * @returns {Promise<void>}
  */
 export async function applyScriptDirGuard({ path, existedBefore, marker, headerOnlyContent }) {
+  // Look before locking. `path` is the developer's live file, and the lock is
+  // a directory created beside it: taking it on every run wrote into the real
+  // data directory to confirm there was nothing to clean, and an interrupted
+  // run left the lock there (#5113). The check is repeated under the lock.
+  if (!existsSync(path) || !readFileSync(path, 'utf-8').includes(marker)) return;
   await withPortalHealthLock(path, async () => {
     if (!existsSync(path)) return; // never touched -- the expected, fixed case
     const current = readFileSync(path, 'utf-8');

@@ -1,11 +1,23 @@
+import { pathToFileURL } from "node:url";
 import { chromium, type Browser, type BrowserContext, type Page, type Frame, type Response } from "playwright-core";
+import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
+import { pickComboboxOption } from "./option-match.mjs";
+import { isResumeLabel } from "./resume-label.mjs";
 import { resolveCli } from "../clis";
 import { fencingReport } from "../cli-fencing.mjs";
 import { CAPS } from "../worker-capabilities.mjs";
+import { assertSafeApplyUrl, installApplyEgressGuard, isUnsafeApplyUrlError, isBlockedNavigation, UnsafeApplyUrlError } from "./url-guard.mjs";
+
+type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
+
+async function applyLaunch(): Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }> {
+  const file = resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope");
+  return import(/* webpackIgnore: true */ pathToFileURL(file).href) as Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }>;
+}
 
 /** The frame with the most interactive controls — where the agentic interpreter
  *  should look when deterministic extraction found nothing usable. */
@@ -31,15 +43,20 @@ function cssAttr(v: string): string {
 
 /** Navigate resiliently: a transient nav error / slow ATS shouldn't fail the
  *  whole apply. Up to 3 attempts with backoff; returns the navigation Response
- *  (status/headers feed the cheap status-block check). */
+ *  (status/headers feed the cheap status-block check). A blocked/private hop
+ *  is not retried — it is the same SSRF miss as a first-hop-only check. */
 async function gotoResilient(page: Page, url: string): Promise<Response | null> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await assertSafeApplyUrl(page.url());
       await page.waitForLoadState("load", { timeout: 8_000 }).catch(() => {});
+      await assertSafeApplyUrl(page.url());
       return resp;
     } catch (e) {
+      if (isUnsafeApplyUrlError(e)) throw e;
+      if (isBlockedNavigation(e)) throw new UnsafeApplyUrlError();
       lastErr = e;
       await page.waitForTimeout(800 * (attempt + 1));
     }
@@ -109,10 +126,6 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
   }
 }
 
-// A persistent apply SESSION keeps one real-form page open (headed-but-off-screen)
-// so we can: extract → (user verifies pre-filled answers) → FILL the real form →
-// bringToFront() for the human to submit it themselves. Headed (channel:chrome) =
-// the user's own Chrome on their residential IP (best ATS success); never submits.
 type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string };
 
 declare global {
@@ -128,18 +141,15 @@ const SESSIONS: Map<string, Session> = (globalThis.__coApplySessions ??= new Map
 async function headedBrowser(): Promise<Browser> {
   const b = globalThis.__coHeadedBrowser;
   if (b && b.isConnected()) return b;
+  const { HEADED_APPLY_LAUNCH, BUNDLED_HEADED_LAUNCH } = await applyLaunch();
   let nb: Browser;
   try {
-    nb = await chromium.launch({
-      channel: "chrome",
-      headless: false,
-      args: ["--window-position=-3200,-3200", "--window-size=1280,940"], // off-screen during fill; moved on-screen at handoff
-    });
+    nb = await chromium.launch(HEADED_APPLY_LAUNCH);
   } catch {
     // No system Google Chrome → fall back to Playwright's bundled Chromium if
     // present; otherwise a clear, actionable error.
     try {
-      nb = await chromium.launch({ headless: false, args: ["--window-position=-3200,-3200", "--window-size=1280,940"] });
+      nb = await chromium.launch(BUNDLED_HEADED_LAUNCH);
     } catch {
       throw new Error("The apply feature needs Google Chrome. Install Chrome (or run: npx playwright install chromium) and try again.");
     }
@@ -177,10 +187,14 @@ async function nudgeScroll(page: Page): Promise<void> {
 }
 
 export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+  // Refuse before launching any navigation, so an obviously-internal target
+  // never reaches Playwright at all.
+  await assertSafeApplyUrl(url);
   prune();
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer); // someone's active
   const browser = await headedBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await installApplyEgressGuard(context);
   context.setDefaultTimeout(8000); // no single action hangs the whole open/fill
   const page = await context.newPage();
   const abort = async (msg: string): Promise<never> => {
@@ -201,7 +215,14 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     }
   };
   // 1) Navigate (resilient) → cheapest hard-block check on the Response status.
-  const resp = await gotoResilient(page, url);
+  let resp: Response | null;
+  try {
+    resp = await gotoResilient(page, url);
+  } catch (e) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    throw e;
+  }
   await snap(); // first paint
   const sBlock = statusBlock(resp?.status(), resp ? resp.headers() : {});
   if (sBlock) return abort(sBlock.message);
@@ -310,15 +331,22 @@ export function getSession(id: string): Session | undefined {
 /** Open a bare headed page on a URL (for the agentic drive loop / validation),
  *  without the full extract pipeline. Caller must close the context. */
 export async function newDrivePage(url: string): Promise<{ page: Page; context: BrowserContext }> {
+  await assertSafeApplyUrl(url);
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer);
   const browser = await headedBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await installApplyEgressGuard(context);
   context.setDefaultTimeout(8000);
   const page = await context.newPage();
-  await gotoResilient(page, url);
-  await dismissConsent(page).catch(() => {});
-  await page.waitForTimeout(1000);
-  return { page, context };
+  try {
+    await gotoResilient(page, url);
+    await dismissConsent(page).catch(() => {});
+    await page.waitForTimeout(1000);
+    return { page, context };
+  } catch (e) {
+    await context.close().catch(() => {});
+    throw e;
+  }
 }
 
 /** Extract+enrich the current page (used after the drive loop reaches a form). */
@@ -386,7 +414,7 @@ export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: st
 /** True for a file field that wants the candidate's résumé/CV (vs. cover letter,
  *  portfolio, or a generic attachment we leave for the user). */
 function isResumeField(f: ApplyField): boolean {
-  return f.type === "file" && /resume|résumé|\bcv\b|curriculum|lebenslauf|currículum/i.test(f.label || "");
+  return f.type === "file" && isResumeLabel(f.label);
 }
 
 /** Fill the real form with verified answers, screenshotting after each field.
@@ -434,13 +462,10 @@ export async function fillSession(
         await s.frame.locator(`[data-co-field="${cssAttr(meta.id)}"]`).first().setInputFiles(cvPath);
         ok = true;
       } catch {
-        // fallback: any file input inside the same field container
-        try {
-          await s.frame.locator(`input[type=file]`).first().setInputFiles(cvPath);
-          ok = true;
-        } catch {
-          ok = false;
-        }
+        // A replaced/missing resume control does not identify another upload.
+        // The first file input may be a cover letter or portfolio: leave it for
+        // the user rather than attach the CV to an unrelated field.
+        ok = false;
       }
       steps.push({ fieldId: meta.id, label: `${meta.label || "Resume"} (CV attached)`, ok, thumb: await shoot() });
     }
@@ -468,24 +493,22 @@ export async function fillSession(
         await loc.scrollIntoViewIfNeeded().catch(() => {});
         await loc.click();
         await s.page.waitForTimeout(150);
-        await loc.pressSequentially(value, { delay: 15 }).catch(async () => {
-          await s.page.keyboard.type(value);
+        // No line breaks reach the keyboard: an Enter in a form can submit it.
+        const typed = String(value).replace(/[\r\n]+/g, " ");
+        await loc.pressSequentially(typed, { delay: 15 }).catch(async () => {
+          await s.page.keyboard.insertText(typed);
         });
         await s.page.waitForTimeout(300);
-        const esc = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const menu = '.select__menu .select__option, .select__menu-list [role="option"], [class*="menu" i] [role="option"]';
-        const exact = s.frame.locator(menu).filter({ hasText: new RegExp(`^\\s*${esc}\\s*$`, "i") }).first();
-        if (await exact.count()) {
-          await exact.click();
+        const options = s.frame.locator(menu);
+        const pick = pickComboboxOption(await options.allInnerTexts(), value);
+        if (pick >= 0) {
+          await options.nth(pick).click();
         } else {
-          // fall back to the first option that contains the typed text; else give
-          // up (Escape closes the menu) — leave it for the human, never submit.
-          const partial = s.frame.locator(menu).filter({ hasText: new RegExp(esc, "i") }).first();
-          if (await partial.count()) await partial.click();
-          else {
-            await s.page.keyboard.press("Escape").catch(() => {});
-            gaveUp = true;
-          }
+          // No exact or single whole-word option: Escape closes the menu and the
+          // field is left for the person. Never Enter, never submit.
+          await s.page.keyboard.press("Escape").catch(() => {});
+          gaveUp = true;
         }
       } else if (meta.type === "select") {
         await loc.selectOption({ label: value }).catch(async () => {

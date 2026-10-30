@@ -1,6 +1,6 @@
 /**
  * @typedef {{ type: "text", text: string } | { type: "tool", name: string } | { type: "status", label: string }} JobProgress
- * @typedef {{ status: "done", tokens?: number, costUsd?: number } | { status: "error", message: string }} JobCompletion
+ * @typedef {{ status: "done", tokens?: number, costUsd?: number, reportN?: number } | { status: "error", message: string }} JobCompletion
  */
 
 /**
@@ -34,6 +34,7 @@ export async function readJobStream(stream, onProgress) {
         status: "done",
         ...(typeof event.tokens === "number" ? { tokens: event.tokens } : {}),
         ...(typeof event.costUsd === "number" ? { costUsd: event.costUsd } : {}),
+        ...(typeof event.reportN === "number" ? { reportN: event.reportN } : {}),
       };
     }
     if (event?.type === "text" && typeof event.text === "string") onProgress(event);

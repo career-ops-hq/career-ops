@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { pdfIndexEntryForReport, pdfPathForReport, reportNumberFromCell } from "../../src/lib/apply/cv-selection.mjs";
+import { parsePdfManifestRows, pdfIndexEntryForReport, pdfPathForReport, reportNumberFromCell } from "../../src/lib/apply/cv-selection.mjs";
 
 test("reportNumberFromCell only accepts markdown report links", () => {
   assert.equal(reportNumberFromCell("[010]"), null);
@@ -86,4 +86,35 @@ test("pdfIndexEntryForReport can be asked for the cover instead", () => {
   ].join("\n");
 
   assert.deepEqual(pdfIndexEntryForReport(index, 10, "cover"), { found: true, path: "output/cover-010-acme.pdf" });
+});
+
+test("parsePdfManifestRows extracts structured entries and defaults missing kind to cv", () => {
+  const index = [
+    "# report\tpdf\thtml\tformat\tdate\tkind",
+    "010\toutput/cv-010.pdf\toutput/cv-010.html\tletter\t2026-08-01\tcv",
+    "011\toutput/cover-011.pdf\t\ta4\t2026-08-02\tcover",
+    "012\toutput/legacy-012.pdf\t\tletter\t2026-08-03", // missing kind column
+    "013\toutput/blank-kind.pdf\t\tletter\t2026-08-04\t  ", // whitespace-only kind
+    "014\toutput/other.pdf\t\tletter\t2026-08-05\tportfolio", // unknown kind
+  ].join("\n");
+
+  const rows = parsePdfManifestRows(index);
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows[0], {
+    reportId: "010",
+    pdf: "output/cv-010.pdf",
+    format: "letter",
+    date: "2026-08-01",
+    kind: "cv",
+  });
+  assert.deepEqual(rows[1], {
+    reportId: "011",
+    pdf: "output/cover-011.pdf",
+    format: "a4",
+    date: "2026-08-02",
+    kind: "cover",
+  });
+  assert.equal(rows[2].kind, "cv");
+  assert.equal(rows[3].kind, "cv");
+  assert.equal(rows[4].kind, "unknown");
 });

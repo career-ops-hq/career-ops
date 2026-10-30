@@ -15,6 +15,8 @@ import { nextScheduledRun } from "../src/lib/scheduled-cadence.mjs";
 import { isMainModule } from "../../lib/is-main-module.mjs";
 import { scheduledRunnerResourcePath, scheduledStorePath } from "../src/lib/scheduled-runner-path.mjs";
 import { getCareerOpsRoot } from "../../path-resolver.mjs";
+import { getProfilePath } from "../src/lib/core/profile-path.mjs";
+import { scanFailureMessage } from "../src/lib/scheduled-scan-error.mjs";
 
 const CODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const MAX_RUNS = 100;
@@ -40,7 +42,7 @@ export function enqueueDueJobs(store, nowMs = Date.now()) {
       queued += 1;
     }
 
-    const nextRunAt = nextScheduledRun(dueAt, job.every, job.unit, nowMs, job.timezone || "UTC");
+    const nextRunAt = nextScheduledRun(job.startAt, job.every, job.unit, nowMs, job.timezone || "UTC");
     if (nextRunAt) job.nextRunAt = nextRunAt;
     job.updatedAt = new Date(nowMs).toISOString();
   }
@@ -177,21 +179,18 @@ function writeJobPortals(root, job) {
   return tempPath;
 }
 
-function firstErrorLine(result) {
-  const raw = result.stderr || result.error?.message || `scanner exit ${result.status ?? "unknown"}`;
-  return String(raw).split(/\r?\n/).find(Boolean)?.slice(0, 300) || "Scan failed";
-}
-
 /*
  * Keep the temporary portal overlay scoped to each retry. A thrown setup or
  * spawn error is retryable just like a non-zero scanner exit, while cleanup
- * still runs before the next attempt.
+ * still runs before the next attempt. A scanner that ran into the timeout is
+ * not retried: the same sweep would hit the same limit, three times over.
  */
 
 export function executeJob(root, job, options = {}) {
   const spawnFn = options.spawnFn || spawnSync;
   const startedAt = Date.now();
   let lastError = "Scan failed";
+  let finalAttempt = MAX_ATTEMPTS;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     let tempPortals = null;
@@ -203,7 +202,14 @@ export function executeJob(root, job, options = {}) {
         [command.script, ...command.args],
         {
           cwd: CODE_ROOT,
-          env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_PORTALS: tempPortals },
+          env: {
+            ...process.env,
+            CAREER_OPS_ROOT: root,
+            CAREER_OPS_PORTALS: tempPortals,
+            // The scanner runs with cwd = the checkout; a relative override is
+            // resolved here, the way the web resolves it, so both read one file.
+            ...(process.env.CAREER_OPS_PROFILE?.trim() ? { CAREER_OPS_PROFILE: getProfilePath(root) } : {}),
+          },
           encoding: "utf8",
           timeout: SCAN_TIMEOUT_MS,
           maxBuffer: MAX_OUTPUT_BYTES,
@@ -221,9 +227,13 @@ export function executeJob(root, job, options = {}) {
           message: `Scan finished with ${rolesFound} matching role${rolesFound === 1 ? "" : "s"}.`,
         };
       }
-      lastError = firstErrorLine(result);
+      lastError = scanFailureMessage(result, { timeoutMs: SCAN_TIMEOUT_MS });
+      if (result.error?.code === "ETIMEDOUT") {
+        finalAttempt = attempt;
+        break;
+      }
     } catch (error) {
-      lastError = firstErrorLine({ error });
+      lastError = scanFailureMessage({ error });
     } finally {
       if (tempPortals) {
         try {
@@ -237,7 +247,7 @@ export function executeJob(root, job, options = {}) {
 
   return {
     state: "failed",
-    attempt: MAX_ATTEMPTS,
+    attempt: finalAttempt,
     rolesFound: 0,
     durationMs: Date.now() - startedAt,
     message: lastError,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applicationKey, applySavedStatus, saveStatus } from "../../src/lib/pipeline-status.mjs";
+import { applicationKey, applySavedStatus, saveStatus, undoStatus } from "../../src/lib/pipeline-status.mjs";
 
 const row = { n: "11", company: "Fixture Alpha", role: "Engineer", date: "2026-10-02", report: "", status: "Evaluated" };
 const other = { ...row, n: "12", company: "Fixture Beta" };
@@ -77,4 +77,19 @@ for (const body of [null, {}, { ok: false, status: "Applied" }, { ok: true }, { 
 
 test("HTML 200 is not confirmation", async () => {
   await assert.rejects(saveStatus("11", "Evaluated", "Applied", async () => new Response("<html>login</html>")), /Could not confirm/);
+});
+
+test("undo asks the status endpoint to take back the row's last change", async () => {
+  const restored = await undoStatus("11", async (url, options) => {
+    assert.equal(url, "/api/status");
+    assert.equal(options.method, "POST");
+    assert.deepEqual(JSON.parse(options.body), { n: "11", undo: true });
+    return Response.json({ ok: true, status: "Evaluated", changed: true });
+  });
+  assert.equal(restored, "Evaluated");
+});
+
+test("undo failures carry the endpoint's message", async () => {
+  await assert.rejects(undoStatus("11", async () => Response.json({ error: "#11 has no logged status change to undo", code: "nothing-to-undo" }, { status: 404 })), /no logged status change/);
+  await assert.rejects(undoStatus("11", async () => Response.json({ ok: true })), /Could not confirm/);
 });

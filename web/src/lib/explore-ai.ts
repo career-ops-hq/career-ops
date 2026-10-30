@@ -53,6 +53,59 @@ function toOffer(raw: unknown): DiscoveredOffer | null {
   };
 }
 
+/**
+ * Server side of the known-URL dedup: passes the AI's text through unchanged
+ * except for `<<offer:…>>` envelopes whose URL is already known (scan history,
+ * inbox), which it drops. /api/explore/ai runs it on the stream so the full
+ * known set never has to be sent to the browser. The envelope grammar, the
+ * offer reading and the URL key are the client parser's own, so both sides
+ * agree on what an offer and its key are. A malformed envelope passes through
+ * for the client to report.
+ */
+export function makeKnownOfferFilter(known: Set<string>) {
+  let buf = "";
+  return {
+    feed(delta: string): string {
+      buf += delta;
+      let out = "";
+      for (;;) {
+        const open = buf.indexOf(OPEN);
+        if (open === -1) {
+          // Hold back a trailing partial opener, as the client parser does.
+          const hold = pendingOpenerLen(buf, OPEN);
+          out += buf.slice(0, buf.length - hold);
+          buf = buf.slice(buf.length - hold);
+          return out;
+        }
+        out += buf.slice(0, open);
+        const close = buf.indexOf(CLOSE, open + OPEN.length);
+        if (close === -1) {
+          buf = buf.slice(open);
+          return out;
+        }
+        const envelope = buf.slice(open, close + CLOSE.length);
+        const json = buf.slice(open + OPEN.length, close);
+        buf = buf.slice(close + CLOSE.length);
+        let offer: DiscoveredOffer | null = null;
+        try {
+          offer = toOffer(JSON.parse(json));
+        } catch {
+          offer = null;
+        }
+        const key = offer ? canon(offer.url) : "";
+        if (key && known.has(key)) continue;
+        out += envelope;
+      }
+    },
+    /** Whatever is still buffered when the stream ends. */
+    flush(): string {
+      const rest = buf;
+      buf = "";
+      return rest;
+    },
+  };
+}
+
 export function makeAiStreamParser(opts?: { knownUrls?: Set<string> }) {
   const known = opts?.knownUrls ?? new Set<string>();
   const seen = new Set<string>();

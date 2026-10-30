@@ -37,6 +37,15 @@
  *      role but never merges titles that differ by a city, country, language,
  *      segment or seniority word.
  *
+ *   3. SAME SOURCE. A repost is the same site listing the role again under a
+ *      new URL. scan-history.tsv mixes many sources — the employer's ATS, job
+ *      boards, aggregators, alert emails — and one live opening is routinely
+ *      picked up by two of them on different days: the ATS scan finds it on
+ *      Monday, a job-board copy arrives on Thursday. Grouped across sources,
+ *      that reads as a repost even though the opening was listed once and
+ *      never changed. Membership therefore also requires the same source host
+ *      (see sourceHost); a cross-source sighting is a duplicate, not a repost.
+ *
  * ONE CASE THE TITLE RULE CANNOT SETTLE: a multi-employer aggregator. Its board
  * carries many different employers' postings under its own name, so identical
  * titles there are genuinely different jobs and every rule above rests on an
@@ -62,13 +71,14 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 // Namespace import, not default: js-yaml 5.x drops the default export, and
 // #2656 migrated the rest of the repo for exactly that reason.
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 import { parseScanHistoryLine, scanHistoryLineHasColumn } from './lib/scan-history-columns.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -118,14 +128,6 @@ const windowDays = intFlag('--window', DEFAULT_WINDOW_DAYS);
 const minSpanDays = intFlag('--min-span', MIN_REPOST_SPAN_DAYS);
 
 // --- Date helpers ---
-function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 function daysBetween(d1, d2) {
   return Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
 }
@@ -203,16 +205,14 @@ export function companyKey(row) {
 // that card would be titled with the normalized key — "joinupch" rather than
 // "joinup.ch". Map.has() is identical to Set.has() on the matching path.
 // BOTH collections, not just tracked_companies. A multi-employer board is far
-// likelier to live under `job_boards` — that is what the section is for — and
-// the two entries this template ships the flag on (Founderful, joinup.ch) are
-// both there. Reading only one collection made the shipped default load ZERO
-// aggregators while looking configured, which is the worst version of this: a
-// flag the user can see in their own config and that silently does nothing.
+// likelier to live under `job_boards` — that is what the section is for — so
+// reading only one collection would leave a flag the user can see in their own
+// config silently doing nothing.
 export function loadAggregatorCompanies(portalsPath = PORTALS_PATH) {
   const found = new Map();
   try {
     if (!existsSync(portalsPath)) return found;
-    const doc = yaml.load(readFileSync(portalsPath, 'utf-8'));
+    const doc = loadYaml(readFileSync(portalsPath, 'utf-8'));
     for (const entries of [doc?.tracked_companies, doc?.job_boards]) {
       if (!Array.isArray(entries)) continue;
       for (const entry of entries) {
@@ -396,8 +396,21 @@ function detectRepostsInGroup(rows, windowDays, minSpan = MIN_REPOST_SPAN_DAYS) 
   return results;
 }
 
+// The site a posting URL belongs to, for constraint 3 of the header: hostname,
+// lowercased, without `www.` or a two-letter regional prefix (`de.linkedin.com`
+// and `www.linkedin.com` are one site; a role re-listed across them is still a
+// repost). Unparseable URLs keep the raw string, so they never merge with
+// anything but themselves.
+export function sourceHost(url) {
+  let host;
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return String(url); }
+  const labels = host.split('.');
+  if (labels.length > 2 && (labels[0] === 'www' || /^[a-z]{2}$/.test(labels[0]))) labels.shift();
+  return labels.join('.');
+}
+
 // Group one company's rows into title groups: all rows sharing a
-// titleIdentityKey land in one group.
+// titleIdentityKey and a sourceHost land in one group.
 //
 // This is a single O(N) bucketing pass. It replaced a nested loop that compared
 // every pair of titles with roleFuzzyMatch, and then an inverted token index
@@ -421,7 +434,7 @@ function groupRowsByTitle(rows) {
   const groups = [];
   const groupOfKey = new Map();
   for (const row of rows) {
-    const key = titleIdentityKey(row.title);
+    const key = `${titleIdentityKey(row.title)}\u0000${sourceHost(row.url)}`;
     let idx = groupOfKey.get(key);
     if (idx === undefined) {
       idx = groups.length;
@@ -607,6 +620,20 @@ function runSelfTest() {
     scanRow('https://jobs.example.com/initech/2', '2026-01-10', 'Channel Account Manager - Spain', 'Initech'),
   ];
   check(detectReposts(perCountry, DEFAULT_WINDOW_DAYS).length === 0, 'two countries\' requisitions are not a repost');
+
+  // Shape 4 — one opening picked up by two sources on different days: the
+  // employer's ATS first, a job-board copy later. Same company, same title,
+  // different URLs, a real span — and still one listing, not a repost.
+  const crossSource = [
+    scanRow('https://jobs.ashbyhq.com/hooli/1', '2026-01-10', 'Senior Product Manager', 'Hooli'),
+    scanRow('https://www.jobboard.example/jobs/hooli-senior-pm-77', '2026-01-14', 'Senior Product Manager', 'Hooli'),
+  ];
+  check(detectReposts(crossSource, DEFAULT_WINDOW_DAYS).length === 0, 'one opening seen on two sources is not a repost');
+  check(
+    detectReposts([...crossSource, scanRow('https://jobs.ashbyhq.com/hooli/2', '2026-02-20', 'Senior Product Manager', 'Hooli')], DEFAULT_WINDOW_DAYS).length === 1,
+    'the same source re-listing the role under a new URL is still a repost',
+  );
+  check(sourceHost('https://de.linkedin.com/jobs/view/1') === sourceHost('https://www.linkedin.com/jobs/view/2'), 'regional subdomains are one source');
   check(
     detectReposts(perCountry, DEFAULT_WINDOW_DAYS, 0).length === 0,
     'a trailing country word splits the titles even with the span floor disabled',

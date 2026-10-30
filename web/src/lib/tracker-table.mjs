@@ -10,11 +10,12 @@
  * next.config.mjs) and refuses modules outside it, so the shared source is a
  * JSON file read with fs, like every other career-ops file this app consumes.
  *
- * Plain .mjs (same pattern as clean-chips.mjs) so tracker-columns-tests.mjs can
+ * Plain .mjs (same pattern as clean-chips.mjs) so tests/tracker-columns.test.mjs can
  * import it directly under Node and regression-test the REAL alias chain.
  */
 import fs from "node:fs";
 import path from "node:path";
+import { readTrackerUrl } from "./posting-url.mjs";
 
 /**
  * Canonical tracker-parse field name → web Application field. The web type
@@ -27,6 +28,7 @@ import path from "node:path";
 const WEB_FIELD = {
   num: "n", date: "date", company: "company", via: "via", role: "role", location: "location",
   score: "score", status: "status", pdf: "pdf", report: "report", notes: "notes",
+  url: "url",
   // The tracker's Apply Link / Follow-up columns (already in the shared alias
   // table) were mapped nowhere, so the web read path silently dropped them.
   applylink: "applyLink", followup: "followUp",
@@ -117,6 +119,16 @@ function trackerCells(line) {
  * @returns {Record<string, number> | null}
  */
 export function detectColumnMap(lines, aliases) {
+  return detectHeader(lines, aliases)?.map ?? null;
+}
+
+/**
+ * detectColumnMap plus the header row's own cell count.
+ * @param {string[]} lines
+ * @param {Record<string, string>} aliases
+ * @returns {{ map: Record<string, number>, width: number } | null}
+ */
+function detectHeader(lines, aliases) {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line.startsWith("|")) continue;
@@ -127,7 +139,7 @@ export function detectColumnMap(lines, aliases) {
       const k = WEB_FIELD[aliases[c.toLowerCase()]];
       if (k) m[k] = i; // unconditional: last occurrence wins, same as detectColumns
     });
-    if (["n", "company", "role", "score", "status"].every((k) => m[k] != null)) return m;
+    if (["n", "company", "role", "score", "status"].every((k) => m[k] != null)) return { map: m, width: cells.length };
   }
   return null;
 }
@@ -165,16 +177,34 @@ function emptyRow(pick) {
   return row;
 }
 
+/**
+ * The URL column is stored as `[label](href)` (#3516). Hand the caller the
+ * href. Every other column stays the raw cell, including Apply Link.
+ * @param {string} field
+ * @param {string} raw
+ * @returns {string}
+ */
+function urlCell(field, raw) {
+  return field === "url" ? readTrackerUrl(raw) : raw;
+}
+
 export function parseApplications(md, rootDir, systemRootDir) {
   const lines = md.split("\n");
-  const map = detectColumnMap(lines, loadHeaderAliases(rootDir, systemRootDir));
+  const header = detectHeader(lines, loadHeaderAliases(rootDir, systemRootDir));
+  const map = header?.map ?? null;
   const mappedWidth = map ? Math.max(...Object.values(map)) + 1 : 0;
+  // The eight-cell floor for rows, lowered only for a header that is itself
+  // narrower (no PDF/Report column, which parseTrackerRow reads). For a header
+  // of eight or more cells it stays, so a seven-cell row that lost an interior
+  // cell under a header with unrecognized trailing columns is still dropped
+  // rather than read one column shifted.
+  const minCells = Math.min(8, header?.width ?? 8);
   const rows = [];
   for (const raw of lines) {
     const line = raw.trim();
     if (!line.startsWith("|")) continue;
     const cells = trackerCells(line);
-    if (cells.length < 8) continue;
+    if (cells.length < minCells) continue;
     if (map) {
       // Width guard, mirroring parseTrackerRow: a row missing an INTERIOR cell
       // shifts every later column one left, so requiring merely that the
@@ -190,7 +220,7 @@ export function parseApplications(md, rootDir, systemRootDir) {
       // while the emitter dropped it, and Apply Link / Follow-up be resolved
       // by the shared alias table and thrown away the same way. A field the
       // map has no index for reads "", exactly as before.
-      rows.push(emptyRow((k) => at(k)));
+      rows.push(emptyRow((k) => urlCell(k, at(k))));
     } else {
       // Legacy fixed order; tolerate the 8-cell variant where Notes is absent.
       if (!/^\d+$/.test(cells[0])) continue; // header / separator / malformed
@@ -199,8 +229,41 @@ export function parseApplications(md, rootDir, systemRootDir) {
       // fixed layout does not carry (via, location, applyLink, followUp)
       // stays "" without anyone having to remember to write it down.
       const positional = { n, date, company, role, score, status, pdf, report, notes: rest.join(" | ") };
-      rows.push(emptyRow((k) => positional[k] ?? ""));
+      rows.push(emptyRow((k) => urlCell(k, positional[k] ?? "")));
     }
   }
   return rows;
+}
+
+/**
+ * Why a tracker read produced the rows it did.
+ *
+ * `missing` is no file (the caller passes null). A new install is an empty
+ * list, and the file must not be created here. `empty` is a blank file or a
+ * real tracker table with no data rows. `malformed` is bytes that are not a
+ * tracker table; callers must leave the file alone. `rows` is at least one
+ * application.
+ *
+ * @param {string | null | undefined} md
+ * @param {string} [rootDir]
+ * @param {string} [systemRootDir]
+ * @returns {"missing" | "empty" | "malformed" | "rows"}
+ */
+export function classifyTracker(md, rootDir, systemRootDir) {
+  if (md == null) return "missing";
+  const text = String(md).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (parseApplications(text, rootDir, systemRootDir).length > 0) return "rows";
+  if (!text.trim()) return "empty";
+  const lines = text.split("\n");
+  if (detectHeader(lines, loadHeaderAliases(rootDir, systemRootDir))) return "empty";
+  // Alias table missing: a header whose first cell is the number column is
+  // still an empty tracker, not a damaged file.
+  const legacyHeader = lines.some((raw) => {
+    const line = raw.trim();
+    if (!line.startsWith("|")) return false;
+    const cells = trackerCells(line);
+    return cells.length >= 8 && /^(#|num)$/i.test(cells[0] ?? "");
+  });
+  if (legacyHeader) return "empty";
+  return "malformed";
 }

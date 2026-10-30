@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { atsVendorOf } from './ats-vendor.mjs';
-import { detectColumns, extractTrackerReportNumbers, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
+import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
+import { detectColumns, extractCellUrl, isHeaderRow, isSeparatorRow, linkedReportNumbers, reportUrlForNumbers as reportUrlFromReports } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveWorkspaceRoot } from './tracker-utils.mjs';
 
@@ -63,32 +64,8 @@ function seedOf(company, rawUrl, source) {
   };
 }
 
-function linkedReportNumbers(reportCell, notesCell) {
-  const link = String(reportCell ?? '').match(/\[([^\]]*)\]\(([^)]+)\)/);
-  if (!link) return extractTrackerReportNumbers(reportCell, notesCell);
-  // Reuse the tracker's canonical local-target validation. It rejects HTTP(S)
-  // and protocol-relative links, and returns both numbers on a label/target
-  // mismatch. Exactly one number therefore proves a local, self-consistent
-  // report link. A present-but-invalid link must not fall back to Notes.
-  const validated = extractTrackerReportNumbers(reportCell);
-  return validated.length === 1 ? validated : [];
-}
-
-function reportUrlForNumbers(reportNumbers, reportsRoot) {
-  if (!reportsRoot || !existsSync(reportsRoot) || reportNumbers.length === 0) return null;
-  let filenames;
-  try { filenames = readdirSync(reportsRoot); } catch { return null; }
-  for (const reportNum of reportNumbers) {
-    const reportName = filenames.find((name) => new RegExp(`^0*${reportNum}-.*\\.md$`, 'i').test(name));
-    if (!reportName) continue;
-    let report;
-    try { report = readFileSync(path.join(reportsRoot, reportName), 'utf-8'); } catch { continue; }
-    const match = report.match(/\*\*URL:\*\*[ \t]*(\S+)/);
-    if (!match) continue;
-    const url = match[1].replace(/^<|>$/g, '').replace(/[),.;]+$/, '');
-    if (atsVendorOf(url)) return url;
-  }
-  return null;
+export function reportUrlForNumbers(reportNumbers, reportsRoot, accept = atsVendorOf) {
+  return reportUrlFromReports(reportNumbers, reportsRoot, accept);
 }
 
 export function parseTrackerAtsSeeds(text, { reportsRoot } = {}) {
@@ -104,7 +81,11 @@ export function parseTrackerAtsSeeds(text, { reportsRoot } = {}) {
     // links to the evaluation report that owns the posting's **URL:** field.
     // Custom trackers may carry URL directly; prefer it but never scrape an
     // arbitrary Notes URL, which may be unrelated evidence.
-    const directUrl = columns.url == null ? null : cells[columns.url];
+    // The URL cell may be a markdown link (#3516): read its HREF through the
+    // shared extractor rather than relying on WEB_URL_RE happening to stop
+    // at the link's closing paren — the same contract every tracker reader
+    // follows, and one regex edit away from breaking if left implicit.
+    const directUrl = columns.url == null ? null : extractCellUrl(cells[columns.url]);
     const reportNumbers = linkedReportNumbers(
       columns.report == null ? '' : cells[columns.report],
       columns.notes == null ? '' : cells[columns.notes],
@@ -121,9 +102,9 @@ export function parseScanHistoryAtsSeeds(text) {
   const seeds = [];
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    const cells = line.split('\t');
-    if (String(cells[0]).trim().toLowerCase() === 'url') continue;
-    const seed = seedOf(cells[4], cells[0], 'scan-history');
+    const row = parseScanHistoryLine(line);
+    if (row.url.trim().toLowerCase() === 'url') continue;
+    const seed = seedOf(row.company, row.url, 'scan-history');
     if (seed) seeds.push(seed);
   }
   return seeds;

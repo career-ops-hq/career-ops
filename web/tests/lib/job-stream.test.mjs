@@ -61,6 +61,11 @@ test("confirmed completion forwards progress and preserves the reported usage", 
   assert.deepEqual(result, { status: "done", tokens: 1234, costUsd: 0.12 });
 });
 
+test("a done event carries the completed report number through to the client", async () => {
+  const { result } = await read([record({ type: "done", tokens: 10, costUsd: 0.01, reportN: 21 })]);
+  assert.deepEqual(result, { status: "done", tokens: 10, costUsd: 0.01, reportN: 21 });
+});
+
 test("the final done record is accepted without a trailing newline", async () => {
   const { result } = await read([JSON.stringify({ type: "done", tokens: 0, costUsd: 0 })]);
   assert.deepEqual(result, { status: "done", tokens: 0, costUsd: 0 });

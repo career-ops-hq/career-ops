@@ -32,6 +32,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -58,7 +59,7 @@ function resolvedPaths(dataRoot, cwd, { via = 'CAREER_OPS_ROOT' } = {}) {
     },
   });
   assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
-  assert.equal(r.status, 0, `child exited ${r.status}: ${r.stderr}`);
+  assert.equal(r.status, 0, describeSpawn(r, `child exited ${r.status}`));
   const m = r.stdout.match(/<<<PATHS>>>([\s\S]*?)<<<END>>>/);
   assert.ok(m, `no PATHS payload in child stdout: ${r.stdout.slice(0, 300)}`);
   return JSON.parse(m[1]);

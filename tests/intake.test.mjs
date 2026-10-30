@@ -314,6 +314,7 @@ if (process.platform !== 'win32' && process.getuid?.() !== 0) {
   const dataContractDoc = readFileSync(join(ROOT, 'DATA_CONTRACT.md'), 'utf-8');
   const gitignoreDoc = readFileSync(join(ROOT, '.gitignore'), 'utf-8');
   const updaterSrc = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  const manifestSrc = readFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), 'utf-8');
   const agentsDoc = readFileSync(join(ROOT, 'AGENTS.md'), 'utf-8');
   if (
     dataContractDoc.includes('documents/*')
@@ -323,8 +324,8 @@ if (process.platform !== 'win32' && process.getuid?.() !== 0) {
     && gitignoreDoc.includes('!documents/README.md')
     && gitignoreDoc.includes('data/intake-state.json')
     && updaterSrc.includes("'documents/'")
-    && updaterSrc.includes("'modes/intake.md'")
-    && updaterSrc.includes("'intake.mjs'")
+    && manifestSrc.includes("'modes/intake.md'")
+    && manifestSrc.includes("'intake.mjs'")
     && agentsDoc.includes('`intake`')
   ) {
     pass('intake registered in data contract, gitignore, updater manifest, and AGENTS.md routing');

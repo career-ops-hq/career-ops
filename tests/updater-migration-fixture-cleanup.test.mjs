@@ -23,13 +23,13 @@
 import { mkdtempSync, mkdirSync, copyFileSync, existsSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { pass, fail, NODE, ROOT, rmSync, hermeticGitEnv } from './helpers.mjs';
 import { gitIn } from '../update-system.mjs';
 
 console.log('\n🧪 Testing updater-migration-tests.mjs fixture cleanup...');
 
-const SUITE_FILES = ['update-system.mjs', 'updater-migration-tests.mjs', 'AGENTS.md', 'VERSION'];
+const SUITE_FILES = ['update-system.mjs', 'lib/update-manifest.mjs', 'updater-migration-tests.mjs', 'AGENTS.md', 'VERSION'];
 
 // Every proxy variable curl and git read, pointed at a closed local port. With
 // the fixture repository leaked, `check` gets past its guard and reaches for
@@ -46,7 +46,10 @@ const NO_NETWORK = {
 
 function makeCopy(dir) {
   mkdirSync(dir, { recursive: true });
-  for (const file of SUITE_FILES) copyFileSync(join(ROOT, file), join(dir, file));
+  for (const file of SUITE_FILES) {
+    mkdirSync(dirname(join(dir, file)), { recursive: true });
+    copyFileSync(join(ROOT, file), join(dir, file));
+  }
 }
 
 function spawnIn(cwd, fixtureDir, args) {

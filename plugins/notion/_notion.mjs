@@ -16,7 +16,7 @@
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from '../../lib/yaml-document.mjs';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const STATES_PATH = join(DIR, '..', '..', 'templates', 'states.yml');
@@ -26,14 +26,13 @@ const MAX = 1900; // safety margin under Notion's 2000-char rich_text limit
 let _states;
 function loadStates() {
   if (_states) return _states;
-  const doc = yaml.load(readFileSync(STATES_PATH, 'utf-8'));
-  const labels = [], aliasMap = {};
+  const doc = loadYaml(readFileSync(STATES_PATH, 'utf-8'));
+  const aliasMap = {};
   for (const s of doc.states) {
-    labels.push(s.label);
     aliasMap[s.label.toLowerCase()] = s.label;
     for (const a of (s.aliases || [])) aliasMap[String(a).toLowerCase()] = s.label;
   }
-  _states = { labels, aliasMap };
+  _states = { aliasMap };
   return _states;
 }
 /** Canonical label for a status (case-insensitive, alias-aware), or null. */
@@ -42,7 +41,6 @@ export function canonicalStatus(raw) {
   const key = String(raw).replace(/\*\*/g, '').trim().toLowerCase();
   return loadStates().aliasMap[key] || null;
 }
-export function statusLabels() { return loadStates().labels.slice(); }
 
 // ── text → rich_text for property values (chunk-safe under the 2000-char limit) ──
 export function rich(text) {

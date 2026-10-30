@@ -5,6 +5,7 @@
 // without an extension, ESM specifiers for plain JS modules must be fully
 // specified.
 import { isReservedReportFile } from "./report-files.mjs";
+import { claudeUsageTokens } from "./claude-usage.mjs";
 
 /**
  * Dashboard-friendly shape both `parseCodexEvent` and `parseClaudeEvent` return.
@@ -29,13 +30,14 @@ const STATUS_RECONNECTING = "Reconnecting…";
  * formula is the only place that difference is visible (adapted from #2689,
  * which reached this from the accounting side).
  *
- * The dashboard's metric is TOKENS BILLED AT FULL RATE — `/api/usage/route.ts`
- * defines it as input + output + cache-creation, deliberately omitting
- * discounted cache reads.
+ * The dashboard's Claude metric is TOTAL TOKEN ACTIVITY — input + output +
+ * cache creation + cache reads. Cache reads are discounted, so this is a
+ * context-volume signal rather than a dollar-cost estimate. `/api/usage` and
+ * this per-run parser share `claudeUsageTokens` so those totals cannot drift.
  *
  *   Claude  `input_tokens` EXCLUDES cache reads (they live in
- *           `cache_read_input_tokens`), and cache writes are a separate pool
- *           billed at full rate. → input + output + cache_creation
+ *           `cache_read_input_tokens`), and cache writes are separate too.
+ *           → input + output + cache_creation + cache_read
  *   Codex   `input_tokens` INCLUDES `cached_input_tokens` (OpenAI's
  *           convention), so adding is double-counting and the cached portion
  *           must be SUBTRACTED. → (input − cached) + output
@@ -272,11 +274,9 @@ export function parseClaudeEvent(line) {
     // user most wants to see the cost of.
     const result = {};
     if (ev.usage) {
-      // Addition here, subtraction for Codex — see the header note. Claude's
-      // input_tokens excludes cache reads, so cache writes must be added back
-      // in; this is the same formula /api/usage uses.
-      const u = ev.usage;
-      result.tokens = tokenCount(u.input_tokens) + tokenCount(u.output_tokens) + tokenCount(u.cache_creation_input_tokens);
+      // Addition here, subtraction for Codex — see the header note. This shared
+      // helper keeps the per-run total identical to /api/usage.
+      result.tokens = claudeUsageTokens(ev.usage);
       if (typeof ev.total_cost_usd === "number") result.costUsd = ev.total_cost_usd;
     }
     // A terminal failure, the counterpart of parseCodexEvent's turn.failed. The
@@ -408,23 +408,40 @@ export function completedReportNames(entries) {
  * @returns {boolean}
  */
 export function hasNewCompletedReport(beforeEntries, afterEntries) {
+  return newCompletedReportName(beforeEntries, afterEntries) != null;
+}
+
+/** Basename of the first completed report that appeared after `beforeEntries`. */
+export function newCompletedReportName(beforeEntries, afterEntries) {
   const before = completedReportNames(beforeEntries);
   const after = completedReportNames(afterEntries);
   for (const name of after) {
-    if (!before.has(name)) return true;
+    if (!before.has(name)) return name;
   }
-  return false;
+  return null;
+}
+
+/** Leading report number from a new completed report, or null. */
+export function newCompletedReportNum(beforeEntries, afterEntries) {
+  const name = newCompletedReportName(beforeEntries, afterEntries);
+  if (!name) return null;
+  const n = parseInt(name, 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 // Graceful-SIGTERM budget (ms) for a run, kept safely under the route's 800s
-// maxDuration. pdf reserves headroom for its post-agent render+mark phase; a
-// plain evaluate has no such phase, so it gets nearly the whole budget. The old
+// maxDuration. pdf reserves headroom for its post-agent Chromium render.
+// evaluate reserves 60s for report-persist (write the report, merge the
+// tracker, release the sentinel), which runs after the agent. Other kinds
+// have no post-agent phase, so they keep nearly the whole budget. The old
 // 285s evaluate floor killed real evaluations mid-run — ~25 Bash calls plus web
 // searches routinely run longer — and the kill then misreported as "didn't save
 // a report" (#3124).
 export const RUN_MAX_DURATION_S = 800;
 export function killMsForKind(kind) {
-  return kind === "pdf" ? 600_000 : 780_000;
+  if (kind === "pdf") return 600_000;
+  if (kind === "evaluate") return 740_000;
+  return 780_000;
 }
 
 // Message for a run the route stopped at its own time limit. It names the limit,
@@ -433,4 +450,24 @@ export function killMsForKind(kind) {
 // blaming the CLI sends the user to re-check the wrong thing (#3124).
 export function timeoutMessage(killMs, kind) {
   return `This run passed the ${Math.round(killMs / 1000)}s time limit and was stopped before it could finish — re-run it, or run a very long ${kind} on Claude Code directly. The CLI was working; we cut it off, so it isn't recorded as a result.`;
+}
+
+/**
+ * Structured CLIs stream each assistant message as text deltas with nothing
+ * between messages. A tool call ends a message, so the next text starts on a new
+ * line. Without the break, a <<cv-html>> opener that starts a new message lands
+ * mid-line after the previous message's prose, and parseCvEnvelope, which needs
+ * the opener on its own line, reports no envelope.
+ *
+ * @returns {(ev: ParsedEvent | null | undefined) => string} the text to append
+ */
+export function createAgentTextJoiner() {
+  let newMessage = false;
+  return (ev) => {
+    if (ev?.tool) newMessage = true;
+    if (!ev?.text) return "";
+    const text = newMessage ? `\n${ev.text}` : ev.text;
+    newMessage = false;
+    return text;
+  };
 }

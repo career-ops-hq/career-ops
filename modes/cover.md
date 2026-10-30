@@ -7,6 +7,8 @@ Works in two modes:
 
 ---
 
+**Unattended runs** (`modes/_shared.md` → **Unattended runs**): never ask and never wait. With no JD, or when Steps 3 to 6 need the candidate's confirmation or answers, write no letter and end with `needs_confirmation: cover_input {first missing item} - rerun with the JD and those answers`.
+
 ## Step 0 — JD Gate (mandatory)
 
 Before doing anything, confirm a job description is present.
@@ -41,6 +43,8 @@ Read `article-digest.md` if it exists — supplementary proof points and metrics
 Read `modes/_writing.md` — the shared writing guidance (Voice DNA guardrail, Writing Style calibration, Professional Writing & ATS rules). A cover letter is candidate-facing prose, the same category that module governs, so it gets the same standard as the report and apply outputs instead of a thinner local one (#2006).
 
 Read `modes/_profile.md` if it exists — the candidate's personalization file. It captures their target roles, adaptive framing and archetypes, exit narrative, cross-cutting advantage, proof points, comp targets, negotiation scripts, location policy, and any voice or writing-style rules they have added. Its rules **govern the letter's voice and structure and override the generic defaults in this mode and in `_writing.md`**, so the candidate's personalization is never lost.
+
+If `modes/_profile.md` has no `## Writing Style` section and `writing-samples/` holds a file other than `README.md`, run the Writing Style calibration in `modes/_writing.md` now and write the result to `modes/_profile.md` before drafting. Skip this when the section already exists.
 
 ---
 
@@ -289,10 +293,22 @@ Only after explicit user approval.
 Before rendering, run the shared fact validator against the assembled cover
 letter HTML. It checks metric-like claims plus explicitly asserted employers,
 titles, and tools against `cv.md`, `article-digest.md`, and the optional
-`config/cv-facts.json` allowlist. The validator returns a stable `pass`, `warn`,
-or `block` verdict. Advisory `warn_phrases` do not stop PDF generation; a
-`block` verdict does, so add the missing evidence or obtain a verified
-allowlist exception first.
+`config/cv-facts.json` allowlist. The answers on this payload count only for a
+number the letter states as a plan. The validator returns a stable `pass`, `warn`, or `block` verdict. Advisory
+`warn_phrases` do not stop PDF generation. A block verdict stops PDF generation.
+
+Copy each Step 5 answer and each Step 6 answer into `user_inputs` verbatim.
+A number the candidate wrote there supports the same number when the letter
+states it as a plan, as in "I will read the last 6 months of incident reviews".
+It never supports an employer, a title, a tool, or past experience. "I have 6
+months of incident-response experience" still needs `cv.md` or
+`article-digest.md`, whatever the answers say. A number that is in none of
+`cv.md`, `article-digest.md`, and `user_inputs` still blocks the PDF. Do not rewrite the candidate's wording to get past the gate, and do not
+add a plan to cv.md to make the gate pass. Career evidence belongs in `cv.md`
+or `article-digest.md`. A verified exception belongs in `config/cv-facts.json`.
+
+An `answers` object is also a source. Its string values count, including a
+nested list such as gap answers. The rendered letter is not a source for itself.
 
 Assemble the JSON payload:
 
@@ -322,6 +338,13 @@ Assemble the JSON payload:
     "closing": "{approved closing}",
     "language_closing": "{approved language sentence or null}"
   },
+  "user_inputs": [
+    "{each Step 5 answer, verbatim}",
+    "{Step 6 answer A, verbatim}",
+    "{Step 6 answer B, verbatim}",
+    "{Step 6 answer C, verbatim}",
+    "{Step 6 answer D, verbatim}"
+  ],
   "output_path": "output/{company-slug}-{role-slug}-cover.pdf"
 }
 ```

@@ -198,7 +198,7 @@ In deutschen Stellenanzeigen und Vertragsverhandlungen tauchen Begriffe auf, die
 3. Beim Matching exakte Zeilen aus dem Lebenslauf zitieren
 4. WebSearch für Vergütungs- und Firmendaten nutzen
 5. Nach jeder Bewertung im Tracker eintragen
-6. Inhalte in der Sprache der Stellenanzeige erzeugen (Deutsch, wenn die Anzeige deutsch ist; Englisch sonst)
+6. Inhalte für den Nutzer in `{language.output}` aus `config/profile.yml` erzeugen (Englisch, wenn nicht gesetzt), unabhängig von der Sprache der Stellenanzeige. Begriffe dieses Marktes beibehalten und bei Bedarf in dieser Sprache erklären
 7. Direkt und konkret sein — keine Floskeln
 8. Beim Erzeugen deutscher Texte (PDF-Summaries, Bullets, LinkedIn-Nachrichten, STAR-Stories): natürliches Tech-Deutsch, keine wörtliche Übersetzung. Kurze Sätze, aktive Verben, Passiv vermeiden. Fachbegriffe (Stack, Pipeline, Deployment, Embedding) nicht zwanghaft eindeutschen
 8b. **Case-Study-URLs in der PDF Professional Summary:** Wenn das PDF Case Studies oder Demos erwähnt, MÜSSEN die URLs schon im ersten Absatz (Professional Summary) auftauchen. Recruiter lesen oft nur die Summary. Alle URLs im HTML mit `white-space: nowrap`
@@ -213,6 +213,6 @@ In deutschen Stellenanzeigen und Vertragsverhandlungen tauchen Begriffe auf, die
 | WebFetch | Fallback, um Stellenanzeigen aus statischen Seiten zu extrahieren |
 | Playwright | Prüfen, ob Stellenanzeigen noch aktiv sind (browser_navigate + browser_snapshot), Stellenanzeigen aus SPAs extrahieren. **KRITISCH: NIEMALS 2+ Agenten parallel mit Playwright starten — sie teilen sich eine Browser-Instanz** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | Temporäres HTML für PDF, applications.md, Reports .md |
-| Edit | Tracker aktualisieren |
-| Bash | `node generate-pdf.mjs` |
+| Write | Temporäres HTML für PDF, Reports .md, TSV-Dateien für den Tracker in `batch/tracker-additions/` (niemals `applications.md` direkt) |
+| Edit | Korrekturen an Reports und anderen generierten Inhalten. Nie die Tracker-Tabelle: neue Zeilen kommen als TSV hinzu und werden mit `node merge-tracker.mjs` zusammengeführt, Status- und Notizänderungen laufen über `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

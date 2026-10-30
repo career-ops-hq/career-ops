@@ -13,10 +13,10 @@
 // here instead of in somebody's `pdf` run.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { listTree } from '../lib/walk-tree.mjs';
 import { KEYWORDS_HEADINGS, extractKeywords } from '../keyword-match.mjs';
 import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
 
@@ -34,19 +34,10 @@ const keywordsUnder = (heading) =>
 
 // ---- The shipped modes ------------------------------------------------------
 
+// listTree skips a checkout placed under modes/ — another tree's content, not
+// this repository's to hold to this contract (#3681/#3762) — on every descent.
 function walk(dir) {
-  const out = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) {
-      // A checkout placed under modes/ is another tree's content (#3762).
-      if (isNestedCheckout(full)) continue;
-      out.push(...walk(full));
-    } else if (e.name.endsWith('.md')) {
-      out.push(full);
-    }
-  }
-  return out;
+  return listTree(dir, { match: /\.md$/ });
 }
 
 // By property, not by file name: only eight of the evaluation modes are called
@@ -85,6 +76,16 @@ for (const { rel, text } of modes) {
       `"${headings[0]}" is not read: add its title to KEYWORDS_HEADINGS in keyword-match.mjs, and keep the old title, which reports on disk still carry`);
   });
 }
+
+// batch/batch-prompt.md lists its report headings rather than defining Block F,
+// so the walk above never sees it; its reports went unread until this check.
+check('batch/batch-prompt.md: the keyword heading it writes is read', () => {
+  const text = readFileSync(join(ROOT, 'batch', 'batch-prompt.md'), 'utf-8');
+  const heading = text.match(/^- `(## [^`]*Keywords[^`]*)`$/m)?.[1];
+  assert.ok(heading, 'no `## ...Keywords...` heading listed in batch/batch-prompt.md');
+  assert.deepEqual(keywordsUnder(heading), KEYWORDS,
+    `"${heading}" is not read: add its title to KEYWORDS_HEADINGS in keyword-match.mjs`);
+});
 
 // ---- The reader -------------------------------------------------------------
 

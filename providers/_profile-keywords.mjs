@@ -16,7 +16,8 @@
 // would require changing the Provider.fetch(entry, ctx) contract itself.
 
 import { existsSync, readFileSync } from 'fs';
-import * as yaml from 'js-yaml';
+import { loadYaml } from '../lib/yaml-document.mjs';
+import { getProfilePath } from '../path-resolver.mjs';
 
 // Matches the CAREER_OPS_PROFILE override already honored by scan.mjs,
 // cv-templates.mjs, followup-cadence.mjs, plugins/_engine.mjs, and
@@ -26,7 +27,7 @@ import * as yaml from 'js-yaml';
 // the variable held when the first provider loaded, so a test could not
 // isolate the fallback from a developer's own CAREER_OPS_PROFILE.
 function defaultProfilePath() {
-  return process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+  return getProfilePath();
 }
 
 function cleanKeywords(value) {
@@ -64,7 +65,7 @@ export function profileTargetKeywords(profile) {
 export function resolveProfileKeywords(profilePath = defaultProfilePath()) {
   if (!existsSync(profilePath)) return [];
   try {
-    const profile = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const profile = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
     return profileTargetKeywords(profile);
   } catch {
     return [];

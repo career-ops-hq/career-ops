@@ -32,13 +32,15 @@
  * is UNKNOWN rather than true. Returning s.toLowerCase() gave every "N/A" row
  * one shared key, so unrelated employers compared equal on it.
  *
- * Used by merge-tracker.mjs. Kept in its own module so scan.mjs / scan-history
- * can adopt the same key later without the definitions drifting.
+ * The tracker scripts compare posting URLs through it, and scan.mjs takes its
+ * fragment and language-param handling from it, so the scanner and the tracker
+ * do not keep two copies that can drift apart.
  */
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { linkedInPathJobId } from './lib/linkedin-url.mjs';
 
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
@@ -194,14 +196,9 @@ function foldHostname(host) {
 // Extractors are keyed on the DOMAIN, never on the path: `/jobs/view/{id}` is
 // also Workable's employer-board shape, where it means something else.
 const AGGREGATOR_POSTING_ID = {
-  // linkedin.com/jobs/view/{id} · .../jobs/view/{title-slug}-{id} · any page
-  // that carries the posting in ?currentJobId= (search and collection views).
-  'linkedin.com': (u) => {
-    const path = u.pathname.match(/^\/jobs\/view\/(?:.*-)?(\d+)\/?$/);
-    if (path) return path[1];
-    const current = u.searchParams.get('currentJobId');
-    return current && /^\d+$/.test(current) ? current : null;
-  },
+  // The shapes and the /comm/ email link are documented in lib/linkedin-url.mjs.
+  // parseAggregator has already matched the folded host, so only the path is read.
+  'linkedin.com': linkedInPathJobId,
   // indeed.com/viewjob?jk={id}; a results page carries the focused posting as
   // ?vjk={id}. The job key is the requisition, so region hosts (uk./www./de.)
   // and the two page shapes all reduce to it.
@@ -336,6 +333,171 @@ export function normalizeUrl(raw) {
   }
 
   return u.toString();
+}
+
+// Query params naming the language a posting page renders in. An ATS that
+// serves every language version of one posting at one URL tells the versions
+// apart by one of these (Personio `?language=`, Recruitee `?lang=`). scan.mjs
+// imports this list for its own dedup key, so the scanner and the tracker read
+// the same names.
+export const LANGUAGE_PARAMS = ['language', 'lang', 'locale'];
+
+/**
+ * The posting a URL names, apart from the language it asks for.
+ *
+ * `key` is the normalizeUrl() key of the URL without its language param, so
+ * the language versions of one posting share it. `language` is the param's
+ * value reduced to its language subtag (`en-GB` → `en`), or '' when the URL
+ * names no language — which means "the posting's default version, language
+ * unknown", not a language of its own.
+ *
+ * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
+ * @returns {{key: string, language: string}} `key` is '' when there is no key.
+ */
+export function postingLanguageKey(raw) {
+  if (typeof raw !== 'string') return { key: '', language: '', script: '' };
+  let u;
+  try { u = new URL(raw.trim()); } catch { return { key: normalizeUrl(raw), language: '', script: '' }; }
+  let language = '';
+  let script = '';
+  for (const name of [...u.searchParams.keys()]) {
+    if (!LANGUAGE_PARAMS.includes(name.toLowerCase())) continue;
+    if (!language) {
+      const raw = u.searchParams.get(name);
+      language = languageSubtag(raw);
+      script = postingScript(raw);
+    }
+    u.searchParams.delete(name);
+  }
+  return { key: normalizeUrl(u.href), language, script };
+}
+
+/**
+ * The script a posting language param names, or '' when the value does not say.
+ *
+ * Separate from languageSubtag() because the two answer different questions.
+ * languageSubtag() reduces to the language, which is what ranking a posting
+ * against `preferred_languages` wants: a user who writes `zh` means Chinese,
+ * and should match a Traditional posting as readily as a Simplified one.
+ * Posting IDENTITY is the opposite question, and there the script is not a
+ * regional variant at all — it changes the text. `zh-Hant` and `zh-Hans` are
+ * not the same page for any reader, which is why this project ships
+ * `modes/zh/` and `modes/zh-TW/` as two market mode sets rather than one.
+ *
+ * The script is reported only when the value actually establishes it:
+ *
+ * - an explicit script subtag (`zh-Hant`, `sr-Cyrl`) — stated outright;
+ * - otherwise the script implied by an explicit REGION (`zh-TW` → Hant,
+ *   `zh-CN` → Hans), which is reliable for the cases that matter;
+ * - otherwise ''. A bare `zh` is never resolved to a script, because
+ *   `Intl.Locale('zh').maximize()` answers `zh-Hans-CN` — a guess at the
+ *   commonest case, not something the URL said. A posting served as `?lang=zh`
+ *   may well be the Traditional one under a loose code, so treating it as
+ *   Simplified would assert two postings where there is no evidence of two.
+ *   Unknown stays unknown, the same way an absent language param does.
+ *
+ * @param {unknown} value - A language param value.
+ * @returns {string} A script subtag (`Hant`), or ''.
+ */
+export function postingScript(value) {
+  if (typeof value !== 'string') return '';
+  const v = value.trim();
+  if (!v) return '';
+  let loc;
+  try { loc = new Intl.Locale(v.replace(/_/g, '-')); } catch { return ''; }
+  if (loc.script) return loc.script;
+  if (!loc.region) return '';
+  try { return loc.maximize().script || ''; } catch { return ''; }
+}
+
+/**
+ * A posting language reduced to the form two languages are compared in; ''
+ * when the value is empty or not a string.
+ *
+ * A value that parses as a language tag (`_` read as `-`) is reduced by
+ * `Intl.Locale` to its canonical language subtag: the region and script go
+ * (`en-GB`, `en_GLOBAL`, `zh-Hant-TW` → `en`, `en`, `zh`) — regional variants of
+ * one language are the same text for any reader — and legacy or three-letter
+ * codes map to the current two-letter one (`deu` → `de`, `iw` → `he`). Anything
+ * that doesn't parse, such as `English (US)`, is compared whole, case-folded; a
+ * name like `German` parses as a (non-standard) tag and comes back lowercased.
+ * The two postings being compared come from one employer, and almost always
+ * one provider, so the value only has to be consistent within a source, not
+ * standard across sources. scan.mjs's languageFormsForDedup is built on it.
+ *
+ * @param {unknown} value - A language param value, `Job.language`, or a
+ *   scan-history `language` cell.
+ * @returns {string}
+ */
+export function languageSubtag(value) {
+  if (typeof value !== 'string') return '';
+  const v = value.trim();
+  if (!v) return '';
+  try {
+    return new Intl.Locale(v.replace(/_/g, '-')).language;
+  } catch {
+    return v.toLowerCase();
+  }
+}
+
+/**
+ * What two posting URLs say about whether they name the same posting.
+ *
+ * - `'no-key'`: either side has no key — no evidence at all.
+ * - `'same'`: the same page in the same language, or both without one.
+ * - `'distinct'`: two different pages, or the same page in two known,
+ *   different languages — two language versions of one posting are kept as
+ *   two tracker rows. Two known, different SCRIPTS of one language count here
+ *   too (`zh-Hant` vs `zh-Hans`): a script is not a regional variant, it is
+ *   different text. See postingScript().
+ * - `'one-sided-language'`: the same page with a language on one side only.
+ *   The bare URL is the posting's default version, and the URL does not say
+ *   which language that is, so this is not proof of two postings — a
+ *   re-evaluation of the same report may match across it — but it is not
+ *   proof of one either: the bare row may be the German version and the other
+ *   its English one, so a title match must not fold them together.
+ *
+ * @param {string} rawA
+ * @param {string} rawB
+ * @returns {'no-key'|'same'|'distinct'|'one-sided-language'}
+ */
+export function postingUrlRelation(rawA, rawB) {
+  return relatePostingLanguageKeys(postingLanguageKey(rawA), postingLanguageKey(rawB));
+}
+
+/**
+ * What two postingLanguageKey() results say about one posting.
+ *
+ * Same answers as postingUrlRelation(). A caller that already parsed both
+ * URLs compares the keys here instead of parsing them again.
+ *
+ * @param {{key: string, language: string, script: string}} a
+ * @param {{key: string, language: string, script: string}} b
+ * @returns {'no-key'|'same'|'distinct'|'one-sided-language'}
+ */
+export function relatePostingLanguageKeys(a, b) {
+  if (!a.key || !b.key) return 'no-key';
+  if (a.key !== b.key) return 'distinct';
+  if (a.language === b.language) {
+    // One language, two scripts: two versions, not one page. Only when BOTH
+    // sides actually state a script — `zh` vs `zh-Hant` stays 'same', because
+    // the bare code is not evidence of Simplified.
+    if (a.language && a.script && b.script && a.script !== b.script) return 'distinct';
+    return 'same';
+  }
+  return a.language && b.language ? 'distinct' : 'one-sided-language';
+}
+
+/**
+ * One key per posting: the board's own posting id on a known aggregator, so a
+ * LinkedIn alert link and the plain /jobs/view/ link agree, else normalizeUrl.
+ *
+ * @param {string} raw
+ * @returns {string} '' when the input is not a usable posting URL
+ */
+export function postingKey(raw) {
+  const agg = aggregatorPostingId(raw);
+  return agg ? `${agg.domain}:${agg.id}` : normalizeUrl(raw);
 }
 
 export default normalizeUrl;

@@ -30,11 +30,13 @@ export function FollowupsDueSectionSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-export function PipelineTableRowsSkeleton({ rows = 8 }: { rows?: number }) {
+export function PipelineTableRowsSkeleton({ rows = 8, trackerColumn = false }: { rows?: number; trackerColumn?: boolean }) {
   return (
     <>
       {Array.from({ length: rows }).map((_, i) => (
         <tr key={i}>
+          {trackerColumn && <td className="w-8 px-3 py-3"><Skeleton className="size-4" /></td>}
+          {trackerColumn && <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>}
           <td className="px-4 py-3">
             <div className="flex items-center gap-2.5">
               <Skeleton className="size-5 rounded-full" />
@@ -49,7 +51,7 @@ export function PipelineTableRowsSkeleton({ rows = 8 }: { rows?: number }) {
               <Skeleton className="h-4 w-20" />
             </div>
           </td>
-          <td className="whitespace-nowrap px-4 py-3"><Skeleton className="h-4 w-20" /></td>
+          <td className={`whitespace-nowrap px-4 py-3${trackerColumn ? " hidden lg:table-cell" : ""}`}><Skeleton className="h-4 w-20" /></td>
         </tr>
       ))}
     </>
@@ -180,6 +182,34 @@ export function AnalyticsPageSkeleton() {
           </div>
         </section>
       ))}
+    </div>
+  );
+}
+
+export function DocumentsPageSkeleton() {
+  return (
+    <div className="mx-auto max-w-5xl space-y-6">
+      <div>
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="mt-2 h-4 w-64" />
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex flex-col rounded-2xl border border-border bg-surface/50 p-5">
+            <div className="flex items-center space-x-2">
+              <Skeleton className="h-8 w-8 rounded" />
+              <Skeleton className="h-5 w-40" />
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Skeleton className="h-5 w-12 rounded-md" />
+              <Skeleton className="h-5 w-24 rounded-md" />
+            </div>
+            <div className="mt-6 pt-4 border-t border-border">
+              <Skeleton className="h-9 w-full rounded-md" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

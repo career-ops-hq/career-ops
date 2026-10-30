@@ -20,6 +20,10 @@ const TRACKER_HEADER = '# Applications Tracker\n\n| # | Date | Company | Role | 
 
 function evalModule(script, envOverrides = {}) {
   const cleanEnv = { ...process.env };
+  // CAREER_OPS_ROOT outranks CAREER_OPS_DATA_DIR, and the suite pins it to a
+  // scratch root (tests/helpers.mjs), as a developer's shell may: a case that
+  // sets the alias has to clear the variable it is an alias for (#5113).
+  if ('CAREER_OPS_DATA_DIR' in envOverrides) cleanEnv.CAREER_OPS_ROOT = '';
   for (const [k, v] of Object.entries(envOverrides)) {
     if (v === null || v === undefined) {
       delete cleanEnv[k];
@@ -179,7 +183,7 @@ try {
   try {
     const appendTestScript = `
     import { appendCandidate, CANDIDATES_PATH } from './paste-reply.mjs';
-    appendCandidate({
+    await appendCandidate({
       message_id: 'test-cli-msg',
       subject: 'Interview Confirmation',
       from: 'talent@acme.com',

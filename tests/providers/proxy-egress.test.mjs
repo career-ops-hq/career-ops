@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { fetchText, fetchResponse } from '../../providers/_http.mjs';
+import { describeSpawn } from '../helpers/describe-spawn.mjs';
 
 async function listening(server) {
   server.listen(0, '127.0.0.1');
@@ -133,33 +134,96 @@ test('direct requests work without undici; opting in explains how to install it'
     await assert.rejects(fetchText('http://public.example/'), /run npm install/);
   `;
   const result = spawnSync(process.execPath, ['--experimental-loader', loader, '--input-type=module', '-e', script], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
 });
 
 test('credential-bearing HTTP proxies are rejected without exposing their credentials', async () => {
   for (const proxyVariable of ['HTTP_PROXY', 'HTTPS_PROXY']) {
-    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', [proxyVariable]: 'http://user:secret@proxy.example:3128' }, async () => {
-      await assert.rejects(fetchText('https://public.example/'), (error) => {
-        assert.match(error.message, /credentials must use HTTPS/);
-        assert.ok(!error.message.includes('secret'));
-        assert.ok(!error.message.includes('user:'));
-        return true;
+    for (const invalidProxy of ['http://user:secret@proxy.example:3128', 'http://user:secret@127.proxy.example:3128']) {
+      await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', [proxyVariable]: invalidProxy }, async () => {
+        await assert.rejects(fetchText('https://public.example/'), (error) => {
+          assert.match(error.message, /credentials must use HTTPS/);
+          assert.ok(!error.message.includes('secret'));
+          assert.ok(!error.message.includes('user:'));
+          return true;
+        });
       });
-    });
+    }
   }
 });
 
 test('credential-bearing HTTPS proxies remain available to provider requests', async () => {
-  const originalFetch = globalThis.fetch;
+  // The request must be sent to the configured HTTPS proxy, not rejected up
+  // front. A bare TCP accept is enough: the TLS handshake fails, but the
+  // connection proves the proxy was used.
+  let connections = 0;
+  const proxy = http.createServer();
+  proxy.on('connection', (socket) => {
+    connections++;
+    socket.destroy();
+  });
+  const { port } = new URL(await listening(proxy));
   try {
-    globalThis.fetch = async (_url, options) => {
-      assert.ok(options.dispatcher);
-      return new Response('TLS PROXY CONFIGURED');
-    };
-    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: 'https://user:secret@proxy.example:3128' }, async () => {
-      assert.equal(await fetchText('https://public.example/'), 'TLS PROXY CONFIGURED');
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: `https://user:secret@localhost:${port}` }, async () => {
+      await assert.rejects(fetchText('https://public.example/', { timeoutMs: 2000 }), (error) => {
+        assert.doesNotMatch(error.message, /credentials must use HTTPS/);
+        return true;
+      });
     });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.ok(connections > 0);
+  } finally { proxy.close(); }
 });
+
+test('proxy path does not use globalThis.fetch', async () => {
+  const destinations = [];
+  const proxy = http.createServer();
+  proxy.on('connect', (req, socket) => {
+    destinations.push(req.url);
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nPROXIED!'));
+  });
+  const proxyUrl = await listening(proxy);
+  const realFetch = globalThis.fetch;
+  // The proxy agent must be paired with undici's own fetch, never Node's bundled one.
+  globalThis.fetch = () => { throw new Error('global fetch must not be used on the proxy path'); };
+  try {
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: proxyUrl.replace('127.0.0.1', 'localhost'), NO_PROXY: 'localhost,127.0.0.1' }, async () => {
+      assert.equal(await fetchText('http://unresolvable.invalid/job', { redirect: 'error' }), 'PROXIED!');
+      assert.deepEqual(destinations, ['unresolvable.invalid:80']);
+    });
+  } finally { globalThis.fetch = realFetch; proxy.close(); }
+});
+
+test('credential-bearing HTTP proxies on loopback are allowed under CAREER_OPS_TRUST_PROXY_EGRESS=1', async () => {
+  const destinations = [];
+  const authHeaders = [];
+  const proxy = http.createServer();
+  proxy.on('connect', (req, socket) => {
+    destinations.push(req.url);
+    authHeaders.push(req.headers['proxy-authorization']);
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nPROXIED!'));
+  });
+  const proxyUrl = await listening(proxy);
+  const { port } = new URL(proxyUrl);
+  try {
+    for (const host of ['localhost', '127.0.0.1']) {
+      const loopbackProxy = `http://user:secret@${host}:${port}`;
+      await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: loopbackProxy, NO_PROXY: '' }, async () => {
+        assert.equal(await fetchText('http://unresolvable.invalid/job', { redirect: 'error' }), 'PROXIED!');
+      });
+    }
+    const initialDestCount = destinations.length;
+    const loopbackHttpsProxy = `http://user:secret@localhost:${port}`;
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: loopbackHttpsProxy, NO_PROXY: '' }, async () => {
+      await assert.rejects(fetchText('https://unresolvable.invalid/job', { timeoutMs: 1000 }), (err) => {
+        assert.doesNotMatch(err.message, /credentials must use HTTPS/);
+        return true;
+      });
+    });
+    assert.ok(destinations.slice(initialDestCount).includes('unresolvable.invalid:443'));
+    assert.ok(authHeaders.length >= 3);
+    assert.ok(authHeaders.every((header) => header === 'Basic dXNlcjpzZWNyZXQ='));
+  } finally { proxy.close(); }
+});
+

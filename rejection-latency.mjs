@@ -48,16 +48,18 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
-import { parseActiveInterviews } from './process-quality.mjs';
+import { parseActiveInterviews, findColumn } from './process-quality.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
+import { companiesMatchIgnoringCorporateForm } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -65,7 +67,7 @@ const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-i
   ? join(DATA_ROOT, 'data/active-interviews.md')
   : join(DATA_ROOT, 'active-interviews.md');
 export const DEFAULT_TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
+const PROFILE_FILE = getProfilePath();
 
 export const DEFAULT_COURTESY_DAYS = 30;
 
@@ -130,14 +132,6 @@ const cliCourtesyDays = argValue('--courtesy-days');
 const cliToday = argValue('--today');
 
 // --- Date helpers (same conventions as detect-reposts.mjs) ---
-export function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 // Extract a YYYY-MM-DD date from a free-form Date/Time cell
 // (e.g. "2026-06-01 14:00 EST" → 2026-06-01). Returns null when the cell
 // contains no valid date.
@@ -215,18 +209,11 @@ export function groupIdentity(company, via) {
   return { key: `?via:${companyKey(channel)}`, label };
 }
 
-// Case-insensitive column lookup for candidate-edited markdown headers
-// ("Notes" vs "notes" vs " Notes ") — same convention as process-quality.mjs.
-function findColumn(row, name) {
-  const key = Object.keys(row || {}).find(k => k.trim().toLowerCase() === name);
-  return key ? String(row[key] ?? '') : '';
-}
-
 // --- Profile / jurisdiction resolution ---
 export function loadProfile(profilePath = PROFILE_FILE) {
   if (!profilePath || !existsSync(profilePath)) return {};
   try {
-    return yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    return loadYaml(readFileSync(profilePath, 'utf-8')) || {};
   } catch {
     return {};
   }
@@ -380,7 +367,10 @@ export function computeRejectionLatency(interviewRows, trackerByCompany, opts = 
 
     const role = findColumn(row, 'role').trim();
 
-    const companyRows = tracker.get(cKey);
+    const companyRows = tracker.get(cKey)
+      ?? [...tracker.values()]
+        .filter(group => companiesMatchIgnoringCorporateForm(company, group[0].company))
+        .flat();
     if (!companyRows || companyRows.length === 0) {
       // No tracker row still in Interview state for this company at all →
       // either a response was recorded (Responded/Offer/Rejected — nothing
@@ -703,7 +693,12 @@ if (isMainModule(import.meta.url)) {
     ? cliCourtesy
     : (Number.isFinite(profileCourtesy) && profileCourtesy > 0 ? profileCourtesy : DEFAULT_COURTESY_DAYS);
 
-  let today = new Date();
+  // The local day, the default computeRejectionLatency() documents. Passing
+  // `new Date()` bypassed it: that default applies only when no Date is
+  // given, and daysBetween() reads a Date's UTC day, so the CLI counted from
+  // the UTC day and flagged (or missed) a company a day early everywhere the
+  // two days differ.
+  let today = parseDate(localToday());
   if (cliToday) {
     const parsed = parseDate(cliToday);
     if (!parsed) {

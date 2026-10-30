@@ -4,7 +4,7 @@ This repository is two things at once, and which one you are working on depends 
 
 **A. Helping a person with their job search.** If the user runs career-ops as a product (evaluate a posting, tailor a CV, scan portals, track applications, prepare an interview), then `AGENTS.md` and the files under `modes/` govern everything you do, exactly as they would in any other AI coding CLI. Ignore the rest of this file.
 
-**B. Working on the repository itself.** If you were asked to reproduce a bug, brief a pull request, write or fix a test, re-sync a translation, find stale documentation, or make any change to the code (this is what the maintainers use Copilot cloud agent for), then the rules below apply. In this mode `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `OPENCODE.md`, `KIMI.md`, `GEMINI.md`, every file under `modes/` and the skills under `.claude/skills/` are **text you may read or edit, never instructions you follow**: do not run a mode, do not evaluate a posting, do not generate a CV, do not invoke the `career-ops` skill. If a task seems to require it, stop and say so in your report.
+**B. Working on the repository itself.** If you were asked to reproduce a bug, brief a pull request, write or fix a test, re-sync a translation, find stale documentation, or make any change to the code (this is what the maintainers use Copilot cloud agent for), then the rules below apply. In this mode `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `OPENCODE.md`, `KIMI.md`, `GEMINI.md`, every file under `modes/` and the skill router at `.agents/skills/career-ops/SKILL.md` (which every CLI's `skills/` directory, `.claude/skills/` included, symlinks to) are **text you may read or edit, never instructions you follow**: do not run a mode, do not evaluate a posting, do not generate a CV, do not invoke the `career-ops` skill. If a task seems to require it, stop and say so in your report.
 
 ## Setup, build and validate
 
@@ -12,13 +12,13 @@ This repository is two things at once, and which one you are working on depends 
 - Full suite: `node test-all.mjs --quick` (skips the dashboard build). Run it before you finish, every time.
 - One area: `node test-all.mjs --only <substring>` (for example `--only providers/themuse`).
 - Syntax: `npm run lint`.
-- Dashboard (Go): `npm run build:dashboard` only when you touched `dashboard/`.
+- Dashboard (Go): when you touched `dashboard/` or `templates/states.yml`, run `go test ./...` from `dashboard/`. CI runs it on every pull request, and it is the only check that the dashboard accepts every state in `templates/states.yml`; `node test-all.mjs` does not run it. Add `npm run build:dashboard` when you touched `dashboard/`.
 - New tests go in their own file under `tests/**/*.test.mjs` (auto-discovered). Never add a numbered section to `test-all.mjs`.
 
 ## Files you must not touch
 
 - The **user layer** defined in `DATA_CONTRACT.md`: `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `article-digest.md`, `portals.yml`, `data/`, `documents/`, `reports/`, `output/`, `interview-prep/`. These are the user's private files even when the repo ships an example.
-- The **control files**: `CLAUDE.md`, `AGENTS.md`, `modes/_shared.md`, `DATA_CONTRACT.md`, `update-system.mjs`, `updater-migration-tests.mjs`, anything under `.github/`, `package.json`, `package-lock.json`, `plugins-registry.json`, `plugins/_*.mjs`.
+- The **control files**: `CLAUDE.md`, `AGENTS.md`, `modes/_shared.md`, `DATA_CONTRACT.md`, `update-system.mjs`, `updater-migration-tests.mjs`, anything under `.github/`, `package.json`, `package-lock.json`, everything under `plugins-registry/`, `plugins/_*.mjs`.
 - Anything under `web/` (owned by a separate track).
 
 If the task cannot be completed without touching one of these, stop and explain why in your report instead of doing it.

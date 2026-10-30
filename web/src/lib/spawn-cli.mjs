@@ -62,7 +62,13 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   // shell, so launch the .js/.exe it wraps (a no-op elsewhere; cli-launch.mjs).
   // After fencing, so the fencers see the CLI's own argv rather than node's.
   const launch = prepareCliLaunch(binPath, fencedArgs);
-  const child = spawn(launch.command, launch.args, options);
+  // windowsHide: on Windows a child attaches to the parent's console. A
+  // long-lived dev server whose console has gone stale then kills EVERY child
+  // at DLL init with 0xC0000142 (STATUS_DLL_INIT_FAILED), in ~20 ms and with no
+  // output at all; the same spawn with windowsHide (CREATE_NO_WINDOW) succeeds.
+  // Nothing spawned here needs a console, so never inherit one. Set after the
+  // caller's options so no caller can opt back in. No-op on POSIX (#3809).
+  const child = spawn(launch.command, launch.args, { ...options, windowsHide: true });
   child.stdin?.end();
   return child;
 }

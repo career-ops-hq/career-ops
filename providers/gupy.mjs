@@ -5,10 +5,14 @@ import { resolveProfileKeywords } from './_profile-keywords.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Gupy provider: board-wide job_boards: feed over the Brazilian Gupy ATS.
-//   https://employability-portal.gupy.io/api/v1/jobs  (public, zero-auth)
+//   https://portal.gupy.io/api/job-search/jobs  (public, zero-auth)
 // Response shape: { data: [ { name, jobUrl, careerPageName, city, state,
-//   country, workplaceType, publishedDate, description,
-//   isConfidentialCareerPage, ... } ], pagination: { total, offset, limit } }
+//   workplaceType, type, publishedDate, description, ... } ],
+//   pagination: { total, offset, limit } }
+//
+// That is the endpoint portal.gupy.io's own job search calls. The API's
+// earlier host, employability-portal.gupy.io, has answered a bare nginx 404 on
+// every path since early October 2026.
 //
 // Target list: `job_boards:`. Gupy hosts the career pages of thousands of
 // Brazilian employers (<tenant>.gupy.io) and exposes one public search across
@@ -16,28 +20,31 @@ import { resolveProfileKeywords } from './_profile-keywords.mjs';
 // runs one sweep per keyword and the results are merged. The board therefore
 // surfaces employers that are not in tracked_companies at all.
 //
-// Source Indexing Policy (checked 2026-09-28):
+// Source Indexing Policy (checked 2026-10-07, against the portal endpoint):
 //   - Rule 1: postings are the employers' own, published on their Gupy career
-//     page, free to read and apply to. Rows flagged isConfidentialCareerPage
-//     carry "Confidencial" instead of an employer and are dropped (about 7% of
-//     a 100-row sample).
+//     page, free to read and apply to. A confidential posting carries
+//     "Confidencial" where the employer goes and is dropped. The portal
+//     endpoint no longer flags it with isConfidentialCareerPage, so the label
+//     is what identifies it (4 rows of a 500-row sample).
 //   - Rule 2: jobUrl is the posting on the employer's own <tenant>.gupy.io
 //     career page, the shortest path to the employer the payload offers.
 //   - Rule 3: results are ordered publishedDate-descending; the payload
 //     carries no sponsored or promoted flag.
-//   - Rule 6: employability-portal.gupy.io/robots.txt answers 404 (no rules);
-//     portal.gupy.io/robots.txt is `User-agent: *` / `Disallow:` (allow all).
+//   - Rule 6: portal.gupy.io/robots.txt is `User-agent: *` / `Disallow:`
+//     (allow all), which covers the API path.
 //
-// Paginated via offset/limit. limit caps at 100 server-side (limit=200 is a
-// 400). Every keyword is swept independently and results are deduped by
-// posting URL, since one posting commonly matches several keywords.
+// Paginated via offset/limit. limit caps at 100 server-side (limit=101 is a
+// 400), and the API serves no offset past 9,900 (offset=10000 is a 400).
+// Every keyword is swept independently and results are deduped by posting
+// URL, since one posting commonly matches several keywords.
 //
 // `pagination.total` is NOT usable as a stop condition. It reports the page
 // size, not the result-set size: at limit=100 it answers 100 at every offset
 // however deep the feed goes (measured 2026-08-13: jobName=Desenvolvedor
 // returned 370 postings across 4 pages, and every page reported total=100;
-// re-checked 2026-09-28). Reading it as a count ends every sweep after page 0.
-// A short page is the only end-of-feed signal this API gives.
+// re-checked 2026-09-28, and on the portal endpoint 2026-10-07). Reading it as
+// a count ends every sweep after page 0. A short page is the only end-of-feed
+// signal this API gives.
 //
 // The endpoint answers the shared default user-agent with no Origin/Referer
 // and no sec-ch-ua block, so no browser impersonation is needed.
@@ -54,8 +61,10 @@ import { resolveProfileKeywords } from './_profile-keywords.mjs';
 // whole platform and would ignore the tenant. Search keys live in a `gupy:`
 // block, the vdab/arbeitsagentur/jobbankca shape: `keywords` (falls back to
 // config/profile.yml target_roles), `q`, `since_days`, `workplace_types`,
-// `job_types`, `state`, `country`. `max_pages` stays on the entry itself, as
-// it does for jobbankca and mycareersfuture.
+// `job_types` and `state`. The API reads the two lists as `workplaceType` and
+// `type`, comma-joined. It has no country filter, so a `country` key draws a
+// warning and is not sent. `max_pages` stays on the entry itself, as it does
+// for jobbankca and mycareersfuture.
 //
 // One entry, N independent queries. Three places where this reads the
 // provider contract for that shape:
@@ -68,16 +77,19 @@ import { resolveProfileKeywords } from './_profile-keywords.mjs';
 //   - `max_pages` is per keyword, so the entry's ceiling is
 //     max_pages × keywords.length.
 
-const API_BASE = 'https://employability-portal.gupy.io/api/v1/jobs';
-const API_HOST = 'employability-portal.gupy.io';
+const API_BASE = 'https://portal.gupy.io/api/job-search/jobs';
+const API_HOST = 'portal.gupy.io';
 // Hosts whose URL means "the whole Gupy platform", as opposed to one tenant.
-const PLATFORM_HOSTS = new Set(['portal.gupy.io', API_HOST]);
+// The retired API host stays here so an entry that still points `api:` at it
+// resolves to this provider; fetch() only ever calls API_BASE.
+const PLATFORM_HOSTS = new Set([API_HOST, 'employability-portal.gupy.io']);
 const PER_PAGE = 100; // server-side maximum
 const DEFAULT_MAX_PAGES = 5; // × PER_PAGE = 500 postings per keyword
-// Runaway bound, not a coverage target. Iteration stops on a short page, so on
-// an honest feed this costs nothing: a measured 10-keyword sweep needed 13
-// requests and no keyword got past page 4.
-const MAX_PAGES_CAP = 200;
+// The API's own ceiling: offset 10,000 and beyond answers 400, so no keyword
+// goes deeper than 100 pages. On an honest feed a short page stops iteration
+// long before that: a measured 10-keyword sweep needed 13 requests and no
+// keyword got past page 4.
+const MAX_PAGES_CAP = 100;
 // Spacing between requests to the same host. No throttling observed; this is
 // the contract's default range.
 const INTER_REQUEST_DELAY_MS = 200;
@@ -86,6 +98,11 @@ const INTER_REQUEST_DELAY_MS = 200;
 // that is not perfectly monotonic can never strand an eligible posting on an
 // unfetched page. Costs at most one extra page per keyword.
 const EARLY_STOP_MARGIN_MS = 2 * 86_400_000;
+
+// What a confidential posting shows where the employer goes (Source Indexing
+// Policy rule 1). Matched whole, so an employer whose name merely contains
+// the word is kept.
+const CONFIDENTIAL_EMPLOYER = /^(?:empresa\s+)?confidencial$/i;
 
 /** Hosts a Gupy posting URL is allowed to live on. */
 function isSafeGupyUrl(value) {
@@ -266,8 +283,9 @@ export function buildGupyLocation(j) {
  *                  the cross-listing fingerprint work without a second request.
  *   - postedAt:    `publishedDate` ISO → epoch ms (omitted when unparseable).
  *
- * A posting flagged `isConfidentialCareerPage`, or with a blank
- * `careerPageName`, names no employer and is dropped (Source Indexing Policy
+ * A confidential posting (flagged `isConfidentialCareerPage`, or labelled
+ * "Confidencial" where the employer goes) or one with a blank
+ * `careerPageName` names no employer and is dropped (Source Indexing Policy
  * rule 1). scan.mjs copies `company` into the pipeline as-is, so an empty one
  * would reach it unattributed.
  *
@@ -285,7 +303,7 @@ export function normalizeGupyApiJob(j) {
   if (!isSafeGupyUrl(rawUrl)) return null;
 
   const company = typeof j.careerPageName === 'string' ? j.careerPageName.trim() : '';
-  if (!company) return null;
+  if (!company || CONFIDENTIAL_EMPLOYER.test(company)) return null;
 
   /** @type {{ title: string, url: string, company: string, location: string, description?: string, postedAt?: number }} */
   const job = {
@@ -333,7 +351,11 @@ export default {
     const workplaceTypes = listParam(cfg.workplace_types);
     const jobTypes = listParam(cfg.job_types);
     const state = typeof cfg.state === 'string' ? cfg.state.trim() : '';
-    const country = typeof cfg.country === 'string' ? cfg.country.trim() : '';
+    if (typeof cfg.country === 'string' && cfg.country.trim()) {
+      console.error(
+        `⚠️  gupy: entry "${entry?.name || '(unnamed)'}" sets gupy.country, but the Gupy API has no country filter; it is ignored`,
+      );
+    }
 
     // Total page budget for this call, not pages per keyword (see the header).
     // Counts pages ATTEMPTED: a failing sweep moves on to the next keyword, so
@@ -379,10 +401,9 @@ export default {
           offset: String(page * PER_PAGE),
           limit: String(PER_PAGE),
         });
-        if (workplaceTypes) params.set('workplaceTypes', workplaceTypes);
-        if (jobTypes) params.set('jobTypes', jobTypes);
+        if (workplaceTypes) params.set('workplaceType', workplaceTypes);
+        if (jobTypes) params.set('type', jobTypes);
         if (state) params.set('state', state);
-        if (country) params.set('country', country);
 
         const url = assertApiUrl(`${API_BASE}?${params}`);
         if (pagesAttempted > 0) await sleep(INTER_REQUEST_DELAY_MS, ctx);
@@ -423,12 +444,16 @@ export default {
         // Newest-first ordering means once a whole page sits past the window,
         // every later page does too.
         if (pageIsPastWindow(pageJobs, cutoffMs)) break;
-        // Full page in hand and no max_pages left: the feed has more and this
-        // entry's config stopped us. Not warned when ctx.maxPages did the
-        // cutting; a probe is not a misconfiguration.
+        // Full page in hand and no max_pages left: the feed has more, and
+        // either this entry's max_pages or the API's own ceiling stopped us.
+        // Not warned when ctx.maxPages did the cutting; a probe is not a
+        // misconfiguration.
         if (page + 1 >= maxPages) {
+          const remedy = maxPages < MAX_PAGES_CAP
+            ? 'raise max_pages on this entry for more'
+            : `the API serves no deeper, so split "${keyword}" into narrower keywords`;
           console.error(
-            `⚠️  gupy: "${keyword}" truncated at max_pages=${maxPages} (${maxPages * PER_PAGE} postings read, feed has more); raise max_pages on this entry for more`,
+            `⚠️  gupy: "${keyword}" truncated at max_pages=${maxPages} (${maxPages * PER_PAGE} postings read, feed has more); ${remedy}`,
           );
         }
       }

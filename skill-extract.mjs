@@ -42,6 +42,11 @@ export const SKILL_TOKENS = [
   'Airflow', 'dbt', 'MLOps', 'MLflow', 'LangChain', 'LlamaIndex',
   'Hugging Face', 'RAG', 'LLMs?', 'Prompt Engineering',
   'Computer Vision', 'NLP',
+  // How an LLM application invokes tools (#5292). LLM-engineering postings name
+  // it as a requirement in its own right, and in jd-skill-gap an unlisted phrase
+  // is split into two meaningless gaps ("Tool", "Calling"). The two names stay
+  // separate skills: no alias between them.
+  'Function Calling', 'Tool Calling',
   // Other spellings of the AI/ML tokens above (2026-10-04), each aliased to its
   // display name in CANONICAL. jd-skill-gap and upskill compare a CV with a JD
   // only through that name, so a spelling missing here turns a skill the CV

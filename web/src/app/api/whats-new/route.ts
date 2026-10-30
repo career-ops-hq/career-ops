@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, readApplications } from "@/lib/career-ops";
+import { careerOpsRoot, readApplications, readLinkedReport } from "@/lib/career-ops";
 import { getNormalizeTextKey } from "@/lib/core/text-key";
+import { getAggregatorRule } from "@/lib/core/aggregator-id";
 import { evaluatedKeys, isEvaluated } from "@/lib/whats-new-suppression.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
@@ -30,21 +31,40 @@ export async function GET(req: Request) {
   let rows: string[];
   try {
     rows = fs.readFileSync(path.join(careerOpsRoot(), "data", "scan-history.tsv"), "utf8").split("\n");
-  } catch {
-    return Response.json({ offers: [], count: 0 });
+  } catch (err) {
+    // ENOENT is the only failure that legitimately means "no matches": a user
+    // who has never run a scan has no history, and an empty result is the
+    // truth. Every other failure — unreadable, a directory, bad encoding — is
+    // the file being BROKEN, and answering 200 with `{offers: [], count: 0}`
+    // let that read as "nothing new this week". The home hero then settles both
+    // loops and can claim "You're all caught up" off a file it could not open.
+    //
+    // Same rule the user-layer readers follow: distinguish ENOENT from every
+    // other failure, and let a broken user-layer file surface as something the
+    // user can act on rather than as an empty default.
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return Response.json({ offers: [], count: 0 });
+    }
+    return Response.json(
+      { error: `scan history could not be read: ${(err as Error)?.message ?? "unknown error"}`, offers: [], count: 0 },
+      { status: 500 },
+    );
   }
 
   // Roles already evaluated → don't resurface as "new". Keyed on company AND
   // role, not company alone: suppressing by employer removed that employer's
-  // entire board after one evaluation (#3131). See lib/whats-new-suppression.
+  // entire board after one evaluation (#3131), and refined by posting URL when
+  // both sides have one (#5684), by posting id on an aggregator. See
+  // lib/whats-new-suppression.
   const normalizeTextKey = await getNormalizeTextKey();
-  const evaluated = evaluatedKeys(readApplications(), normalizeTextKey);
+  const aggregator = await getAggregatorRule();
+  const evaluated = evaluatedKeys(readApplications(), normalizeTextKey, readLinkedReport);
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
     if (!url || !/^https?:\/\//i.test(url)) return null;
     if (status && /skipped|expired/i.test(status)) return null;
-    if (isEvaluated(evaluated, normalizeTextKey, company, title)) return null;
+    if (isEvaluated(evaluated, normalizeTextKey, company, title, url, aggregator)) return null;
     return {
       url,
       company: (company || "").trim(),
@@ -56,6 +76,16 @@ export async function GET(req: Request) {
     };
   };
 
-  const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
-  return Response.json({ offers, count });
+  // Same rule as the scan history above, for the linked reports: a missing one
+  // is "URL unknown", any other read failure throws from readLinkedReport. The
+  // reads are lazy, inside toOffer, so they surface here.
+  try {
+    const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
+    return Response.json({ offers, count });
+  } catch (err) {
+    return Response.json(
+      { error: (err as Error)?.message ?? "unknown error", offers: [], count: 0 },
+      { status: 500 },
+    );
+  }
 }

@@ -3,12 +3,16 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { writeTempPortals, cleanupTempPortals } from "./portals";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { titleFit } from "@/lib/title-fit.mjs";
 import { resolveScanTimeoutMs, scanTimeoutMessage } from "./scan-timeout.mjs";
 import { ATS_LABEL, ATS_SOURCES, type AtsSource, type DiscoveredOffer, type ExploreFilters, type FitBand, type ScanEvent } from "@/lib/explore";
 import { mergeScanResults, timedOutMessage } from "./scan-merge.mjs";
+import { parseScanJsonStdout } from "./scan-json.mjs";
+import { scannerArgs } from "./scan-args.mjs";
 
 export type { DiscoveredOffer, ScanEvent, AtsSource } from "@/lib/explore";
 export { ATS_SOURCES } from "@/lib/explore";
@@ -51,9 +55,9 @@ function firstMatch(title: string, positives: string[]): string | undefined {
  * posture as seedExploreFilters in portals.ts). Annotation only: the result
  * never feeds filtering, ordering, or the summary counts.
  */
-function loadProfileTargets(): string[] {
+export function loadProfileTargets(): string[] {
   try {
-    const doc = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8"));
+    const doc = yaml.load(fs.readFileSync(getProfilePath(careerOpsRoot()), "utf8"));
     return profileTargetKeywords(doc && typeof doc === "object" ? (doc as Record<string, unknown>) : null);
   } catch {
     return [];
@@ -158,9 +162,9 @@ type ScanJson = {
 // Scan budget (ms) from config/profile.yml `scan.timeout_seconds` — the same
 // place `scan.extractor` lives. Never throws: a missing/malformed profile keeps
 // the default (a broken config must not block scanning).
-function readScanTimeoutMs(): number {
+export function readScanTimeoutMs(): number {
   try {
-    const parsed = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8"));
+    const parsed = yaml.load(fs.readFileSync(getProfilePath(careerOpsRoot()), "utf8"));
     return resolveScanTimeoutMs(parsed);
   } catch {
     return resolveScanTimeoutMs(undefined);
@@ -196,19 +200,15 @@ function runScanner(
   return new Promise((resolve) => {
     const args = [
       rootScript("scan-ats-full"),
-      "--dry-run",
-      "--since",
-      String(Math.max(1, filters.sinceDays || 7)),
-      "--ats",
-      ats.join(","),
-      "--limit",
-      String(Math.max(1, filters.limitPerAts || 150)),
+      ...scannerArgs({ ats, json: useJson, sinceDays: filters.sinceDays, limitPerAts: filters.limitPerAts }),
     ];
-    if (useJson) args.push("--json");
 
     const child = spawn(process.execPath, args, {
-      cwd: careerOpsRoot(),
+      cwd: resolveCodeRoot(process.cwd(), process.env),
       env: { ...process.env, CAREER_OPS_PORTALS: tempPortals },
+      // windowsHide: see api/doctor/route.ts — a stale inherited console kills
+      // every child with 0xC0000142 on Windows; never inherit one.
+      windowsHide: true,
     });
 
     const { offers, seen } = sink;
@@ -362,12 +362,7 @@ function runScanner(
     });
     child.on("close", () => {
       if (useJson) {
-        let j: ScanJson | null = null;
-        try {
-          j = JSON.parse(jsonOut.trim()) as ScanJson;
-        } catch {
-          j = null;
-        }
+        const j = parseScanJsonStdout(jsonOut) as ScanJson | null;
         settle({ json: j && Array.isArray(j.offers) ? j : null, timedOut });
         return;
       }

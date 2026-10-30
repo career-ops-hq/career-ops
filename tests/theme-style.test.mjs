@@ -11,16 +11,17 @@ console.log('\ntheme-style.mjs (dynamic PDF theming, #1837)');
 
 try {
   const {
-    styleTokensFrom, readStyleTokens, buildThemeStyleBlock, injectThemeStyle,
+    styleTokensFrom, readStyleTokens, readLockedSections, buildThemeStyleBlock, injectThemeStyle,
   } = await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
 
   // styleTokensFrom: recognized keys → css vars; ignore unknown/non-string/missing
-  const t = styleTokensFrom({ accent_color: '#2563eb', secondary_color: '#111827', tag_color: '#0e7490', tag_bg: '#ecfeff', tag_border: '#a5f3fc', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', job_break_inside: 'avoid', nope: 'x', font_weight: 700 });
+  const t = styleTokensFrom({ accent_color: '#2563eb', secondary_color: '#111827', tag_color: '#0e7490', tag_bg: '#ecfeff', tag_border: '#a5f3fc', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', job_break_inside: 'avoid', project_break_inside: 'avoid', nope: 'x', font_weight: 700 });
   if (t['--accent-color'] === '#2563eb' && t['--secondary-color'] === '#111827'
       && t['--tag-color'] === '#0e7490' && t['--tag-bg'] === '#ecfeff' && t['--tag-border'] === '#a5f3fc'
       && t['--font-family'] === 'Outfit, sans-serif' && t['--font-size'] === '10pt' && t['--page-margin'] === '0.5in'
-      && t['--job-break-inside'] === 'avoid' && !('--font-weight' in t) && Object.keys(t).length === 9) {
-    pass('styleTokensFrom maps the 9 recognized keys and ignores unknown/non-string');
+      && t['--job-break-inside'] === 'avoid' && t['--project-break-inside'] === 'avoid'
+      && !('--font-weight' in t) && Object.keys(t).length === 10) {
+    pass('styleTokensFrom maps the 10 recognized keys and ignores unknown/non-string');
   } else {
     fail(`styleTokensFrom => ${JSON.stringify(t)}`);
   }
@@ -30,7 +31,7 @@ try {
     fail('styleTokensFrom should return {} for null/non-object/array');
   }
 
-  // readStyleTokens: from a profile file; missing file → {}
+  // readStyleTokens & readLockedSections: from a profile file; missing file handling
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-theme-'));
   try {
     const p = join(dir, 'profile.yml');
@@ -50,6 +51,50 @@ try {
     const rt3 = readStyleTokens(p3);
     if (rt3['--secondary-color'] === '#111827' && Object.keys(rt3).length === 1) pass('readStyleTokens reads secondary_color from a profile file');
     else fail(`readStyleTokens secondary_color => ${JSON.stringify(rt3)}`);
+
+    // readLockedSections helper tests (#2053)
+    if (Array.isArray(readLockedSections(join(dir, 'nope.yml'))) && readLockedSections(join(dir, 'nope.yml')).length === 0) {
+      pass('readLockedSections returns empty array for non-existent file');
+    } else {
+      fail('readLockedSections should return empty array for non-existent file');
+    }
+
+    const pLocked = join(dir, 'profile-locked.yml');
+    writeFileSync(pLocked, 'cv:\n  locked_sections:\n    - Education\n    - Open Source Contributions\n', 'utf-8');
+    const loaded = readLockedSections(pLocked);
+    if (loaded.length === 2 && loaded[0] === 'education' && loaded[1] === 'open source contributions') {
+      pass('readLockedSections parses array and applies foldKey lowercase');
+    } else {
+      fail(`readLockedSections unexpected result: ${JSON.stringify(loaded)}`);
+    }
+
+    writeFileSync(pLocked, 'cv:\n  locked_sections: Education\n', 'utf-8');
+    const loadedSingle = readLockedSections(pLocked);
+    if (loadedSingle.length === 1 && loadedSingle[0] === 'education') {
+      pass('readLockedSections tolerates single string value');
+    } else {
+      fail(`readLockedSections unexpected single string result: ${JSON.stringify(loadedSingle)}`);
+    }
+
+    // Reject unsupported cv.locked_sections types (review requirement)
+    const pBadType = join(dir, 'profile-bad-type.yml');
+    writeFileSync(pBadType, 'cv:\n  locked_sections: true\n', 'utf-8');
+    let threwBool = false;
+    try { readLockedSections(pBadType); } catch (e) { if (e instanceof TypeError) threwBool = true; }
+    if (threwBool) pass('readLockedSections rejects boolean cv.locked_sections with TypeError');
+    else fail('readLockedSections should throw TypeError for boolean cv.locked_sections');
+
+    writeFileSync(pBadType, 'cv:\n  locked_sections:\n    education: true\n', 'utf-8');
+    let threwObj = false;
+    try { readLockedSections(pBadType); } catch (e) { if (e instanceof TypeError) threwObj = true; }
+    if (threwObj) pass('readLockedSections rejects mapping/object cv.locked_sections with TypeError');
+    else fail('readLockedSections should throw TypeError for mapping cv.locked_sections');
+
+    writeFileSync(pBadType, 'cv:\n  locked_sections:\n    - Education\n    - 123\n', 'utf-8');
+    let threwArrNonStr = false;
+    try { readLockedSections(pBadType); } catch (e) { if (e instanceof TypeError) threwArrNonStr = true; }
+    if (threwArrNonStr) pass('readLockedSections rejects non-string array items with TypeError');
+    else fail('readLockedSections should throw TypeError for non-string item in cv.locked_sections');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -131,49 +176,31 @@ try {
     }
   }
 
-  // Template contract (#3242): every shipped template keeps ITS OWN current
-  // pagination behavior as the effective --job-break-inside default, so the
-  // opt-in token changes nobody's layout. resume-template.html and
-  // templates/ats/cv-template.ats.html have always kept a role whole (avoid);
-  // the rest let a role flow across a page break (auto, per #1145).
+  // Template contract (#3242 for roles, and the sibling token for projects):
+  // every shipped template keeps ITS OWN current pagination behavior as the
+  // effective default, so an opt-in token changes nobody's layout. For roles,
+  // resume-template.html and templates/ats/cv-template.ats.html have always
+  // kept a role whole (avoid) and the rest let a role flow across a page break
+  // (auto, per #1145). For projects, every template currently lets an entry
+  // split, so the effective default is auto everywhere.
   //
-  // Both places that carry the default are pinned: the :root token default,
-  // which is what actually resolves in the templates that declare one, and the
-  // .job var() fallback, the only default in the templates that don't. The
-  // modern and legacy properties are checked separately with a property
-  // boundary, so `page-break-inside:` can never satisfy the `break-inside:`
-  // check, and the legacy alias must come first: declared last it wins the
-  // cascade and turns any keyword it does not accept (avoid-page) into auto.
-  // The token may be declared on :root only. On body or anything inside it, a
-  // declaration would beat the profile override, which arrives as a later
-  // :root block; :root-only also keeps a single place to read the default.
+  // Both places that carry a default are pinned: the :root token default, which
+  // is what actually resolves in the templates that declare one, and the rule's
+  // var() fallback, the only default in the templates that don't. The modern and
+  // legacy properties are checked separately with a property boundary, so
+  // `page-break-inside:` can never satisfy the `break-inside:` check, and the
+  // legacy alias must come first: declared last it wins the cascade and turns
+  // any keyword it does not accept (avoid-page) into auto. A token may be
+  // declared on :root only. On body or anything inside it, a declaration would
+  // beat the profile override, which arrives as a later :root block; :root-only
+  // also keeps a single place to read the default.
+  //
+  // Parameterized over the tokens rather than copied per token: the subtle parts
+  // (legacy-first ordering, :root-only, alias rejection, exact match on the root
+  // declaration) must not drift between two tokens making the same promise about
+  // different entries.
   {
-    for (const v of ['avoid', 'auto']) {
-      const block = buildThemeStyleBlock(styleTokensFrom({ job_break_inside: v }));
-      if (block.includes(`--job-break-inside: ${v};`)) pass(`job_break_inside: ${v} reaches the injected :root block`);
-      else fail(`job_break_inside: ${v} => ${block}`);
-    }
-
-    const { listTemplates } = await import(pathToFileURL(join(ROOT, 'cv-templates.mjs')).href);
-    // [effective default, declared on :root]
-    const expected = {
-      'templates/cv-template.html': ['auto', true],
-      'templates/cv-template.compact.html': ['auto', true],
-      'templates/cv-template.executive.html': ['auto', true],
-      'templates/cv-template.jake.html': ['auto', true],
-      'templates/cv-template.leadership.html': ['auto', true],
-      'templates/cv-template.modern.html': ['auto', true],
-      'templates/cv-template.zh-minimal.html': ['auto', false],
-      'templates/resume-template.html': ['avoid', false],
-      'templates/ats/cv-template.ats.html': ['avoid', true],
-    };
-    // A new template must declare its default here, or the opt-in would ship
-    // dead in it (template-page-breaks.test.mjs discovers templates the same way).
-    const discovered = listTemplates('cv').filter((t) => t.format === 'html')
-      .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
-    const unlisted = discovered.filter((t) => !(t in expected));
-    if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared job_break_inside default`);
-    else fail(`templates with no declared job_break_inside default: ${unlisted.join(', ') || '(none discovered)'}`);
+    const { listTemplates, DEFAULT_TEMPLATES_DIR } = await import(pathToFileURL(join(ROOT, 'cv-templates.mjs')).href);
 
     // Innermost `selector { body }` rules of every <style> block, with
     // comments stripped (they hold braces and token names) and {{PLACEHOLDER}}s
@@ -188,33 +215,84 @@ try {
     const declRe = (prop) => new RegExp(`(?:^|[\\s;{])${prop}\\s*:\\s*([^;}]+)`, 'gi');
     const declValues = (body, prop) => [...body.matchAll(declRe(prop))].map((m) => m[1].replace(/\s+/g, ' ').trim());
     const declIndex = (body, prop) => body.search(declRe(prop));
-    // A rule targets .job when the subject compound of any selector in its
+    // A rule targets `.cls` when the subject compound of any selector in its
     // list carries the class: `.job`, `div.job`, `.job:last-child`,
     // `:is(.job, .x)`, but not `.job li` or `.job-company`.
     const selectorList = (sel) => sel.split(/,(?![^()]*\))/).map((s) => s.trim());
     const subject = (s) => s.replace(/\([^()]*\)/g, (m) => m.replace(/[\s>+~]/g, '')).split(/\s*[\s>+~]\s*/).pop();
-    const isJobSelector = (sel) => selectorList(sel).some((s) => /\.job(?![\w-])/.test(subject(s)));
+    const targets = (sel, cls) => selectorList(sel).some((s) => new RegExp(`\\.${cls}(?![\\w-])`).test(subject(s)));
 
-    for (const [tpl, [value, declaresRoot]] of Object.entries(expected)) {
-      const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
-      const jobRules = rules.filter((r) => isJobSelector(r.selector));
-      const want = `var(--job-break-inside, ${value})`;
-      const modern = jobRules.flatMap((r) => declValues(r.body, 'break-inside'));
-      const legacy = jobRules.flatMap((r) => declValues(r.body, 'page-break-inside'));
-      const aliases = jobRules.flatMap((r) => [...declValues(r.body, '-webkit-column-break-inside'), ...declValues(r.body, 'all')]);
-      const legacyFirst = jobRules.every((r) => {
-        const legacyAt = declIndex(r.body, 'page-break-inside');
-        const modernAt = declIndex(r.body, 'break-inside');
-        return legacyAt === -1 || modernAt === -1 || legacyAt < modernAt;
-      });
-      const tokenDecls = rules.flatMap((r) => declValues(r.body, '--job-break-inside').map((v) => `${r.selector} => ${v}`));
-      const readsToken = (vals) => vals.length > 0 && vals.every((v) => v.replace(/\s/g, '') === want.replace(/\s/g, ''));
-      // Exact rather than `every`: a :root block the parse lost must fail, not pass on an empty list.
-      const rootDefaultOk = JSON.stringify(tokenDecls) === JSON.stringify(declaresRoot ? [`:root => ${value}`] : []);
-      if (readsToken(modern) && readsToken(legacy) && !aliases.length && legacyFirst && rootDefaultOk) {
-        pass(`${tpl}: .job page-break-inside then break-inside read --job-break-inside with its own default (${value})${declaresRoot ? ', matching its :root default' : ''}`);
-      } else {
-        fail(`${tpl}: #3242 contract broken (want ${want}, legacy alias first, token on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} aliases=${JSON.stringify(aliases)} legacyFirst=${legacyFirst} token=${JSON.stringify(tokenDecls)}`);
+    const ROOT_DECLARED = {
+      'templates/cv-template.html': true,
+      'templates/cv-template.compact.html': true,
+      'templates/cv-template.executive.html': true,
+      'templates/cv-template.jake.html': true,
+      'templates/cv-template.leadership.html': true,
+      'templates/cv-template.modern.html': true,
+      'templates/cv-template.zh-minimal.html': false,
+      'templates/resume-template.html': false,
+      'templates/ats/cv-template.ats.html': true,
+    };
+    // [effective default, declared on :root]
+    const withDefaults = (defaults) => Object.fromEntries(
+      Object.entries(ROOT_DECLARED).map(([tpl, root]) => [tpl, [defaults[tpl], root]]));
+    const ALL_AUTO = Object.fromEntries(Object.keys(ROOT_DECLARED).map((t) => [t, 'auto']));
+
+    const TOKENS = [
+      {
+        key: 'job_break_inside', cssVar: '--job-break-inside', cls: 'job', label: '#3242',
+        expected: withDefaults({
+          ...ALL_AUTO,
+          'templates/resume-template.html': 'avoid',
+          'templates/ats/cv-template.ats.html': 'avoid',
+        }),
+      },
+      {
+        key: 'project_break_inside', cssVar: '--project-break-inside', cls: 'project',
+        label: 'project opt-in',
+        // resume-template.html has always kept a project whole (it grouped
+        // .project with .edu-item under break-inside: avoid); every other
+        // template lets one split.
+        expected: withDefaults({ ...ALL_AUTO, 'templates/resume-template.html': 'avoid' }),
+      },
+    ];
+
+    for (const tok of TOKENS) {
+      for (const v of ['avoid', 'auto']) {
+        const block = buildThemeStyleBlock(styleTokensFrom({ [tok.key]: v }));
+        if (block.includes(`${tok.cssVar}: ${v};`)) pass(`${tok.key}: ${v} reaches the injected :root block`);
+        else fail(`${tok.key}: ${v} => ${block}`);
+      }
+
+      // A new template must declare its default here, or the opt-in would ship
+      // dead in it (template-page-breaks.test.mjs discovers templates the same way).
+      const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html')
+        .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
+      const unlisted = discovered.filter((t) => !(t in tok.expected));
+      if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared ${tok.key} default`);
+      else fail(`templates with no declared ${tok.key} default: ${unlisted.join(', ') || '(none discovered)'}`);
+
+      for (const [tpl, [value, declaresRoot]] of Object.entries(tok.expected)) {
+        const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
+        const owned = rules.filter((r) => targets(r.selector, tok.cls));
+        const want = `var(${tok.cssVar}, ${value})`;
+        const modern = owned.flatMap((r) => declValues(r.body, 'break-inside'));
+        const legacy = owned.flatMap((r) => declValues(r.body, 'page-break-inside'));
+        const aliases = owned.flatMap((r) => [...declValues(r.body, '-webkit-column-break-inside'), ...declValues(r.body, 'all')]);
+        const legacyFirst = owned.every((r) => {
+          const legacyAt = declIndex(r.body, 'page-break-inside');
+          const modernAt = declIndex(r.body, 'break-inside');
+          return legacyAt === -1 || modernAt === -1 || legacyAt < modernAt;
+        });
+        const tokenDecls = rules.flatMap((r) => declValues(r.body, tok.cssVar).map((v) => `${r.selector} => ${v}`));
+        const readsToken = (vals) => vals.length > 0 && vals.every((v) => v.replace(/\s/g, '') === want.replace(/\s/g, ''));
+        // Exact rather than `every`: a :root block the parse lost must fail, not pass on an empty list.
+        const rootDefaultOk = JSON.stringify(tokenDecls) === JSON.stringify(declaresRoot ? [`:root => ${value}`] : []);
+        if (readsToken(modern) && readsToken(legacy) && !aliases.length && legacyFirst && rootDefaultOk) {
+          pass(`${tpl}: .${tok.cls} page-break-inside then break-inside read ${tok.cssVar} with its own default (${value})${declaresRoot ? ', matching its :root default' : ''}`);
+        } else {
+          fail(`${tpl}: ${tok.label} contract broken (want ${want}, legacy alias first, token on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} aliases=${JSON.stringify(aliases)} legacyFirst=${legacyFirst} token=${JSON.stringify(tokenDecls)}`);
+        }
       }
     }
   }

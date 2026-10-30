@@ -18,6 +18,7 @@ import { safeEncodeURIComponent } from './providers/_safe-url.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -37,12 +38,17 @@ const RSS_SOURCES = {
     'https://www.prnewswire.com/rss/venture-capital-list.rss',
   ],
   guardian: ['https://www.theguardian.com/technology/rss'],
+  // Opt-in (not in DEFAULT_SOURCES): public, no-auth RSS checked 2026-10-16.
+  // Tech trade press that regularly carries funding announcements: a 1-month
+  // dry run read 30 items, 8 funding-like, and produced 4 candidates.
+  siliconangle: ['https://siliconangle.com/feed/'],
 };
 
 const SOURCE_HOSTS = {
   techcrunch: ['techcrunch.com'],
   prnewswire: ['prnewswire.com'],
   guardian: ['theguardian.com'],
+  siliconangle: ['siliconangle.com'],
   hacker_news: ['hn.algolia.com', 'news.ycombinator.com'],
 };
 
@@ -50,6 +56,7 @@ const SOURCE_RANK = {
   techcrunch: 70,
   prnewswire: 65,
   guardian: 50,
+  siliconangle: 45,
   hacker_news: 35,
   web: 5,
 };
@@ -83,8 +90,7 @@ const GENERIC_NAMES = new Set([
   'round',
 ]);
 
-function usage() {
-  console.log(`Usage:
+const USAGE = `Usage:
   node company-funded.mjs --dry-run
   node company-funded.mjs --limit 25 --months 6 --sort date
   node company-funded.mjs --sources techcrunch,prnewswire,guardian,hn --dry-run
@@ -94,45 +100,47 @@ Options:
   --months <n>            Recent-funding window. Default: 3.
   --sort <date|score>     Candidate ordering. Default: date.
   --sources <csv>         Sources. Default: techcrunch,prnewswire,guardian,hn.
+                          Also available: siliconangle.
   --dry-run               Print only; do not write report/JSON files.
   --json                  Print machine-readable JSON.
   --self-test             Run offline self-test.
-`);
-}
+`;
+
+function usage() { console.log(USAGE); }
 
 function parseArgs(argv) {
-  const opts = {
-    limit: DEFAULT_LIMIT,
-    months: DEFAULT_MONTHS,
-    sort: DEFAULT_SORT,
-    sources: [...DEFAULT_SOURCES],
-    dryRun: false,
-    json: false,
-    selfTest: false,
-    help: false,
+  const args = argv.slice(2);
+  const KNOWN_FLAGS = ['--dry-run','--json','--self-test','--help','-h','--limit','--months','--sort','--sources'];
+  const VALUE_FLAGS = ['--limit','--months','--sort','--sources'];
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  return {
+    limit: parseLimit(flagValue(args, '--limit') ?? String(DEFAULT_LIMIT)),
+    months: parseMonths(flagValue(args, '--months') ?? String(DEFAULT_MONTHS)),
+    sort: parseSort(flagValue(args, '--sort') ?? DEFAULT_SORT),
+    sources: parseSources(flagValue(args, '--sources') ?? DEFAULT_SOURCES.join(',')),
+    dryRun: hasFlag(args, '--dry-run'),
+    json: hasFlag(args, '--json'),
+    selfTest: hasFlag(args, '--self-test'),
+    help: hasFlag(args, '--help') || hasFlag(args, '-h'),
   };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === '--dry-run') opts.dryRun = true;
-    else if (arg === '--json') opts.json = true;
-    else if (arg === '--self-test') opts.selfTest = true;
-    else if (arg === '--help' || arg === '-h') opts.help = true;
-    else if (arg === '--limit') opts.limit = Number(argv[++i] || '');
-    else if (arg === '--months') opts.months = Number(argv[++i] || '');
-    else if (arg === '--sort') opts.sort = String(argv[++i] || '').trim().toLowerCase();
-    else if (arg === '--sources') opts.sources = parseSources(argv[++i] || '');
-    else throw new Error(`unknown option: ${arg}`);
-  }
-  if (!Number.isInteger(opts.limit) || opts.limit <= 0 || opts.limit > 100) {
-    throw new Error('--limit must be an integer from 1 to 100');
-  }
-  if (!Number.isInteger(opts.months) || opts.months <= 0 || opts.months > 120) {
-    throw new Error('--months must be an integer from 1 to 120');
-  }
-  if (!['date', 'score'].includes(opts.sort)) {
-    throw new Error('--sort must be date or score');
-  }
-  return opts;
+}
+
+function parseLimit(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 100) throw new Error('--limit must be an integer from 1 to 100');
+  return n;
+}
+
+function parseMonths(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 120) throw new Error('--months must be an integer from 1 to 120');
+  return n;
+}
+
+function parseSort(value) {
+  const s = String(value || '').trim().toLowerCase();
+  if (!['date', 'score'].includes(s)) throw new Error('--sort must be date or score');
+  return s;
 }
 
 function parseSources(value) {
@@ -141,7 +149,7 @@ function parseSources(value) {
     .map((s) => normalizeSourceName(s.trim()))
     .filter(Boolean);
   const unique = [...new Set(out)];
-  const allowed = new Set(['techcrunch', 'prnewswire', 'guardian', 'hn']);
+  const allowed = new Set(['techcrunch', 'prnewswire', 'guardian', 'siliconangle', 'hn']);
   for (const source of unique) {
     if (!allowed.has(source)) throw new Error(`unknown source in --sources: ${source}`);
   }
@@ -773,9 +781,9 @@ function hnQueries() {
   ];
 }
 
-async function fetchHnDiscovery({ months = DEFAULT_MONTHS, diagnostics = [] } = {}) {
+async function fetchHnDiscovery({ months = DEFAULT_MONTHS, now = new Date(), diagnostics = [] } = {}) {
   const diag = diagnostics.find((d) => d.source === 'hn') || diagnostic('hn');
-  const cutoff = Math.floor(Date.now() / 1000) - months * 31 * 24 * 60 * 60;
+  const cutoff = Math.floor(now.getTime() / 1000) - months * 31 * 24 * 60 * 60;
   const out = [];
   for (const query of hnQueries()) {
     const url =
@@ -819,11 +827,11 @@ async function fetchHnDiscovery({ months = DEFAULT_MONTHS, diagnostics = [] } = 
 async function collectDiscoveryItems(opts, diagnostics) {
   const requested = new Set(opts.sources || DEFAULT_SOURCES);
   const hits = [];
-  for (const source of ['techcrunch', 'prnewswire', 'guardian']) {
+  for (const source of ['techcrunch', 'prnewswire', 'guardian', 'siliconangle']) {
     if (requested.has(source)) hits.push(...await fetchRssDiscovery(source, diagnostics));
   }
   if (requested.has('hn')) {
-    hits.push(...await fetchHnDiscovery({ months: opts.months, diagnostics }));
+    hits.push(...await fetchHnDiscovery({ months: opts.months, now: opts.now, diagnostics }));
   }
   return hits;
 }
@@ -934,20 +942,24 @@ function printHuman(result) {
 
 export async function discoverFundedCompanies(opts = {}) {
   const months = opts.months || DEFAULT_MONTHS;
+  // The moment the window is measured back from; one value for the whole run,
+  // copied so a caller changing its own Date cannot move it mid-run.
+  const now = opts.now instanceof Date ? new Date(opts.now.getTime()) : new Date();
   const sources = (opts.sources || DEFAULT_SOURCES).map(normalizeSourceName);
   const diagnostics = [...new Set(sources)].map(diagnostic);
   const hits = Array.isArray(opts.discoveryItems)
     ? opts.discoveryItems
-    : await collectDiscoveryItems({ ...opts, months, sources }, diagnostics);
+    : await collectDiscoveryItems({ ...opts, months, sources, now }, diagnostics);
   const companies = buildCandidates(hits, {
     months,
     sort: opts.sort || DEFAULT_SORT,
     limit: opts.limit || DEFAULT_LIMIT,
+    now,
     diagnostics,
   });
 
   return {
-    generated_at: isoDate(),
+    generated_at: isoDate(now),
     window_months: months,
     sort: opts.sort || DEFAULT_SORT,
     dry_run: Boolean(opts.dryRun),
@@ -1008,7 +1020,7 @@ async function selfTest() {
 }
 
 async function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const opts = parseArgs(process.argv);
   if (opts.help) {
     usage();
     return;

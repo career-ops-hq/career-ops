@@ -18,6 +18,8 @@
  */
 
 import { pass, fail, ROOT } from './helpers.mjs';
+import { FROZEN_EVALUATION_MODES, discoverEvaluationModes, readModeText } from './evaluation-mode-parity-helpers.mjs';
+import { hasEmbeddedJdArchive } from '../check-jd-archive.mjs';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -30,10 +32,10 @@ console.log('\nJD-archive validator wiring + read-only boundary (#2789)');
 try {
   const jdArchiveSrc = readFile('check-jd-archive.mjs');
 
-  const updaterSrc = readFile('update-system.mjs');
-  const jdArchiveSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  const manifestSrc = readFile('lib/update-manifest.mjs');
+  const jdArchiveSysBlock = (manifestSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
   if (jdArchiveSysBlock.includes("'check-jd-archive.mjs'")) {
-    pass('check-jd-archive.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+    pass('check-jd-archive.mjs is in SYSTEM_PATHS (lib/update-manifest.mjs: shipped + updatable)');
   } else {
     fail('check-jd-archive.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
   }
@@ -74,6 +76,39 @@ try {
     pass('modes/oferta.md states JD archival as required (matches the Machine Summary "required" phrasing style)');
   } else {
     fail('modes/oferta.md does not state JD archival as a required step');
+  }
+
+  // A market's evaluation mode replaces oferta.md when language.modes_dir
+  // points at it, so its template must carry the section too, with the heading
+  // in English: check-jd-archive.mjs finds it by name. Frozen files are exempt
+  // until their re-sync (#3669, #3828) brings the section with it.
+  const localizedWithoutArchive = discoverEvaluationModes(ROOT)
+    .filter(file => !FROZEN_EVALUATION_MODES.has(file))
+    .filter(file => !readModeText(ROOT, `modes/${file}`).includes('\n## Job Description (archived verbatim)\n'));
+  if (localizedWithoutArchive.length === 0) {
+    pass('every re-synced localized evaluation mode carries a Job Description (archived verbatim) section');
+  } else {
+    fail(`localized evaluation modes missing the Job Description (archived verbatim) section: ${localizedWithoutArchive.join(', ')}`);
+  }
+
+  // Each template's own placeholder line, left in place by an evaluator, must
+  // not pass as an archive. check-jd-archive.mjs collects them from modes/ by
+  // shape (a parenthesized line under the heading); a template whose
+  // placeholder loses that shape would silently drop out of the set.
+  const placeholderTemplates = ['oferta.md', ...discoverEvaluationModes(ROOT)
+    .filter(file => !FROZEN_EVALUATION_MODES.has(file))];
+  const unrejectedPlaceholders = [];
+  for (const file of placeholderTemplates) {
+    const lines = readModeText(ROOT, `modes/${file}`).split(/\r?\n/);
+    const at = lines.indexOf('## Job Description (archived verbatim)');
+    const placeholder = at === -1 ? '' : lines[at + 1].trim();
+    const report = `## Job Description (archived verbatim)\n${placeholder}\n\n## Machine Summary\n`;
+    if (!placeholder || hasEmbeddedJdArchive(report)) unrejectedPlaceholders.push(`${file}: ${placeholder || '(no placeholder line)'}`);
+  }
+  if (unrejectedPlaceholders.length === 0) {
+    pass(`check-jd-archive.mjs rejects the unfilled placeholder of all ${placeholderTemplates.length} evaluation-mode templates`);
+  } else {
+    fail(`check-jd-archive.mjs credits an unfilled template placeholder as an archive: ${unrejectedPlaceholders.join('; ')}`);
   }
 
   const pdfDoc = readFile('modes/pdf.md');

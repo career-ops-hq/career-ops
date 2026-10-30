@@ -3,9 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
+import { patchProfileText } from "@/lib/profile-yaml-edit.mjs";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
+import { readJsonObject } from "@/lib/json-body";
+import { followupsEnabledFromProfile } from "@/lib/followups-setting.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +45,11 @@ async function readCoreDefaults(): Promise<Partial<Record<ProfileCadenceKey, num
   const script = rootScript("followup-cadence");
   if (!fs.existsSync(script)) return null;
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000 }, (_e, out) => resolve(out || ""));
+    // process.execPath + windowsHide: see api/doctor/route.ts — a stale inherited
+    // console kills every child with 0xC0000142 on Windows; never inherit one.
+    execFile(process.execPath, [script, "--json"], { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 12_000, windowsHide: true }, (_e, out) =>
+      resolve(out || ""),
+    );
   });
   try {
     const start = stdout.indexOf("{");
@@ -68,8 +77,9 @@ async function readCoreDefaults(): Promise<Partial<Record<ProfileCadenceKey, num
 }
 
 export async function GET() {
-  const file = path.join(careerOpsRoot(), "config", "profile.yml");
+  const file = getProfilePath(careerOpsRoot());
   const overrides: Partial<Record<ProfileCadenceKey, number>> = {};
+  let enabled = true;
   if (fs.existsSync(file)) {
     let profile: Record<string, unknown> = {};
     try {
@@ -78,6 +88,7 @@ export async function GET() {
     } catch {
       /* unreadable/malformed → show defaults (read is best-effort) */
     }
+    enabled = followupsEnabledFromProfile(profile);
     const source = isObj(profile.followup_cadence) ? profile.followup_cadence : {};
     for (const key of PROFILE_CADENCE_KEYS) {
       const n = Number.parseInt(String(source[key]), 10);
@@ -88,16 +99,12 @@ export async function GET() {
   // `defaultsAvailable: false` tells the form to render its placeholders as
   // unknown rather than inventing a number — an honest gap beats a stale copy.
   const effective = { ...(defaults ?? {}), ...overrides };
-  return Response.json({ defaults: defaults ?? {}, defaultsAvailable: defaults !== null, overrides, effective });
+  return Response.json({ defaults: defaults ?? {}, defaultsAvailable: defaults !== null, overrides, effective, enabled });
 }
 
 export async function POST(req: Request) {
-  let body: Record<string, unknown>;
-  try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<Record<string, unknown>>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
 
   const cadence: Record<string, number> = {};
   for (const key of PROFILE_CADENCE_KEYS) {
@@ -108,17 +115,26 @@ export async function POST(req: Request) {
     }
     cadence[key] = n;
   }
-  if (Object.keys(cadence).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
+  if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+    return Response.json({ error: "enabled must be true or false" }, { status: 400 });
+  }
+  const enabled = body.enabled as boolean | undefined;
+  if (Object.keys(cadence).length === 0 && enabled === undefined) {
+    return Response.json({ error: "nothing to write" }, { status: 400 });
+  }
 
   const root = careerOpsRoot();
-  const file = path.join(root, "config", "profile.yml");
+  const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
+  let source = "";
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a cadence-only profile.
     try {
-      const seeded = yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8"));
+      source = fs.readFileSync(path.join(resolveCodeRoot(process.cwd(), process.env), "config", "profile.example.yml"), "utf8");
+      const seeded = yaml.load(source);
       base = isObj(seeded) ? seeded : {};
     } catch {
+      source = "";
       base = {};
     }
   } else {
@@ -126,7 +142,8 @@ export async function POST(req: Request) {
     // read/parsed must never be overwritten with a cadence-only file.
     let parsed: unknown;
     try {
-      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+      source = fs.readFileSync(file, "utf8");
+      parsed = yaml.load(source);
     } catch {
       return Response.json({ error: "config/profile.yml exists but could not be read as YAML — refusing to overwrite it." }, { status: 409 });
     }
@@ -138,14 +155,24 @@ export async function POST(req: Request) {
     base = parsed as Record<string, unknown>;
   }
 
-  const merged = {
-    ...base,
-    followup_cadence: { ...(isObj(base.followup_cadence) ? base.followup_cadence : {}), ...cadence },
-  };
+  const merged: Record<string, unknown> = { ...base };
+  const patch: Parameters<typeof patchProfileText>[1] = {};
+  if (Object.keys(cadence).length > 0) {
+    merged.followup_cadence = { ...(isObj(base.followup_cadence) ? base.followup_cadence : {}), ...cadence };
+    patch.followup_cadence = cadence;
+  }
+  if (enabled !== undefined) {
+    merged.follow_ups = { ...(isObj(base.follow_ups) ? base.follow_ups : {}), enabled };
+    patch.follow_ups = { enabled };
+  }
   try {
-    atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
+    // Edit only the cadence lines so the rest of the profile, comments
+    // included, stays as the user wrote it (#5662). A shape the line edit
+    // cannot place falls back to yaml.dump; the backup holds the prior bytes.
+    const text = patchProfileText(source, patch, merged) ?? yaml.dump(merged, { lineWidth: 100, noRefs: true });
+    atomicWriteWithBackup(file, text);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }
-  return Response.json({ ok: true, followup_cadence: merged.followup_cadence });
+  return Response.json({ ok: true, followup_cadence: merged.followup_cadence, follow_ups: merged.follow_ups });
 }

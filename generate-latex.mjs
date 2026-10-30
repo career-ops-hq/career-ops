@@ -9,16 +9,29 @@
  *
  * Default: validates career-ops template structure (from templates/cv-template.tex).
  * --compile-only: skip template validation; compile any user-owned .tex (latex-tex mode).
+ * --source <path>: an extra fact-gate source, repeatable (latex-tex passes the user's own .tex).
+ * --skip-fact-check: compile without the fact gate.
  *
- * Requires: tectonic (preferred) or pdflatex on PATH.
+ * Both modes run the CV fact gate (verify-cv-facts.mjs) on the .tex before
+ * compiling, when the data root has a cv.md to check against — the same
+ * condition generate-pdf.mjs uses. A blocked document is not compiled.
+ *
+ * Requires: a repo-local tectonic (`node install-latex-engine.mjs`, see
+ * install-latex-engine.mjs), or tectonic / pdflatex on PATH.
  */
 
 import { readFile, writeFile, stat, copyFile, rm } from 'fs/promises';
 import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+
+const ROOT = dirname(fileURLToPath(import.meta.url));
+
+const INSTALL_HINT = 'node install-latex-engine.mjs';
 
 const MIN_SECTIONS = 4;
 
@@ -45,17 +58,40 @@ const CJK_RE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script
 const CJK_PACKAGE_RE = /\\usepackage(?:\[[^\]]*\])?\{[^}]*\b(?:xeCJK|ctex)\b[^}]*\}|\\documentclass(?:\[[^\]]*\])?\{ctex(?:art|rep|book)?\}/;
 
 /**
- * Resolve the LaTeX engine available on PATH, preferring tectonic (XeTeX
- * backend, supports CJK via fontspec/xeCJK) over pdflatex (no CJK support).
+ * Where install-latex-engine.mjs puts tectonic: next to the scripts.
+ * @param {string} [root]
+ * @param {string} [platform]
+ * @returns {string}
+ */
+export function localTectonicPath(root = ROOT, platform = process.platform) {
+  return join(root, platform === 'win32' ? 'tectonic.exe' : 'tectonic');
+}
+
+// The binary resolveLatexEngine() last succeeded with, so the compile runs the
+// executable it probed (the repo-local path, not whatever is on PATH).
+let resolvedEngineBin = null;
+
+/**
+ * Resolve the LaTeX engine, preferring tectonic (XeTeX backend, supports CJK
+ * via fontspec/xeCJK) over pdflatex (no CJK support). A repo-local tectonic
+ * from install-latex-engine.mjs is tried before PATH.
  * @returns {string|null}
  */
 export function resolveLatexEngine() {
-  for (const candidate of ['tectonic', 'pdflatex']) {
+  const local = localTectonicPath();
+  const candidates = [
+    ...(existsSync(local) ? [{ name: 'tectonic', bin: local }] : []),
+    { name: 'tectonic', bin: 'tectonic' },
+    { name: 'pdflatex', bin: 'pdflatex' },
+  ];
+  for (const candidate of candidates) {
     try {
-      execFileSync(candidate, ['--version'], { stdio: 'pipe' });
-      return candidate;
+      execFileSync(candidate.bin, ['--version'], { stdio: 'pipe' });
+      resolvedEngineBin = candidate.bin;
+      return candidate.name;
     } catch { /* not found */ }
   }
+  resolvedEngineBin = null;
   return null;
 }
 
@@ -98,7 +134,7 @@ export function validateLatexContent(content, compileOnly, engine = null) {
     } else if (engine === 'tectonic') {
       issues.push('CJK characters detected but no CJK package (xeCJK/ctex) is loaded. Generate from the CJK-aware template instead: `node build-cv-latex.mjs <input.json> <output.tex> --template=cjk` (templates/cv-template.cjk.tex), or use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
     } else {
-      issues.push('CJK characters detected. This CJK-aware LaTeX path needs a XeTeX-based engine (fontspec/xeCJK) — pdfLaTeX cannot compile it. Install tectonic (brew install tectonic) and regenerate from the CJK-aware template (`--template=cjk`), or use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
+      issues.push(`CJK characters detected. This CJK-aware LaTeX path needs a XeTeX-based engine (fontspec/xeCJK) — pdfLaTeX cannot compile it. Install tectonic (\`${INSTALL_HINT}\`, one-time download) and regenerate from the CJK-aware template (\`--template=cjk\`), or use \`pdf\` mode (HTML to PDF, which renders CJK) for these CVs.`);
     }
   }
 
@@ -173,7 +209,8 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
 
   if (!engine) {
     report.compiled = false;
-    report.compileError = 'No LaTeX engine found. Install tectonic (brew install tectonic) or pdflatex.';
+    report.compileError = `No LaTeX engine found. Run \`${INSTALL_HINT}\` (downloads tectonic once, ~10-22 MB) or install tectonic/pdflatex yourself.`;
+    report.installHint = INSTALL_HINT;
     return report;
   }
 
@@ -190,7 +227,7 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
 
   try {
     if (engine === 'tectonic') {
-      execFileSync('tectonic', ['--outdir', texDir, compilePath], {
+      execFileSync(resolvedEngineBin || 'tectonic', ['--outdir', texDir, compilePath], {
         cwd: texDir,
         stdio: 'pipe',
         timeout: 120_000,
@@ -254,16 +291,83 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
   return report;
 }
 
+/**
+ * Run the CV fact gate on a .tex document before it is compiled (#5348).
+ *
+ * The latex and latex-tex modes hand the user a CV as sendable as the one
+ * pdf mode renders, and until this ran here neither path checked it at all:
+ * generate-pdf.mjs gates in code, this compiler did not. Same condition as
+ * generate-pdf: no cv.md in the data root means there is nothing to check
+ * against, so the gate is skipped rather than failing every claim.
+ *
+ * @param {string} content - the .tex source
+ * @param {{root?: string, extraSources?: string[], label?: string}} [options]
+ *   extraSources: further evidence files, such as the user's own source .tex in
+ *   latex-tex mode, which is user-authored and may hold facts cv.md lacks.
+ * @returns {Promise<{verdict: 'pass'|'warn'|'block'|'skipped', reason?: string, result?: object}>}
+ */
+export async function runLatexFactGate(content, { root = getCareerOpsRoot(), extraSources = [], label } = {}) {
+  const cvPath = join(root, 'cv.md');
+  if (!existsSync(cvPath)) return { verdict: 'skipped', reason: `no cv.md in ${root}` };
+  // Imported lazily, as generate-pdf.mjs does: a test that copies this script
+  // alone into a temp workspace has no cv.md and never reaches the import.
+  const { assertFacts } = await import('./verify-cv-facts.mjs');
+  // An explicit --source that does not exist is a mistyped path, not an empty
+  // source. Read as empty, it would leave the claims it was passed to back
+  // unsupported and blame the CV instead of the path.
+  const extraPaths = extraSources.map(p => resolve(p));
+  const missing = extraPaths.filter(p => !existsSync(p));
+  if (missing.length) return { verdict: 'block', reason: `--source file not found: ${missing.join(', ')}` };
+  const sourcePaths = [cvPath, join(root, 'article-digest.md'), ...extraPaths];
+  try {
+    const result = assertFacts(content, { sourcePaths, configPath: join(root, 'config', 'cv-facts.json'), label });
+    return { verdict: result.verdict, result };
+  } catch (err) {
+    return { verdict: 'block', reason: err.message };
+  }
+}
+
 // ── CLI flags + help ──────────────────────────────────────
 
-const KNOWN_FLAGS = ['--compile-only', '--help', '-h'];
+const KNOWN_FLAGS = ['--compile-only', '--skip-fact-check', '--source', '--help', '-h'];
+const VALUE_FLAGS = ['--source'];
 
 const USAGE = `Usage:
-  node generate-latex.mjs <input.tex> [output.pdf]                 # validate career-ops template structure, then compile
+  node generate-latex.mjs <input.tex> [output.pdf]                 # fact-check, validate career-ops template structure, then compile
   node generate-latex.mjs <input.tex> [output.pdf] --compile-only  # skip template validation; compile any user-owned .tex (latex-tex mode)
+  node generate-latex.mjs <input.tex> [output.pdf] --source <path> # add a fact-gate source (repeatable), e.g. the user's own .tex
+  node generate-latex.mjs <input.tex> [output.pdf] --skip-fact-check
   node generate-latex.mjs --help|-h                                # print this usage block and exit
 
-Requires tectonic (preferred) or pdflatex on PATH.`;
+The fact gate runs when the data root has a cv.md; a blocked document is not compiled.
+Requires a repo-local tectonic (${INSTALL_HINT}) or tectonic/pdflatex on PATH.`;
+
+/**
+ * Split argv into positionals, --source values and boolean flags.
+ *
+ * @param {string[]} rawArgs
+ * @returns {{positionals: string[], sources: string[], compileOnly: boolean, skipFactCheck: boolean}}
+ */
+export function parseLatexArgs(rawArgs) {
+  const positionals = [];
+  const sources = [];
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i];
+    if (arg === '--source') {
+      if (rawArgs[i + 1] !== undefined) sources.push(rawArgs[++i]);
+    } else if (arg.startsWith('--source=')) {
+      sources.push(arg.slice('--source='.length));
+    } else if (arg !== '--compile-only' && arg !== '--skip-fact-check') {
+      positionals.push(arg);
+    }
+  }
+  return {
+    positionals,
+    sources,
+    compileOnly: rawArgs.includes('--compile-only'),
+    skipFactCheck: rawArgs.includes('--skip-fact-check'),
+  };
+}
 
 async function main() {
   const rawArgs = process.argv.slice(2);
@@ -275,12 +379,11 @@ async function main() {
   // /…/--help: ENOENT"), and a mistyped `--compileonly` landed in args[1]
   // as the OUTPUT path while template validation it meant to skip ran anyway.
   // This is the defect lib/cli-flags.mjs was written for; see its header.
-  validateFlags(rawArgs, KNOWN_FLAGS, USAGE);
+  validateFlags(rawArgs, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-  const compileOnly = rawArgs.includes('--compile-only');
-  const args = rawArgs.filter(a => a !== '--compile-only');
-  const inputPath = args[0];
-  const outputPath = args[1];
+  const { positionals, sources, compileOnly, skipFactCheck } = parseLatexArgs(rawArgs);
+  const inputPath = positionals[0];
+  const outputPath = positionals[1];
 
   if (!inputPath) {
     console.error(USAGE);
@@ -296,7 +399,37 @@ async function main() {
     process.exit(1);
   }
 
+  const factCheck = skipFactCheck
+    ? { verdict: 'skipped', reason: '--skip-fact-check' }
+    : await runLatexFactGate(content, { extraSources: sources, label: basename(absPath) });
+  if (factCheck.verdict === 'block') {
+    // Nothing is compiled. A fact gate that let the PDF through and reported
+    // afterwards would leave the sendable artifact on disk.
+    console.error(factCheck.reason);
+    console.log(JSON.stringify({
+      file: basename(absPath),
+      path: absPath,
+      issues: [factCheck.reason],
+      valid: false,
+      compileOnly,
+      compiled: false,
+      factCheck: { verdict: 'block', reason: factCheck.reason },
+    }, null, 2));
+    process.exit(1);
+  }
+  if (factCheck.result?.configMissing) {
+    console.error('⚠️  No config/cv-facts.json — forbidden/advisory phrase checks did not run.');
+  }
+  if (factCheck.verdict === 'warn') {
+    const { printFactWarnings } = await import('./verify-cv-facts.mjs');
+    console.error(`⚠️  CV fact check warning: ${basename(absPath)}`);
+    printFactWarnings(factCheck.result, console.error);
+  }
+
   const report = await compileLatexFile(absPath, content, outputPath || null, compileOnly);
+  report.factCheck = factCheck.result
+    ? { verdict: factCheck.verdict, configMissing: factCheck.result.configMissing }
+    : { verdict: factCheck.verdict, reason: factCheck.reason };
   console.log(JSON.stringify(report, null, 2));
   process.exit(report.compiled ? 0 : (report.valid ? 1 : 1));
 }

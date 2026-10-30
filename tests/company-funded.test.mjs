@@ -357,9 +357,11 @@ try {
       sources: ['techcrunch'],
       months: 3,
       limit: 5,
+      now: new Date('2026-07-20T00:00:00Z'),
     });
     if (
       result.companies[0]?.company === 'Acme' &&
+      result.generated_at === '2026-07-20' &&
       seenFetchOptions.every((call) => call.options?.redirect === 'manual') &&
       String(seenFetchOptions[0]?.url) === 'https://techcrunch.com/feed/' &&
       seenFetchOptions.some((call) => String(call.url) === 'https://techcrunch.com/final-feed/')
@@ -370,6 +372,39 @@ try {
     }
   } finally {
     globalThis.fetch = originalFetch;
+  }
+
+  // Opt-in source: siliconangle is accepted by --sources, is fetched only when
+  // requested, and is not part of the default set.
+  {
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      const host = new URL(String(url)).hostname;
+      const item = host === 'siliconangle.com' || host.endsWith('.siliconangle.com')
+        ? ['Gamma raises $12M Seed', 'https://siliconangle.com/2026/07/14/gamma']
+        : null;
+      const body = item
+        ? `<?xml version="1.0"?><rss><channel><item><title>${item[0]}</title><link>${item[1]}</link><pubDate>Wed, 15 Jul 2026 12:00:00 +0000</pubDate><description>${item[0]}.</description></item></channel></rss>`
+        : '<?xml version="1.0"?><rss><channel></channel></rss>';
+      const res = new Response(body, { status: 200, headers: { 'content-type': 'application/rss+xml' } });
+      Object.defineProperty(res, 'url', { value: String(url) });
+      return res;
+    };
+    try {
+      const optIn = await mod.discoverFundedCompanies({ dryRun: true, sources: ['siliconangle'], months: 3, limit: 5, now: new Date('2026-07-20T00:00:00Z') });
+      const names = optIn.companies.map((c) => c.company).sort().join(',');
+      const fetched = urls.some((u) => { const x = new URL(u); return (x.hostname === 'siliconangle.com' || x.hostname.endsWith('.siliconangle.com')) && x.pathname.startsWith('/feed'); });
+      if (names === 'Gamma' && fetched) pass('discoverFundedCompanies reads the opt-in siliconangle feed when asked');
+      else fail(`opt-in sources wrong: companies=${names} urls=${JSON.stringify(urls)}`);
+
+      urls.length = 0;
+      await mod.discoverFundedCompanies({ dryRun: true, months: 3, limit: 5, now: new Date('2026-07-20T00:00:00Z') });
+      if (urls.length > 0 && !urls.some((u) => { const h = new URL(u).hostname; return h === 'siliconangle.com' || h.endsWith('.siliconangle.com'); })) pass('the default sources do not fetch the opt-in feeds');
+      else fail(`default run touched opt-in feeds or fetched nothing: ${JSON.stringify(urls)}`);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   }
 
   globalThis.fetch = async (url, options) => {
@@ -429,23 +464,27 @@ try {
     globalThis.fetch = originalFetch;
   }
 
-  const recentAcme = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-  const recentBeta = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+  // A fixed `now`: the Hacker News query cutoff and the candidate window are
+  // both measured back from it.
+  const hnNow = new Date('2026-07-20T00:00:00Z');
+  const hnCutoff = Math.floor(hnNow.getTime() / 1000) - 3 * 31 * 24 * 60 * 60;
+  const hnRequestUrls = [];
   globalThis.fetch = async (url, options) => {
+    hnRequestUrls.push(String(url));
     const res = new Response(JSON.stringify({
       hits: [
         {
           title: 'Acme raises $25M Series A',
           url: '',
           objectID: '123',
-          created_at: recentAcme,
+          created_at: '2026-07-18T10:00:00.000Z',
           story_text: 'Acme raises funding.',
         },
         {
           title: 'Beta raises $30M Series B',
           url: 'https://techcrunch.com/beta',
           objectID: '124',
-          created_at: recentBeta,
+          created_at: '2026-07-19T10:00:00.000Z',
           story_text: 'Beta raises funding.',
         },
       ],
@@ -462,7 +501,13 @@ try {
       sources: ['hn'],
       months: 3,
       limit: 5,
+      now: hnNow,
     });
+    if (hnRequestUrls.length > 0 && hnRequestUrls.every((url) => url.includes(`numericFilters=created_at_i>${hnCutoff}`))) {
+      pass('discoverFundedCompanies measures the Hacker News created_at_i cutoff from opts.now');
+    } else {
+      fail(`Hacker News cutoff not taken from opts.now (expected ${hnCutoff}): ${JSON.stringify(hnRequestUrls)}`);
+    }
     const acme = result.companies.find((c) => c.company === 'Acme');
     const beta = result.companies.find((c) => c.company === 'Beta');
     const acmeEvidence = acme?.funding.sources[0];

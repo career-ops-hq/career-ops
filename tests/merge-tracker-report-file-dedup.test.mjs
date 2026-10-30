@@ -8,11 +8,11 @@
 // the fix.
 import { pass, fail, isolatedBatchStatePath } from './helpers.mjs';
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MERGE = join(HERE, '..', 'merge-tracker.mjs');
@@ -98,5 +98,55 @@ ok('a conflicting explicit URL still blocks the report-file match (URL disagreem
     runMerge(env);
     const rows = trackerRows(env);
     assert.equal(rows.length, 2, 'a conflicting explicit URL must still be respected as evidence of a distinct posting');
+  } finally { cleanup(env); }
+});
+
+// Pass 0.5 compares resolved paths. Only the addition's own path has to be a
+// real file; an existing row whose path string equals it names the same file
+// by definition. Statting every existing row's report for each addition, under
+// the tracker lock, made the tier's cost grow with the tracker for no gain.
+ok('the report-file tier does not stat every existing row\'s report', () => {
+  const env = makeEnv();
+  try {
+    const N = 300;
+    const rows = [];
+    for (let i = 1; i <= N; i++) {
+      writeFileSync(join(env.reportsDir, `${i}-co${i}.md`), `# Eval\n**Score:** 4.0/5\n**URL:** N/A\n`);
+      rows.push(`| ${i} | 2026-09-01 | Co${i} | Role ${i} | 4.0/5 | Evaluated | ❌ | [${i}](reports/${i}-co${i}.md) | n |`);
+    }
+    writeTracker(env, rows);
+    writeFileSync(join(env.reportsDir, `${N + 1}-newco.md`), '# Eval\n**Score:** 4.1/5\n**URL:** N/A\n');
+    addTsv(env, `${N + 1}-newco.tsv`, [String(N + 1), '2026-09-02', 'Newco', 'Platform Engineer', 'Evaluated', '4.1/5', '❌', `[${N + 1}](reports/${N + 1}-newco.md)`, 'new']);
+
+    // Count fs probes of reports/ in the child. syncBuiltinESMExports() makes
+    // merge-tracker's named `statSync`/`existsSync` imports see the wrappers.
+    const counter = join(env.base, 'count-stats.mjs');
+    const countFile = join(env.base, 'stat-count.txt');
+    writeFileSync(counter, [
+      "import fs from 'node:fs';",
+      "import { syncBuiltinESMExports } from 'node:module';",
+      // Values come from the environment, never spliced into this source.
+      'const dirs = JSON.parse(process.env.COUNT_STAT_DIRS);',
+      'let n = 0;',
+      'for (const name of ["statSync", "existsSync"]) {',
+      '  const orig = fs[name];',
+      '  fs[name] = function (p, ...rest) { if (dirs.some((d) => String(p).startsWith(d))) n++; return orig.call(this, p, ...rest); };',
+      '}',
+      'syncBuiltinESMExports();',
+      "process.on('exit', () => fs.writeFileSync(process.env.COUNT_STAT_FILE, String(n)));",
+    ].join('\n'));
+    execFileSync('node', ['--import', pathToFileURL(counter).href, MERGE], {
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.addDir, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.addDir),
+        // Both spellings: macOS reports a tmpdir path as /var or /private/var.
+        COUNT_STAT_DIRS: JSON.stringify([env.reportsDir, realpathSync(env.reportsDir)]),
+        COUNT_STAT_FILE: countFile,
+      },
+    });
+    assert.equal(trackerRows(env).length, N + 1, 'the new posting is appended as its own row');
+    const probes = Number(readFileSync(countFile, 'utf-8'));
+    assert.ok(probes < 20, `merging one addition probed reports/ ${probes} times against a ${N}-row tracker`);
   } finally { cleanup(env); }
 });

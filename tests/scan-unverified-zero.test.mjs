@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { makeHttpCtx } from '../providers/_http.mjs';
 import { computeConsecutiveFailures, emptyTargetStatus } from '../scan.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 function observedContext() {
   const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
@@ -96,7 +97,7 @@ test('scan records a swallowed first-page HTTP failure as unverified_zero', () =
       encoding: 'utf8',
       timeout: 30000,
     });
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     const receipt = JSON.parse(result.stdout);
     assert.deepEqual(receipt.errors, []);
     assert.deepEqual(receipt.unverified_zero, ['Failed Board']);

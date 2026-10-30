@@ -73,8 +73,15 @@ test("only the persisting kinds may write", () => {
   // Given the kinds that produce canonical artifacts (reports, tracker, portals)
   const writers = KNOWN_KINDS.filter((k) => capabilitiesFor(k).writes);
 
-  // Then exactly those two, and nothing has quietly joined them.
-  assert.deepEqual(writers.sort(), ["evaluate", "fix-portal"]);
+  // Then only fix-portal. evaluate emits the report inline and must not write.
+  assert.deepEqual(writers, ["fix-portal"]);
+});
+
+test("evaluate fetches the posting and does not write", () => {
+  const caps = capabilitiesFor("evaluate");
+  assert.equal(caps, CAPS.networkReadOnly);
+  assert.equal(caps.writes, false);
+  assert.equal(caps.network, "fetch");
 });
 
 test("the policy and Claude's tool scope agree for every kind", () => {
@@ -133,4 +140,14 @@ test("pdf cannot reach the network on either runtime", () => {
   for (const tool of ["WebFetch", "WebSearch"]) {
     assert.ok(!allowed.includes(tool), `pdf must not be granted ${tool}`);
   }
+});
+
+test("cover drafts with web research but writes nothing", () => {
+  // Given cover.md Step 3 runs web searches and slug mode re-reads the posting url
+  const caps = capabilitiesFor("cover");
+
+  // Then it fetches like research and never holds a write tool
+  assert.equal(caps, CAPS.networkReadOnly);
+  assert.equal(grantsWriteCapability(toolScopeFor("cover")), false);
+  assert.ok(KNOWN_KINDS.includes("cover"), "guards that iterate KNOWN_KINDS must reach cover");
 });

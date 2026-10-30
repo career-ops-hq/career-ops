@@ -55,13 +55,12 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstatSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'path';
-import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { unescapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
 const DEFAULT_VCF = join(DATA_ROOT, 'output/contacts.vcf');
@@ -104,15 +103,6 @@ const vcfPathArg = (() => {
 const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'internal-referral', 'other']);
 
 // --- Phonebook parsing (TSV) ---
-export function escapeFormulaCell(value) {
-  const cell = String(value ?? '');
-  return /^'*[=+\-@]/.test(cell) ? `'${cell}` : cell;
-}
-
-export function unescapeFormulaCell(value) {
-  const cell = String(value ?? '');
-  return cell.replace(/^'(?='*[=+\-@])/, '');
-}
 
 // line: {name}\t{company}\t{type}\t{title}\t{phone}\t{email}\t{linkedin}\t{tracker#|-}\t{notes}
 // Cells are split BEFORE trimming the line (only the trailing \r is stripped):
@@ -467,9 +457,12 @@ function writeVcf(contacts, quality) {
   const outPath = resolve(vcfPathArg ?? DEFAULT_VCF);
   // Path-traversal guard: keep the vCard write inside the project directory so
   // a crafted output argument (e.g. "../../etc/cron.d/x") can't escape the
-  // repo. Anchored to the repo root (CAREER_OPS), not process.cwd() — see the
-  // generate-pdf.mjs precedent. Cheap lexical gate first…
-  const relOut = relative(CAREER_OPS, outPath);
+  // repo. Anchored to the data root (the root the contacts are read from and
+  // DEFAULT_VCF lives in), not process.cwd() and not this script's own
+  // directory: they differ when CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR /
+  // .career-ops-data points the user layer outside the checkout. Cheap lexical
+  // gate first…
+  const relOut = relative(DATA_ROOT, outPath);
   if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
     console.error(`Refusing to write the vCard outside the project directory: ${outPath}`);
     process.exit(1);
@@ -489,7 +482,7 @@ function writeVcf(contacts, quality) {
     console.error(`Refusing to write the vCard outside the project directory: ${outPath}`);
     process.exit(1);
   }
-  const repoReal = realpathSync(CAREER_OPS);
+  const repoReal = realpathSync(DATA_ROOT);
   const canonicalTarget = existsSync(outPath)
     ? realpathSync(outPath)
     : join(realpathSync(dirname(outPath)), basename(outPath));

@@ -48,6 +48,8 @@ var (
 	// "City ST" / "City, ST" with a strict two-letter US state code so prose like
 	// "Sams AI" or "Kerin Colby DONE" can't false-positive.
 	reCityState = regexp.MustCompile(`\b([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+){0,2}),? (A[KLRZ]|C[AOT]|D[CE]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\b`)
+	// Explicit "Location: <value>" in notes; the value ends at ";" or a newline.
+	reLocationLabel = regexp.MustCompile(`(?i)\blocation:\s*([^;\n]+)`)
 	// International cities, checked only when no US "City, ST" matches, so
 	// European/other non-US roles still surface a Location. Cities only (not bare
 	// country names) to avoid prose false-positives like "Portugal eligible" or
@@ -154,14 +156,24 @@ func payCeiling(span string) float64 {
 // deriveNoteFields populates Location, WorkMode, PayRange, PaySource and
 // LastContact from the application's Notes (plus Role for work-mode keywords).
 func deriveNoteFields(app *model.CareerApplication) {
-	lower := strings.ToLower(app.Role + " " + app.Notes)
+	lower := strings.ToLower(app.Role + " " + app.Notes + " " + app.Location)
 
-	// Location: first "City, ST" in the notes, falling back to the role title
-	// (some tracker rows carry the city there, e.g. "... — Charlotte, NC"). When
-	// no US "City, ST" is present, fall back to an international city/country so
-	// European and other non-US roles still show a Location.
-	if m := reCityState.FindStringSubmatch(app.Notes); m != nil {
-		app.Location = CanonicalizeLocation(m[1] + ", " + m[2])
+	// Location: an explicit value (tracker Location column, already set by the
+	// reader, then a "Location: ..." segment in the notes ending at ";" or a
+	// newline) is kept whatever the town. Otherwise infer the first "City, ST" in
+	// the notes, falling back to the role title (some tracker rows carry the city
+	// there, e.g. "... — Charlotte, NC"). When no US "City, ST" is present, fall
+	// back to an international city/country so European and other non-US roles
+	// still show a Location.
+	if app.Location == "" {
+		if m := reLocationLabel.FindStringSubmatch(app.Notes); m != nil {
+			app.Location = CanonicalizeLocation(m[1])
+		}
+	}
+	if app.Location == "" {
+		if m := reCityState.FindStringSubmatch(app.Notes); m != nil {
+			app.Location = CanonicalizeLocation(m[1] + ", " + m[2])
+		}
 	}
 	if app.Location == "" {
 		if m := reCityState.FindStringSubmatch(app.Role); m != nil {

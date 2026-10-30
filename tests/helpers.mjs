@@ -2,17 +2,188 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { basename, join, dirname, resolve, sep, delimiter } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { localToday } from '../lib/local-today.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
+import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
+import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
+
+// The suite must never follow a developer's own tracker override into their
+// real data. CAREER_OPS_TRACKER outranks the CAREER_OPS_ROOT that fixtures pin,
+// so with it set in the shell a test that runs normalize-statuses.mjs against
+// its fixture root rewrote the developer's tracker instead (and left a .bak
+// beside it), and a dozen checks failed on rows that were not theirs.
+//
+// Blanked here because test-all.mjs imports this module before it runs
+// anything, so the runner and each child it spawns start without the override;
+// a suite that imports these helpers is covered when run on its own as well.
+// Blanked rather than deleted: every reader trims the value and treats an empty
+// one as unset, which is also how the Go tests neutralise it
+// (`t.Setenv("CAREER_OPS_TRACKER", "")`), and a variable that is set is not
+// overwritten by a later .env load (#4707 did the same for one test and
+// CAREER_OPS_PIPELINE). A test that needs the override sets its own.
+process.env.CAREER_OPS_TRACKER = '';
+
+// A shell that opted into the shared PDF painter must not make the suite
+// attach to that painter or start one. Blanked rather than deleted, same as
+// the tracker override above. A test that wants the painter sets it itself.
+process.env.CAREER_OPS_PDF_SHARED = '';
+
+// The same rule for the data root itself, which is where everything else a
+// script reads and writes is resolved from (#5113). Left alone, the suite ran
+// against whatever the shell pointed at: with CAREER_OPS_ROOT exported the way
+// the README suggests, the script smoke tests appended a fixture row to the
+// developer's real data/assessments.tsv on every run, and with nothing
+// exported, three suites overwrote live files in the checkout's own data/ and
+// restored them from memory — so an interrupted run left a three-row fixture
+// where the tracker had been, in a directory git does not track.
+//
+// So the suite gets a data root of its own. Pinned through CAREER_OPS_ROOT
+// because that outranks both CAREER_OPS_DATA_DIR and the `.career-ops-data`
+// marker (path-resolver.mjs), and set here for the reason the tracker override
+// is cleared here: the runner and every child it spawns inherit it, and a suite
+// run on its own is covered as well. A test that needs a particular root pins
+// its own, in its child's env or around its own import.
+//
+// One directory per run, not per process. The process that creates it exports
+// it as CAREER_OPS_TEST_DATA_ROOT; a child that loads these helpers finds that
+// and joins the run's root rather than making another, and only the creator
+// removes it.
+const SANDBOX_ENV = 'CAREER_OPS_TEST_DATA_ROOT';
+const SANDBOX_PREFIX = 'career-ops-test-data-';
+
+// The variable is inherited, so it is only as trustworthy as the shell it came
+// from: a stale export naming a real directory would make this process a
+// guest in it — fixtures written there, no snapshot, no drift check. Join only
+// what these helpers could have made: a directory of that name, directly under
+// the OS temp directory.
+function isRunSandbox(path) {
+  try {
+    const real = realpathSync(path);
+    return statSync(real).isDirectory()
+      && dirname(real) === realpathSync(tmpdir())
+      && basename(real).startsWith(SANDBOX_PREFIX);
+  } catch {
+    return false;
+  }
+}
+
+const inheritedSandbox = process.env[SANDBOX_ENV]?.trim();
+const ownsSandbox = !(inheritedSandbox && isRunSandbox(inheritedSandbox));
+
+/**
+ * The data root the developer's own commands resolve to, read before it is
+ * overridden below. Null in a child of the run: the process that owns the
+ * sandbox is the one that answers for the real root.
+ */
+export const REAL_DATA_ROOT = ownsSandbox ? getCareerOpsRoot() : null;
+const realRootBefore = ownsSandbox ? snapshotDataRoot(REAL_DATA_ROOT, ROOT) : null;
+
+/** The scratch data root every script resolves to while the suite runs. */
+export const SANDBOX_DATA_ROOT = ownsSandbox
+  ? realpathSync(mkdtempSync(join(tmpdir(), SANDBOX_PREFIX)))
+  : realpathSync(inheritedSandbox);
+
+/**
+ * Point the data root back at the suite's sandbox.
+ *
+ * Called when these helpers load, and again by any test that had to move or
+ * unset the variable in-process: `delete process.env.CAREER_OPS_ROOT` in a
+ * `finally` does not restore anything, it hands every later suite in the same
+ * process the developer's real root.
+ *
+ * @returns {void}
+ */
+export function pinSandboxDataRoot() {
+  process.env[SANDBOX_ENV] = SANDBOX_DATA_ROOT;
+  process.env.CAREER_OPS_ROOT = SANDBOX_DATA_ROOT;
+  // Blanked, not deleted, for the same reasons as CAREER_OPS_TRACKER above.
+  process.env.CAREER_OPS_DATA_DIR = '';
+}
+pinSandboxDataRoot();
+
+/**
+ * Environment for a child that runs a COPY of the scripts as its own checkout.
+ *
+ * Many fixtures copy a script and path-resolver.mjs into a temp directory and
+ * expect the copy to treat that directory as its data root, which is what the
+ * resolver does when nothing overrides it. Something does now — the pin above —
+ * and a developer's exported CAREER_OPS_ROOT always did, so the expectation is
+ * stated in the child's env instead of assumed from the shell's.
+ *
+ * @param {Record<string, string>} [extra] - Further variables for the child.
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function ownRootEnv(extra = {}) {
+  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_PDF_SHARED: '', ...extra };
+}
+
+let realRootChecked = false;
+
+/**
+ * Compare the real data root with how the run found it.
+ *
+ * Answers once: finish() reports through the counters, and the exit hook
+ * below must not report the same paths a second time.
+ *
+ * @returns {string[]|null} Lines describing what changed, or null when nothing
+ *   did, the check already ran, or this process does not own the sandbox.
+ */
+export function realDataRootDrift() {
+  if (!ownsSandbox || realRootChecked) return null;
+  realRootChecked = true;
+  const drift = diffSnapshots(realRootBefore, snapshotDataRoot(REAL_DATA_ROOT, ROOT));
+  return drift.length > 0 ? describeDrift(REAL_DATA_ROOT, drift, ROOT) : null;
+}
+
+/**
+ * Make SIGINT and SIGTERM end the process through process.exit().
+ *
+ * Node's default for both is to die where it stands, which skips the 'exit'
+ * hook below — so the run most likely to have left something behind in the
+ * developer's data was the one run that never looked. Exiting through
+ * process.exit() runs the hook, and removes the scratch data root on the way.
+ *
+ * Opt-in, for the long-lived runner: a handler only runs between two turns of
+ * the event loop, so the caller has to be a process that yields.
+ *
+ * @returns {void}
+ */
+export function exitOnInterrupt() {
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    process.on(signal, () => {
+      console.log(`\n  ⛔ interrupted (${signal}) — this is not a test result`);
+      process.exit(code);
+    });
+  }
+}
+
+if (ownsSandbox) {
+  // 'exit' also fires for process.exit(), so this covers a suite run on its
+  // own, which never reaches finish(), and a run ended by exitOnInterrupt().
+  process.on('exit', () => {
+    const drift = realDataRootDrift();
+    if (drift) {
+      console.log(`\n  ❌ ${drift.join('\n     ')}\n`);
+      // Keep a signal's own exit status; anything else becomes a failure.
+      if (!process.exitCode) process.exitCode = 1;
+    }
+    try {
+      _rmSync(SANDBOX_DATA_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Under the OS temp directory, which is reclaimed without us.
+    }
+  });
+}
 
 /**
  * A merge-tracker fixture must not consult the install's batch history.
@@ -85,8 +256,102 @@ export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
  */
 export function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
 
+/**
+ * Report that a tool this suite needs is missing (see tests/required-tools.mjs).
+ *
+ * A warning on a machine that simply lacks the tool, and a failure in a run
+ * that must have it (`test-all.mjs --needs <tool>`, or its variable set to 1),
+ * where a skip would turn the check green without running it.
+ *
+ * @param {'browser'|'latex'} tool
+ * @param {string} msg - What was skipped and why.
+ * @returns {void}
+ */
+export function toolUnavailable(tool, msg) {
+  if (toolRequired(tool)) fail(`${msg} — ${REQUIRED_TOOL_ENV[tool]}=1, so a missing ${tool} is a failure in this run`);
+  else warn(msg);
+}
+
 /** Current counter snapshot. */
 export function results() { return { passed, failed, warnings }; }
+
+/**
+ * Add another process's counters to this one's.
+ *
+ * `test-all.mjs --jobs N` runs each discovered suite in a child process. The
+ * child counts its own pass()/fail()/warn() calls and has already printed their
+ * lines; the parent only needs the totals, so the summary line and the exit
+ * code cover every suite exactly as they do when suites run in-process.
+ *
+ * @param {{passed?: number, failed?: number, warnings?: number}} counts - A results() snapshot from a child.
+ * @returns {void}
+ */
+export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0 } = {}) {
+  passed += p;
+  failed += f;
+  warnings += w;
+}
+
+/**
+ * Import one discovered pass/fail-style suite, containing a throw.
+ *
+ * Shared by the two places a suite is imported: test-all.mjs's in-process loop
+ * (`--jobs 1`) and tests/run-discovered-child.mjs (one suite per process), so a
+ * crashing suite reads the same whichever way the run was started.
+ *
+ * An uncaught THROW from a suite ends the run just as completely as a
+ * process.exit() would, and rather more quietly: node unwinds straight out of
+ * test-all, finish() never prints its summary, and every suite sorting after
+ * this one silently never runs. That does not read as a broken suite — it reads
+ * as a finished one, so the screen of green above the cut looks like a pass.
+ * (Measured on a Windows box with no symlink privilege: tests/intake.test.mjs
+ * threw at import and took 2067 of 3693 checks with it, with no verdict line at
+ * all — #2828.) A discovered suite is a guest, not a co-host: its crash is one
+ * failure, not the end of the run.
+ *
+ * How much "one failure" actually cost is reported as `ran`, the exact number
+ * of assertions made before the throw; the reported totals only ever include
+ * those, and nothing else says the rest never happened (#3976). An earlier
+ * version also estimated how many assertions never ran, from a static count of
+ * pass()/fail() call sites in the file. artemtrofymenko (the issue's author)
+ * measured that estimate against real suites and found it wrong in both
+ * directions badly enough to make the diagnostic worse than none: a suite
+ * asserting through a local wrapper has far more real assertions than call
+ * sites (tests/discover-ats.test.mjs: 155 executed, 4 call sites — the estimate
+ * goes negative and the line silently does not print, for 38 of 278 in-process
+ * suites), and a suite writing `if (cond) pass(...); else fail(...)` pairs has
+ * roughly twice as many call sites as real assertions, so the estimate invents
+ * lost assertions that never existed. A signal present for some suites and
+ * silently absent for others turns its own absence into a false reassurance.
+ * `ran` alone does not have that failure mode, so it is printed
+ * unconditionally.
+ *
+ * @param {string} file - Absolute path of the suite.
+ * @param {string} rel - The name to report it under (repo-relative path).
+ * @returns {Promise<void>} Resolves when the import has; never rejects.
+ */
+export async function importSuiteContained(file, rel) {
+  const before = results();
+  try {
+    await import(pathToFileURL(file).href);
+  } catch (err) {
+    const ran = (results().passed - before.passed) + (results().failed - before.failed);
+    fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+    console.log(`      ${ran} assertion${ran === 1 ? '' : 's'} ran before the throw; everything after it in this file did not run`);
+    // The throw site, not just the message: a suite that dies mid-import
+    // leaves no other clue how far it got.
+    for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+      if (line.trim()) console.log(`      ${line.trim()}`);
+    }
+  } finally {
+    // A suite that sealed git (sealProcessGitEnv) hands the environment back,
+    // so the suites after it in this process do not inherit the seal.
+    if (unsealGitEnv) {
+      unsealGitEnv();
+      unsealGitEnv = null;
+    }
+  }
+}
 
 /**
  * Print the summary line and exit with the suite's exit code.
@@ -108,6 +373,10 @@ export function finish() {
   // stay authoritative for inline assertions; this only adds a failure source
   // that was already being computed and thrown away.
   const runnerFailed = Boolean(process.exitCode);
+  // Before the summary, so a run that wrote to the developer's data cannot
+  // print "All tests passed" above the line that says it did (#5113).
+  const drift = realDataRootDrift();
+  if (drift) fail(drift.join('\n     '));
   console.log('\n' + '='.repeat(50));
   console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`
     + (runnerFailed ? ' — plus failures in a discovered node:test suite (see above)' : ''));
@@ -181,6 +450,12 @@ function resolveAllowedExecutable(cmd) {
   for (const candidate of WINDOWS_BASH_CANDIDATES) {
     if (cmd === candidate) return candidate;
   }
+  // The PATH probe resolves bash to an install dir the candidate list does not
+  // know (a Git outside Program Files/Scoop, e.g. D:\Git). Allow exactly the
+  // path getBash() itself resolved and memoized — never an arbitrary caller
+  // string: bash callers reach it as run(getBash(), ...), so the cache is set
+  // by construction, and what it holds is the same shell the probes ran.
+  if (bashCache !== null && cmd === bashCache) return cmd;
   throw new Error(`run(): executable not in the test-helper allowlist: ${cmd}`);
 }
 
@@ -226,6 +501,9 @@ export function run(cmd, args = [], opts = {}) {
     lastFailure = {
       status: e?.status ?? null,
       signal: e?.signal ?? null,
+      // 'ETIMEDOUT' when the timeout killed the child. A killed child has no
+      // exit status, so this is the only field that says it ran out of time.
+      code: e?.code ?? null,
       stdout: e?.stdout == null ? '' : String(e.stdout),
       stderr: e?.stderr == null ? '' : String(e.stderr),
     };
@@ -243,10 +521,51 @@ let lastFailure = null;
  * Cleared by a successful run so a stale record is never attributed to a later
  * command. The suite is sequential, so "most recent" is unambiguous.
  *
- * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string}|null}
+ * @returns {{status: number|null, signal: string|null, code: string|null, stdout: string, stderr: string}|null}
  */
+// describeSpawn lives in helpers/describe-spawn.mjs and is re-exported here so
+// the 410 tests that already import from this file can reach it. It is a
+// SEPARATE module because importing this one is not free: the lines above set
+// process.env.CAREER_OPS_TRACKER, call pinSandboxDataRoot() and register an
+// 'exit' hook. A test that does not already depend on that must be able to
+// describe a failed child without inheriting it.
+export { describeSpawn } from './helpers/describe-spawn.mjs';
+
 export function lastRunFailure() {
   return lastFailure;
+}
+
+// A V8 stack frame as Node prints it for an uncaught exception:
+// `    at fn (/path/file.mjs:12:5)`, `    at /path/file.mjs:12:5`.
+const STACK_FRAME_RE = /^ {4}at \S.*:\d+:\d+\)?$/m;
+
+/**
+ * Run a command that is expected to refuse its input, and report whether it
+ * refused it the intended way.
+ *
+ * `run(...) === null` is not that check. run() returns null for every failure:
+ * the intended rejection, but also an uncaught TypeError (Node exits 1 for that
+ * too), a signal, and the 30 s timeout. A script that crashed on the bad input
+ * therefore read as "correctly rejected". This requires the expected exit
+ * status, no signal, the expected message on stderr, and no stack trace there,
+ * so a crash whose text happens to contain the message still fails.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} args - Argument vector.
+ * @param {{stderr: string|RegExp, status?: number|null}} expected - The rejection:
+ *   a substring (or pattern) stderr must contain, and the exit status (default 1).
+ *   A signal-killed child has status null; it still never passes, since any
+ *   signal is refused.
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {boolean} True only for the intended rejection. On false,
+ *   formatRunFailure() describes what the child actually did.
+ */
+export function runRejects(cmd, args, { stderr, status = 1 }, opts = {}) {
+  if (run(cmd, args, opts) !== null) return false;
+  const f = lastFailure;
+  if (!f || f.signal !== null || f.status !== status) return false;
+  if (STACK_FRAME_RE.test(f.stderr)) return false;
+  return typeof stderr === 'string' ? f.stderr.includes(stderr) : stderr.test(f.stderr);
 }
 
 /**
@@ -408,40 +727,146 @@ export function formatRunFailure(maxChars = 2000) {
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
 
 /**
- * Recursively collect files under `dir` whose basename matches `match`.
+ * Every TRACKED file under `dir` whose basename matches `match`.
  *
- * Deterministic by construction: entries are sorted lexicographically at every
- * level, so the result is identical on every run and every OS — the same
- * property test-all.mjs's own `tests/` discovery relies on (#1440).
+ * Enumerated through lib/mjs-files.mjs (#3890), not a private walk. This used
+ * to recurse the working tree with a skip-list its one caller passed in
+ * (`node_modules`, `.next`, `.git`, `out`, `dist`, `coverage`) — the same
+ * hand-maintained shape #3419 removed from the syntax gate, and the same silent
+ * narrowing: a suite added under a directory somebody forgot to un-skip never
+ * enters the guard, and the run is exactly as green as one that read it. Git
+ * already knows which of those trees is repository content, so the skip-list
+ * parameter is gone rather than reproduced here.
+ *
+ * That also retires the `isNestedCheckout` guard this walk used to need, and
+ * retires it rather than losing it: a name-matching skip-list never fired on a
+ * linked worktree, which marks itself with a `.git` FILE, so the walk descended
+ * into a whole second checkout of this repository (#3499, #3762). Nothing in
+ * that second checkout is tracked HERE, so the index cannot name it — the
+ * hazard is gone by construction instead of by a rule each walker remembers.
+ *
+ * Deterministic by construction (sorted), which is the property test-all.mjs's
+ * own `tests/` discovery relies on (#1440).
  *
  * A missing `dir` yields `[]` rather than throwing, so the caller reports its
- * own contract failure (e.g. "discovery is empty") instead of the run dying
- * mid-traversal with an ENOENT that says nothing about what was expected.
+ * own contract failure (e.g. "discovery is empty") instead of the run dying on
+ * an ENOENT that says nothing about what was expected. A `dir` that EXISTS but
+ * that git can see nothing in is a different thing entirely — that is a scan
+ * that could not look, and trackedFiles throws rather than let it read as a
+ * clean sweep.
  *
- * @param {string} dir - Absolute directory to walk.
- * @param {RegExp} match - Tested against each entry's basename.
- * @param {Set<string>} [skipDirs] - Directory names never descended into.
- * @returns {string[]} Absolute paths, parents before children.
+ * @param {string} dir - Absolute directory inside a git working tree.
+ * @param {RegExp} match - Tested against each tracked file's basename.
+ * @returns {string[]} Absolute paths, lexicographically sorted.
  */
-export function walkFiles(dir, match, skipDirs = new Set()) {
+export function walkFiles(dir, match) {
   if (!existsSync(dir)) return [];
-  const out = [];
-  const entries = readdirSync(dir, { withFileTypes: true })
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
-      // which matches by NAME — never fires on one, and the walk descends into a
-      // whole second checkout of this repository (#3499, #3762). The caller's
-      // own set stays authoritative for everything else.
-      if (isNestedCheckout(full)) continue;
-      if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
-    } else if (match.test(entry.name)) {
-      out.push(full);
+  return trackedFiles(dir, (rel) => match.test(basename(rel)));
+}
+
+/**
+ * Directory of the installation of `pkgName` that Node's bare-specifier lookup
+ * would find from `fromDir`, or null when there is none.
+ *
+ * Walks the same way Node does: `<dir>/node_modules/<pkgName>` for `fromDir`
+ * and then each ancestor up to the filesystem root, nearest first, skipping any
+ * `<dir>` that is itself named `node_modules` (Node never looks for
+ * `node_modules/node_modules`). A candidate counts only if it holds a
+ * package.json, so an empty or half-removed directory is not mistaken for an
+ * installation. Walked by hand rather than through
+ * `require.resolve('<pkg>/package.json')`, which a package's `exports` map is
+ * allowed to refuse.
+ *
+ * @param {string} pkgName - Package name, scoped names included (`@scope/name`).
+ * @param {string} [fromDir=ROOT] - Directory the lookup starts from.
+ * @returns {string|null} The package directory, or null if not installed.
+ */
+export function findInstalledPackage(pkgName, fromDir = ROOT) {
+  let dir = resolve(fromDir);
+  for (;;) {
+    if (basename(dir) !== 'node_modules') {
+      const candidate = join(dir, 'node_modules', pkgName);
+      if (existsSync(join(candidate, 'package.json'))) return candidate;
     }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
   }
-  return out;
+}
+
+/**
+ * Copy an installed package into `dest` together with the packages it depends
+ * on, so the copy can load them from where it now sits.
+ *
+ * A LINKED package needs none of this: Node resolves a module's imports from
+ * its real location, so everything installed beside the original is still in
+ * reach. A COPY has only its own directory. Copying js-yaml alone leaves it
+ * unable to find argparse; the sandbox then dies with ERR_MODULE_NOT_FOUND,
+ * which reads as a failure of whatever the suite was testing.
+ *
+ * Each dependency is resolved the way Node would resolve it for the original
+ * (findInstalledPackage from the package's real path) and placed in the copy's
+ * own `node_modules`, the first place Node looks from there, so two packages
+ * that need different versions of a third cannot collide. One that is installed
+ * nowhere is skipped: the original could not load it either (an optional
+ * dependency for another platform). One already inside the package came along
+ * with the copy. `chain` stops a dependency cycle from recursing forever; the
+ * member it skips is an ancestor directory of the copy, where Node finds it.
+ *
+ * @param {string} source - The installed package directory.
+ * @param {string} dest - Where the copy goes.
+ * @param {Set<string>} [chain] - Real paths of the packages being copied above this one.
+ * @returns {void}
+ */
+function copyPackageWithDependencies(source, dest, chain = new Set()) {
+  // The real directory, not a link to it: a package manager may install a
+  // package as a symlink, and copying that would recreate the link this
+  // fallback exists because we could not make.
+  const real = realpathSync(source);
+  cpSync(real, dest, { recursive: true });
+  const within = new Set(chain).add(real);
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(real, 'package.json'), 'utf-8'));
+  } catch {
+    return;
+  }
+  // Peers too. A package imports its peer like any other dependency, and npm
+  // installs the peer beside it, so the original resolves it from its own
+  // location and a copy that left it behind does not.
+  for (const name of Object.keys({ ...manifest.peerDependencies, ...manifest.optionalDependencies, ...manifest.dependencies })) {
+    const installed = findInstalledPackage(name, real);
+    if (installed === null) continue;
+    const depReal = realpathSync(installed);
+    if (depReal.startsWith(real + sep) || within.has(depReal)) continue;
+    copyPackageWithDependencies(depReal, join(dest, 'node_modules', name), within);
+  }
+}
+
+/**
+ * Put one installed package at `<nodeModulesDir>/<pkgName>`: a link when the
+ * platform allows one, otherwise a copy that carries its dependencies.
+ *
+ * 'junction' is ignored on POSIX, and on Windows it is the one link type
+ * granted without Developer Mode or elevation -- the privilege whose absence
+ * aborted a whole suite in #2828. The copy is the last resort.
+ *
+ * @param {string} nodeModulesDir - The sandbox's `node_modules` (created if absent).
+ * @param {string} pkgName - Package name, scoped names included.
+ * @param {string} source - The installed package directory.
+ * @param {(target: string, path: string, type: string) => void} [link] - Link
+ *   primitive; a test passes one that throws to exercise the copy.
+ * @returns {string} Path to the package inside the sandbox.
+ */
+function placePackage(nodeModulesDir, pkgName, source, link = symlinkSync) {
+  const dest = join(nodeModulesDir, pkgName);
+  mkdirSync(dirname(dest), { recursive: true });
+  try {
+    link(source, dest, 'junction');
+  } catch {
+    copyPackageWithDependencies(source, dest);
+  }
+  return dest;
 }
 
 /**
@@ -466,27 +891,25 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
  * beside the `playwright` stub each sandbox already writes there -- makes the
  * sandbox self-sufficient wherever it physically lives.
  *
+ * The package is taken from wherever Node would resolve it for the repo, not
+ * from `ROOT/node_modules` specifically. A git worktree (for example one under
+ * `.claude/worktrees/<name>`) usually has no `node_modules` of its own: the
+ * scripts under test import fine there because Node walks up into the main
+ * checkout's `node_modules`, so insisting on `ROOT/node_modules` failed every
+ * suite that links a package while the code it tests resolved without trouble.
+ *
  * @param {string} sandboxDir - Sandbox root; its `node_modules/` is created if absent.
- * @param {string} pkgName - Package directory name under `ROOT/node_modules`.
+ * @param {string} pkgName - Package name, as it would be imported from the repo root.
  * @returns {string} Path to the package as seen from inside the sandbox.
  */
 export function linkRepoPackage(sandboxDir, pkgName) {
-  const source = join(ROOT, 'node_modules', pkgName);
   const dest = join(sandboxDir, 'node_modules', pkgName);
   if (existsSync(dest)) return dest;
-  if (!existsSync(source)) {
-    throw new Error(`linkRepoPackage: ${pkgName} is not installed at ${source} -- run npm install`);
+  const source = findInstalledPackage(pkgName);
+  if (source === null) {
+    throw new Error(`linkRepoPackage: ${pkgName} is not installed in any node_modules from ${ROOT} upward -- run npm install`);
   }
-  mkdirSync(dirname(dest), { recursive: true });
-  try {
-    // 'junction' is ignored on POSIX, and on Windows it is the one link type
-    // granted without Developer Mode or elevation -- the privilege whose absence
-    // aborted a whole suite in #2828. The copy below is the last resort.
-    symlinkSync(source, dest, 'junction');
-  } catch {
-    cpSync(source, dest, { recursive: true });
-  }
-  return dest;
+  return placePackage(join(sandboxDir, 'node_modules'), pkgName, source);
 }
 
 /**
@@ -672,6 +1095,67 @@ export function codeMask(src) {
 export const isCodeRange = (isCode, from, to) => isCode.slice(from, to).every(Boolean);
 
 /**
+ * Give a sandbox the packages a checkout with no `node_modules` of its own
+ * actually runs on, one link per package.
+ *
+ * A git worktree (for example one under `.claude/worktrees/<name>`) usually has
+ * no `node_modules`: its scripts import fine because Node walks up into the
+ * main checkout's tree. Each package `<root>/package.json` declares is resolved
+ * the way those scripts resolve it (findInstalledPackage, nearest first) and
+ * linked into the sandbox's own `node_modules` from wherever it was found.
+ *
+ * Per package, not one link to "the" inherited tree, because there may be more
+ * than one: Node resolves each specifier separately, so js-yaml can come from a
+ * nearer ancestor and undici from a farther one. A single link to the nearer
+ * tree left the sandbox unable to load the second package while the worktree
+ * loaded both, which is the false failure this fallback exists to remove.
+ *
+ * Keyed on the declared dependencies rather than on whatever `node_modules`
+ * sits on the way up, because an unrelated one is easy to have there (a stray
+ * `~/node_modules` above a fresh clone). Nothing declared, or none of it
+ * installed anywhere above, is therefore "not installed". A package.json that
+ * is there and cannot be read is a different fault with a different remedy, and
+ * is reported as itself: `npm ci` does not fix a manifest that does not parse.
+ *
+ * @param {string} destDir - Sandbox directory to receive `node_modules/`.
+ * @param {string} root - Checkout whose own `node_modules` is absent.
+ * @param {Function} [link] - Link primitive, passed through to placePackage.
+ * @returns {string|null} null once linked; otherwise why it could not be.
+ */
+function linkInheritedDependencies(destDir, root, link) {
+  const manifestPath = join(root, 'package.json');
+  let names = [];
+  let text = null;
+  try {
+    text = readFileSync(manifestPath, 'utf-8');
+  } catch (err) {
+    // Absent is the ordinary case (a fixture directory, a bare clone of
+    // something else) and means "declares nothing". Anything else is a manifest
+    // that exists and could not be read.
+    if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') {
+      return `package.json at ${manifestPath} is unreadable (${err.code})`;
+    }
+  }
+  if (text !== null) {
+    try {
+      const declared = JSON.parse(text)?.dependencies;
+      if (declared && typeof declared === 'object' && !Array.isArray(declared)) names = Object.keys(declared);
+    } catch (err) {
+      return `package.json at ${manifestPath} is not valid JSON (${err.message})`;
+    }
+  }
+  const found = names
+    .map((name) => [name, findInstalledPackage(name, root)])
+    .filter(([, dir]) => dir !== null);
+  if (found.length === 0) {
+    return `node_modules is not installed at ${root} or in a parent directory -- run \`npm ci\` there`;
+  }
+  const nodeModules = join(destDir, 'node_modules');
+  for (const [name, dir] of found) placePackage(nodeModules, name, dir, link);
+  return null;
+}
+
+/**
  * Link the repository's whole installed dependency tree into a sandbox
  * directory, so a script copied out of the repo can still resolve its package
  * imports.
@@ -680,13 +1164,20 @@ export const isCodeRange = (isCode, from, to) => isCode.slice(from, to).every(Bo
  * against a target that does not exist, so a separate check is one a call site
  * can forget. The link is then created dangling, the sandboxed script dies with
  * ERR_MODULE_NOT_FOUND, and the section's own catch reports that as a crash of
- * whatever it was testing. A git worktree is the ordinary way to land in that
- * state: test-all.mjs itself still resolves js-yaml through the parent
- * checkout's `node_modules` by Node's upward walk, while `join(ROOT,
- * 'node_modules')` inside the worktree does not exist. The suite is designed to
- * run on a fresh clone with only Node (see the file header), where an absent
- * tree is the expected state, so the caller is handed a reason to report and
- * skip on instead of a broken sandbox.
+ * whatever it was testing. The suite is designed to run on a fresh clone with
+ * only Node (see the file header), where an absent tree is the expected state,
+ * so the caller is handed a reason to report and skip on instead of a broken
+ * sandbox.
+ *
+ * A git worktree is not that state, though it looks like it: `join(root,
+ * 'node_modules')` does not exist there either, while test-all.mjs and every
+ * script under test resolve their packages through the parent checkout's tree
+ * by Node's upward walk. Reporting "not installed" there skipped (or, where the
+ * caller throws on the reason, failed) suites whose dependencies were one
+ * directory up. So when `root` has no tree of its own, the packages it
+ * inherits are linked instead, one by one (linkInheritedDependencies), the
+ * same position linkRepoPackage takes for a single package. The sandbox's
+ * `node_modules` is then a real directory holding those links, not one link.
  *
  * 'junction' on Windows, because a directory symlink needs
  * SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless Developer
@@ -695,17 +1186,30 @@ export const isCodeRange = (isCode, from, to) => isCode.slice(from, to).every(Bo
  * type argument is ignored off Windows.
  *
  * @param {string} destDir - Sandbox directory to receive the node_modules link.
- * @param {string} [root=ROOT] - Repository root holding the installed tree.
+ * @param {string} [root=ROOT] - Repository root whose installed tree is linked:
+ *   its own `node_modules`, or the packages it inherits from parent directories.
+ * @param {{link?: Function}} [options] - `link` replaces the link primitive for
+ *   the inherited packages; a test passes one that throws to exercise the copy.
  * @returns {string|null} null once linked; otherwise why it could not be.
  */
-export function linkNodeModules(destDir, root = ROOT) {
+export function linkNodeModules(destDir, root = ROOT, { link } = {}) {
   const target = join(root, 'node_modules');
   try {
+    let stats;
+    try {
+      stats = statSync(target);
+    } catch (err) {
+      // Only an ABSENT own tree falls back to the inherited packages. Anything
+      // that is there and cannot be used (a loop, no permission) is still
+      // reported as itself below, never papered over with a parent's tree.
+      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') throw err;
+      return linkInheritedDependencies(destDir, root, link);
+    }
     // isDirectory, because statSync succeeds on a regular FILE standing where the
     // tree belongs. Without this an executable one links cleanly and the sandbox
     // gets a symlink to a file, which is the broken sandbox this function exists
     // to refuse. The message says what it is rather than calling it unreadable.
-    if (!statSync(target).isDirectory()) {
+    if (!stats.isDirectory()) {
       return `node_modules at ${target} is not a directory`;
     }
     // Traverse permission, not read permission, is what resolution needs, and
@@ -732,7 +1236,7 @@ export function linkNodeModules(destDir, root = ROOT) {
     // lands in the call site's catch, which is where the misattribution this
     // function exists to prevent came from.
     if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
-      return `node_modules is not installed at ${root} -- run \`npm ci\` there`;
+      return `node_modules is not installed at ${root} or in a parent directory -- run \`npm ci\` there`;
     }
     return `node_modules at ${target} is unreadable (${err.code})`;
   }
@@ -747,9 +1251,9 @@ let bashSourceCache = null;
  * Which probe in getBash() produced the current bash, or null before the first
  * getBash() call.
  *
- * getBash() returns the bare string 'bash' from three different branches -- the
- * WSL probe, the PATH probe, and the give-up path -- so its return value alone
- * cannot tell a caller which shell it is about to run. On Windows those are not
+ * getBash() returns the bare string 'bash' from two different branches -- the
+ * WSL probe and the give-up path -- so its return value alone cannot tell a
+ * caller which shell it is about to run. On Windows those are not
  * interchangeable: 'bash' via WSL is a different OS with a different PATH and a
  * different mount scheme (/mnt/c/... vs /c/...). Recording the branch is what
  * lets a failure name the shell instead of leaving the reader to infer it
@@ -802,6 +1306,45 @@ function warnFallbackShell(exe) {
 }
 
 /**
+ * The absolute path of `name` as the ambient PATH resolves it, or null when
+ * no PATH entry holds it.
+ *
+ * The bare command name only resolves through the process's own PATH, and
+ * several bash-driven fixtures deliberately spawn with PATH replaced by a
+ * POSIX-only list (`SYSTEM_PATH`, e.g. tests/batch-runner-dry-run-without-cli
+ * .test.mjs). On Windows that override hides every real install directory, so
+ * a bare `bash` cached from the probe comes back ENOENT at spawn time. Resolve
+ * the file once here, while the ambient PATH is still intact, and later spawns
+ * need no PATH at all.
+ *
+ * Follows Windows executable resolution order (current directory unless
+ * NoDefaultCurrentDirectoryInExePath is set, then PATH directories in order,
+ * checking executable extensions: .com before .exe).
+ *
+ * @param {string} name - Executable base name, e.g. 'bash'.
+ * @returns {string|null} Absolute path, or null if not found on PATH.
+ */
+function resolveOnPath(name) {
+  const pathEnv = process.env.PATH || '';
+  const pathext = ['.com', '.exe'];
+  const includeCwd = !process.env.NoDefaultCurrentDirectoryInExePath;
+  const dirs = [
+    ...(includeCwd ? ['.'] : []),
+    ...pathEnv.split(delimiter).filter(Boolean),
+  ];
+  for (const entry of dirs) {
+    const dir = entry.replace(/^"|"$/g, ''); // Windows PATH entries may be quoted
+    for (const ext of pathext) {
+      for (const e of [ext, ext.toUpperCase()]) {
+        const candidate = join(dir, `${name}${e}`);
+        try { if (statSync(candidate).isFile()) return resolve(candidate); } catch {}
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve the bash executable to use for shell-script checks, lazily.
  *
  * The Windows probes below shell out up to four times (the WSL probe can even
@@ -832,7 +1375,10 @@ export function getBash() {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
       bashSourceCache = 'path';
-      return (bashCache = cmd);
+      // The probe proved `bash` resolves on the ambient PATH; cache the file
+      // it resolved to, not the bare name — a spawn that overrides PATH (the
+      // POSIX-only SYSTEM_PATH fixtures) cannot re-resolve it on Windows.
+      return (bashCache = resolveOnPath(cmd) || cmd);
     } catch {}
   }
   bashSourceCache = 'unresolved';
@@ -890,24 +1436,26 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
- * Build a throwaway git repository for the two updater suites that hand the
- * updater its git runner (`updater-add-paths`, `updater-is-tracked`). Only
- * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
- * and then asks about index membership, which is a different question.
+ * Build a throwaway git repository for the updater suites that hand the
+ * updater its git runner (`updater-add-paths`, `updater-is-tracked`, and
+ * `updater-rollback-target-manifest`). The first asserts on ignore RESOLUTION;
+ * the second writes its own .gitignore and asks about index membership; the
+ * third builds real backup/target commits and invokes the rollback CLI.
  *
  * The pins below are the reason this is shared rather than copied, but they are
- * not all load-bearing for both callers, and this docstring should not imply
+ * not all load-bearing for every caller, and this docstring should not imply
  * otherwise. Mutation-tested by dropping each pin under a GIT_CONFIG_GLOBAL it
  * exists to neutralise:
  *
  *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
  *     inherited from the environment breaks every commit the fixtures make.
- *     Dropping either reddens BOTH suites.
+ *     Dropping either reddens all three suites.
  *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
  *     what is measured (the failure mode reported in #2269). Dropping it reddens
  *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
- *     then reads index membership, which a global rule does not move. Kept for
- *     both as a defensive pin, proven by one.
+ *     then reads index membership, while updater-rollback-target-manifest stages
+ *     snapshots with `git add -A`, so a global rule could drop a fixture file;
+ *     it stayed green in the mutation run only because no such rule was set.
  *
  * Point `core.excludesFile` at an empty file rather than /dev/null: git on
  * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
@@ -948,6 +1496,7 @@ export function makeUpdaterRepo({ prefix = 'co-updater-', includeRoot = false } 
   const dir = mkdtempSync(join(tmpdir(), prefix));
   const g = hermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
+  g('config', 'core.autocrlf', 'false');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
@@ -1035,14 +1584,94 @@ const REPO_LOCATION_ENV = [
  * the ordinary way to inherit one. The list is git's own, the rest of
  * `git rev-parse --local-env-vars` after the three hermeticGitEnv handles.
  *
+ * `stdio` is for the calls whose git failure is the expected outcome. The
+ * default inherits stderr, so those print git's own `fatal:` line into an
+ * otherwise passing suite; pass `['pipe', 'pipe', 'pipe']` for a runner that
+ * keeps it. A suite that needs a quiet runner must get it from here rather than
+ * from a bare execFileSync, which would be sealed against nothing.
+ *
  * @param {string} dir - The fixture repository.
+ * @param {{stdio?: import('child_process').StdioOptions}} [options]
  * @returns {(...args: string[]) => string}
  */
-export function hermeticGitRunner(dir) {
+export function hermeticGitRunner(dir, { stdio } = {}) {
   const env = hermeticGitEnv(join(dir, '.git', 'co-hermetic-gitconfig'));
   for (const name of REPO_LOCATION_ENV) delete env[name];
-  return (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf-8', env }).trim();
+  const options = { cwd: dir, encoding: 'utf-8', env, ...(stdio ? { stdio } : {}) };
+  return (...args) => execFileSync('git', args, options).trim();
 }
+
+/**
+ * Seal THIS process's git environment, for a suite whose fixtures run git
+ * through something that inherits process.env rather than through
+ * `hermeticGitRunner`: the updater's own `gitIn` / `gitQuietIn` and the `*In`
+ * helpers built on them, a bare `execFileSync('git', ...)`, or a CLI spawned
+ * with the parent's environment. Those inherit the environment as a real
+ * install must, so a fixture built with them is only as isolated as the
+ * contributor's shell. With `tag.gpgSign = true` in ~/.gitconfig a lightweight
+ * `git tag` becomes a signed annotated tag with no message and git dies with
+ * "no tag message?"; with `commit.gpgSign = true` every fixture commit is
+ * signed with the contributor's own key, or fails where gpg cannot sign.
+ *
+ * Sealing the process rather than one runner is what reaches the git calls
+ * the code under test makes for itself. Call it before the suite's first git
+ * command; a later `process.env` override (an identity negative control, say)
+ * still applies on top and restores back to the seal.
+ *
+ * A suite run directly, under `node --test`, or by `test-all.mjs --jobs N` has
+ * a process of its own. The serial loop (`--jobs 1`, or a single matched file)
+ * imports the suite into test-all's process instead, so the seal records every
+ * variable it changes and `importSuiteContained` puts them back once the import
+ * settles, thrown or not. The suites after it see the environment they would
+ * have seen without it.
+ *
+ * The environment is `hermeticGitEnv`'s, so the runtime-layer pins come with
+ * it, and the variables that helper and `hermeticGitRunner` drop are deleted
+ * from process.env, not merely left uncopied. The repository-location names
+ * are matched without regard to case: Windows environment names are
+ * case-insensitive, so a `Git_Dir` would otherwise survive and still point git
+ * at another repository. The config path names a file that is never created:
+ * a missing global file is simply an empty one.
+ */
+export function sealProcessGitEnv() {
+  // One directory per process: the serial loop imports several sealing suites
+  // into one, and an exit listener each would add up.
+  if (!sealDir) {
+    const dir = mkdtempSync(join(tmpdir(), 'co-sealed-git-'));
+    process.on('exit', () => _rmSync(dir, { recursive: true, force: true }));
+    sealDir = dir;
+  }
+  const sealed = hermeticGitEnv(join(sealDir, 'gitconfig'));
+  const repoLocation = new Set(REPO_LOCATION_ENV);
+  for (const name of Object.keys(sealed)) {
+    if (repoLocation.has(name.toUpperCase())) delete sealed[name];
+  }
+  const changed = new Map();
+  for (const name of Object.keys(process.env)) {
+    if (!Object.hasOwn(sealed, name)) {
+      changed.set(name, process.env[name]);
+      delete process.env[name];
+    }
+  }
+  for (const [name, value] of Object.entries(sealed)) {
+    if (process.env[name] !== value && !changed.has(name)) changed.set(name, process.env[name]);
+    process.env[name] = value;
+  }
+  // A second seal in the same suite must not record the first one's values as
+  // the originals.
+  if (!unsealGitEnv) {
+    unsealGitEnv = () => {
+      for (const [name, value] of changed) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    };
+  }
+}
+
+/** Set while a seal is in force; `importSuiteContained` calls and clears it. */
+let unsealGitEnv = null;
+let sealDir = null;
 
 /**
  * Can a directory write-deny actually stop THIS process from creating a file?
@@ -1102,4 +1731,30 @@ export function directoryDenyBinds() {
       try { rmSync(probeDir, { recursive: true, force: true }); } catch {}
     }
   }
+}
+
+/**
+ * Point provider requests for a public-looking origin at a local test server.
+ *
+ * providers/_http.mjs refuses a loopback destination, by name (`localhost`,
+ * at lookup time) and as a literal (`127.0.0.1`, before dialling), so a test
+ * can no longer hand it a local URL. Address the request to `publicOrigin`
+ * instead and run it inside this wrapper: the guard sees the public name, and
+ * the transport is redirected to `localOrigin` here, at the fetch boundary.
+ * The local server still receives a real socket, so timeouts and headers are
+ * exercised for real. Restores the original fetch when `fn` settles.
+ *
+ * @template T
+ * @param {string} publicOrigin - e.g. 'http://stalls.example.test'
+ * @param {string} localOrigin  - e.g. `http://127.0.0.1:${port}`
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withLocalServerAs(publicOrigin, localOrigin, fn) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    const url = String(input);
+    return realFetch(url.startsWith(publicOrigin) ? localOrigin + url.slice(publicOrigin.length) : input, init);
+  };
+  try { return await fn(); } finally { globalThis.fetch = realFetch; }
 }

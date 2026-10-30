@@ -21,6 +21,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../../lib/is-main-module.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const README = join(ROOT, 'README.md');
@@ -182,6 +183,6 @@ function main() {
   console.log(renderSection(loadSponsors()));
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   try { main(); } catch (e) { console.error(e.message); process.exit(1); }
 }

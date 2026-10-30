@@ -32,6 +32,7 @@ Parse the JSON output:
 | `gaps` | `[{skill, reports, lowFitReports, lowFitShare, weightedScore, tier, sources}]` sorted by weighted score. Weight per report = `5.0 − score` (a 2.1/5 report says more about gaps than a 4.5/5 one); a skill counts once per report, not per mention |
 | `excludedAsKnown` | Skills found in report gaps but already present in `cv.md`/`config/profile.yml` |
 | `knownSkills` | The extracted known-skill set (for transparency) |
+| `skipBlockers` | `{window, skips, blockers: [{label, kind, skips, missing, partial, closeCalls, nudge, reports, wordings}]}`. The critical or high requirements marked `missing` or `partial` in the last `skips` SKIP or Discarded reports, from `requirement_importance`. Known skills are not subtracted: a `partial` on a CV skill means the CV evidence is thin. `nudge` is `learn` or `evidence`. Narrate it as "9 of your last 20 skips" |
 
 Tiers are fixed, explainable thresholds over the share of low-fit (score < 4.0) reports naming the gap — always narrate them that way ("named in 4/9 low-fit reports"), never as an opaque ranking.
 

@@ -22,15 +22,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { codeMask, isCodeRange } from './helpers.mjs';
 import { shouldDedupScanHistoryRow } from '../scan.mjs';
 import { parseScanHistory, detectReposts } from '../detect-reposts.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -78,7 +79,7 @@ function inFrozenTz(tz, expr, instant = INSTANT) {
     env: { ...process.env, TZ: tz },
   });
   assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
-  assert.equal(r.status, 0, `child exited ${r.status}: ${r.stderr}`);
+  assert.equal(r.status, 0, describeSpawn(r, `child exited ${r.status}`));
   return r.stdout.trim();
 }
 
@@ -358,28 +359,23 @@ function topLevelArgs({ list, isCode }) {
   return out;
 }
 
-/** Every .mjs source file in the repo, at any depth. */
-function sourceFiles(dir, acc = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    // Vendored code, build output, and the suite's own scratch copy of the repo
-    // (test-all.mjs mkdtemps it under ROOT) would otherwise be walked.
-    if (entry.isDirectory()) {
-      if (/^(node_modules|\.git|\.next|coverage|dist|build)$/.test(entry.name)) continue;
-      if (entry.name.startsWith('.tmp-script-test-')) continue;
-      // ...and so would git's OWN scratch copy of the repo. The `\.git` above
-      // matches a directory NAME, which a linked worktree does not have — it
-      // marks itself with a `.git` file. This gate read the worktree's stale
-      // sources as repo source and failed, naming files that are correct on the
-      // branch under test (#3499). Same hazard as the line above it, different
-      // author of the second copy.
-      if (isNestedCheckout(join(dir, entry.name))) continue;
-      sourceFiles(join(dir, entry.name), acc);
-    } else if (entry.name.endsWith('.mjs') && !entry.name.endsWith('.test.mjs')) {
-      acc.push(join(dir, entry.name));
-    }
-  }
-  return acc;
-}
+/**
+ * Every tracked .mjs source file in the repo, at any depth, tests excluded.
+ *
+ * Enumerated through lib/mjs-files.mjs (#3890) rather than a private walk. The
+ * walk this replaces named `node_modules`, `.git`, `.next`, `coverage`, `dist`,
+ * `build`, `.tmp-script-test-*` and — via isNestedCheckout() — a linked
+ * worktree, whose stale sources once failed this very gate by naming files that
+ * are correct on the branch under test (#3499). Git tracks none of those, so
+ * the index excludes all of them without a list anyone has to keep current.
+ *
+ * That matters here specifically: this gate is DERIVED, not a hard-coded list
+ * of writers, so a new scan script is covered the day it lands — but only if
+ * the enumerator can see it. A skip-list that silently stops covering a
+ * directory turns a derived gate back into a hard-coded one without saying so.
+ */
+const sourceFiles = () =>
+  trackedFiles(ROOT, (rel) => rel.endsWith('.mjs') && !rel.endsWith('.test.mjs'));
 
 // The census above is only as good as its scanner, and every shape below was
 // found by review rather than by the scanner's own tests. So the scanner gets
@@ -416,8 +412,10 @@ test('the scanner resolves every call the four known writers contain', () => {
   // The shapes above are synthetic. This is the real files, and it is what
   // would catch masking that is correct in miniature and wrong at scale.
   // scan.mjs went 5 → 7 when the location and posting-age cuts started
-  // recording what they drop (`skipped_location`, `skipped_age`).
-  for (const [file, expected] of [['scan.mjs', 7], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
+  // recording what they drop (`skipped_location`, `skipped_age`), and 7 → 8
+  // when the title cut did (`skipped_title`, #2695), and 8 → 9 when the
+  // experience filter did (`skipped_experience`).
+  for (const [file, expected] of [['scan.mjs', 9], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     const naive = [...src.matchAll(/(?<!function )\bappendToScanHistory\s*\(/g)].length;
     assert.equal(naive, expected, `${file}: expected ${expected} call sites, source has ${naive} — update this expectation deliberately`);
@@ -431,7 +429,21 @@ test('every scan-history writer stamps the local day', () => {
   // `scripts/scan-foo.mjs` counts, not just a direct child of ROOT. That is the
   // shape tests/lock-rm-contention.test.mjs used to finally pin its own family
   // shut after two reintroductions.
-  const writers = sourceFiles(ROOT)
+  const sources = sourceFiles();
+
+  // The four known writers all sit at the repository ROOT, so the floor below
+  // ("at least four") stays true even when the enumeration has narrowed to the
+  // root and stopped covering `scripts/`, `providers/` and everything else —
+  // the derived gate quietly reverts to the hard-coded list it was written to
+  // replace, and reads exactly as green. That is #3419's failure shape, here.
+  // So assert the REACH separately from the count.
+  assert.ok(
+    sources.some((f) => relative(ROOT, f).split('\\').join('/').includes('/')),
+    'the enumeration stopped at the repository root — a scan-history writer added under any ' +
+      'subdirectory would silently leave this gate while it kept reporting the four it already knew',
+  );
+
+  const writers = sources
     .map((file) => ({ file, calls: scanHistoryCallArgs(readFileSync(file, 'utf-8')), src: readFileSync(file, 'utf-8') }))
     .filter((w) => w.calls.length > 0);
 

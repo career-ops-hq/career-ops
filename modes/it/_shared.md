@@ -203,7 +203,7 @@ Negli annunci e nelle trattative in Italia si usano termini e tutele specifici c
 3. Citare righe esatte del CV durante il matching
 4. Usare WebSearch per dati retributivi e informazioni sull'azienda
 5. Registrare nel tracker dopo ogni valutazione
-6. Generare il contenuto nella lingua dell'annuncio (italiano se l'annuncio è in italiano, inglese altrimenti)
+6. Generare il contenuto per l'utente in `{language.output}` di `config/profile.yml` (inglese se non è impostato), qualunque sia la lingua dell'annuncio. Mantenere i termini di questo mercato e spiegarli in quella lingua quando serve
 7. Essere diretti e concreti -- nessun giro di parole
 8. Italiano tech naturale per i testi generati. Frasi brevi, verbi d'azione, evitare il passivo. Non tradurre forzatamente i termini tecnici (stack, pipeline, deployment, embedding, ecc.)
 8b. **URL dei case study nel Professional Summary del PDF:** Se il PDF menziona demo o case study, i relativi URL DEVONO comparire nel primo paragrafo (Professional Summary) -- i recruiter spesso leggono solo quello. Tutti gli URL in HTML con `white-space: nowrap`
@@ -218,6 +218,6 @@ Negli annunci e nelle trattative in Italia si usano termini e tutele specifici c
 | WebFetch | Fallback per estrarre annunci da pagine statiche |
 | Playwright | Verificare se gli annunci sono attivi (browser_navigate + browser_snapshot), estrarre annunci da Single Page Application (SPA). **CRITICO: non eseguire MAI 2+ agenti in parallelo con Playwright -- condividono la stessa istanza del browser** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | HTML temporaneo per PDF, applications.md, report .md |
-| Edit | Aggiornare il tracker |
-| Bash | `node generate-pdf.mjs` |
+| Write | HTML temporaneo per PDF, report .md, file TSV per il tracker in `batch/tracker-additions/` (mai `applications.md` direttamente) |
+| Edit | Correzioni a report e altri contenuti generati. Mai la tabella del tracker: le nuove righe entrano come TSV unito con `node merge-tracker.mjs`, le modifiche di stato e note passano da `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

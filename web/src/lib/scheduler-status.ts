@@ -5,10 +5,12 @@ import { promisify } from "node:util";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { readLockStatus } from "./scheduled-jobs-store.mjs";
+import { osScheduleStatus } from "./scheduled-os-schedule.mjs";
 import { scheduledRunnerResourcePath, scheduledStorePath } from "./scheduled-runner-path.mjs";
 
 const execFileAsync = promisify(execFile);
 const TASK_NAME = "career-ops recurring scan";
+const LAUNCHD_LABEL = "io.career-ops.scheduled-scan";
 
 export type SchedulerStatus = {
   platform: NodeJS.Platform;
@@ -23,10 +25,44 @@ export type SchedulerStatus = {
   };
 };
 
-async function readTask(): Promise<SchedulerStatus["task"]> {
-  if (process.platform !== "win32") {
-    return { exists: false, enabled: false, status: null, nextRun: null, lastRun: null };
+const EMPTY_TASK: SchedulerStatus["task"] = { exists: false, enabled: false, status: null, nextRun: null, lastRun: null };
+
+function readTickMtimeMs(): number | null {
+  try {
+    return fs.statSync(scheduledStorePath(careerOpsRoot()) + ".tick").mtimeMs;
+  } catch {
+    return null;
   }
+}
+
+async function readUnixTask(platform: "darwin" | "linux"): Promise<SchedulerStatus["task"]> {
+  const tickMtimeMs = readTickMtimeMs();
+  const now = new Date();
+  if (platform === "linux") {
+    let crontabText = "";
+    try {
+      crontabText = (await execFileAsync("crontab", ["-l"], { timeout: 5_000 })).stdout;
+    } catch {
+      // No crontab, or crontab is missing: nothing is installed.
+    }
+    return osScheduleStatus({ platform, crontabText, launchctlExitCode: null, tickMtimeMs, now });
+  }
+
+  const uid = process.getuid?.();
+  if (uid === undefined) return { ...EMPTY_TASK };
+  let launchctlExitCode = 0;
+  try {
+    await execFileAsync("launchctl", ["print", `gui/${uid}/${LAUNCHD_LABEL}`], { timeout: 5_000 });
+  } catch {
+    // launchctl exits non-zero (113) when the job is not loaded; only zero matters.
+    launchctlExitCode = 1;
+  }
+  return osScheduleStatus({ platform, crontabText: "", launchctlExitCode, tickMtimeMs, now });
+}
+
+async function readTask(): Promise<SchedulerStatus["task"]> {
+  if (process.platform === "darwin" || process.platform === "linux") return readUnixTask(process.platform);
+  if (process.platform !== "win32") return { ...EMPTY_TASK };
 
   const script = [
     `$task = Get-ScheduledTask -TaskName '${TASK_NAME}' -ErrorAction SilentlyContinue`,

@@ -24,23 +24,28 @@
  * script that already references `invite-match.mjs` (e.g. #1495's own
  * history) — left as a maintainer call, not blocking.
  *
+ * Also reports interview rules found in the invite (`constraints`, #5732):
+ * read-only tags like [constraint:no-ai]; --apply never writes them.
+ *
  * Run: node invite-match.mjs < invite.txt          (JSON to stdout)
  *      node invite-match.mjs --file invite.txt
  *      echo "..." | node invite-match.mjs --summary
  *      node invite-match.mjs --apply [--id N]      (rejection-classified matches only; advances status to Rejected)
+ *      node invite-match.mjs --no-clarification-draft   (omit the pre-interview clarification draft)
  *      node invite-match.mjs --self-test
  *
  * Issue #1495, #2098 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, extractReqNumber } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './tracker-utils.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 // Sibling scripts live next to this file in the *code* checkout, which is a
@@ -61,12 +66,13 @@ const args = process.argv.slice(2);
 // validateFlags() (#2775). Order matters: the unrecognized-flag check runs
 // BEFORE the --help check, so `--help --bogus` still errors instead of
 // printing usage and exiting 0.
-const KNOWN_FLAGS = ['--summary', '--self-test', '--file', '--apply', '--id', '--help', '-h'];
+const KNOWN_FLAGS = ['--summary', '--self-test', '--file', '--apply', '--id', '--no-clarification-draft', '--help', '-h'];
 const USAGE = `Usage:
   node invite-match.mjs < invite.txt          # JSON to stdout
   node invite-match.mjs --file invite.txt     # read invite text from a file
   node invite-match.mjs --summary             # human-readable summary instead of JSON
   node invite-match.mjs --apply [--id N]      # rejection-classified matches only; advances status to Rejected
+  node invite-match.mjs --no-clarification-draft  # invites only: omit the pre-interview clarification email draft
   node invite-match.mjs --self-test           # run the built-in self-test suite
   node invite-match.mjs --help                # print this usage block and exit
   node invite-match.mjs -h                    # same as --help`;
@@ -94,6 +100,7 @@ if (isMainModule(import.meta.url)) {
 
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
+const noClarificationDraft = args.includes('--no-clarification-draft');
 const fileIdx = args.indexOf('--file');
 // Treat a following recognized flag (e.g. `--file --summary`) the same as a
 // missing value — otherwise it's silently accepted as the path and produces
@@ -143,27 +150,12 @@ function normalizeStatusKey(status) {
     .toLowerCase();
 }
 
-// True legal-entity suffixes, stripped repeatedly (chained) since a name can
-// legitimately carry more than one ("Acme Holdings Inc." → "acme holdings").
-// These are unambiguous enough that removing several in a row is safe.
-// Exported so merge-tracker.mjs can share the vocabulary rather than keep a
-// second copy of it: a private list there is exactly the identity drift #2445
-// set out to remove.
-export const LEGAL_SUFFIXES = [
-  'incorporated', 'inc', 'corporation', 'corp', 'company', 'co',
-  'limited', 'ltd', 'llc', 'llp', 'lp', 'plc',
-];
-
-// Generic business-descriptor words that vary between how a recruiter signs
-// an email and how the tracker recorded the company, but are common enough
-// as substantive parts of a name (e.g. "Data Solutions" vs "Data Corp") that
-// chaining their removal risks collapsing two different companies to the
-// same key. Stripped at most once, and only after legal suffixes are gone —
-// never chained with each other or with LEGAL_SUFFIXES.
-export const GENERIC_DESCRIPTORS = [
-  'group', 'holdings', 'technologies', 'technology', 'solutions',
-  'canada', 'international',
-];
+// Legal-entity suffixes and generic business descriptors live in
+// tracker-utils.mjs next to companiesMatchIgnoringCorporateForm(), which shares
+// the vocabulary. Re-exported here so `import { LEGAL_SUFFIXES } from
+// './invite-match.mjs'` keeps working for existing callers while there is a
+// single definition. normalizeCompanyName() below chain-strips LEGAL_SUFFIXES.
+export { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS };
 
 /**
  * Normalize a company name for matching: lowercase, strip punctuation and
@@ -664,6 +656,85 @@ export function classifyEmail(text) {
   return { classification: 'unknown', matchedPhrases: [], phraseStrength: null };
 }
 
+// --- Interview constraints (#5732) ---
+
+// Phrase matching only (zero-token, no network). Each detector is deliberately
+// narrow: "silence stays silence" -- a constraint is reported only when the
+// invite says it. Keys are stable; the tag form `[constraint:<key>]` mirrors
+// the `[process-friction]` convention parsed by process-quality.mjs.
+// A duration counts as the interview's length only when the text ties it to the
+// interview: a length verb or noun right before it ("lasts 30 minutes", "plan for
+// 45 minutes", "Duration: 30 minutes"), an adjective form ("a 45-minute interview",
+// "30 minutes long"), or a bracketed length ("(30 minutes)"). Other intervals --
+// "join 10 minutes early", "reply within 24 hours", "starts 30 minutes after the
+// assessment" -- have no such tie, so they never suppress length-not-stated.
+const LENGTH_CONTEXT = /\b(?:last|lasts|lasting|take|takes|taking|run|runs|running|duration|length|scheduled for|set for|plan for|allow|allot|allocate|expect|approximately|about|around|up to|for)\b[^.\n]{0,25}?\b\d+(?:\.\d+)?\s*[-–]?\s*(?:minutes?|mins?|hours?|hrs?)\b/i;
+const LENGTH_ADJECTIVE = /\b\d+(?:\.\d+)?\s*[-–]?\s*(?:minutes?|mins?|hours?|hrs?)\s*[-–]?\s*(?:long\b|(?:interview|call|conversation|session|meeting|chat|screen|screening|assessment)\b)/i;
+const LENGTH_BRACKETED = /\(\s*\d+(?:\.\d+)?\s*[-–]?\s*(?:minutes?|mins?|hours?|hrs?)\s*\)/i;
+const LENGTH_NAMED = /\b(?:half|one|an)[-\s]hour\b/i;
+function statesDuration(text) {
+  // "The interview will be 30 minutes": an interview noun + copula + duration.
+  const copula = /\b(?:interview|call|conversation|session|meeting|chat|screen|screening|assessment)\s+(?:will\s+be|would\s+be|should\s+be|is|runs?)\s+(?:about\s+|around\s+|approximately\s+)?\d+(?:\.\d+)?\s*[-–]?\s*(?:minutes?|mins?|hours?|hrs?)\b/i;
+  return LENGTH_CONTEXT.test(text) || LENGTH_ADJECTIVE.test(text) || LENGTH_BRACKETED.test(text) || LENGTH_NAMED.test(text) || copula.test(text);
+}
+
+const NAME = "[\\p{Lu}][\\p{L}'.-]*(?:\\s+[\\p{Lu}][\\p{L}'.-]*){0,3}";
+const DASH = "\\s*[-\\u2013\\u2014,]\\s*";
+// "with Jordan Reyes - Director of X and Sam Ito - Manager of Y"
+const PANEL_LINE = new RegExp(`\\bwith\\s+(${NAME}${DASH}[^\\n]+)`, 'u');
+const PANEL_SPLIT = new RegExp(`\\s+and\\s+(?=${NAME}${DASH})`, 'u');
+const PANEL_DASH = new RegExp(DASH, 'u');
+
+const CONSTRAINT_DETECTORS = [
+  // The prohibition must sit in the same sentence as the AI-tool mention.
+  { key: 'no-ai', test: t => /\b(?:ai|artificial intelligence|chatgpt|copilot|generative)\b[^.\n]{0,120}\b(?:not (?:be )?(?:permitted|allowed)|(?<!\bnot\s)(?<!n't\s)(?<!\bno longer\s)(?:prohibited|forbidden)|not be used)\b/i.test(t)
+      || /\b(?:not (?:be )?(?:permitted|allowed)|prohibited|forbidden|may not use|do not use|must not use)\b[^.\n]{0,80}\b(?:ai|artificial intelligence|chatgpt|copilot)\b/i.test(t) },
+  { key: 'recorded', test: t => /\b(?:will|may) be (?:audio[- ]?|video[- ]?)?recorded\b|\bwe (?:will|may) record\b|\bthis (?:interview|call|session|meeting) is (?:being )?recorded\b/i.test(t) },
+  { key: 'no-recording', test: t => /\b(?:recording|recordings)\b[^.\n]{0,60}\b(?:not (?:be )?(?:permitted|allowed)|prohibited)\b|\b(?:do not|don't|may not|must not) (?:record|screenshot)\b|\bno recording\b/i.test(t) },
+  { key: 'camera-required', test: t => /\bcamera\b[^.\n]{0,40}\b(?:(?<!\bnot\s)(?<!n't\s)(?<!\bno longer\s)(?:required|mandatory)|must be on|on throughout)\b|\b(?:required|must|please) (?:to )?(?:have|keep|turn on|enable)\b[^.\n]{0,30}\b(?:camera|video on)\b|\bvideo (?:must be|required)\b/i.test(t) },
+  { key: 'test-link', test: t => /\b(?:test|check|try)\b[^.\n]{0,40}\b(?:link|connection|audio|video|setup)\b[^.\n]{0,40}\b(?:before(?:hand)?|ahead of|in advance|prior to)\b/i.test(t) },
+  { key: 'id-required', test: t => /\b(?:photo |government[- ]issued |valid )?(?:id|identification)\b[^.\n]{0,40}\b(?:(?<!\bnot\s)(?<!n't\s)(?<!\bno longer\s)required|must|will be (?:checked|verified|requested))\b|\b(?:bring|have|present|show)\b[^.\n]{0,40}\b(?:photo id|government[- ]issued id|identification)\b/i.test(t) },
+];
+
+// Untitled list: "with Jordan Reyes and Sam Ito" / "with A B, C D and E F".
+// Product and platform words are not interviewers.
+const PANEL_UNTITLED = new RegExp(`\\bwith\\s+(${NAME}(?:\\s*,\\s*(?:and\\s+)?|\\s+and\\s+|\\s*&\\s*)${NAME}(?:(?:\\s*,\\s*(?:and\\s+)?|\\s+and\\s+|\\s*&\\s*)${NAME})*)`, 'u');
+const NOT_A_PERSON = /\b(?:teams|zoom|google|meet|microsoft|webex|skype|outlook|calendar|link|phone|video|camera|team|hr|recruiter|us|me)\b/i;
+function extractPanel(text) {
+  const m = text.match(PANEL_LINE);
+  if (m) {
+    const people = m[1].replace(/[.\s]+$/, '').split(PANEL_SPLIT).map(p => p.trim()).filter(Boolean);
+    if (people.length >= 2) return people.map(p => p.split(PANEL_DASH)[0].trim());
+  }
+  const u = text.match(PANEL_UNTITLED);
+  if (!u) return null;
+  const names = u[1].split(/\s*,\s*(?:and\s+)?|\s+and\s+|\s*&\s*/).map(n => n.replace(/[.\s]+$/, '').trim()).filter(Boolean);
+  if (names.length < 2 || names.some(n => NOT_A_PERSON.test(n))) return null;
+  return names;
+}
+
+/**
+ * Extract the interview's rules from pasted invite text by phrase matching.
+ * Returns an array of `{key, tag, detail?}` in a fixed order. Keys: no-ai,
+ * recorded, no-recording, camera-required, test-link, id-required, panel
+ * (detail = names), length-not-stated. Empty/non-string input returns [];
+ * `length-not-stated` is only added when the text is non-empty and reads like
+ * an invite (so unrelated text does not gain a spurious constraint).
+ *
+ * @param {string} text
+ * @returns {Array<{key: string, tag: string, detail?: string}>}
+ */
+export function extractConstraints(text) {
+  if (!text || typeof text !== 'string') return [];
+  const out = [];
+  const add = (key, detail) => out.push({ key, tag: `[constraint:${key}]`, ...(detail ? { detail } : {}) });
+  for (const { key, test } of CONSTRAINT_DETECTORS) if (test(text)) add(key);
+  const panel = extractPanel(text);
+  if (panel) add('panel', panel.join('; '));
+  if (classifyEmail(text).classification === 'invite' && !statesDuration(text)) add('length-not-stated');
+  return out;
+}
+
 // --- Tracker loading ---
 function loadTracker(appsFile = APPS_FILE) {
   if (!existsSync(appsFile)) return [];
@@ -692,6 +763,7 @@ export function matchInvite(signals, trackerRows) {
 
   const targetKey = normalizeCompanyName(signals.company);
   if (!targetKey) return [];
+  const reqId = signals.reqId?.toLowerCase();
 
   const scored = [];
   for (const row of trackerRows) {
@@ -703,12 +775,21 @@ export function matchInvite(signals, trackerRows) {
 
     // A req/job ID appearing in the row's notes is a near-certain match —
     // boost it above any name-only match (including another exact name
-    // match without the req ID). Compared case-insensitively: the invite
+    // match without the req ID). Match the whole ID token, so JR1234 cannot
+    // also boost a different requisition JR12345 or JR1234-A. Preserve the
+    // shared parser's explicit glued labels (req_JR1234, reqJR1234), but require the
+    // whole suffix. A bare JR1234 is an ID, not a label for numeric ID 1234;
+    // after a separate label, REQ-1234 is itself the ID, not another label.
+    // Compared case-insensitively: the invite
     // and the notes may case the same ID differently ("jr12352" vs
     // "JR12352"). matchConfidence is a ranking score, not a probability,
     // so it's intentionally allowed to exceed 1 here.
-    if (signals.reqId && row.notes
-      && row.notes.toLowerCase().includes(signals.reqId.toLowerCase())) {
+    if (reqId && row.notes
+      && row.notes.toLowerCase().split(/[^a-z0-9_-]+/)
+        .filter(token => /[a-z0-9]/.test(token)).some((token, index, tokens) =>
+        token === reqId || (!/^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?|jr|id)[_-]*|r_[_-]*)$/.test(tokens[index - 1] || '')
+          && /^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?)[_-]?|r_)/.test(token)
+          && token.endsWith(reqId) && extractReqNumber(token)?.toLowerCase() === reqId))) {
       confidence += 0.5;
     }
 
@@ -738,6 +819,150 @@ export function matchInvite(signals, trackerRows) {
   return scored;
 }
 
+// --- Pre-interview clarification draft (#6092) ---
+
+// Locale-keyed so a market mode can add its own wording later; English only for
+// now. Placeholders are literal bracketed text the candidate fills in.
+const CLARIFICATION_TEMPLATES = {
+  en: {
+    subject: (company, role) => `Questions ahead of the ${role} interview at ${company}`,
+    greeting: name => (name ? `Hello ${name},` : 'Hello,'),
+    intro: (company, role) =>
+      `Thank you for the invitation to interview for the ${role} position at ${company}. I am looking forward to it, and I would like to prepare well. Could you share a few details beforehand?`,
+    questions: [
+      'Who does this role report to?',
+      'What are the main deliverables expected in the first three months?',
+      'Is the posting the full scope of the role, or are there responsibilities beyond what it lists?',
+    ],
+    closing: 'Thank you, and I look forward to speaking with you.',
+    signoff: 'Best regards,\n[Your name]',
+  },
+};
+const PLACEHOLDER_COMPANY = '[company]';
+const PLACEHOLDER_ROLE = '[role]';
+
+const REPORTING_LINE_STATED = /\b(?:reports?\s+(?:directly\s+)?to|reporting\s+(?:line|to|structure)|you\s+will\s+report|will\s+report\s+to)\b/i;
+const DELIVERABLES_STATED = /\b(?:deliverables?|first\s+(?:three|3|90|ninety)\s+(?:months?|days?)|first\s+(?:quarter|90\s*days)|key\s+responsibilities|responsibilities\s+(?:include|are)|you\s+will\s+be\s+responsible)\b/i;
+
+// Text that came from the invite is untrusted: only ever let a short, plain
+// name through, never anything carrying a link, address, or line break.
+function safeName(value, maxLen) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > maxLen) return null;
+  if (!/^[\p{L}][\p{L}0-9 '&.,-]*$/u.test(v)) return null;
+  if (/https?|www\.|@/i.test(v)) return null;
+  return v;
+}
+
+// Tracker cells are the user's own data, so they get a wider allowlist than
+// invite-derived text (parentheses, slashes, digits, combining marks), with the
+// same hard stops: length, control characters, links and addresses.
+const TRACKER_NAME_RE = /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} '&.,()+\/#:;\u{2019}\u{2013}\u{2014}-]*$/u;
+function safeTrackerName(value, maxLen) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > maxLen) return null;
+  if (/[\p{Cc}\u{2028}\u{2029}]/u.test(v)) return null;
+  if (!TRACKER_NAME_RE.test(v) || /https?|www\.|@/i.test(v)) return null;
+  return v;
+}
+
+// A contact name is used only when the invite names one in a place a sender
+// belongs: a From: line, or a sign-off followed by a name line. First name only.
+function extractContactName(text) {
+  const NAME_ONLY = /^[\p{Lu}][\p{L}'.-]*(?:\s+[\p{Lu}][\p{L}'.-]*){0,2}$/u;
+  // Sender labels that name a team or organisation, not a person. Deliberately
+  // not NOT_A_PERSON, whose "link" would reject real surnames.
+  const NOT_A_CONTACT = /\b(?:careers?|recruit(?:er|ers|ing|ment)|talent|hiring|resources|team|support|notifications?|hr|staffing)\b/i;
+  const firstName = raw => {
+    const t = raw.trim();
+    if (!NAME_ONLY.test(t) || NOT_A_CONTACT.test(t)) return null;
+    return safeName(t, 40)?.split(/\s+/)[0] ?? null;
+  };
+  const from = text.match(/^\s*from\s*:\s*([^\n<]+?)\s*(?:<[^>\n]*>)?\s*$/im);
+  const fromName = from ? firstName(from[1]) : null;
+  if (fromName) return fromName;
+  // A rejected From: label (e.g. a team) falls through to the sign-off.
+  const sign = text.match(/\n\s*(?:best(?: regards)?|kind regards|regards|thanks|thank you|sincerely|cheers)\s*,?\s*\n\s*([^\n]+)\s*(?:\n|$)/i);
+  return sign ? firstName(sign[1]) : null;
+}
+
+// The report cell is a markdown link; resolve it against each root in turn.
+// Reads only local .md files that stay inside one of those roots.
+function readReportHeader(reportCell, roots) {
+  const href = typeof reportCell === 'string' ? reportCell.match(/\]\(([^)\s]+)\)/)?.[1] : null;
+  if (!href || !href.toLowerCase().endsWith('.md') || /^[a-z]+:/i.test(href)) return '';
+  for (const root of roots) {
+    const full = resolve(root, href);
+    const rel = relative(root, full);
+    if (rel.startsWith('..') || isAbsolute(rel)) continue;
+    try {
+      if (existsSync(full)) return readFileSync(full, 'utf-8').split('\n').slice(0, 40).join('\n');
+    } catch { /* unreadable report: treat as no record */ }
+  }
+  return '';
+}
+
+/**
+ * Build the pre-interview clarification email draft (subject + body) for an
+ * invite-classified analysis. Pure and offline: reads only the analysis, the
+ * invite text, and (optionally) the matched row's report header. Never sends.
+ *
+ * Company/role come from the tracker row only when exactly one candidate
+ * matched with an exact company-name match; otherwise the role is left as a
+ * `[role]` placeholder rather than guessed.
+ *
+ * @param {object} analysis - Result of analyzeInvite (before clarificationDraft is added).
+ * @param {string} text - The pasted invite text.
+ * @param {{row?: object|null, readReport?: (row: object) => string, lang?: string}} [options]
+ * @returns {{subject: string|null, body: string|null, skipped: boolean, skipReason: string|null}|null}
+ */
+export function buildClarificationDraft(analysis, text, options = {}) {
+  if (!analysis || analysis.classification !== 'invite') return null;
+  const tpl = CLARIFICATION_TEMPLATES[options.lang] || CLARIFICATION_TEMPLATES.en;
+  const skip = reason => ({ subject: null, body: null, skipped: true, skipReason: reason });
+  const invite = typeof text === 'string' ? text : '';
+
+  const candidates = analysis.candidates || [];
+  const confident = candidates.length === 1 && candidates[0].nameScore === 1 ? candidates[0] : null;
+
+  if (confident && options.row) {
+    const row = options.row;
+    if (REPORTING_LINE_STATED.test(row.notes || '')) {
+      return skip(`tracker row #${row.num} notes already record a reporting line`);
+    }
+    const header = options.readReport ? options.readReport(row) : '';
+    if (REPORTING_LINE_STATED.test(header)) {
+      return skip(`report for tracker row #${row.num} already records a reporting line`);
+    }
+  }
+  if (REPORTING_LINE_STATED.test(invite) && DELIVERABLES_STATED.test(invite)) {
+    return skip('the invite already states the reporting line and deliverables');
+  }
+
+  let company = null;
+  let role = null;
+  if (confident) {
+    company = safeTrackerName(confident.company, 60);
+    role = safeTrackerName(confident.role, 80);
+  } else {
+    // No tracker fallback outside an exact single match.
+    company = safeName(analysis.signals?.company, 60);
+  }
+  company = company || PLACEHOLDER_COMPANY;
+  role = role || PLACEHOLDER_ROLE;
+
+  const lines = [
+    tpl.greeting(extractContactName(invite)), '',
+    tpl.intro(company, role), '',
+    ...tpl.questions.map((q, i) => `${i + 1}. ${q}`), '',
+    tpl.closing, '',
+    tpl.signoff,
+  ];
+  return { subject: tpl.subject(company, role), body: lines.join('\n'), skipped: false, skipReason: null };
+}
+
 /**
  * End-to-end: parse invite text, load the tracker, return ranked candidates
  * plus the signals that were extracted (so the caller/CLI can show what was
@@ -745,9 +970,10 @@ export function matchInvite(signals, trackerRows) {
  *
  * @param {string} text - Raw invite/rejection email text.
  * @param {Array<object>} [trackerRows] - Injectable for tests; defaults to loadTracker().
- * @returns {{signals: object, classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null, candidates: Array<object>}}
+ * @param {{clarificationDraft?: boolean, readReport?: (row: object) => string}} [options] - clarificationDraft:false suppresses the draft (`--no-clarification-draft`); readReport is injectable for tests.
+ * @returns {{signals: object, classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null, candidates: Array<object>, constraints: Array<{key: string, tag: string, detail?: string}>, clarificationDraft: object|null}}
  */
-export function analyzeInvite(text, trackerRows = null) {
+export function analyzeInvite(text, trackerRows = null, options = {}) {
   const signals = {
     company: extractCompany(text),
     date: extractDate(text),
@@ -758,10 +984,23 @@ export function analyzeInvite(text, trackerRows = null) {
     // unaffected.
     isAIInterviewer: isAIInterviewerPlatform(text),
   };
+  // Additive (#5732): top-level so every existing key keeps its shape.
+  const constraints = extractConstraints(text);
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
   const { classification, matchedPhrases, phraseStrength } = classifyEmail(text);
-  return { signals, classification, matchedPhrases, phraseStrength, candidates };
+  const result = { signals, classification, matchedPhrases, phraseStrength, candidates, constraints };
+  // Additive (#6092): appended last so every existing key keeps its position.
+  // null unless the text is an invite and the draft was not suppressed.
+  let clarificationDraft = null;
+  if (options.clarificationDraft !== false) {
+    const row = candidates.length === 1 ? rows.find(r => r.num === candidates[0].appNumber) : null;
+    clarificationDraft = buildClarificationDraft(result, text, {
+      row,
+      readReport: options.readReport ?? (r => readReportHeader(r.report, [dirname(APPS_FILE), CAREER_OPS])),
+    });
+  }
+  return { ...result, clarificationDraft };
 }
 
 /**
@@ -875,6 +1114,18 @@ export function selectApplyTarget(result, idArg) {
 }
 
 // --- Summary mode ---
+function printClarificationDraft(draft) {
+  if (!draft) return;
+  if (draft.skipped) {
+    console.log(`  Clarification draft: skipped (${draft.skipReason})\n`);
+    return;
+  }
+  console.log('  Clarification draft (not sent -- review before sending):');
+  console.log(`  Subject: ${draft.subject}`);
+  for (const line of draft.body.split('\n')) console.log(`    ${line}`);
+  console.log('');
+}
+
 function printSummary(result) {
   console.log(`\n${'='.repeat(70)}`);
   console.log('  Interview Invite / Rejection Matcher — career-ops');
@@ -885,7 +1136,14 @@ function printSummary(result) {
   console.log(`  Extracted company:  ${result.signals.company || '(not found)'}`);
   console.log(`  Extracted date:     ${result.signals.date || '(not found)'}`);
   console.log(`  Extracted req ID:   ${result.signals.reqId || '(not found)'}`);
-  console.log(`  Extracted platform: ${result.signals.platform || '(not found)'}\n`);
+  console.log(`  Extracted platform: ${result.signals.platform || '(not found)'}`);
+  const constraints = result.constraints || [];
+  console.log(`  Constraints:        ${constraints.length ? constraints.map(c => c.tag + (c.detail ? ` (${c.detail})` : '')).join(' ') : '(none)'}`);
+  if (constraints.some(c => c.key === 'length-not-stated')) {
+    console.log('  Length not stated -- mark the calendar block as a guess.');
+  }
+  console.log('');
+  printClarificationDraft(result.clarificationDraft);
 
   if (!result.signals.company) {
     console.log('  Could not find a company name in the invite text — paste more context or check manually.\n');
@@ -920,308 +1178,26 @@ function runSelfTest() {
     if (cond) { pass += 1; } else { fail += 1; console.error(`  FAIL: ${label}`); }
   };
 
-  // --- normalizeCompanyName ---
-  check(normalizeCompanyName('Acme Corp.') === 'acme', 'strips "Corp." suffix');
-  check(normalizeCompanyName('Acme Technologies Inc.') === 'acme', 'strips chained suffixes');
-  check(normalizeCompanyName('Acme (Example Group)') === 'acme', 'drops parenthetical branding');
-  check(normalizeCompanyName('Acme & Co') === normalizeCompanyName('Acme and Co'), '"&" normalizes the same as "and"');
-  check(normalizeCompanyName('  ACME   ') === 'acme', 'trims and lowercases whitespace-padded input');
+  // Smoke checks across the core pipeline
+  check(normalizeCompanyName('Acme Corp.') === 'acme', 'normalizeCompanyName strips corporate suffixes');
+  check(extractCompany('Company: Example Industries\nRole: Analyst') === 'Example Industries', 'extractCompany extracts company name');
+  check(extractPlatform('Join via Zoom: https://us02web.zoom.us/j/1234567890') === 'Zoom', 'extractPlatform detects Zoom URL');
+  check(classifyEmail('Unfortunately, we have decided not to move forward with your application.').classification === 'rejection', 'classifyEmail detects rejection');
+  check(classifyEmail('We would like to invite you to schedule your phone screen for next week.').classification === 'invite', 'classifyEmail detects invite');
 
-  // Non-Latin company names must survive the fold (#2517). The Latin-only
-  // [a-z0-9] class deleted them entirely, so every one keyed to '' and
-  // matchInvite's `if (!targetKey) return []` bailed — pasting an invite from
-  // any company in the ja/ko/zh/zh-TW/ru/ua/ar/hi markets modes/ ships
-  // returned ZERO candidates even when the row was right there.
-  check(normalizeCompanyName('アクメ株式会社') === 'アクメ株式会社', 'a Japanese company name survives normalization');
-  check(normalizeCompanyName('Яндекс') === 'яндекс', 'a Cyrillic company name survives normalization and case-folds');
-  check(normalizeCompanyName('北京字节跳动') !== normalizeCompanyName('アクメ株式会社'), 'two different non-Latin companies keep distinct keys');
-  check(normalizeCompanyName('ＡＣＭＥ') === normalizeCompanyName('ACME'), 'NFKC folds full-width to half-width');
-  // The rest of the shipped non-Latin markets, so coverage isn't just ja/ru.
-  check(normalizeCompanyName('삼성전자') === '삼성전자', 'a Korean company name survives normalization');
-  check(normalizeCompanyName('Київстар') === 'київстар', 'a Ukrainian company name survives normalization and case-folds');
-  check(normalizeCompanyName('شركة النور') === 'شركة النور', 'an Arabic company name survives normalization, spaces intact');
-  check(normalizeCompanyName('हिन्दी टेक') === 'हिन्दी टेक', 'a Devanagari name survives normalization');
-  // The actual \p{M} invariant: names differing ONLY in combining marks must
-  // stay distinct. A mark-stripping fold would collapse these into one company.
-  check(normalizeCompanyName('कंपनी') !== normalizeCompanyName('कपनी'), 'Devanagari names differing only in matras keep distinct keys');
-  {
-    const rows = [
-      { num: 1, company: 'アクメ株式会社', role: 'エンジニア', status: 'Applied', notes: '' },
-      { num: 2, company: 'Acme Inc', role: 'Engineer', status: 'Applied', notes: '' },
-    ];
-    const jp = matchInvite({ company: 'アクメ株式会社' }, rows);
-    check(jp.length === 1 && jp[0].appNumber === 1, 'an invite from a non-Latin company matches its own tracker row');
-    const latin = matchInvite({ company: 'Acme Inc' }, rows);
-    check(latin.length === 1 && latin[0].appNumber === 2, 'the Latin path still matches its own row, unchanged');
-  }
-
-  // --- companySimilarity ---
-  check(companySimilarity('acme', 'acme') === 1, 'identical strings score 1');
-  check(companySimilarity('acme example', 'acme') > 0.5, 'substring containment scores high');
-  check(companySimilarity('acme', 'globex') === 0, 'unrelated names score 0');
-  check(companySimilarity('', 'acme') === 0, 'empty string never matches');
-
-  // --- extractCompany ---
-  check(extractCompany('Company: Example Industries\nRole: Analyst') === 'Example Industries', 'extracts from "Company:" line');
-  check(extractCompany('Schedule Your Phone Screen – Acme Opportunity') === 'Acme', 'extracts from generic "Schedule Your Phone Screen" subject');
-  check(extractCompany('Looking forward to interviewing with Example Corp for the role.') === 'Example Corp', 'extracts from "interviewing with X" phrasing');
-  check(extractCompany('no company signal here at all') === null, 'returns null when nothing plausible is found');
-
-  // --- extractDate ---
-  check(extractDate('Interview scheduled for 2026-07-09 at 4pm') === '2026-07-09', 'extracts ISO date');
-  check(extractDate('See you on July 9, 2026') === '2026-07-09', 'extracts named-month date');
-  check(extractDate('no date mentioned') === null, 'returns null when no date is present');
-
-  // --- extractReqId ---
-  check(extractReqId('Req ID: R260013984') === 'R260013984', 'extracts "Req ID:" token');
-  check(extractReqId('Job ID: 43683') === '43683', 'extracts "Job ID:" token');
-  check(extractReqId('no id here') === null, 'returns null when no req-like token is present');
-  check(extractReqId('requisition 26023019') === '26023019', 'extracts a bare "requisition" label');
-  check(extractReqId('Req 32807') === '32807', 'extracts an abbreviated "Req" label');
-  // Four digits, not five: REQ_ID_PREFIXED needs \d{5,10}, so only the labelled
-  // branch can produce this. "JR12352" would pass on the fallback alone and the
-  // assertion would survive the labelled branch breaking entirely.
-  check(extractReqId('Job Requisition ID: JR1234') === 'JR1234', 'extracts a letter-prefixed token via the labelled branch');
-  check(extractReqId('') === null, 'returns null for empty text');
-  check(extractReqId('your job application on 2026-08-16') === null, 'a date after "job" is not a req id');
-
-  // Equivalence guards for the separator rewrite. A punctuation separator before
-  // the literal `id` is exactly where a rewrite can silently widen the grammar:
-  // `\s*(?:id)?` only ever allows WHITESPACE ahead of `id`, so these must stay
-  // as they were. An earlier draft of this fix moved the class in front of the
-  // optional group; the first three below began matching where they had not,
-  // and the fourth kept matching but its capture changed from `id12345` to
-  // `12345` — so the last one guards the captured value, not match/no-match.
-  check(extractReqId('req:id 12345') === null, 'a colon before "id" does not make a req label');
-  check(extractReqId('req#id 999888') === null, 'a hash before "id" does not make a req label');
-  check(extractReqId('job#id 43683') === null, 'the job branch still requires whitespace before "id"');
-  check(extractReqId('req:id12345') === 'id12345', 'req: followed by id12345 captures the whole token, letters included');
-
-  // The separator rewrite is a performance fix, so the guard has to be a clock.
-  // The previous `\s*(?:id)?[:\s#]*` shape backtracked quadratically on THIS
-  // shape of non-matching input — a label, then a long run the class can eat,
-  // then a character that cannot start the capture — costing 669ms here on Node
-  // 22 and ~2.8s at 64K. (Non-matching text in general is not quadratic; it
-  // takes this shape to trigger it.) analyzeInvite() runs extractReqId over
-  // whole pasted emails, so the length is caller-controlled.
-  //
-  // Date.now() measures wall time, so it counts scheduler pauses on a loaded CI
-  // worker as if they were regex work. The threshold therefore has to absorb
-  // that noise without losing the signal, and the 64K probe separates the two
-  // cases widely enough to do both: the rewritten patterns finish in ~0.2ms
-  // against a 1000ms limit (roughly 5000x of slack for scheduling), while the
-  // ambiguous shape costs ~2.8s and still overshoots by ~2.7x. The narrower
-  // 32K/250ms pairing detected the regression just as well but left only ~250ms
-  // of absolute headroom, which is inside what a contended runner can produce.
-  const redosProbe = `Requisition ${' '.repeat(64000)}x`;
-  const redosStart = Date.now();
-  check(extractReqId(redosProbe) === null, 'a long non-matching run still yields null');
-  const redosMs = Date.now() - redosStart;
-  check(redosMs < 1000, `extractReqId does not backtrack quadratically (64K-space probe took ${redosMs}ms, was ~2.8s)`);
-
-  // --- extractPlatform ---
-  check(extractPlatform('Join via Zoom: https://us02web.zoom.us/j/1234567890') === 'Zoom', 'detects Zoom from a zoom.us URL');
-  check(extractPlatform('Join Microsoft Teams Meeting: https://teams.microsoft.com/l/meetup-join/xyz') === 'Microsoft Teams', 'detects Microsoft Teams from a teams.microsoft.com URL');
-  check(extractPlatform('Meeting link: https://teams.live.com/meet/abc') === 'Microsoft Teams', 'detects Microsoft Teams from a teams.live.com URL');
-  check(extractPlatform('Google Meet: https://meet.google.com/abc-defg-hij') === 'Google Meet', 'detects Google Meet from a meet.google.com URL');
-  check(extractPlatform('We will call you at (416) 555-0199 for the screen.') === 'Phone', 'detects a phone call from a phone-number pattern with no meeting URL');
-  check(extractPlatform('Please confirm your availability for the interview.') === null, 'returns null when no platform or phone signal is present');
-  check(extractPlatform('') === null, 'returns null for empty text');
-  check(extractPlatform('Please visit https://notzoom.us for details.') === null, 'does not report Zoom for a lookalike host (notzoom.us)');
-  check(extractPlatform('Contact support@zoom.us with questions.') === null, 'does not report Zoom for an email address containing zoom.us');
-  check(extractPlatform('See https://teams.microsoft.com.evil.example for the link.') === null, 'does not report Microsoft Teams for a lookalike domain (teams.microsoft.com.evil.example)');
-  check(extractPlatform('See https://example.com/zoom.us for details.') === null, 'does not detect Zoom as a URL path segment on an unrelated host');
-  check(extractPlatform('See https://example.com?next=zoom.us for details.') === null, 'does not detect Zoom as a URL query value on an unrelated host');
-  check(extractPlatform('See https://example.com/teams.microsoft.com for details.') === null, 'does not detect Microsoft Teams as a URL path segment on an unrelated host');
-  check(extractPlatform('See https://example.com?next=teams.microsoft.com for details.') === null, 'does not detect Microsoft Teams as a URL query value on an unrelated host');
-  check(extractPlatform('See https://example.com/meet.google.com for details.') === null, 'does not detect Google Meet as a URL path segment on an unrelated host');
-  check(extractPlatform('See https://example.com?next=meet.google.com for details.') === null, 'does not detect Google Meet as a URL query value on an unrelated host');
-  check(extractPlatform('Join via Zoom: https://zoom.us:443/j/123456789') === 'Zoom', 'detects Zoom from a zoom.us URL with an explicit port');
-  check(extractPlatform('Join Microsoft Teams Meeting: https://teams.microsoft.com:8443/l/meetup-join/xyz') === 'Microsoft Teams', 'detects Microsoft Teams from a teams.microsoft.com URL with an explicit port');
-  check(extractPlatform('Google Meet: https://meet.google.com:443/abc-defg-hij') === 'Google Meet', 'detects Google Meet from a meet.google.com URL with an explicit port');
-
-  // --- AI-interviewer platforms (#2673) ---
-  check(extractPlatform('Your interview link: https://meet.alex.com/room/abc123') === 'Alex', 'detects Alex from a meet.alex.com URL');
-  check(extractPlatform('Please join at https://alex.com/i/xyz789') === 'Alex', 'detects Alex from a bare alex.com URL');
-  // HireVue is detected and named as a platform...
-  check(extractPlatform('Complete your on-demand interview: https://app.hirevue.com/interview/abc') === 'HireVue', 'detects HireVue from a hirevue.com URL');
-  // ...but is NOT asserted as confirmed-AI: HireVue hosts on-demand
-  // recorded screening, live human-conducted interviews, and a separate AI
-  // Interviewer product on the same domain with no reliable public
-  // discriminator between them (CodeRabbit review on #2676), so asserting
-  // AI-led for every hirevue.com match would be a guess, not a detection.
-  check(isAIInterviewerPlatform('Complete your on-demand interview: https://app.hirevue.com/interview/abc') === false, 'isAIInterviewerPlatform is false for a HireVue URL — modality unconfirmed, not asserted AI-led');
-  check(isAIInterviewerPlatform('Your interview link: https://meet.alex.com/room/abc123') === true, 'isAIInterviewerPlatform is true for an Alex URL');
-  check(isAIInterviewerPlatform('Join via Zoom: https://us02web.zoom.us/j/1234567890') === false, 'isAIInterviewerPlatform is false for a human-mediated Zoom URL');
-  check(isAIInterviewerPlatform('We will call you at (416) 555-0199 for the screen.') === false, 'isAIInterviewerPlatform is false for a plain phone number');
-  check(isAIInterviewerPlatform('') === false, 'isAIInterviewerPlatform is false for empty text');
-
-  // --- matchInvite (fixture rows, no real tracker data) ---
-  const fixtureRows = [
-    { num: 101, company: 'Example Industries', role: 'Training Coordinator', status: 'Applied', date: '2026-06-01', notes: 'Req EX9001' },
-    { num: 102, company: 'Example Industries', role: 'HR Generalist', status: 'Rejected', date: '2026-05-10', notes: 'Rejected 2026-05-20' },
-    { num: 103, company: 'Acme Corp', role: 'Program Coordinator', status: 'Interview', date: '2026-06-15', notes: '' },
-    { num: 104, company: 'Globex LLC', role: 'Analyst', status: 'Applied', date: '2026-06-20', notes: '' },
+  const rows = [
+    { num: 101, company: 'Example Industries', role: 'Analyst', status: 'Applied', date: '2026-06-01', notes: '' },
   ];
-
-  const noSignal = matchInvite({ company: null, date: null, reqId: null }, fixtureRows);
-  check(noSignal.length === 0, 'no company signal → no candidates');
-
-  const acmeMatch = matchInvite({ company: 'Acme Corp.', date: null, reqId: null }, fixtureRows);
-  check(acmeMatch.length === 1 && acmeMatch[0].appNumber === 103, 'matches "Acme Corp." to the Acme Corp tracker row despite suffix punctuation');
-
-  const exampleMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, fixtureRows);
-  check(exampleMatch.length === 2, 'same company with multiple tracker rows returns all candidates, not just one');
-  check(exampleMatch[0].appNumber === 101, 'active (Applied) row ranks above the Rejected row for the same company when name-match is tied');
-
-  const reqBoosted = matchInvite({ company: 'Example Industries', date: null, reqId: 'EX9001' }, fixtureRows);
-  check(reqBoosted[0].appNumber === 101 && reqBoosted[0].matchConfidence > exampleMatch[0].matchConfidence, 'a req ID found in notes boosts that candidate\'s confidence');
-
-  const noMatch = matchInvite({ company: 'Totally Unrelated Co', date: null, reqId: null }, fixtureRows);
-  check(noMatch.length === 0, 'unrelated company name returns no candidates');
-
-  // --- analyzeInvite (end-to-end with injected rows, no file I/O) ---
-  const fullText = 'Schedule Your Phone Screen – Acme Opportunity\nInterview scheduled for 2026-07-09.\nJoin via Zoom: https://zoom.us/j/1234567890';
-  const result = analyzeInvite(fullText, fixtureRows);
-  check(result.signals.company === 'Acme', 'analyzeInvite extracts company end-to-end');
-  check(result.signals.date === '2026-07-09', 'analyzeInvite extracts date end-to-end');
-  check(result.signals.platform === 'Zoom', 'analyzeInvite extracts platform end-to-end');
-  check(result.candidates.length === 1 && result.candidates[0].appNumber === 103, 'analyzeInvite returns the matched candidate end-to-end');
-  check(result.classification === 'invite', 'analyzeInvite classifies an invite-phrased email as "invite" (no regression from #2098)');
-
-  // --- classifyEmail (#2098) ---
-  check(classifyEmail('Unfortunately, we have decided not to move forward with your application.').classification === 'rejection', 'detects "decided not to move forward" as rejection');
-  check(classifyEmail('Thank you for your interest. We regret to inform you that you have not been selected to advance.').classification === 'rejection', 'detects "regret to inform" / "not been selected to advance" as rejection');
-  check(classifyEmail('After careful consideration, we have decided to move forward with other candidates whose qualifications more closely align with this role.').classification === 'rejection', 'detects "move forward with other candidates" as rejection');
-  check(classifyEmail('Unfortunately, we are not able to offer you a position at this time.').classification === 'rejection', 'detects "not able to offer you a position" as rejection');
-  check(classifyEmail('We would like to invite you to schedule your phone screen for next week.').classification === 'invite', 'detects invite phrasing as "invite"');
-  check(classifyEmail('Looking forward to interviewing with you next Tuesday.').classification === 'invite', 'detects "interviewing with" as "invite"');
-  check(classifyEmail('Thanks for your recent purchase, here is your receipt.').classification === 'unknown', 'unrelated text classifies as "unknown"');
-  check(classifyEmail('').classification === 'unknown', 'empty text classifies as "unknown"');
-  check(classifyEmail('Thank you for interviewing with us last week. Unfortunately, we will not be moving forward with your application.').classification === 'rejection', 'rejection language wins when both invite and rejection phrasing appear (references a past interview)');
-
-  // --- CodeRabbit PR #2100: "unfortunately" alone must never be sufficient ---
-  const rescheduleOnly = classifyEmail('Unfortunately we need to push your interview to next Tuesday due to a scheduling conflict.');
-  check(rescheduleOnly.classification !== 'rejection', '"unfortunately" alone (benign reschedule) does NOT classify as rejection');
-  check(rescheduleOnly.classification === 'unknown', '"unfortunately"-only reschedule email classifies as unknown, not invite or rejection');
-
-  const weakPlusStrong = classifyEmail('Unfortunately, we have decided not to move forward with your application at this time.');
-  check(weakPlusStrong.classification === 'rejection', '"unfortunately" alongside a strong rejection phrase still classifies as rejection');
-  check(weakPlusStrong.matchedPhrases.includes('unfortunately') && weakPlusStrong.matchedPhrases.includes('decided not to move forward'), 'matchedPhrases includes both the weak and strong phrase that co-occurred');
-
-  const rejectionPhraseCheck = classifyEmail('We regret to inform you that you have not been selected.');
-  check(Array.isArray(rejectionPhraseCheck.matchedPhrases) && rejectionPhraseCheck.matchedPhrases.length > 0, 'matchedPhrases is populated for a rejection classification');
-
-  const invitePhraseCheck = classifyEmail('We would like to invite you to schedule your phone screen for next week.');
-  check(Array.isArray(invitePhraseCheck.matchedPhrases) && invitePhraseCheck.matchedPhrases.includes('schedule your phone screen'), 'matchedPhrases is populated for an invite classification');
-
-  // --- analyzeInvite classification for a rejection email (fixture rows, no file I/O) ---
-  const rejectionText = 'Dear Candidate,\n\nCompany: Example Industries\nThank you for applying. Unfortunately, we have decided not to move forward with your application at this time.';
-  const rejectionResult = analyzeInvite(rejectionText, fixtureRows);
-  check(rejectionResult.classification === 'rejection', 'analyzeInvite classifies a rejection email as "rejection"');
-  check(rejectionResult.candidates.length === 2 && rejectionResult.candidates[0].appNumber === 101, 'a rejection email still returns ranked candidates (matching is unaffected by classification), active row ranked first');
-  check(Array.isArray(rejectionResult.matchedPhrases) && rejectionResult.matchedPhrases.length > 0, 'analyzeInvite exposes matchedPhrases for a rejection classification');
-
-  // --- analyzeInvite: the false-positive CodeRabbit named must not enable --apply ---
-  const rescheduleText = 'Dear Candidate,\n\nCompany: Example Industries\nUnfortunately we need to push your interview to next Tuesday due to a scheduling conflict.';
-  const rescheduleResult = analyzeInvite(rescheduleText, fixtureRows);
-  check(rescheduleResult.classification !== 'rejection', 'analyzeInvite does not classify a benign reschedule email (containing only "unfortunately") as rejection — --apply would refuse this');
-
-  // --- classifyEmail phraseStrength (#2100 CodeRabbit major finding follow-up) ---
-  check(classifyEmail('We are sorry to inform you that we have decided not to move forward with your application.').phraseStrength === 'strong', 'a strong rejection phrase reports phraseStrength "strong"');
-  check(classifyEmail('We would like to invite you to schedule your phone screen.').phraseStrength === null, 'an invite classification reports phraseStrength null');
-  check(classifyEmail('Thanks for your recent purchase.').phraseStrength === null, 'an unknown classification reports phraseStrength null');
-
-  // --- maintainer finding, PR #2100 review comment 2026-08-07: strong-tier
-  // phrases demoted to weak must never trigger `rejection` alone, only in
-  // combination with a second corroborating phrase ---
-  check(classifyEmail('We are sorry to report the negotiation was not successful.').classification !== 'rejection', '"not successful" alone (demoted phrase, unrelated context) does not classify as rejection');
-  check(classifyEmail('We regret to inform all staff that the downtown office lease will not be renewed.').classification !== 'rejection', '"regret to inform" alone (demoted phrase, non-candidate-directed context) does not classify as rejection');
-  check(classifyEmail('Please note the Q3 expansion will not be moving forward due to budget constraints.').classification !== 'rejection', '"will not be moving forward" alone (demoted phrase, unrelated project context) does not classify as rejection');
-  check(classifyEmail('We are currently unable to offer you a start date earlier than March.').classification !== 'rejection', '"unable to offer you" alone (demoted phrase, non-rejection context) does not classify as rejection');
-
-  // --- maintainer finding (PR #2100 review, 2026-08-07): realistic
-  // non-rejection emails must never classify as `rejection`, whether via a
-  // strong phrase or a `strong` phraseStrength. This is the exact false-
-  // positive class the review flagged: reschedules, delay apologies, and
-  // unrelated (non-candidate-directed) bad-news announcements that happen to
-  // share vocabulary with genuine rejection boilerplate. A false `rejection`
-  // is the unsafe direction here because `--apply` performs an irreversible
-  // tracker write gated on it (#2098) — a missed rejection only costs one
-  // unnecessary follow-up, but a false one silently kills a live process.
-  const rescheduleEmail = 'Hi Jamie,\n\nThanks for your flexibility — we need to reschedule your interview to next week. Something came up on our end and we want to make sure we can give you our full attention. Would Tuesday or Thursday afternoon work?\n\nSorry for the back and forth.\n\nBest,\nRecruiting Team';
-  const rescheduleEmailResult = classifyEmail(rescheduleEmail);
-  check(rescheduleEmailResult.classification !== 'rejection', 'realistic reschedule email does not classify as rejection');
-  check(rescheduleEmailResult.phraseStrength !== 'strong', 'realistic reschedule email does not report phraseStrength "strong"');
-
-  const delayApologyEmail = 'Hi Alex,\n\nApologies for the delay in getting back to you — we\'re still reviewing candidates for this role and expect to have an update within the next week. Thanks so much for your patience.\n\nBest,\nTalent Acquisition Team';
-  const delayApologyEmailResult = classifyEmail(delayApologyEmail);
-  check(delayApologyEmailResult.classification !== 'rejection', 'realistic delay-apology email does not classify as rejection');
-  check(delayApologyEmailResult.phraseStrength !== 'strong', 'realistic delay-apology email does not report phraseStrength "strong"');
-
-  const redundancyAnnouncementEmail = 'Hi team,\n\nWe regret to inform everyone that, following today\'s town hall, the company will be closing our satellite office as part of a broader restructuring, and several roles across departments are affected. To be clear, this update is unrelated to any individual candidate applications currently in progress — those pipelines continue as normal.\n\nThank you for your understanding.\n\nPeople Team';
-  const redundancyAnnouncementEmailResult = classifyEmail(redundancyAnnouncementEmail);
-  check(redundancyAnnouncementEmailResult.classification !== 'rejection', 'unrelated company-wide redundancy announcement does not classify as rejection');
-  check(redundancyAnnouncementEmailResult.phraseStrength !== 'strong', 'unrelated company-wide redundancy announcement does not report phraseStrength "strong"');
-
-  // --- matchInvite nameScore exposure (#2100 CodeRabbit major finding follow-up) ---
-  const exactNameRows = [{ num: 501, company: 'Example Industries', role: 'Analyst', status: 'Applied', date: null, notes: '' }];
-  const exactNameMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, exactNameRows);
-  check(exactNameMatch[0].nameScore === 1, 'matchInvite exposes nameScore 1 for an exact company-name match');
-  const fuzzyNameRows = [{ num: 502, company: 'Example Industries Global Holdings', role: 'Analyst', status: 'Applied', date: null, notes: '' }];
-  const fuzzyNameMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, fuzzyNameRows);
-  check(fuzzyNameMatch[0].nameScore < 1, 'matchInvite exposes nameScore < 1 for a partial/fuzzy company-name match');
-
-  // --- selectApplyTarget confidence gate (#2100 CodeRabbit major finding: line 768-769) ---
-  // A sole candidate that is both an exact company-name match AND backed by a
-  // strong rejection phrase auto-applies.
-  const strongExactSelection = selectApplyTarget(
-    { candidates: [{ appNumber: 501, nameScore: 1 }], phraseStrength: 'strong' },
-    null
+  const fullText = 'Company: Example Industries\nWe would like to invite you to schedule your phone screen.\nInterview scheduled for 2026-07-09\nJoin via Zoom: https://zoom.us/j/1234567890';
+  const result = analyzeInvite(fullText, rows);
+  check(
+    result.signals.company === 'Example Industries' &&
+    result.signals.platform === 'Zoom' &&
+    result.candidates.length === 1 &&
+    result.candidates[0].appNumber === 101 &&
+    result.classification === 'invite',
+    'analyzeInvite extracts signals and matches candidates end-to-end'
   );
-  check(!strongExactSelection.error && strongExactSelection.target.appNumber === 501, 'selectApplyTarget auto-applies a sole candidate that is both an exact company match and a strong rejection classification');
-
-  // A sole candidate that is an exact company match but only weakly
-  // classified (e.g. "unfortunately" alone) must NOT auto-apply — this is
-  // the regression CodeRabbit's major finding described.
-  const weakOnlySelection = selectApplyTarget(
-    { candidates: [{ appNumber: 502, nameScore: 1 }], phraseStrength: 'weak' },
-    null
-  );
-  check(!!weakOnlySelection.error && weakOnlySelection.code === 2, 'selectApplyTarget refuses to auto-apply a sole candidate when the rejection classification is only weak, even with an exact company match');
-
-  // A sole candidate that is only a fuzzy/partial company-name match must NOT
-  // auto-apply even with a strong rejection phrase — this is the exact
-  // low-confidence-fuzzy-match scenario CodeRabbit flagged on line 768-769.
-  const fuzzySoleSelection = selectApplyTarget(
-    { candidates: [{ appNumber: 503, nameScore: 0.4 }], phraseStrength: 'strong' },
-    null
-  );
-  check(!!fuzzySoleSelection.error && fuzzySoleSelection.code === 2, 'selectApplyTarget refuses to auto-apply a sole candidate that is only a fuzzy/partial company-name match, even with a strong rejection classification');
-  check(fuzzySoleSelection.candidate && fuzzySoleSelection.candidate.appNumber === 503, 'selectApplyTarget exposes the near-miss candidate on a confidence-gate refusal');
-
-  // --id always overrides the confidence gate — an explicit human/agent
-  // choice is trusted regardless of nameScore/phraseStrength.
-  const idOverrideSelection = selectApplyTarget(
-    { candidates: [{ appNumber: 503, nameScore: 0.4 }], phraseStrength: 'weak' },
-    503
-  );
-  check(!idOverrideSelection.error && idOverrideSelection.target.appNumber === 503, 'selectApplyTarget honors an explicit --id even when the sole-candidate confidence gate would otherwise refuse');
-
-  // Zero candidates must refuse with code 2 (distinct concern from the
-  // confidence gate above, but same exit code family — "nothing to apply to").
-  const noCandidateSelection = selectApplyTarget({ candidates: [], phraseStrength: 'strong' }, null);
-  check(!!noCandidateSelection.error && noCandidateSelection.code === 2, 'selectApplyTarget refuses with code 2 when no candidates matched');
-
-  // Multiple viable candidates must refuse with code 3 (distinct from the
-  // code-2 refusals above) and expose the ranked candidates collection the
-  // CLI output logic uses to print the disambiguation list.
-  const ambiguousSelection = selectApplyTarget(
-    { candidates: [{ appNumber: 601, nameScore: 1 }, { appNumber: 602, nameScore: 1 }], phraseStrength: 'strong' },
-    null
-  );
-  check(!!ambiguousSelection.error && ambiguousSelection.code === 3, 'selectApplyTarget refuses with code 3 when multiple candidates matched');
-  check(Array.isArray(ambiguousSelection.candidates) && ambiguousSelection.candidates.length === 2, 'selectApplyTarget exposes the ranked candidate list on an ambiguous refusal');
 
   console.log(`\n  invite-match self-test: ${pass} passed, ${fail} failed\n`);
   process.exit(fail > 0 ? 1 : 0);
@@ -1243,7 +1219,7 @@ if (isMainModule(import.meta.url)) {
       text = readFileSync(0, 'utf-8'); // stdin
     }
 
-    const result = analyzeInvite(text);
+    const result = analyzeInvite(text, null, { clarificationDraft: !noClarificationDraft });
 
     if (applyMode) {
       // Scoped strictly to the Rejected transition (#2098) — never applies

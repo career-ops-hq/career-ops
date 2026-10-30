@@ -22,7 +22,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
+import { spawn } from 'node:child_process';
+import { tryAcquireDirLockSync } from '../lib/dir-lock.mjs';
 import {
   acquirePipelineLock, LockTimeoutError, OWNERLESS_GRACE_MS,
   lockRecoveryVerdict, RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE,
@@ -54,6 +57,60 @@ function churnLock(lockDir, everyMs) {
     handoffs: () => handoffs,
     stop() {
       clearInterval(timer);
+      rmSync(lockDir, { recursive: true, force: true });
+    },
+  };
+}
+
+// churnLock's handoffs, made on a worker thread's own event loop. A test whose
+// subject is the extension rule needs a holder that keeps making progress even
+// when the main thread stalls. The in-process timer above cannot promise that:
+// a stall keeps it from firing between the two fingerprint samples the wait
+// policy compares, the lock then reads as wedged, and the caller gives up early.
+// Real holders are other processes, so this is the closer model.
+//
+// The directory is created once and never removed. Each handoff swaps in a new
+// owner.json by rename, retried through Windows contention. A rename is atomic,
+// so the waiter never sees a free lock.
+// A remove-then-create swap would leave a gap another thread can slip through.
+// Resolves once the first owner is on disk; stop() is async because it ends the
+// worker.
+async function churnLockInWorker(lockDir, everyMs) {
+  const worker = new Worker(`
+    const { mkdirSync, writeFileSync } = require('node:fs');
+    const { join } = require('node:path');
+    const { workerData, parentPort } = require('node:worker_threads');
+    (async () => {
+      const { renameSyncWithRetry } = await import(workerData.trackerUtilsUrl);
+      const owner = join(workerData.lockDir, 'owner.json');
+      const staged = join(workerData.lockDir, 'owner.json.next');
+      let handoffs = 0;
+      const stamp = () => JSON.stringify({
+        pid: process.pid, token: 'handoff-' + handoffs++, started_at: new Date().toISOString(),
+      });
+      mkdirSync(workerData.lockDir, { recursive: true });
+      writeFileSync(owner, stamp(), 'utf-8');
+      parentPort.postMessage('ready');
+      setInterval(() => {
+        writeFileSync(staged, stamp(), 'utf-8');
+        renameSyncWithRetry(staged, owner);
+      }, workerData.everyMs);
+    })();
+  `, {
+    eval: true,
+    workerData: {
+      lockDir,
+      everyMs,
+      trackerUtilsUrl: pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', 'tracker-utils.mjs')).href,
+    },
+  });
+  await new Promise((resolve, reject) => {
+    worker.once('message', resolve);
+    worker.once('error', reject);
+  });
+  return {
+    async stop() {
+      await worker.terminate();
       rmSync(lockDir, { recursive: true, force: true });
     },
   };
@@ -301,18 +358,43 @@ test('lockRecoveryVerdict: an absent directory is VANISHED, never STALE — "gon
 
 test('lockRecoveryVerdict: STALE, LIVE and the grace floor keep their existing meanings', () => {
   const root = fixtureRoot();
+  const liveChild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
   try {
     const dead = join(root, 'data', 'dead.lock');
     writeCrashedHolder(dead);
     assert.equal(lockRecoveryVerdict(dead, 1), RECOVER_STALE, 'a crashed holder is still reclaimable');
 
+    // A live owner is ANOTHER live process. This process's own pid no longer
+    // stands in for one: without a handle behind it, it is a leftover (#5390).
     const live = join(root, 'data', 'live.lock');
     mkdirSync(live, { recursive: true });
     writeFileSync(join(live, 'owner.json'), JSON.stringify({
-      pid: process.pid, token: 'live', started_at: new Date().toISOString(),
+      pid: liveChild.pid, token: 'live', started_at: new Date().toISOString(),
     }), 'utf-8');
     backdate(live, OWNERLESS_GRACE_MS * 50);
     assert.equal(lockRecoveryVerdict(live, 1), RECOVER_LIVE, 'a live owner is never stale, however old');
+
+    // Our own pid with a token no handle of ours holds: a release whose rm was
+    // swallowed, or a stamp we could not confirm. Judged by age, so a long-lived
+    // process (the web server) does not keep it LIVE until it restarts.
+    const leftover = join(root, 'data', 'leftover.lock');
+    mkdirSync(leftover, { recursive: true });
+    writeFileSync(join(leftover, 'owner.json'), JSON.stringify({
+      pid: process.pid, token: 'no-handle', started_at: new Date().toISOString(),
+    }), 'utf-8');
+    assert.equal(lockRecoveryVerdict(leftover, 1), RECOVER_LIVE, 'our own leftover is respected while young');
+    backdate(leftover, OWNERLESS_GRACE_MS * 50);
+    assert.equal(lockRecoveryVerdict(leftover, 1), RECOVER_STALE, 'our own leftover ages out once old');
+
+    // Our own pid with a handle we really hold: live, however old.
+    const held = join(root, 'data', 'held.lock');
+    const handle = tryAcquireDirLockSync(held, { staleMs: 1 });
+    try {
+      backdate(held, OWNERLESS_GRACE_MS * 50);
+      assert.equal(lockRecoveryVerdict(held, 1), RECOVER_LIVE, 'a lock this process holds is never stale');
+    } finally {
+      handle.release();
+    }
 
     const fresh = join(root, 'data', 'fresh.lock');
     mkdirSync(fresh, { recursive: true });
@@ -331,6 +413,7 @@ test('lockRecoveryVerdict: STALE, LIVE and the grace floor keep their existing m
     backdate(opaque, OWNERLESS_GRACE_MS * 5);
     assert.equal(lockRecoveryVerdict(opaque, 1), RECOVER_LIVE, 'a stamp we could not read protects the lock');
   } finally {
+    liveChild.kill();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -433,7 +516,7 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
 
 test('acquirePipelineLock: extended waiting is still bounded by maxWaitMs, so endless churn cannot hang a caller', async () => {
   const root = fixtureRoot();
-  const churn = churnLock(`${root}/data/pipeline.md.lock`, 30);
+  const churn = await churnLockInWorker(`${root}/data/pipeline.md.lock`, 30);
   try {
     const p = join(root, 'data', 'pipeline.md');
     // Progress must buy patience, never immortality: a lock handed round for
@@ -447,7 +530,7 @@ test('acquirePipelineLock: extended waiting is still bounded by maxWaitMs, so en
     assert.ok(elapsed >= 400, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
     assert.ok(elapsed < 3000, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
   } finally {
-    churn.stop();
+    await churn.stop();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -529,7 +612,7 @@ test('acquirePipelineLock: a maxWaitMs of 0 means no waiting, not the default ce
 
 test('acquirePipelineLock: a negative or -Infinity ceiling takes the default rather than becoming zero', async () => {
   const root = fixtureRoot();
-  const churn = churnLock(`${root}/data/pipeline.md.lock`, 20);
+  let held;
   try {
     const p = join(root, 'data', 'pipeline.md');
     // A negative ceiling is a mistake, not a request for no waiting. Clamping it
@@ -537,17 +620,28 @@ test('acquirePipelineLock: a negative or -Infinity ceiling takes the default rat
     // different behaviour; the default is at least bounded and obvious. Paired
     // with the zero test above on purpose — together they pin that 0 and "less
     // than 0" are NOT the same input.
+    //
+    // The blocker is one live holder that never changes hands, not churnLock.
+    // churnLock's progress comes from a timer on the same event loop as the code
+    // under test. A stall on that loop (a slow filesystem call on a busy runner)
+    // can keep the timer from firing between two fingerprint samples. The lock
+    // then looks wedged and the caller gives up well before the default ceiling.
+    // In production the holder is another process, so that stall never starves
+    // it. An unchanging holder makes the lower bound independent of scheduling.
+    // The wedged-holder rule cannot fire before timeoutMs, and a zero clamp
+    // still throws within milliseconds.
+    held = await acquirePipelineLock(p, { timeoutMs: 300, retryMs: 20 });
     for (const bad of [-5, -Infinity]) {
       const startedAt = Date.now();
       const outcome = await settleOrGiveUp(
-        acquirePipelineLock(p, { timeoutMs: 50, retryMs: 20, maxWaitMs: bad }), 3000,
+        acquirePipelineLock(p, { timeoutMs: 300, retryMs: 20, maxWaitMs: bad }), 3000,
       );
       const elapsed = Date.now() - startedAt;
       assert.ok(outcome instanceof LockTimeoutError, `maxWaitMs=${bad}: expected a timeout, got: ${outcome}`);
       assert.ok(elapsed >= 300, `maxWaitMs=${bad} gave up after ${elapsed}ms — clamped to zero instead of defaulting`);
     }
   } finally {
-    churn.stop();
+    held?.release();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -701,8 +795,14 @@ test('createLockWaitPolicy: a hardDeadline that is not a number is refused, not 
 });
 
 test('no lock module re-derives the wait ceiling — the policy holds the only copy (#3895)', () => {
-  const policyModule = join(REPO_ROOT, 'pipeline-lock.mjs');
-  const sources = collectMjsFiles(REPO_ROOT).filter((f) => f !== SELF && f !== policyModule);
+  const policyModule = join(REPO_ROOT, 'lib', 'dir-lock.mjs');
+  // The web's copy of the policy module is the policy, not a re-derivation of
+  // it, for exactly as long as it is byte-identical (#5358). A drifted copy is
+  // scanned like any other file.
+  const webMirror = join(REPO_ROOT, 'web', 'src', 'lib', 'core', 'dir-lock.mjs');
+  const mirrorIsPolicy = existsSync(webMirror) && readFileSync(webMirror).equals(readFileSync(policyModule));
+  const sources = collectMjsFiles(REPO_ROOT)
+    .filter((f) => f !== SELF && f !== policyModule && !(mirrorIsPolicy && f === webMirror));
 
   // A guard that cannot look must never pass: an empty or tiny scan means the
   // walk failed, not that the repository is clean.
@@ -936,7 +1036,7 @@ for (const [label, value] of [
     const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
     process.env.CAREER_OPS_OWNERLESS_GRACE_MS = value;
     try {
-      const lock = await import(`../pipeline-lock.mjs?grace-bad-${label.replace(/\s/g, '-')}`);
+      const lock = await import(`../lib/dir-lock.mjs?grace-bad-${label.replace(/\s/g, '-')}`);
       assert.equal(
         lock.OWNERLESS_GRACE_MS, 1_000,
         `${label} is not a floor, so the 1000ms default must stand`,
@@ -962,7 +1062,7 @@ test('a valid CAREER_OPS_OWNERLESS_GRACE_MS is still honored (control)', async (
   const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
   process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '2500';
   try {
-    const lock = await import('../pipeline-lock.mjs?grace-good');
+    const lock = await import('../lib/dir-lock.mjs?grace-good');
     assert.equal(lock.OWNERLESS_GRACE_MS, 2_500, 'a finite positive override must reach the floor');
   } finally {
     if (prior === undefined) delete process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
@@ -975,7 +1075,7 @@ test('the ownerless grace floor honors CAREER_OPS_OWNERLESS_GRACE_MS', async () 
   const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
   process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '30000';
   try {
-    const lock = await import('../pipeline-lock.mjs?grace-env');
+    const lock = await import('../lib/dir-lock.mjs?grace-env');
     const dir = join(root, 'x.lock');
     mkdirSync(dir, { recursive: true });
     backdate(dir, 5_000); // ownerless and 5s old: past the 1s default floor

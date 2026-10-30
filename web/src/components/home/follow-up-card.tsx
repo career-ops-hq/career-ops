@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check, Clock, FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
+import { NextDateDialog } from "@/components/followups/next-date-dialog";
 
 export type FollowUp = {
   num?: number;
@@ -16,16 +17,18 @@ export type FollowUp = {
   // are due now, 'waiting'/'cold' are not (#86).
   urgency?: "urgent" | "overdue" | "waiting" | "cold";
   nextFollowupDate?: string | null;
+  nextOverride?: string | null;
   daysUntilNext?: number | null;
 };
 
 // One-tap overdue follow-up row (demand loop). "Mark followed up" appends a
 // table row to data/follow-ups.md (append-only) so the core cadence advances;
-// "Snooze" is a client dismiss. The cadence is the core's — we just surface + record.
+// "Snooze" pins a date through the same persisted schedule as /followups.
 export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLogged?: () => void }) {
-  const [state, setState] = useState<"idle" | "logging" | "done" | "snoozed" | "error">("idle");
+  const [state, setState] = useState<"idle" | "logging" | "done" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  if (state === "snoozed" || state === "done") return null;
+  const [showNextDate, setShowNextDate] = useState(false);
+  if (state === "done") return null;
 
   const log = async () => {
     setState("logging");
@@ -80,7 +83,7 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
           onClick={log}
           title={state === "error" && errorMsg ? errorMsg : undefined}
           className={cn(
-            "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-surface-hover px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-brand-soft hover:text-brand max-sm:min-h-[44px]",
+            "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-surface-hover px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-brand-soft hover:text-brand-text max-sm:min-h-[44px]",
             state === "error" && "text-red-500 hover:text-red-400",
           )}
         >
@@ -89,14 +92,27 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
           <span className="sm:hidden">{state === "error" ? "Retry" : "Followed up"}</span>
         </button>
         {followup.num != null && (
-          <a href={`/pipeline/${followup.num}`} title="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
+          <a href={`/pipeline/${followup.num}`} title="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand-text max-sm:min-h-[44px] max-sm:min-w-[44px]">
             <FileText className="size-4" />
           </a>
         )}
-        <button type="button" onClick={() => setState("snoozed")} className="inline-flex shrink-0 items-center justify-center text-[11px] text-faint transition hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]">
+        <button
+          type="button"
+          disabled={state === "logging" || followup.num == null}
+          onClick={() => setShowNextDate(true)}
+          title={followup.num == null ? "An application number is required to snooze this follow-up." : "Choose the next follow-up date"}
+          className="inline-flex shrink-0 items-center justify-center text-[11px] text-faint transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 max-sm:min-h-[44px] max-sm:min-w-[44px]"
+        >
           Snooze
         </button>
       </div>
+      {showNextDate && followup.num != null && (
+        <NextDateDialog
+          entry={{ ...followup, num: followup.num }}
+          onClose={() => setShowNextDate(false)}
+          onChanged={() => onLogged?.()}
+        />
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { toolRequired } from './required-tools.mjs';
 import { injectThemeStyle, readStyleTokens } from '../theme-style.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -20,7 +21,7 @@ const BODY_SURFACES = [
 ];
 
 test('Chinese Minimal applies profile typography and colors without changing its defaults', {
-  skip: !existsSync(chromium.executablePath()) && 'Chromium is not installed',
+  skip: !toolRequired('browser') && !existsSync(chromium.executablePath()) && 'Chromium is not installed',
 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-theme-'));
   let browser;

@@ -9,6 +9,16 @@ import path from "node:path";
 import "../helpers/web-ts-alias-loader.mjs";
 import { classifyLeaf, buildPipelineSankey, layoutSankey, parseStatusLog, statusToken } from "../../src/lib/pipeline-sankey.mjs";
 
+test("Assessment has its own engaged leaf and records a submitted application", () => {
+  const graph = buildPipelineSankey([{ n: '1', status: 'Assessment' }]);
+  assert.equal(classifyLeaf({ n: '1', status: 'online assessment' }, []), 'assessment');
+  assert.equal(graph.nodes.find(node => node.id === 'assessment')?.value, 1);
+  assert.equal(graph.nodes.find(node => node.id === 'submitted')?.value, 1);
+  assert.ok(!graph.nodes.some(node => node.id === 'interview'));
+  assert.equal(classifyLeaf({ n: '1', status: 'Discarded' },
+    [{ num: 1, from: 'Assessment', to: 'Discarded' }]), 'discarded');
+});
+
 test("statusToken uses canonStatus aliases (same map as Analytics)", () => {
   assert.equal(statusToken("Interview"), "INTERVIEW");
   assert.equal(statusToken("Interview 2026-08-20"), "INTERVIEW");
@@ -61,6 +71,23 @@ test("Discarded after reaching Applied or later stays under Submitted", () => {
   assert.equal(classifyLeaf({ n: 7, status: "Descartado" }, [{ num: 7, from: "Respondido", to: "Descartado" }]), "discarded");
   assert.equal(classifyLeaf({ n: 7, status: "Discarded" }, [{ num: 7, from: "Rejected", to: "Discarded" }]), "discarded");
   assert.equal(classifyLeaf({ n: 7, status: "Discarded" }, [{ num: 7, from: "Interview", to: "Discarded" }]), "discardedInterview");
+});
+
+test("an unknown status is not Still evaluated", () => {
+  assert.equal(classifyLeaf({ n: 4, status: "Paused" }, []), "other");
+  const g = buildPipelineSankey([
+    { n: 1, status: "Evaluated" },
+    { n: 2, status: "Paused" },
+    { n: 3, status: "SKIP" },
+  ]);
+  const v = Object.fromEntries(g.nodes.map((n) => [n.id, n.value]));
+  assert.equal(v.evaluated, 1);
+  assert.equal(v.other, 1);
+  assert.equal(g.nodes.find((n) => n.id === "other")?.label, "Other status");
+  assert.equal(
+    v.tracked,
+    (v.skip || 0) + (v.evaluated || 0) + (v.other || 0) + (v.discardedEarly || 0) + (v.submitted || 0),
+  );
 });
 
 test("buildPipelineSankey conserves tracked = skip + evaluated + submitted", () => {

@@ -26,6 +26,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -112,7 +113,7 @@ test('a real failure still exits non-zero', () => {
       cwd: dir, encoding: 'utf-8', timeout: 60_000,
       env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' },
     });
-    assert.notEqual(r.status, 0, 'an unreadable tracker was reported as success');
+    assert.ok(exitedNonZero(r), describeSpawn(r, 'an unreadable tracker was reported as success'));
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
   }

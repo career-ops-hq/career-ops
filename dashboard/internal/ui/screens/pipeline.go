@@ -2,6 +2,7 @@ package screens
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -79,6 +80,12 @@ type PipelineUpdateStatusMsg struct {
 	NewStatus     string
 }
 
+// StatusUpdateFailedMsg exposes a failed tracker write in the active screen.
+// Stderr is hidden while the dashboard occupies the terminal's alt-screen.
+type StatusUpdateFailedMsg struct {
+	Err string
+}
+
 // PipelineUpdateStatusAndNotesMsg requests an atomic status + notes update.
 // Used by the discard reason picker (Issue 1380) to commit both changes in a
 // single tracker write.
@@ -103,12 +110,25 @@ type PipelineHistoryFailedMsg struct {
 	Err string
 }
 
+// PipelineTrackerFailedMsg reports that the tracker could not be read and the
+// screen is still showing the previous applications.
+//
+// Sibling of PipelineHistoryFailedMsg, for the more consequential of the two
+// files: rebuilding the pipeline from a failed tracker read empties it, and
+// ComputeProgressMetrics then reports every rate as 0% — an empty pipeline and
+// a search that looks like it is failing, because a file could not be opened.
+type PipelineTrackerFailedMsg struct {
+	Err string
+}
+
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
 
 // PipelineOpenStatsMsg is emitted when the stats (dimension breakdown) screen should open.
 type PipelineOpenStatsMsg struct{}
 
+// Mirrors the ids in templates/discard-reasons.yml, in order.
+// tests/discard-reasons-vocabulary.test.mjs fails when the two drift.
 var canonicalDiscardReasons = []string{
 	"salary_too_low",
 	"hybrid_required",
@@ -142,15 +162,16 @@ const (
 
 // Filter modes
 const (
-	filterAll       = "all"
-	filterEvaluated = "evaluated"
-	filterApplied   = "applied"
-	filterInterview = "interview"
-	filterResponded = "responded"
-	filterSkip      = "skip"
-	filterRejected  = "rejected"
-	filterDiscarded = "discarded"
-	filterTop       = "top"
+	filterAll        = "all"
+	filterEvaluated  = "evaluated"
+	filterApplied    = "applied"
+	filterInterview  = "interview"
+	filterResponded  = "responded"
+	filterAssessment = "assessment"
+	filterSkip       = "skip"
+	filterRejected   = "rejected"
+	filterDiscarded  = "discarded"
+	filterTop        = "top"
 )
 
 type pipelineTab struct {
@@ -163,6 +184,7 @@ func getPipelineTabs() []pipelineTab {
 		{filterAll, i18n.Current.TabAll},
 		{filterEvaluated, i18n.Current.TabEvaluated},
 		{filterInterview, i18n.Current.TabInterview},
+		{filterAssessment, i18n.Current.TabAssessment},
 		{filterResponded, i18n.Current.TabResponded},
 		{filterApplied, i18n.Current.TabApplied},
 		{filterTop, i18n.Current.TabTop},
@@ -179,7 +201,7 @@ type ColumnID int
 
 const (
 	// Optional columns — user-toggleable via the column picker (C key).
-	ColDate        ColumnID = iota // APPLIED date
+	ColDate        ColumnID = iota // DATE: latest status change (ledger), else the tracker's evaluation date
 	ColLocation                    // LOCATION city+state
 	ColPay                         // PAY range
 	ColHasReport                   // RPT: ✓/—
@@ -199,7 +221,7 @@ type colDef struct {
 
 func getOptionalCols() []colDef {
 	return []colDef{
-		{ColDate, i18n.Current.ColApplied, "", 10, true},
+		{ColDate, i18n.Current.ColDate, "", 10, true},
 		{ColLocation, i18n.Current.ColLocation, "", 20, true},
 		{ColPay, i18n.Current.ColPay, "", 16, true},
 		{ColHasReport, i18n.Current.ColReport, "✓/—", 4, false},
@@ -224,6 +246,7 @@ func getStatusPairs(currentNormalized string) []StatusPair {
 		{i18n.Current.StatusEvaluated, "Evaluated"},
 		{i18n.Current.StatusApplied, "Applied"},
 		{i18n.Current.StatusResponded, "Responded"},
+		{i18n.Current.StatusAssessment, "Assessment"},
 		{i18n.Current.StatusInterview, "Interview"},
 		{i18n.Current.StatusOffer, "Offer"},
 		{i18n.Current.StatusHired, "Hired"},
@@ -269,7 +292,7 @@ func (m PipelineModel) currentStatusPairs() []StatusPair {
 }
 
 // statusGroupOrder defines display order for grouped view.
-var statusGroupOrder = []string{"hired", "interview", "offer", "responded", "applied", "evaluated", "skip", "rejected", "discarded"}
+var statusGroupOrder = []string{"hired", "interview", "offer", "assessment", "responded", "applied", "evaluated", "skip", "rejected", "discarded"}
 
 // PipelineModel implements the career pipeline dashboard screen.
 type PipelineModel struct {
@@ -497,8 +520,13 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	case PipelineOpenFailedMsg:
 		m.flash = "Could not open " + msg.Target + ": " + msg.Err
 		return m, nil
+	case StatusUpdateFailedMsg:
+		m.flash = "Could not update status: " + msg.Err
 	case PipelineHistoryFailedMsg:
 		m.flash = "Status history unavailable; progress uses previous data: " + msg.Err
+		return m, nil
+	case PipelineTrackerFailedMsg:
+		m.flash = "Tracker unavailable; showing previous applications: " + msg.Err
 		return m, nil
 	case pipelineStartDiscardPickerMsg:
 		// Issue 1380: initialise the discard reason picker state.
@@ -642,7 +670,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	case "d":
 		if app, ok := m.CurrentApp(); ok {
 			manifest := data.LoadPDFManifest(m.careerOpsPath)
-			candidates := data.ResolvePDFs(m.careerOpsPath, app, manifest)
+			candidates := data.ResolvePDFs(data.PDFWorkspaceRoot(m.careerOpsPath), app, manifest)
 			if len(candidates) == 0 {
 				m.flash = "No CV PDF found for this application — generate one with /career-ops pdf"
 			} else {
@@ -652,13 +680,14 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "D":
 		if app, ok := m.CurrentApp(); ok {
+			workspaceRoot := data.PDFWorkspaceRoot(m.careerOpsPath)
 			manifest := data.LoadPDFManifest(m.careerOpsPath)
 			entry, found := manifest.Lookup(app)
 			// Manifest lookup requires a report number; fall back to PDF-path
 			// index when the manifest was written without --report (common case).
 			if !found || entry.HTMLPath == "" {
 				byPath := data.LoadPDFEntriesByPath(m.careerOpsPath)
-				candidates := data.ResolvePDFs(m.careerOpsPath, app, manifest)
+				candidates := data.ResolvePDFs(workspaceRoot, app, manifest)
 				for _, c := range candidates {
 					if e, ok := byPath[c]; ok && e.HTMLPath != "" {
 						entry = e
@@ -671,12 +700,12 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 				m.flash = "No source HTML found for this application — run /career-ops pdf first"
 				return m, nil
 			}
-			if _, err := os.Stat(filepath.Join(m.careerOpsPath, filepath.FromSlash(entry.HTMLPath))); err != nil {
+			if _, err := os.Stat(filepath.Join(workspaceRoot, filepath.FromSlash(entry.HTMLPath))); err != nil {
 				m.flash = "Source HTML missing: " + entry.HTMLPath
 				return m, nil
 			}
 			m.flash = "Regenerating PDF via generate-pdf.mjs — this takes a few seconds..."
-			path, report := m.careerOpsPath, entry.ReportNumber
+			path, report := workspaceRoot, entry.ReportNumber
 			html, pdf, format := entry.HTMLPath, entry.PDFPath, entry.Format
 			return m, func() tea.Msg {
 				return PipelineGeneratePDFMsg{
@@ -834,17 +863,6 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 		if app, ok := m.CurrentApp(); ok {
 			newStatus := m.currentStatusPairs()[m.statusCursor].Canonical
 			norm := data.NormalizeStatus(newStatus)
-			if norm == "hired" {
-				m.hiredApp = app
-				m.hiredStep = 1
-				return m, func() tea.Msg {
-					return PipelineUpdateStatusMsg{
-						CareerOpsPath: m.careerOpsPath,
-						App:           app,
-						NewStatus:     newStatus,
-					}
-				}
-			}
 			if norm == "discarded" || norm == "skip" {
 				return m, func() tea.Msg {
 					return m.startDiscardFlow(app, newStatus)
@@ -1119,7 +1137,7 @@ func (m PipelineModel) handleColPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) 
 
 // openPDFCmd emits a PipelineOpenPDFMsg for a root-relative PDF path.
 func (m PipelineModel) openPDFCmd(relPath string) tea.Cmd {
-	fullPath := filepath.Join(m.careerOpsPath, filepath.FromSlash(relPath))
+	fullPath := filepath.Join(data.PDFWorkspaceRoot(m.careerOpsPath), filepath.FromSlash(relPath))
 	return func() tea.Msg {
 		return PipelineOpenPDFMsg{Path: fullPath}
 	}
@@ -1206,12 +1224,24 @@ func (m *PipelineModel) applyFilterAndSort() {
 	m.filtered = filtered
 }
 
+// effectiveDate is what the DATE column shows and what the date sort orders
+// by: the row's latest status transition from status-log.tsv when it has one,
+// otherwise the tracker's own Date cell (the evaluation date). Other readers
+// of app.Date — the hired-flow weeks math, the LAST column's "same as date"
+// elision — mean the evaluation date on purpose and do not go through here.
+func effectiveDate(app model.CareerApplication) string {
+	if app.StatusDate != "" {
+		return app.StatusDate
+	}
+	return app.Date
+}
+
 // sortLess returns the comparator for the active sort mode. Shared by the flat
 // sort and the within-group tiebreaker in grouped view.
 func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 	switch m.sortMode {
 	case sortDate:
-		return func(a, b model.CareerApplication) bool { return a.Date > b.Date }
+		return func(a, b model.CareerApplication) bool { return effectiveDate(a) > effectiveDate(b) }
 	case sortCompany:
 		return func(a, b model.CareerApplication) bool {
 			return strings.ToLower(a.Company) < strings.ToLower(b.Company)
@@ -1345,15 +1375,8 @@ func (m PipelineModel) View() string {
 	metricsBar := m.renderMetrics()
 	sortBar := m.renderSortBar()
 	searchBar := m.renderSearchBar()
-	body := m.renderBody()
 	preview := m.renderPreview()
 	help := m.renderHelp()
-
-	// Apply scroll to body
-	bodyLines := strings.Split(body, "\n")
-	if m.scrollOffset > 0 && m.scrollOffset < len(bodyLines) {
-		bodyLines = bodyLines[m.scrollOffset:]
-	}
 
 	// Calculate available height for body
 	previewLines := strings.Count(preview, "\n") + 1
@@ -1361,10 +1384,14 @@ func (m PipelineModel) View() string {
 	if availHeight < 3 {
 		availHeight = 3
 	}
-	if len(bodyLines) > availHeight {
-		bodyLines = bodyLines[:availHeight]
+
+	// Render only the rows that will be shown. An offset past the end shows the
+	// body from the top, as slicing the fully rendered body used to.
+	bodyLines := m.renderBodyWindow(m.scrollOffset, availHeight)
+	if len(bodyLines) == 0 {
+		bodyLines = m.renderBodyWindow(0, availHeight)
 	}
-	body = strings.Join(bodyLines, "\n")
+	body := strings.Join(bodyLines, "\n")
 
 	// Column picker overlay
 	if m.colPicker {
@@ -1429,6 +1456,18 @@ func (m PipelineModel) renderSearchBar() string {
 	return style.Render(prompt + " " + display + matchInfo + hint)
 }
 
+// avgScoreLabel is the header's average score, or "—" when no row has a
+// score. AvgScore is averaged over scored rows only and every score is above
+// zero, so it is positive exactly when there is one; printed as "0.0" it read
+// as a pipeline that had been scored and scored nothing, a mean taken over no
+// values.
+func avgScoreLabel(avg float64) string {
+	if avg > 0 {
+		return fmt.Sprintf("%.1f", avg)
+	}
+	return "—"
+}
+
 func (m PipelineModel) renderHeader() string {
 	style := lipgloss.NewStyle().
 		Bold(true).
@@ -1438,8 +1477,7 @@ func (m PipelineModel) renderHeader() string {
 		Padding(0, 2)
 
 	right := lipgloss.NewStyle().Foreground(m.theme.Subtext)
-	avg := fmt.Sprintf("%.1f", m.metrics.AvgScore)
-	info := right.Render(fmt.Sprintf(i18n.Current.OffersSummary, m.metrics.Total, avg))
+	info := right.Render(fmt.Sprintf(i18n.Current.OffersSummary, m.metrics.Total, avgScoreLabel(m.metrics.AvgScore)))
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render(i18n.Current.AppTitle)
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
@@ -1538,14 +1576,40 @@ func (m PipelineModel) renderSortBar() string {
 }
 
 func (m PipelineModel) renderBody() string {
+	return strings.Join(m.renderBodyWindow(0, math.MaxInt), "\n")
+}
+
+// renderBodyWindow returns the body's display lines from line `start`, at most
+// `height` of them: the same lines as rendering the whole body and slicing it,
+// without rendering the rows outside the window. View used to render every
+// filtered row on each keypress and then keep a screenful.
+//
+// A row or group header that is not rendered counts as one line. That holds for
+// both: every cell is truncated to its column and neither sets a width that
+// could wrap. The selected row is the exception, since it is padded to the
+// screen width and can wrap on a narrow terminal, so it is always rendered and
+// counted by its real line count.
+func (m PipelineModel) renderBodyWindow(start, height int) []string {
+	lines := make([]string, 0, min(height, len(m.filtered)+8))
+	line := 0 // index of the next display line
+	emit := func(s string) bool {
+		for _, l := range strings.Split(s, "\n") {
+			if line >= start && len(lines) < height {
+				lines = append(lines, l)
+			}
+			line++
+		}
+		return len(lines) < height
+	}
+
 	if len(m.filtered) == 0 {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(m.theme.Subtext).
 			Padding(1, 2)
-		return emptyStyle.Render(i18n.Current.NoOffersMatch)
+		emit(emptyStyle.Render(i18n.Current.NoOffersMatch))
+		return lines
 	}
 
-	var lines []string
 	prevStatus := ""
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
 
@@ -1554,24 +1618,35 @@ func (m PipelineModel) renderBody() string {
 
 		// Group header in grouped mode
 		if m.viewMode == "grouped" && norm != prevStatus {
-			count := m.countByNormStatus(norm)
-			headerStyle := lipgloss.NewStyle().
-				Bold(true).
-				Foreground(m.theme.Subtext)
-			lines = append(lines, padStyle.Render(
-				headerStyle.Render(fmt.Sprintf("── %s (%d) %s",
-					strings.ToUpper(statusLabel(norm)), count,
-					strings.Repeat("─", max(0, m.width-30-len(statusLabel(norm)))))),
-			))
 			prevStatus = norm
+			if line < start {
+				line++
+			} else {
+				count := m.countByNormStatus(norm)
+				headerStyle := lipgloss.NewStyle().
+					Bold(true).
+					Foreground(m.theme.Subtext)
+				if !emit(padStyle.Render(
+					headerStyle.Render(fmt.Sprintf("── %s (%d) %s",
+						strings.ToUpper(statusLabel(norm)), count,
+						strings.Repeat("─", max(0, m.width-30-len(statusLabel(norm)))))),
+				)) {
+					break
+				}
+			}
 		}
 
 		selected := i == m.cursor
-		line := m.renderAppLine(app, selected)
-		lines = append(lines, line)
+		if line < start && !selected {
+			line++
+			continue
+		}
+		if !emit(m.renderAppLine(app, selected)) {
+			break
+		}
 	}
 
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // colWidths holds per-column rune budgets for the table.
@@ -1672,7 +1747,7 @@ func (m PipelineModel) workModeColor(mode string) lipgloss.Color {
 }
 
 func (m PipelineModel) renderLocCell(app model.CareerApplication, width int) string {
-	text := app.WorkMode
+	text := i18n.Current.WorkModeLabel(app.WorkMode)
 	if app.Location != "" {
 		if text != "" {
 			text += " · " + app.Location
@@ -1712,19 +1787,27 @@ func (m PipelineModel) renderPostedCell(app model.CareerApplication, width int) 
 	if app.PostedOn == "" {
 		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
 	}
-	posted, err := time.Parse("2006-01-02", app.PostedOn)
+	// Local calendar days against the dashboard's own clock, the way
+	// FormatTimeAgo counts them for the label in this same cell. time.Parse
+	// read the date as UTC midnight and compared it with the real time.Now(),
+	// so east of UTC a posting dated today was "in the future" until the UTC
+	// date caught up, and got the dash meant for bad data, while its label
+	// would have said "today".
+	posted, err := time.ParseInLocation("2006-01-02", app.PostedOn, time.Local)
 	if err != nil {
 		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
 	}
+	now := i18n.NowFunc()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	// A requisition cannot have gone live in the future. Such a date is bad data
 	// (a typo, or a provider field that isn't the posting date at all), and it
-	// would otherwise read as the freshest possible req: time.Since is negative,
-	// which lands in the first case below and paints it green — the one colour
-	// that says "act on this now".
-	if posted.After(time.Now()) {
+	// would otherwise read as the freshest possible req: a negative age lands in
+	// the first case below and paints it green — the one colour that says "act
+	// on this now".
+	if posted.After(today) {
 		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
 	}
-	days := int(time.Since(posted).Hours() / 24)
+	days := int(math.Round(today.Sub(posted).Hours() / 24))
 	color := m.theme.Red
 	switch {
 	case days <= postedFreshDays:
@@ -1771,7 +1854,7 @@ func (m PipelineModel) renderColumnHeader() string {
 		h.Render(i18n.Current.ColFit), // score cell is unpadded, always 3 runes wide
 	}
 	if cw.date != 0 {
-		segments = append(segments, cell(i18n.Current.ColApplied, cw.date))
+		segments = append(segments, cell(i18n.Current.ColDate, cw.date))
 	}
 	segments = append(segments, cell(i18n.Current.ColCompany, cw.company))
 	segments = append(segments, cell(i18n.Current.ColRole, cw.role))
@@ -1831,8 +1914,9 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	company := truncateRunes(app.Company, cw.company)
 	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(cw.company)
 
-	// Date (fixed width)
-	dateText := app.Date
+	// Date (fixed width): latest status change when the ledger has one, else
+	// the tracker's own (evaluation) date.
+	dateText := effectiveDate(app)
 	if dateText == "" {
 		dateText = "—"
 	}
@@ -1917,7 +2001,7 @@ func (m PipelineModel) renderPreview() string {
 	// and the only place narrow terminals see location/pay/last-contact.
 	var facts []string
 	if app.WorkMode != "" || app.Location != "" {
-		loc := app.WorkMode
+		loc := i18n.Current.WorkModeLabel(app.WorkMode)
 		if app.Location != "" {
 			if loc != "" {
 				loc += " · " + app.Location
@@ -2277,15 +2361,16 @@ func (m PipelineModel) scoreStyle(score float64) lipgloss.Style {
 
 func (m PipelineModel) statusColorMap() map[string]lipgloss.Color {
 	return map[string]lipgloss.Color{
-		"hired":     m.theme.Green, // terminal success — never uncoloured (default) like an unknown status
-		"interview": m.theme.Green,
-		"offer":     m.theme.Green,
-		"applied":   m.theme.Sky,
-		"responded": m.theme.Blue,
-		"evaluated": m.theme.Text,
-		"skip":      m.theme.Red,
-		"rejected":  m.theme.Subtext,
-		"discarded": m.theme.Subtext,
+		"hired":      m.theme.Green, // terminal success — never uncoloured (default) like an unknown status
+		"interview":  m.theme.Green,
+		"offer":      m.theme.Green,
+		"applied":    m.theme.Sky,
+		"responded":  m.theme.Blue,
+		"assessment": m.theme.Mauve,
+		"evaluated":  m.theme.Text,
+		"skip":       m.theme.Red,
+		"rejected":   m.theme.Subtext,
+		"discarded":  m.theme.Subtext,
 	}
 }
 

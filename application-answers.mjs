@@ -8,6 +8,27 @@ import { localToday } from './lib/local-today.mjs';
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
 const VALID_STATES = new Set(['filled', 'submitted']);
+// A level-1/2 Markdown heading closes this section, including tabs, up to
+// three leading spaces, and empty headings. Level-3 groups stay inside it.
+const ANSWERS_SECTION_END_RE = /^ {0,3}#{1,2}(?:[ \t]+|$)/;
+
+function findUnfencedHeading(text, pattern) {
+  let fence = null;
+  for (const line of text.matchAll(/^.*$/gm)) {
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line[0]);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line[0]);
+    if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+      fence = open[1];
+      continue;
+    }
+    if (pattern.test(line[0])) return line;
+  }
+  return null;
+}
 
 function inline(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -290,11 +311,11 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
   const skipped = [];
   const onSkip = strict ? (line) => skipped.push(line.trim()) : undefined;
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
-  const heading = /^## Application Answers\s*$/m.exec(report);
+  const heading = findUnfencedHeading(report, /^## Application Answers[ \t]*$/);
   if (!heading) return null;
 
   const afterHeading = heading.index + heading[0].length;
-  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  const nextHeading = findUnfencedHeading(report.slice(afterHeading), ANSWERS_SECTION_END_RE);
   const body = report.slice(
     afterHeading,
     nextHeading ? afterHeading + nextHeading.index : report.length,
@@ -329,10 +350,11 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
  * NEITHER the letter NOR the name identifies this block. Both move with the
  * locale: of the 19 evaluation modes, 3 write the English name under `H)`
  * (canonical, `ar`, `ja`), 5 write a translated name under `H)`
- * (`es ru tr zh zh-TW`), and 11 write a translated name under `G)`
- * (`da de fr hi id it ko nl pl pt ua`). Matching one exact heading found the
- * block in 3 of 19, so in sixteen languages `modes/apply.md` silently
- * regenerated every answer the evaluation had already drafted and paid for.
+ * (`es ru tr zh zh-TW`), and 11 wrote a translated name under `G)`
+ * (`da de fr hi id it ko nl pl pt ua`) until #5843 moved it to `H)`. Matching
+ * one exact heading found the block in 3 of 19, so in sixteen languages
+ * `modes/apply.md` silently regenerated every answer the evaluation had
+ * already drafted and paid for.
  *
  * A trailing parenthetical marker is the signal instead, which is the
  * convention `web/src/lib/report-sections.mjs` already established for the
@@ -382,9 +404,10 @@ function findDraftAnswersHeading(report) {
   // Last resort, and the only path that reads a TRANSLATED heading (#4400).
   // Neither rule above fires on one today: no mode emits the `(draft)` marker
   // (`git grep '(draft)' -- 'modes/*'` is empty), and the name rule is the
-  // English words, which five shipped modes translate — modes/es, modes/ru,
-  // modes/tr, modes/zh and modes/zh-TW. For those the block silently returned
-  // null, which is indistinguishable from a report that has no Block H.
+  // English words, which sixteen shipped modes translate (modes/es, modes/ru,
+  // modes/tr, modes/zh, modes/zh-TW, and since #5843 the eleven that used to
+  // write it under `G)`). For those the block silently returned null, which is
+  // indistinguishable from a report that has no Block H.
   //
   // The letter is the structural part every mode keeps: `modes/oferta.md`
   // defines `H)` as the draft-answers block and each translation renders the
@@ -461,7 +484,7 @@ export function parseDraftAnswersBlockH(reportText) {
 export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
   const section = formatApplicationAnswersSection(snapshot).trimEnd();
-  const heading = /^## Application Answers\s*$/m.exec(report);
+  const heading = findUnfencedHeading(report, /^## Application Answers[ \t]*$/);
 
   if (!heading) {
     return `${report.trimEnd()}\n\n${section}\n`;
@@ -469,12 +492,13 @@ export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
 
   const start = heading.index;
   const afterHeading = start + heading[0].length;
-  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  const nextHeading = findUnfencedHeading(report.slice(afterHeading), ANSWERS_SECTION_END_RE);
   const end = nextHeading ? afterHeading + nextHeading.index : report.length;
   const before = report.slice(0, start).trimEnd();
-  const after = report.slice(end).trimStart();
+  const after = report.slice(end);
 
-  return [before, section, after].filter(Boolean).join('\n\n') + '\n';
+  const updated = [before, section, after].filter(Boolean).join('\n\n');
+  return updated.endsWith('\n') ? updated : `${updated}\n`;
 }
 
 function parseArgs(argv) {

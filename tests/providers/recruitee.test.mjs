@@ -1,4 +1,5 @@
-// tests/providers/recruitee.test.mjs — moved verbatim from test-all.mjs (#1440).
+// tests/providers/recruitee.test.mjs — Recruitee provider: detect(), the
+// offers-API fetch, and the offer parser.
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -14,8 +15,8 @@ try {
   if (recruitee.id === 'recruitee') pass('recruitee.id is "recruitee"');
   else fail(`recruitee.id is ${JSON.stringify(recruitee.id)}`);
 
-  const hit = recruitee.detect({ name: 'Channable', careers_url: 'https://channable.recruitee.com' });
-  if (hit && hit.url === 'https://channable.recruitee.com/api/offers/') {
+  const hit = recruitee.detect({ name: 'Acme', careers_url: 'https://acme.recruitee.com' });
+  if (hit && hit.url === 'https://acme.recruitee.com/api/offers/') {
     pass('recruitee.detect() resolves <slug>.recruitee.com → api offers');
   } else {
     fail(`recruitee.detect() returned ${JSON.stringify(hit)}`);
@@ -27,19 +28,32 @@ try {
     fail('recruitee.detect() should return null for non-recruitee URLs');
   }
 
+  // A tenant host behind http:, a string that is not a URL, and an entry with
+  // no careers_url at all are junk input: detect() answers null, never throws.
+  const junkDetects = [
+    { name: 'Acme', careers_url: 'http://acme.recruitee.com' },
+    { name: 'Acme', careers_url: 'not a url' },
+    { name: 'Acme' },
+  ].map(entry => recruitee.detect(entry));
+  if (junkDetects.every(hit => hit === null)) {
+    pass('recruitee.detect() returns null for a non-HTTPS tenant URL, a malformed URL and a missing careers_url');
+  } else {
+    fail(`recruitee.detect() junk input returned ${JSON.stringify(junkDetects)}`);
+  }
+
   // parseRecruiteeResponse
   const sample = {
     offers: [
-      { title: 'Senior PM', careers_url: 'https://channable.recruitee.com/o/senior-pm', city: 'Utrecht', country: 'Netherlands', remote: false },
-      { title: 'Backend Eng', url: 'https://channable.recruitee.com/o/backend', city: 'Amsterdam', country: 'Netherlands', remote: true },
-      { title: 'AI Lead', careers_url: 'https://channable.recruitee.com/o/ai-lead', location: 'Remote, EMEA' },
+      { title: 'Senior PM', careers_url: 'https://acme.recruitee.com/o/senior-pm', city: 'Utrecht', country: 'Netherlands', remote: false },
+      { title: 'Backend Eng', url: 'https://acme.recruitee.com/o/backend', city: 'Amsterdam', country: 'Netherlands', remote: true },
+      { title: 'AI Lead', careers_url: 'https://acme.recruitee.com/o/ai-lead', location: 'Remote, EMEA' },
     ],
   };
-  const jobs = parseRecruiteeResponse(sample, 'Channable');
+  const jobs = parseRecruiteeResponse(sample, 'Acme');
   if (jobs.length === 3) pass('parseRecruiteeResponse extracts 3 offers');
   else fail(`parseRecruiteeResponse returned ${jobs.length} offers`);
 
-  if (jobs[0]?.title === 'Senior PM' && jobs[0]?.company === 'Channable' && jobs[0]?.url === 'https://channable.recruitee.com/o/senior-pm') {
+  if (jobs[0]?.title === 'Senior PM' && jobs[0]?.company === 'Acme' && jobs[0]?.url === 'https://acme.recruitee.com/o/senior-pm') {
     pass('parseRecruiteeResponse prefers careers_url field over url');
   } else {
     fail(`row 0 = ${JSON.stringify(jobs[0])}`);
@@ -77,13 +91,34 @@ try {
     fail(`flat-location no-duplicate = ${JSON.stringify(primaryCountry[1]?.location)}`);
   }
 
-  if (parseRecruiteeResponse({}, 'X').length === 0) pass('empty {} → empty result');
-  else fail('empty {} should yield empty result');
-
-  if (parseRecruiteeResponse({ offers: null }, 'X').length === 0) {
-    pass('null offers → empty result (no crash)');
+  // Empty vs broken: a present-and-empty `offers` array is an empty board; any
+  // other envelope is not the documented shape and throws, naming what it got.
+  if (parseRecruiteeResponse({ offers: [] }, 'X').length === 0) {
+    pass('parseRecruiteeResponse returns [] for a present-and-empty offers array');
   } else {
-    fail('null offers should yield empty result');
+    fail('parseRecruiteeResponse should return [] for { offers: [] }');
+  }
+  const brokenEnvelopes = [
+    [{}, '[]'],
+    [{ offers: null }, '[offers]'],
+    [{ offers: {} }, '[offers]'],
+    [{ jobs: [] }, '[jobs]'],
+    [null, '[object]'],
+    ['', '[string]'],
+    [42, '[number]'],
+  ];
+  const envelopeResults = brokenEnvelopes.map(([body, got]) => {
+    try {
+      parseRecruiteeResponse(body, 'X');
+      return `${JSON.stringify(body)} did not throw`;
+    } catch (e) {
+      return e.message === `recruitee: unexpected response — expected offers[], got: ${got}` ? null : `${JSON.stringify(body)} threw "${e.message}"`;
+    }
+  }).filter(Boolean);
+  if (envelopeResults.length === 0) {
+    pass('parseRecruiteeResponse throws, naming the keys or type it got, for every envelope that is not { offers: [...] }');
+  } else {
+    fail(`envelope check: ${envelopeResults.join('; ')}`);
   }
 
   // careers_url with non-string value → detect() returns null without crashing
@@ -94,7 +129,7 @@ try {
   }
 
   // SSRF: malicious URL with recruitee.com in the PATH (not host) must not be detected.
-  if (recruitee.detect({ name: 'Spoof', careers_url: 'https://evil.example/channable.recruitee.com/foo' }) === null) {
+  if (recruitee.detect({ name: 'Spoof', careers_url: 'https://evil.example/acme.recruitee.com/foo' }) === null) {
     pass('recruitee.detect() rejects path-spoofed URLs');
   } else {
     fail('recruitee.detect() must NOT misdetect path-spoofed URLs');
@@ -102,24 +137,24 @@ try {
 
   // Per-offer URL validation: custom-domain https URLs are KEPT (Recruitee
   // tenants serve postings on their own domain, e.g. careers.hostaway.com);
-  // the per-offer URL is display-only and not host-locked to *.recruitee.com
-  // — see #recruitee. A non-https, malformed, or missing URL drops the WHOLE
+  // the per-offer URL is display-only and not host-locked to *.recruitee.com.
+  // A non-https, malformed, or missing URL drops the WHOLE
   // offer (url is this provider's own dedup key downstream — see the Drop
   // rule doc on parseRecruiteeResponse), not just the url field.
   const offerUrlOffers = parseRecruiteeResponse(
     {
       offers: [
-        { title: 'Recruitee domain', careers_url: 'https://channable.recruitee.com/o/good' },
+        { title: 'Recruitee domain', careers_url: 'https://acme.recruitee.com/o/good' },
         { title: 'Custom domain', careers_url: 'https://careers.hostaway.com/o/senior-backend' },
-        { title: 'Insecure', careers_url: 'http://channable.recruitee.com/o/insecure' },
+        { title: 'Insecure', careers_url: 'http://acme.recruitee.com/o/insecure' },
         { title: 'No URL field' },
       ],
     },
-    'Channable',
+    'Acme',
   );
   if (
     offerUrlOffers.length === 2 &&
-    offerUrlOffers[0]?.url === 'https://channable.recruitee.com/o/good' &&
+    offerUrlOffers[0]?.url === 'https://acme.recruitee.com/o/good' &&
     offerUrlOffers[1]?.url === 'https://careers.hostaway.com/o/senior-backend'
   ) {
     pass('parseRecruiteeResponse keeps custom-domain https URLs, drops offers with non-https or missing URL entirely');
@@ -132,32 +167,34 @@ try {
   let fetchedUrl = null;
   let fetchedOpts = null;
   const fetchJobs = await recruitee.fetch(
-    { name: 'Channable', careers_url: 'https://channable.recruitee.com/' },
-    { fetchJson: async (url, opts) => { fetchedUrl = url; fetchedOpts = opts; return { offers: [{ title: 'Senior PM', careers_url: 'https://channable.recruitee.com/o/senior-pm' }] }; } },
+    { name: 'Acme', careers_url: 'https://acme.recruitee.com/' },
+    { fetchJson: async (url, opts) => { fetchedUrl = url; fetchedOpts = opts; return { offers: [{ title: 'Senior PM', careers_url: 'https://acme.recruitee.com/o/senior-pm' }] }; } },
   );
-  if (fetchedUrl === 'https://channable.recruitee.com/api/offers/' && fetchedOpts?.redirect === 'error' && fetchJobs.length === 1) {
+  if (fetchedUrl === 'https://acme.recruitee.com/api/offers/' && fetchedOpts?.redirect === 'error' && fetchJobs.length === 1) {
     pass('recruitee.fetch() hits /api/offers/ with redirect:"error" and returns parsed offers');
   } else {
     fail(`recruitee.fetch() url=${JSON.stringify(fetchedUrl)} opts=${JSON.stringify(fetchedOpts)} jobs=${fetchJobs.length}`);
   }
 
   // fetch() refuses entries whose careers_url can't derive a trusted
-  // <slug>.recruitee.com API URL — the guard chain must run before any request.
+  // <slug>.recruitee.com API URL — the guard chain runs before any request,
+  // so the fetch stub is never entered.
+  let untrustedFetchCalls = 0;
   try {
     await recruitee.fetch(
       { name: 'Evil', careers_url: 'https://evil.example.com/careers' },
-      { fetchJson: async () => { throw new Error('must not be called'); } },
+      { fetchJson: async () => { untrustedFetchCalls++; return { offers: [] }; } },
     );
     fail('recruitee.fetch() should throw for an untrusted careers_url');
   } catch (e) {
-    if (/cannot derive API URL for Evil/.test(e.message)) {
-      pass('recruitee.fetch() throws before fetching when the host is untrusted');
+    if (/cannot derive API URL for Evil/.test(e.message) && untrustedFetchCalls === 0) {
+      pass('recruitee.fetch() throws before fetching when the host is untrusted (fetchJson called 0 times)');
     } else {
-      fail(`recruitee.fetch() threw the wrong error: ${e.message}`);
+      fail(`recruitee.fetch() untrusted host: error "${e.message}", fetchJson calls ${untrustedFetchCalls}`);
     }
   }
 
-  // ── Description (#3175 phase 2) ──
+  // ── Description ──
   // Recruitee's list payload embeds each offer's HTML body for free — same
   // request, no per-job fetch. It must arrive as plain text (tags stripped,
   // entities decoded), and offers without a body omit the key entirely.
@@ -166,14 +203,14 @@ try {
       offers: [
         {
           title: 'With body',
-          careers_url: 'https://channable.recruitee.com/o/with-body',
+          careers_url: 'https://acme.recruitee.com/o/with-body',
           description: '&lt;p&gt;Build &lt;strong&gt;pipelines&lt;/strong&gt; at Hostaway&amp;rsquo;s HQ&lt;/p&gt;&lt;script&gt;evil()&lt;/script&gt;',
         },
-        { title: 'Without body', careers_url: 'https://channable.recruitee.com/o/no-body' },
-        { title: 'Empty body', careers_url: 'https://channable.recruitee.com/o/empty-body', description: '   ' },
+        { title: 'Without body', careers_url: 'https://acme.recruitee.com/o/no-body' },
+        { title: 'Empty body', careers_url: 'https://acme.recruitee.com/o/empty-body', description: '   ' },
       ],
     },
-    'Channable',
+    'Acme',
   );
   if (descOffers[0]?.description === "Build pipelines at Hostaway\u2019s HQ") {
     pass('parseRecruiteeResponse double-decodes the offer body to plain text (tags + script gone)');
@@ -186,7 +223,333 @@ try {
     fail(`rows 1-2 = ${JSON.stringify(descOffers.slice(1))}`);
   }
 
-  // ── Demo-tenant filtering (#4190) ──────────────────────────────────────────
+  // The list payload splits the body in two: `description` holds the
+  // introduction and `requirements` the tasks and candidate profile. Both reach
+  // the description, introduction first, so content_filter / visa_filter see
+  // the whole posting; either one alone is enough.
+  const bodyOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          title: 'Both fields',
+          careers_url: 'https://x.recruitee.com/o/both',
+          description: '<p>Acme builds checkout software.</p>',
+          requirements: '<ul><li>Playwright and TypeScript</li><li>German is not required</li></ul>',
+        },
+        { title: 'Requirements only', careers_url: 'https://x.recruitee.com/o/req-only', description: '', requirements: '<p>API testing</p>' },
+        { title: 'Null requirements', careers_url: 'https://x.recruitee.com/o/null-req', description: '<p>Intro only</p>', requirements: null },
+      ],
+    },
+    'X',
+  );
+  if (bodyOffers[0]?.description === 'Acme builds checkout software. Playwright and TypeScript German is not required') {
+    pass('parseRecruiteeResponse joins description and requirements, introduction first');
+  } else {
+    fail(`both-fields description = ${JSON.stringify(bodyOffers[0]?.description)}`);
+  }
+  if (bodyOffers[1]?.description === 'API testing' && bodyOffers[2]?.description === 'Intro only') {
+    pass('parseRecruiteeResponse keeps a body carried by only one of description / requirements');
+  } else {
+    fail(`single-field descriptions = ${JSON.stringify(bodyOffers.slice(1).map(o => o.description))}`);
+  }
+
+  // ── postedAt from published_at ──
+  // Recruitee writes `YYYY-MM-DD HH:MM:SS UTC`; anything else is omitted
+  // rather than guessed.
+  const dateOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        { title: 'Published', careers_url: 'https://x.recruitee.com/o/published', published_at: '2026-10-13 06:29:35 UTC' },
+        { title: 'Null date', careers_url: 'https://x.recruitee.com/o/null-date', published_at: null },
+        { title: 'Garbage date', careers_url: 'https://x.recruitee.com/o/garbage-date', published_at: 'yesterday' },
+        { title: 'Impossible date', careers_url: 'https://x.recruitee.com/o/impossible-date', published_at: '2026-13-45 06:29:35 UTC' },
+        { title: 'February 30', careers_url: 'https://x.recruitee.com/o/february-30', published_at: '2026-02-30 06:29:35 UTC' },
+        { title: 'Hour 24', careers_url: 'https://x.recruitee.com/o/hour-24', published_at: '2026-10-13 24:00:00 UTC' },
+      ],
+    },
+    'X',
+  );
+  if (dateOffers[0]?.postedAt === Date.UTC(2026, 9, 13, 6, 29, 35)) {
+    pass('parseRecruiteeResponse reads published_at ("YYYY-MM-DD HH:MM:SS UTC") into postedAt epoch ms');
+  } else {
+    fail(`published postedAt = ${JSON.stringify(dateOffers[0]?.postedAt)}`);
+  }
+  if (dateOffers.slice(1).every(o => !('postedAt' in o))) {
+    pass('parseRecruiteeResponse omits postedAt for a null, malformed or impossible published_at, including a day or hour that Date.UTC would roll over (Feb 30, 24:00)');
+  } else {
+    fail(`bad-date rows = ${JSON.stringify(dateOffers.slice(1))}`);
+  }
+
+  // ── salary annualized by period ──
+  // Shapes observed on live tenants: string bounds, year / month / hour
+  // periods, a one-sided range, and a period-less object.
+  const salaryOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        { title: 'Yearly', careers_url: 'https://x.recruitee.com/o/yearly', salary: { min: '60000', max: '70000', period: 'year', currency: 'EUR' } },
+        { title: 'Monthly', careers_url: 'https://x.recruitee.com/o/monthly', salary: { min: '5000', max: '6000', period: 'month', currency: 'eur' } },
+        { title: 'Hourly max only', careers_url: 'https://x.recruitee.com/o/hourly', salary: { min: null, max: '15', period: 'hour', currency: 'EUR' } },
+        { title: 'Min only', careers_url: 'https://x.recruitee.com/o/min-only', salary: { min: '80000', max: null, period: 'year', currency: 'EUR' } },
+        { title: 'No period', careers_url: 'https://x.recruitee.com/o/no-period', salary: { min: '60000', max: '70000', period: null, currency: 'EUR' } },
+        { title: 'Unknown period', careers_url: 'https://x.recruitee.com/o/unknown-period', salary: { min: '500', max: '600', period: 'fortnight', currency: 'EUR' } },
+        { title: 'Empty salary', careers_url: 'https://x.recruitee.com/o/empty', salary: { min: null, max: null, period: null, currency: null } },
+        { title: 'Non-numeric', careers_url: 'https://x.recruitee.com/o/non-numeric', salary: { min: 'competitive', max: '', period: 'year', currency: 'EUR' } },
+      ],
+    },
+    'X',
+  );
+  const salaryOf = (i) => JSON.stringify(salaryOffers[i]?.salary);
+  if (salaryOf(0) === JSON.stringify({ min: 60000, max: 70000, currency: 'EUR' })) {
+    pass('parseRecruiteeResponse keeps a yearly salary as is, string bounds read as numbers');
+  } else {
+    fail(`yearly salary = ${salaryOf(0)}`);
+  }
+  if (salaryOf(1) === JSON.stringify({ min: 60000, max: 72000, currency: 'EUR' })) {
+    pass('parseRecruiteeResponse annualizes a monthly salary (×12) and upper-cases the currency');
+  } else {
+    fail(`monthly salary = ${salaryOf(1)}`);
+  }
+  if (salaryOf(2) === JSON.stringify({ min: 31200, max: 31200, currency: 'EUR' })
+    && salaryOf(3) === JSON.stringify({ min: 80000, max: 80000, currency: 'EUR' })) {
+    pass('parseRecruiteeResponse annualizes an hourly salary (×2080) and fills a one-sided range from the other bound');
+  } else {
+    fail(`one-sided salaries = ${salaryOf(2)}, ${salaryOf(3)}`);
+  }
+  if (salaryOffers.slice(4).every(o => !('salary' in o))) {
+    pass('parseRecruiteeResponse omits salary with no period, an unknown period, or no numeric bound');
+  } else {
+    fail(`unusable salary rows = ${JSON.stringify(salaryOffers.slice(4).map(o => o.salary))}`);
+  }
+
+  // ── Language versions ──
+  // `translations` carries every language version of an offer. The default
+  // one is the translation whose Job text equals the top-level one, whatever
+  // its key order; it always comes first, and the others only with allLanguages.
+  const bilingual = {
+    title: 'Senior QA Engineer (m/w/d)',
+    careers_url: 'https://acme.recruitee.com/o/senior-qa',
+    description: '<p>Acme baut Software.</p>',
+    requirements: '<p>Playwright</p>',
+    location: 'Berlin, Germany',
+    published_at: '2026-10-13 06:29:35 UTC',
+    salary: { min: '60000', max: '70000', period: 'year', currency: 'EUR' },
+    translations: {
+      en: { title: 'Senior QA Engineer (m/f/d)', description: '<p>Acme builds software.</p>', requirements: '<p>Playwright. German is not required.</p>' },
+      de: { title: 'Senior QA Engineer (m/w/d)', description: '<p>Acme baut Software.</p>', requirements: '<p>Playwright</p>' },
+    },
+  };
+  const oneVersion = parseRecruiteeResponse({ offers: [bilingual] }, 'Acme');
+  if (oneVersion.length === 1 && oneVersion[0].language === 'de'
+    && oneVersion[0].url === 'https://acme.recruitee.com/o/senior-qa?lang=de'
+    && oneVersion[0].title === 'Senior QA Engineer (m/w/d)') {
+    pass('parseRecruiteeResponse returns only the default version by default, tagged with its language in `language` and `?lang=`');
+  } else {
+    fail(`default-only versions = ${JSON.stringify(oneVersion)}`);
+  }
+
+  const allVersions = parseRecruiteeResponse({ offers: [bilingual] }, 'Acme', { allLanguages: true });
+  const [deVersion, enVersion] = allVersions;
+  if (allVersions.length === 2 && deVersion?.language === 'de' && enVersion?.language === 'en') {
+    pass('parseRecruiteeResponse with allLanguages returns the default version first, though its key comes second in translations');
+  } else {
+    fail(`all-language order = ${JSON.stringify(allVersions.map(v => v.language))}`);
+  }
+  if (enVersion?.title === 'Senior QA Engineer (m/f/d)'
+    && enVersion?.description === 'Acme builds software. Playwright. German is not required.'
+    && enVersion?.url === 'https://acme.recruitee.com/o/senior-qa?lang=en') {
+    pass('parseRecruiteeResponse builds a further version from its own translation: title, description + requirements, ?lang= URL');
+  } else {
+    fail(`en version = ${JSON.stringify(enVersion)}`);
+  }
+  if (enVersion?.location === deVersion?.location && enVersion?.postedAt === deVersion?.postedAt
+    && JSON.stringify(enVersion?.salary) === JSON.stringify(deVersion?.salary) && enVersion?.company === 'Acme') {
+    pass('parseRecruiteeResponse gives every language version the offer\'s location, date, salary and company');
+  } else {
+    fail(`shared fields differ: de=${JSON.stringify(deVersion)} en=${JSON.stringify(enVersion)}`);
+  }
+
+  // A translation identical to the default one is a copy under another label;
+  // an untitled or badly keyed translation is unusable. None of them is a version.
+  const unusableTranslations = parseRecruiteeResponse({
+    offers: [{
+      title: 'Founder Associate (m/w/d)',
+      careers_url: 'https://acme.recruitee.com/o/founder-associate',
+      description: '<p>Same text</p>',
+      requirements: '<p>Same list</p>',
+      translations: {
+        de: { title: 'Founder Associate (m/w/d)', description: '<p>Same text</p>', requirements: '<p>Same list</p>' },
+        en: { title: 'Founder Associate (m/w/d)', description: '<p>Same text</p>', requirements: '<p>Same list</p>' },
+        fr: { title: '  ', description: '<p>Texte</p>', requirements: '<p>Liste</p>' },
+        'en US/../x': { title: 'Bad key', description: '<p>x</p>', requirements: '<p>y</p>' },
+      },
+    }],
+  }, 'Acme', { allLanguages: true });
+  if (unusableTranslations.length === 1 && unusableTranslations[0].language === 'de') {
+    pass('parseRecruiteeResponse skips a byte-identical copy, an untitled translation and a malformed language key');
+  } else {
+    fail(`unusable translations = ${JSON.stringify(unusableTranslations.map(v => [v.language, v.title]))}`);
+  }
+
+  // A copy is judged by the Job it would produce, not by the raw payload: a
+  // translation that differs from the default one only in markup and
+  // whitespace yields the same title and description, so it is skipped too.
+  const markupCopy = parseRecruiteeResponse({
+    offers: [{
+      title: 'Founder Associate (m/w/d)',
+      careers_url: 'https://acme.recruitee.com/o/founder-associate',
+      description: '<p>Same text</p>',
+      requirements: '<p>Same list</p>',
+      translations: {
+        de: { title: 'Founder Associate (m/w/d)', description: '<p>Same text</p>', requirements: '<p>Same list</p>' },
+        en: { title: ' Founder Associate (m/w/d) ', description: '<div>Same   text</div>', requirements: '<ul><li>Same list</li></ul>' },
+      },
+    }],
+  }, 'Acme', { allLanguages: true });
+  if (markupCopy.length === 1 && markupCopy[0].language === 'de') {
+    pass('parseRecruiteeResponse skips a translation that differs from the default one only in markup and whitespace');
+  } else {
+    fail(`markup copy = ${JSON.stringify(markupCopy.map(v => [v.language, v.title, v.description]))}`);
+  }
+
+  // The default version is matched by the whole Job text, requirements
+  // included: a translation with the top-level title and description but other
+  // requirements is a further version, even when its key comes first. A
+  // missing field and an empty one produce the same text.
+  const requirementsDiffer = parseRecruiteeResponse({
+    offers: [{
+      title: 'Data Engineer (m/w/d)',
+      careers_url: 'https://acme.recruitee.com/o/data',
+      description: '<p>Acme</p>',
+      requirements: null,
+      translations: {
+        en: { title: 'Data Engineer (m/w/d)', description: '<p>Acme</p>', requirements: '<p>English is enough.</p>' },
+        de: { title: 'Data Engineer (m/w/d)', description: '<p>Acme</p>', requirements: '' },
+      },
+    }],
+  }, 'Acme', { allLanguages: true });
+  if (JSON.stringify(requirementsDiffer.map(v => [v.language, v.description])) === JSON.stringify([['de', 'Acme'], ['en', 'Acme English is enough.']])) {
+    pass('parseRecruiteeResponse matches the default version by title, description and requirements together');
+  } else {
+    fail(`requirements differ = ${JSON.stringify(requirementsDiffer.map(v => [v.language, v.description]))}`);
+  }
+
+  // No translation equal to the top-level fields → the default language is
+  // unknown. Without allLanguages: one Job, top-level fields, no `language`,
+  // URL unchanged. With it: every translation, tagged, in the API's order, and
+  // no untagged top-level Job next to them.
+  const unknownDefaultOffer = {
+    title: 'Backend Engineer (m/w/d)',
+    careers_url: 'https://acme.recruitee.com/o/backend',
+    description: '<p>Top level</p>',
+    translations: {
+      de: { title: 'Backend Engineer (m/w/d)', description: '<p>Top level, edited</p>' },
+      en: { title: 'Backend Engineer (m/f/d)', description: '<p>English</p>' },
+    },
+  };
+  const unknownDefault = parseRecruiteeResponse({ offers: [unknownDefaultOffer] }, 'Acme');
+  if (unknownDefault.length === 1 && !('language' in unknownDefault[0])
+    && unknownDefault[0].url === 'https://acme.recruitee.com/o/backend' && unknownDefault[0].description === 'Top level') {
+    pass('parseRecruiteeResponse returns one top-level Job with no language when no translation matches the top-level fields');
+  } else {
+    fail(`unknown default = ${JSON.stringify(unknownDefault)}`);
+  }
+  const unknownDefaultAll = parseRecruiteeResponse({ offers: [unknownDefaultOffer] }, 'Acme', { allLanguages: true });
+  if (JSON.stringify(unknownDefaultAll.map(v => [v.language, v.url, v.description])) === JSON.stringify([
+    ['de', 'https://acme.recruitee.com/o/backend?lang=de', 'Top level, edited'],
+    ['en', 'https://acme.recruitee.com/o/backend?lang=en', 'English'],
+  ])) {
+    pass('parseRecruiteeResponse with allLanguages returns every translation, tagged, when none matches the top-level fields');
+  } else {
+    fail(`unknown default, all languages = ${JSON.stringify(unknownDefaultAll.map(v => [v.language, v.url, v.description]))}`);
+  }
+
+  // fetch() reads the language switch from ctx.dedupIncludeLanguage.
+  const stubCtx = (extra) => ({ ...extra, fetchJson: async () => ({ offers: [bilingual] }) });
+  const fetchedDefault = await recruitee.fetch({ name: 'Acme', careers_url: 'https://acme.recruitee.com' }, stubCtx({}));
+  const fetchedAll = await recruitee.fetch({ name: 'Acme', careers_url: 'https://acme.recruitee.com' }, stubCtx({ dedupIncludeLanguage: true }));
+  if (fetchedDefault.length === 1 && fetchedAll.length === 2) {
+    pass('recruitee.fetch() returns further language versions only when ctx.dedupIncludeLanguage is true');
+  } else {
+    fail(`fetch language switch: default=${fetchedDefault.length}, all=${fetchedAll.length}`);
+  }
+
+  // portals.yml preferred_languages reaches the provider as
+  // ctx.preferredLanguageRank. Without the switch, the preferred translations
+  // come back next to the default version, and no other language does.
+  const trilingual = {
+    ...bilingual,
+    translations: {
+      ...bilingual.translations,
+      fr: { title: 'Ingénieur QA senior (h/f)', description: '<p>Acme crée des logiciels.</p>', requirements: '<p>Playwright</p>' },
+    },
+  };
+  const rankOf = (...languages) => (language) => languages.indexOf(language);
+  const preferredOnly = parseRecruiteeResponse({ offers: [trilingual] }, 'Acme', { preferredLanguageRank: rankOf('fr') });
+  if (JSON.stringify(preferredOnly.map(v => v.language)) === JSON.stringify(['de', 'fr'])) {
+    pass('parseRecruiteeResponse with preferred languages returns the default version and the preferred one only');
+  } else {
+    fail(`preferred-only versions = ${JSON.stringify(preferredOnly.map(v => v.language))}`);
+  }
+  const noPreferredTranslation = parseRecruiteeResponse({ offers: [bilingual] }, 'Acme', { preferredLanguageRank: rankOf('fr') });
+  if (JSON.stringify(noPreferredTranslation.map(v => v.language)) === JSON.stringify(['de'])) {
+    pass('parseRecruiteeResponse with preferred languages returns the default version alone when no translation is preferred');
+  } else {
+    fail(`no preferred translation = ${JSON.stringify(noPreferredTranslation.map(v => v.language))}`);
+  }
+  const fetchedPreferred = await recruitee.fetch({ name: 'Acme', careers_url: 'https://acme.recruitee.com' },
+    { fetchJson: async () => ({ offers: [trilingual] }), preferredLanguageRank: rankOf('en') });
+  if (JSON.stringify(fetchedPreferred.map(v => v.language)) === JSON.stringify(['de', 'en'])) {
+    pass('recruitee.fetch() reads the preferred languages from ctx.preferredLanguageRank');
+  } else {
+    fail(`fetch preferred languages = ${JSON.stringify(fetchedPreferred.map(v => v.language))}`);
+  }
+
+  // No translation matches the top-level fields: without the switch the offer
+  // still comes back once — the translation in the best-ranked preferred
+  // language the offer has, else the top-level fields with no language.
+  const unknownDefaultTrilingual = {
+    ...unknownDefaultOffer,
+    translations: {
+      ...unknownDefaultOffer.translations,
+      fr: { title: 'Ingénieur backend (h/f)', description: '<p>Français</p>' },
+    },
+  };
+  const unknownDefaultCases = [
+    ['de, en preferred → de', rankOf('de', 'en'), ['de|?lang=de']],
+    ['en, de preferred → en', rankOf('en', 'de'), ['en|?lang=en']],
+    ['es, fr, en preferred → fr, the best-ranked the offer has', rankOf('es', 'fr', 'en'), ['fr|?lang=fr']],
+    ['only languages the offer lacks → top-level fields, no language', rankOf('es'), ['undefined|']],
+  ];
+  for (const [label, rank, expected] of unknownDefaultCases) {
+    const actual = parseRecruiteeResponse({ offers: [unknownDefaultTrilingual] }, 'Acme', { preferredLanguageRank: rank })
+      .map(v => `${v.language}|${v.url.replace('https://acme.recruitee.com/o/backend', '')}`);
+    if (JSON.stringify(actual) === JSON.stringify(expected)) pass(`parseRecruiteeResponse, no default version: ${label}`);
+    else fail(`no default version, ${label} — got ${JSON.stringify(actual)}`);
+  }
+
+  // A ?lang= on one entry's careers_url (Recruitee's own param) asks for that
+  // language for that entry: it replaces the default version wherever the offer
+  // has it, and wins over the preferred languages. With dedupIncludeLanguage
+  // every version comes back regardless.
+  const fetchLanguages = async (offer, careersUrl, extra = {}) => (await recruitee.fetch(
+    { name: 'Acme', careers_url: careersUrl },
+    { fetchJson: async () => ({ offers: [offer] }), ...extra },
+  )).map(v => `${v.language}|${v.url.replace(/^https:\/\/acme\.recruitee\.com\/o\/[a-z-]+/, '')}`);
+  const entryCases = [
+    ['?lang=en on careers_url → the English version alone', await fetchLanguages(trilingual, 'https://acme.recruitee.com/?lang=en'), ['en|?lang=en']],
+    ['?lang= the offer lacks → the default version', await fetchLanguages(trilingual, 'https://acme.recruitee.com/?lang=es'), ['de|?lang=de']],
+    ['?lang= wins over the preferred languages', await fetchLanguages(trilingual, 'https://acme.recruitee.com/?lang=EN', { preferredLanguageRank: rankOf('fr') }), ['en|?lang=en']],
+    ['a malformed ?lang= is ignored', await fetchLanguages(trilingual, 'https://acme.recruitee.com/?lang=en%20US'), ['de|?lang=de']],
+    ['with dedupIncludeLanguage every version comes back', await fetchLanguages(trilingual, 'https://acme.recruitee.com/?lang=en', { dedupIncludeLanguage: true }), ['de|?lang=de', 'en|?lang=en', 'fr|?lang=fr']],
+    ['no default version, ?lang=en → the English translation', await fetchLanguages(unknownDefaultTrilingual, 'https://acme.recruitee.com/?lang=en'), ['en|?lang=en']],
+    ['no default version, ?lang= the offer lacks → top-level fields, no language', await fetchLanguages(unknownDefaultTrilingual, 'https://acme.recruitee.com/?lang=es', { preferredLanguageRank: rankOf('fr') }), ['undefined|']],
+  ];
+  for (const [label, actual, expected] of entryCases) {
+    if (JSON.stringify(actual) === JSON.stringify(expected)) pass(`recruitee.fetch(): ${label}`);
+    else fail(`recruitee.fetch(): ${label} — got ${JSON.stringify(actual)}`);
+  }
+
+  // ── Demo-tenant filtering ──────────────────────────────────────────────────
   // Recruitee itself stamps "(Sample)" on its own seeded posting — captured
   // live, byte-identical, from two unrelated tenants (adecco, accenture).
   const demoOffers = parseRecruiteeResponse(
@@ -200,7 +563,7 @@ try {
     'ExampleCo',
   );
   if (demoOffers.length === 1 && demoOffers[0].title === 'Real Backend Engineer') {
-    pass('parseRecruiteeResponse drops any posting whose title carries the "(Sample)" marker, case-insensitively (#4190)');
+    pass('parseRecruiteeResponse drops any posting whose title carries the "(Sample)" marker, case-insensitively');
   } else {
     fail(`parseRecruiteeResponse demo-filter kept ${demoOffers.length} offers: ${JSON.stringify(demoOffers.map(o => o.title))}`);
   }
@@ -307,18 +670,18 @@ try {
   // `title: ''` — same convention as ibm.mjs / eightfold.mjs. Every row here
   // carries a valid `careers_url` so only the title check is under test (a
   // missing/invalid URL is covered separately by the "URL validation" case
-  // above, which now drops the whole offer).
+  // above, which drops the whole offer).
   const titleDropOffers = parseRecruiteeResponse(
     {
       offers: [
-        { title: 'Real Offer', careers_url: 'https://channable.recruitee.com/o/real' },
-        { careers_url: 'https://channable.recruitee.com/o/no-title' },
-        { title: '', careers_url: 'https://channable.recruitee.com/o/blank-title' },
-        { title: '   ', careers_url: 'https://channable.recruitee.com/o/whitespace-title' },
-        { title: 42, careers_url: 'https://channable.recruitee.com/o/non-string-title' },
+        { title: 'Real Offer', careers_url: 'https://acme.recruitee.com/o/real' },
+        { careers_url: 'https://acme.recruitee.com/o/no-title' },
+        { title: '', careers_url: 'https://acme.recruitee.com/o/blank-title' },
+        { title: '   ', careers_url: 'https://acme.recruitee.com/o/whitespace-title' },
+        { title: 42, careers_url: 'https://acme.recruitee.com/o/non-string-title' },
       ],
     },
-    'Channable',
+    'Acme',
   );
   if (titleDropOffers.length === 1 && titleDropOffers[0]?.title === 'Real Offer') {
     pass('parseRecruiteeResponse drops offers with no usable title (missing, blank, whitespace-only, non-string)');

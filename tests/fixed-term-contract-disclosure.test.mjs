@@ -15,7 +15,8 @@ function check(label, condition, detail) {
   else fail(`${label}: ${detail}`);
 }
 
-const signal = oferta.match(/\*\*16\. Fixed-Term Contract Disclosure\*\*[\s\S]*?(?=\n### Output format:)/)?.[0] ?? '';
+const signal = readFileSync(join(ROOT, 'modes', 'oferta-signals', '16-fixed-term-contract-disclosure.md'), 'utf8');
+check('oferta indexes Signal 16 and its file', oferta.includes('**16. Fixed-Term Contract Disclosure**. Read `modes/oferta-signals/16-fixed-term-contract-disclosure.md`'), 'missing Signal 16 index line');
 check('oferta defines standalone Signal 16', Boolean(signal), 'missing Signal 16 section');
 check(
   'signal recognizes explicit fixed-term and duration wording',

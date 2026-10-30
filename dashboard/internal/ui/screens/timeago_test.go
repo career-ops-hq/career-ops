@@ -3,12 +3,22 @@ package screens
 import (
 	"testing"
 	"time"
+
+	"github.com/santifer/career-ops/dashboard/internal/i18n"
 )
 
 func TestFormatTimeAgo(t *testing.T) {
-	today := time.Now().Format("2006-01-02")
-	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-	threeDaysAgo := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
+	// Pin the clock: with the wall clock, a run that crosses local midnight
+	// between computing these dates and formatting them reads "today" as
+	// "yesterday".
+	now := time.Date(2026, 3, 10, 23, 59, 59, 0, time.Local)
+	originalNowFunc := i18n.NowFunc
+	i18n.NowFunc = func() time.Time { return now }
+	t.Cleanup(func() { i18n.NowFunc = originalNowFunc })
+
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+	threeDaysAgo := now.AddDate(0, 0, -3).Format("2006-01-02")
 
 	// Day-granular dates never fabricate sub-day hours: same day is "today".
 	if got := formatTimeAgo(today); got != "today" {
@@ -22,7 +32,7 @@ func TestFormatTimeAgo(t *testing.T) {
 	}
 
 	// Future dates clamp to "today" instead of going negative.
-	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
 	if got := formatTimeAgo(tomorrow); got != "today" {
 		t.Errorf("future date should clamp to \"today\", got %q", got)
 	}

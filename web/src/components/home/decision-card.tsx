@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Check, X, FileText, Loader2 } from "lucide-react";
@@ -8,27 +8,54 @@ import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
+import { statusWriteError } from "@/lib/home/status-result.mjs";
 import type { Application } from "@/lib/career-ops";
+import type { CardReason } from "@/lib/machine-summary.mjs";
+
+const DECISION_TONE: Record<string, string> = {
+  Apply: "text-emerald-600 dark:text-emerald-400",
+  Consider: "text-sky-600 dark:text-sky-400",
+  "Research first": "text-amber-600 dark:text-amber-400",
+  Skip: "text-muted",
+};
 
 // Awaiting-decision row: a scored role with no terminal status. Primary action
-// opens the report (PDF + Apply live there). Skip / Applied still write status.
-export function DecisionCard({ app }: { app: Application }) {
+// opens the report (PDF + Apply live there). Skip / Applied still write status,
+// and onDecided lets the parent offer an undo once the card is gone.
+export function DecisionCard({ app, reason, onDecided }: { app: Application; reason?: CardReason; onDecided?: (status: "Applied" | "Discarded") => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [failedStatus, setFailedStatus] = useState<"Applied" | "Discarded" | null>(null);
+  const submitting = useRef(false);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
   const company = companyPresentation(app);
 
   const setStatus = async (status: "Applied" | "Discarded") => {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(status);
+    setError(null);
+    setFailedStatus(null);
     try {
-      await fetch("/api/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n: app.n, status }) });
+      const response = await fetch("/api/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n: app.n, status }) });
+      const result = await response.json().catch(() => null);
+      const failure = statusWriteError(response.ok, result, status);
+      if (failure) {
+        setError(failure);
+        setFailedStatus(status);
+        return;
+      }
       setDone(status);
+      onDecided?.(status);
       router.refresh();
     } catch {
-      /* ignore */
+      setError("Could not confirm the change. Check your connection and pipeline, then retry.");
+      setFailedStatus(status);
     } finally {
+      submitting.current = false;
       setBusy("");
     }
   };
@@ -54,6 +81,13 @@ export function DecisionCard({ app }: { app: Application }) {
           </span>
         )}
       </div>
+      {reason && (
+        <div data-testid="card-reason" className="space-y-0.5 text-xs leading-snug">
+          {reason.decision && <p className={cn("font-medium", DECISION_TONE[reason.decision] ?? "text-muted")}>{reason.decision}</p>}
+          {reason.plus && <p className="line-clamp-1 text-muted"><span className="text-emerald-600 dark:text-emerald-400">+</span> {reason.plus}</p>}
+          {reason.minus && <p className="line-clamp-1 text-muted"><span className="text-red-600 dark:text-red-400">−</span> {reason.minus}</p>}
+        </div>
+      )}
       <div className="flex items-center gap-2">
         {/* Primary is the report (PDF + Apply live there). Marking Applied from
             Today skipped that path and wrote a status with no application. */}
@@ -82,6 +116,12 @@ export function DecisionCard({ app }: { app: Application }) {
           Applied
         </button>
       </div>
+      {error && (
+        <div role="alert" className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
+          <p className="min-w-0 flex-1">{error}</p>
+          {failedStatus && <button type="button" disabled={!!busy} onClick={() => setStatus(failedStatus)} className="shrink-0 underline disabled:opacity-60 max-sm:min-h-[44px]">Retry</button>}
+        </div>
+      )}
     </div>
   );
 }
