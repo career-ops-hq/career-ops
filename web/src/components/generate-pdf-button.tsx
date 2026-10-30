@@ -16,7 +16,8 @@ import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company: string; pdfReady: boolean }) {
   const { jobs, startJob } = useJobs();
   const listQuery = pipelineQuery(useSearchParams().toString());
-  const studioHref = `/pipeline/${encodeURIComponent(n)}/cv-studio${listQuery ? `?${listQuery}` : ""}`;
+  const jobQuery = listQuery ? `?${listQuery}` : "";
+  const studioHref = `/pipeline/${encodeURIComponent(n)}/cv-studio${jobQuery}`;
   const job = useMemo(
     () => jobs.filter((j) => j.kind === "pdf" && j.input === n).sort((a, b) => b.startedAt - a.startedAt)[0],
     [jobs, n],
@@ -28,7 +29,7 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
 
   if (state.kind === "running")
     return (
-      <Link href={`/jobs/${state.jobId}`} className="inline-flex items-center justify-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-xs font-medium text-brand-text max-sm:min-h-[44px]">
+      <Link href={`/jobs/${state.jobId}${jobQuery}`} className="inline-flex items-center justify-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-xs font-medium text-brand-text max-sm:min-h-[44px]">
         <Loader2 className="size-3.5 animate-spin" /> Generating CV…
       </Link>
     );
@@ -57,7 +58,7 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
         >
           <RotateCcw className="size-3" />
         </button>
-        <FailureNote failure={state.failure} />
+        <FailureNote failure={state.failure} jobQuery={jobQuery} />
       </span>
     );
 
@@ -74,16 +75,16 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
         <FileDown className="size-3.5" /> Generate tailored CV (PDF)
       </button>
       <CostBadge kind="spend" size="xs" />
-      <FailureNote failure={state.failure} />
+      <FailureNote failure={state.failure} jobQuery={jobQuery} />
     </span>
   );
 }
 
-function FailureNote({ failure }: { failure: PdfFailure }) {
+function FailureNote({ failure, jobQuery }: { failure: PdfFailure; jobQuery: string }) {
   if (!failure) return null;
   return (
     <Link
-      href={`/jobs/${failure.jobId}`}
+      href={`/jobs/${failure.jobId}${jobQuery}`}
       role="alert"
       title="Open the run log"
       className="inline-flex max-w-md items-start gap-1 text-xs text-red-700 hover:underline dark:text-red-400"

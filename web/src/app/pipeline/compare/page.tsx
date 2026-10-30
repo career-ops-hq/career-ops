@@ -45,6 +45,7 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
   const params = await searchParams;
   const { n } = params;
   const backQuery = pipelineQuery(params);
+  const reportQuery = backQuery ? `?${backQuery}` : "";
   const columns = compareIds(n).map(column).filter((c): c is Column => c !== null);
   const labels = [...new Set(columns.flatMap((c) => [...c.fields.keys()]))];
 
@@ -64,7 +65,7 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
                 <th className="w-32 px-4 py-3" />
                 {columns.map((c) => (
                   <th key={c.n} scope="col" className="px-4 py-3 font-normal">
-                    <Link href={`/pipeline/${c.n}`} className="flex items-center gap-2 hover:text-brand-text">
+                    <Link href={`/pipeline/${c.n}${reportQuery}`} className="flex items-center gap-2 hover:text-brand-text">
                       <CompanyLogo name={c.company} size={24} />
                       <span className="font-medium">{c.company}</span>
                     </Link>

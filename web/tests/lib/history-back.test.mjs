@@ -94,6 +94,14 @@ test("the list, the studio, and the checklist walk back through the real entry",
   assert.ok(modifiedAt > 0 && modifiedAt < sync.indexOf("history.replaceState"), "a modified click must return before replaceState");
   assert.match(back, /previousMatchIndex\(href, location\.href, current\.index/);
   assert.match(back, /window\.history\.go\(match - current\.index\)/);
-  assert.match(pdf, /cv-studio\$\{listQuery \? `\?\$\{listQuery\}` : ""\}`/);
+  assert.match(pdf, /cv-studio\$\{jobQuery\}`/);
+  assert.match(pdf, /\/jobs\/\$\{state\.jobId\}\$\{jobQuery\}/);
+  assert.match(pdf, /\/jobs\/\$\{failure\.jobId\}\$\{jobQuery\}/);
   assert.match(studio, /pipelineQuery\(useSearchParams\(\)\.toString\(\)\)/);
+  const compare = readFileSync(new URL("./app/pipeline/compare/page.tsx", root), "utf8");
+  assert.match(compare, /\/pipeline\/\$\{c\.n\}\$\{reportQuery\}/);
+  const jobPage = readFileSync(new URL("./app/jobs/[id]/page.tsx", root), "utf8");
+  assert.match(jobPage, /pipelineQuery\(useSearchParams\(\)\.toString\(\)\)/);
+  assert.match(jobPage, /href=\{pipelineHref\}/);
+  assert.doesNotMatch(jobPage, /href="\/pipeline"/);
 });
