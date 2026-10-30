@@ -29,6 +29,8 @@ career-ops runs in Claude Code, in the terminal or in the Code tab of the Claude
 - **Portal scans read public job listings.** They fetch listings from the job boards you turn on in `portals.yml`: applicant tracking systems such as Greenhouse, Ashby, Lever, Workable and SmartRecruiters, and the regional boards in [`providers/`](https://github.com/career-ops-hq/career-ops/tree/main/providers). These requests read listings; they don't send your CV or profile.
 - **A browser on your machine.** Playwright opens job pages in a headless Chromium to read listings and to check whether a role is still open, and it renders your CV to PDF locally.
 - **Update checks.** On the first message of a session career-ops asks the GitHub API whether there is a newer release. It updates only when you say yes.
+- **Optional local apps.** A web UI (`npm run ui`) listens only on 127.0.0.1; it refuses to open to the network unless you allow that explicitly. A terminal dashboard you build yourself with Go (`npm run build:dashboard`) compiles on your machine and downloads its Go modules through the Go module proxy.
+- **Optional scheduled scans.** Only if you install them: `web/scripts/install-scan-schedule.sh` adds a user-level LaunchAgent (macOS) or one marked crontab line (Linux), and `install-scan-schedule.ps1` adds a scheduled task (Windows). Every 15 minutes it runs at most one of the scans you saved in the web UI. `uninstall-scan-schedule.sh` (or `.ps1`) removes it.
 
 career-ops can fill application forms and draft answers. It drafts and fills; it never submits. You press Submit.
 
