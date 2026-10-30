@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -23,18 +25,42 @@ type clipboardCommand struct {
 var (
 	clipboardGOOS     = runtime.GOOS
 	clipboardLookPath = exec.LookPath
-	runClipboardCmd   = func(name string, args []string, stdin string) error {
-		cmd := exec.Command(name, args...)
-		cmd.Stdin = strings.NewReader(stdin)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			if msg := strings.TrimSpace(string(out)); msg != "" {
-				return fmt.Errorf("%w: %s", err, msg)
-			}
-			return err
-		}
-		return nil
-	}
+	runClipboardCmd   = runClipboardProcess
 )
+
+// runClipboardProcess runs one clipboard utility with stdin as its input.
+//
+// wl-copy and xclip fork a child that keeps serving the clipboard after the
+// command itself exits, and that child inherits stderr. With a pipe on stderr
+// (CombinedOutput, or any non-*os.File writer) Wait blocks until another app
+// takes the clipboard, so the result never reaches the screen. Stderr goes to
+// a temporary file instead, which Wait does not drain, and stdout is
+// discarded; the file is only read to explain a failure.
+func runClipboardProcess(name string, args []string, stdin string) error {
+	errFile, err := os.CreateTemp("", "career-ops-clipboard-*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = errFile.Close()
+		_ = os.Remove(errFile.Name())
+	}()
+
+	cmd := exec.Command(name, args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	cmd.Stderr = errFile
+	if err := cmd.Run(); err != nil {
+		if _, seekErr := errFile.Seek(0, io.SeekStart); seekErr == nil {
+			if out, readErr := io.ReadAll(io.LimitReader(errFile, 4096)); readErr == nil {
+				if msg := strings.TrimSpace(string(out)); msg != "" {
+					return fmt.Errorf("%w: %s", err, msg)
+				}
+			}
+		}
+		return err
+	}
+	return nil
+}
 
 // clipboardCandidates lists the utilities to try, in order, for goos.
 func clipboardCandidates(goos string) []clipboardCommand {
