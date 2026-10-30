@@ -36,7 +36,7 @@ for (const heading of [
   'Requisitos', 'REQUISITOS', 'Requisitos del puesto', 'Requisitos mínimos',
   'Requerimientos', 'Requerimientos específicos',
   'Calificaciones', 'Calificaciones requeridas',
-  'Que buscamos', 'Lo que buscamos', 'Lo que necesitas', 'Lo que esperamos',
+  'Que buscamos', 'Qué buscamos', 'Lo que buscamos', 'Lo que necesitas', 'Lo que esperamos',
   'Perfil del cargo', 'Perfil requerido',
   'Conocimientos requeridos', 'Habilidades requeridas', 'Competencias requeridas',
   'Para el puesto',
@@ -46,15 +46,21 @@ for (const heading of [
   });
 }
 
-test('a Spanish closing heading (Beneficios) ends the requirements block', () => {
-  const jd = `Requisitos${BULLETS}\nBeneficios\n- Bono de carga familiar\n- Seguro de vida\n`;
-  assertExtracts(jd, 'es closer');
-});
+// A skill listed after the closer must stay out: if the closer did not match,
+// Tekla would leak into the requirements block and the assertion would fail.
+function assertClosedBefore(closer) {
+  const jd = `Requisitos\n- Excel\n${closer}\n- Tekla\n`;
+  assert.deepEqual(extractJdSkills(jd), ['Excel'], `closer "${closer}" did not end the requirements block`);
+}
 
-test('a Spanish closing heading (Funciones) ends the requirements block', () => {
-  const jd = `Requisitos${BULLETS}\nFunciones\n- Koordinierung von Baustellen\n`;
-  assertExtracts(jd, 'es closer: funciones');
-});
+for (const closer of [
+  'Beneficios', 'Funciones', 'Qué ofrecemos', 'Cómo postular', 'Como postular',
+  'Postulación', 'Proceso de selección', 'Proceso de seleccion',
+]) {
+  test(`a Spanish closing heading (${closer}) ends the requirements block`, () => {
+    assertClosedBefore(closer);
+  });
+}
 
 test('a Spanish cv.md exposes its named skills section to the classifier', () => {
   const cv = [

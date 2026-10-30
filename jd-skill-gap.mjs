@@ -116,7 +116,7 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     'requerimientos?\\s+(?:del\\s+puesto|espec\\u00edficos|generales)',
     'calificaciones',
     'calificaciones?\\s+(?:requeridas|necesarias)',
-    'que\\s+buscamos',
+    'qu[eé]\\s+buscamos',
     'lo\\s+que\\s+buscamos',
     'lo\\s+que\\s+necesitas',
     'lo\\s+que\\s+esperamos',
@@ -188,7 +188,7 @@ const NON_REQUIREMENT_HEADER_RE = new RegExp(
     'beneficios?', 'funciones?', 'responsabilidades?',
     'lo\\s+que\\s+ofrecemos', 'qu[eé]\\s+ofrecemos', 'nuestro\\s+ofrecimiento',
     'acerca\\s+de\\s+nosotros', 'acerca\\s+de\\s+la\\s+empresa',
-    'como\\s+postular', 'postulacion', 'proceso\\s+de\\s+selecci\\u00f3n',
+    'c[oó]mo\\s+postular', 'postulaci[oó]n', 'proceso\\s+de\\s+selecci[oó]n',
     'etapas\\s+del\\s+proceso',
   ].join('|') + ')\\b|(?:' + [
     // zh-TW / zh-CN closing headers — drops \b for the same CJK reason.
