@@ -33,7 +33,7 @@
 
 ```yaml
 language:
-  primary: zh
+  output: zh-CN
   modes_dir: modes/zh
 ```
 

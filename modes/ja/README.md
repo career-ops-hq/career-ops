@@ -35,7 +35,7 @@ Claude は `modes/` の代わりにこのフォルダのファイルを読み込
 
 ```yaml
 language:
-  primary: ja
+  output: ja
   modes_dir: modes/ja
 ```
 

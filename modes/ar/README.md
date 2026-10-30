@@ -29,7 +29,7 @@
 
 ```yaml
 language:
-  primary: ar
+  output: ar
   modes_dir: modes/ar
 ```
 
