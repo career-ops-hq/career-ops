@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { findPhrase, readPdfPages } from "../helpers/report-print-pdf.mjs";
 
 const url = process.env.REPORT_PRINT_TEST_URL;
 const root = process.env.REPORT_PRINT_TEST_ROOT;
@@ -91,6 +92,14 @@ test("A printed report shows its content without app chrome in either theme", { 
       assert.ok(section?.text.includes(text), `${theme}: "${name}" prints its text ("${text}")`);
     }
 
+    // CV Match stays an open article, so the details list above never sees it.
+    const lead = page.locator("main article.report-prose").filter({ has: page.getByRole("heading", { name: "CV Match", exact: true }) });
+    assert.equal(await lead.count(), 1, `${theme}: CV Match prints as one open section`);
+    assert.equal(await lead.isVisible(), true, `${theme}: CV Match is visible on paper`);
+    const leadText = await lead.innerText();
+    assert.match(leadText, /The fictional candidate matches the fictional requirements closely/);
+    assert.match(leadText, /Fictional proof point/);
+
     const tables = page.locator("main .report-prose table");
     assert.ok(await tables.count() > 0, `${theme}: report table renders`);
     const clipped = await tables.evaluateAll((found) =>
@@ -101,9 +110,19 @@ test("A printed report shows its content without app chrome in either theme", { 
     const color = await page.locator("main .report-prose p").first().evaluate((el) => getComputedStyle(el).color);
     assert.ok(luminance(color) < 0.3, `${theme}: body text prints dark on white paper (color ${color})`);
 
-    if (theme === "dark") {
-      const pdf = await page.pdf({ format: "Letter" });
-      assert.ok(pdf.length > 1000, "the report renders to a PDF");
+    const pdf = await page.pdf({ format: "Letter" });
+    assert.ok(pdf.length > 1000, `${theme}: the report renders to a PDF`);
+    const pages = readPdfPages(pdf);
+    const phrases = [
+      "The fictional candidate matches the fictional requirements closely",
+      "Paragraph 8 of the fictional company notes",
+      "Reflection text that keeps going",
+      "https://fixture-print.example/evidence/3",
+    ];
+    for (const phrase of phrases) {
+      const found = findPhrase(pages, phrase);
+      assert.ok(found, `${theme}: PDF includes "${phrase}"`);
+      assert.deepEqual(found.outside, [], `${theme}: "${phrase}" stays inside the page`);
     }
     assert.deepEqual(errors, []);
     await context.close();
