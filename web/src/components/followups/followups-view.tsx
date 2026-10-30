@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
+import { useListSearch } from "@/lib/use-list-search";
 import { CalendarClock, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -113,32 +115,26 @@ export function FollowupsView() {
   const sortKey: SortKey | null = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : null;
   const dir = (params.get("dir") === "-1" ? -1 : 1) as 1 | -1;
 
-  const [q, setQ] = useState(params.get("q") ?? "");
-  const lastUrlQ = useRef(params.get("q") ?? "");
-  useEffect(() => {
-    const urlQ = params.get("q") ?? "";
-    if (urlQ !== lastUrlQ.current) {
-      lastUrlQ.current = urlQ;
-      setQ(urlQ);
-    }
-  }, [params]);
-
-  const setParams = useCallback(
+  const qRef = useRef(params.get("q") ?? "");
+  const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
-      const sp = new URLSearchParams(params.toString());
-      for (const [k, v] of Object.entries(updates)) {
-        if (v == null || v === "") sp.delete(k);
-        else sp.set(k, String(v));
+      const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
+      if (qs === params.toString()) return false;
+      const href = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Search already filtered the rows. A transition would hide them.
+      if (isSearchOnlyWrite(updates)) {
+        router.replace(href, { scroll: false });
+        return true;
       }
-      const qs = sp.toString();
-      if (qs === params.toString()) return;
       startRouteProgress();
       startTransition(() => {
-        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+        router.replace(href, { scroll: false });
       });
+      return true;
     },
     [params, router, pathname, startTransition],
   );
+  const { q, setQ, setParams } = useListSearch(params, commitParams, qRef);
 
   const entries = useMemo(() => (data?.available ? data.entries : []), [data]);
   const upcoming = useMemo(() => {
@@ -446,7 +442,7 @@ function FollowupRow({
           {e.daysUntilNext == null ? (
             <span className="text-faint">—</span>
           ) : (
-            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-600 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
+            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-700 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
               {relativeDays(e.daysUntilNext)}
             </span>
           )}

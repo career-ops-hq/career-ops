@@ -60,6 +60,7 @@ Den tilpasser dit CV og skriver udkast til dine&nbsp;svar. <strong>Du&nbsp;trykk
 </p>
 
 <p align="center"><a href="#din-tur">Prøv den på ét&nbsp;job&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Læs hele&nbsp;historien&nbsp;→</a></p>
+<p align="center"><sub>Vil du helst undgå terminalen? <a href="https://career-ops.org/waitlist?ref=readme-da">Skriv dig på ventelisten til en webversion&nbsp;→</a></sub></p>
 
 <br>
 

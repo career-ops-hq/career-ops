@@ -60,6 +60,7 @@
 </p>
 
 <p align="center" dir="rtl"><a href="#دورك">جرّبه على وظيفة&nbsp;واحدة&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">اقرأ القصة&nbsp;كاملة&nbsp;←</a></p>
+<p align="center" dir="rtl"><sub>تفضّل ألّا تستخدم الطرفية؟ <a href="https://career-ops.org/waitlist?ref=readme-ar">انضم إلى قائمة الانتظار لنسخة الويب&nbsp;←</a></sub></p>
 
 <br>
 

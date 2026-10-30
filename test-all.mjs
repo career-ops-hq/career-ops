@@ -2680,6 +2680,8 @@ const exactAllowedFiles = new Set([
   // The OpenAI plugin directory listing names its developer, like the
   // claude-directory manifest that '.claude-plugin/plugin.json' above covers.
   'openai-directory/plugin.json',
+  // The Antigravity Marketplace manifest credits its author the same way.
+  'antigravity-directory/plugin.json',
   // Hired Wall: celebrates a hire with a link back to the project, and the
   // scripts/tests that build and cover that feature necessarily carry the
   // same URL (#4131).

@@ -60,6 +60,7 @@ Nó điều chỉnh CV và soạn nháp&nbsp;câu&nbsp;trả&nbsp;lời. <strong
 </p>
 
 <p align="center"><a href="#đến-lượt-bạn">Thử với một tin&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Đọc toàn bộ&nbsp;câu&nbsp;chuyện&nbsp;→</a></p>
+<p align="center"><sub>Không muốn dùng terminal? <a href="https://career-ops.org/waitlist?ref=readme-vi">Đăng ký danh sách chờ cho phiên bản web&nbsp;→</a></sub></p>
 
 <br>
 
