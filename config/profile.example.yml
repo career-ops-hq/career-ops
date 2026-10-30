@@ -247,6 +247,8 @@ cv:
   # early-career candidates usually want 1. strict_pages: true turns an
   # overflow into a failed render instead of a warning. A --max-pages or
   # --strict-pages flag on generate-pdf.mjs still wins for a single render.
+  # A value that is set but unusable (max_pages: 0, strict_pages: "yes") stops
+  # a CV render with a message naming it, rather than falling back to 2 pages.
   # max_pages: 1
   # strict_pages: true
 

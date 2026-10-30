@@ -50,7 +50,7 @@ Yes. Set `cv.template` (and/or `cover_letter.template`) in `config/profile.yml` 
 
 ## Can every CV be one page?
 
-Yes. Set `cv.max_pages: 1` in `config/profile.yml`, and add `cv.strict_pages: true` if a CV that runs over should fail instead of only warning. Every CV render then uses that budget: the `pdf` mode, auto-pipeline, batch workers and the web UI. A cover letter keeps the default. Students, new graduates and early-career candidates usually want this. Without the setting a CV may run to 2 pages, with a warning past that. A `--max-pages` or `--strict-pages` flag on `generate-pdf.mjs` still wins for a single render.
+Yes. Set `cv.max_pages: 1` in `config/profile.yml`, and add `cv.strict_pages: true` if a CV that runs over should fail instead of only warning. Every CV render then uses that budget: the `pdf` mode, auto-pipeline, batch workers and the web UI. A cover letter keeps the default. Students, new graduates and early-career candidates usually want this. Without the setting a CV may run to 2 pages, with a warning past that. A `--max-pages` or `--strict-pages` flag on `generate-pdf.mjs` still wins for a single render. A typo in either value stops the CV render with a message naming the key, instead of quietly falling back to 2 pages. Onboarding offers this setting when you report under 2 years of experience.
 
 ## Why does career-ops refuse to use a number from my story bank?
 

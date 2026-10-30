@@ -347,6 +347,30 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     fail(`profile page budget did not reach the batch path as expected: status=${budgetBatch.status}\n${budgetBatch.output.trim()}`);
   }
 
+  // --- Test 3c (#6326): an unusable profile budget fails only the CV entries;
+  // the cover letter in the same batch, which never reads cv.*, still renders.
+  const badBudgetProfile = join(sandbox, 'bad-budget-profile.yml');
+  writeFileSync(badBudgetProfile, 'name: Test Candidate\ncv:\n  max_pages: none\n', 'utf-8');
+  const badBudgetManifest = join(sandbox, 'bad-budget-batch.json');
+  writeFileSync(badBudgetManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/bad-budget-cv.pdf', kind: 'cv' },
+    { input: 'c.html', output: 'out/bad-budget-cover.pdf', kind: 'cover' },
+  ]), 'utf-8');
+  const badBudgetBatch = run([`--batch=${badBudgetManifest}`], { env: { CAREER_OPS_PROFILE: badBudgetProfile } });
+  let badBudgetResults = null;
+  try { badBudgetResults = JSON.parse(readFileSync(`${badBudgetManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  if (
+    badBudgetBatch.status === 1 &&
+    Array.isArray(badBudgetResults) && badBudgetResults.length === 2 &&
+    badBudgetResults[0].ok === false && /Invalid page budget in config\/profile\.yml: cv\.max_pages "none"/.test(badBudgetResults[0].error || '') &&
+    !existsSync(join(sandbox, 'out', 'bad-budget-cv.pdf')) &&
+    badBudgetResults[1].ok === true
+  ) {
+    pass('an unusable profile page budget fails the batch CV entry and leaves the cover letter');
+  } else {
+    fail(`an invalid profile page budget was not scoped to batch CV entries: status=${badBudgetBatch.status}\n${badBudgetBatch.output.trim()}`);
+  }
+
   // --- Test 4: a shared-browser launch failure yields a complete failed
   // manifest and exit 1, never an uncaught throw that skips the manifest ---
   const failManifest = join(sandbox, 'launchfail.json');

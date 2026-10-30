@@ -412,19 +412,37 @@ try {
     fail(`a cover letter picked up the CV page budget from the profile: ${coverLetter.output.trim()}`);
   }
 
+  // A typo in a stated budget must not quietly print a 2-page CV: the CV render
+  // stops before rendering and names every unusable key.
+  const invalidProfileEnv = withProfile('invalid', '  max_pages: 0\n  strict_pages: "yes"\n');
   const invalidProfilePdf = join(sandbox, 'invalid-profile.pdf');
-  const invalidProfile = runPdf([input, invalidProfilePdf],
-    withProfile('invalid', '  max_pages: 0\n  strict_pages: "yes"\n'));
+  const invalidProfile = runPdf([input, invalidProfilePdf], invalidProfileEnv);
   if (
-    invalidProfile.status === 0 &&
-    invalidProfile.output.includes('config/profile.yml cv.max_pages "0" is not a positive integer — ignoring it.') &&
-    invalidProfile.output.includes('config/profile.yml cv.strict_pages "yes" is not true or false — ignoring it.') &&
-    invalidProfile.output.includes('📐 Page budget: 2 (warning only)\n') &&
-    manifestHasPdf(invalidProfilePdf)
+    invalidProfile.status !== 0 &&
+    invalidProfile.output.includes('Invalid page budget in config/profile.yml: cv.max_pages "0" is not a positive integer; cv.strict_pages "yes" is not true or false.') &&
+    !invalidProfile.output.includes('📐 Page budget') &&
+    !existsSync(invalidProfilePdf)
   ) {
-    pass('an unusable cv.max_pages / cv.strict_pages is named and ignored, never fatal');
+    pass('an unusable cv.max_pages / cv.strict_pages stops a CV render before rendering');
   } else {
-    fail(`an invalid profile page budget was not reported and ignored: ${invalidProfile.output.trim()}`);
+    fail(`an invalid profile page budget did not stop the CV render: ${invalidProfile.output.trim()}`);
+  }
+
+  // A flag that covers both keys never reads them, so the render proceeds.
+  const coveredPdf = join(sandbox, 'invalid-profile-covered.pdf');
+  const covered = runPdf([input, coveredPdf, '--max-pages=2', '--strict-pages'], invalidProfileEnv);
+  if (covered.status === 0 && covered.output.includes('📐 Page budget: 2 (strict)\n') && manifestHasPdf(coveredPdf)) {
+    pass('flags that cover an unusable profile budget let the CV render');
+  } else {
+    fail(`flags covering an invalid profile budget did not let the render through: ${covered.output.trim()}`);
+  }
+
+  const invalidCoverPdf = join(sandbox, 'invalid-profile-cover.pdf');
+  const invalidCover = runPdf([input, invalidCoverPdf, '--kind=cover'], invalidProfileEnv);
+  if (invalidCover.status === 0 && existsSync(invalidCoverPdf)) {
+    pass('an unusable CV page budget does not stop a cover letter');
+  } else {
+    fail(`an invalid CV page budget stopped a cover letter: ${invalidCover.output.trim()}`);
   }
 
   // A redirected tracker defines a separate workspace. The renderer must allow

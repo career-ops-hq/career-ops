@@ -405,6 +405,44 @@ test('experience_filter with no action is written as label', () => {
   } finally { cleanup(dir); }
 });
 
+test('no cv answer leaves the page budget commented out (#6326)', () => {
+  const { dir, res, read } = run(ANSWERS);
+  try {
+    assert.equal(res.status, 0, describeSpawn(res));
+    const profile = read('config/profile.yml');
+    assert.equal(yaml.load(profile).cv.max_pages, undefined);
+    assert.equal(yaml.load(profile).cv.strict_pages, undefined);
+    assert.match(profile, /^ {2}# max_pages: 1$/m);
+  } finally { cleanup(dir); }
+});
+
+test('an early-career cv answer writes a one-page budget (#6326)', () => {
+  const answers = {
+    ...ANSWERS,
+    candidate: { ...ANSWERS.candidate, years_of_experience: 1 },
+    cv: { max_pages: 1, strict_pages: true },
+  };
+  const { dir, res, read } = run(answers);
+  try {
+    assert.equal(res.status, 0, describeSpawn(res));
+    const cv = yaml.load(read('config/profile.yml')).cv;
+    assert.equal(cv.max_pages, 1);
+    assert.equal(cv.strict_pages, true);
+    assert.equal(cv.output_format, 'html', 'the rest of the cv: block is untouched');
+  } finally { cleanup(dir); }
+});
+
+test('an unusable cv answer exits 1 and writes nothing (#6326)', () => {
+  for (const cv of [{ max_pages: 0 }, { max_pages: 1.5 }, { strict_pages: 'yes' }]) {
+    const { dir, res } = run({ ...ANSWERS, cv });
+    try {
+      assert.equal(res.status, 1, describeSpawn(res));
+      assert.match(res.stderr, /cv\.(max_pages|strict_pages)/);
+      assert.equal(existsSync(join(dir, 'config', 'profile.yml')), false);
+    } finally { cleanup(dir); }
+  }
+});
+
 test('experience_filter without years of experience exits 1 and writes nothing', () => {
   const { dir, res } = run({ ...ANSWERS, portals: { ...ANSWERS.portals, experience_filter: {} } });
   try {

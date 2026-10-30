@@ -1795,14 +1795,10 @@ async function generatePDF() {
     process.exit(1);
   }
 
-  // #6326: cv.max_pages / cv.strict_pages in config/profile.yml, applied per
-  // document by pageBudgetFor(). Read once here so an unusable key is named
-  // once, not once per batch entry.
+  // #6326: cv.max_pages / cv.strict_pages in config/profile.yml, read once and
+  // applied per document by pageBudgetFor().
   const flagBudget = { maxPages, maxPagesSupplied, strictPages };
   const profileBudget = readCvPageBudget(workspaceProfilePath());
-  for (const problem of profileBudget.invalid || []) {
-    console.warn(`⚠️  config/profile.yml ${problem} — ignoring it.`);
-  }
 
   // Resolve the format before the batch branch, so a batch and a single render
   // inherit the same configured size and a bad --format fails the same way in
@@ -1916,7 +1912,13 @@ async function generatePDF() {
   console.log(`📄 Input:  ${inputPath}`);
   console.log(`📁 Output: ${outputPath}`);
   console.log(`📏 Format: ${format.toUpperCase()}`);
-  const budget = pageBudgetFor(resolveArtifactKind(kindFlag, outputPath).kind, flagBudget, profileBudget);
+  let budget;
+  try {
+    budget = pageBudgetFor(resolveArtifactKind(kindFlag, outputPath).kind, flagBudget, profileBudget);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
   const budgetSource = budget.fromProfile.length > 0 ? ` — ${budget.fromProfile.join(' and ')} from config/profile.yml` : '';
   console.log(`📐 Page budget: ${budget.maxPages}${budget.strictPages ? ' (strict)' : ' (warning only)'}${budgetSource}`);
 
@@ -1986,14 +1988,26 @@ async function generatePDF() {
  * cover letter keeps the flag-or-default budget, since a cv.* key says nothing
  * about it. Exported for tests.
  *
+ * Throws when a CV would read a key that is set but unusable: a typo in a
+ * stated budget must not quietly print a 2-page CV. A flag that covers the
+ * key, or a cover letter, never reads it, so neither is stopped.
+ *
  * @param {string|null} kind - From resolveArtifactKind().
  * @param {{maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}} flags
- * @param {{maxPages?: number, strictPages?: boolean}} profile - From readCvPageBudget().
+ * @param {{maxPages?: number, strictPages?: boolean, invalid?: {key: string, message: string}[]}} profile - From readCvPageBudget().
  * @returns {{maxPages: number, strictPages: boolean, fromProfile: string[]}}
  */
 export function pageBudgetFor(kind, flags, profile = {}) {
   const budget = { maxPages: flags.maxPages, strictPages: flags.strictPages, fromProfile: [] };
   if (kind !== 'cv') return budget;
+  const read = (profile.invalid || []).filter((p) =>
+    (p.key === 'max_pages' && !flags.maxPagesSupplied) || (p.key === 'strict_pages' && !flags.strictPages));
+  if (read.length > 0) {
+    throw new Error(
+      `Invalid page budget in config/profile.yml: ${read.map((p) => p.message).join('; ')}. ` +
+      'Fix the value, or pass --max-pages / --strict-pages for this render.',
+    );
+  }
   if (!flags.maxPagesSupplied && profile.maxPages !== undefined) {
     budget.maxPages = profile.maxPages;
     budget.fromProfile.push('cv.max_pages');
