@@ -285,9 +285,9 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor 또는 그 밖의 CLI | 일상 언어: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor 또는 그 밖의 지원되는 CLI | 일상 언어: "Run the career-ops scan mode" |
 
-`/career-ops`만 입력하면 명령어 메뉴가 표시됩니다 (이를 사용하는 CLI에서). 일상 언어는 모든 CLI에서 동작합니다. Claude Code 플러그인으로 사용할 때 명령어는 `/career-ops:career-ops`입니다.
+`/career-ops`만 입력하면 명령어 메뉴가 표시됩니다 (이를 사용하는 CLI에서). 일상 언어는 지원하는 모든 CLI에서 동작합니다. Claude Code 플러그인으로 사용할 때 명령어는 `/career-ops:career-ops`입니다.
 
 모든 CLI가 하나의 라우터 `.agents/skills/career-ops/SKILL.md`와 같은 `modes/*.md` 파일을 공유하므로, 어떤 CLI에서 실행해도 모드는 똑같이 동작합니다. Codex에서는 슬래시 명령이 보장되지 않습니다. 일상 언어로 요청하거나 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`로 프롬프트 하나를 헤드리스로 실행하세요([docs/CODEX.md](docs/CODEX.md)). 지원하는 각 CLI에서 실행하는 방법, 헤드리스 명령이 있는 CLI의 해당 명령, CLI별 설정 참고 사항은 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)에 있습니다.
 
