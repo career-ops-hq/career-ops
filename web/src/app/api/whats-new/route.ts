@@ -1,5 +1,6 @@
-import { readApplications, readScanHistoryLines } from "@/lib/career-ops";
+import { readApplications, readLinkedReport, readScanHistoryLines } from "@/lib/career-ops";
 import { getNormalizeTextKey } from "@/lib/core/text-key";
+import { getAggregatorRule } from "@/lib/core/aggregator-id";
 import { evaluatedKeys, isEvaluated } from "@/lib/whats-new-suppression.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
@@ -38,15 +39,18 @@ export async function GET(req: Request) {
 
   // Roles already evaluated → don't resurface as "new". Keyed on company AND
   // role, not company alone: suppressing by employer removed that employer's
-  // entire board after one evaluation (#3131). See lib/whats-new-suppression.
+  // entire board after one evaluation (#3131), and refined by posting URL when
+  // both sides have one (#5684), by posting id on an aggregator. See
+  // lib/whats-new-suppression.
   const normalizeTextKey = await getNormalizeTextKey();
-  const evaluated = evaluatedKeys(readApplications(), normalizeTextKey);
+  const aggregator = await getAggregatorRule();
+  const evaluated = evaluatedKeys(readApplications(), normalizeTextKey, readLinkedReport);
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
     if (!url || !/^https?:\/\//i.test(url)) return null;
     if (status && /skipped|expired/i.test(status)) return null;
-    if (isEvaluated(evaluated, normalizeTextKey, company, title)) return null;
+    if (isEvaluated(evaluated, normalizeTextKey, company, title, url, aggregator)) return null;
     return {
       url,
       company: (company || "").trim(),
@@ -58,6 +62,16 @@ export async function GET(req: Request) {
     };
   };
 
-  const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
-  return Response.json({ offers, count });
+  // Same rule as the scan history above, for the linked reports: a missing one
+  // is "URL unknown", any other read failure throws from readLinkedReport. The
+  // reads are lazy, inside toOffer, so they surface here.
+  try {
+    const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
+    return Response.json({ offers, count });
+  } catch (err) {
+    return Response.json(
+      { error: (err as Error)?.message ?? "unknown error", offers: [], count: 0 },
+      { status: 500 },
+    );
+  }
 }
