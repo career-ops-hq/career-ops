@@ -577,18 +577,21 @@ tracker row, so a contact cannot be attached across companies.
 Optional GitHub evidence step of the `expand` mode (#5295). Reads the pull
 requests you authored through your existing `gh auth` (no new token) and checks
 what `cv.md` claims against them. Read-only: PR title, state, repository,
-stars, visibility, and commit counts/dates. README reading is separately
-opt-in through `github_evidence.read_readmes: true`; it never reads
-source code and never writes `cv.md`. Candidates reach `cv.md` only through `expand`'s confirm gate and
+stars, visibility, commit counts/dates, and document file names. README reading
+is separately opt-in through `github_evidence.read_readmes: true`; it never
+reads source code or file contents and never writes `cv.md`. Candidates reach
+`cv.md` only through `expand`'s confirm gate and
 `add-entry.mjs`.
 
 ```bash
 node github-evidence.mjs          # writes output/github-evidence-{date}.{md,json}
 node github-evidence.mjs --json   # same, and prints the JSON on stdout
+node github-evidence.mjs --skip-document-listing # omit document names and tree queries
 ```
 
-- Only PRs and commits you authored count. Your own repos (owning is not
-  authorship) and forks are listed by name and counts only, never as evidence.
+- Only PRs and commits you authored count as contribution evidence. Your own
+  repos (owning is not authorship) and forks are listed by name and counts only
+  for PR authorship; confirmed document names can still inform `expand` proposals.
 - A private repo is evidence only when listed in `config/profile.yml`:
   `github_evidence.private_allowlist: ["owner/repo"]` (empty by default). Any
   other private repo, or one whose visibility could not be read, appears by
@@ -641,6 +644,37 @@ counts as not logged in: a login check that fails any other way (no stderr,
 `gh` crashed or was killed) is a `2` naming the exit status. On exit `2` or
 `3`, `expand` continues with its zero-key behaviour; on exit `1` it asks the
 user to fix `candidate.github` (its Input steps 2–4).
+
+**Document names (`documents`, #5728).** PRDs, requirement-change notes, data
+contracts and acceptance baselines kept under `docs/` are invisible to a README
+read and to PR evidence. The report therefore also lists document file names on
+the default branch of your own non-fork repos (the 30 most recently pushed, via
+one GraphQL query) and of each allowlisted repo that is not a fork: one
+`repos/<owner>/<repo>/git/trees/<branch>?recursive=1` call per repo, plus one
+metadata call per allowlisted repo the own-repo query did not return. A document
+is a file under `docs/`, `doc/` or `documentation/` (`.md`, `.mdx`, `.rst`,
+`.adoc`, `.txt`, `.docx`, `.pdf`, `.pptx`, `.xlsx` and similar), or a top-level
+document other than README, CHANGELOG, LICENSE, CONTRIBUTING and the like.
+Names matching a product or requirement keyword in English or Chinese (`prd`,
+`requirement`, `spec`, `acceptance`, `contract`, `design`, 需求, 契约, 口径,
+验收, …) carry them in `keywords`, and flagged names are listed first, at most
+40 per repo (`filesCapped`). Names only: no file is opened and no source code is
+read. Names are listed for public repos and allowlisted private ones; any other
+private repo or repo with unknown visibility shows counts only, with names
+hidden (`namesShown: false`). This visibility rule applies only to the
+`documents` section; the existing PR metadata section continues to show
+non-allowlisted private repositories by name and count. Hidden document rows
+also omit repository names, branch names and raw GitHub error paths from JSON,
+Markdown and stderr while retaining safe error types and HTTP status codes. A truncated tree sets
+`treeTruncated`. A failed call is a gap in `documents.gaps` (`status` `partial`
+or `failed`) and changes neither the rest of the report nor the exit code. The
+Markdown report adds the same list as its last section. `expand` asks you which
+of these documents are your own work before reading any of them.
+
+Pass `--skip-document-listing` for one run, or set
+`github_evidence.skip_document_listing: true` in `config/profile.yml` to skip
+document tree queries by default. PR and commit evidence still runs, and the
+report marks the document listing as skipped.
 
 ---
 

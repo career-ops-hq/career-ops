@@ -162,12 +162,18 @@ language:
 # (`node github-evidence.mjs`, needs a logged-in `gh`) may use as evidence.
 # Empty by default: a private repo appears only by name and PR and commit counts,
 # never with PR titles or commit dates, until you add it here yourself as
-# "owner/repo". Only PR and commit metadata is read by default, never source
-# code or commit messages. README content is read only when you separately set
-# read_readmes: true. Nothing reaches cv.md without your confirmation.
+# "owner/repo". Only PR and commit metadata and document file names are read by
+# default, never source code or commit messages. README content is read only when
+# you separately set read_readmes: true. Nothing reaches cv.md without your
+# confirmation.
 # github_evidence:
 #   private_allowlist: []            # e.g. ["acme-corp/billing-service"]
 #   read_readmes: false               # opt in to reading allowlisted READMEs
+# The same step lists document file names (docs/ and top-level documents) for
+# your public repos and allowlisted ones; your other private repos show document
+# counts only.
+# Add `skip_document_listing: true` under `github_evidence` to skip document
+# names and tree queries while keeping PR and commit evidence enabled.
 
 # Controls which model tier evaluates your offers. Valid values:
 #   economy  -- cheapest/fastest model, no extended thinking. Best for high-volume scanning.
