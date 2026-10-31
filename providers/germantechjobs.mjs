@@ -19,8 +19,9 @@ import { htmlToText } from './_html-to-text.mjs';
 //
 //   - `<title>` carries the employer: "{Role} @ {Company} [{salary range}]".
 //     Company comes from that last " @ " segment, and the trailing salary
-//     bracket is stripped from the role. A title with no " @ " keeps the entry
-//     name as its company rather than inventing one.
+//     bracket is stripped from the role. A title with no " @ " has no
+//     identifiable employer, so the row is skipped rather than attributed to
+//     the board.
 //   - There is no location tag, and the `<description>` does not carry one
 //     either (sampled 2026-10-30: 20 of 626 items mention a location line,
 //     the rest pack salary/requirements/tech only). Location is therefore ''
@@ -51,10 +52,6 @@ function toEpochMs(value) {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   const ms = Date.parse(value.trim());
   return Number.isFinite(ms) ? ms : undefined;
-}
-
-function fallbackCompany(entry) {
-  return typeof entry?.name === 'string' && entry.name.trim() ? entry.name.trim() : 'GermanTechJobs';
 }
 
 // Resolve a tag's inner text: unwrap a CDATA section, else decode entities.
@@ -93,14 +90,16 @@ function cleanUrl(value) {
  *   "CIAM Platform Engineer (w/m/d) @ SEW-EURODRIVE GmbH & Co KG [50.000 - 80.000 €]"
  *   "Technischer Systemberater (w/m/div.) @ Buderus [49.000 - 89.000 €]"
  * The company is after the last " @ ", the role before it, and a trailing
- * salary bracket " [... €]" is stripped. When no " @ " is present the whole
- * string is the title and company falls back to defaultCompany.
+ * salary bracket " [... €]" is stripped. When no " @ " is present there is no
+ * identifiable employer, so the caller drops the row rather than attributing
+ * it to the board or the portal entry name (phase 1 of the
+ * [source policy](https://github.com/career-ops-hq/career-ops/blob/main/CONTRIBUTING.md#source-indexing-policy)
+ * asks for listings attributed to an identifiable employer).
  *
  * @param {string} rawTitle
- * @param {string} defaultCompany
- * @returns {{title: string, company: string}}
+ * @returns {{title: string, company: string}} company is '' when unattributable
  */
-function splitTitle(rawTitle, defaultCompany) {
+function splitTitle(rawTitle) {
   let text = rawTitle.trim();
   text = text.replace(/\s*\[[^\]]*€[^\]]*\]\s*$/, '').trim();
 
@@ -110,7 +109,7 @@ function splitTitle(rawTitle, defaultCompany) {
     const company = text.slice(at + 3).trim();
     if (title && company) return { title, company };
   }
-  return { title: text, company: defaultCompany };
+  return { title: text, company: '' };
 }
 
 // CDATA sections (a job <description>'s raw, unescaped text) and XML comments
@@ -136,10 +135,9 @@ const ENVELOPE_RE = /<rss\b[^>]*>[\s\S]*<channel\b[^>]*>[\s\S]*<\/channel>[\s\S]
  * CDATA) and `<content:encoded>`. No location tag.
  *
  * @param {string} xml - raw RSS feed body
- * @param {string} [defaultCompany] - fallback company for unsplittable titles
  * @returns {Array<{title: string, url: string, company: string, location: string, description: string, postedAt?: number}>}
  */
-export function parseGermantechjobsFeed(xml, defaultCompany = 'GermanTechJobs') {
+export function parseGermantechjobsFeed(xml) {
   if (typeof xml !== 'string') {
     throw new Error(`germantechjobs: unexpected feed response — expected an <rss><channel> envelope, got: ${typeof xml}`);
   }
@@ -166,8 +164,6 @@ export function parseGermantechjobsFeed(xml, defaultCompany = 'GermanTechJobs') 
     throw new Error(`germantechjobs: malformed feed — ${openItems} <item> open tag(s) but ${closedItems} </item> close tag(s) (truncated response?)`);
   }
 
-  const fallback = typeof defaultCompany === 'string' && defaultCompany.trim() ? defaultCompany.trim() : 'GermanTechJobs';
-
   // Item boundaries are matched against the masked xml (so CDATA text cannot
   // end a block early), but each block is sliced from the REAL xml at that same
   // position/length, preserving the actual CDATA content for field parsing.
@@ -181,7 +177,12 @@ export function parseGermantechjobsFeed(xml, defaultCompany = 'GermanTechJobs') 
     const rawTitle = tagText(item, 'title');
     if (!rawTitle) continue;
 
-    const { title, company } = splitTitle(rawTitle, fallback);
+    // No identifiable employer after " @ " means the row cannot be attributed
+    // to anyone: drop it rather than filing it under the board or the portal
+    // entry name, which would let the scanner's company+role dedup merge two
+    // different employers' same-titled postings into one opening.
+    const { title, company } = splitTitle(rawTitle);
+    if (!company) continue;
 
     // Description ships in the list payload, so it is free — the scanner's
     // content_filter and visa_filter read it. `description` is the posting
@@ -226,6 +227,6 @@ export default {
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertFeedUrl above it keeps the request pinned to germantechjobs.de.
     const text = await ctx.fetchText(feedUrl, { redirect: 'error' });
-    return parseGermantechjobsFeed(text, fallbackCompany(entry));
+    return parseGermantechjobsFeed(text);
   },
 };

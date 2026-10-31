@@ -89,17 +89,40 @@ try {
     fail(`parse: second company is ${JSON.stringify(second.company)}`);
   }
 
-  // A title with no " @ " keeps the whole string and falls back to the entry
-  // name — never an invented employer.
+  // A title with no " @ " has no identifiable employer. Filing it under the
+  // board or the portal entry name would attribute it to nobody and let
+  // company+role dedup merge two employers' same-titled postings, so the row
+  // is dropped (Source Indexing Policy, rule 1).
   const noAt = parseGermantechjobsFeed(
     '<rss><channel><item><title>Werkstudent IT</title><link>https://germantechjobs.de/jobs/x</link></item></channel></rss>',
-    'Acme Board',
   );
-  if (noAt.length === 1 && noAt[0].title === 'Werkstudent IT' && noAt[0].company === 'Acme Board') {
-    pass('parse: a title with no employer keeps the entry-name fallback');
+  if (noAt.length === 0) {
+    pass('parse: a title with no identifiable employer is dropped, not given the board name');
   } else {
-    fail(`parse: unsplittable title produced ${JSON.stringify(noAt[0])}`);
+    fail(`parse: unattributable title produced ${JSON.stringify(noAt[0])}`);
   }
+
+  // A named portal entry must not become the employer either.
+  const noAtEntryName = await germantechjobs.fetch(
+    { name: 'Acme Board', provider: 'germantechjobs' },
+    {
+      fetchText: async () => '<rss><channel><item><title>Werkstudent IT</title><link>https://germantechjobs.de/jobs/x</link></item></channel></rss>',
+      fetchJson: async () => { throw new Error('fetchJson should not be called'); },
+    },
+  );
+  if (noAtEntryName.length === 0) {
+    pass('parse: an unroutable title is not attributed to the entry name');
+  } else {
+    fail(`parse: entry name leaked into company: ${JSON.stringify(noAtEntryName[0])}`);
+  }
+
+  // An empty role before " @ " is equally unattributable — the company exists
+  // but there is no posting to show.
+  const emptyRole = parseGermantechjobsFeed(
+    '<rss><channel><item><title> @ Bora</title><link>https://germantechjobs.de/jobs/y</link></item></channel></rss>',
+  );
+  if (emptyRole.length === 0) pass('parse: a title with an empty role is dropped');
+  else fail(`parse: empty-role title produced ${JSON.stringify(emptyRole[0])}`);
 
   if (first.postedAt === Date.parse('Thu, 29 Oct 2026 09:30:00 GMT')) {
     pass('parse: pubDate becomes an epoch-ms postedAt');
@@ -165,6 +188,74 @@ try {
   );
   if (offBoard.length === 0) pass('parse: a link off the board is rejected');
   else fail(`parse: an off-board link survived: ${offBoard[0]?.url}`);
+
+  // A <description> CDATA whose text carries real-looking feed structure must
+  // not end the item early. This is the reason maskCdataAndComments exists:
+  // without it the item block is sliced at the first literal </item> inside the
+  // description, and the row loses its description (or splits into two).
+  const cdataTrapBody = 'We run </item></channel></rss> pipelines and parse <item> tags for a living. Salary: 55.000 €.';
+  const cdataTrap = parseGermantechjobsFeed(
+    '<rss><channel><item><title>Platform Engineer @ Trap Co</title>'
+      + '<link>https://germantechjobs.de/jobs/trap</link>'
+      + `<description><![CDATA[<p>${cdataTrapBody}</p>]]></description>`
+      + '</item></channel></rss>',
+  );
+  if (cdataTrap.length === 1) pass('parse: structure text inside CDATA does not split the item');
+  else fail(`parse: CDATA structure text produced ${cdataTrap.length} rows`);
+
+  if (cdataTrap.length === 1 && cdataTrap[0].company === 'Trap Co' && cdataTrap[0].title === 'Platform Engineer') {
+    pass('parse: the row keeps its title and employer when CDATA carries structure');
+  } else {
+    fail(`parse: CDATA row fields are ${JSON.stringify(cdataTrap[0])}`);
+  }
+
+  // The CDATA text survives intact; htmlToText strips the markup, so the
+  // literal "</item>" wording is gone but the words around it are not.
+  const trapDesc = cdataTrap.length === 1 ? (cdataTrap[0].description || '') : '';
+  if (/pipelines and parse/.test(trapDesc) && /tags for a living/.test(trapDesc)) {
+    pass('parse: the CDATA text survives a structure-word description');
+  } else {
+    fail(`parse: CDATA description lost its content: ${JSON.stringify(trapDesc)}`);
+  }
+
+  // A full envelope whose only item is a CDATA trap still counts as one item —
+  // the open/close item tally must be taken on the masked body, or this throws
+  // a spurious "truncated response".
+  let cdataTallyThrew = null;
+  try {
+    cdataTallyThrew = parseGermantechjobsFeed(
+      '<rss><channel><item><title>A @ B</title><link>https://germantechjobs.de/jobs/t</link>'
+        + '<description><![CDATA[mention </item> here]]></description></item></channel></rss>',
+    );
+  } catch (e) {
+    cdataTallyThrew = e;
+  }
+  if (Array.isArray(cdataTallyThrew) && cdataTallyThrew.length === 1) {
+    pass('parse: a CDATA </item> does not trip the open/close item tally');
+  } else {
+    fail(`parse: CDATA </item> tripped the tally: ${cdataTallyThrew?.message || 'wrong row count'}`);
+  }
+
+  // An unparseable <pubDate> must leave postedAt unset rather than becoming
+  // NaN or epoch 0 — both would sort the row to the wrong end of a feed.
+  for (const bad of ['not a date', 'Thu, 32 Oct 2026 09:30:00 GMT', '', '   ']) {
+    const parsedBad = parseGermantechjobsFeed(
+      '<rss><channel><item><title>A @ B</title><link>https://germantechjobs.de/jobs/d</link>'
+        + `<pubDate>${bad}</pubDate></item></channel></rss>`,
+    );
+    const ok = parsedBad.length === 1 && !('postedAt' in parsedBad[0]);
+    if (ok) pass(`parse: invalid pubDate ${JSON.stringify(bad)} leaves postedAt unset`);
+    else fail(`parse: pubDate ${JSON.stringify(bad)} produced ${JSON.stringify(parsedBad[0]?.postedAt)}`);
+  }
+
+  // A valid epoch-0 date is a real timestamp and must not be dropped by a
+  // truthiness check.
+  const epochZero = parseGermantechjobsFeed(
+    '<rss><channel><item><title>A @ B</title><link>https://germantechjobs.de/jobs/e</link>'
+      + '<pubDate>Thu, 01 Jan 1970 00:00:00 GMT</pubDate></item></channel></rss>',
+  );
+  if (epochZero.length === 1 && epochZero[0].postedAt === 0) pass('parse: an epoch-0 pubDate is kept as 0, not dropped');
+  else fail(`parse: epoch-0 pubDate produced ${JSON.stringify(epochZero[0]?.postedAt)}`);
 
   // ── fetch ────────────────────────────────────────────────────────────
   let calls = 0;
