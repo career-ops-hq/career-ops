@@ -73,7 +73,7 @@ import { resolveColumns, parseTrackerRow, extractTrackerReportLinks, extractTrac
 import { loadYaml } from './lib/yaml-document.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { parseAmount, compensationPeriod } from './providers/_salary-text.mjs';
+import { parseAmount, compensationPeriod, isCurrencyCode } from './providers/_salary-text.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
@@ -214,12 +214,14 @@ export function reportToObservation(content, num, date) {
   // comparison (see computeRelocationAdjustment below). null when the JD
   // states no location, same no-invented-data posture as advertised_comp.
   const postingLocation = yamlStr(body, 'posting_location');
-  // Currency = first standalone UPPERCASE 3-letter token, case-SENSITIVE on
-  // purpose: lowercase 3-letter English words in sloppy values ("per", "and")
-  // must not register as currencies. Tradeoff: a lowercase "100k eur" yields
-  // UNKNOWN (excluded from gap math, surfaced in currencyMismatches) — acceptable;
-  // a corrective TSV observation with an explicit currency overrides it.
-  const currencyGuess = adv ? (adv.match(/\b[A-Z]{3}\b/)?.[0] ?? 'UNKNOWN') : null;
+  // Currency = first standalone UPPERCASE 3-letter token that is a real
+  // ISO-4217 code, so a label in front ("OTE: 100k USD") is never taken for the
+  // currency. Case-SENSITIVE on purpose: lowercase 3-letter English words in
+  // sloppy values ("per", "and") must not register as currencies. Tradeoff: a
+  // lowercase "100k eur" yields UNKNOWN (excluded from gap math, surfaced in
+  // currencyMismatches) — acceptable; a corrective TSV observation with an
+  // explicit currency overrides it.
+  const currencyGuess = adv ? ((adv.match(/\b[A-Z]{3}\b/g) ?? []).find(isCurrencyCode) ?? 'UNKNOWN') : null;
   return {
     company, role, postingLocation,
     observation: adv === null ? null : {
