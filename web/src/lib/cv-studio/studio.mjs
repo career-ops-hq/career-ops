@@ -127,6 +127,17 @@ export function emptyEdits(sourceHash) {
   return { v: 1, sourceHash, preset: { ...DEFAULT_PRESET }, use: {}, hidden: [], shown: [], order: {}, restored: {} };
 }
 
+/** True when Reset would change nothing. A fresh object here would still count as a new undo step. */
+function isUntouched(edits) {
+  return edits.preset.length === DEFAULT_PRESET.length
+    && edits.preset.tone === DEFAULT_PRESET.tone
+    && edits.hidden.length === 0
+    && edits.shown.length === 0
+    && Object.keys(edits.use).length === 0
+    && Object.keys(edits.order).length === 0
+    && Object.keys(edits.restored).length === 0;
+}
+
 /**
  * Edits saved against another version of the tailored CV are dropped rather
  * than misapplied to whatever bullets now sit at the same ids. Null when `raw`
@@ -172,8 +183,19 @@ export function parseEdits(raw, sourceHash) {
  *   | {type: "restore", item: string, index: number}
  *   | {type: "unrestore", item: string, index: number}
  *   | {type: "preset", preset: Partial<Preset>}
- *   | {type: "reset"}} StudioAction
+ *   | {type: "reset"}
+ *   | {type: "replace", edits: StudioEdits}} StudioAction
  */
+
+/** @param {BulletUse} a @param {BulletUse} b */
+function sameBulletUse(a, b) {
+  if (a.kind !== b.kind) return false;
+  if (a.kind !== "custom") return true;
+  if (a.text !== b.text) return false;
+  const left = a.keywords;
+  const right = b.keywords;
+  return left.length === right.length && left.every((word, i) => word === right[i]);
+}
 
 /**
  * @param {StudioEdits} edits
@@ -183,8 +205,11 @@ export function parseEdits(raw, sourceHash) {
  */
 export function studioReducer(edits, action, doc) {
   switch (action.type) {
-    case "use":
+    case "use": {
+      const chosen = edits.use[action.id];
+      if (chosen && sameBulletUse(chosen, action.use)) return edits;
       return { ...edits, use: { ...edits.use, [action.id]: action.use } };
+    }
     case "toggle": {
       const isHidden = hiddenSet(doc, edits).has(action.id);
       const presetHides = presetHidden(doc, edits.preset).has(action.id);
@@ -207,10 +232,15 @@ export function studioReducer(edits, action, doc) {
     }
     case "unrestore":
       return { ...edits, restored: { ...edits.restored, [action.item]: (edits.restored[action.item] ?? []).filter((i) => i !== action.index) } };
-    case "preset":
-      return { ...edits, preset: { ...edits.preset, ...action.preset } };
+    case "preset": {
+      const preset = { ...edits.preset, ...action.preset };
+      if (preset.length === edits.preset.length && preset.tone === edits.preset.tone) return edits;
+      return { ...edits, preset };
+    }
     case "reset":
-      return emptyEdits(edits.sourceHash);
+      return isUntouched(edits) ? edits : emptyEdits(edits.sourceHash);
+    case "replace":
+      return action.edits;
   }
 }
 
@@ -375,4 +405,50 @@ function readableRuns(parts) {
   });
   flush();
   return out;
+}
+
+/** How many earlier edit states Undo can step back through. */
+export const UNDO_LIMIT = 30;
+
+/**
+ * The undo history after recording `state`: oldest first, so Undo pops the
+ * most recent. Past the limit the oldest state is dropped.
+ *
+ * @param {StudioEdits[]} history
+ * @param {StudioEdits} state - The edits from before the change being recorded.
+ * @param {number} [limit]
+ * @returns {StudioEdits[]}
+ */
+export function pushUndo(history, state, limit = UNDO_LIMIT) {
+  return [...history, state].slice(-limit);
+}
+
+/**
+ * Cmd+Z or Ctrl+Z steps back. Shift stays out so Cmd+Shift+Z and Ctrl+Shift+Z
+ * remain redo. Caps Lock reports Z with shift off, so the letter is folded.
+ *
+ * @param {{ key?: string, shiftKey?: boolean, metaKey?: boolean, ctrlKey?: boolean }} event
+ * @returns {boolean}
+ */
+export function isStudioUndoKey(event) {
+  const key = typeof event?.key === "string" ? event.key.toLowerCase() : "";
+  return key === "z" && event.shiftKey !== true && Boolean(event.metaKey || event.ctrlKey);
+}
+
+/**
+ * Record one edit against the edits on screen now.
+ *
+ * A wording save can call this after an await. The edits argument has to be
+ * the current ones, not the snapshot from when that request started, or Undo
+ * drops a hide that happened in between.
+ *
+ * @param {StudioEdits} current
+ * @param {StudioAction} action
+ * @param {StudioDoc} doc
+ * @param {StudioEdits[]} history
+ */
+export function applyRecordedEdit(current, action, doc, history) {
+  const next = studioReducer(current, action, doc);
+  if (next === current) return { edits: current, history, recorded: false };
+  return { edits: next, history: pushUndo(history, current), recorded: true };
 }
