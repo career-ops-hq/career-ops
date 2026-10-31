@@ -60,6 +60,7 @@
 </p>
 
 <p align="center"><a href="#இப்போது-உங்கள்-முறை">ஒரு வேலையை வைத்து முயன்று&nbsp;பாருங்கள்&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">முழுக் கதையையும்&nbsp;படியுங்கள்&nbsp;→</a></p>
+<p align="center"><sub>டெர்மினலைப் பயன்படுத்த விருப்பமில்லையா? <a href="https://career-ops.org/waitlist?ref=readme-ta">வெப் பதிப்புக்கான காத்திருப்புப் பட்டியலில் சேருங்கள்&nbsp;→</a></sub></p>
 
 <br>
 

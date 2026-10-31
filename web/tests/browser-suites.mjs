@@ -52,6 +52,7 @@ const SUITES = {
   "assistant-markdown-lazy": { url: "ASSISTANT_MARKDOWN_LAZY_TEST_URL", fixture: "blank" },
   "assistant-request-feedback": { url: "ASSISTANT_FEEDBACK_TEST_URL", fixture: "blank" },
   "assistant-status-recovery": { url: "ASSISTANT_STATUS_TEST_URL", fixture: "blank" },
+  "back-link-scroll": { url: "BACK_SCROLL_TEST_URL", root: "BACK_SCROLL_TEST_ROOT", fixture: "pipeline-long" },
   "command-palette": { url: "COMMAND_PALETTE_TEST_URL", root: "COMMAND_PALETTE_TEST_ROOT", fixture: "pipeline-status" },
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
   "cv-upload": { url: "CV_UPLOAD_TEST_URL", root: "CV_UPLOAD_TEST_ROOT", fixture: "cv-upload" },
@@ -64,6 +65,7 @@ const SUITES = {
   "pipeline-inline-status": { url: "PIPELINE_STATUS_TEST_URL", root: "PIPELINE_STATUS_TEST_ROOT", fixture: "pipeline-status" },
   "pipeline-report-states": { url: "PIPELINE_REPORT_STATES_TEST_URL", root: "PIPELINE_REPORT_STATES_TEST_ROOT", fixture: "pipeline-report-states" },
   "pipeline-return": { url: "PIPELINE_RETURN_TEST_URL", root: "PIPELINE_RETURN_TEST_ROOT", fixture: "pipeline-status" },
+  "pipeline-views": { url: "PIPELINE_VIEWS_TEST_URL", root: "PIPELINE_VIEWS_TEST_ROOT", fixture: "pipeline-status" },
   "skip-link": { url: "SKIP_LINK_TEST_URL", fixture: "blank" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },
 };

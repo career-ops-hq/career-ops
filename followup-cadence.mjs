@@ -996,9 +996,13 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
     });
   }
 
-  // Sort by urgency priority: urgent > overdue > waiting > cold
   const urgencyOrder = { urgent: 0, overdue: 1, waiting: 2, cold: 3 };
-  entries.sort((a, b) => (urgencyOrder[a.urgency] ?? 9) - (urgencyOrder[b.urgency] ?? 9));
+  const byPressure = (a, b) =>
+    (urgencyOrder[a.urgency] ?? 9) - (urgencyOrder[b.urgency] ?? 9)
+    || (a.daysUntilNext ?? Infinity) - (b.daysUntilNext ?? Infinity)
+    || b.daysSinceApplication - a.daysSinceApplication
+    || a.num - b.num;
+  entries.sort(byPressure);
 
   // Retired applications are counted but not listed — surfacing them in the
   // entries array would defeat the point of retiring them, and the count keeps
