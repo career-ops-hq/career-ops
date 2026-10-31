@@ -19,7 +19,9 @@ For each course/cert the candidate asks about, evaluate 6 dimensions:
 
 ## Priority
 
-Training that improves credibility in "production-grade AI":
+Prioritize training that closes the gaps between the candidate's CV and their target roles in `modes/_profile.md`. When the tracker has evaluations, take the gaps from the `upskill` mode (`node upskill.mjs`), which ranks the skills recent postings asked for and the CV lacks. Otherwise use the gaps `modes/_profile.md` names.
+
+For example, a candidate targeting production AI platform roles would rank:
 1. LLM evaluation and testing
 2. Observability and monitoring
 3. Cost/reliability trade-offs

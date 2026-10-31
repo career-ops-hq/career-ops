@@ -1,9 +1,8 @@
 # Mode: project — Portfolio Project Evaluation
 
 **URL:** {project-url}
-**Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 
-Scoring matrix with 6 dimensions (1–5):
+Scoring matrix with 6 dimensions (1–5). "Target roles" are the North Star and archetypes in `modes/_profile.md`; "JD skill" means a skill those roles' postings ask for.
 
 | Dimension | Weight | 5 = ... | 1 = ... |
 |-----------|------|---------|---------|
