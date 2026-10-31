@@ -203,6 +203,10 @@ career-ops 对求职者永久免费。这些公司赞助了本项目：
 
 </details>
 
+## 工作原理
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+
 ## 快速开始
 
 **最快的方式，一条命令：**
@@ -247,13 +251,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline
-# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
-# In Codex, ask for the same mode in plain language, e.g.:
-# "Run the career-ops scan mode"
-# "Run the career-ops pipeline mode for data/pipeline.md"
-# "Run the career-ops pdf mode for the latest evaluated role"
-# "Run the career-ops tracker mode and summarize the current statuses"
+# Paste a job URL or JD text to trigger auto-pipeline.
+# Every other mode, and how to ask for it in your CLI: see Usage below.
 ```
 
 </details>
@@ -270,187 +269,131 @@ npm i -g @santifer/career-ops
 - `npx @santifer/career-ops init`：最适合首次使用；会创建一个专用的项目文件夹。
 - `npm i -g @santifer/career-ops`：如果你更想输入 `career-ops init` 而不是 `npx` 的写法。它不会增加其他命令。
 
+### 其他运行方式
+
+- **在任意文件夹中，作为 Claude Code 插件：** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md)。
+- **不使用 AI CLI：** 独立的 Gemini、Ollama 和 OpenAI 兼容脚本可以单独评估一份职位描述。见 [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval)。
+
 > **这个系统就是设计成由你的 AI 编码 CLI 自己来定制的。** 模式、原型、评分权重、谈判话术：直接让它改就行。它读取的正是它自己使用的文件，所以它清楚该改哪里。
 
 完整安装指南见 [docs/SETUP.md](docs/SETUP.md)；用自定义或本地模型低成本运行 career-ops 的方法见 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)（在 Antigravity CLI 免费层零成本运行见 [docs/FREE_TIER.md](docs/FREE_TIER.md)）；定时扫描和零 token 的"初筛到短名单"配方见 [docs/AUTOMATION.md](docs/AUTOMATION.md)；ATS 自动填表流程的细节见 [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md)；把 LinkedIn 联系人导出与漏斗中的公司交叉比对见 [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md)；常见设置问题的解答见 [docs/FAQ.md](docs/FAQ.md)，包括[故事溯源如何防止编造数字](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank)。设计原则在 [ARCHITECTURE.md](ARCHITECTURE.md)；运行时流程在 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 用法
 
-career-ops 使用共享的命令路由。在会注册斜杠命令的 CLI 里，它看起来是这样：
+把职位链接或职位描述粘贴到你的 AI CLI 中。career-ops 会检查带链接的职位是否仍在招（粘贴的文本没有可检查的链接），对照你的简历打分，撰写报告，定制你的简历（默认生成 PDF），并在你的追踪表中新增一行。大多数日子里这就够了。其余一切都是按名称调用的模式。如果无法读取某个职位，流水线会停下并请你粘贴文本。
 
-```
-/career-ops           → 显示所有可用命令
-/career-ops {JD}      → 自动流水线：评估 + 报告 + PDF + 追踪记录（粘贴文本或 URL）
-/career-ops pipeline  → 处理收件箱里待处理的 URL（data/pipeline.md）
-/career-ops oferta    → 仅评估，区块 A 到 H（不自动生成 PDF）
-/career-ops ofertas   → 比较并排序多个职位
-/career-ops contacto  → LinkedIn 妙招：找到联系人 + 起草消息
-/career-ops deep      → 针对公司的深度调研提示词
-/career-ops interview-prep → 生成针对特定公司的面试准备文档
-/career-ops interview    → 交互式的个人资料/简历入门访谈
-/career-ops master-profile → 导入、审阅并校验你的主职业档案（Master Career Profile）
-/career-ops eu-swe    → 在简历/申请/面试前校准一份欧洲 SWE 申请
-/career-ops interview/plan → 为即将到来的面试制定按时间块安排的准备计划
-/career-ops interview/practice → 模拟面试，一次一个问题并给出反馈
-/career-ops interview/debrief → 面试后复盘：补上短板，预测下一轮
-/career-ops interview-redflag → 入职前分析雇主的危险信号
-/career-ops pdf       → 仅生成 PDF，ATS 优化简历
-/career-ops text      → 定制的 markdown 简历（镜像 cv.md，不生成 PDF）
-/career-ops latex     → 把简历导出为 LaTeX/Overleaf .tex
-/career-ops latex-tex → 就地定制你自己的 resume.tex（可选；cv.md 仍是默认）
-/career-ops cover     → 求职信：单独粘贴职位描述，或 /career-ops cover {slug}
-/career-ops email     → 正式申请邮件草稿（仅草稿；从不发送、提交或点击）
-/career-ops add       → 向简历添加项目/论文/职位（抓取 + 预览 + 确认）
-/career-ops expand    → 从个人资料链接自动发现并补充缺失的能力
-/career-ops training  → 对照你的 North Star 评估课程/证书
-/career-ops project   → 评估一个作品集项目点子
-/career-ops tracker   → 申请状态总览
-/career-ops agent-inbox → 为下一个会话排队/清空请求（data/agent-inbox.md）
-/career-ops apply     → 实时申请助手（读取表单 + 生成答案）
-/career-ops scan      → 扫描招聘平台并发现新职位
-/career-ops discover  → 把公司列表解析为可扫描的 ATS 板块 + 追加到 portals.yml（零 token）
-/career-ops batch     → 用并行 worker 批量处理
-/career-ops patterns  → 分析拒信模式并改进目标定位
-/career-ops offer-prep → 和候选人一起阅读收到的 offer/合同：逐条款解读 + 给律师的问题（不是法律建议）
-/career-ops titles    → 根据你的简历推荐相近的职位名称以扩大搜索范围
-/career-ops upskill   → 基于已评估报告的综合技能差距分析
-/career-ops followup  → 跟进节奏追踪：标记逾期，生成草稿
-/career-ops reply-watch → 归类雇主回复并建议追踪记录更新
-/career-ops outcome   → 记录申请结果并归档产物
-/career-ops calibrate → 咨询性报告：你的评估分数能预测真实结果吗？读取 /outcome 数据；从不改变评分
-/career-ops update    → 更新 career-ops 系统文件，带 diff 预览 + 兼容性检查
-```
+### 如何调用模式
 
-或者直接粘贴一个职位 URL 或描述：career-ops 会自动识别并运行完整流水线。
+| CLI | 如何调用 `scan` |
+| --- | --- |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Pi | `/skill:career-ops scan` |
+| Codex、Qwen、Cursor 或任何其他受支持的 CLI | 自然语言：“Run the career-ops scan mode” |
 
-Codex 里不保证有斜杠命令。请改用同样的模式名称写在提示词里，或者通过 `codex exec` 调用。
+单独输入 `/career-ops` 会显示命令菜单（在使用它的 CLI 中）。自然语言在所有受支持的 CLI 中都能用。作为 Claude Code 插件使用时，命令是 `/career-ops:career-ops`。
 
-## 工作原理
+它们共用同一个路由器 `.agents/skills/career-ops/SKILL.md` 和同一批 `modes/*.md` 文件，所以无论由哪个 CLI 运行，模式的行为都一样。Codex 不保证支持斜杠命令：请用自然语言提出请求，或用 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` 以无头方式运行一条提示词（[docs/CODEX.md](docs/CODEX.md)）。如何在每个受支持的 CLI 中运行、带有无头命令的 CLI 的对应命令，以及 各 CLI 的设置说明，都在 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) 中。
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+### 日常命令
 
-## Antigravity CLI 集成
+| 命令 | 作用 |
+| --- | --- |
+| *粘贴链接或职位描述* | 完整流水线：职位是否仍在招的检查（仅限链接）、A-G 评估（高分时另加 H）、报告、定制简历（默认 PDF）、追踪表新增一行 |
+| `scan` | 扫描你的招聘平台以发现新职位，并加入收件箱（`data/pipeline.md`） |
+| `pipeline` | 评估收件箱中等待处理的每个链接 |
+| `apply` | 与你一起逐个字段填写申请表。提交前会停下 |
+| `tracker` | 每份申请当前的进展 |
+| `followup` | 哪些申请该跟进了，并附草稿 |
 
-career-ops 原生支持 Antigravity CLI，方式和支持 Claude Code、OpenCode 一样。所有斜杠命令都通过共享的 skill 入口提供，使用相同的 `modes/*.md` 评估逻辑。
+<details>
+<summary><b>全部命令，按求职阶段划分</b></summary>
 
-Google 已把消费者版 Gemini CLI 的访问迁移到 Antigravity CLI。`GEMINI.md` 现在是一个不做任何事的兼容性守卫，这样 Antigravity 在同时读取 `AGENTS.md` 和 `GEMINI.md` 时不会重复加载完整的项目指令。
+`oferta`、`ofertas` 和 `contacto` 保留原来的西班牙语名称，意思分别是：offer、多个 offer、联系人。
 
-### 原生 Antigravity CLI
+**寻找职位**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-agy
+| 命令 | 作用 |
+| --- | --- |
+| [`scan`](modes/scan.md) | 扫描招聘平台并发现新职位 |
+| [`discover`](modes/discover.md) | 把公司名称列表解析为可扫描的 ATS 招聘页，并追加到 `portals.yml`（零 token） |
+| [`pipeline`](modes/pipeline.md) | 处理收件箱（`data/pipeline.md`）里待处理的链接 |
+| [`triage`](modes/triage.md) | 在完整评估之前，依据 `modes/_brief.md` 快速做一轮是否值得投的初筛（不写入任何文件） |
+| [`batch`](modes/batch.md) | 用并行的无头 worker 评估大量职位 |
+| [`titles`](modes/titles.md) | 根据你的简历推荐相近的职位名称，以拓宽搜索范围 |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
+**评估职位**
 
-这个 skill 按开放标准定义在 `.agents/skills/career-ops/SKILL.md` 中，并为每个支持的 CLI（例如 `.claude/`、`.qwen/`、`.antigravitycli/`、`.grok/`）建立了符号链接或引用。 Cursor 会自动发现 `.agents/skills/` 中的共享 skill。
+| 命令 | 作用 |
+| --- | --- |
+| *粘贴链接或职位描述* | [Auto-pipeline](modes/auto-pipeline.md)：评估 + 报告 + 定制简历（默认 PDF） + 追踪表条目 |
+| [`oferta`](modes/oferta.md) | 仅评估，区块 A 到 G，高分时另加 H（不生成 PDF） |
+| [`ofertas`](modes/ofertas.md) | 比较并排序多个职位 |
+| [`deep`](modes/deep.md) | 针对公司的深度调研提示词 |
+| [`eu-swe`](modes/regional/eu-swe.md) | 在准备简历、申请或面试之前，校准一份欧洲软件工程岗位的申请 |
 
-## Codex 集成
+**申请**
 
-career-ops 通过同一个共享路由支持 Codex，但调用方式和自动注册斜杠命令的 CLI 不同。完整指南见 [docs/CODEX.md](docs/CODEX.md)。
+| 命令 | 作用 |
+| --- | --- |
+| [`pdf`](modes/pdf.md) | ATS 优化简历，输出为 PDF |
+| [`ats`](modes/ats.md) | 检查生成的简历对 ATS 是否友好：评分及可修复的问题 |
+| [`text`](modes/text.md) | 定制的 markdown 简历（与 `cv.md` 一致，不生成 PDF） |
+| [`latex`](modes/latex.md) | 把简历导出为 LaTeX/Overleaf 的 `.tex` |
+| [`latex-tex`](modes/latex-tex.md) | 就地定制你自己的 `resume.tex`（需主动开启；默认仍是 `cv.md`） |
+| [`cover`](modes/cover.md) | 求职信，基于粘贴的职位描述或已评估的报告（`cover {slug}`） |
+| [`email`](modes/email.md) | 正式的求职邮件草稿。仅限草稿：绝不发送、提交或点击 |
+| [`contacto`](modes/contacto.md) | 找到招聘经理、招聘人员或同行，并起草一条 LinkedIn 消息 |
+| [`apply`](modes/apply.md) | 实时申请助手（使用此仓库中的 Playwright）。不会提交 |
 
-### 交互式 Codex
+**面试**
 
-```bash
-cd career-ops
-codex
-```
+| 命令 | 作用 |
+| --- | --- |
+| [`interview-prep`](modes/interview-prep.md) | 针对具体公司的面试准备文档 |
+| [`interview/plan`](modes/interview/plan.md) | 为即将到来的面试制定按时间块划分的准备计划 |
+| [`interview/practice`](modes/interview/practice.md) | 模拟面试，一次一个问题，并给出反馈 |
+| [`interview/debrief`](modes/interview/debrief.md) | 面试后复盘：补齐短板，预测下一轮 |
+| [`interview-redflag`](modes/interview-redflag.md) | 入职前分析雇主的警示信号 |
 
-Codex 里不保证有斜杠命令。如果 `/career-ops` 不可用，就用自然语言让 Codex 直接运行对应模式：
+**申请之后**
 
-```text
-Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
-Run the career-ops scan mode and summarize new matches.
-Run the career-ops pipeline mode for data/pipeline.md.
-Run the career-ops pdf mode for the latest evaluated role.
-Run the career-ops tracker mode and summarize the current statuses.
-```
+| 命令 | 作用 |
+| --- | --- |
+| [`tracker`](modes/tracker.md) | 申请状态总览 |
+| [`followup`](modes/followup.md) | 跟进节奏：标记逾期的申请，生成草稿 |
+| [`reply-watch`](modes/reply-watch.md) | 对雇主的回复分类，并建议更新追踪表 |
+| [`outcome`](modes/outcome.md) | 记录申请结果并归档相关产物 |
+| [`offer-prep`](modes/offer-prep.md) | 与你一起阅读收到的 offer 或合同：逐条梳理条款，并列出要问律师的问题（不构成法律建议） |
 
-### 单次执行的 Codex（`codex exec`）
+**你的个人资料和简历**
 
-```bash
-codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-codex exec "Run career-ops scan mode in this repo and summarize new matches."
-codex exec "Run career-ops pipeline mode for data/pipeline.md."
-codex exec "Run career-ops pdf mode for the latest evaluated role."
-codex exec "Run career-ops tracker mode and summarize the current statuses."
-```
+| 命令 | 作用 |
+| --- | --- |
+| [`interview`](modes/interview.md) | 资料设置：围绕你的经历进行交互式访谈，据此构建简历和个人资料（不是面试练习） |
+| [`intake`](modes/intake.md) | 根据 `documents/` 中的文件（主简历、LinkedIn 导出）建立或充实你的个人资料。未经你确认不会写入任何内容 |
+| [`master-profile`](modes/master-profile.md) | 导入、审阅并校验你的 Master Career Profile，并把选定的事实准备成简历要点 |
+| [`add`](modes/add.md) | 向简历添加项目、论文或职位（抓取、预览、确认） |
+| [`expand`](modes/expand.md) | 根据你的个人资料链接，发现简历中缺少的能力 |
+| [`retro`](modes/retro.md) | 回顾本次会话，把你教给它的内容保存为规则（只写入你接受的） |
 
-## Grok Build CLI 集成
+**优化你的投递方向**
 
-career-ops 原生支持 Grok Build CLI，方式和支持 Claude Code、OpenCode 一样。`AGENTS.md` 会作为项目规则自动加载，所有斜杠命令都通过共享的 skill 入口提供。
+| 命令 | 作用 |
+| --- | --- |
+| [`patterns`](modes/patterns.md) | 分析被拒模式并优化投递方向 |
+| [`calibrate`](modes/calibrate.md) | 检查你的评估分数能否预测真实结果。仅供参考：绝不改动评分 |
+| [`upskill`](modes/upskill.md) | 基于你已评估的全部报告做技能差距分析 |
+| [`training`](modes/training.md) | 对照你的 North Star 评估课程或证书 |
+| [`project`](modes/project.md) | 评估作品集项目的想法 |
 
-### 原生 Grok Build CLI
+**系统**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-grok
+| 命令 | 作用 |
+| --- | --- |
+| [`agent-inbox`](modes/agent-inbox.md) | 把请求排入下一次会话的队列，并在那时处理（`data/agent-inbox.md`）。`inbox` 同样可用 |
+| [`update`](modes/update.md) | 更新 career-ops 系统文件，附带 diff 预览和兼容性检查 |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-无头批量 worker 请使用 `grok -p "prompt"`（加上 `--yolo` 可自动批准工具执行）。
-
-## Pi 集成
-
-career-ops 原生支持 [Pi](https://github.com/earendil-works/pi)，不需要维护任何包装文件：Pi 会把仓库根目录的 `AGENTS.md` 读作项目上下文，并自行发现位于 `.agents/skills/career-ops/SKILL.md` 的共享 skill。之后路由就能以 `/skill:career-ops` 的形式使用。
-
-### 原生 Pi
-
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-pi
-
-# 2. Use the shared skill with subcommands:
-/skill:career-ops "Senior AI Engineer at Anthropic..."
-/skill:career-ops pipeline
-/skill:career-ops scan
-/skill:career-ops pdf
-/skill:career-ops tracker
-```
-
-### 单次执行的 Pi（`pi -p`）
-
-```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
-```
-
-如果某个 Pi 版本要求先对项目资源做信任确认，就在仓库里运行一次 `/trust`，然后重启 `pi`，让项目 skill 加载（`/trust` 对之后启动的 Pi 进程生效）；或者用 `-a` 启动，它只信任单次运行，不需要重启。
-
-### 独立的 Gemini API 脚本（无需安装 CLI）
-
-```bash
-# 1. Get a free API key at https://aistudio.google.com/apikey
-cp .env.example .env
-# Edit .env, set GEMINI_API_KEY=your_key_here
-
-# 2. Install dependencies
-npm install
-
-# 3. Evaluate a job description
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-node agent-inbox.mjs add "..."   # queue a request for the next session
-npm run gemini:eval -- "JD text here"
-```
-
-> **免费层：** 两种方式都无需付费。原生 CLI 使用 Google OAuth；API 脚本使用 `gemini-3.6-flash`（速率限制取决于模型和层级；当前配额见 Google AI 文档）。
+</details>
 
 ## 预配置平台
 
