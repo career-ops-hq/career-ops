@@ -31,7 +31,7 @@ veya
 
 ```yaml
 language:
-  primary: tr
+  output: tr
   modes_dir: modes/tr
 ```
 
