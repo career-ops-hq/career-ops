@@ -44,7 +44,7 @@ import { endpointHeaders } from './lib/endpoint-headers.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
-  isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
+  isPostingUrl, normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
@@ -466,25 +466,14 @@ console.log(evaluationText);
 // ---------------------------------------------------------------------------
 // Parse score summary
 // ---------------------------------------------------------------------------
-const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
-
-let company    = 'unknown';
-let role       = 'unknown';
-let score      = '?';
-let archetype  = 'unknown';
-let legitimacy = 'unknown';
-
-if (summaryMatch) {
-  const extract = (key) => {
-    const m = summaryMatch[1].match(new RegExp(`${key}:\\s*(.+)`));
-    return m ? m[1].trim() : 'unknown';
-  };
-  company    = extract('COMPANY');
-  role       = extract('ROLE');
-  score      = extract('SCORE');
-  archetype  = extract('ARCHETYPE');
-  legitimacy = extract('LEGITIMACY');
-}
+const summary    = parseScoreSummary(evaluationText);
+const company    = summary?.company    || 'unknown';
+const role       = summary?.role       || 'unknown';
+const score      = summary?.score      || '?';
+const archetype  = summary?.archetype  || 'unknown';
+const legitimacy = summary?.legitimacy || 'unknown';
+// An addition for company and role "unknown" would merge as a real application.
+const trackable  = Boolean(summary?.company && summary.role && summary.role.toLowerCase() !== 'unknown');
 
 // ---------------------------------------------------------------------------
 // Save report
@@ -531,41 +520,46 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     writeFileSync(reportPath, reportContent, 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
-    // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
-    // into data/applications.md. Evaluations persist as a tracker addition and
-    // merge-tracker.mjs applies dedup, status validation, report-link
-    // normalization and the tracker lock. A pasted literal skipped all of that,
-    // and at 8 cells it was also silently dropped by every reader's width guard.
-    // Field order is the TSV contract's -- status BEFORE score; merge-tracker
-    // swaps them into the tracker's own column order, resolved by name.
-    const additionName = `${num}-${companySlug}.tsv`;
-    const trackerFields = [
-      String(parseInt(num, 10)),
-      today,
-      tsvSafe(company),
-      tsvSafe(role),
-      'Evaluated',
-      normalizedTrackerScore(score),
-      '❌',
-      `[${num}](reports/${filename})`,
-      tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
-    ];
-    // Optional tenth field, labelled in the header below so it resolves by name.
-    // Pass 0 can then match on it instead of waiting for --backfill-urls.
-    if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
-    // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
-    // so this row cannot be ingested into the wrong columns. The optional URL
-    // needs its own label -- values are read BY label, so a tenth field the
-    // header does not name is not mis-mapped, it is dropped.
-    const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
-    mkdirSync(PATHS.trackerAdditions, { recursive: true });
-    writeFileSync(
-      join(PATHS.trackerAdditions, additionName),
-      `${additionHeader}\n${trackerFields.join('\t')}\n`,
-      'utf-8',
-    );
-    console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
-    console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
+    if (!trackable) {
+      console.warn(`\n⚠️   The reply has no ${summary ? 'company and role in its SCORE_SUMMARY' : 'SCORE_SUMMARY block'}, so no tracker row was written.`);
+      console.warn('    Re-run the evaluation, or use a model that follows the report format.');
+    } else {
+      // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
+      // into data/applications.md. Evaluations persist as a tracker addition and
+      // merge-tracker.mjs applies dedup, status validation, report-link
+      // normalization and the tracker lock. A pasted literal skipped all of that,
+      // and at 8 cells it was also silently dropped by every reader's width guard.
+      // Field order is the TSV contract's -- status BEFORE score; merge-tracker
+      // swaps them into the tracker's own column order, resolved by name.
+      const additionName = `${num}-${companySlug}.tsv`;
+      const trackerFields = [
+        String(parseInt(num, 10)),
+        today,
+        tsvSafe(company),
+        tsvSafe(role),
+        'Evaluated',
+        normalizedTrackerScore(score),
+        '❌',
+        `[${num}](reports/${filename})`,
+        tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
+      ];
+      // Optional tenth field, labelled in the header below so it resolves by name.
+      // Pass 0 can then match on it instead of waiting for --backfill-urls.
+      if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
+      // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
+      // so this row cannot be ingested into the wrong columns. The optional URL
+      // needs its own label -- values are read BY label, so a tenth field the
+      // header does not name is not mis-mapped, it is dropped.
+      const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+      mkdirSync(PATHS.trackerAdditions, { recursive: true });
+      writeFileSync(
+        join(PATHS.trackerAdditions, additionName),
+        `${additionHeader}\n${trackerFields.join('\t')}\n`,
+        'utf-8',
+      );
+      console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
+      console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
+    }
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
   } finally {
