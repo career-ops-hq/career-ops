@@ -325,6 +325,24 @@ a hard expiry (e.g. 7 days). For an automation you want to survive
 indefinitely, independent of whether you have a chat window open, hand it to
 the OS scheduler instead and let it invoke the CLI headlessly.
 
+### Queue a recurring alert without a pile
+
+A scheduled job that drops a request into the agent inbox
+(`node agent-inbox.mjs add "..."`, see `modes/agent-inbox.md`) leaves one
+pending item per run, so a daily alert that nobody drains is waiting 30 times
+by the end of the month. Pass `--supersede` with the fixed start of the alert
+text, and each run resolves the still-pending copies from earlier runs before
+it queues the new one:
+
+```bash
+node agent-inbox.mjs add "follow-up alert: 5 overdue, oldest 12 days" \
+  --supersede "follow-up alert:"
+```
+
+Pick a prefix only this job writes. Every pending item whose request starts
+with it is ticked with `superseded by a newer item`; resolved items and
+requests you queued yourself under a different wording are left alone.
+
 ### Gate what a scan-and-score run merges into the tracker
 
 If you also run a scan-and-score agent (custom, or one you've built per
