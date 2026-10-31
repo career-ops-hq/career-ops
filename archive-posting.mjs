@@ -23,7 +23,6 @@
  * resolving the next day. outcome.mjs looks captures up by report number.
  */
 
-import { chromium } from 'playwright';
 import { open, unlink, readFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
@@ -497,7 +496,11 @@ async function main() {
       results.push({ url, filename, reference, skipped: true });
     }
   } else {
-    // Sequential — project convention: never Playwright in parallel
+    // Sequential — project convention: never Playwright in parallel.
+    // Loaded here, after --help / --dry-run / a missing pipeline have already
+    // returned. A static import made those paths wait on the browser package
+    // and crash when it was not installed.
+    const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: true });
     try {
       for (const { url, company, role } of targets) {
