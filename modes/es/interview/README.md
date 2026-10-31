@@ -30,4 +30,5 @@ Estas habilidades asumen que existen los siguientes archivos (valores predetermi
 | `interview-prep/question-bank.md` | Banco de preguntas con seguimiento de brechas (se crea en el primer uso) |
 | `interview-prep/interview-prep-guide.md` | Principios generales para la entrevista (opcional) |
 | `interview-prep/{company}-{role}.md` | Archivo de preparación específico para el rol |
+| `interview-prep/sessions/*.md` | Transcripciones por ronda; front matter `stated_priorities` opcional (prioridades del rol declaradas por el entrevistador), escrito por el informe y leído por el plan y la práctica |
 | `interview-prep/retracted-claims.md` | Afirmaciones que la persona candidata ha retirado por considerarlas indefendibles — filtro estricto en la práctica y el informe (formato: `**"[afirmación]"** ([contexto]). Razón: [motivo de una línea + encuadre correcto si corresponde].`) |
