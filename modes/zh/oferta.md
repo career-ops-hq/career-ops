@@ -294,7 +294,12 @@
 
 ## Job Description (archived verbatim)
 （职位描述全文，逐字粘贴——见下方要求）
+
+## Machine Summary
+（供下游脚本读取的 YAML 块——见下方要求）
 ```
+
+**Machine Summary（必须）：** 报告末尾、`## Job Description (archived verbatim)` 之后的 YAML 块。脚本按标题而不是位置查找它，所以放在最后，不挡在读者和 Block A 之间。schema、字段的确切名称和规则以 `batch/batch-prompt.md` 为准（唯一来源，这里不重复）。标题 `## Machine Summary` 和字段名保持英文。其中包括 `advertised_comp`（职位描述里写明的薪资数字，原样照录，没有则为 `null`）、`risk_summary`（Risk Summary 块转成的映射）和 `requirement_importance`（Block B 逐行对应；职位描述没有可用的要求列表时为 `[]`）。
 
 **JD 存档（必须，#2789）：** 每份报告都必须包含 `## Job Description (archived verbatim)` 一节，原样粘贴职位描述全文，不得摘要或改写。该标题保持英文，因为 `check-jd-archive.mjs` 按名称查找它。`**URL:**` 不是存档：职位关闭后链接即失效，原始要求就再也找不回来。该节第一行写来源上可见的发布日期（`Posted: {日期或页面上显示的相对时间}`，确实没有时写 `Posted: not visible in source`），不要用报告文件自身的时间代替。若 JD 过长或无法完整引用，用 `archive-posting.mjs` (下方命令) 存档，并在该节中**只**写这一句：`See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`。不得用改写代替原文；完整规则见 `modes/oferta.md` 的 **JD archival**。
 

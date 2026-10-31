@@ -145,10 +145,15 @@ export function structuralGaps(text) {
     gaps.push('report section order A)–G) → Risk Summary → H)');
   }
   // Scripts find the Machine Summary by its heading, so it goes last (#6156)
-  // instead of standing between the reader and A). Not every locale has one.
+  // instead of standing between the reader and A). Every template asks for
+  // one: the web app refuses a report without it (#6158).
   const sections = lines.filter(line => /^ {0,3}##[ \t]+/.test(line));
-  const machine = sections.findIndex(line => /^ {0,3}##[ \t]+Machine Summary[ \t]*$/.test(line));
-  if (machine >= 0 && machine !== sections.length - 1) gaps.push('## Machine Summary is not the last report section');
+  const machine = sections.filter(line => /^ {0,3}##[ \t]+Machine Summary[ \t]*$/.test(line)).length;
+  if (machine === 0) gaps.push('## Machine Summary');
+  else if (machine > 1) gaps.push('duplicate ## Machine Summary');
+  else if (!/^ {0,3}##[ \t]+Machine Summary[ \t]*$/.test(sections.at(-1))) {
+    gaps.push('## Machine Summary is not the last report section');
+  }
   // The header ends at the first H2, whatever it is, not just at A).
   const firstSection = lines.findIndex(line => /^ {0,3}##[ \t]+/.test(line));
   const header = lines.slice(0, firstSection);

@@ -345,7 +345,12 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 
 ## Job Description (archived verbatim)
 (posting の全文を verbatim で貼る — 下の要件を参照)
+
+## Machine Summary
+(downstream script 用の YAML block — 下の要件を参照)
 ```
+
+**Machine Summary（必須）：** report の末尾、`## Job Description (archived verbatim)` の後に置く YAML block。Script は位置ではなく見出しで探すので、読者とブロック A の間に挟まらないよう最後に置く。Schema、正確な field 名、ルールは `batch/batch-prompt.md` が source（ここに複製しない）。見出し `## Machine Summary` と field 名は英語のまま。`advertised_comp`（JD に書かれた給与額をそのまま、なければ `null`）、`risk_summary`（Risk Summary ブロックを map にしたもの）、`requirement_importance`（ブロック B を 1 行ずつ。JD に使える要件リストがなければ `[]`）を含む。
 
 **JD archival（必須、#2789）：** すべての report に `## Job Description (archived verbatim)` section を入れ、posting の全文をそのまま貼る。要約・言い換えはしない。見出しは英語のまま：`check-jd-archive.mjs` が名前で探す。`**URL:**` は archive ではない：posting が閉じると link は切れ、元の要件はもう取り戻せない。Section の 1 行目は source に表示されている掲載日（`Posted: {日付または表示どおりの相対表記}`、本当に無いときは `Posted: not visible in source`）で、report file 自体の日時で代用しない。JD が長すぎる、または全文を引用できないときは `archive-posting.mjs` (下の command) で capture し、section には `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` の一文**だけ**を書く。言い換えで代用しない。Rule 全体は `modes/oferta.md` の **JD archival** を参照。
 

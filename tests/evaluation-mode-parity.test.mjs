@@ -103,8 +103,16 @@ test('a Machine Summary ahead of any other report section is reported', () => {
   assert.ok(structuralGaps(mode(atTop)).includes('## Machine Summary is not the last report section'));
   const beforeKeywords = `${REPORT}## Keyword Coverage\n{coverage}\n`;
   assert.ok(structuralGaps(mode(beforeKeywords)).includes('## Machine Summary is not the last report section'));
-  // A locale without one is not asked to add it here.
-  assert.deepEqual(structuralGaps(mode(REPORT.replace(machine, ''))), []);
+});
+
+test('a template with no Machine Summary, or two, is reported', () => {
+  const machine = '## Machine Summary\n{machine fields}\n';
+  assert.deepEqual(structuralGaps(mode(REPORT.replace(machine, ''))), ['## Machine Summary']);
+  // A heading outside the template, or a comment, is not a section the report carries.
+  const prose = `${mode(REPORT.replace(machine, ''))}\n${machine}`;
+  assert.deepEqual(structuralGaps(prose), ['## Machine Summary']);
+  assert.deepEqual(structuralGaps(mode(REPORT.replace(machine, `<!-- ${machine} -->\n`))), ['## Machine Summary']);
+  assert.deepEqual(structuralGaps(mode(REPORT + machine)), ['duplicate ## Machine Summary']);
 });
 
 // The batch worker writes its report from batch/batch-prompt.md, not a mode file.
