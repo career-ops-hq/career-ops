@@ -210,7 +210,7 @@ claimed in Step 3b. Use this gambit-variant structure.
 - `**Role (proposed):** {invented title}`
 - `**Archetype:** {selected}`
 - `**Conviction:** {X}/5`
-- `**URL:** {company / careers URL used for research}`
+- `**URL:** N/A (no posting)`: never a research link. The tracker takes this header as the posting URL, so two gambits citing one company page would read as one posting. Research links go in the thesis.
 - `**Legitimacy:** N/A (speculative — no posting to verify)`
 - `**PDF:** {path or pending}`
 
@@ -257,18 +257,18 @@ decision_maker: "{name, title}"
 
 ### Tracker
 
-The status follows the Step 8 recommendation. Only a pitch that is going out is
-an active pursuit:
+The status follows the Step 8 recommendation. `send` is a recommendation, not a
+send: nothing is in flight until the candidate says so.
 
 | `recommend` | Tracker status | Why |
 |---|---|---|
-| `send` | `Speculative` | The create-a-role pitch is in flight |
+| `send` | `Evaluated` | Drafts are ready; the candidate has not sent them yet |
 | `hold` | `Evaluated` | Report done, the decision is still the candidate's |
 | `skip` | `SKIP` | No evidenced need: not pursued |
 
-If the candidate later sends a held pitch anyway, record it then with
-`node set-status.mjs --report {###} Speculative`; never write `Speculative` for a
-pitch that has not been sent on.
+When the candidate confirms they sent the pitch (after `send` or `hold`), record
+it then with `node set-status.mjs --report {###} Speculative`; never write
+`Speculative` for a pitch that has not been sent.
 
 Write the addition to `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv`
 in the format AGENTS.md gives under "TSV Format for Tracker Additions": a header

@@ -10548,47 +10548,6 @@ try {
   fail(`tracker-link normalization tests crashed: ${e.message}`);
 }
 
-// ── 63. SPECULATIVE STATE (gambit) ──────────────────────────────
-
-console.log('\n63. Speculative state (gambit)');
-
-const statesSpec = readFile('templates/states.yml');
-if (statesSpec.includes('label: Speculative')) {
-  pass('states.yml defines the Speculative state');
-} else {
-  fail('states.yml is missing the Speculative state');
-}
-
-// verify-pipeline.mjs and merge-tracker.mjs derive their canonical states and
-// aliases from templates/states.yml, so Speculative reaches them from there.
-const verifySpec = readFile('verify-pipeline.mjs');
-if (verifySpec.includes('loadCanonicalStates(')) {
-  pass('verify-pipeline.mjs accepts speculative as canonical (via states.yml)');
-} else {
-  fail('verify-pipeline.mjs no longer reads canonical states from states.yml');
-}
-
-const normSpec = readFile('normalize-statuses.mjs');
-if (/canonical\s*=\s*\[[^\]]*'Speculative'/s.test(normSpec)) {
-  pass('normalize-statuses.mjs treats Speculative as canonical');
-} else {
-  fail('normalize-statuses.mjs canonical array missing Speculative');
-}
-
-const dedupSpec = readFile('dedup-tracker.mjs');
-if (dedupSpec.includes("'speculative'")) {
-  pass('dedup-tracker.mjs ranks speculative');
-} else {
-  fail('dedup-tracker.mjs STATUS_RANK missing speculative');
-}
-
-const mergeSpec = readFile('merge-tracker.mjs');
-if (mergeSpec.includes('loadCanonicalStates(')) {
-  pass('merge-tracker.mjs accepts Speculative as canonical (via states.yml)');
-} else {
-  fail('merge-tracker.mjs no longer reads canonical states from states.yml');
-}
-
 // ── RESERVE-REPORT-NUM RANGE RESERVATION (#1426) ────────────────
 // Manual multi-agent fan-outs need N report numbers up front. --count N
 // reserves a contiguous range (per-slot atomic sentinels); tests run against

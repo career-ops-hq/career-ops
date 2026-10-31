@@ -24,7 +24,7 @@ With the optional Via column (intermediary channel, #1596) after Company:
 Possible states: `Evaluated` → (`Speculative`) → `Applied` → `Responded` → `Assessment` → `Interview` → `Offer` / `Rejected` / `Discarded` / `SKIP`
 
 - `Evaluated` = offer evaluated with report, pending decision
-- `Speculative` = create-a-role pitch from `gambit` is out (there is no posting); becomes `Applied`/`Responded` once the company engages
+- `Speculative` = create-a-role pitch from `gambit` is out (there is no posting). A reply to the pitch stays `Speculative` with the reply in Notes: `Responded` counts as submitted, and nothing was. Move to `Applied` once the candidate submits an application, or to `Interview` if the company opens a process
 - `Applied` = the candidate submitted their application
 - `Responded` = Company has responded (not yet interview)
 - `Assessment` = online assessment or asynchronous screening is in progress
