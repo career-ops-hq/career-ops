@@ -1,5 +1,7 @@
 .git
-node_modules
+# Patterns are anchored at the context root, so a bare `node_modules` skips
+# only the root one. web/node_modules and scaffolder/node_modules count too.
+**/node_modules
 output
 batch/logs
 batch/batch-state.tsv
@@ -14,3 +16,28 @@ reports/*.md
 *.log
 .DS_Store
 writing-samples
+
+# User Layer (DATA_CONTRACT.md). The Dockerfile copies only package.json and
+# the project is bind-mounted at runtime, so none of this belongs in the
+# build context, which is sent to the Docker daemon on every build.
+cv.md
+article-digest.md
+voice-dna.md
+portals.yml
+config/profile.yml
+config/plugins.yml
+config/cv-facts.json
+config/local-paths.txt
+data
+documents
+interview-prep
+modes/_profile.md
+modes/_custom.md
+modes/_brief.md
+.career-ops-web
+plugins.local
+
+# Build output
+web/.next
+dashboard/career-dashboard
+dashboard/career-dashboard.exe
