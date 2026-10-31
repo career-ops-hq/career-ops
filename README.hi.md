@@ -60,6 +60,7 @@
 </p>
 
 <p align="center"><a href="#अब-आपकी-बारी">एक नौकरी पर आज़माएँ&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">पूरी कहानी&nbsp;पढ़ें&nbsp;→</a></p>
+<p align="center"><sub>टर्मिनल इस्तेमाल नहीं करना चाहते? <a href="https://career-ops.org/waitlist?ref=readme-hi">वेब वर्ज़न की वेटलिस्ट में शामिल हों&nbsp;→</a></sub></p>
 
 <br>
 

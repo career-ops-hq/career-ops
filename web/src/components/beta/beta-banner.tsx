@@ -138,12 +138,12 @@ export function BetaBanner() {
             </details>
             {similar.length > 0 && (
               <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-                <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Already reported? A 👍 on an existing issue beats a duplicate:</p>
+                <p className="text-xs font-medium text-amber-800 dark:text-amber-400">Already reported? A 👍 on an existing issue beats a duplicate:</p>
                 <ul className="mt-1.5 space-y-1">
                   {similar.map((s) => (
                     <li key={s.number}>
                       <a href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-foreground underline-offset-2 transition-colors hover:text-brand-text hover:underline">
-                        <ThumbsUp className="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                        <ThumbsUp className="size-3 shrink-0 text-amber-800 dark:text-amber-400" />
                         <span className="font-mono">#{s.number}</span> {s.title.slice(0, 60)}
                       </a>
                     </li>

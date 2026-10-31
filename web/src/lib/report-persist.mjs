@@ -16,9 +16,10 @@ import fs from "node:fs";
 import { slugify } from "./pdf-paths.mjs";
 import { setInboxSkip } from "./inbox-skip.mjs";
 import { parseEvaluationOptions } from "./evaluation-options.mjs";
+import { machineSummarySection } from "./machine-summary-section.mjs";
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
-const YAML_FENCE = /##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
+const YAML_FENCE = /^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
 const TITLE_RE = /^#\s+Evaluation:\s+(.+?)\s+(?:—|--|–|-)\s+(.+)$/m;
 
 /**
@@ -92,7 +93,7 @@ function tsvUnsafe(value) {
 }
 
 export function parseReportMeta(markdown) {
-  const fence = String(markdown ?? "").match(YAML_FENCE)?.[1] ?? "";
+  const fence = machineSummarySection(markdown).match(YAML_FENCE)?.[1] ?? "";
   const title = String(markdown ?? "").match(TITLE_RE);
   const company = yamlScalar(fence, "company") || title?.[1]?.trim() || null;
   const role = yamlScalar(fence, "role") || title?.[2]?.trim() || null;

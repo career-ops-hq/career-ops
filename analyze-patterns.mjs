@@ -19,6 +19,7 @@ import { join, dirname, relative, isAbsolute, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia, firstLinkTarget } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { loadCanonicalStates, resolveCanonicalStateId, foldStatusInput, trackerLinkDirsFor, resolveWorkspaceRoot, resolveWorkspaceRootFor } from './tracker-utils.mjs';
@@ -319,7 +320,7 @@ function normalizeScalar(value) {
 }
 
 export function parseMachineSummary(content) {
-  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+  const fenceMatch = machineSummarySection(content).match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (!fenceMatch) return null;
 
   const raw = fenceMatch[1].trim();

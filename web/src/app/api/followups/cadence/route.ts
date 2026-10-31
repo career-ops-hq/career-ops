@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
@@ -24,6 +25,17 @@ export const dynamic = "force-dynamic";
 function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
+
+/** Short id of the profile bytes the form loaded. A later save sends it back
+ *  so a second tab cannot write a stale snapshot over a save that already landed. */
+function textRevision(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+/** Revision for "config/profile.yml does not exist yet". Two tabs that both
+ *  load before the first save get this value, so the second save is refused
+ *  once the first one creates the file. A hash is hex, so it never equals this. */
+const ABSENT_REVISION = "absent";
 
 /**
  * PURE defaults, read from the core rather than copied (#2369).
@@ -80,13 +92,34 @@ export async function GET() {
   const file = getProfilePath(careerOpsRoot());
   const overrides: Partial<Record<ProfileCadenceKey, number>> = {};
   let enabled = true;
-  if (fs.existsSync(file)) {
+  let revision: string | null = ABSENT_REVISION;
+  let raw: string | undefined;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as { code?: unknown }).code) : "";
+    // A missing profile is the first-run case. Any other read error must not
+    // look like defaults, or the form saves those defaults with no revision
+    // once the file can be read again.
+    if (code !== "ENOENT") {
+      return Response.json({ error: "config/profile.yml could not be read." }, { status: 500 });
+    }
+  }
+  if (raw !== undefined) {
+    revision = textRevision(raw);
     let profile: Record<string, unknown> = {};
     try {
-      const parsed = yaml.load(fs.readFileSync(file, "utf8"));
-      profile = isObj(parsed) ? parsed : {};
+      const parsed = yaml.load(raw);
+      // A list or a single value is not a profile. Defaults here would look
+      // like the saved cadence, and a later save is refused anyway.
+      if (!isMapping(parsed)) {
+        return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value." }, { status: 409 });
+      }
+      profile = parsed as Record<string, unknown>;
     } catch {
-      /* unreadable/malformed → show defaults (read is best-effort) */
+      // A syntax error is not an empty profile. Defaults here would look
+      // like the saved cadence, and a later save is refused anyway.
+      return Response.json({ error: "config/profile.yml could not be read as YAML." }, { status: 500 });
     }
     enabled = followupsEnabledFromProfile(profile);
     const source = isObj(profile.followup_cadence) ? profile.followup_cadence : {};
@@ -99,7 +132,7 @@ export async function GET() {
   // `defaultsAvailable: false` tells the form to render its placeholders as
   // unknown rather than inventing a number — an honest gap beats a stale copy.
   const effective = { ...(defaults ?? {}), ...overrides };
-  return Response.json({ defaults: defaults ?? {}, defaultsAvailable: defaults !== null, overrides, effective, enabled });
+  return Response.json({ defaults: defaults ?? {}, defaultsAvailable: defaults !== null, overrides, effective, enabled, revision });
 }
 
 export async function POST(req: Request) {
@@ -127,7 +160,9 @@ export async function POST(req: Request) {
   const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
   let source = "";
+  let currentRevision: string | null = null;
   if (!fs.existsSync(file)) {
+    currentRevision = ABSENT_REVISION;
     // First create: seed from the example so we never leave a cadence-only profile.
     try {
       source = fs.readFileSync(path.join(resolveCodeRoot(process.cwd(), process.env), "config", "profile.example.yml"), "utf8");
@@ -143,6 +178,7 @@ export async function POST(req: Request) {
     let parsed: unknown;
     try {
       source = fs.readFileSync(file, "utf8");
+      currentRevision = textRevision(source);
       parsed = yaml.load(source);
     } catch {
       return Response.json({ error: "config/profile.yml exists but could not be read as YAML — refusing to overwrite it." }, { status: 409 });
@@ -155,6 +191,15 @@ export async function POST(req: Request) {
     base = parsed as Record<string, unknown>;
   }
 
+  // Optional. Clients that omit it keep the old merge. Clients that send the
+  // revision from GET are refused when another save changed the file first.
+  if (typeof body.revision === "string" && body.revision !== currentRevision) {
+    return Response.json({
+      error: "These cadence settings changed in another tab. The saved values were kept.",
+      revision: currentRevision,
+    }, { status: 409 });
+  }
+
   const merged: Record<string, unknown> = { ...base };
   const patch: Parameters<typeof patchProfileText>[1] = {};
   if (Object.keys(cadence).length > 0) {
@@ -165,14 +210,20 @@ export async function POST(req: Request) {
     merged.follow_ups = { ...(isObj(base.follow_ups) ? base.follow_ups : {}), enabled };
     patch.follow_ups = { enabled };
   }
+  let text: string;
   try {
     // Edit only the cadence lines so the rest of the profile, comments
     // included, stays as the user wrote it (#5662). A shape the line edit
     // cannot place falls back to yaml.dump; the backup holds the prior bytes.
-    const text = patchProfileText(source, patch, merged) ?? yaml.dump(merged, { lineWidth: 100, noRefs: true });
+    text = patchProfileText(source, patch, merged) ?? yaml.dump(merged, { lineWidth: 100, noRefs: true });
     atomicWriteWithBackup(file, text);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }
-  return Response.json({ ok: true, followup_cadence: merged.followup_cadence, follow_ups: merged.follow_ups });
+  return Response.json({
+    ok: true,
+    revision: textRevision(text),
+    followup_cadence: merged.followup_cadence,
+    follow_ups: merged.follow_ups,
+  });
 }

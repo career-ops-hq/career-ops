@@ -834,7 +834,7 @@ export function replaceUserFile(path, content) {
  * @param {string} path
  * @returns {string}
  */
-function userFileWriteTarget(path) {
+export function userFileWriteTarget(path) {
   let current = canonicalizeTrackerPath(path);
   for (let hops = 0; hops < 40; hops++) {
     let stat;

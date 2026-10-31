@@ -1,19 +1,4 @@
-// Client-safe (no node). Deterministic "is this CV good enough to score?" signal —
-// ZERO tokens. Advisory only: it drives a green-check vs amber hint, NEVER blocks
-// saving (the minimal-CV principle: even a rough parse is enough for a first score).
-
-export type CvReadiness = { scoreable: boolean; words: number; hasExperience: boolean; hasSkills: boolean; hint?: string };
-
-export function cvReadiness(md: string): CvReadiness {
-  const text = (md || "").trim();
-  const words = text ? text.split(/\s+/).length : 0;
-  const hasExperience = /(^|\n)#{1,3}\s*(experience|work|employment|empleo|experiencia)/i.test(text) || /\b(20\d\d)\s*[-–—]\s*(20\d\d|present|now|actualidad)/i.test(text);
-  const hasSkills = /(^|\n)#{1,3}\s*(skills|technologies|competenc|habilidad)/i.test(text);
-  const scoreable = words >= 80 && (hasExperience || hasSkills || words >= 200);
-  let hint: string | undefined;
-  if (!scoreable) hint = words < 40 ? "That's very short — add your experience for real matches (you can save anyway)." : "Looks thin — add a role or two for better matches (you can save anyway).";
-  return { scoreable, words, hasExperience, hasSkills, hint };
-}
+// Client-safe (no node). The readiness check lives in readiness.mjs.
 
 // ── CV ingest stream markers (parallel to the <<act:>>/<<offer:>> envelopes) ──
 export type CvSeed = { title?: string; roles?: string[]; location?: string };

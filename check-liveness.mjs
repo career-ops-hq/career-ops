@@ -37,7 +37,7 @@ import { localToday } from './lib/local-today.mjs';
 import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
@@ -50,6 +50,64 @@ const USAGE = `Usage:
   node check-liveness.mjs --no-record             # check only; write nothing to scan-history
   node check-liveness.mjs --help                  # print this usage block and exit
   node check-liveness.mjs -h                      # alias for --help`;
+
+const KNOWN_FLAGS = [
+  '--no-fallback', '--throttle', '--no-record', '--file', '--tracker', '--status',
+  '--discard-expired', '--apply', '--help', '-h',
+];
+
+/**
+ * `--throttle` alone means the 5000ms default. `--throttle 1000` and
+ * `--throttle=1000` both mean 1000. A non-numeric equals value stays on the
+ * default rather than becoming a URL to check.
+ *
+ * @param {string[]} args
+ * @returns {number}
+ */
+function throttleBaseMsFrom(args) {
+  if (!hasFlag(args, '--throttle')) return 0;
+  const eq = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
+  const raw = eq !== undefined ? eq.slice('--throttle='.length) : (() => {
+    const idx = args.indexOf('--throttle');
+    const next = idx === -1 ? undefined : args[idx + 1];
+    return typeof next === 'string' && /^\d+$/.test(next) ? next : undefined;
+  })();
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 5000;
+}
+
+/**
+ * Tokens that are not flags and not a flag's operand. Those are the URLs.
+ * `--dry-run` is not a flag this script accepts, so it never reaches here:
+ * validateFlags rejects it first. A numeric `--throttle` operand is not a URL.
+ *
+ * @param {string[]} args
+ * @returns {string[]}
+ */
+function urlPositionals(args) {
+  const skip = new Set();
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (typeof a !== 'string') continue;
+    if (a.startsWith('--file=') || a.startsWith('--status=') || a.startsWith('--throttle=')) {
+      skip.add(i);
+      continue;
+    }
+    if (a === '--file' || a === '--status') {
+      skip.add(i);
+      if (args[i + 1] !== undefined) skip.add(i + 1);
+      continue;
+    }
+    if (a === '--throttle') {
+      skip.add(i);
+      const next = args[i + 1];
+      if (typeof next === 'string' && /^\d+$/.test(next)) skip.add(i + 1);
+      continue;
+    }
+    if (a === '-h' || a.startsWith('--')) skip.add(i);
+  }
+  return args.filter((_, i) => !skip.has(i));
+}
 
 /**
  * Is this run allowed to record its verdicts?
@@ -159,21 +217,36 @@ export function discardExpiredRows(rows, { apply, note, trackerPath, reportsRoot
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    return;
+  // Unknown flags used to survive into the URL list: `--dry-run --file urls.txt`
+  // checked three strings and never opened the file, and `--help` ran before
+  // that filter so `--help --bogus` exited 0. validateFlags rejects the unknown
+  // flag first, then prints help. --throttle's operand is optional (bare
+  // `--throttle` is the 5000ms default), and --status keeps the message the
+  // status-flag test locks, so the missing-operand check stays here rather
+  // than in requireOperand. See tests/validate-flags-value-operand.test.mjs.
+  validateFlags(args, KNOWN_FLAGS, USAGE, {
+    valueFlags: ['--file', '--status', '--throttle'],
+  });
+
+  if (hasFlag(args, '--file')) {
+    const filePath = flagValue(args, '--file');
+    if (typeof filePath !== 'string' || !filePath.trim() || filePath.startsWith('--')) {
+      console.error('Error: --file requires a value');
+      process.exit(1);
+    }
   }
 
   // Portals like pracuj.pl serve a Cloudflare anti-bot wall to headless Chromium.
   // On a challenge we retry once in a headed browser (which clears it); pass
   // --no-fallback to stay fully headless (e.g. on a machine with no display).
   const noFallback = args.includes('--no-fallback');
-  // --throttle or --throttle=<ms>: wait base..2*base ms (jittered) between browser
-  // checks of the same host (createHostSpacer in liveness-browser.mjs)
-  // to stay under rate-based WAF limits. pracuj.pl's Cloudflare flags the session
-  // after ~2 rapid hits, so a bulk run needs spacing. Default base 5000ms.
-  const throttleArg = args.find((a) => a === '--throttle' || a.startsWith('--throttle='));
-  const throttleBaseMs = throttleArg ? (Number(throttleArg.split('=')[1]) || 5000) : 0;
+  // --throttle, --throttle <ms>, or --throttle=<ms>: wait base..2*base ms
+  // (jittered) between browser checks of the same host (createHostSpacer in
+  // liveness-browser.mjs) to stay under rate-based WAF limits. pracuj.pl's
+  // Cloudflare flags the session after ~2 rapid hits, so a bulk run needs
+  // spacing. Bare --throttle uses a 5000ms base. The space form used to be
+  // ignored (the number was checked as a URL) and the base stayed 5000.
+  const throttleBaseMs = throttleBaseMsFrom(args);
   const record = recordingEnabled(args);
   // `--status Rejected` as well as `--status=Rejected`. Only the `=` form was
   // read, so the space form, and any `--status` with no value, fell back to
@@ -188,13 +261,10 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  // The space form's value is an argv token of its own; it is not a URL.
-  const statusTokens = new Set(args.filter((a, i) => a.startsWith('--status=') || a === '--status' || (args[i - 1] === '--status' && a === statusValue)));
   const fromTracker = args.includes('--tracker');
   const discardExpired = args.includes('--discard-expired');
   const applyDiscards = args.includes('--apply');
-  const positional = args.filter((a) => a !== '--no-fallback' && a !== '--no-record' && a !== throttleArg
-    && a !== '--tracker' && a !== '--discard-expired' && a !== '--apply' && !statusTokens.has(a));
+  const positional = urlPositionals(args);
 
   if (discardExpired && !fromTracker) {
     console.error('--discard-expired requires --tracker.');
@@ -202,7 +272,7 @@ async function main() {
     return;
   }
 
-  if (positional.length === 0 && !fromTracker) {
+  if (positional.length === 0 && !fromTracker && !hasFlag(args, '--file')) {
     console.error(USAGE);
     process.exitCode = 1;
     return;
@@ -228,8 +298,8 @@ async function main() {
     console.log(`Tracker rows with status ${statuses.join(' or ')}: ${targets.length} with a posting URL${noUrl.length ? `, ${noUrl.length} without (${noUrl.map((n) => `#${n}`).join(' ')})` : ''}`);
     for (const t of targets) labels.set(t.url, `#${t.num} ${t.company} · ${t.role} (${t.status})`);
     urls = targets.map((t) => t.url);
-  } else if (positional[0] === '--file') {
-    const text = await readFile(positional[1], 'utf-8');
+  } else if (hasFlag(args, '--file')) {
+    const text = await readFile(flagValue(args, '--file'), 'utf-8');
     urls = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
   } else {
     urls = positional;
