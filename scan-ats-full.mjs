@@ -70,7 +70,7 @@ import paylocity, { boardUrl as paylocityBoardUrl } from './providers/paylocity.
 import join, { parseCompanySitemap } from './providers/join.mjs';
 import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
-import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, scanHistoryPolicy, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
@@ -1315,7 +1315,8 @@ async function main() {
   // (#3439). `portal` here is scan-history.tsv's recorded `offer.source`, so
   // providerForSource resolves it the same way the checkpoint reseed above
   // does.
-  const { seen: seenUrls } = loadSeenUrls({}, {
+  // scanHistoryPolicy: the recheck window scan.mjs applies to the same history.
+  const { seen: seenUrls } = loadSeenUrls(scanHistoryPolicy(config), {
     extraTokensFor: (url, portal) => providerForSource(portal)?.dedupKey?.({ url }),
   });
   const blacklist = loadBlacklist();

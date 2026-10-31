@@ -28,7 +28,6 @@ const CONFIG_SKIPS = ['skipped_content', 'skipped_visa', 'skipped_country_eligib
 // Statuses that deliberately keep a URL seen for good. Shrink-only: each entry
 // must still be written somewhere (checked below), and a new one needs a reason.
 const DELIBERATE_PINS = new Map([
-  ['skipped_dup', 'restates a URL already seen, in this run or in history'],
   ['skipped_date', "scan-interamt's incremental cut: published before its last scan, which covered it"],
 ]);
 

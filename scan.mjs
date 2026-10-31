@@ -1493,12 +1493,19 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
  * relisted: pinning the retirement for good would put the recheck the user
  * configured out of reach for exactly the URLs most likely to come back.
  *
+ * `skipped_dup` says a scanner met a seen URL again, so it can pin no longer than
+ * whatever made the URL seen. As a permanent pin, the first repeat sighting kept
+ * an aged posting out for good, and scan-dayforce.mjs and scan-interamt.mjs write
+ * one on every scan that lists it. Its `first_seen` is the day of that repeat,
+ * not of the posting, so the TTL reads it only for a row with no original in
+ * scan-history; otherwise collectSeenUrls lets the row go with its original.
+ *
  * Everything else keeps its permanent pin. The distinction is whether the status
  * describes a POSTING, which can change, or the URL itself — an invalid URL does
  * not become valid and a blocked host does not become reachable because a window
  * elapsed.
  */
-const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
+const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired', 'skipped_dup']);
 
 /**
  * Statuses recorded for VISIBILITY only, which must never pin a URL for dedup.
@@ -1605,8 +1612,18 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
   return ageDays < recheckAfterDays;
 }
 
-function scanHistoryPolicy(config = {}) {
-  const raw = config.scan_history?.recheck_after_days;
+/**
+ * The `scan_history` recheck policy portals.yml sets, in the shape
+ * collectSeenUrls and loadSeenUrls take. Exported so every scanner that builds
+ * a seen set releases the rows scan.mjs releases: a policy left out reads as
+ * "dedup forever", so a scanner that skipped it kept a URL seen after
+ * scan.mjs had let it back in.
+ *
+ * @param {object|null} [config] - Parsed portals.yml.
+ * @returns {{recheckAfterDays: number|null}}
+ */
+export function scanHistoryPolicy(config = {}) {
+  const raw = config?.scan_history?.recheck_after_days;
   const parsed = Number.parseInt(raw, 10);
   return {
     recheckAfterDays: Number.isFinite(parsed) && parsed >= 0 ? parsed : null,
@@ -2076,6 +2093,13 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     if (!identityPromotableUrls.has(urlToken)) identityPromotableUrls.set(urlToken, new Set());
     identityPromotableUrls.get(urlToken).add(listingKey || null);
   };
+  const pinHistoryRow = (urlToken, url, title, language) => {
+    seen.add(urlToken);
+    const recorded = languageFormsForDedup(language);
+    recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
+  };
+  const dupRows = [];
+  const agedOrphanDups = new Set();
 
   // scan-history.tsv
   // Line 0 only when it is the header; a headerless legacy file starts with a data row.
@@ -2088,11 +2112,16 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     // and the URL was never queued, so counting it as "eligible again" would
     // overstate what the TTL released. See OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
+    // Under a recheck window a repeat sighting takes its verdict from the URL's
+    // other rows, which can sit anywhere in the file, so it waits for all of
+    // them (next loop). With no window it pins like any other row.
+    if (status === 'skipped_dup' && policy.recheckAfterDays != null) {
+      dupRows.push({ url, firstSeen, title, language });
+      continue;
+    }
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       const urlToken = normalizeUrlForDedup(url);
-      seen.add(urlToken);
-      const recorded = languageFormsForDedup(language);
-      recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
+      pinHistoryRow(urlToken, url, title, language);
       // Only accepted or intentionally deferred posting rows can teach this
       // scan a strong identity. A verification rejection such as an expired
       // URL may pin that URL, but must not suppress a different live alias
@@ -2109,6 +2138,28 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       const urlToken = normalizeUrlForDedup(url);
       recheckCandidates.add(urlToken);
       if (status === 'added' && listingKey) recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+    }
+  }
+
+  // A `skipped_dup` row is dated the day of the repeat, and a scanner writes one
+  // on every run that lists the URL, so reading that date would restart the
+  // clock each time. The URL's own rows decide instead, whatever the repeat's
+  // age: one still pinned keeps it seen, and once they are all released the
+  // repeat goes with them.
+  //
+  // Only a row with no original here falls back on its own `first_seen`: the
+  // agent workflow in modes/scan.md writes these for a URL whose original lives
+  // in the tracker or pipeline. An aged one stops pinning and nothing more. It
+  // stays out of recheckCandidates, which the pipeline pass below reads as
+  // "scan-history released this URL": a row repeating a `- [x]` entry would
+  // otherwise un-pin the very entry it repeats.
+  for (const { url, firstSeen, title, language } of dupRows) {
+    const urlToken = normalizeUrlForDedup(url);
+    if (!seen.has(urlToken) && recheckCandidates.has(urlToken)) continue;
+    if (seen.has(urlToken) || shouldDedupScanHistoryRow({ firstSeen, status: 'skipped_dup' }, policy)) {
+      pinHistoryRow(urlToken, url, title, language);
+    } else {
+      agedOrphanDups.add(urlToken);
     }
   }
 
@@ -2180,7 +2231,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   // actionable pipeline row pinned again is not eligible, and saying so keeps the
   // number the scanners print honest.
   let recheckEligible = 0;
-  for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
+  for (const key of [...recheckCandidates, ...agedOrphanDups]) if (!seen.has(key)) recheckEligible++;
 
   return { seen, recheckEligible, identityPromotableUrls, variants };
 }

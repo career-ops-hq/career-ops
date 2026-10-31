@@ -70,6 +70,7 @@ import {
   appendToPipeline,
   appendToScanHistory,
   loadSeenUrls,
+  scanHistoryPolicy,
   normalizeUrlForDedup,
   buildTitleFilter,
   buildLocationFilter,
@@ -389,7 +390,8 @@ export function loadConfig(portalsPath = PORTALS_PATH, singleTenant = null) {
     matchedTitleKeywords: (title) => matchedTitleKeywords(title, config.title_filter),
   };
 
-  return { boards, invalidCount, filters };
+  // The recheck window scan.mjs applies to the same seen set.
+  return { boards, invalidCount, filters, historyPolicy: scanHistoryPolicy(config) };
 }
 
 // ── Fetch helpers (all run through page.request — same context, same cookies) ──
@@ -626,7 +628,7 @@ export async function scanBoardWithRetry(boardCfg, filters, {
 async function main() {
   const { dryRun, debug, singleTenant } = parseArgs();
   mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
-  const { boards, invalidCount, filters } = loadConfig(PORTALS_PATH, singleTenant);
+  const { boards, invalidCount, filters, historyPolicy } = loadConfig(PORTALS_PATH, singleTenant);
 
   if (invalidCount > 0) {
     console.log(`  Skipping ${invalidCount} malformed dayforce_boards entr${invalidCount === 1 ? 'y' : 'ies'} (bad tenant/board/culture/jobBoardId)`);
@@ -637,7 +639,7 @@ async function main() {
     return;
   }
 
-  const { seen } = loadSeenUrls();
+  const { seen } = loadSeenUrls(historyPolicy);
   const date = localToday();
 
   let totalFound = 0;
