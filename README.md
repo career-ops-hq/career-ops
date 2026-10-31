@@ -190,7 +190,7 @@ It reformulates your CV; it must never fabricate it. A check in code stops a PDF
 | **Negotiation Scripts**  | Salary negotiation frameworks, geographic discount pushback, competing offer leverage                                                    |
 | **Application Email Drafts** | Formal recruiter/referral/cold application emails from a report or pasted JD, with subject line, attachment checklist, source-backed fit points, and a profile-driven contact block. Draft-only -- career-ops never sends, submits, or clicks anything. |
 | **Portal Scanner**       | 100+ companies pre-configured (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + custom web-search queries across Ashby, Greenhouse, Lever, Wellfound |
-| **Funded Company Discovery** | Review-first `company:funded` command surfaces recently funded companies and source diagnostics from structured public feeds without editing your data |
+| **Funded Company Discovery** | Review-first `npm run company:funded` script surfaces recently funded companies and source diagnostics from structured public feeds without editing your data |
 | **Batch Processing**     | Parallel evaluation with headless CLI workers (`claude -p` / `opencode run`)                                                             |
 | **Dashboard TUI**        | Terminal UI to browse, filter, and sort your pipeline                                                                                    |
 | **Pipeline Integrity**   | Automated merge, dedup, status normalization, health checks                                                                              |
@@ -200,6 +200,10 @@ It reformulates your CV; it must never fabricate it. A check in code stops a PDF
 | **Plugin System**        | Opt-in integrations (Gmail, Notion, Apify + a community registry), disabled by default -- see [docs/PLUGINS.md](docs/PLUGINS.md)        |
 
 </details>
+
+## How It Works
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Quick Start
 
@@ -245,22 +249,11 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline
-# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
-# In Codex, ask for the same mode in plain language, e.g.:
-# "Run the career-ops scan mode"
-# "Run the career-ops pipeline mode for data/pipeline.md"
-# "Run the career-ops pdf mode for the latest evaluated role"
-# "Run the career-ops tracker mode and summarize the current statuses"
+# Paste a job URL or JD text to trigger auto-pipeline.
+# Every other mode, and how to ask for it in your CLI: see Usage below.
 ```
 
 </details>
-
-### Scanning through an outbound proxy
-
-Node's ordinary `fetch()` may ignore `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in a proxy-only sandbox. Provider requests can use those variables with `CAREER_OPS_TRUST_PROXY_EGRESS=1 node scan.mjs`. This uses a request-scoped proxy dispatcher; unrelated requests are unaffected, and `NO_PROXY` destinations still use the local private-address guard.
-
-Set this flag **only when the configured proxy itself blocks connections to private, loopback and metadata addresses**. When a proxy resolves the destination remotely, career-ops cannot verify that final address locally; the proxy must enforce that part of the SSRF boundary. Without this explicit trust setting, provider requests keep their normal direct transport and a DNS failure names the proxy setup needed. Proxy URLs containing credentials must use HTTPS; credential-free HTTP proxies remain supported. Existing installations keep direct transport after a system update; proxy environment variables alone do not enable it. Before enabling the flag, run `npm install` in the career-ops directory to install the added `undici` dependency. It is loaded only for an opted-in request with a configured proxy, so direct scanning continues to work even before that dependency is installed.
 
 ### Global install
 
@@ -274,210 +267,131 @@ This installs the `career-ops` binary globally, so you can run `career-ops init 
 - `npx @santifer/career-ops init`: best for first use; creates a dedicated project folder.
 - `npm i -g @santifer/career-ops`: if you'd rather type `career-ops init` than the `npx` form. It adds no other commands.
 
-### Install as a Claude plugin (Claude desktop app)
+### Other ways to run it
 
-Install career-ops once and use it from any folder in the Claude desktop app's **Code** tab. You don't need to clone anything or open a career-ops folder.
-
-1. In the Claude desktop app, open **Customize → Plugins**.
-2. Select **Add → Add marketplace** and enter `career-ops-hq/career-ops`.
-3. Open **Discover**, find **career-ops**, and select **Add**.
-4. To get new versions without doing anything, open the marketplace you added and turn on **Sync automatically**. **Check for updates** pulls them right away. A new version means a new `version` in `.claude-plugin/plugin.json`. Pushes that leave it unchanged don't reach installs (see [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md#updating)).
-5. Start a new session in the **Code** tab. The first start takes a few extra seconds while career-ops installs its Node packages. Then type `/career-ops:career-ops`, or paste a job URL. On first use it walks you through setup.
-
-By default, your CV, profile, tracker and reports are saved in `~/career-ops-data` (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` picks another folder). They are never saved inside the plugin: a folder inside it is refused, so plugin updates never touch your files.
-
-From the Claude Code CLI, the same install is two commands:
-
-```text
-/plugin marketplace add career-ops-hq/career-ops
-/plugin install career-ops@career-ops
-```
-
-> **Code tab and Claude Code only.** A plugin added in Customize also shows up in Chat and Cowork, but career-ops can't run there as a plugin: Chat has no access to your files, and Cowork can't install the plugin's packages. To use career-ops in Cowork, open a career-ops folder instead ([docs/COWORK.md](docs/COWORK.md)).
-
-Where everything lives, how updates work and how to pick another data folder: [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **From any folder, as a Claude Code plugin:** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **Without an AI CLI:** standalone Gemini, Ollama and OpenAI-compatible scripts evaluate a JD on their own. See [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval).
 
 > **The system is designed to be customized by your AI coding CLI itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask it to change them. It reads the same files it uses, so it knows exactly what to edit.
 
-See [docs/SETUP.md](docs/SETUP.md) for the full setup guide, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for instructions on running career-ops cheaply using custom or local models (and [docs/FREE_TIER.md](docs/FREE_TIER.md) for running it at zero cost on Antigravity CLI's free tier), [docs/AUTOMATION.md](docs/AUTOMATION.md) for scheduling recurring scans and a zero-token triage-to-shortlist recipe, [docs/KEEPING_PORTALS_LIVE.md](docs/KEEPING_PORTALS_LIVE.md) for keeping your company list current, [docs/BACKUP_STRATEGIES.md](docs/BACKUP_STRATEGIES.md) for backing up your CV, tracker and reports, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) for details on the ATS auto-fill flow, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) for cross-referencing a LinkedIn connections export against the companies in your funnel, and [docs/FAQ.md](docs/FAQ.md) for answers to common setup questions, including [how story provenance prevents invented numbers](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Design principles live in [ARCHITECTURE.md](ARCHITECTURE.md); runtime flows in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+See [docs/SETUP.md](docs/SETUP.md) for the full setup guide (including [scanning through an outbound proxy](docs/SETUP.md#scanning-through-an-outbound-proxy)), [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) for how to run career-ops in each supported CLI, and its headless command where it has one, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for instructions on running career-ops cheaply using custom or local models (and [docs/FREE_TIER.md](docs/FREE_TIER.md) for running it at zero cost on Antigravity CLI's free tier), [docs/AUTOMATION.md](docs/AUTOMATION.md) for scheduling recurring scans and a zero-token triage-to-shortlist recipe, [docs/KEEPING_PORTALS_LIVE.md](docs/KEEPING_PORTALS_LIVE.md) for keeping your company list current, [docs/BACKUP_STRATEGIES.md](docs/BACKUP_STRATEGIES.md) for backing up your CV, tracker and reports, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) for details on the ATS auto-fill flow, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) for cross-referencing a LinkedIn connections export against the companies in your funnel, and [docs/FAQ.md](docs/FAQ.md) for answers to common setup questions, including [how story provenance prevents invented numbers](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Design principles live in [ARCHITECTURE.md](ARCHITECTURE.md); runtime flows in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Usage
 
-career-ops uses a shared command router. In CLIs that register slash commands, it looks like this:
+Paste a job URL or description into your AI CLI. career-ops checks that a linked posting is still live (pasted text has no link to check), scores it against your CV, writes a report, tailors your CV (a PDF by default) and adds a row to your tracker. That covers most days. Everything else is a mode you ask for by name. If a posting can't be read, the pipeline stops and asks you to paste the text.
 
-```
-/career-ops           → Show all available commands
-/career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
-/career-ops pipeline  → Process pending URLs from inbox (data/pipeline.md)
-/career-ops oferta    → Evaluation only, blocks A to H (no auto PDF)
-/career-ops ofertas   → Compare and rank multiple offers
-/career-ops contacto  → LinkedIn power move: find contacts + draft message
-/career-ops deep      → Deep research prompt about company
-/career-ops interview-prep → Generate company-specific interview prep doc
-/career-ops interview    → Interactive profile/CV onboarding interview
-/career-ops master-profile → Import, review, validate, and prepare selected Profile facts as CV bullets
-/career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
-/career-ops interview/plan → Time-blocked prep plan for an upcoming interview
-/career-ops interview/practice → Practice interview, one question at a time with feedback
-/career-ops interview/debrief → Post-interview debrief: close gaps, predict next round
-/career-ops interview-redflag → Analyze employer warning signs before joining a company
-/career-ops pdf       → PDF only, ATS-optimized CV
-/career-ops text      → Tailored markdown CV (mirrors cv.md, no PDF)
-/career-ops latex     → Export CV as LaTeX/Overleaf .tex
-/career-ops latex-tex → Tailor your own resume.tex in place (opt-in; cv.md stays default)
-/career-ops cover     → Cover letter: standalone JD paste or /career-ops cover {slug}
-/career-ops email     → Formal application email draft (draft-only; never sends, submits, or clicks)
-/career-ops add       → Add a project/paper/role to your CV (fetch + preview + confirm)
-/career-ops expand    → Auto-discover and add missing competencies from profile links
-/career-ops training  → Evaluate course/cert against North Star
-/career-ops project   → Evaluate portfolio project idea
-/career-ops tracker   → Application status overview
-/career-ops agent-inbox → Queue/drain requests for the next session (data/agent-inbox.md)
-/career-ops apply     → Live application assistant (Playwright from this checkout, does not submit)
-/career-ops scan      → Scan portals and discover new offers
-/career-ops discover  → Resolve a company list to scannable ATS boards + append to portals.yml (zero-token)
-/career-ops batch     → Batch processing with parallel workers
-/career-ops patterns  → Analyze rejection patterns and improve targeting
-/career-ops offer-prep → Read a received offer/contract with the candidate: clause walk + lawyer questions (not legal advice)
-/career-ops titles    → Suggest adjacent job titles from your CV to broaden the search
-/career-ops upskill   → Aggregate skill-gap analysis from your evaluated reports
-/career-ops followup  → Follow-up cadence tracker: flag overdue, generate drafts
-/career-ops reply-watch → Classify employer replies and suggest tracker updates
-/career-ops outcome   → Record application outcome & archive artifacts
-/career-ops calibrate → Advisory report: do your evaluation scores predict your real outcomes? Reads /outcome data; never changes scoring
-/career-ops update    → Update career-ops system files with diff preview + compat check
-```
+### Asking for a mode
 
-Or just paste a job URL or description directly -- career-ops auto-detects it and runs the full pipeline.
+| CLI | How you ask for `scan` |
+| --- | --- |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Pi | `/skill:career-ops scan` |
+| Codex, Qwen, Cursor, or any other supported CLI | Plain language: "Run the career-ops scan mode" |
 
-In Codex, slash commands are not guaranteed. Use the same mode names in a prompt instead, or call them from `codex exec`.
+`/career-ops` with nothing after it shows the command menu in the CLIs that use it. Plain language works in every supported CLI. As a Claude Code plugin, the command is `/career-ops:career-ops`.
 
-## How It Works
+All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same `modes/*.md` files, so a mode behaves the same whichever CLI runs it. Slash commands are not guaranteed in Codex: ask in plain language, or run one prompt headless with `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). How to run it in each supported CLI, headless commands where a CLI has one, and per-CLI setup notes are in [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+### The everyday commands
 
-## Antigravity CLI Integration
+| Command | What it does |
+| --- | --- |
+| *paste a URL or JD* | Full pipeline: liveness check (URLs only), A-G evaluation plus H at high scores, report, tailored CV (PDF by default), tracker row |
+| `scan` | Scan your portals for new postings and add them to the inbox (`data/pipeline.md`) |
+| `pipeline` | Evaluate every URL waiting in the inbox |
+| `apply` | Fill an application form with you, field by field. It stops before Submit |
+| `tracker` | Where every application stands |
+| `followup` | Which applications are due a follow-up, with drafts |
 
-career-ops supports Antigravity CLI natively, the same way it supports Claude Code and OpenCode. All slash commands are available through the shared skill entrypoint, using the same `modes/*.md` evaluation logic.
+<details>
+<summary><b>All commands, by stage of the search</b></summary>
 
-Google has transitioned consumer Gemini CLI access to Antigravity CLI. `GEMINI.md` is now a no-op compatibility guard so Antigravity does not duplicate the full project instructions when it reads both `AGENTS.md` and `GEMINI.md`.
+`oferta`, `ofertas` and `contacto` keep their original Spanish names: offer, offers, contact.
 
-### Native Antigravity CLI
+**Find roles**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-agy
+| Command | What it does |
+| --- | --- |
+| [`scan`](modes/scan.md) | Scan portals and discover new offers |
+| [`discover`](modes/discover.md) | Resolve a list of company names to scannable ATS boards and append them to `portals.yml` (zero-token) |
+| [`pipeline`](modes/pipeline.md) | Process pending URLs from the inbox (`data/pipeline.md`) |
+| [`triage`](modes/triage.md) | Fast first-pass go/no-go score from `modes/_brief.md`, before a full evaluation (writes no files) |
+| [`batch`](modes/batch.md) | Evaluate many postings with parallel headless workers |
+| [`titles`](modes/titles.md) | Suggest adjacent job titles from your CV to broaden the search |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
+**Evaluate a role**
 
-The skill is defined using the open standard in `.agents/skills/career-ops/SKILL.md` and symlinked/referenced for each supported CLI (e.g. `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`). Cursor automatically discovers the shared skill in `.agents/skills/`.
+| Command | What it does |
+| --- | --- |
+| *paste a URL or JD* | [Auto-pipeline](modes/auto-pipeline.md): evaluation + report + tailored CV (PDF by default) + tracker entry |
+| [`oferta`](modes/oferta.md) | Evaluation only, Blocks A to G plus H at high scores (no PDF) |
+| [`ofertas`](modes/ofertas.md) | Compare and rank several offers |
+| [`deep`](modes/deep.md) | Deep research prompt about the company |
+| [`eu-swe`](modes/regional/eu-swe.md) | Calibrate a European software-engineering application before CV, apply or interview |
 
-## Codex Integration
+**Apply**
 
-career-ops supports Codex through the same shared router, but the invocation model is different from CLIs that auto-register slash commands. For the full guide, see [docs/CODEX.md](docs/CODEX.md).
+| Command | What it does |
+| --- | --- |
+| [`pdf`](modes/pdf.md) | ATS-optimized CV as a PDF |
+| [`ats`](modes/ats.md) | ATS-friendliness check of a generated CV: score and fixable issues |
+| [`text`](modes/text.md) | Tailored CV as markdown (mirrors `cv.md`, no PDF) |
+| [`latex`](modes/latex.md) | Export the CV as LaTeX/Overleaf `.tex` |
+| [`latex-tex`](modes/latex-tex.md) | Tailor your own `resume.tex` in place (opt-in; `cv.md` stays the default) |
+| [`cover`](modes/cover.md) | Cover letter, from a pasted JD or an evaluated report (`cover {slug}`) |
+| [`email`](modes/email.md) | Formal application email draft. Draft-only: never sends, submits or clicks |
+| [`contacto`](modes/contacto.md) | Find the hiring manager, recruiter or a peer, and draft a LinkedIn message |
+| [`apply`](modes/apply.md) | Live application assistant (Playwright from this checkout). Does not submit |
 
-### Interactive Codex
+**Interview**
 
-```bash
-cd career-ops
-codex
-```
+| Command | What it does |
+| --- | --- |
+| [`interview-prep`](modes/interview-prep.md) | Company-specific interview prep document |
+| [`interview/plan`](modes/interview/plan.md) | Time-blocked prep plan for an upcoming interview |
+| [`interview/practice`](modes/interview/practice.md) | Practice interview, one question at a time, with feedback |
+| [`interview/debrief`](modes/interview/debrief.md) | Post-interview debrief: close gaps, predict the next round |
+| [`interview-redflag`](modes/interview-redflag.md) | Analyze an employer's warning signs before you join |
 
-Slash commands are not guaranteed in Codex. If `/career-ops` is unavailable, ask Codex to run the mode directly in plain language:
+**After you apply**
 
-```text
-Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
-Run the career-ops scan mode and summarize new matches.
-Run the career-ops pipeline mode for data/pipeline.md.
-Run the career-ops pdf mode for the latest evaluated role.
-Run the career-ops tracker mode and summarize the current statuses.
-```
+| Command | What it does |
+| --- | --- |
+| [`tracker`](modes/tracker.md) | Application status overview |
+| [`followup`](modes/followup.md) | Follow-up cadence: flag overdue applications, generate drafts |
+| [`reply-watch`](modes/reply-watch.md) | Classify employer replies and suggest tracker updates |
+| [`outcome`](modes/outcome.md) | Record an application's outcome and archive its artifacts |
+| [`offer-prep`](modes/offer-prep.md) | Read a received offer or contract with you: clause walk and questions for a lawyer (not legal advice) |
 
-### One-shot Codex (`codex exec`)
+**Your profile and CV**
 
-```bash
-codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-codex exec "Run career-ops scan mode in this repo and summarize new matches."
-codex exec "Run career-ops pipeline mode for data/pipeline.md."
-codex exec "Run career-ops pdf mode for the latest evaluated role."
-codex exec "Run career-ops tracker mode and summarize the current statuses."
-```
+| Command | What it does |
+| --- | --- |
+| [`interview`](modes/interview.md) | Profile setup: an interactive interview about your experience that builds your CV and profile (not interview practice) |
+| [`intake`](modes/intake.md) | Build or enrich your profile from files in `documents/` (master CV, LinkedIn export). Nothing is written without your confirmation |
+| [`master-profile`](modes/master-profile.md) | Import, review and validate your Master Career Profile, and prepare selected facts as CV bullets |
+| [`add`](modes/add.md) | Add a project, paper or role to your CV (fetch, preview, confirm) |
+| [`expand`](modes/expand.md) | Discover competencies missing from your CV, from your profile links |
+| [`retro`](modes/retro.md) | Review this session and keep what you taught it as rules (writes only the ones you accept) |
 
-## Grok Build CLI Integration
+**Improve your targeting**
 
-career-ops supports Grok Build CLI natively, the same way it supports Claude Code and OpenCode. `AGENTS.md` is auto-loaded as project rules, and all slash commands are available through the shared skill entrypoint.
+| Command | What it does |
+| --- | --- |
+| [`patterns`](modes/patterns.md) | Analyze rejection patterns and improve targeting |
+| [`calibrate`](modes/calibrate.md) | Check whether your evaluation scores predict your real outcomes. Advisory: never changes scoring |
+| [`upskill`](modes/upskill.md) | Skill-gap analysis across your evaluated reports |
+| [`training`](modes/training.md) | Evaluate a course or certification against your North Star |
+| [`project`](modes/project.md) | Evaluate a portfolio project idea |
 
-### Native Grok Build CLI
+**System**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-grok
+| Command | What it does |
+| --- | --- |
+| [`agent-inbox`](modes/agent-inbox.md) | Queue requests for the next session, and work through them then (`data/agent-inbox.md`). `inbox` works too |
+| [`update`](modes/update.md) | Update career-ops system files, with a diff preview and compatibility check |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-For headless batch workers, use `grok -p "prompt"` (add `--yolo` to auto-approve tool executions).
-
-## Pi Integration
-
-career-ops supports [Pi](https://github.com/earendil-works/pi) natively, with no wrapper file to maintain: Pi reads `AGENTS.md` from the repo root as project context and discovers the shared skill at `.agents/skills/career-ops/SKILL.md` on its own. The router is then available as `/skill:career-ops`.
-
-### Native Pi
-
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-pi
-
-# 2. Use the shared skill with subcommands:
-/skill:career-ops "Senior AI Engineer at Anthropic..."
-/skill:career-ops pipeline
-/skill:career-ops scan
-/skill:career-ops pdf
-/skill:career-ops tracker
-```
-
-### One-shot Pi (`pi -p`)
-
-```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
-```
-
-If a Pi build gates project resources behind a trust decision, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
-
-### Standalone Gemini API Script (No CLI install needed)
-
-```bash
-# 1. Get a free API key at https://aistudio.google.com/apikey
-cp .env.example .env
-# Edit .env, set GEMINI_API_KEY=your_key_here
-
-# 2. Install dependencies
-npm install
-
-# 3. Evaluate a job description
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-node agent-inbox.mjs add "..."   # queue a request for the next session
-npm run gemini:eval -- "JD text here"
-```
-
-> **Free tier:** Both options work without billing. Native CLI uses Google OAuth; the API script uses `gemini-3.6-flash` (rate limits are model- and tier-dependent; see Google AI docs for current quotas).
+</details>
 
 ## Pre-configured Portals
 

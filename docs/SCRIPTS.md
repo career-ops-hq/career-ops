@@ -1451,7 +1451,8 @@ Standalone evaluators — run the same evaluation logic
 (`modes/oferta.md` + `modes/_shared.md` + `cv.md`) without an interactive AI
 CLI:
 
-- `gemini:eval` — Google Gemini free tier (`GEMINI_API_KEY` in `.env`)
+- `gemini:eval` — Google Gemini free tier (`GEMINI_API_KEY` in `.env`; copy
+  `.env.example` and get a free key at https://aistudio.google.com/apikey)
 - `ollama:eval` — fully local and private via Ollama
 - `openai:eval` — any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq,
   DeepSeek, LM Studio, llama.cpp, vLLM, ...)
