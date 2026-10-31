@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "career-ops",
   "displayName": "career-ops",
-  "version": "1.38.0",
+  "version": "1.39.0",
   "description": "Open-source AI job search agent: finds openings, scores each job posting against your CV, tailors your CV and cover letter, and tracks applications.",
   "logo": "assets/logo.png",
   "suggestedPrompts": [

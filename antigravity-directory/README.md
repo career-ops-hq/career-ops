@@ -8,7 +8,7 @@ This is the career-ops plugin for the Antigravity Marketplace. Project home: htt
 
 The plugin adds one skill, `career-ops`. The skill is a router: the modes, scripts and rules it follows live in a career-ops folder on your machine.
 
-On first use the skill looks for an existing career-ops folder: the one named in `CAREER_OPS_ROOT`, then `./career-ops`, then `~/career-ops`. If there is none, it asks you before installing one with `npx @santifer/career-ops@1.38.0 init`. After that, paste a job URL or ask for a mode, for example a portal scan or a tailored CV. <!-- x-release-please-version -->
+On first use the skill looks for an existing career-ops folder: the one named in `CAREER_OPS_ROOT`, then `./career-ops`, then `~/career-ops`. If there is none, it asks you before installing one with `npx @santifer/career-ops@1.39.0 init`. After that, paste a job URL or ask for a mode, for example a portal scan or a tailored CV. <!-- x-release-please-version -->
 
 career-ops runs in the Antigravity agent, in the Antigravity App and in the Antigravity CLI: the agent runs its scripts on your machine.
 
