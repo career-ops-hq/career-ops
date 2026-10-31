@@ -1092,17 +1092,17 @@ func StatusPriority(status string) int {
 		return 4
 	case "evaluated":
 		return 5
-	// tie with "evaluated": speculative rows sort in the same band
+	// Right after evaluated, as in statusGroupOrder.
 	case "speculative":
-		return 5
-	case "skip":
 		return 6
-	case "rejected":
+	case "skip":
 		return 7
-	case "discarded":
+	case "rejected":
 		return 8
-	default:
+	case "discarded":
 		return 9
+	default:
+		return 10
 	}
 }
 
