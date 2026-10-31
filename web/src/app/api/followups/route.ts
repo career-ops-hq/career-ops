@@ -1,6 +1,7 @@
+import { coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { selectDueFollowups, pickNextUpcoming, selectUpcomingFollowups } from "@/lib/core/followup-view.mjs";
 
@@ -21,7 +22,7 @@ export async function GET(req: Request) {
   const stdout = await new Promise<string>((resolve) => {
     // process.execPath + windowsHide: see api/doctor/route.ts — a stale inherited
     // console kills every child with 0xC0000142 on Windows; never inherit one.
-    execFile(process.execPath, [script, "--json"], { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 12_000, windowsHide: true }, (err, out) =>
+    execFile(process.execPath, [script, "--json"], { cwd: resolveCodeRoot(process.cwd(), process.env), env: coreProfileEnv(careerOpsRoot()), timeout: 12_000, windowsHide: true }, (err, out) =>
       resolve(err ? "" : out || ""),
     );
   });

@@ -1,8 +1,9 @@
+import { coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import type { DiscoveredOffer } from "./scan";
 import { pipelineWriterResult } from "./pipeline-writer-result.mjs";
@@ -86,7 +87,7 @@ process.stdin.on("end", async () => {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
       cwd: resolveCodeRoot(process.cwd(), process.env),
-      env: process.env,
+      env: coreProfileEnv(careerOpsRoot()),
       // windowsHide: see api/doctor/route.ts — a stale inherited console kills
       // every child with 0xC0000142 on Windows; never inherit one.
       windowsHide: true,
