@@ -22,14 +22,10 @@
  * A caller that states the tree it means passes `explicitRoot: true` and gets
  * `<root>/config/profile.yml`.
  *
- * A blank or whitespace-only value counts as unset. A relative value resolves
- * like the sibling lane variables (CAREER_OPS_PORTALS, CAREER_OPS_PIPELINE,
- * CAREER_OPS_SCAN_HISTORY) do in core, against the cwd the core CLI runs in. The
- * web's own cwd is <checkout>/web, one directory too deep, while the core scripts
- * it spawns run with cwd = the root it passes, so the base is `root`, never
- * process.cwd(). That mirrors core's cwd rule for the CLI, anchored to the root
- * the web passes (cv-template.mjs does the same). An absolute value is returned
- * unchanged. That rule lives in resolveOverride() alone.
+ * A blank or whitespace-only value counts as unset. The web anchors relative
+ * overrides to the data root. Core scripts run from the code checkout, so
+ * coreProfileEnv() passes this resolved path across that cwd boundary. An
+ * absolute override is unchanged; explicitRoot still bypasses the override.
  */
 import path from "node:path";
 
@@ -45,6 +41,18 @@ function resolveOverride(value, root) {
 export function getProfilePath(root, { explicitRoot = false, env = process.env } = {}) {
   const override = explicitRoot ? undefined : env.CAREER_OPS_PROFILE?.trim();
   return override ? resolveOverride(override, root) : path.join(root, "config", "profile.yml");
+}
+
+/**
+ * Preserve the web's selected profile when a core child runs from the checkout.
+ * @param {string} root Absolute data root.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function coreProfileEnv(root, env = process.env) {
+  return env.CAREER_OPS_PROFILE?.trim()
+    ? { ...env, CAREER_OPS_PROFILE: getProfilePath(root, { env }) }
+    : { ...env };
 }
 
 /** What the prompts say when no override is set. */
