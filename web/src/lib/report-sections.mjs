@@ -290,3 +290,16 @@ export function sectionPreview(md) {
   }
   return `${n} row${n === 1 ? "" : "s"}`;
 }
+
+/**
+ * Archetype strings are job titles. Unlabeled, they sit under the real role
+ * and read as a second title.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function archetypeCaption(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return `Archetype: ${text}`;
+}
