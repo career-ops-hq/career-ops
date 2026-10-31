@@ -29,6 +29,7 @@
  *   - a TZID that is not an IANA zone (e.g. a Windows zone name) is reported as
  *     `unknown-tzid` and not converted
  *   - RRULE is ignored (only the first occurrence is read; a warning says so)
+ *   - a cancellation (METHOD:CANCEL or STATUS:CANCELLED) gets no row
  *
  * Display zone: --tz, else config/profile.yml `location.timezone` (when it is
  * a valid IANA name), else this machine's zone.
@@ -139,32 +140,35 @@ export function parseIcsDate(value, params = {}) {
 }
 
 /**
- * Parse the FIRST VEVENT of an .ics body.
- * @returns {{ props: Array<{name:string, params:object, value:string}> } | null}
+ * Parse the FIRST VEVENT of an .ics body, plus the calendar's METHOD.
+ * @returns {{ props: Array<{name:string, params:object, value:string}>, method: string|null } | null}
  */
 export function firstEvent(text) {
   const lines = unfoldLines(text);
   let depth = 0;
   let inEvent = false;
+  let method = null;
   const props = [];
   for (const line of lines) {
     const p = parseContentLine(line);
     if (!p) continue;
     if (p.name === 'BEGIN') {
+      if (!inEvent && p.value.toUpperCase() === 'VCALENDAR') { method = null; continue; }
       if (!inEvent && p.value.toUpperCase() === 'VEVENT') { inEvent = true; depth = 0; continue; }
       if (inEvent) depth += 1;
       continue;
     }
     if (p.name === 'END') {
-      if (inEvent && depth === 0 && p.value.toUpperCase() === 'VEVENT') return { props };
+      if (inEvent && depth === 0 && p.value.toUpperCase() === 'VEVENT') return { props, method };
       if (inEvent) depth -= 1;
       continue;
     }
+    if (!inEvent && p.name === 'METHOD') method = p.value.trim().toUpperCase();
     // Properties of nested components (e.g. VALARM) are not the event's.
     if (inEvent && depth === 0) props.push(p);
   }
   // A truncated file that never closes the VEVENT still yields what it had.
-  return inEvent ? { props } : null;
+  return inEvent ? { props, method } : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +290,9 @@ export function parseIcs(text, { displayZone } = {}) {
   const get = (name) => ev.props.find((p) => p.name === name);
   const text_ = (name) => { const p = get(name); return p ? unescapeText(p.value).trim() || null : null; };
 
+  // A cancellation carries the same start and end as the invite it cancels.
+  const cancelled = ev.method === 'CANCEL' || text_('STATUS')?.toUpperCase() === 'CANCELLED';
+  if (cancelled) warnings.push({ code: 'cancelled', message: 'This .ics cancels the event. There is no row to paste; update the existing row in data/active-interviews.md instead.' });
   if (get('RRULE')) warnings.push({ code: 'rrule-ignored', message: 'RRULE present and ignored; only the first occurrence is read.' });
 
   const dtstartProp = get('DTSTART');
@@ -348,6 +355,7 @@ export function parseIcs(text, { displayZone } = {}) {
       organizer,
       attendees,
       allDay,
+      cancelled,
       start: strip(start),
       end: strip(end),
       durationMinutes: allDay ? null : durationMinutes,
@@ -385,7 +393,7 @@ export function dateTimeCell(event) {
  * supplying Company and Role; otherwise those stay em dashes.
  */
 export function buildRow(event, tracker = null) {
-  if (!event) return null;
+  if (!event || event.cancelled) return null;
   const notes = [];
   if (event.durationMinutes !== null && event.durationMinutes !== undefined) notes.push(`${event.durationMinutes} min`);
   if (event.start?.tzid && event.start.kind !== 'unknown-tzid') notes.push(`invite zone ${event.start.tzid}`);
