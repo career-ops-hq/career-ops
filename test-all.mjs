@@ -12,6 +12,10 @@
  *   node test-all.mjs --only <substring>      # Run ONLY discovered tests/**\/*.test.mjs
  *                                             # files whose path contains <substring>
  *                                             # (e.g. --only providers/themuse).
+ *   node test-all.mjs --needs <tool,...>      # Run ONLY discovered suites that declare one of
+ *                                             # these tools (browser, latex), with the tool
+ *                                             # required: a suite that would skip without it
+ *                                             # fails instead. See tests/required-tools.mjs.
  *   node test-all.mjs --jobs <N>              # Run at most N discovered suites at a time,
  *                                             # one process each. Default: every available
  *                                             # CPU, or CAREER_OPS_TEST_JOBS when set.
@@ -20,15 +24,19 @@
  *                                             # below run at the same time as the
  *                                             # discovered suites, in one of the N slots.
  *
+ *   A full run (anything but --only) waits for any other full run on this
+ *   machine to finish first; CAREER_OPS_TEST_QUEUE=0 skips the wait. See
+ *   lib/test-queue.mjs.
+ *
  *   `--inline-child <result.json>` is how a run with more than one job starts
  *   those inline sections in a process of their own. It is not a way to run
  *   part of the suite: it prints no summary and its exit code says nothing
  *   about what failed.
  *
- *   LOUD WARNING: `--only` runs ONLY discovered tests/ files — every inline
- *   core section above (syntax, scripts, dashboard, data contract, personal
- *   data, paths, etc.) is SKIPPED. A green `--only` run is NOT a green
- *   suite. Always run the full suite (no flags) before pushing.
+ *   LOUD WARNING: `--only` and `--needs` run ONLY discovered tests/ files —
+ *   every inline core section above (syntax, scripts, dashboard, data
+ *   contract, personal data, paths, etc.) is SKIPPED. A green `--only` run
+ *   is NOT a green suite. Always run the full suite (no flags) before pushing.
  *
  * NEW TESTS GO IN A FILE OF THEIR OWN, NOT IN A SECTION HERE.
  * Node tests matching tests/**\/*.test.mjs are auto-discovered — no
@@ -68,8 +76,9 @@ import { join, dirname, basename, relative, delimiter } from 'path';
 import { tmpdir, availableParallelism } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { REQUIRED_TOOL_ENV, declaresTool } from './tests/required-tools.mjs';
 import { collectMjsFiles } from './lib/mjs-files.mjs';
 import { checkSyntax, NODE_CHECK_TIMEOUT_MS } from './lib/syntax-check.mjs';
 import { walkTree, listTree } from './lib/walk-tree.mjs';
@@ -78,6 +87,7 @@ import { childFailureExcerpt } from './lib/failure-excerpt.mjs';
 import { SCRATCH_PREFIX, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 import { MARKER_FILE } from './tests/data-root-guard.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { holdTestQueue } from './lib/test-queue.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -285,15 +295,22 @@ function reportNodeTestSuite(rel, ok, stdout, detail, how) {
   }
 }
 
-async function runDiscovered(filter = null) {
+async function runDiscovered(filter = null, tools = null) {
   let files = discoverTests(TESTS_DIR);
   if (filter) {
     const norm = (p) => p.slice(TESTS_DIR.length + 1).replace(/\\/g, '/');
     files = files.filter((f) => norm(f).includes(filter));
   }
+  if (tools) {
+    files = files.filter((f) => {
+      const src = stripJsComments(readFileSync(f, 'utf-8'));
+      return tools.some((tool) => declaresTool(src, tool));
+    });
+  }
   if (files.length === 0) {
     // Fail hard: a path typo must never silently turn CI green.
-    console.log(`  ❌ no test files matched${filter ? ` --only "${filter}"` : ''} under tests/`);
+    const what = [filter && `--only "${filter}"`, tools && `--needs ${tools.join(',')}`].filter(Boolean).join(' ');
+    console.log(`  ❌ no test files matched${what ? ` ${what}` : ''} under tests/`);
     process.exit(1);
   }
   // One file gains nothing from a child process, and --jobs 1 is the original
@@ -695,6 +712,32 @@ const JOBS = (() => {
 process.env.CAREER_OPS_TEST_JOBS = '1';
 
 const ONLY = hasFlag(process.argv, '--only') ? (flagValue(process.argv, '--only') ?? '') : null;
+
+// `--needs browser,latex`: only the discovered suites that declare one of these
+// tools (tests/required-tools.mjs), with the tool REQUIRED, so a suite that
+// would skip for lack of it fails instead (#5756, #5758). Run where the tools
+// are installed: the tool-suites CI job, in the cv-visual image. Composes with
+// --only. Like --only, it skips every inline section.
+const NEEDS = hasFlag(process.argv, '--needs') ? (flagValue(process.argv, '--needs') ?? '') : null;
+if (NEEDS !== null) {
+  const tools = NEEDS.split(',').map((t) => t.trim()).filter(Boolean);
+  const unknown = tools.filter((t) => !Object.hasOwn(REQUIRED_TOOL_ENV, t));
+  if (tools.length === 0 || NEEDS.startsWith('--') || unknown.length) {
+    console.log(`  ❌ --needs takes a comma-separated list of: ${Object.keys(REQUIRED_TOOL_ENV).join(', ')}${unknown.length ? ` (got "${unknown.join('", "')}")` : ''}`);
+    process.exit(1);
+  }
+  if (ONLY !== null && (ONLY === '' || ONLY.startsWith('--'))) {
+    console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
+    process.exit(1);
+  }
+  // Set before any suite starts: children inherit it, and toolRequired()
+  // reads it on every call in this process.
+  for (const tool of tools) process.env[REQUIRED_TOOL_ENV[tool]] = '1';
+  console.log(`\n🧪 career-ops test suite (--needs ${tools.join(',')}${ONLY ? ` --only ${ONLY}` : ''})\n`);
+  await runDiscovered(ONLY || null, tools);
+  finish();
+}
+
 if (ONLY !== null) {
   if (ONLY === '' || ONLY.startsWith('--')) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
@@ -703,6 +746,19 @@ if (ONLY !== null) {
   console.log('\n🧪 career-ops test suite (--only ' + ONLY + ')\n');
   await runDiscovered(ONLY);
   finish();
+}
+
+// From here on this is a full run, and full runs take turns: two at once on one
+// machine each get half its cores and overrun their timeouts. See
+// lib/test-queue.mjs. Not in the inline sections' child, whose parent holds the
+// queue already.
+if (INLINE_CHILD === null) {
+  try {
+    await holdTestQueue();
+  } catch (err) {
+    console.log(`  ❌ ${err.message}`);
+    process.exit(1);
+  }
 }
 
 // More than one job: the inline sections go to a child and the discovered
@@ -847,6 +903,7 @@ const scripts = [
   { name: 'process-quality.mjs --self-test', expectExit: 0 },
   { name: 'company-history.mjs --self-test', expectExit: 0 },
   { name: 'rejection-latency.mjs --self-test', expectExit: 0 },
+  { name: 'role-clarity.mjs --self-test', expectExit: 0 },
   { name: 'salary-gap.mjs --self-test', expectExit: 0 },
   { name: 'negotiation-roi.mjs --self-test', expectExit: 0 },
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
@@ -856,6 +913,7 @@ const scripts = [
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
+  { name: 'sponsor-check.mjs --self-test', expectExit: 0 },
   { name: 'cv-title-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-structure.mjs --self-test', expectExit: 0 },
@@ -1736,7 +1794,7 @@ try {
     finalUrl: SHELL,
     frames: [{ url: 'https://ads.example.net/widget', text: 'Sponsored. '.repeat(30), controls: ['Apply now'] }],
   }), SHELL);
-  if (crossOrigin.result === 'expired' && crossOrigin.code === 'insufficient_content') {
+  if (crossOrigin.result === 'uncertain' && crossOrigin.code === 'insufficient_content') {
     pass('a cross-origin frame cannot make an empty shell look active');
   } else {
     fail(`cross-origin frame leaked into the verdict: ${JSON.stringify(crossOrigin)}`);
@@ -2619,6 +2677,11 @@ const exactAllowedFiles = new Set([
   // GitHub Sponsors funding target + Codex plugin manifest (#4131) — same
   // maintainer-credit shape as the .claude-plugin/.github/plugin ones above.
   'funding.json', '.codex-plugin/plugin.json',
+  // The OpenAI plugin directory listing names its developer, like the
+  // claude-directory manifest that '.claude-plugin/plugin.json' above covers.
+  'openai-directory/plugin.json',
+  // The Antigravity Marketplace manifest credits its author the same way.
+  'antigravity-directory/plugin.json',
   // Hired Wall: celebrates a hire with a link back to the project, and the
   // scripts/tests that build and cover that feature necessarily carry the
   // same URL (#4131).
@@ -3329,8 +3392,8 @@ for (const header of ['專業摘要', '工作經歷', '學歷', '證照', '技�
   }
 }
 
-// generate-pdf.mjs imports playwright at module scope; degrade to a warning
-// rather than crashing the suite where it is not installed.
+// Importing generate-pdf.mjs does not load Playwright. Keep the warning so a
+// missing sibling module still skips this section instead of crashing it.
 let pdfModule = null;
 try {
   pdfModule = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
@@ -14023,8 +14086,17 @@ try {
   // have enabled; without it "no MCP config" is false on a real machine and the
   // warning assertion below fails. Same reasoning as the GIT_CONFIG_* pinning
   // in section 12c.
+  //
+  // PATH is pinned for the same reason. With no --cli and no CAREER_OPS_CLI,
+  // doctor treats one other installed CLI as the active one, and several as
+  // unset. Either way the "no MCP config" warning this block asserts never
+  // mentions Playwright, so a developer machine would decide the result. An
+  // empty directory keeps every agent CLI out, including one a system image
+  // might ship under a short name. Node is started by its absolute path, and
+  // the git check skips itself when git cannot be run.
   const emptyClaudeCfg = mkdtempSync(join(tmpdir(), 'co-emptycfg-'));
-  const doctorEnv = { env: { ...process.env, CLAUDE_CONFIG_DIR: emptyClaudeCfg } };
+  const emptyDoctorPath = mkdtempSync(join(tmpdir(), 'co-empty-path-'));
+  const doctorEnv = { env: { ...process.env, CLAUDE_CONFIG_DIR: emptyClaudeCfg, PATH: emptyDoctorPath } };
 
   // No project MCP config → doctor surfaces a (non-fatal) warning instead of
   // letting SPA job boards fail silently. doctor reads project MCP config from
@@ -14077,6 +14149,7 @@ try {
   }
   rmSync(withLocalMcp, { recursive: true, force: true });
   rmSync(emptyClaudeCfg, { recursive: true, force: true });
+  rmSync(emptyDoctorPath, { recursive: true, force: true });
 } catch (e) {
   fail(`Playwright MCP detection test crashed: ${e.message}`);
 }
@@ -16826,7 +16899,12 @@ try {
     ["merge-tracker.mjs writes the cell through formatUrlCell", /put\('url', formatUrlCell\(/.test(mergeSrc)],
     ["merge-tracker.mjs reads the href before keying", /url: COLMAP\.url != null \? extractCellUrl\(/.test(mergeSrc)],
     ["tracker-parse.mjs returns the href on parsed rows", /url: extractCellUrl\(at\('url'\)\)/.test(parseSrc)],
-    ["the Go dashboard extracts the href", /func extractCellURL\(/.test(goCareerSrc) && /JobURL:\s+extractCellURL\(at\("url"\)\)/.test(goCareerSrc)],
+    // JobURL goes through trackerPostingURL, which reads the cell with
+    // extractCellURL and then drops a "—"/"N/A"/local:jds/ value that names no
+    // posting: kept, it switched off every JobURL enrichment tier.
+    ["the Go dashboard extracts the href", /func extractCellURL\(/.test(goCareerSrc)
+      && /JobURL:\s+trackerPostingURL\(at\("url"\)\)/.test(goCareerSrc)
+      && /func trackerPostingURL\(cell string\) string \{\s*value := extractCellURL\(cell\)/.test(goCareerSrc)],
     // history-ats-seeds reads the cell directly rather than through
     // parseTrackerRow, so it is listed on its own.
     ["history-ats-seeds.mjs extracts the href", /extractCellUrl\(cells\[columns\.url\]\)/.test(historySeedsSrc)],

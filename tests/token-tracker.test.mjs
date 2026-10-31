@@ -1,6 +1,6 @@
 // tests/token-tracker.test.mjs — token tracking & cost estimation unit tests
 import { pass, fail } from './helpers.mjs';
-import { estimateCost, TokenAccumulator, formatBreakdown } from '../utils/token-tracker.mjs';
+import { estimateCost, TokenAccumulator, formatBreakdown, formatK } from '../utils/token-tracker.mjs';
 import { parseTokenVal } from '../batch/aggregate-tokens.mjs';
 
 console.log('\ntoken-tracker.mjs & aggregate-tokens.mjs unit tests');
@@ -83,6 +83,7 @@ try {
   // 8. MiniMax model rates include uncached input, cached input, and output
   const minimaxUsage = { prompt_tokens: 1000000, completion_tokens: 1000000, cached_tokens: 500000 };
   const minimaxCases = [
+    ['MiniMax-M3.1-Flash', 0.6825],
     ['MiniMax-M3', 2.76],
     ['MiniMax-M2.7', 1.38],
   ];
@@ -93,6 +94,14 @@ try {
     } else {
       fail(`estimateCost for ${model} failed: expected ${expected}, got ${actual}`);
     }
+  }
+
+  // 9. formatK returns '12.4k' for 12400
+  const formatted = formatK(12400);
+  if (formatted === '12.4k') {
+    pass('formatK(12400) returns "12.4k"');
+  } else {
+    fail(`formatK failed: expected "12.4k", got "${formatted}"`);
   }
 } catch (e) {
   fail(`token-tracker tests crashed: ${e.message}`);

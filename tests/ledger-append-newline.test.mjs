@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 const href = (m) => pathToFileURL(join(ROOT, m)).href;
@@ -80,7 +81,7 @@ try {
     const r = spawnSync(NODE, [join(ROOT, 'set-status.mjs'), '--row', '1', 'Applied'], {
       cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' },
     });
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     const rows = lines(readFileSync(log, 'utf-8')).map(l => l.split('\t'));
     assert.equal(rows.length, 2);
     assert.deepEqual(rows[0].slice(0, 5), ['7', '2026-01-05', '-', 'Evaluated', 'correction']);

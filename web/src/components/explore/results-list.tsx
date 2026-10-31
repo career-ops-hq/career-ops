@@ -43,7 +43,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
               ? "found by AI on the open web · unverified until you evaluate"
               : employer ? "From selected employer sites · check the original JD · 0 tokens spent" : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}`}
           </p>
-          {!isAi && error && <p className="text-[12px] text-amber-700 dark:text-amber-300">{error}</p>}
+          {!isAi && error && <p className="text-[12px] text-amber-800 dark:text-amber-300">{error}</p>}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -62,7 +62,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
                 key={s}
                 type="button"
                 onClick={() => setSort(s)}
-                className={cn("rounded-md px-2.5 py-1 font-medium capitalize transition-colors", sort === s ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground")}
+                className={cn("rounded-md px-2.5 py-1 font-medium capitalize transition-colors", sort === s ? "bg-brand-soft text-brand-text" : "text-muted hover:text-foreground")}
               >
                 {s}
               </button>
@@ -72,7 +72,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
             <button
               type="button"
               onClick={() => addToPipeline(addable)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand-text"
             >
               <Plus className="size-3.5" /> Add all {addable.length}
             </button>

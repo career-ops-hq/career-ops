@@ -10,6 +10,10 @@ candidate:
   # no title element.
   # title: "Senior Backend Engineer"
   email: "jane@example.com"
+  # Optional. Total years of professional experience. portals.yml
+  # experience_filter compares it with the minimum each JD states; nothing
+  # reads it unless that filter is on. A number (2.5 is fine).
+  # years_of_experience: 6
   # Optional. Any other mailboxes that are also you. Follow-up contact extraction uses these to
   # avoid reporting your own address as somebody to chase, when a tracker note happens to cite it.
   # alternate_emails:
@@ -158,10 +162,12 @@ language:
 # (`node github-evidence.mjs`, needs a logged-in `gh`) may use as evidence.
 # Empty by default: a private repo appears only by name and PR and commit counts,
 # never with PR titles or commit dates, until you add it here yourself as
-# "owner/repo". Only PR and commit metadata is read, never source code or commit
-# messages, and nothing reaches cv.md without your confirmation.
+# "owner/repo". Only PR and commit metadata is read by default, never source
+# code or commit messages. README content is read only when you separately set
+# read_readmes: true. Nothing reaches cv.md without your confirmation.
 # github_evidence:
 #   private_allowlist: []            # e.g. ["acme-corp/billing-service"]
+#   read_readmes: false               # opt in to reading allowlisted READMEs
 
 # Optional, off by default. The stale GitHub evidence check
 # (`node evidence-freshness.mjs`) that `oferta` and `auto-pipeline` run before
@@ -216,9 +222,10 @@ cv:
   # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
   # The ID starts with "D" and is 11 characters long.
   # canva_resume_design_id: "DAxxxxxxxxx"
-  # Which CV template to use by default. Value is the kebab-case name of a file
-  # in templates/ named cv-template.<name>.html (e.g. "modern" ->
-  # templates/cv-template.modern.html). Leave unset/commented to use the built-in
+  # Which CV template to use by default. Value is the kebab-case name of a
+  # cv-template.<name>.html file. Built-in templates live in templates/; put your
+  # own in {DATA_ROOT}/data/templates/ (e.g. cv-template.modern.html, selected
+  # with template: modern). Leave unset/commented to use the built-in
   # templates/cv-template.html. You can also pick per-generation just by asking
   # (e.g. "use the modern template").
   # template: modern

@@ -15,6 +15,20 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=22 level=handle handle=pelarson28 role="Customer Success Associate" sector="Startup (growth-stage)" geo="United States" weeks=10 link="https://github.com/career-ops-hq/career-ops/issues/6337" -->
+### Hire #22
+
+> After a layoff, I used career-ops to scan and evaluate roles, prep a take-home and a final round that walked through every job on my LinkedIn, and script my offer call. About 10 we
+
+<a href="https://github.com/pelarson28"><img src="https://github.com/pelarson28.png?size=64" width="28" height="28" align="top" alt="@pelarson28"> **@pelarson28**</a> · Customer Success Associate · United States · 10 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/6337)
+
+<!-- hire n=21 level=handle handle=gpirujo role="Staff Software Engineer" sector="Full remote agency" geo="Remote LATAM + EU" weeks=5 link="https://github.com/career-ops-hq/career-ops/issues/6249" -->
+### Hire #21
+
+> Landed a Staff Software Engineer role at Fluxon, ~5.5 weeks from first application to signed offer, through a 4-round interview process ending with a conversation with the CTO. Tar
+
+<a href="https://github.com/gpirujo"><img src="https://github.com/gpirujo.png?size=64" width="28" height="28" align="top" alt="@gpirujo"> **@gpirujo**</a> · Staff Software Engineer · Remote LATAM + EU · 5 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/6249)
+
 <!-- hire n=20 level=handle handle=bluezeb12 role="Database Systems Engineer" sector="Contracting Firm" geo="remote US" weeks=9 link="https://github.com/career-ops-hq/career-ops/issues/5921" -->
 ### Hire #20
 

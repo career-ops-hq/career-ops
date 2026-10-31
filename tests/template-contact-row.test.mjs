@@ -38,21 +38,21 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listTemplates } from '../cv-templates.mjs';
+import { listTemplates, DEFAULT_TEMPLATES_DIR } from '../cv-templates.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * Every HTML template that renders a contact row.
  *
- * listTemplates('cv') discovers the CV templates and packs; resume-template.html
+ * listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }) discovers the CV templates and packs; resume-template.html
  * is a separate kind but shares this header markup verbatim, and
  * templates/README.md requires it to be kept in sync with cv-template.html — so
  * it is held to the same invariant rather than left as the one place the bug
  * can survive.
  */
 function contactRowTemplates() {
-  const found = listTemplates('cv')
+  const found = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR })
     .filter((t) => t.format === 'html')
     .map((t) => t.path);
   found.push(join(ROOT, 'templates', 'resume-template.html'));

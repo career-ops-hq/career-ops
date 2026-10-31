@@ -56,14 +56,14 @@ test("persist-evaluation-report --help prints usage and exits 0", () => {
     cwd: ROOT,
     encoding: "utf8",
   });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.match(result.stdout, /^Usage:/m);
 });
 
 test("persist-evaluation-report -h matches --help", () => {
   const long = spawnSync(process.execPath, [SCRIPT, "--help"], { cwd: ROOT, encoding: "utf8" });
   const short = spawnSync(process.execPath, [SCRIPT, "-h"], { cwd: ROOT, encoding: "utf8" });
-  assert.equal(short.status, 0, short.stderr);
+  assert.equal(short.status, 0, describeSpawn(short));
   assert.equal(short.stdout, long.stdout);
 });
 test("tracker addition builders in lib and web agree", async (t) => {
@@ -93,7 +93,7 @@ test("the script writes the report and the headed addition", () => {
       input: JSON.stringify(body),
       encoding: "utf8",
     });
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.deepEqual(JSON.parse(result.stdout), { ok: true });
     assert.equal(readFileSync(join(root, "reports", ROW.reportFile), "utf8"), body.markdown);
     assert.equal(readFileSync(join(root, "batch", "tracker-additions", "035-globex.tsv"), "utf8"), coreLine(ROW));

@@ -761,7 +761,8 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRe
     // iCIMS note above). Measured over 218 loads on 17 ATS: 18 were still empty
     // when the poll ended, 16 of them live postings. Only a body with no text at
     // all qualifies: a short page ("Page not found", a header and footer) keeps
-    // insufficient_content.
+    // insufficient_content, also `uncertain` but with a code that says the page
+    // did render something.
     if (verdict.code === 'insufficient_content' && !reading.bodyText.trim()) {
       verdict = {
         result: 'uncertain',

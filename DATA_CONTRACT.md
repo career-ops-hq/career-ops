@@ -67,6 +67,7 @@ These files contain your personal data, customizations, and work product. Update
 | `jds/*` | Your saved job descriptions; `jds/.gitkeep` is the system-owned directory scaffold and may be replaced by the updater |
 | `templates/cv-{candidate}-{company-slug}.html`, `templates/cover-{candidate}-{company-slug}.html` | Your per-application generated CVs/cover letters, for installs that save the HTML twin under `templates/` instead of `output/` (#3636). `templates/` is otherwise system-owned (base CV/cover templates), so these are recognized by name rather than directory: anything under `templates/` starting with `cv-` or `cover-` that is NOT one of the shipped `cv-template*.html` / `cover-letter-template*.html` files is treated as your data — see `isGeneratedTemplateArtifact()` in `update-system.mjs` |
 | `templates/cv-template.{name}.html` / `.tex`, `templates/cover-letter-template.{name}.html` / `.tex` | Your own named CV/cover-letter template variant, when `{name}` matches `cv.template` / `cover_letter.template` in `config/profile.yml`, or in the profile an exported `CAREER_OPS_PROFILE` names (the updater never loads a `.env`; it reads both, and skips with a warning a data-root profile it cannot parse while the override is the one in force; the convention `cv-templates.mjs`'s `resolveTemplate()` reads — see its `KINDS`). `templates/` is otherwise system-owned, and a variant file this install created shares that directory and naming shape with the real shipped variants (`cv-template.zh-minimal.html`, ...), so it is recognized by cross-referencing the configured template name rather than by directory — see `isUserConfiguredTemplateVariant()` in `update-system.mjs`. An unconfigured or differently-named `cv-template.*.html` file is not covered by this carve-out and is still managed as a system file (updated or pruned normally). This is distinct from `templates/cv-{candidate}-{company-slug}.html` / `templates/cover-{candidate}-{company-slug}.html`, which is generated per-application *output*, not an authored template *variant*. |
+| `data/templates/*` | Your own named CV/cover-letter templates, in the same naming as `templates/` (`cv-template.{name}.html`, `cover-letter-template.{name}.html`, or a pack subdirectory). `cv-templates.mjs` searches this directory under the data root alongside the checkout's `templates/`, and a name found in both resolves to your file. The updater never touches it, so a template here needs no `cv.template` / `cover_letter.template` carve-out. `doctor.mjs` warns, without blocking anything, about a template here that no longer resolves or that lacks a slot every shipped variant keeps |
 
 ### Fork-local paths
 
@@ -195,12 +196,13 @@ That is what `update-system.mjs apply` does with every system file this install 
 
 ## Custom Data Directory
 
-By default, all User Layer files reside inside the project repository root. You can configure a separate, external directory for your personal data.
+By default, a checkout keeps all User Layer files inside the project repository root. A Claude Code plugin install keeps them in `~/career-ops-data` instead (see the Plugin Install Default below). Either way, you can configure a separate, external directory for your personal data.
 
 ### Resolution Precedence:
-1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory.
+1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory. A directory inside a Claude Code plugin install copy is refused, here and in the marker file, because Claude Code replaces that copy on every plugin update.
 2. **Marker File (`.career-ops-data`):** A repository-level marker file named `.career-ops-data` containing the path (absolute or relative) to the user data directory.
-3. **Repository Default:** Defaults to the codebase/repository root directory.
+3. **Plugin Install Default (`~/career-ops-data`):** When neither is set and the code runs from a Claude Code plugin install copy (inside `~/.claude/plugins/cache/`, `marketplaces/` or `synced/`). Claude Code replaces that copy on every plugin update, so it can never hold User Layer files. See [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+4. **Repository Default:** Otherwise, defaults to the codebase/repository root directory.
 
 When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `data/`, `reports/`, `output/`, `portals.yml`, `batch/tracker-additions/`) will be resolved relative to that path. System Layer files continue to be resolved relative to the codebase/repository root, keeping code and personal data completely separate.
 

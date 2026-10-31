@@ -162,16 +162,20 @@ const OWN_GUARD = new Map([
   // Not in #3092's audit, found by this sweep: a guard that predates it.
   ['fix-slugs.mjs',
     'a hand-rolled --file check BEFORE validateFlags, covering more than requireOperand does: `--file=` (empty) and `--file -h` (single-dash next token) are rejected too.'],
+  ['check-liveness.mjs',
+    '--throttle takes an OPTIONAL operand: bare `--throttle` is the 5000ms default, so requireOperand would reject a call the usage documents. ' +
+    '--status keeps its own message ("--status needs a value"), locked by tests/check-liveness-status-flag.test.mjs. ' +
+    '--file is rejected beside those, before any token is checked as a URL.'],
 ]);
 
 // The ratchet. Raising this is a review conversation, not a formality: it means
 // a caller runs a validator better than the shared one, and the entry above has
 // to say what that validator is. Lowering it is free — it follows a caller
 // opting in.
-const MAX_OWN_GUARD = 6;
+const MAX_OWN_GUARD = 7;
 
 // The sweep must never go green by finding nothing. A floor set below today's
-// count (6 own-guard + 14 opted into requireOperand = 20, and the opted-in half
+// count (7 own-guard + the opted-in requireOperand callers, and the opted-in half
 // grows with every new CLI) leaves room for a script to be deleted without a
 // spurious failure, while a scanner that silently stopped matching call sites
 // still trips it.

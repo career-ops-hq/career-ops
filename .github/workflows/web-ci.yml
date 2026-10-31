@@ -39,6 +39,11 @@ jobs:
         run: npm install --ignore-scripts
         working-directory: .
       - run: npm ci
+      # The web tree carries the only tracked lockfile, so this audits the
+      # exact pinned versions (#5771's class of finding). This workflow is
+      # informative by design: a red here blocks nothing, it is one more
+      # place an advisory gets seen before it ships.
+      - run: npm audit --audit-level=high
       - run: npm test
       - run: npx tsc --noEmit
       - run: npm run build

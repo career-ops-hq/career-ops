@@ -30,6 +30,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { trackedFiles } from '../lib/mjs-files.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -92,7 +93,7 @@ test('a CLI reached through a symlinked directory still runs', (t) => {
         `${viaLink.status} — the main-guard silently suppressed it (#3170)`,
     );
     assert.equal(output(viaLink), output(direct), 'the symlinked invocation behaved differently');
-    assert.equal(viaLink.status, direct.status);
+    assert.equal(viaLink.status, direct.status, describeSpawn(viaLink));
   } finally {
     cleanup();
   }
@@ -399,7 +400,7 @@ test("update-system.mjs's inlined guard realpaths both sides", (t) => {
       `the updater printed no usage through a symlink (exit ${viaLink.status}) — its inlined ` +
         'guard stopped realpathing both sides, and every update silently no-ops (#3170)',
     );
-    assert.equal(viaLink.status, 1, 'the usage branch must still exit non-zero');
+    assert.equal(viaLink.status, 1, describeSpawn(viaLink, 'the usage branch must still exit non-zero'));
   } finally {
     cleanup();
   }

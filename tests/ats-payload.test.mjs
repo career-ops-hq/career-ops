@@ -173,20 +173,20 @@ test('--help exits 0 and prints usage', () => {
 
 test('an unrecognized flag is named and refused', () => {
   const r = run(['--sumary']);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.match(r.stderr, /unrecognized flag/i);
   assert.ok(r.stderr.includes('--sumary'));
 });
 
 test('--help --bogus still errors', () => {
   const r = run(['--help', '--bogus']);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.match(r.stderr, /unrecognized flag/i);
 });
 
 test('a missing file exits 1 and writes nothing to stdout', () => {
   const r = run([join(tmpdir(), 'ats-payload-does-not-exist.json')]);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.equal(r.stdout, '');
   assert.match(r.stderr, /cannot read payload/);
 });
@@ -197,7 +197,7 @@ test('malformed JSON exits 1 and writes nothing to stdout', () => {
     const file = join(dir, 'cv.json');
     writeFileSync(file, '{ "competencies": [');
     const r = run([file]);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.equal(r.stdout, '');
     assert.match(r.stderr, /not valid JSON/);
   } finally {
@@ -211,7 +211,7 @@ test('a JSON array is refused — a payload is an object', () => {
     const file = join(dir, 'cv.json');
     writeFileSync(file, '[]');
     const r = run([file]);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stderr, /not a CV payload object/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -223,7 +223,7 @@ test('a string skills field is refused rather than silently discarded (PR #3422)
   // so "Python" vanished and stdout carried a well-formed-looking payload with
   // the skills gone — data loss disguised as a clean result.
   const r = run(['-'], { input: JSON.stringify({ competencies: ['AWS'], skills: 'Python' }) });
-  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `exited ${r.status}, want 1`));
   assert.equal(r.stdout, '', 'a refused payload must not reach stdout');
   assert.match(r.stderr, /unusable payload shape/);
   assert.match(r.stderr, /`skills` must be an array/);
@@ -233,7 +233,7 @@ test('a non-array experience is refused rather than reported as clean', () => {
   // Otherwise the lints iterate [] and print "No lint findings", which reads
   // exactly like a genuinely clean payload.
   const r = run(['-'], { input: JSON.stringify({ experience: { company: 'Acme' } }) });
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.equal(r.stdout, '');
   assert.match(r.stderr, /`experience` must be an array/);
 });
@@ -261,7 +261,7 @@ test('a mixed-type competencies array is refused rather than silently thinned', 
   // check passed, while toItemList() dropped the object and the fold emitted
   // `items: "AWS"` — one competency gone from a payload that looked fine.
   const r = run(['-'], { input: JSON.stringify({ competencies: ['AWS', { name: 'Kubernetes' }] }) });
-  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `exited ${r.status}, want 1`));
   assert.equal(r.stdout, '', 'a refused payload must not reach stdout');
   assert.match(r.stderr, /`competencies` has 1 member\(s\) with no scalar value/);
   assert.match(r.stderr, /\[1\] \(object\)/);
@@ -284,7 +284,7 @@ test('a non-scalar in the skills category the fold merges into is refused', () =
       skills: [{ category: 'Core Competencies', items: ['X', { y: 1 }] }],
     }),
   });
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.equal(r.stdout, '');
   assert.match(r.stderr, /Merging the competencies into it would drop them/);
 });
@@ -307,7 +307,7 @@ test('a scalar items on the merge target is refused and reaches stdout not at al
     const r = run(['-'], {
       input: JSON.stringify({ competencies: ['A'], skills: [{ category: 'Core Competencies', items }] }),
     });
-    assert.equal(r.status, 1, `items=${JSON.stringify(items)} exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `items=${JSON.stringify(items)} exited ${r.status}, want 1`));
     assert.equal(r.stdout, '', `items=${JSON.stringify(items)} let a payload reach stdout`);
     assert.match(r.stderr, /a string or array is expected/);
   }
@@ -332,7 +332,7 @@ test('a scalar items on a category the fold never touches is not policed', () =>
 test('a second positional argument is refused rather than ignored', () => {
   withFixture(DIRTY_PAYLOAD, (file) => {
     const r = run([file, 'extra.json']);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stderr, /unexpected extra positional argument/);
   });
 });

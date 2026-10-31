@@ -2,8 +2,8 @@
 //
 // Workable had no API rung, so every apply.workable.com URL fell through to
 // Playwright. The posting pages render client-side, so a read before the app
-// paints sees nav/footer only; classifyLiveness returns insufficient_content,
-// which reads as expired — a live posting reported dead and written to
+// paints sees nav/footer only; classifyLiveness returned insufficient_content,
+// which then read as expired — a live posting reported dead and written to
 // scan-history as skipped (#5000, the costly direction).
 //
 // The rung reads the v2 JSON endpoint, which needs no browser:

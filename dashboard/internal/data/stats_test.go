@@ -252,3 +252,19 @@ func TestComputeStatsMetrics(t *testing.T) {
 		t.Errorf("expected QualityBarPct ~50.0, got %f", metrics.QualityBarPct)
 	}
 }
+
+// Every tier label ComputeStatsMetrics can emit is in ScoreTierLabels, in its
+// order. The stats screen colours slices by looking a label up there, so a
+// label the list lacks would fall back to the neutral colour.
+func TestScoreTiersUseTheExportedLabels(t *testing.T) {
+	apps := []model.CareerApplication{{Score: 4.7}, {Score: 4.1}, {Score: 3.6}, {Score: 3.1}, {Score: 2.4}}
+	got := ComputeStatsMetrics(apps).ScoreTiers
+	if len(got) != len(ScoreTierLabels) {
+		t.Fatalf("one app per tier gave %d tiers, want %d: %v", len(got), len(ScoreTierLabels), got)
+	}
+	for i, tier := range got {
+		if tier.Label != ScoreTierLabels[i] {
+			t.Errorf("ScoreTiers[%d] = %q, want %q", i, tier.Label, ScoreTierLabels[i])
+		}
+	}
+}

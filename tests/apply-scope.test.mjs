@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listTree } from '../lib/walk-tree.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NODE = process.execPath;
@@ -109,8 +110,10 @@ test('allowed roots are this checkout and the configured data root only', async 
   const previousData = process.env.CAREER_OPS_DATA_DIR;
   const data = scratch();
   try {
+    // Named rather than cleared: with both variables empty, a .career-ops-data
+    // marker in the checkout still names a data root.
     process.env.CAREER_OPS_ROOT = '';
-    process.env.CAREER_OPS_DATA_DIR = '';
+    process.env.CAREER_OPS_DATA_DIR = ROOT;
     assert.deepEqual(allowedRoots(), [ROOT]);
 
     process.env.CAREER_OPS_DATA_DIR = data;
@@ -270,17 +273,18 @@ test('apply instructions name the scope guard and stop telling agents to attach 
 test('check-path and launch-options stay inside the project browser', () => {
   const rootRun = spawnSync(NODE, [join(ROOT, 'apply-scope.mjs'), 'root'], {
     cwd: ROOT,
-    env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '' },
+    // The data root is named for the same reason as in the allowedRoots test above.
+    env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: ROOT },
     encoding: 'utf8',
   });
-  assert.equal(rootRun.status, 0);
+  assert.equal(rootRun.status, 0, describeSpawn(rootRun));
   assert.equal(rootRun.stdout.trim(), ROOT);
 
   const launch = spawnSync(NODE, [join(ROOT, 'apply-scope.mjs'), 'launch-options'], {
     cwd: ROOT,
     encoding: 'utf8',
   });
-  assert.equal(launch.status, 0);
+  assert.equal(launch.status, 0, describeSpawn(launch));
   const options = JSON.parse(launch.stdout);
   assert.equal(options.headless, false);
   assert.equal(Object.hasOwn(options, 'channel'), false);
@@ -291,7 +295,7 @@ test('check-path and launch-options stay inside the project browser', () => {
     env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '' },
     encoding: 'utf8',
   });
-  assert.equal(help.status, 0);
+  assert.equal(help.status, 0, describeSpawn(help));
   assert.match(help.stdout, /^Usage:/);
   assert.equal(help.stdout.includes(ROOT), false);
 
@@ -303,7 +307,7 @@ test('check-path and launch-options stay inside the project browser', () => {
       env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '' },
       encoding: 'utf8',
     });
-    assert.equal(checked.status, 1);
+    assert.equal(checked.status, 1, describeSpawn(checked));
     assert.match(checked.stderr, /outside the project/);
 
     const link = join(data, 'link');
@@ -313,7 +317,7 @@ test('check-path and launch-options stay inside the project browser', () => {
       env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: data },
       encoding: 'utf8',
     });
-    assert.equal(escaped.status, 1);
+    assert.equal(escaped.status, 1, describeSpawn(escaped));
     assert.match(escaped.stderr, /outside the project/);
 
     const dangling = join(data, 'dangling');
@@ -323,7 +327,7 @@ test('check-path and launch-options stay inside the project browser', () => {
       env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: data },
       encoding: 'utf8',
     });
-    assert.equal(danglingCheck.status, 1);
+    assert.equal(danglingCheck.status, 1, describeSpawn(danglingCheck));
     assert.match(danglingCheck.stderr, /outside the project/);
   } finally {
     rmSync(outside, { recursive: true, force: true });

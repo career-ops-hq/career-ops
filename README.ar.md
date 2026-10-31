@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;أنشأه <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;أنشأه <a href="https://github.com/santifer"><strong>@santifer</strong></a>، بمشاركة&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ar.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ar.md#builders">&#8294;700+&#8297; مساهم</a></p>
 
 <p align="center" dir="rtl">
 <strong>أشهر من إرسال السير الذاتية إلى&nbsp;الصمت.</strong><br>
@@ -60,6 +60,7 @@
 </p>
 
 <p align="center" dir="rtl"><a href="#دورك">جرّبه على وظيفة&nbsp;واحدة&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">اقرأ القصة&nbsp;كاملة&nbsp;←</a></p>
+<p align="center" dir="rtl"><sub>تفضّل ألّا تستخدم الطرفية؟ <a href="https://career-ops.org/waitlist?ref=readme-ar">انضم إلى قائمة الانتظار لنسخة الويب&nbsp;←</a></sub></p>
 
 <br>
 
@@ -123,6 +124,8 @@ npx @santifer/career-ops init
 <br>
 
 التوظيف لن يصلح نفسه بنفسه. من يمرّون به يستطيعون، وهم في الغرفة أصلًا، يقارنون ملاحظاتهم ويصلحون إعدادات بعضهم بعضًا.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ar" alt="جدار متحرك لصور المساهمين الرمزية على GitHub، يمتلئ بترتيب الوصول منذ أبريل 2026، مع ترك المربع التالي مفتوحًا." width="100%"></a></p>
 
@@ -322,25 +325,7 @@ npm i -g @santifer/career-ops
 
 ## كيف يعمل النظام؟
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## تكامل Antigravity CLI
 

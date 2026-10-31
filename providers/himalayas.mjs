@@ -100,7 +100,15 @@ export default {
       // query value keeps every request on the same pinned endpoint.
       if (cursor !== null) url.searchParams.set('cursor', cursor);
       const feedUrl = assertHimalayasUrl(url.href);
-      const json = await fetchJsonWithRetry(ctx, feedUrl, { redirect: 'error' });
+      // No retry while probing: a probe-budget rejection has no status, so
+      // the retry helper would read it as a transport error and spend the
+      // probe's remaining requests on it. A normal scan keeps the default policy.
+      const json = await fetchJsonWithRetry(
+        ctx,
+        feedUrl,
+        { redirect: 'error' },
+        probeCap === Infinity ? {} : { retries: 0 },
+      );
       if (!json || !Array.isArray(json.jobs)) {
         throw new Error(`himalayas: unexpected API response - expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
       }

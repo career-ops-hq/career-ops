@@ -592,7 +592,7 @@ Write the complete evaluation to:
 reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md
 ```
 
-`{company-slug}` is lowercase, hyphenated, and filesystem-safe.
+`{company-slug}` is lowercase, hyphenated, and filesystem-safe: built as `modes/oferta.md` step 1 describes, it must match `^[a-z0-9-]+$`.
 
 Report header:
 
@@ -681,7 +681,7 @@ risk_summary:
 
 Then include:
 
-- `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is). Never paraphrase or restate it under this heading. If you cannot reproduce the text in full, run `node archive-posting.mjs <url> --company={company-slug} --report={{REPORT_NUM}}` (the same slug as in the report filename) and use the pointer sentence from `modes/oferta.md` instead; `check-jd-archive.mjs` does not credit a section that calls itself a paraphrase.
+- `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is). Never paraphrase or restate it under this heading. If you cannot reproduce the text in full, capture it with `archive-posting.mjs` as **Command arguments** below shows (`company` is the same slug as in the report filename, `report` is `{{REPORT_NUM}}`) and use the pointer sentence from `modes/oferta.md` instead; `check-jd-archive.mjs` does not credit a section that calls itself a paraphrase.
 - `## Machine Summary`
 - `## A) Role Summary`
 - `## B) CV Match`
@@ -694,7 +694,40 @@ Then include:
 - `## Risk Summary`
 - `## Score Evidence`
 - `## Extracted Keywords`
-- `## Keyword Coverage`, the block `node keyword-match.mjs {report-path}` prints, pasted after the keyword list. A report without both sections leaves the coverage check in `modes/pdf.md` Step 22 with nothing to read.
+- `## Keyword Coverage`, the block the `keyword-match.mjs` command under **Command arguments** below prints for this report, pasted after the keyword list. A report without both sections leaves the coverage check in `modes/pdf.md` Step 22 with nothing to read.
+
+**Command arguments (#5853):** never type the posting URL, the company slug or the report path into a command line, not even inside quotes: a URL's `&`, `'`, `$` or spaces are shell syntax. Write the values to a JSON file with your file tool and run the fixed command for it, which checks each value and passes each one to the script as its own argument, with no shell (same rule as `modes/oferta.md`). A value that fails its check stops the run: fix the value, never the check. For the archive capture the file is `{"url": "…", "company": "{company-slug}", "report": "{{REPORT_NUM}}"}`:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
+
+For keyword coverage it is `{"report": "reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md"}`:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 Translate these human-facing headings according to `language.output` when it is not English. Keep `## Machine Summary`, the `## Job Description (archived verbatim)` heading, and the YAML keys exact for downstream parsers: `check-jd-archive.mjs` matches the archive heading by its literal English `## Job Description` prefix, so a translated heading reports a real archive as missing.
 
