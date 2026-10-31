@@ -208,6 +208,8 @@ try {
     [['Lead Golang Developer / Andersen ⚡️', 'Europe (Remote)'], 'Andersen', '"Title / Employer" (@opento_dev)'],
     [['☁️ Middle Golang Developer — Timeweb Cloud', 'Зарплата не указана'], 'Timeweb Cloud', '"Title — Employer" (@godevjob)'],
     [['Python Backend Developer — YLAB Development'], 'YLAB Development', 'a brand token keeps a name ending in a department word'],
+    [['Senior Python Developer — Moscow Exchange'], 'Moscow Exchange', 'a name that only starts with a place keeps it'],
+    [['Backend Engineer', 'The Trade Desk is a global advertising technology company.'], 'The Trade Desk', 'a three-word name opening with "The" before "is a"'],
     [['iOS Engineer – Creative App', 'ElevenLabs is an AI research and product company.'], 'ElevenLabs', '"Employer is a …" on the second line beats the team after the dash (@forallmobile)'],
     [['Data Engineer (со знанием Java или Groovy)', 'от 200 000 до 230 000 ₽', 'WILIX', 'WILIX - аккредитованная IT - компания.'], 'WILIX', 'a finder.work mirror\'s employer after the salary line (@jc_it)'],
   ];
@@ -236,6 +238,13 @@ try {
     [['Coherent Solutions — Custom Software Development'], 'a line of business after the employer'],
     [['💳 Senior Backend Engineer (Go) — Payment Core / Card Issuing'], 'a product area after the dash'],
     [['Backend Engineer', 'This is a full-time role.'], 'a pronoun before "is a"'],
+    [['Backend Engineer', 'This role is a full-time position.'], 'a determiner and one word before "is a"'],
+    [['Python Developer / Москва'], 'a city after the slash'],
+    [['Senior Python Developer — Санкт-Петербург'], 'a city after the dash'],
+    [['Go Developer в Алматы'], 'an undeclined city after `в`'],
+    [['QA Engineer / LATAM'], 'a region after the slash'],
+    [['QA Engineer / Worldwide'], 'a reach after the slash'],
+    [['Data Engineer', 'от 200 000 до 230 000 ₽', 'Москва'], 'a city after the salary line'],
     [['#Develpment', 'Custom Software Development', 'Worldwide 🌏'], 'a line of business on the hashtag template'],
   ];
   for (const [lines, label] of positionalRefused) {
@@ -424,6 +433,15 @@ try {
   const reach = postToJob(parseChannelPage(page(post(12457, '2026-09-04T10:00:00+00:00', `#Analytics<br/>Plurio<br/>Worldwide 🌏<br/>Senior Marketing Analyst (Americas)<br/>remote<br/>${A('https://www.plurio.ai/careers/senior-marketing-analyst')}`)), 'devjobs').posts[0]);
   if (reach?.title === 'Senior Marketing Analyst (Americas)' && reach.company === 'Plurio') pass('the hashtag template skips a work-format line ("Worldwide 🌏") when choosing the title');
   else fail(`hashtag reach post = ${JSON.stringify(reach)}`);
+
+  // A run of adjacent work-format words ending in a digit used to backtrack
+  // exponentially in FORMAT_ONLY_RE while choosing the hashtag-template
+  // title: at 60 words the scan would never return.
+  const started = performance.now();
+  const formatRun = postToJob(parseChannelPage(page(post(12456, '2026-09-04T10:00:00+00:00', `#Analytics<br/>Plurio<br/>${'офис'.repeat(60)}1<br/>${A('https://www.plurio.ai/careers/senior-marketing-analyst')}`)), 'devjobs').posts[0]);
+  const elapsed = performance.now() - started;
+  if (elapsed < 1000 && formatRun?.title.startsWith('офисофис')) pass(`a run of 60 work-format words ending in a digit is read in ${elapsed.toFixed(0)}ms, not backtracked`);
+  else fail(`format run took ${elapsed.toFixed(0)}ms, post = ${JSON.stringify(formatRun)}`);
 
   // --- fetch: redirect guard, mapping, paging ------------------------------
   const calls = [];

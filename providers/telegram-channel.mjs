@@ -115,7 +115,10 @@ const GENERIC_ORG_RE = /(компани|команд|стартап|проект
 const WORK_FORMAT_RE = /(?<![\p{L}])(удал[её]н\p{L}*|гибрид\p{L}*|офис\p{L}*|релокац\p{L}*|remote|hybrid|onsite|on-site|office)(?![\p{L}])/iu;
 // A line that is nothing but a work format or a reach ("Worldwide 🌏",
 // "remote", "Удалённо · Москва" is not: it names a city) — never a title.
-const FORMAT_ONLY_RE = /^(?:(?:worldwide|anywhere|global|remote|hybrid|on-?site|office|удал[её]нн?\p{L}*|гибрид\p{L}*|офис\p{L}*)[\s,/()·|-]*)+$/iu;
+// Each word must end where its letters do: the separator may be empty, and
+// without that, "офисофис…1" can be split between the \p{L}* tails in
+// exponentially many ways before the match fails.
+const FORMAT_ONLY_RE = /^(?:(?:worldwide|anywhere|global|remote|hybrid|on-?site|office|удал[её]нн?\p{L}*|гибрид\p{L}*|офис\p{L}*)(?![\p{L}])[\s,/()·|-]*)+$/iu;
 // A phrase, not a name: "в Чехии или Испании", "Автотестировщик на Java".
 const FUNCTION_WORD_RE = /(?<![\p{L}])(или|и|на|в|во|с|со|для|по|от|до|из|за|к|у|о|об|при|and|or|of|the|to|in|for|with)(?![\p{L}])/u;
 // What precedes `в` when the `в` phrase is a destination: "с переездом в
@@ -136,8 +139,9 @@ function isDepartment(name) {
   return DEPARTMENT_RE.test(name) && name.split(/\s+/).every((w) => /^\p{Lu}\p{Ll}+$/u.test(w));
 }
 // What opens "… is a …" when it is not the employer: "This is a full-time
-// role", "The role is a …".
-const PRONOUN_RE = /^(this|it|we|our|you|your|he|she|they|that|there|here|the\s+\p{L}+|candidate|salary|position|role|job)$/iu;
+// role", "The role is a …", "This role is a …", "Our mission is a …". A
+// determiner and one word: "The Trade Desk is a …" is three and stays.
+const PRONOUN_RE = /^(this|it|we|our|you|your|he|she|they|that|there|here|(?:the|this|that|these|those|our|your|my|its|their)\s+\p{L}+|candidate|salary|position|role|job)$/iu;
 // A stack word opening the right-hand side of "Title / X" names the
 // technology, not the employer ("Android-разработчик / Kotlin Multiplatform").
 const STACK_WORD_RE = /^(kotlin|swift|java|javascript|typescript|react|vue|angular|node(?:\.js)?|python|go|golang|php|ruby|rust|scala|flutter|unity|unreal|c\+\+|c#|\.net|ios|android|backend|frontend|fullstack|full-stack|mobile|web|devops|qa|ml|data|sql|graphql|kmp|1с|1c)(?![\p{L}\p{N}])/iu;
@@ -151,6 +155,12 @@ const PERSON_RE = /(?:ович|евич|овна|евна|ична|инична)
 // with it; a missing row beats a wrong employer.
 const LOCATIVE_RE = /^[\p{Script=Cyrillic}-]+[еиу]$/u;
 const YEAR_RE = /(?<!\d)(19|20)\d{2}(?!\d)/;
+// A place alone where the employer would be: "Python Developer / Москва",
+// "Go Developer в Алматы", "QA Engineer / LATAM". Whole candidate only, so
+// "Moscow Exchange" keeps its name. LOCATIONISH_RE misses these: its \b
+// never fires next to a Cyrillic letter, and its list is short. Closed on
+// purpose: the cities, countries and regions RU/CIS channels post for.
+const PLACE_RE = /^(?:москва|мск|санкт-петербург|петербург|спб|питер|новосибирск|екатеринбург|казань|нижний новгород|краснодар|ростов-на-дону|самара|пермь|воронеж|уфа|омск|томск|иннополис|калининград|минск|киев|київ|львов|алматы|астана|ташкент|бишкек|тбилиси|батуми|ереван|баку|белград|нови-сад|лимассол|кипр|дубай|оаэ|стамбул|анталья|варшава|берлин|лиссабон|бали|таиланд|россия|рф|беларусь|казахстан|узбекистан|кыргызстан|армения|грузия|азербайджан|сербия|черногория|турция|польша|германия|португалия|испания|европа|снг|moscow|saint petersburg|st petersburg|minsk|kyiv|kiev|almaty|astana|tashkent|bishkek|tbilisi|batumi|yerevan|baku|belgrade|novi sad|limassol|cyprus|dubai|uae|istanbul|warsaw|berlin|london|lisbon|amsterdam|prague|bali|thailand|russia|belarus|kazakhstan|uzbekistan|kyrgyzstan|armenia|georgia|azerbaijan|serbia|montenegro|turkey|türkiye|poland|germany|portugal|spain|netherlands|uk|usa|us|eu|europe|emea|apac|latam|cis|mena|asia)$/iu;
 // The employer phrase "X ищет …" opens a line (Proglib channels: "💻
 // Wildberries ищет iOS-разработчика"; POSTER channels: "💎 Plus8Soft ищет
 // Senior Frontend Developer"; "Компания «Top Selection» ищет …"). Singular
@@ -208,8 +218,8 @@ function bareLine(line) {
 /**
  * plausibleEmployer() for the shapes that take the employer from its position
  * in a line rather than from a marker: also refuses a sector, a unit, a
- * contract term, a role, a person, a year, and a name that does not start the
- * way a name does. Digits are allowed (`БЮРО 1440`, `01.tech`).
+ * contract term, a role, a person, a year, a place, and a name that does not
+ * start the way a name does. Digits are allowed (`БЮРО 1440`, `01.tech`).
  *
  * @param {string} raw
  */
@@ -220,6 +230,8 @@ function positionalEmployer(raw) {
   if (!n || !/^[\p{Lu}\p{N}]/u.test(n) || /[()[\]«»]/.test(n)) return '';
   if (YEAR_RE.test(n) || ROLE_WORD_RE.test(n) || GENERIC_ORG_RE.test(n) || CONTRACT_RE.test(n) || PERSON_RE.test(n)) return '';
   if (WORK_FORMAT_RE.test(n) || FUNCTION_WORD_RE.test(n) || isDepartment(n)) return '';
+  const bare = n.replace(/[^\p{L}\p{N}]+$/u, '');
+  if (PLACE_RE.test(bare) || FORMAT_ONLY_RE.test(bare)) return '';
   return n;
 }
 
