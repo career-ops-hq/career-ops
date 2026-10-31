@@ -261,6 +261,11 @@ async function cmdRun(args) {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
     const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
+    const failed = results.filter(r => !r.ok);
+    if (failed.length) {
+      for (const r of failed) console.error(`${r.id} ${hook} failed: ${r.error}`);
+      process.exit(1);
+    }
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     const { jobs, counts } = admitPluginJobs(found, {
       id,
@@ -290,17 +295,30 @@ async function cmdRun(args) {
     const rowCount = snapshot.applications.length;
     const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
     const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dataRoot: DATA_ROOT, dryRun, timeoutMs, pluginId: id }), id);
+    let failed = false;
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
-      else console.log(`${r.id} export: failed — ${r.error}`);
+      else {
+        console.error(`${r.id} export failed: ${r.error}`);
+        failed = true;
+      }
     }
+    if (failed) process.exit(1);
     return;
   }
 
   if (hook === 'notify') {
     const message = positional.slice(hookArgStart).join(' ') || '(career-ops notification)';
     const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
-    for (const r of results) console.log(r.ok ? `${r.id} notify: sent.` : `${r.id} notify: failed — ${r.error}`);
+    let failed = false;
+    for (const r of results) {
+      if (r.ok) console.log(`${r.id} notify: sent.`);
+      else {
+        console.error(`${r.id} notify failed: ${r.error}`);
+        failed = true;
+      }
+    }
+    if (failed) process.exit(1);
     return;
   }
 }
