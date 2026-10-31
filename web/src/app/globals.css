@@ -1,5 +1,9 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+/* Desktop windows tall enough that the sidebar's links, usage meter and theme
+   toggle all end above the Ask button parked at the sidebar's foot (about 850px
+   of sidebar content). Shorter windows keep Ask in the bottom-right corner. */
+@custom-variant md-tall (@media (min-width: 48rem) and (min-height: 56rem));
 
 /* ──────────────────────────────────────────────────────────────────────────
    Design tokens — inherited from career-ops-docs. Brand burnt-orange #dd7627

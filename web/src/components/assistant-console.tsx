@@ -825,7 +825,7 @@ export function AssistantConsole() {
           onClick={(e) => openAssistant(e.currentTarget)}
           onPointerEnter={loadMarkdown}
           onFocus={loadMarkdown}
-          className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px]"
+          className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px] md-tall:bottom-24 md-tall:left-3 md-tall:right-auto md-tall:max-w-[13.5rem]"
         >
           <CoMark size={26} />
           <span className="text-sm font-medium">Ask<span className="sr-only"> the assistant</span></span>

@@ -87,7 +87,7 @@ export function BetaBanner() {
 
   return (
     <>
-      <aside aria-label="Pre-release build" className="fixed bottom-3 left-3 z-[70] flex items-center gap-2 rounded-full border border-brand/30 bg-surface/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur-md">
+      <aside aria-label="Pre-release build" className="fixed bottom-3 left-3 z-[70] flex items-center gap-2 rounded-full border border-brand/30 bg-surface/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur-md md:w-[13.5rem] md:min-w-0 md:max-w-[13.5rem] md:flex-wrap">
         <span className="flex items-center gap-1.5 font-medium text-brand-text">
           <span className="size-1.5 animate-pulse rounded-full bg-brand" /> {meta.version} · {meta.channel}
         </span>
