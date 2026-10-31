@@ -691,13 +691,13 @@ Validator for JD archival (#2789). A report's `**URL:**` header is a live pointe
 
 A report counts as archived when ANY of these holds:
 
-- it carries a `## Job Description` section (with or without the `(archived verbatim)` suffix) containing at least 40 non-whitespace characters after stripping HTML comments, and the section is none of the shapes below, which are rejected however long they are:
+- it carries a `## Job Description` section (with or without the `(archived verbatim)` suffix) at least 40 characters long once HTML comments are stripped and its ends trimmed (whitespace inside the text counts), and the section is none of the shapes below, which are rejected however long they are:
   - the unfilled placeholder from `modes/oferta.md` or a localized evaluation mode (the set is read from the templates), alone or under a filled-in `Posted:` line;
   - the pointer sentence alone (`See jds/{file} for the full archive.`): the capture it names has to resolve through one of the next two rules instead;
   - a page that was never the posting: a sign-in/login wall, a 404 shell, a paywall, a "please enable JavaScript" shell, or a bot-verification page;
   - a paraphrase or restatement that says so, in the section or in its heading (`## Job Description (paraphrase, not verbatim)`);
 - a `jds/` capture with a numeric report-number prefix exists for it, resolved via `jd-capture.mjs`'s `findCaptureForReport` (the same report-number lookup `outcome.mjs` already relies on) using the report number and company slug parsed straight from the report's own filename (`{###}-{company-slug}-{YYYY-MM-DD}.md`). `archive-posting.mjs --report=N` writes captures this way; or
-- the report's tracker row links a `jds/` capture under any filename, in its Report or Notes cell (`local:jds/acme-senior-engineer.md`). The file has to exist, and a link that leads outside the data root is ignored. This is how the date-prefixed, sha1-suffixed and bare company-role captures (see "JD captures (`jds/`)" below) are credited, since they have no report number to key on.
+- the report's tracker row links a `jds/` capture ending in `.md`, `.txt` or `.pdf`, under any name, in its Report or Notes cell (`local:jds/acme-senior-engineer.md`). The file has to exist, and a link that leads outside the data root is ignored. This is how the date-prefixed, sha1-suffixed and bare company-role captures (see "JD captures (`jds/`)" below) are credited, since they have no report number to key on.
 
 A report with none of these gets a finding, and its severity depends on the report's own tracker row:
 
