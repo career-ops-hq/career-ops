@@ -16,7 +16,9 @@
  * Exit code 1 if any file FAILS audit — usable as a pre-send gate. Dependency-free: text only,
  * no package installs, no PDF metadata editing.
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, realpathSync, statSync, accessSync, constants, chmodSync, chownSync, renameSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { extname } from 'node:path';
 import { validateFlags } from './lib/cli-flags.mjs';
 
@@ -105,7 +107,45 @@ function processFile(file, mode, opts){
       let cleaned;
       if(isHtml){ const { masked, masks } = maskCode(t); cleaned = restoreCode(cleanText(masked, opts.ascii, opts.keepJoiners), masks); }
       else { cleaned = cleanText(t, opts.ascii, opts.keepJoiners); }
-      writeFileSync(file, cleaned);
+      if (process.platform === 'win32') {
+        writeFileSync(file, cleaned);
+      } else {
+        // Follow a file symlink, and publish only after the entire replacement is written.
+        const target = realpathSync(file);
+        const metadata = statSync(target);
+        // Keep sticky, but do not restore privilege bits cleared by a content write.
+        const mode = metadata.mode & 0o1777;
+        accessSync(target, constants.W_OK);
+        const temporary = `${target}.${randomUUID()}.tmp`;
+        try {
+          writeFileSync(temporary, '', { flag: 'wx', mode: 0o600 });
+          if (process.platform !== 'win32') {
+            // Clear inherited ACLs before cp restores the source restrictions.
+            if (process.platform === 'darwin') execFileSync('chmod', ['-N', temporary]);
+            if (process.platform === 'linux') {
+              const permissions = execFileSync('ls', ['-ld', '--', temporary], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).split(/\s+/)[0];
+              if (!/^-[rwxStTs-]{9}[+.]?$/.test(permissions)) throw new Error('Cannot determine temporary document access controls');
+              // GNU cp -p does not remove a destination ACL when the source has none.
+              // Ordinary files do not need the standalone ACL utility.
+              if (permissions.endsWith('+')) execFileSync('setfacl', ['-b', '--', temporary]);
+            }
+            execFileSync('cp', process.platform === 'linux'
+              ? ['-p', '--preserve=xattr', target, temporary]
+              : ['-p', target, temporary]);
+            chmodSync(temporary, 0o600);
+          }
+          writeFileSync(temporary, cleaned);
+          const temporaryMetadata = statSync(temporary);
+          if (process.platform !== 'win32'
+            && (temporaryMetadata.uid !== metadata.uid || temporaryMetadata.gid !== metadata.gid)) {
+            chownSync(temporary, metadata.uid, metadata.gid);
+          }
+          chmodSync(temporary, mode);
+          renameSync(temporary, target);
+        } finally {
+          rmSync(temporary, { force: true });
+        }
+      }
       const after = readFileSync(file,'utf8');
       const re = scanText(isHtml ? maskCode(after).masked : after, opts.keepJoiners).found;
       const ok = Object.keys(re).length===0;
