@@ -180,6 +180,11 @@ function buildSnapshot() {
 }
 
 async function cmdList() {
+  const problem = readPluginConfigListError(DATA_ROOT);
+  if (problem) {
+    console.error(problem);
+    process.exit(1);
+  }
   warnConfigLeftInCodeRoot(ROOT, DATA_ROOT);
   const cfg = await loadPluginConfig(DATA_ROOT);
   await loadDotenvOnce(DATA_ROOT);
@@ -208,6 +213,11 @@ async function cmdList() {
 }
 
 async function cmdRun(args) {
+  const problem = readPluginConfigListError(DATA_ROOT);
+  if (problem) {
+    console.error(problem);
+    process.exit(1);
+  }
   const dryRun = args.includes('--dry-run');
   const positional = args.filter(a => a !== '--dry-run');
   const token = positional[0];
@@ -369,6 +379,41 @@ export function parsePluginConfig(raw, file) {
     throw new Error(`${file} does not contain a YAML mapping — refusing to overwrite it. Nothing was changed.`);
   }
   return cfg;
+}
+
+/**
+ * Why `list` and `run` stop. Scan keeps loadPluginConfig's fail-open read.
+ * Null when the file is absent, empty, or a YAML mapping.
+ * @param {string|null} raw
+ * @param {string} [file]
+ * @returns {string|null}
+ */
+export function pluginConfigListError(raw, file = 'config/plugins.yml') {
+  if (raw == null) return null;
+  try {
+    parsePluginConfig(raw, file);
+    return null;
+  } catch (err) {
+    const first = String(err.message).split('\n')[0];
+    const yaml = first.match(/valid YAML \((.*)\) —/);
+    const detail = yaml ? yaml[1] : (first.includes('YAML mapping') ? 'the file is not a YAML mapping' : first);
+    return `${file}: ${detail}. A broken file is not the same as every plugin being off. Fix ${file}, then run: node plugins.mjs list`;
+  }
+}
+
+function readPluginConfigListError(root) {
+  const rel = 'config/plugins.yml';
+  const file = path.join(root, rel);
+  // Read first and treat only ENOENT as absent. existsSync says false for a
+  // file in a config/ this user cannot search, which would list every plugin as off.
+  let raw;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    return `${rel} could not be read (${err.message}). Fix the file, then run: node plugins.mjs list`;
+  }
+  return pluginConfigListError(raw, rel);
 }
 
 // Write enabled:true/false into config/plugins.yml, merging (never clobbering
