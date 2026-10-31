@@ -263,6 +263,10 @@ try {
     // career.habr.com is a subdomain of habr.com, a long-read host: the board
     // check must come first, or every Proglib channel's links are dropped.
     ['https://career.habr.com/vacancies/1000169492', 'board', 'a Habr Career vacancy (a habr.com subdomain)'],
+    ['https://career.habr.com/vacancies/1000169492/?utm_source=tg', 'board', 'a Habr Career vacancy with a trailing slash and a tracking tail'],
+    ['https://career.habr.com/companies/job', null, 'a Habr Career company profile whose slug is a vacancy word'],
+    ['https://career.habr.com/companies/yandex/vacancies', null, 'a Habr Career company\'s vacancy list'],
+    ['https://career.habr.com/vacancies?q=go', null, 'a Habr Career search'],
     ['https://habr.com/ru/articles/912345/', null, 'a Habr article'],
     ['https://www.remocate.app/jobs/staff-software-engineer-backend-recoveries-affirm', 'board', 'a Remocate mirror page'],
     ['https://offerclaw.app/vacancy/chief-technology-officer-tekhnicheskiy-direktor-83351aab', 'board', 'an offerclaw mirror page'],

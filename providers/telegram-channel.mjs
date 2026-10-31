@@ -397,6 +397,9 @@ export function classifyLink(href) {
   if (!host || (!board && NON_APPLY_HOSTS.test(host)) || SHORTENER_HOSTS.test(host) || FORM_HOSTS.test(host)) return null;
   const path = u.pathname.replace(/\/+$/, '');
   if (host === 'linkedin.com' || host.endsWith('.linkedin.com')) return /\/jobs\/view\//.test(path) ? 'board' : null;
+  // Only a vacancy page: "/companies/job", "/companies/<slug>/vacancies" and
+  // "/vacancies?q=…" carry a vacancy word but are a profile and listings.
+  if (host === 'career.habr.com') return /^\/vacancies\/\d+$/.test(path) ? 'board' : null;
   // A homepage or a listing root stays one even with a tracking tail
   // (`/?utm_source=telegram` is what channel footers add); only a parameter
   // that could identify a vacancy (`?gh_jid=123`, `?id=…`) makes it a page.
