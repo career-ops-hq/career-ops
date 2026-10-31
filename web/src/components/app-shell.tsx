@@ -8,6 +8,7 @@ import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BackToTop } from "@/components/back-to-top";
+import { CommandPalette } from "@/components/command-palette";
 import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
 import { ApplyProvider } from "@/components/apply/apply-provider";
@@ -41,6 +42,7 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
               career-ops
             </span>
           </Link>
+          <CommandPalette followupsEnabled={followupsEnabled} />
           <nav className="flex flex-col gap-1">
             {visibleNavItems(followupsEnabled).map(({ href, label, icon: Icon, chip }) => {
               const active = isActivePath(href, pathname);
