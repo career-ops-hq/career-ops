@@ -80,9 +80,17 @@ const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 // bullet extraction runs). Stripping only doubled `**`/`__` markers — never
 // a single `*`/`_` — leaves a literal bullet character untouched, since a
 // real bullet is one asterisk, not two.
+const HEADING_BOUNDARY = '(?=\\s*(?:[:：/／\\-–—*_\\(\\)\\[\\]【】]|$))';
+const SKILL_TERM = '(?:experience|knowledge|skills|abilities)';
+const SKILL_SEP = '(?:,?\\s+(?:and|&)\\s+|,\\s*|\\s*[/／]\\s*)';
 const REQUIREMENT_HEADER_RE = new RegExp(
   '^#{0,6}\\s*\u3010?\\s*(?:(?:' + [
-    'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
+    'required', 'requirements', 'qualifications',
+    `ksa${HEADING_BOUNDARY}`,
+    `(?:requirement|qualification)${HEADING_BOUNDARY}`,
+    `(?:(?:role|job|position|minimum|basic|key|core)\\s+)(?:qualifications?|requirements?)(?:\\s+(?:and|&)\\s+${SKILL_TERM})?${HEADING_BOUNDARY}`,
+    `(?:qualifications?|requirements?)(?:\\s+(?:and|&)\\s+${SKILL_TERM})${HEADING_BOUNDARY}`,
+    'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
     // (?:'|’)?\s*re|\s+are (not just (?:'|’)?\s*re): the contracted-only form
     // matched "we're"/"we re" but not the equally common uncontracted "we are"
     // (#4273 — the Netflix posting that surfaced this used the uncontracted,
@@ -103,7 +111,7 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     "it(?:'|’)?s\\s+important\\s+to\\s+us\\s+that\\s+you\\s+have",
     'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
-    'skills\\s+(?:and|&)\\s+experience',
+    `(?:${SKILL_TERM}${SKILL_SEP}){1,3}${SKILL_TERM}(?:\\s+(?:required|requirements?))?${HEADING_BOUNDARY}`,
   ].join('|') + ')s?\\b|(?:' + [
     // Spanish (es-419 / es-ES) requirement headers. A Spanish-language
     // posting's requirements block is invisible to the English list above, so
@@ -357,12 +365,34 @@ function scanJd(jdText) {
       sawRequirementSection = true;
       // "Requirements: SQL; dbt; Tableau" puts the whole list on the header
       // line, with no bullets under it. A separator is required so a sentence
-      // such as "About you: Curious and kind" is not read as a list.
-      // The full-width colon and the CJK separators (、，；) count the same as
-      // their ASCII forms: "任职要求：Python、Docker".
-      const colon = headerLine.search(/[:：]/);
-      const inline = colon === -1 ? '' : headerLine.slice(colon + 1);
-      if (/[;,、，；]/.test(inline)) addSkillTokens(inline, skills);
+      // such as "About you: Curious and kind" or "Who you are: Passionate team player"
+      // is not read as a list.
+      // Inline requirements can be introduced by colons (: / ：) or dashes (" - ", " — ").
+      const sepMatch = /[:：]|\s+[-–—]\s+/.exec(headerLine);
+      const inline = sepMatch ? headerLine.slice(sepMatch.index + sepMatch[0].length) : '';
+      if (sepMatch) {
+        const isRequirementHeading =
+          /\b(?:require\w*|qualif\w*|must[- ]have|preferred|nice[- ]to[- ]have|skills?|experience|knowledge|abilities|ksa)\b|[\u4e00-\u9fa5]/i.test(
+            headerLine.slice(0, sepMatch.index)
+          );
+        if (/[;,、，；]/.test(inline)) {
+          addSkillTokens(inline, skills);
+        } else if (
+          inline.trim() !== '' &&
+          isRequirementHeading &&
+          (sepMatch[0] !== '：' || !/[\u4e00-\u9fa5]/.test(headerLine.slice(0, sepMatch.index)))
+        ) {
+          const opener = /^\s*([A-Z][a-z]+)\s+([a-z]+)/.exec(inline);
+          const stripped = opener ? inline.slice(inline.indexOf(opener[1]) + opener[1].length) : inline;
+          const fullSkills = extractSkills(inline);
+          const strippedSkills = extractSkills(stripped);
+          const keepsAll = [...fullSkills].every((s) => strippedSkills.has(s));
+          const isListConnector = opener && (opener[2] === 'and' || opener[2] === 'or');
+          const isUnknownSkill = isListConnector && fullSkills.size > 0;
+          const unknownOpener = opener && keepsAll && !isUnknownSkill && extractSkills(opener[1]).size === 0;
+          addSkillTokens(unknownOpener ? stripped : inline, skills);
+        }
+      }
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;
