@@ -30,7 +30,7 @@ const script = join(sandbox, 'generate-pdf.mjs');
 // imported lazily, so a sandbox without it would pass every entry unchecked
 // only if the gate were never reached. Here it must be reached.
 for (const file of [
-  'generate-pdf.mjs', 'verify-cv-facts.mjs', 'theme-style.mjs', 'cv-experience-order.mjs',
+  'generate-pdf.mjs', 'verify-cv-facts.mjs', 'cv-voice.mjs', 'theme-style.mjs', 'cv-experience-order.mjs',
   'tracker-utils.mjs', 'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
   'cv-sections-core.mjs', 'path-resolver.mjs',
 ]) copyFileSync(join(ROOT, file), join(sandbox, file));
@@ -77,6 +77,7 @@ writeFileSync(join(sandbox, 'honest-too.html'), cvDoc('Cut p95 latency by 30%.')
 // Counts the extractor cannot read (its lexicon covers English, German and
 // French, not Spanish): the gate warns, and says why.
 writeFileSync(join(sandbox, 'spanish.html'), cvDoc('Dirigió 45 técnicos de mantenimiento en 3 obras.'), 'utf-8');
+writeFileSync(join(sandbox, 'stock.html'), cvDoc('Spearheaded a team of 4 engineers and cut p95 latency by 30%.'), 'utf-8');
 
 function run(args) {
   const result = spawnSync(NODE, [script, ...args], {
@@ -157,6 +158,16 @@ try {
     pass('a warning prints what the gate could not check, not just the header');
   } else {
     fail(`single-file coverage warning: status=${spanish.status}\n${spanish.output.trim()}`);
+  }
+
+  const stock = run(['stock.html', 'single/stock.pdf']);
+  if (stock.status !== 0
+      && !existsSync(join(sandbox, 'single', 'stock.pdf'))
+      && /Voice check failed for stock\.html/.test(stock.output)
+      && /spearheaded/.test(stock.output)) {
+    pass('a stock verb the CV did not use blocks the PDF before render');
+  } else {
+    fail(`stock verb: status=${stock.status}\n${stock.output.trim()}`);
   }
 
   const singleSkipped = run(['inflated.html', 'single/inflated-skipped.pdf', '--skip-fact-check']);

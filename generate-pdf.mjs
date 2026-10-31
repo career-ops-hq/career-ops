@@ -1661,15 +1661,16 @@ async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
  * both paths, because the batch run is exactly that caller and for a while it
  * was the path with no gate at all.
  *
- * Callers pass the normalized HTML and skip the call when --skip-fact-check is
- * set or the workspace has no cv.md to check against.
+ * Callers pass the normalized HTML and the HTML from before ATS normalization.
+ * They skip the call when --skip-fact-check is set or the workspace has no cv.md.
  *
  * @param {string} html - Normalized HTML, as it will be printed.
  * @param {string} label - Document name for the error and warning lines.
+ * @param {string} [rawHtml] - HTML before ATS normalization, so an em dash is still visible.
  * @returns {Promise<void>} Resolves when the document passes or only warns.
- * @throws {Error} When a metric, fact or forbidden phrase blocks the document.
+ * @throws {Error} When the voice check or the fact gate rejects the document.
  */
-async function runFactGate(html, label) {
+async function runFactGate(html, label, rawHtml = html) {
   // Imported lazily, by the callers' guard. A static import is resolved at module
   // load whether or not the gate runs, and the page-budget/batch suites copy
   // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
@@ -1679,7 +1680,18 @@ async function runFactGate(html, label) {
   // module is genuinely missing in a real workspace this throws and the render
   // fails, which is the correct direction to fail for a fact gate.
   const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
-  const factCheck = assertFacts(html, { label, ...factGateInputs() });
+  const { voiceIssues, voiceTellMessage, voiceDashWarning, candidateOwnWords } = await import('./cv-voice.mjs');
+  const inputs = factGateInputs();
+  // The voice check allows wording the CV, voice-dna.md, and the cv-facts
+  // allow lists already have. article-digest.md backs facts, not phrasing.
+  const cvPath = resolve(workspaceRoot, 'cv.md');
+  const source = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
+  const found = voiceIssues(rawHtml, `${source}\n${candidateOwnWords(workspaceRoot)}`);
+  const voiceError = voiceTellMessage(found, label);
+  if (voiceError) throw new Error(voiceError);
+  const dashWarning = voiceDashWarning(found, label);
+  if (dashWarning) console.warn(`⚠️  ${dashWarning}`);
+  const factCheck = assertFacts(html, { label, ...inputs });
   // Ahead of the verdict, because it qualifies it: with no config the phrase
   // lists are empty, so a "passed" below covers metrics and facts only.
   if (factCheck.configMissing) {
@@ -1960,6 +1972,7 @@ async function generatePDF() {
   validateCvExperienceOrder(html, { allowNonChronological });
   validateLockedSections(html, cvMarkdown, readLockedSections(workspaceProfilePath(), sectionKey));
 
+  const rawHtml = html;
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
   html = normalized.html;
@@ -1973,7 +1986,7 @@ async function generatePDF() {
 
   // Fact gate, on the normalized HTML: the document that actually prints.
   if (!skipFactCheck) {
-    if (cvMarkdown) await runFactGate(html, basename(inputPath));
+    if (cvMarkdown) await runFactGate(html, basename(inputPath), rawHtml);
     else warnFactGateNotRun();
   }
 
@@ -2128,12 +2141,13 @@ async function runBatchFromManifest(manifestPath, globals) {
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
       validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
       validateLockedSections(html, cvMarkdown, lockedKeys);
+      const rawHtml = html;
       html = normalizeTextForATS(html).html;
       warnLongPortalFields(html, entryOutput);
       // Same gate, same guard and same place as the single render. A blocked
       // entry throws into the catch below: it is recorded as failed and never
       // reaches Chromium, and the rest of the batch still renders.
-      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput));
+      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput), rawHtml);
 
       entries.push({
         _idx: i,
