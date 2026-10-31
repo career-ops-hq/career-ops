@@ -258,6 +258,20 @@ func TestParseApplicationsResolvesTrackerRelativeReportLinks(t *testing.T) {
 	}
 }
 
+func TestNormalizeStatusSpeculative(t *testing.T) {
+	cases := map[string]string{
+		"Speculative": "speculative",
+		"speculative": "speculative",
+		"gambit":      "speculative",
+		"spec":        "speculative",
+	}
+	for in, want := range cases {
+		if got := NormalizeStatus(in); got != want {
+			t.Fatalf("NormalizeStatus(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // A report named with parentheses must resolve whole: a `[^)]+` link regex
 // cut `001-acme-(berlin)-….md` at the first `)` (career-ops-hq/career-ops#5482).
 func TestParseApplicationsKeepsParenthesesInReportLink(t *testing.T) {
@@ -638,6 +652,12 @@ func TestNormalizeStatus(t *testing.T) {
 				t.Errorf("NormalizeStatus(%q) = %q; want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStatusPrioritySpeculativeBeatsTerminal(t *testing.T) {
+	if StatusPriority("Speculative") >= StatusPriority("skip") {
+		t.Fatalf("Speculative should sort ahead of skip/rejected/discarded")
 	}
 }
 

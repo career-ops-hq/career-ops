@@ -25,10 +25,10 @@ function applicationByNumber<T extends { n: string }>(apps: T[], n: string): T |
 export const BATCH_CAP = 12; // hard ceiling on a single fan-out
 
 // Canonical states (templates/states.yml) — the web validates against the same set.
-const CANON_STATUS = ["Evaluated", "Applied", "Responded", "Assessment", "Interview", "Offer", "Hired", "Rejected", "Discarded", "SKIP"];
+const CANON_STATUS = ["Evaluated", "Speculative", "Applied", "Responded", "Assessment", "Interview", "Offer", "Hired", "Rejected", "Discarded", "SKIP"];
 
 const TAB_VALUES = [
-  "INBOX", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP", "OTHER",
+  "INBOX", "ALL", "EVALUATED", "SPECULATIVE", "APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP", "OTHER",
 ] as const;
 const SORT_VALUES = ["company", "role", "score", "status", "date"] as const;
 

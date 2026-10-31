@@ -714,6 +714,8 @@ func NormalizeStatus(raw string) string {
 	case strings.Contains(s, "discarded") || strings.Contains(s, "descartado") || s == "descartada" || s == "cerrada" || s == "cancelada" ||
 		strings.HasPrefix(s, "duplicado") || strings.HasPrefix(s, "dup") || strings.Contains(s, "iptal edildi") || strings.Contains(s, "iptal_edildi") || strings.Contains(s, "ıptal edildi") || strings.Contains(s, "ıptal_edildi"):
 		return "discarded"
+	case strings.Contains(s, "speculative") || s == "spec" || s == "gambit":
+		return "speculative"
 	case strings.Contains(s, "evaluated") || strings.Contains(s, "evaluada") || s == "condicional" || s == "hold" || s == "evaluar" || s == "verificar" || strings.Contains(s, "değerlendirildi") || strings.Contains(s, "degerlendirildi"):
 		return "evaluated"
 	default:
@@ -1057,7 +1059,7 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 // Reject malformed UI input cheaply; the writer validates against states.yml.
 func isCanonicalStatusName(status string) bool {
 	switch strings.ToLower(status) {
-	case "evaluated", "applied", "responded", "assessment", "interview", "offer", "hired", "rejected", "discarded", "skip":
+	case "evaluated", "speculative", "applied", "responded", "assessment", "interview", "offer", "hired", "rejected", "discarded", "skip":
 		return true
 	}
 	return false
@@ -1090,14 +1092,17 @@ func StatusPriority(status string) int {
 		return 4
 	case "evaluated":
 		return 5
-	case "skip":
+	// Right after evaluated, as in statusGroupOrder.
+	case "speculative":
 		return 6
-	case "rejected":
+	case "skip":
 		return 7
-	case "discarded":
+	case "rejected":
 		return 8
-	default:
+	case "discarded":
 		return 9
+	default:
+		return 10
 	}
 }
 

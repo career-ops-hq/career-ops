@@ -27,6 +27,9 @@ export const STATUS_ALIAS = {
   "değerlendirildi": "EVALUATED",
   degerlendirildi: "EVALUATED",
   evaluado: "EVALUATED", // web-only: not in states.yml
+  // Speculative — states.yml `speculative`
+  spec: "SPECULATIVE",
+  gambit: "SPECULATIVE",
   // Applied — states.yml `applied`
   aplicado: "APPLIED",
   enviada: "APPLIED",

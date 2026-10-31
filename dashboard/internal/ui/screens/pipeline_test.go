@@ -736,6 +736,24 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 	}
 }
 
+func TestPipelineTabsIncludeSpeculative(t *testing.T) {
+	found := false
+	for _, tab := range getPipelineTabs() {
+		if tab.filter == filterSpeculative {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected pipeline tabs to include the speculative filter")
+	}
+}
+
+func TestStatusLabelSpeculative(t *testing.T) {
+	if got := statusLabel("speculative"); got != "Speculative" {
+		t.Fatalf("statusLabel(speculative) = %q, want Speculative", got)
+	}
+}
+
 // Regression: the viewer status path starts the discard reason picker (or the
 // hired celebration) on the pipeline model and then immediately reloads data.
 // WithReloadedData must carry that in-progress flow state over — wiping it
@@ -824,6 +842,20 @@ func TestGetStatusPairsUnrecognizedStatusFallsBackToStaticOrder(t *testing.T) {
 	for i := range base {
 		if got[i].Canonical != base[i].Canonical {
 			t.Fatalf("got[%d].Canonical = %q, want %q (static order)", i, got[i].Canonical, base[i].Canonical)
+		}
+	}
+}
+
+func TestSpeculativeHasItsOwnStatusColour(t *testing.T) {
+	m := NewPipelineModel(theme.NewTheme(""), nil, model.PipelineMetrics{}, t.TempDir(), 120, 30)
+	colours := m.statusColorMap()
+	spec, ok := colours["speculative"]
+	if !ok {
+		t.Fatal("speculative has no status colour")
+	}
+	for status, c := range colours {
+		if status != "speculative" && c == spec {
+			t.Fatalf("speculative shares its colour with %q", status)
 		}
 	}
 }
