@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
+import { TemplatesSection } from "@/components/templates/templates-section";
 import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
 import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
 import { CONFIG_KEY as STORAGE_KEY, writeConfig } from "@/lib/config-events.mjs";
@@ -316,6 +317,8 @@ export function ConfigForm() {
       </button>
 
       <CadenceSettings />
+
+      <TemplatesSection />
 
       <div className="mt-8 flex items-center gap-3">
         <button
