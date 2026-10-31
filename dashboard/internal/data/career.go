@@ -970,16 +970,19 @@ func markdownLinkDestination(raw string) (string, bool) {
 var trackerHeaderAliases = map[string]string{
 	"#": "num", "num": "num",
 	"date": "date", "fecha": "date", "datum": "date", "data": "date",
-	"dato": "date", "tanggal": "date",
+	"dato": "date", "tanggal": "date", "tarih": "date",
 	"company": "company", "empresa": "company",
 	"firma": "company", "virksomhed": "company", "perusahaan": "company",
+	"entreprise": "company", "azienda": "company", "şirket": "company",
 	"via": "via", "role": "role", "puesto": "role",
-	"rolle": "role", "rola": "role", "vaga": "role",
-	"location": "location", "ort": "location", "score": "score", "status": "status",
-	"pdf": "pdf", "materials": "pdf", "report": "report",
+	"rolle": "role", "rola": "role", "vaga": "role", "ruolo": "role", "rol": "role",
+	"location": "location", "ort": "location",
+	"score": "score", "punteggio": "score", "puan": "score",
+	"status": "status", "statut": "status", "stato": "status", "durum": "status",
+	"pdf": "pdf", "materials": "pdf", "report": "report", "rapor": "report",
 	"apply link": "applylink", "apply": "applylink",
 	"follow-up": "followup", "follow up": "followup", "followup": "followup",
-	"notes": "notes", "url": "url",
+	"notes": "notes", "notlar": "notes", "url": "url",
 }
 
 // legacyTrackerColumns is the original fixed layout in splitTrackerRow field
