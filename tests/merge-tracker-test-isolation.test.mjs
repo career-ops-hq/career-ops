@@ -26,7 +26,7 @@ test('merge-tracker fixtures ignore failed rows from an inherited batch-state', 
   const previousState = process.env.CAREER_OPS_BATCH_STATE;
   process.env.CAREER_OPS_BATCH_STATE = inheritedState;
   try {
-    const output = run(NODE, ['merge-tracker.mjs'], {
+    const output = run(NODE, ['merge-tracker.mjs', '--allow-headerless'], {
       env: {
         ...process.env,
         CAREER_OPS_TRACKER: tracker,

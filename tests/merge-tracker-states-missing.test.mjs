@@ -54,7 +54,7 @@ test('merge-tracker merges with the status as written when templates/states.yml 
 
     const env = { ...process.env, CAREER_OPS_ROOT: dataRoot };
     for (const k of ['CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_ADDITIONS', 'CAREER_OPS_BATCH_STATE']) delete env[k];
-    const r = spawnSync(process.execPath, [join(codeRoot, 'merge-tracker.mjs')], {
+    const r = spawnSync(process.execPath, [join(codeRoot, 'merge-tracker.mjs'), '--allow-headerless'], {
       cwd: tmp, env, encoding: 'utf-8', timeout: 60_000,
     });
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
