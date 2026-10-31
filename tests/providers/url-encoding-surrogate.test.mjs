@@ -305,6 +305,22 @@ try {
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/101',
   );
+
+  // trakstar.parseTrakstarPage — an off-host hosted_url is rebuilt from the
+  // opening id, so a lone surrogate in that id drops one row.
+  const { parseTrakstarPage } = await load('trakstar.mjs');
+  check(
+    'trakstar.parseTrakstarPage',
+    () => parseTrakstarPage(
+      { meta: { total: 2 }, objects: [
+        { id: `${LONE}bad`, title: 'Bad Id', hosted_url: 'https://evil.example/nope' },
+        { id: 'good1', title: 'Good Id', hosted_url: 'https://evil.example/nope' },
+      ] },
+      'Acme',
+      'acme',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.hire.trakstar.com/jobs/good1/',
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -331,7 +347,7 @@ try {
   // regression this list catches.
   const CONVERTED = [
     'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
-    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
+    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs', 'trakstar.mjs',
     'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
 
