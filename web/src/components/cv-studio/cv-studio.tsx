@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, FileText, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { arrange, renderBlocks, type BlockTree } from "@/lib/cv-studio/html-blocks.mjs";
 import { emptyEdits, resolveStudio, studioReducer, type StudioAction, type StudioDoc, type StudioEdits } from "@/lib/cv-studio/studio.mjs";
+import { shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
 import { SectionCard } from "./section-card";
 import { CvPreview } from "./cv-preview";
 import { CoverageMeter } from "./coverage-meter";
@@ -21,6 +22,7 @@ const REASONS: Record<string, { title: string; body: string }> = {
 };
 
 const STALE = "This CV was regenerated in another tab. Reload the Studio.";
+const KEEPALIVE_BYTES = 60_000;
 const SAVE_ERRORS: Record<string, string> = { stale: STALE, busy: "This CV is already being saved. Wait for that save to finish." };
 
 export function CvStudio({ n }: { n: string }) {
@@ -65,34 +67,101 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
 
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const send = useCallback(
-    (method: "PUT" | "POST", body: object) => {
-      const sent = queue.current.then(() => fetch(`/api/cv-studio/${encodeURIComponent(n)}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
-      queue.current = sent.catch(() => {});
+    (method: "PUT" | "POST", body: object, keepalive = false) => {
+      const payload = JSON.stringify(body);
+      const bytes = new TextEncoder().encode(payload).length;
+      const start = () =>
+        fetch(`/api/cv-studio/${encodeURIComponent(n)}`, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: keepalive && bytes < KEEPALIVE_BYTES,
+        });
+      // A keepalive request is the page-exit flush. It starts now: queued
+      // behind an autosave, it might never start before the page is gone.
+      // The server drops it if an older PUT from this tab lands after it.
+      const sent = keepalive ? start() : queue.current.then(start);
+      queue.current = Promise.all([queue.current, sent]).catch(() => {});
       return sent;
     },
     [n],
   );
 
-  const first = useRef(true);
+  const savedJsonRef = useRef(JSON.stringify(data.edits));
+  const savingJsonRef = useRef<string | null>(null);
+  const editsRef = useRef(edits);
+  // After commit, not during render. A discarded render must not publish edits the screen no longer shows.
+  useLayoutEffect(() => {
+    editsRef.current = edits;
+  }, [edits]);
+  const tabRef = useRef(Math.random().toString(36).slice(2, 12));
+  const revRef = useRef(0);
+  const [, rerender] = useState(0);
+  const showStatus = useCallback(() => rerender((n) => n + 1), []);
+
+  const putEdits = useCallback(
+    (payload: StudioEdits, keepalive: boolean) => {
+      const serialized = JSON.stringify(payload);
+      if (!shouldSendEdits(savedJsonRef.current, serialized, savingJsonRef.current, keepalive)) return;
+      savingJsonRef.current = serialized;
+      showStatus();
+      revRef.current += 1;
+      send("PUT", { edits: payload, tab: tabRef.current, rev: revRef.current }, keepalive)
+        .then((r) => {
+          if (savingJsonRef.current !== serialized) return;
+          savingJsonRef.current = null;
+          if (!r.ok) {
+            setAutosaveError(r.status === 409 ? STALE : "Autosave failed. Your latest changes are not saved yet.");
+            showStatus();
+            return;
+          }
+          // The server now holds this payload. If the edits moved on, even back
+          // to what was saved before it, send them.
+          const latest = JSON.stringify(editsRef.current);
+          setAutosaveError(null);
+          savedJsonRef.current = serialized;
+          if (latest !== serialized) putEdits(editsRef.current, keepalive);
+          showStatus();
+        })
+        .catch(() => {
+          if (savingJsonRef.current === serialized) savingJsonRef.current = null;
+          setAutosaveError("Autosave failed. Is the dashboard still running?");
+          showStatus();
+        });
+    },
+    [showStatus, send],
+  );
+
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
+    const flush = () => putEdits(editsRef.current, true);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [putEdits]);
+
+  useEffect(() => {
+    const serialized = JSON.stringify(edits);
+    if (serialized === savedJsonRef.current || serialized === savingJsonRef.current) return;
     setSave((s) => (s.kind === "saved" ? { kind: "idle" } : s));
-    const t = setTimeout(() => {
-      send("PUT", { edits })
-        .then((r) => setAutosaveError(r.ok ? null : r.status === 409 ? STALE : "Autosave failed. Your latest changes are not saved yet."))
-        .catch(() => setAutosaveError("Autosave failed. Is the dashboard still running?"));
-    }, 500);
-    return () => clearTimeout(t);
-  }, [edits, send]);
+    const timer = setTimeout(() => putEdits(editsRef.current, false), 500);
+    return () => clearTimeout(timer);
+  }, [edits, putEdits]);
+
+  const editsJson = JSON.stringify(edits);
+  const editStatus = savingJsonRef.current === editsJson ? "Saving" : editsJson !== savedJsonRef.current ? "Unsaved" : "Saved";
 
   const saveForApply = useCallback(async () => {
     setSave({ kind: "saving" });
     try {
-      const r = await send("POST", { op: "save", edits });
-      const body = (await r.json()) as { pdf?: string; indexed?: boolean; warnings?: string[]; error?: string };
+      revRef.current += 1;
+      const r = await send("POST", { op: "save", edits, tab: tabRef.current, rev: revRef.current });
+      const body = (await r.json()) as { pdf?: string; indexed?: boolean; warnings?: string[]; error?: string; superseded?: boolean };
+      if (body.superseded) {
+        setSave({ kind: "failed", error: "A newer edit was saved while this one was sending. Save again to export the latest." });
+        return;
+      }
       setSave(r.ok && body.pdf ? { kind: "saved", pdf: body.pdf, indexed: body.indexed === true, warnings: body.warnings ?? [] } : { kind: "failed", error: SAVE_ERRORS[body.error ?? ""] ?? body.error ?? "Saving failed." });
     } catch {
       setSave({ kind: "failed", error: "Saving failed. Is the dashboard still running?" });
@@ -117,6 +186,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
           <button onClick={() => dispatch({ type: "reset" })} className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand-text">
             <RotateCcw className="size-3.5" /> Reset
           </button>
+          <p role="status" className="text-xs text-muted">{editStatus}</p>
           <button
             onClick={saveForApply}
             disabled={save.kind === "saving"}
