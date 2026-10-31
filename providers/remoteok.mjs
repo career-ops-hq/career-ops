@@ -12,6 +12,13 @@
 
 const FEED_URL = 'https://remoteok.com/api';
 
+/** Epoch ms for a feed date string, or undefined when absent or unparseable. */
+function toEpochMs(value) {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = Date.parse(value.trim());
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 /** @type {Provider} */
 export default {
   id: 'remoteok',
@@ -20,7 +27,7 @@ export default {
    * Fetches and normalizes postings from the RemoteOK public feed.
    * @param {{ name?: string }} entry - The job_boards entry being processed.
    * @param {{ fetchJson: (url: string, opts?: { redirect?: 'error'|'follow'|'manual' }) => Promise<any> }} ctx - HTTP context.
-   * @returns {Promise<Array<{title: string, url: string, company: string, location: string}>>}
+   * @returns {Promise<Array<{title: string, url: string, company: string, location: string, postedAt?: number}>>}
    */
   async fetch(entry, ctx) {
     // redirect:'error' prevents SSRF via server-side redirects
@@ -33,11 +40,18 @@ export default {
       .filter(j => j && typeof j === 'object'
         && typeof j.position === 'string' && j.position.trim() !== ''
         && typeof j.url === 'string' && /^https?:\/\//i.test(j.url.trim()))
-      .map(j => ({
-        title: j.position.trim(),
-        url: j.url.trim(),
-        company: typeof j.company === 'string' && j.company.trim() ? j.company.trim() : (entry.name || 'RemoteOK'),
-        location: typeof j.location === 'string' ? j.location.trim() : '',
-      }));
+      .map(j => {
+        const job = {
+          title: j.position.trim(),
+          url: j.url.trim(),
+          company: typeof j.company === 'string' && j.company.trim() ? j.company.trim() : (entry.name || 'RemoteOK'),
+          location: typeof j.location === 'string' ? j.location.trim() : '',
+        };
+        // `date` is ISO 8601 with an offset; without it max_posting_age_days
+        // can't judge the row.
+        const postedAt = toEpochMs(j.date);
+        if (postedAt !== undefined) job.postedAt = postedAt;
+        return job;
+      });
   },
 };
