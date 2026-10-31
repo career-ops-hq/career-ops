@@ -54,7 +54,7 @@ export const LOCALES = {
     input: 'Bạn dán URL hoặc mô tả tin tuyển dụng', pill: 400,
     s1: 'Archetype Detection', n1: 'Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation',
     s2: 'A-H Evaluation', sub2: 'reads cv.md', n2: 'Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy',
-    outs: ['Report', 'CV tùy chỉnh', 'Entri Tracker'],
+    outs: ['Report', 'CV tùy chỉnh', 'Tracker'],
   },
 };
 
