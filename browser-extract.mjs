@@ -609,6 +609,10 @@ export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_
   if (where) meta.push(`Location: ${where}`);
   if (loc.remote === true) meta.push('Work model: Remote');
   else if (loc.hybrid === true) meta.push('Work model: Hybrid');
+  // A closed posting can still ship its ad. The marker carries `active: false`
+  // with the text the way Workday carries `canApply: false`, so the caller
+  // reads the closure instead of falling back to a page that hides it.
+  if (json?.active === false) meta.push('Applications closed (active: false)');
 
   return {
     url: postingUrl,

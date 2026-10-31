@@ -42,6 +42,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
 import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
+import { fetchJdViaKnownApi } from './browser-extract.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -710,8 +711,54 @@ export function unreadableJobPage({ status = 0, requestedUrl = '', finalUrl = ''
   return null;
 }
 
-async function fetchJobPage(url) {
+// What the page read strips before the text is taken: it is not job content.
+const NON_CONTENT_SELECTOR = 'script,style,nav,footer,header';
+
+// Most text the runner keeps of one job description. Handed to the API fetcher
+// too, so it does not cut the text short of what the slices below would keep.
+const JD_TEXT_CAP = 16_000;
+
+// Wait for a single-page app to render its job description: until the text the
+// read will keep (the main content, minus nav/header/footer and what is not
+// shown) holds more than 1500 chars, or 15 s. Counting the whole body let a
+// long nav or a consent panel pass while the description still said
+// "Loading...". The count leaves the live DOM alone; the read strips it
+// afterwards. A page that never gets that long (a short posting) is read as it
+// stands.
+export async function waitForJobText(page) {
+  await page.waitForFunction((selector) => {
+    const root = document.querySelector('main, [role="main"], article') || document.body || document;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let length = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const el = node.parentElement;
+      if (!el || el.closest(selector) || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) continue;
+      length += node.nodeValue.trim().length;
+      if (length > 1500) return true;
+    }
+    return false;
+  }, NON_CONTENT_SELECTOR, { timeout: 15_000, polling: 250 }).catch(() => {});
+}
+
+// `fetchApi` is a test seam for the ATS API fetch; the default is the real one.
+export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) {
   assertSafeRemoteUrl(url);
+  const viaApi = await fetchApi(url, JD_TEXT_CAP);
+  if (viaApi?.text) {
+    const { title, text } = viaApi;
+    // The title leads the content, as fetch-jd.mjs prints it: the normalizers
+    // keep it apart from the text and a description need not repeat it.
+    const unreadable = unreadableJobPage({ status: 200, requestedUrl: url, finalUrl: url, text });
+    if (!unreadable) return (title ? `${title}\n\n${text}` : text).slice(0, JD_TEXT_CAP);
+    // The ATS says the posting is closed (Workday canApply, SmartRecruiters
+    // active): a browser read would only lose that. Any other unreadable
+    // reason (too short ...) still falls through to the page.
+    if (classifyLiveness({ status: 200, requestedUrl: url, finalUrl: url, bodyText: text }).result === 'expired') {
+      // Left pending in pipeline.md like any unreadable page (#5814): cmdPipeline
+      // marks a row done only when cmdEvaluate returns a report.
+      throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
+    }
+  }
   let chromium;
   if (!process.env.CAREER_OPS_NO_PLAYWRIGHT) {
     try {
@@ -728,13 +775,13 @@ async function fetchJobPage(url) {
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForTimeout(2000); // wait for SPA render
-      const text = await page.evaluate(() => {
-        document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
+      await waitForJobText(page); // wait for SPA render
+      const text = await page.evaluate((selector) => {
+        document.querySelectorAll(selector).forEach(el => el.remove());
         return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
-      });
+      }, NON_CONTENT_SELECTOR);
       unreadable = unreadableJobPage({ status: response?.status() ?? 0, requestedUrl: url, finalUrl: page.url(), text });
-      if (!unreadable) return text.slice(0, 16_000);
+      if (!unreadable) return text.slice(0, JD_TEXT_CAP);
     } catch (e) {
       console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
     } finally {
@@ -754,7 +801,7 @@ async function fetchJobPage(url) {
     const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
     if (unreadable) throw new Error(`no job description (${unreadable})`);
-    return text.slice(0, 16_000);
+    return text.slice(0, JD_TEXT_CAP);
   } catch (e) {
     throw new Error(`Could not fetch job page: ${e.message}`);
   }
