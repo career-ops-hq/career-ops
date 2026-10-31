@@ -132,7 +132,28 @@ const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 // module must stay side-effect free: a sibling that only reads a constant used
 // to leave a stray data/ in whatever cwd it ran from.
 
-const CONCURRENCY = 10;
+// A morning scan of mixed ATS hosts was waiting on 10 slots while the CPU
+// sat idle. 32 is the global cap. 10 per hostname keeps a single-ATS list
+// at today's parallelism, so one Greenhouse board does not get a bigger
+// burst than it did before. Verify stays at 10. It hammers one URL at a
+// time and is not the morning-scan wait.
+export const SCAN_CONCURRENCY = 32;
+export const HOST_CONCURRENCY = 10;
+export const VERIFY_CONCURRENCY = 10;
+
+export function companyFetchHost(company) {
+  try {
+    const detected = company?._provider?.detect?.(company);
+    const raw = (detected && typeof detected.url === 'string' && detected.url)
+      || (typeof company?.api === 'string' && company.api)
+      || (typeof company?.careers_url === 'string' && company.careers_url)
+      || '';
+    if (!raw) return '';
+    return new URL(raw).hostname;
+  } catch {
+    return '';
+  }
+}
 const PROGRESS_EVERY = 25;
 
 export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
@@ -3816,20 +3837,97 @@ export function emptyTargetStatus(observation) {
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
-async function parallelFetch(tasks, limit, onDone = () => {}) {
-  const results = [];
-  let i = 0;
+export async function parallelFetch(tasks, limit, onDone = () => {}, { hostOf = null, hostLimit = limit } = {}) {
+  // Verify and any other caller that does not name a host keeps the plain
+  // worker pool. Completion order of the returned array stays what it was.
+  if (typeof hostOf !== 'function') {
+    const results = [];
+    let i = 0;
 
-  async function next() {
-    while (i < tasks.length) {
-      const task = tasks[i++];
-      results.push(await task());
-      onDone();
+    async function next() {
+      while (i < tasks.length) {
+        const task = tasks[i++];
+        results.push(await task());
+        onDone();
+      }
     }
+
+    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
+    await Promise.all(workers);
+    return results;
   }
 
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
-  await Promise.all(workers);
+  const n = tasks.length;
+  if (n === 0 || !(limit > 0)) return [];
+  const perHost = Math.max(1, hostLimit);
+  const hosts = tasks.map((task, index) => {
+    try {
+      const host = hostOf(task, index);
+      return typeof host === 'string' ? host : '';
+    } catch {
+      return '';
+    }
+  });
+  const results = new Array(n);
+  const pending = hosts.map((_, index) => index);
+  const hostActive = new Map();
+  let active = 0;
+  let finished = 0;
+  let firstError = null;
+
+  function takeReady() {
+    for (let k = 0; k < pending.length; k++) {
+      const index = pending[k];
+      const host = hosts[index];
+      // An empty host is not a bucket. Unknown URLs must not share one cap.
+      if (host && (hostActive.get(host) || 0) >= perHost) continue;
+      pending.splice(k, 1);
+      return index;
+    }
+    return -1;
+  }
+
+  await new Promise((resolve, reject) => {
+    const launch = () => {
+      while (active < limit) {
+        const index = takeReady();
+        if (index < 0) break;
+        active += 1;
+        const host = hosts[index];
+        if (host) hostActive.set(host, (hostActive.get(host) || 0) + 1);
+        Promise.resolve()
+          .then(() => tasks[index]())
+          .then(
+            (value) => {
+              results[index] = value;
+              try {
+                onDone();
+              } catch (err) {
+                if (firstError === null) firstError = err;
+              }
+            },
+            (err) => {
+              if (firstError === null) firstError = err;
+            },
+          )
+          .finally(() => {
+            active -= 1;
+            finished += 1;
+            if (host) {
+              const left = (hostActive.get(host) || 1) - 1;
+              if (left <= 0) hostActive.delete(host);
+              else hostActive.set(host, left);
+            }
+            launch();
+            if (finished === n) {
+              if (firstError !== null) reject(firstError);
+              else resolve();
+            }
+          });
+      }
+    };
+    launch();
+  });
   return results;
 }
 
@@ -3874,7 +3972,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       console.warn(`  ⚠️ API verification failed for ${offer.url}; falling back to Playwright: ${err.message}`);
       verdicts[i] = null;
     }
-  }), CONCURRENCY);
+  }), VERIFY_CONCURRENCY);
 
   let browser = null, page = null, headed = null;
   let hadBrowserOffer = false;
@@ -4731,7 +4829,10 @@ async function main() {
     }
   });
 
-  await parallelFetch(tasks, CONCURRENCY, progressTicker(tasks.length));
+  await parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
+    hostLimit: HOST_CONCURRENCY,
+    hostOf: (_task, index) => companyFetchHost(targets[index]),
+  });
   // --dry-run leaves no trace, this cache included.
   if (!dryRun) {
     try {
