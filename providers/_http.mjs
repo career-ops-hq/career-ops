@@ -10,6 +10,7 @@ import {
 } from '../user-agent.mjs';
 import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
 import { currentConnectionScope, currentAbortSignal } from './_connection-scope.mjs';
+import { cachedText } from './_http-cache.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 
 /** @typedef {import('./_types.js').Context} Context */
@@ -150,7 +151,7 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
  * @param {typeof fetch} [fetchImpl] undici's fetch when a proxy dispatcher is used; global fetch otherwise.
  * @returns {Promise<any>}
  */
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse, acceptNotModified = false } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -198,6 +199,13 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
         err.message += ' (proxy variables are set but provider requests use direct fetch; set CAREER_OPS_TRUST_PROXY_EGRESS=1 only if your proxy blocks private destination addresses)';
       }
       throw err;
+    }
+    // 304 is the answer to If-None-Match, not a failed board. Count it as a
+    // success and let the caller reuse the body it saved.
+    if (acceptNotModified && res.status === 304) {
+      try { await res.body?.cancel(); } catch {}
+      onResponse?.({ status: 200, headers: res.headers });
+      return await consume(res);
     }
     onResponse?.(res);
     const isInspectableManualRedirect = allowManualRedirectResponse
@@ -370,6 +378,37 @@ async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+function boardText(text) {
+  return String(text).replace(/^\uFEFF/, '');
+}
+
+async function readBoardText(url, opts, maxBytes, conditional) {
+  const headers = new Headers(opts.headers || {});
+  if (conditional?.ifNoneMatch && !headers.has('if-none-match')) {
+    headers.set('if-none-match', conditional.ifNoneMatch);
+  }
+  const acceptNotModified = headers.has('if-none-match');
+  return fetchWithTimeout(url, { ...opts, headers, acceptNotModified }, async (res) => {
+    if (acceptNotModified && res.status === 304) return { notModified: true };
+    const text = await readBodyCapped(res, maxBytes);
+    const cacheControl = res.headers.get('cache-control') || '';
+    return {
+      body: text,
+      etag: res.headers.get('etag'),
+      noStore: cacheControl.toLowerCase().includes('no-store'),
+    };
+  });
+}
+
+function fetchCachedBody(url, opts, maxBytes, json) {
+  return cachedText(url, opts, async (requestUrl, requestOpts, conditional) => {
+    const loaded = await readBoardText(requestUrl, requestOpts, maxBytes, conditional);
+    // A body that does not parse is not a board we should serve again.
+    if (json && !loaded.notModified) JSON.parse(boardText(loaded.body));
+    return loaded;
+  });
+}
+
 /**
  * Fetch and parse a JSON response, with the shared timeout and non-2xx guard.
  *
@@ -384,14 +423,11 @@ async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
  * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
 export async function fetchJson(url, opts = {}) {
-  const maxBytes = resolveMaxBytes(opts.maxBytes);
-  return fetchWithTimeout(url, opts, async (res) => {
-    // res.json() stripped a leading UTF-8 BOM (the spec's UTF-8 decode does);
-    // decoding the body as text and parsing it by hand does not, so a
-    // BOM-prefixed board answer would stop parsing here.
-    const text = await readBodyCapped(res, maxBytes);
-    return JSON.parse(text.replace(/^\uFEFF/, ''));
-  });
+  const text = await fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), true);
+  // res.json() stripped a leading UTF-8 BOM (the spec's UTF-8 decode does);
+  // decoding the body as text and parsing it by hand does not, so a
+  // BOM-prefixed board answer would stop parsing here.
+  return JSON.parse(boardText(text));
 }
 
 /**
@@ -445,8 +481,7 @@ export async function fetchTextHead(url, opts = {}) {
  * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
 export async function fetchText(url, opts = {}) {
-  const maxBytes = resolveMaxBytes(opts.maxBytes);
-  return fetchWithTimeout(url, opts, async (res) => readBodyCapped(res, maxBytes));
+  return fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), false);
 }
 
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
