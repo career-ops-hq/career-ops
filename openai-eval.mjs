@@ -373,7 +373,8 @@ try {
   // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
   // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
   // Header-Timeout, bevor die erste Zeile ankommt (8 t/s × 22k-Prefill).
-  const res = await fetch(endpoint, {
+  const signal = AbortSignal.timeout(timeoutMs);
+  const send = (withUsage) => fetch(endpoint, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -383,13 +384,21 @@ try {
         { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
       stream:      true,
+      ...(withUsage && { stream_options: { include_usage: true } }),
       temperature: 0.4,
     }),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal,
   });
 
+  let res = await send(true);
+  let body = res.ok ? '' : await res.text();
+  // Mistral, among others, answers an unknown field with 400/422 and names it.
+  if ((res.status === 400 || res.status === 422) && /stream_options|include_usage/.test(body)) {
+    res = await send(false);
+    body = res.ok ? '' : await res.text();
+  }
+
   if (!res.ok) {
-    const body = await res.text();
     console.error(`❌  API error: HTTP ${res.status}`);
     console.error(`    ${body.slice(0, 300)}`);
     if (res.status === 401 || res.status === 403) {
@@ -406,6 +415,7 @@ try {
   const decoder = new TextDecoder();
   let sseBuf = '';
   let thinkOpen = false;
+  let streamUsage;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -419,6 +429,7 @@ try {
       if (payload === '[DONE]') continue;
       let delta;
       try { delta = JSON.parse(payload); } catch { continue; }
+      streamUsage = delta.usage ?? delta.x_groq?.usage ?? streamUsage;
       const d = delta.choices?.[0]?.delta ?? {};
       if (d.reasoning_content) {
         if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
@@ -430,6 +441,7 @@ try {
     }
   }
   if (thinkOpen) parts.push('\n</think>\n');
+  if (streamUsage) tracker.record('evaluation', normalizeOpenAIUsage(streamUsage));
   evaluationText = parts.join('').trim();
   if (!evaluationText) {
     console.error('❌  The endpoint returned an empty response.');
