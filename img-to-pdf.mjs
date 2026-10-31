@@ -24,7 +24,6 @@
  * the script errors out rather than silently clobbering a PDF.
  */
 
-import { chromium } from 'playwright';
 import { resolve, dirname, extname } from 'path';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
@@ -127,6 +126,9 @@ export async function convertImageToPdf(inputPath, outputPath, { force = false }
 
   await mkdir(dirname(outputPath), { recursive: true });
 
+  // After argv checks. A static import made --help and a missing path wait
+  // on playwright, and crash when the package was not installed.
+  const { chromium } = await import('playwright');
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
