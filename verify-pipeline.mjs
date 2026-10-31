@@ -373,6 +373,31 @@ function extractReportUrlKey(reportContent) {
   return normalizeUrl(unwrapReportUrlToken(m[1]));
 }
 
+// Report numbers a tracker row's Report cell links: the [NNN] link text(s) and
+// the NNN- prefix of the linked filename(s). Shared with Check 10.
+function linkedReportNums(cell) {
+  const nums = [];
+  for (const link of parseMarkdownLinks(cell)) {
+    if (/^\d+$/.test(link.label)) nums.push(parseInt(link.label, 10));
+    const m = link.target.split(/[\\/]/).pop().match(/^(\d+)-/);
+    if (m) nums.push(parseInt(m[1], 10));
+  }
+  return nums;
+}
+
+// A re-evaluation keeps the earlier report on the same row (#5780): both links
+// in the Report cell, or merge-tracker's `Superseded report [N]` marker in
+// Notes. Map each report number to the rows that keep it on record.
+const SUPERSEDED_RE = /Superseded report \[(\d+)\]/gi;
+const rowsByReport = new Map();
+entries.forEach((e, row) => {
+  const superseded = [...e.notes.matchAll(SUPERSEDED_RE)].map(m => parseInt(m[1], 10));
+  for (const n of [...linkedReportNums(e.report), ...superseded]) {
+    if (!rowsByReport.has(n)) rowsByReport.set(n, new Set());
+    rowsByReport.get(n).add(row);
+  }
+});
+
 const reportFiles = existsSync(REPORTS_DIR)
   ? readdirSync(REPORTS_DIR).filter(f => REPORT_FILE_RE.test(f))
   : [];
@@ -380,7 +405,7 @@ const reportFiles = existsSync(REPORTS_DIR)
 let dupReports = 0;
 const reportsByRole = new Map();
 for (const name of reportFiles) {
-  const companySlug = name.match(REPORT_FILE_RE)[2];
+  const [, num, companySlug] = name.match(REPORT_FILE_RE);
   let role = null;
   let urlKey = '';
   try {
@@ -393,7 +418,7 @@ for (const name of reportFiles) {
   if (!role) continue;
   const key = normalizeKey(companySlug) + '::' + normalizeKey(role);
   if (!reportsByRole.has(key)) reportsByRole.set(key, []);
-  reportsByRole.get(key).push({ name, urlKey });
+  reportsByRole.get(key).push({ name, urlKey, num: parseInt(num, 10) });
 }
 for (const group of reportsByRole.values()) {
   if (group.length < 2) continue;
@@ -404,8 +429,14 @@ for (const group of reportsByRole.values()) {
   // a key and no two share one.
   const keys = group.map(r => r.urlKey);
   if (keys.every(Boolean) && new Set(keys).size === keys.length) continue;
+  // One tracker row keeping every report on record is a re-evaluation, not a
+  // concurrent-worker race. An unreferenced report, reports split across rows,
+  // or two files sharing one number still warn.
+  const nums = group.map(r => r.num);
+  const rows = new Set(nums.flatMap(n => [...(rowsByReport.get(n) ?? [])]));
+  if (new Set(nums).size === nums.length && nums.every(n => rowsByReport.has(n)) && rows.size === 1) continue;
   warn(`Duplicate reports for same company+role: ${group.map(r => r.name).join(', ')}`,
-       "open both reports and delete or archive the stale one if it is a concurrent-worker duplicate; keep both if the JD changed (re-evaluation) or the openings differ (add the posting URL)");
+       "open both reports and delete or archive the stale one if it is a concurrent-worker duplicate; for a re-evaluation, keep both on one row (link both in its Report cell); if the openings differ, add each posting URL");
   dupReports++;
 }
 if (dupReports === 0) ok('No duplicate reports for the same company+role');
@@ -431,17 +462,12 @@ if (dupReports === 0) ok('No duplicate reports for the same company+role');
 // in the cell false-positives as an orphan.
 const referencedNums = new Set();
 for (const e of entries) {
-  const linkTexts = [...e.report.matchAll(/\[(\d+)\]/g)];
-  const linkTargets = parseMarkdownLinks(e.report).map(link => link.target);
-  if (linkTexts.length === 0 && linkTargets.length === 0) {
+  const nums = linkedReportNums(e.report);
+  if (nums.length === 0 && parseMarkdownLinks(e.report).length === 0) {
     referencedNums.add(e.num);
     continue;
   }
-  for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
-  for (const lt of linkTargets) {
-    const m = lt.split(/[\\/]/).pop().match(/^(\d+)-/);
-    if (m) referencedNums.add(parseInt(m[1], 10));
-  }
+  for (const n of nums) referencedNums.add(n);
 }
 
 let orphanReports = 0;
