@@ -201,6 +201,10 @@ CV'ni yeniden ifade eder; asla uydurmamalıdır. Koddaki bir denetim, CV'nde de 
 
 </details>
 
+## Nasıl Çalışır
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+
 ## Hızlı Başlangıç
 
 **En hızlı yol, tek komutla:**
@@ -245,13 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline
-# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
-# In Codex, ask for the same mode in plain language, e.g.:
-# "Run the career-ops scan mode"
-# "Run the career-ops pipeline mode for data/pipeline.md"
-# "Run the career-ops pdf mode for the latest evaluated role"
-# "Run the career-ops tracker mode and summarize the current statuses"
+# Paste a job URL or JD text to trigger auto-pipeline.
+# Every other mode, and how to ask for it in your CLI: see Usage below.
 ```
 
 </details>
@@ -268,187 +267,131 @@ Bu, `career-ops` ikilisini global olarak kurar; böylece `career-ops init [folde
 - `npx @santifer/career-ops init`: ilk kullanım için en iyisi; özel bir proje klasörü oluşturur.
 - `npm i -g @santifer/career-ops`: `npx` biçimi yerine `career-ops init` yazmayı tercih ediyorsan. Başka komut eklemez.
 
+### Çalıştırmanın diğer yolları
+
+- **Herhangi bir klasörden, Claude Code eklentisi olarak:** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **Yapay zekâ CLI'ı olmadan:** bağımsız Gemini, Ollama ve OpenAI uyumlu betikler bir iş tanımını kendi başlarına değerlendirir. Bkz. [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval).
+
 > **Sistem, bizzat yapay zekâ kodlama CLI'ın tarafından özelleştirilmek üzere tasarlandı.** Modlar, arketipler, puanlama ağırlıkları, pazarlık senaryoları: değiştirmesini istemen yeterli. Kullandığı dosyaların aynısını okur, bu yüzden neyi düzenleyeceğini tam olarak bilir.
 
 Tam kurulum kılavuzu için [docs/SETUP.md](docs/SETUP.md), career-ops'u özel veya yerel modellerle ucuza çalıştırmak için [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) (Antigravity CLI'ın ücretsiz katmanında sıfır maliyetle çalıştırmak için [docs/FREE_TIER.md](docs/FREE_TIER.md)), tekrarlayan taramaları zamanlamak ve token harcamayan bir eleme-kısa liste tarifi için [docs/AUTOMATION.md](docs/AUTOMATION.md), ATS otomatik doldurma akışının ayrıntıları için [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md), LinkedIn bağlantı dışa aktarımını hunindeki şirketlerle çapraz kontrol etmek için [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) ve yaygın kurulum sorularının cevapları için [docs/FAQ.md](docs/FAQ.md) sayfasına bak; buna [hikâye kaynağının uydurma sayıları nasıl engellediği](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank) de dahil. Tasarım ilkeleri [ARCHITECTURE.md](ARCHITECTURE.md) içinde; çalışma zamanı akışları [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) içinde.
 
 ## Kullanım
 
-career-ops ortak bir komut yönlendiricisi kullanır. Eğik çizgi komutlarını kaydeden CLI'larda şöyle görünür:
+Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, CV'ni ilana göre uyarlar (varsayılan olarak PDF) ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur. Bir ilan okunamazsa pipeline durur ve metni yapıştırmanı ister.
 
-```
-/career-ops           → Tüm kullanılabilir komutları göster
-/career-ops {JD}      → OTOMATİK HAT: değerlendirme + rapor + PDF + takipçi (metin veya URL yapıştır)
-/career-ops pipeline  → Gelen kutusundaki bekleyen URL'leri işle (data/pipeline.md)
-/career-ops oferta    → Yalnızca değerlendirme, A'dan H'ye bloklar (otomatik PDF yok)
-/career-ops ofertas   → Birden çok ilanı karşılaştır ve sırala
-/career-ops contacto  → LinkedIn hamlesi: kişileri bul + mesaj taslağı yaz
-/career-ops deep      → Şirket hakkında derin araştırma prompt'u
-/career-ops interview-prep → Şirkete özel mülakat hazırlık belgesi üret
-/career-ops interview    → Etkileşimli profil/CV tanışma mülakatı
-/career-ops master-profile → Master Career Profile'ını içe aktar, gözden geçir ve doğrula
-/career-ops eu-swe    → CV/başvuru/mülakat öncesinde bir Avrupa SWE başvurusunu kalibre et
-/career-ops interview/plan → Yaklaşan bir mülakat için zaman bloklu hazırlık planı
-/career-ops interview/practice → Pratik mülakat, geri bildirimle her seferinde bir soru
-/career-ops interview/debrief → Mülakat sonrası değerlendirme: açıkları kapat, sonraki turu öngör
-/career-ops interview-redflag → Bir şirkete katılmadan önce işverenin uyarı işaretlerini analiz et
-/career-ops pdf       → Yalnızca PDF, ATS için optimize edilmiş CV
-/career-ops text      → Uyarlanmış markdown CV (cv.md'yi yansıtır, PDF yok)
-/career-ops latex     → CV'yi LaTeX/Overleaf .tex olarak dışa aktar
-/career-ops latex-tex → Kendi resume.tex dosyanı yerinde uyarla (isteğe bağlı; cv.md varsayılan kalır)
-/career-ops cover     → Ön yazı: tek başına yapıştırılan iş tanımı veya /career-ops cover {slug}
-/career-ops email     → Resmî başvuru e-postası taslağı (yalnızca taslak; asla göndermez, iletmez veya tıklamaz)
-/career-ops add       → CV'ne proje/makale/rol ekle (getir + önizle + onayla)
-/career-ops expand    → Profil bağlantılarından eksik yetkinlikleri otomatik keşfet ve ekle
-/career-ops training  → Kurs/sertifikayı North Star'a göre değerlendir
-/career-ops project   → Portföy projesi fikrini değerlendir
-/career-ops tracker   → Başvuru durumu özeti
-/career-ops agent-inbox → Sonraki oturum için istekleri kuyruğa al/boşalt (data/agent-inbox.md)
-/career-ops apply     → Canlı başvuru asistanı (formu okur + cevapları üretir)
-/career-ops scan      → Portalları tara ve yeni ilanları keşfet
-/career-ops discover  → Bir şirket listesini taranabilir ATS panolarına çevir + portals.yml'e ekle (token harcamaz)
-/career-ops batch     → Paralel işçilerle toplu işleme
-/career-ops patterns  → Ret örüntülerini analiz et ve hedeflemeyi iyileştir
-/career-ops offer-prep → Alınan teklifi/sözleşmeyi adayla birlikte oku: madde madde geçiş + avukata sorular (hukuki tavsiye değildir)
-/career-ops titles    → Aramayı genişletmek için CV'nden komşu iş unvanları öner
-/career-ops upskill   → Değerlendirilmiş raporlarından toplu beceri açığı analizi
-/career-ops followup  → Takip ritmi takipçisi: gecikenleri işaretle, taslaklar üret
-/career-ops reply-watch → İşveren yanıtlarını sınıflandır ve takipçi güncellemeleri öner
-/career-ops outcome   → Başvuru sonucunu kaydet ve çıktıları arşivle
-/career-ops calibrate → Danışma raporu: değerlendirme puanların gerçek sonuçlarını öngörüyor mu? /outcome verilerini okur; puanlamayı asla değiştirmez
-/career-ops update    → career-ops sistem dosyalarını diff önizlemesi + uyumluluk kontrolüyle güncelle
-```
+### Bir mod istemek
 
-Ya da sadece bir iş URL'si veya tanımı yapıştır: career-ops bunu otomatik algılar ve tam hattı çalıştırır.
+| CLI | `scan`'i nasıl istersin |
+| --- | --- |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Pi | `/skill:career-ops scan` |
+| Codex, Qwen, Cursor veya başka herhangi bir desteklenen CLI | Düz dil: "Run the career-ops scan mode" |
 
-Codex'te eğik çizgi komutları garanti değildir. Bunun yerine aynı mod adlarını bir prompt'ta kullan veya `codex exec` ile çağır.
+Arkasında hiçbir şey olmayan `/career-ops` komut menüsünü gösterir onu kullanan CLI'larda. Düz dil her desteklenen CLI'da çalışır. Claude Code eklentisi olarak komut `/career-ops:career-ops` biçimindedir.
 
-## Nasıl Çalışır
+Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `modes/*.md` dosyalarını paylaşır; bu yüzden bir mod hangi CLI çalıştırırsa çalıştırsın aynı davranır. Codex'te eğik çizgi komutları garanti değildir: düz dille iste ya da `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ile tek bir prompt'u headless çalıştır ([docs/CODEX.md](docs/CODEX.md)). Desteklenen her CLI'da nasıl çalıştırılacağı, headless komutu olan CLI'lar için bu komutlar ve CLI'ya özel kurulum notları [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) içindedir.
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+### Günlük komutlar
 
-## Antigravity CLI Entegrasyonu
+| Komut | Ne yapar |
+| --- | --- |
+| *bir URL veya iş tanımı yapıştır* | Tam pipeline: ilanın hâlâ yayında olup olmadığının denetimi (yalnızca URL'ler), A-G değerlendirmesi artı yüksek puanda H, rapor, uyarlanmış CV (varsayılan olarak PDF), tracker satırı |
+| `scan` | Portallarını yeni ilanlar için tarar ve bunları gelen kutusuna ekler (`data/pipeline.md`) |
+| `pipeline` | Gelen kutusunda bekleyen her URL'yi değerlendirir |
+| `apply` | Bir başvuru formunu seninle birlikte alan alan doldurur. Gönder'den önce durur |
+| `tracker` | Her başvurunun durumu |
+| `followup` | Hangi başvurular takip bekliyor, taslaklarıyla birlikte |
 
-career-ops, Claude Code ve OpenCode'u desteklediği gibi Antigravity CLI'ı da yerel olarak destekler. Tüm eğik çizgi komutları, aynı `modes/*.md` değerlendirme mantığını kullanan ortak beceri giriş noktası üzerinden kullanılabilir.
+<details>
+<summary><b>Tüm komutlar, arama aşamasına göre</b></summary>
 
-Google, tüketici Gemini CLI erişimini Antigravity CLI'a taşıdı. `GEMINI.md` artık hiçbir şey yapmayan bir uyumluluk korumasıdır; böylece Antigravity hem `AGENTS.md` hem `GEMINI.md` dosyasını okuduğunda tam proje talimatlarını iki kez yüklemez.
+`oferta`, `ofertas` ve `contacto` özgün İspanyolca adlarını korur: teklif, teklifler, iletişim.
 
-### Yerel Antigravity CLI
+**Pozisyon bul**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-agy
+| Komut | Ne yapar |
+| --- | --- |
+| [`scan`](modes/scan.md) | Portalları tarar ve yeni ilanları keşfeder |
+| [`discover`](modes/discover.md) | Bir şirket adı listesini taranabilir ATS panolarına çevirir ve `portals.yml` dosyasına ekler (token harcamaz) |
+| [`pipeline`](modes/pipeline.md) | Gelen kutusundaki bekleyen URL'leri işler (`data/pipeline.md`) |
+| [`triage`](modes/triage.md) | Tam değerlendirmeden önce `modes/_brief.md` temelinde hızlı bir ilk eleme (başvur/başvurma) puanı (dosya yazmaz) |
+| [`batch`](modes/batch.md) | Paralel headless worker'larla çok sayıda ilanı değerlendirir |
+| [`titles`](modes/titles.md) | Aramayı genişletmek için CV'ne dayanarak yakın iş unvanları önerir |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
+**Bir pozisyonu değerlendir**
 
-Beceri, açık standarda göre `.agents/skills/career-ops/SKILL.md` içinde tanımlanır ve desteklenen her CLI için (ör. `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`) sembolik bağ ile bağlanır veya referans verilir. Cursor, `.agents/skills/` içindeki ortak beceriyi otomatik olarak keşfeder.
+| Komut | Ne yapar |
+| --- | --- |
+| *bir URL veya iş tanımı yapıştır* | [Auto-pipeline](modes/auto-pipeline.md): değerlendirme + rapor + uyarlanmış CV (varsayılan olarak PDF) + tracker kaydı |
+| [`oferta`](modes/oferta.md) | Yalnızca değerlendirme, A'dan G'ye bloklar artı yüksek puanda H (PDF yok) |
+| [`ofertas`](modes/ofertas.md) | Birkaç ilanı karşılaştırır ve sıralar |
+| [`deep`](modes/deep.md) | Şirket hakkında derin araştırma prompt'u |
+| [`eu-swe`](modes/regional/eu-swe.md) | CV, başvuru veya mülakattan önce Avrupa'daki bir yazılım mühendisliği başvurusunu kalibre eder |
 
-## Codex Entegrasyonu
+**Başvur**
 
-career-ops, Codex'i aynı ortak yönlendirici üzerinden destekler; ancak çağırma modeli, eğik çizgi komutlarını otomatik kaydeden CLI'lardan farklıdır. Tam kılavuz için bkz. [docs/CODEX.md](docs/CODEX.md).
+| Komut | Ne yapar |
+| --- | --- |
+| [`pdf`](modes/pdf.md) | PDF olarak ATS için optimize edilmiş CV |
+| [`ats`](modes/ats.md) | Üretilmiş bir CV'nin ATS uyumluluğu denetimi: puan ve düzeltilebilir sorunlar |
+| [`text`](modes/text.md) | Markdown olarak uyarlanmış CV (`cv.md`'yi yansıtır, PDF yok) |
+| [`latex`](modes/latex.md) | CV'yi LaTeX/Overleaf `.tex` olarak dışa aktarır |
+| [`latex-tex`](modes/latex-tex.md) | Kendi `resume.tex` dosyanı yerinde uyarlar (isteğe bağlı; varsayılan `cv.md` kalır) |
+| [`cover`](modes/cover.md) | Ön yazı; yapıştırılmış bir iş tanımından veya değerlendirilmiş bir rapordan (`cover {slug}`) |
+| [`email`](modes/email.md) | Resmî başvuru e-postası taslağı. Yalnızca taslak: asla göndermez, iletmez, tıklamaz |
+| [`contacto`](modes/contacto.md) | İşe alım yöneticisini, işe alımcıyı veya bir meslektaşı bulur ve bir LinkedIn mesajı taslağı yazar |
+| [`apply`](modes/apply.md) | Canlı başvuru asistanı (bu checkout'tan Playwright). Göndermez |
 
-### Etkileşimli Codex
+**Mülakat**
 
-```bash
-cd career-ops
-codex
-```
+| Komut | Ne yapar |
+| --- | --- |
+| [`interview-prep`](modes/interview-prep.md) | Şirkete özel mülakat hazırlık belgesi |
+| [`interview/plan`](modes/interview/plan.md) | Yaklaşan bir mülakat için zaman bloklarına bölünmüş hazırlık planı |
+| [`interview/practice`](modes/interview/practice.md) | Her seferinde tek soruyla, geri bildirimli prova mülakatı |
+| [`interview/debrief`](modes/interview/debrief.md) | Mülakat sonrası değerlendirme: boşlukları kapat, sonraki turu tahmin et |
+| [`interview-redflag`](modes/interview-redflag.md) | Katılmadan önce bir işverenin uyarı işaretlerini analiz eder |
 
-Codex'te eğik çizgi komutları garanti değildir. `/career-ops` kullanılamıyorsa, Codex'ten modu doğrudan düz dille çalıştırmasını iste:
+**Başvurduktan sonra**
 
-```text
-Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
-Run the career-ops scan mode and summarize new matches.
-Run the career-ops pipeline mode for data/pipeline.md.
-Run the career-ops pdf mode for the latest evaluated role.
-Run the career-ops tracker mode and summarize the current statuses.
-```
+| Komut | Ne yapar |
+| --- | --- |
+| [`tracker`](modes/tracker.md) | Başvuru durumu özeti |
+| [`followup`](modes/followup.md) | Takip ritmi: gecikmiş başvuruları işaretler, taslaklar üretir |
+| [`reply-watch`](modes/reply-watch.md) | İşveren yanıtlarını sınıflandırır ve tracker güncellemeleri önerir |
+| [`outcome`](modes/outcome.md) | Bir başvurunun sonucunu kaydeder ve çıktılarını arşivler |
+| [`offer-prep`](modes/offer-prep.md) | Aldığın bir teklifi veya sözleşmeyi seninle birlikte okur: madde madde gözden geçirme ve avukata sorular (hukuki tavsiye değildir) |
 
-### Tek seferlik Codex (`codex exec`)
+**Profilin ve CV'n**
 
-```bash
-codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-codex exec "Run career-ops scan mode in this repo and summarize new matches."
-codex exec "Run career-ops pipeline mode for data/pipeline.md."
-codex exec "Run career-ops pdf mode for the latest evaluated role."
-codex exec "Run career-ops tracker mode and summarize the current statuses."
-```
+| Komut | Ne yapar |
+| --- | --- |
+| [`interview`](modes/interview.md) | Profil kurulumu: deneyimin hakkında CV'ni ve profilini oluşturan etkileşimli bir görüşme (mülakat provası değildir) |
+| [`intake`](modes/intake.md) | `documents/` içindeki dosyalardan (ana CV, LinkedIn dışa aktarımı) profilini oluşturur veya zenginleştirir. Onayın olmadan hiçbir şey yazılmaz |
+| [`master-profile`](modes/master-profile.md) | Master Career Profile'ını içe aktarır, gözden geçirir ve doğrular; seçilen bilgileri CV maddeleri olarak hazırlar |
+| [`add`](modes/add.md) | CV'ne bir proje, makale veya rol ekler (getir, önizle, onayla) |
+| [`expand`](modes/expand.md) | Profil bağlantılarından CV'nde eksik olan yetkinlikleri keşfeder |
+| [`retro`](modes/retro.md) | Bu oturumu gözden geçirir ve ona öğrettiklerini kural olarak saklar (yalnızca kabul ettiklerini yazar) |
 
-## Grok Build CLI Entegrasyonu
+**Hedeflemeni iyileştir**
 
-career-ops, Claude Code ve OpenCode'u desteklediği gibi Grok Build CLI'ı da yerel olarak destekler. `AGENTS.md` proje kuralları olarak otomatik yüklenir ve tüm eğik çizgi komutları ortak beceri giriş noktası üzerinden kullanılabilir.
+| Komut | Ne yapar |
+| --- | --- |
+| [`patterns`](modes/patterns.md) | Ret kalıplarını analiz eder ve hedeflemeyi iyileştirir |
+| [`calibrate`](modes/calibrate.md) | Değerlendirme puanlarının gerçek sonuçlarını öngörüp öngörmediğini denetler. Yalnızca danışma niteliğinde: puanlamayı asla değiştirmez |
+| [`upskill`](modes/upskill.md) | Değerlendirilmiş raporların genelinde beceri açığı analizi |
+| [`training`](modes/training.md) | Bir kursu veya sertifikayı North Star'ına göre değerlendirir |
+| [`project`](modes/project.md) | Bir portfolyo projesi fikrini değerlendirir |
 
-### Yerel Grok Build CLI
+**Sistem**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-grok
+| Komut | Ne yapar |
+| --- | --- |
+| [`agent-inbox`](modes/agent-inbox.md) | Sonraki oturum için istekleri sıraya alır ve o zaman yürütür (`data/agent-inbox.md`). `inbox` da çalışır |
+| [`update`](modes/update.md) | career-ops sistem dosyalarını diff önizlemesi ve uyumluluk denetimiyle günceller |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-Başsız toplu işçiler için `grok -p "prompt"` kullan (araç yürütmelerini otomatik onaylamak için `--yolo` ekle).
-
-## Pi Entegrasyonu
-
-career-ops, [Pi](https://github.com/earendil-works/pi)'yi yerel olarak destekler ve bakımını yapman gereken bir sarmalayıcı dosya yoktur: Pi, depo kökündeki `AGENTS.md` dosyasını proje bağlamı olarak okur ve `.agents/skills/career-ops/SKILL.md` içindeki ortak beceriyi kendi başına keşfeder. Yönlendirici bundan sonra `/skill:career-ops` olarak kullanılabilir.
-
-### Yerel Pi
-
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-pi
-
-# 2. Use the shared skill with subcommands:
-/skill:career-ops "Senior AI Engineer at Anthropic..."
-/skill:career-ops pipeline
-/skill:career-ops scan
-/skill:career-ops pdf
-/skill:career-ops tracker
-```
-
-### Tek seferlik Pi (`pi -p`)
-
-```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
-```
-
-Bir Pi sürümü proje kaynaklarını bir güven kararına bağlıyorsa, depo içinde bir kez `/trust` çalıştır ve proje becerisinin yüklenmesi için `pi`'yi yeniden başlat (`/trust` sonraki Pi süreçlerine uygulanır) ya da tek bir çalıştırmaya güvenen ve yeniden başlatma gerektirmeyen `-a` ile başlat.
-
-### Bağımsız Gemini API Betiği (CLI kurulumu gerekmez)
-
-```bash
-# 1. Get a free API key at https://aistudio.google.com/apikey
-cp .env.example .env
-# Edit .env, set GEMINI_API_KEY=your_key_here
-
-# 2. Install dependencies
-npm install
-
-# 3. Evaluate a job description
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-node agent-inbox.mjs add "..."   # queue a request for the next session
-npm run gemini:eval -- "JD text here"
-```
-
-> **Ücretsiz katman:** İki seçenek de faturalandırma olmadan çalışır. Yerel CLI Google OAuth kullanır; API betiği `gemini-3.6-flash` kullanır (hız limitleri modele ve katmana bağlıdır; güncel kotalar için Google AI belgelerine bak).
+</details>
 
 ## Önceden Yapılandırılmış Portallar
 
