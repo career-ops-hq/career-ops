@@ -1813,16 +1813,17 @@ Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)
 
 ## data/scan-runs.tsv
 
-`scan.mjs` appends one row to this file after each non-dry scan run, recording how many companies/boards it checked, how many postings it found vs. filtered out vs. flagged as duplicates vs. added, and how many errors occurred. `--dry-run` scans never write to this file. Stats appended include:
+`scan.mjs` appends one row to this file after each non-dry scan run, recording how many companies/boards it checked, how many postings it found vs. filtered out vs. flagged as duplicates vs. added, and how many errors occurred. `--dry-run` scans never write to this file. The columns, in header order:
 
 * `timestamp` — ISO timestamp of the scan
-* `status` — always `completed` for now
+* `status` — `completed` for a run that finished, `failed` for one that died after the sweep started (#2643). `stats.mjs` counts every row in `totalRuns`, `failedRuns` and `lastRunDate`, and only `completed` rows in `avgFoundPerRun`, `avgNewPerRun` and `filterRemovalPct`
 * `companies` — number of companies scanned this run
 * `boards` — number of job boards scanned this run
 * `found` — total postings found
 * `filtered_title` — filtered out by title mismatch
 * `filtered_tier` — filtered out by tier
 * `filtered_location` — filtered out by location
+* `filtered_posting_age` — older than `max_posting_age_days`
 * `filtered_salary` — filtered out by salary
 * `filtered_content` — filtered out by content
 * `filtered_cooldown` — skipped because you recently applied to the same company + role and are still in the waiting period
@@ -1830,5 +1831,8 @@ Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)
 * `new_added` — new postings actually added to the pipeline
 * `errors` — number of errors during the run
 * `filtered_blacklist` — skipped because the company is on your `data/blacklist.md` do-not-apply list (#1742)
+* `filtered_visa` — dropped by `visa_filter`
+* `filtered_posted_date` — outside the `--since` / `--posted-after` / `--posted-before` bounds
+* `filtered_country_eligibility` — dropped by `country_eligibility_filter` (#2093)
 
-As the project is in continuous development, to parse for a stat we recommend doing it by column header instead of position.
+As the project is in continuous development, to parse for a stat we recommend doing it by column header instead of position. A file created by an older release keeps its old header while new rows carry the current columns; `node migrate-scan-runs.mjs` reports the mismatch, and `node migrate-scan-runs.mjs --apply` rewrites the file onto the current header after saving `<file>.bak`.
