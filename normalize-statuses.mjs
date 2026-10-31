@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   openTrackerTransaction, rebuildRow,
-  loadCanonicalStates, resolveCanonicalState,
+  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -114,6 +114,22 @@ function normalizeStatus(raw) {
   // makes that hold by construction instead of by remembering.
   const fromStates = resolveCanonicalState(lower, canonicalStates());
   if (fromStates) return { status: fromStates };
+
+  // A legacy cell with a date appended: `Applied 2026-01-02`,
+  // `**Interview** 2026-02-10`. Every reader resolves one through
+  // resolveCanonicalStateId(), which strips the bold and the date, and
+  // verify-pipeline's fix for "Status contains date" is to run this script.
+  // Only the two Spanish special cases above stripped a date, so every other
+  // dated cell was reported as unknown and left in place. Resolve it the way
+  // the readers do: the date goes, the state stays. Text after the date
+  // (`… 2026-01-02 via referral`) is not part of any state, so the cell is
+  // kept in Notes rather than dropped with it.
+  const datedId = resolveCanonicalStateId(raw, canonicalStates());
+  if (datedId) {
+    const status = canonicalStates().find(st => st.id.toLowerCase() === datedId).label;
+    const tail = (s.match(/\s+\d{4}-\d{2}-\d{2}(.*)$/)?.[1] ?? '').trim();
+    return tail ? { status, moveToNotes: raw.trim() } : { status };
+  }
 
   // Unknown — flag it
   return { status: null, unknown: true };
