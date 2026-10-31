@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { findExperienceSections, headingText, boldLineText, toPlainText, normalizePandocLine } from './lib/cv-markdown.mjs';
 
 // Two roots, because this gate compares user-layer files against a user-layer
 // config and previously resolved neither from the user's data root.
@@ -134,7 +135,7 @@ const METRIC_NOUNS = [
   'enrollments', 'enrolments', 'completions', 'courses', 'certifications',
   'certificates', 'sessions', 'responses', 'surveys', 'cohorts',
   'commits', 'contributions', 'repositories', 'repos', 'modules', 'tools',
-  'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
+  'servers', 'nodes', 'guides', 'articles', 'datasets', 'examples', 'deployments',
   'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
   // Headcount outside software. The list above counts users, engineers and
   // repos, so a CV in operations, facilities, healthcare, education or the
@@ -1094,7 +1095,7 @@ export function factClaims(text, sourceNormalized = null) {
 // or a certification rendered and passed the gate, which is the fabrication
 // AGENTS.md treats as most serious.
 //
-// Employer, education and certification fields BLOCK when no source contains
+// Employer, education, certification and award fields BLOCK when no source contains
 // them. The job title only WARNS: cv-title-check.mjs is deliberately warn-only
 // about titles, because reframing one is sometimes the candidate's call, and a
 // second check that blocked on the same field would overrule that choice.
@@ -1108,6 +1109,8 @@ const STRUCTURED_HTML_FIELDS = [
   ['edu-title', 'education', true],
   ['edu-org', 'education', true],
   ['cert-title', 'certification', true],
+  // Standards/authorship credits are rendered in awards too (#1411).
+  ['award-title', 'award', true],
   ['job-role', 'title', false],
 ];
 // One level of nested braces, enough for `\textbf{...}` inside an argument.
@@ -1186,7 +1189,7 @@ function extractStructuredFieldInners(raw, cls) {
 }
 
 /**
- * Employer, education, certification and title claims a CV builder emitted as
+ * Employer, education, certification, award and title claims a CV builder emitted as
  * structured fields.
  *
  * @param {string} text - generated HTML or LaTeX
@@ -1222,6 +1225,154 @@ export function structuredFieldClaims(text) {
   }
   const seen = new Set();
   return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
+}
+
+// Association checks compare bounded records, never the joined source bag.
+// Unsupported source conventions warn; explicit contradictions in recognized
+// records block. Titles and lexical metric context remain advisory.
+function sourceExperience(text) {
+  return findExperienceSections(text).flatMap(lines => {
+    const starts = lines.flatMap((line, i) => headingText(line, 3) === null ? [] : [i]);
+    return starts.flatMap((start, i) => {
+      const block = lines.slice(start, starts[i + 1] ?? lines.length);
+      const company = headingText(block[0], 3).split(/\s+[-–—]+\s+/)[0];
+      const body = block.slice(1).filter(line => line.trim());
+      const title = boldLineText(body[0]);
+      // Keep incomplete headers as evidence of employment. Dropping one
+      // could misclassify a genuine employer mentioned elsewhere as a client.
+      return [{ company, title: title || '', dates: title && body[1] ? toPlainText(body[1]) : '', body: body.join('\n') }];
+    });
+  });
+}
+
+function sourceEducation(text) {
+  const entries = [];
+  let complete = true;
+  let inEducation = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = normalizePandocLine(raw);
+    const heading = headingText(line, 2);
+    if (heading !== null) { inEducation = /^education$/i.test(heading); continue; }
+    if (!inEducation || !line.trim() || /^\s*[-*_]{3,}\s*$/.test(line)) continue;
+    // The flat convention used in examples/cv-example.md. A multiline or
+    // table convention needs its own parser; don't infer a tuple from prose.
+    const match = toPlainText(line).replace(/^\s*[-*+]\s+/, '').match(/^([^,]+),\s*(.+?)(?:\s*\(((?:19|20)\d{2})\))?\s*$/);
+    // Extra comma-separated detail may be a location, GPA or part of the
+    // school name. It is not evidence of a different degree-school pair.
+    if (match && !match[2].includes(',')) entries.push({ title: match[1].trim(), org: match[2].trim(), year: match[3] || '' });
+    else complete = false;
+  }
+  return { entries, complete };
+}
+
+const DATE_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function dateEndpoints(value) {
+  const clean = normalizeFact(stripMarkup(value)).replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
+  const parts = clean.split(/\s*[-–—]+\s*|\s+to\s+/);
+  if (parts.length > 2) return null;
+  const dates = parts.map(part => {
+    if (/^(?:present|current|now)$/.test(part)) return { year: 'present', month: '' };
+    const m = part.trim().match(/^(?:(\d{1,2})[/.]|([a-z]+)\s+)?((?:19|20)\d{2})$/);
+    if (!m) return null;
+    const month = m[1] ? Number(m[1]) : m[2] ? DATE_MONTHS.indexOf(m[2].slice(0, 3)) + 1 : '';
+    return month === 0 || month > 12 ? null : { year: m[3], month };
+  });
+  return dates.every(Boolean) ? dates : null;
+}
+
+// null means the source does not expose enough date precision to compare.
+function datesSupported(target, source) {
+  const a = dateEndpoints(target), b = dateEndpoints(source);
+  if (!a || !b || a.length !== b.length) return null;
+  if (a.some((date, i) => date.year !== b[i].year)) return false;
+  if (a.some((date, i) => date.month && !b[i].month)) return null;
+  return a.every((date, i) => !date.month || date.month === b[i].month);
+}
+
+/** Source-bound contradictions and explicit coverage gaps in default HTML CV records. */
+export function structuredAssociationClaims(targetText, sourceTexts, config = {}) {
+  const blocked = [], advisory = [], gaps = new Set();
+  const norm = value => normalizeFact(stripMarkup(value));
+  const field = (html, cls) => extractStructuredFieldInners(html, cls).map(inner => stripMarkup(inner)).join(' ').trim();
+  const blocks = cls => extractStructuredFieldInners(String(targetText), cls);
+  const experience = sourceTexts.flatMap(sourceExperience);
+  const educationSources = sourceTexts.map(sourceEducation);
+  const education = educationSources.flatMap(source => source.entries);
+  const educationComplete = educationSources.every(source => source.complete);
+  const add = (list, kind, value) => list.push({ kind, value: norm(value) });
+  const jobs = blocks('job');
+  const jobContexts = [];
+  const allowedFacts = new Set((config.allow_facts || []).map(norm));
+  for (const job of jobs) {
+    const company = field(job, 'job-company'), role = field(job, 'job-role'), dates = field(job, 'job-period');
+    if (!company) continue;
+    const matches = experience.filter(entry => norm(entry.company) === norm(company));
+    if (!matches.length) {
+      // An explicit customer mention is evidence of the wrong relationship,
+      // not merely a name somewhere in the source. Other unknown employers
+      // are already handled by the named-field gate, or remain unverified.
+      const escaped = norm(company).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const customer = new RegExp(`\\b(?:customer|client)(?:s)?[,: ]+(?:named |called )?${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+      if (sourceTexts.some(text => customer.test(norm(text)))) add(blocked, 'employer-association', company);
+      else if (!allowedFacts.has(norm(company))) gaps.add('Employment date/title associations could not be checked for an unmatched employer.');
+      continue;
+    }
+    const byRole = matches.filter(entry => norm(entry.title) === norm(role));
+    // Dates are checked against the employer's records; a reframed title
+    // must never turn the intentionally advisory title check into a block.
+    const candidates = matches;
+    const byDate = dates ? candidates.filter(entry => datesSupported(dates, entry.dates) === true) : candidates;
+    jobContexts.push({ html: job, sources: (byDate.length ? byDate : byRole.length ? byRole : candidates).map(entry => entry.body) });
+    if (dates && !byDate.length) {
+      const results = candidates.map(entry => datesSupported(dates, entry.dates));
+      if (results.every(result => result === false)) add(blocked, 'employment-dates', `${company}: ${dates}`);
+      else gaps.add('Employment dates could not be compared at the source date precision or format.');
+    }
+    if (role && experience.some(entry => norm(entry.title) === norm(role))
+      && (!byRole.length || (dates && byDate.length && !byDate.some(entry => norm(entry.title) === norm(role))))) {
+      add(advisory, 'title-association', `${company}: ${role}`);
+    }
+  }
+  for (const item of blocks('edu-item')) {
+    const rawTitle = extractStructuredFieldInners(item, 'edu-title')[0] || '';
+    const title = norm(removeBalancedElements(rawTitle, /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])edu-org(?![\w-])[^"]*"[^>]*>/gi));
+    const org = field(item, 'edu-org'), year = field(item, 'edu-year');
+    if (!title || !org) { gaps.add('Education associations require both a degree and a school.'); continue; }
+    const pairs = education.filter(entry => norm(entry.org) === norm(org) && norm(entry.title) === title);
+    if (!pairs.length) {
+      if (educationComplete && education.some(entry => norm(entry.org) === norm(org)) && education.some(entry => norm(entry.title) === title)) {
+        add(blocked, 'education-association', `${title}, ${org}`);
+      } else gaps.add('Education associations could not be checked against a recognized degree, school entry.');
+    } else if (year && !pairs.some(entry => entry.year && datesSupported(year, entry.year) === true)) {
+      if (educationComplete && pairs.every(entry => entry.year && datesSupported(year, entry.year) === false)) add(blocked, 'graduation-date', `${title}, ${org}: ${year}`);
+      else gaps.add('Graduation year could not be compared with a source year.');
+    }
+  }
+  // Lexical context cannot prove a paraphrase false. Surface uncertainty, not
+  // a hard fabrication verdict, when the same number is reused for a new
+  // outcome. Never let a different bullet's figure silently support it.
+  const stop = new Set(['with', 'from', 'into', 'over', 'have', 'that', 'were', 'while', 'about', 'their', 'there', 'which', 'through', 'across', 'within', 'after', 'before', 'during', 'being', 'been', 'each', 'every', 'other', 'than', 'then', 'them', 'they', 'when', 'where', 'what', 'more', 'most', 'some', 'such', 'only', 'also', 'just', 'like', 'very', 'used', 'using']);
+  const words = text => new Set(norm(text).match(/\p{L}{4,}/gu)?.filter(word => !stop.has(word)) || []);
+  const linesWithMetrics = texts => texts.flatMap(text => text.split(/\r?\n/).map(line => ({ line, metrics: metricClaims(line) })));
+  const allSourceLines = linesWithMetrics(sourceTexts);
+  const explicitlyAllowed = allowedMetricSet('', config.allow_metrics || []);
+  for (const context of jobContexts) {
+    const sourceLines = linesWithMetrics(context.sources);
+    for (const el of findBalancedElements(context.html, /<(li)\b[^>]*>/gi)) {
+      const line = stripMarkup(context.html.slice(el.contentStart, el.contentEnd));
+      for (const metric of metricClaims(line)) {
+        if (explicitlyAllowed.has(metric)) continue;
+        const sources = sourceLines.filter(entry => entry.metrics.has(metric));
+        if (sources.some(entry => norm(entry.line).replace(/^[-*+]\s*/, '') === norm(line))) continue;
+        if (!allSourceLines.some(entry => entry.metrics.has(metric))) continue;
+        const targetWords = words(line);
+        if (!sources.some(entry => [...words(entry.line)].filter(word => targetWords.has(word)).length >= 2)) {
+          add(advisory, 'metric-context', `${metric}: ${line}`);
+        }
+      }
+    }
+  }
+  return { blocked, advisory, warnings: [...gaps] };
 }
 
 /** Split generated/source documents into bounded statements for attribution checks. */
@@ -1944,7 +2095,16 @@ function compactMagnitude(raw) {
 
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text, { keepPlanHorizons = false } = {}) {
-  const clean = spellNumbers(stripMarkup(text, { keepLineBreaks: true }));
+  // Expand only known count units in numeric compounds, then run the same
+  // plan/disclosure filters as spaced counts. Product IDs remain untouched.
+  const clean = spellNumbers(stripMarkup(text, { keepLineBreaks: true })).replace(
+    /(?<![\p{L}\p{N}-])(\d[\d,.]*)[-‑–]([\p{L}]+)(?![\p{L}])/gu,
+    (whole, number, rawNoun) => {
+      const noun = rawNoun.toLowerCase();
+      const plural = METRIC_NOUNS.includes(noun) ? noun : METRIC_NOUNS.includes(`${noun}s`) ? `${noun}s` : null;
+      return plural ? `${number} ${plural}` : whole;
+    },
+  );
   const claims = new Set();
   for (const pattern of SIMPLE_CLAIM_PATTERNS) {
     for (const match of clean.matchAll(pattern)) claims.add(canonicalMetric(match[0]));
@@ -2252,7 +2412,8 @@ export function verifyFacts(targetText, {
   // Per file, before the join: stripMarkup keeps only the body of a LaTeX
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
-  const sourceText = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd)))).join('\n');
+  const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
+  const sourceText = sourceTexts.join('\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
@@ -2262,6 +2423,7 @@ export function verifyFacts(targetText, {
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
   const unsourced = ({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
+  const associations = structuredAssociationClaims(targetText, sourceTexts, config);
   const namedFacts = [
     ...factClaims(targetText, sourceNormalized),
     ...delegatedAuthorshipClaims(targetText, sourceText),
@@ -2274,13 +2436,14 @@ export function verifyFacts(targetText, {
   // words happen to occur elsewhere in cv.md would be dropped, and the whole
   // finding is that the source says something WEAKER about the same entry.
   const languageGap = scopeLanguageGap(targetText, sourceText);
-  const comparedFacts = (languageGap ? [] : scopeInflationClaims(targetText, sourceText))
+  const comparedFacts = [...(languageGap ? [] : scopeInflationClaims(targetText, sourceText)), ...associations.blocked]
     .filter(({ value }) => !allowedFacts.has(value));
   // Adoption claims warn instead of block. The phrase list cannot see every
   // way a source states reach, and a block makes the PDF step tell the agent to
   // stop and fix, so a missed paraphrase would get a true bullet rewritten.
   const advisoryFacts = [
     ...(languageGap ? [] : adoptionClaims(targetText, sourceText)),
+    ...associations.advisory,
     ...fieldClaims.filter(claim => !claim.blocking).map(({ kind, value, line }) => ({ kind, value, line })),
   ].filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
@@ -2297,9 +2460,13 @@ export function verifyFacts(targetText, {
   // One coverage object, so callers that read `coverage.reason` keep working.
   // A count gap keeps its reason and gains the scope sentence.
   const countGap = diagnoseCoverage(targetText);
-  const coverage = !languageGap ? countGap
+  const priorCoverage = !languageGap ? countGap
     : countGap ? { ...countGap, message: `${countGap.message} ${languageGap}` }
       : { reason: 'scope-not-checked', message: languageGap, spans: [] };
+  const coverage = associations.warnings.length
+    ? { reason: 'associations-not-checked', spans: [], ...priorCoverage,
+      message: [priorCoverage?.message, ...associations.warnings].filter(Boolean).join(' ') }
+    : priorCoverage;
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
     verdict: blocked ? 'block' : (warnings.length || advisoryFacts.length || coverage) ? 'warn' : 'pass',

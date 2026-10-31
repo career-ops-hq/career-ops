@@ -33,7 +33,7 @@ for (const file of [
   'cv-sections-core.mjs', 'path-resolver.mjs',
 ]) copyFileSync(join(ROOT, file), join(code, file));
 mkdirSync(join(code, 'lib'), { recursive: true });
-for (const file of ['is-main-module.mjs', 'page-format.mjs', 'dir-lock.mjs', 'yaml-document.mjs']) {
+for (const file of ['is-main-module.mjs', 'page-format.mjs', 'dir-lock.mjs', 'yaml-document.mjs', 'cv-markdown.mjs']) {
   copyFileSync(join(ROOT, 'lib', file), join(code, 'lib', file));
 }
 linkRepoPackage(code, 'js-yaml');
