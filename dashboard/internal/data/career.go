@@ -758,9 +758,10 @@ func LoadReportSummary(careerOpsPath, reportPath string) (archetype, tldr, remot
 	remote = SanitizeTerminalText(remote)
 	comp = SanitizeTerminalText(comp)
 
-	// Truncate long fields
-	if len(tldr) > 120 {
-		tldr = tldr[:117] + "..."
+	// Truncate long fields by characters, not bytes: a byte cut splits a
+	// multi-byte character and stops non-Latin text at half the length.
+	if r := []rune(tldr); len(r) > 120 {
+		tldr = string(r[:117]) + "..."
 	}
 
 	return
