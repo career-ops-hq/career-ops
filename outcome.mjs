@@ -36,6 +36,7 @@ import {
   resolvePdfIndexPath,
   resolveTrackerPath,
   resolveWorkspaceRoot,
+  writeFileAtomic,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -601,28 +602,46 @@ if (matchedRow.role) {
 }
 
 let setStatusResult = null;
+// Serialize the tracker transition with its journal entry, so concurrent
+// confirmations cannot lose feedback or publish in the opposite order.
+let journalLock;
 try {
-  const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CODE_ROOT, env: process.env, encoding: 'utf-8' });
-  setStatusResult = JSON.parse(statusOutput);
+  journalLock = await acquireDirLock(`${outcomeLogPath}.lock`, {
+    timeoutMs: 60_000, retryMs: 75, staleMs: 10 * 60_000, maxWaitMs: 60_000,
+  });
 } catch (err) {
-  failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
+  failExit(`Outcome journal lock unavailable (${err.message})`, 'journal-locked', 1);
 }
-
-// Publish the committed journal only after set-status confirms the transition.
+const releaseJournal = () => releaseOrWarn(journalLock);
+// failExit exits synchronously; its error paths must release the lock too.
+process.once('exit', releaseJournal);
 try {
-  if (existsSync(outcomeLogPath)) {
-    const existingLog = readFileSync(outcomeLogPath, 'utf-8');
-    if (!existingLog.includes(newEntry.trim())) {
-      writeFileSync(outcomeLogPath, existingLog.endsWith('\n') ? existingLog + '\n' + newEntry : existingLog + '\n\n' + newEntry);
-    }
-  } else {
-    const initialLog = `# Application Outcome Log — ${matchedRow.company} — ${matchedRow.role} (#${matchedRow.num})
+  try {
+    const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CODE_ROOT, env: process.env, encoding: 'utf-8' });
+    setStatusResult = JSON.parse(statusOutput);
+  } catch (err) {
+    failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
+  }
+
+  // Publish the committed journal only after set-status confirms the transition.
+  try {
+    if (existsSync(outcomeLogPath)) {
+      const existingLog = readFileSync(outcomeLogPath, 'utf-8');
+      if (!existingLog.includes(newEntry.trim())) {
+        writeFileAtomic(outcomeLogPath, existingLog.endsWith('\n') ? existingLog + '\n' + newEntry : existingLog + '\n\n' + newEntry, { mode: statSync(outcomeLogPath).mode & 0o777 });
+      }
+    } else {
+      const initialLog = `# Application Outcome Log — ${matchedRow.company} — ${matchedRow.role} (#${matchedRow.num})
 
 ${newEntry}`;
-    writeFileSync(outcomeLogPath, initialLog);
+      writeFileAtomic(outcomeLogPath, initialLog);
+    }
+  } catch (err) {
+    failExit(`Tracker updated, but outcome journal could not be saved: ${err.message}`, 'journal-write-failed', 1);
   }
-} catch (err) {
-  failExit(`Tracker updated, but outcome journal could not be saved: ${err.message}`, 'journal-write-failed', 1);
+} finally {
+  releaseJournal();
+  process.off('exit', releaseJournal);
 }
 
 // 6. Clean up output/ — only ever removes a file whose archived copy in
