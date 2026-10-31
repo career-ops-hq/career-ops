@@ -28,11 +28,10 @@ import { NOTES_START, NOTES_END, profilePath as profileMemoryPath, readProfileMe
 import { normalizeMemoryFact } from "@/lib/memory-fact.mjs";
 
 /**
- * Resolve the career-ops "home" — the directory holding the user's sibling
- * files (cv.md, data/, reports/). In production the web/ app lives inside the
- * career-ops checkout, so the home is its parent (..). Dev overrides via
- * CAREER_OPS_ROOT to read the user's real (gitignored) data from a separate
- * checkout — see web/.env.local.
+ * Resolve the career-ops DATA root — the directory holding the user's files
+ * (cv.md, data/, reports/). Same precedence as the core: CAREER_OPS_ROOT →
+ * CAREER_OPS_DATA_DIR → `.career-ops-data` marker → the checkout itself. For
+ * scripts, system modes and templates use resolveCodeRoot() (core/code-root.mjs).
  */
 export function careerOpsRoot(): string {
   // `process.cwd()` is `<core>/web` for `next dev`/`next start`, so its parent is
@@ -398,19 +397,45 @@ export type ReportData = { content: string; file: string };
  *  empty sentinel instead of the real report, making the report body and the
  *  Apply/PDF-ready checks disappear. */
 export function findReportFile(n: string): string | null {
-  if (!/^\d+$/.test(n)) return null;
-  const target = Number(n);
+  const target = reportNumber(n);
+  if (target === null) return null;
   const root = careerOpsRoot();
   const app = readApplications().find((a) => parseInt(a.n, 10) === target);
-  const linked = linkedReportFile(app, root);
-  if (linked) return linked;
-  let files: string[];
+  return resolveReportFile(target, app?.report, root, () => listReportFiles(root));
+}
+
+export function requestReportReader(): (app: Pick<Application, "n" | "report">) => ReportData | null {
+  const root = careerOpsRoot();
+  let files: string[] | null | undefined;
+  const listReports = () => (files === undefined ? (files = listReportFiles(root)) : files);
+  return (app) => {
+    const target = reportNumber(app.n);
+    return target === null ? null : readReportFile(resolveReportFile(target, app.report, root, listReports));
+  };
+}
+
+function reportNumber(n: string): number | null {
+  return /^\d+$/.test(n) ? Number(n) : null;
+}
+
+function listReportFiles(root: string): string[] | null {
   try {
-    files = fs.readdirSync(path.join(root, "reports"));
-  } catch {
-    return null;
+    return fs.readdirSync(path.join(root, "reports"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
   }
-  const match = files.find(
+}
+
+function resolveReportFile(
+  target: number,
+  report: string | undefined,
+  root: string,
+  listReports: () => string[] | null,
+): string | null {
+  const linked = linkedReportFile({ report }, root);
+  if (linked) return linked;
+  const match = listReports()?.find(
     (f) => f.endsWith(".md") && !isReservedReportFile(f) && parseInt(f, 10) === target,
   );
   if (!match) return null;
@@ -497,7 +522,10 @@ export function isRegularContainedFile(p: string, root: string): boolean {
 }
 
 export function readReport(n: string): ReportData | null {
-  const file = findReportFile(n);
+  return readReportFile(findReportFile(n));
+}
+
+function readReportFile(file: string | null): ReportData | null {
   if (!file) return null;
   try {
     // Reports live in the user's runtime checkout, outside the web build graph.
@@ -667,7 +695,10 @@ function resolveEvalModeFile(root: string, modesDir: string): string {
  * should degrade the market vocabulary, not block every evaluation.
  */
 export function readLanguageConfig(): LanguageConfig {
+  // The profile is the user's (data root); the market mode directories it names
+  // are system files and live in the code checkout.
   const root = careerOpsRoot();
+  const codeRoot = resolveCodeRoot(process.cwd(), process.env);
   let modesDirs = ["modes"];
   let output = "en";
   try {
@@ -687,7 +718,7 @@ export function readLanguageConfig(): LanguageConfig {
           if (typeof value !== "string" || !value.trim()) return null;
           const candidate = value.trim().replace(/\/+$/, "");
           if (!MODES_DIR_RE.test(candidate)) return null;
-          return fs.existsSync(path.join(root, candidate)) ? candidate : null;
+          return fs.existsSync(path.join(codeRoot, candidate)) ? candidate : null;
         };
         // The first declared entry is primary. Do not filter it away and
         // silently promote a later market into the evaluation slot. This
@@ -708,5 +739,5 @@ export function readLanguageConfig(): LanguageConfig {
     /* no profile yet, or malformed — defaults are correct */
   }
   const modesDir = modesDirs[0];
-  return { output, modesDir, modesDirs, evalModeFile: resolveEvalModeFile(root, modesDir) };
+  return { output, modesDir, modesDirs, evalModeFile: resolveEvalModeFile(codeRoot, modesDir) };
 }

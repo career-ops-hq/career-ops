@@ -216,8 +216,8 @@ export function ScheduledJobsView() {
                   <span
                     className={
                       scheduler.task.exists && scheduler.task.enabled
-                        ? "rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
-                        : "rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                        ? "rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-400"
+                        : "rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300"
                     }
                   >
                     {!osScheduler

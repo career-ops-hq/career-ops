@@ -28,7 +28,7 @@ test("Pipeline detail links preserve the list context", { skip: liveServerSkip("
 
   await page.goto(`${origin.origin}/pipeline?tab=EVALUATED&min=3.5&sort=company&dir=1`);
   const search = page.getByPlaceholder("Search company or role…");
-  await search.fill("Fixture"); // local typing does not update the URL
+  await search.fill("Fixture"); // detail links include this immediately; the list URL catches up after a short pause
   const row = page.locator("tbody tr").filter({ has: page.getByRole("link", { name: "#11", exact: true }) });
   for (const name of ["#11", "Fixture Alpha", "Engineer"]) {
     const href = await row.getByRole("link", { name, exact: true }).getAttribute("href");

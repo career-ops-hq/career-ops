@@ -332,7 +332,7 @@ export function TodayDashboard({
           <div className="inline-flex max-w-full flex-wrap items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-2 text-sm shadow-lg">
             <div className="min-w-0 flex-1 break-words">
               <span className="text-muted" role="status">{decisionUndo.label}</span>
-              {decisionUndo.error && <p role="alert" className="text-red-600 dark:text-red-400">{decisionUndo.error}</p>}
+              {decisionUndo.error && <p role="alert" className="text-red-700 dark:text-red-400">{decisionUndo.error}</p>}
             </div>
             <button type="button" onClick={() => void undoDecision(decisionUndo)} disabled={decisionUndo.busy} aria-busy={Boolean(decisionUndo.busy)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-text disabled:opacity-50 max-sm:min-h-[44px]">
               <Undo2 className="size-3.5" /> {decisionUndo.busy ? "Undoing…" : decisionUndo.error ? "Retry undo" : "Undo"}

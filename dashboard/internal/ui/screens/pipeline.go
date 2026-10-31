@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/santifer/career-ops/dashboard/internal/data"
 	"github.com/santifer/career-ops/dashboard/internal/i18n"
@@ -39,6 +40,22 @@ type PipelineOpenURLMsg struct {
 type PipelineOpenPDFMsg struct {
 	Path string
 }
+
+// PipelineCopyPDFPathMsg asks the host to copy a CV PDF's absolute path to the
+// OS clipboard (`y`). Path is absolute.
+type PipelineCopyPDFPathMsg struct {
+	Path string
+}
+
+// PipelineClipboardResultMsg reports the outcome of a PipelineCopyPDFPathMsg.
+// Err is empty on success.
+type PipelineClipboardResultMsg struct {
+	Path string
+	Err  string
+}
+
+// noPDFFlash is shown by `d` and `y` when no CV PDF matches the application.
+const noPDFFlash = "No CV PDF found for this application — generate one with /career-ops pdf"
 
 // PipelineOpenFailedMsg reports that an external open (job URL, manifesto or
 // CV PDF) failed. The dashboard runs under an alt-screen, so the failure has to
@@ -344,6 +361,11 @@ type PipelineModel struct {
 	colPicker    bool
 	colPickerIdx int
 	visibleCols  map[ColumnID]bool
+	// keysHelp is the full binding list. The footer cannot show every key once
+	// the terminal is narrower than the shortcut sentence, so `?` opens this
+	// in place of the table and `q` closes it instead of quitting.
+	keysHelp       bool
+	keysHelpOffset int
 
 	// Hired win flow sub-state (Issue 1447)
 	hiredApp  model.CareerApplication
@@ -449,6 +471,8 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	reloaded.discardPendingApp = m.discardPendingApp
 	reloaded.discardPendingStatus = m.discardPendingStatus
 	reloaded.discardPredictedCount = m.discardPredictedCount
+	reloaded.keysHelp = m.keysHelp
+	reloaded.keysHelpOffset = m.keysHelpOffset
 	reloaded.applyFilterAndSort()
 	reloaded.CopyReportCache(&m)
 
@@ -526,6 +550,13 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	case PipelineOpenFailedMsg:
 		m.flash = "Could not open " + msg.Target + ": " + msg.Err
 		return m, nil
+	case PipelineClipboardResultMsg:
+		if msg.Err != "" {
+			m.flash = "Could not copy CV PDF path to clipboard: " + msg.Err
+		} else {
+			m.flash = "Copied CV PDF path to clipboard: " + msg.Path
+		}
+		return m, nil
 	case StatusUpdateFailedMsg:
 		m.flash = "Could not update status: " + msg.Err
 	case PipelineHistoryFailedMsg:
@@ -568,7 +599,15 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 }
 
 func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	if m.keysHelp {
+		return m.handleKeysHelp(msg)
+	}
 	switch msg.String() {
+	case "?":
+		m.keysHelp = true
+		m.keysHelpOffset = 0
+		return m, nil
+
 	case "esc":
 		// While a search is committed, Esc clears the search (matches vim's `:nohl`
 		// ergonomics). With no query, Esc is a no-op — q is the only quit key, which
@@ -675,12 +714,26 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "d":
 		if app, ok := m.CurrentApp(); ok {
-			manifest := data.LoadPDFManifest(m.careerOpsPath)
-			candidates := data.ResolvePDFs(data.PDFWorkspaceRoot(m.careerOpsPath), app, manifest)
-			if len(candidates) == 0 {
-				m.flash = "No CV PDF found for this application — generate one with /career-ops pdf"
+			if rel, found := m.newestPDF(app); !found {
+				m.flash = noPDFFlash
 			} else {
-				return m, m.openPDFCmd(candidates[0]) // newest first
+				return m, m.openPDFCmd(rel)
+			}
+		}
+
+	case "y":
+		if app, ok := m.CurrentApp(); ok {
+			if rel, found := m.newestPDF(app); !found {
+				m.flash = noPDFFlash
+			} else {
+				fullPath, err := m.pdfAbsPath(rel)
+				if err != nil {
+					m.flash = "Could not resolve CV PDF path: " + err.Error()
+					return m, nil
+				}
+				return m, func() tea.Msg {
+					return PipelineCopyPDFPathMsg{Path: fullPath}
+				}
 			}
 		}
 
@@ -788,6 +841,46 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// handleKeysHelp scrolls the binding list. q and Esc leave it; they do not
+// quit, because the footer told the user q was the way out of this list.
+func (m PipelineModel) handleKeysHelp(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "?":
+		m.keysHelp = false
+		m.keysHelpOffset = 0
+		return m, nil
+	case "down", "j":
+		m.keysHelpOffset++
+	case "up", "k":
+		if m.keysHelpOffset > 0 {
+			m.keysHelpOffset--
+		}
+	}
+	visible := m.height - m.chromeRowsFixed() + 1
+	if visible < 1 {
+		visible = 1
+	}
+	maxOffset := m.keyHelpRowCount() - visible
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.keysHelpOffset > maxOffset {
+		m.keysHelpOffset = maxOffset
+	}
+	if m.keysHelpOffset < 0 {
+		m.keysHelpOffset = 0
+	}
+	return m, nil
+}
+
+func (m PipelineModel) keyHelpRowCount() int {
+	const bindings = 19
+	if m.width >= 56 {
+		return (bindings + 1) / 2
+	}
+	return bindings
 }
 
 // handleSearchInput consumes keys while the search input bar is open.
@@ -1141,10 +1234,32 @@ func (m PipelineModel) handleColPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) 
 	return m, nil
 }
 
+// newestPDF resolves the newest CV PDF for app (root-relative). Shared by `d`
+// and `y` so both act on the same file.
+func (m PipelineModel) newestPDF(app model.CareerApplication) (string, bool) {
+	manifest := data.LoadPDFManifest(m.careerOpsPath)
+	candidates := data.ResolvePDFs(data.PDFWorkspaceRoot(m.careerOpsPath), app, manifest)
+	if len(candidates) == 0 {
+		return "", false
+	}
+	return candidates[0], true // newest first
+}
+
+// pdfAbsPath turns a root-relative PDF path into an absolute one. The
+// workspace root follows --path, which may be relative, so the joined path is
+// resolved against the working directory: a copied path must still work when
+// pasted into another app.
+func (m PipelineModel) pdfAbsPath(relPath string) (string, error) {
+	return filepath.Abs(filepath.Join(data.PDFWorkspaceRoot(m.careerOpsPath), filepath.FromSlash(relPath)))
+}
+
 // openPDFCmd emits a PipelineOpenPDFMsg for a root-relative PDF path.
 func (m PipelineModel) openPDFCmd(relPath string) tea.Cmd {
-	fullPath := filepath.Join(data.PDFWorkspaceRoot(m.careerOpsPath), filepath.FromSlash(relPath))
+	fullPath, err := m.pdfAbsPath(relPath)
 	return func() tea.Msg {
+		if err != nil {
+			return PipelineOpenFailedMsg{Target: "CV PDF", Err: err.Error()}
+		}
 		return PipelineOpenPDFMsg{Path: fullPath}
 	}
 }
@@ -1381,50 +1496,94 @@ func (m PipelineModel) View() string {
 	metricsBar := m.renderMetrics()
 	sortBar := m.renderSortBar()
 	searchBar := m.renderSearchBar()
-	preview := m.renderPreview()
 	help := m.renderHelp()
 
-	// Calculate available height for body
-	previewLines := strings.Count(preview, "\n") + 1
-	availHeight := m.height - m.chromeRowsFixed() - previewLines
-	if availHeight < 3 {
-		availHeight = 3
+	// A picker or the key list already fills the bottom of the screen. Leaving
+	// the preview up and then appending the overlay pushes the title past the
+	// top of the terminal.
+	overlay := m.keysHelp || m.statusPicker || m.colPicker || m.pdfPicker || m.discardPicker
+	preview := ""
+	if !overlay {
+		preview = m.renderPreview()
 	}
 
-	// Render only the rows that will be shown. An offset past the end shows the
-	// body from the top, as slicing the fully rendered body used to.
-	bodyLines := m.renderBodyWindow(m.scrollOffset, availHeight)
-	if len(bodyLines) == 0 {
-		bodyLines = m.renderBodyWindow(0, availHeight)
+	previewLines := 0
+	if preview != "" {
+		previewLines = strings.Count(preview, "\n") + 1
 	}
-	body := strings.Join(bodyLines, "\n")
-
-	// Column picker overlay
-	if m.colPicker {
-		body = m.overlayColPicker(body)
+	// chromeRowsFixed includes a one-row preview baseline. Keep that only while
+	// the preview is actually on screen; the old formula then still applies.
+	availHeight := m.height - m.chromeRowsFixed() - previewLines - m.pickerExtraLines()
+	if preview == "" {
+		availHeight++
 	}
-
-	// Status picker overlay
-	if m.statusPicker {
-		body = m.overlayStatusPicker(body)
+	if availHeight < 1 {
+		availHeight = 1
 	}
 
-	// PDF picker overlay
-	if m.pdfPicker {
-		body = m.overlayPDFPicker(body)
-	}
+	var body string
+	if m.keysHelp {
+		body = m.renderKeysHelp(availHeight)
+	} else {
+		// Render only the rows that will be shown. An offset past the end shows the
+		// body from the top, as slicing the fully rendered body used to.
+		bodyLines := m.renderBodyWindow(m.scrollOffset, availHeight)
+		if len(bodyLines) == 0 {
+			bodyLines = m.renderBodyWindow(0, availHeight)
+		}
+		body = strings.Join(bodyLines, "\n")
 
-	// Discard reason picker overlay
-	if m.discardPicker {
-		body = m.overlayDiscardPicker(body)
+		if m.colPicker {
+			body = m.overlayColPicker(body)
+		}
+		if m.statusPicker {
+			body = m.overlayStatusPicker(body)
+		}
+		if m.pdfPicker {
+			body = m.overlayPDFPicker(body)
+		}
+		if m.discardPicker {
+			body = m.overlayDiscardPicker(body)
+		}
 	}
 
 	sections := []string{header, tabs, metricsBar, sortBar}
 	if searchBar != "" {
 		sections = append(sections, searchBar)
 	}
-	sections = append(sections, m.renderColumnHeader(), body, preview, help)
+	sections = append(sections, m.renderColumnHeader(), body)
+	if preview != "" {
+		sections = append(sections, preview)
+	}
+	sections = append(sections, help)
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// pickerExtraLines is how many rows the open overlay appends under the body.
+// Counting the rendered overlay (and dropping the blank line Split inserts for
+// an empty body) keeps a wrapped picker row from blowing the height budget.
+func (m PipelineModel) pickerExtraLines() int {
+	if m.keysHelp {
+		return 0
+	}
+	var rendered string
+	switch {
+	case m.colPicker:
+		rendered = m.overlayColPicker("")
+	case m.statusPicker:
+		rendered = m.overlayStatusPicker("")
+	case m.pdfPicker:
+		rendered = m.overlayPDFPicker("")
+	case m.discardPicker:
+		rendered = m.overlayDiscardPicker("")
+	default:
+		return 0
+	}
+	n := strings.Count(rendered, "\n") + 1
+	if n > 0 {
+		n--
+	}
+	return n
 }
 
 // renderSearchBar returns an empty string when there is no active or in-progress
@@ -1437,7 +1596,6 @@ func (m PipelineModel) renderSearchBar() string {
 
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Text).
-		Width(m.width).
 		Padding(0, 2)
 
 	prompt := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render("/")
@@ -1459,7 +1617,7 @@ func (m PipelineModel) renderSearchBar() string {
 		hint = hintStyle.Render(i18n.Current.SearchHintNormal)
 	}
 
-	return style.Render(prompt + " " + display + matchInfo + hint)
+	return oneLine(m.width, style, prompt+" "+display+matchInfo+hint)
 }
 
 // avgScoreLabel is the header's average score, or "—" when no row has a
@@ -1479,50 +1637,102 @@ func (m PipelineModel) renderHeader() string {
 		Bold(true).
 		Foreground(m.theme.Text).
 		Background(m.theme.Surface).
-		Width(m.width).
 		Padding(0, 2)
 
 	right := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 	info := right.Render(fmt.Sprintf(i18n.Current.OffersSummary, m.metrics.Total, avgScoreLabel(m.metrics.AvgScore)))
-
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render(i18n.Current.AppTitle)
-	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
-	if gap < 1 {
-		gap = 1
-	}
-
-	return style.Render(title + strings.Repeat(" ", gap) + info)
+	return oneLine(m.width, style, fitTitleBar(m.width, title, info))
 }
 
 func (m PipelineModel) renderTabs() string {
+	type tabItem struct {
+		label  string
+		active bool
+		width  int
+	}
+	src := getPipelineTabs()
+	items := make([]tabItem, len(src))
+	total := 0
+	for i, tab := range src {
+		label := fmt.Sprintf(" %s (%d) ", tab.label, m.countForFilter(tab.filter))
+		items[i] = tabItem{label: label, active: i == m.activeTab, width: lipgloss.Width(label)}
+		total += items[i].width
+	}
+
+	avail := m.width - 2 // Padding(0, 1) on the tab row
+	if avail < 1 {
+		avail = 1
+	}
+	start, end := 0, len(items)
+	if total > avail && len(items) > 0 {
+		start, end = m.activeTab, m.activeTab+1
+		if start < 0 {
+			start = 0
+		}
+		if end > len(items) {
+			end = len(items)
+		}
+		for {
+			marks := 0
+			if start > 0 {
+				marks++
+			}
+			if end < len(items) {
+				marks++
+			}
+			inner := avail - marks
+			if inner < 1 {
+				inner = 1
+			}
+			used := 0
+			for i := start; i < end; i++ {
+				used += items[i].width
+			}
+			if end-start == 1 && items[start].width > inner {
+				items[start].label = truncateRunes(items[start].label, inner)
+				items[start].width = lipgloss.Width(items[start].label)
+				break
+			}
+			if start > 0 && used+items[start-1].width <= inner {
+				start--
+				continue
+			}
+			if end < len(items) && used+items[end].width <= inner {
+				end++
+				continue
+			}
+			break
+		}
+	}
+
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue)
+	idleStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 	var tabs []string
 	var underParts []string
-
-	for i, tab := range getPipelineTabs() {
-		// Count items for this tab
-		count := m.countForFilter(tab.filter)
-		label := fmt.Sprintf(" %s (%d) ", tab.label, count)
-
-		if i == m.activeTab {
-			style := lipgloss.NewStyle().
-				Bold(true).
-				Foreground(m.theme.Blue).
-				Padding(0, 0)
-			tabs = append(tabs, style.Render(label))
-			underParts = append(underParts, strings.Repeat("━", lipgloss.Width(label)))
+	add := func(label string, active bool) {
+		w := lipgloss.Width(label)
+		if active {
+			tabs = append(tabs, activeStyle.Render(label))
+			underParts = append(underParts, strings.Repeat("━", w))
 		} else {
-			style := lipgloss.NewStyle().
-				Foreground(m.theme.Subtext).
-				Padding(0, 0)
-			tabs = append(tabs, style.Render(label))
-			underParts = append(underParts, strings.Repeat("─", lipgloss.Width(label)))
+			tabs = append(tabs, idleStyle.Render(label))
+			underParts = append(underParts, strings.Repeat("─", w))
 		}
+	}
+	if start > 0 {
+		add("‹", false)
+	}
+	for i := start; i < end; i++ {
+		add(items[i].label, items[i].active)
+	}
+	if end < len(items) {
+		add("›", false)
 	}
 
 	row := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 	underline := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render(strings.Join(underParts, ""))
-
-	padStyle := lipgloss.NewStyle().Padding(0, 1)
+	padStyle := lipgloss.NewStyle().Padding(0, 1).MaxWidth(max(1, m.width)).MaxHeight(1)
 	return padStyle.Render(row) + "\n" + padStyle.Render(underline)
 }
 
@@ -1549,7 +1759,6 @@ func (m PipelineModel) countForFilter(filter string) int {
 func (m PipelineModel) renderMetrics() string {
 	style := lipgloss.NewStyle().
 		Background(m.theme.Surface).
-		Width(m.width).
 		Padding(0, 2)
 
 	var parts []string
@@ -1565,20 +1774,40 @@ func (m PipelineModel) renderMetrics() string {
 		parts = append(parts, s.Render(fmt.Sprintf("%s:%d", statusLabel(status), count)))
 	}
 
-	return style.Render(strings.Join(parts, "  "))
+	inner := m.width - 4
+	if inner < 1 {
+		inner = 1
+	}
+	var b strings.Builder
+	used := 0
+	for _, part := range parts {
+		w := lipgloss.Width(part)
+		gap := 0
+		if used > 0 {
+			gap = 2
+		}
+		if used > 0 && used+gap+w > inner {
+			break
+		}
+		if gap > 0 {
+			b.WriteString("  ")
+		}
+		b.WriteString(part)
+		used += gap + w
+	}
+	return oneLine(m.width, style, b.String())
 }
 
 func (m PipelineModel) renderSortBar() string {
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Subtext).
-		Width(m.width).
 		Padding(0, 2)
 
 	sortLabel := fmt.Sprintf(i18n.Current.SortLabel, i18n.Current.SortModeLabel(m.sortMode))
 	viewLabel := fmt.Sprintf(i18n.Current.ViewLabel, i18n.Current.ViewModeLabel(m.viewMode))
 	count := fmt.Sprintf(i18n.Current.ShownCount, len(m.filtered))
 
-	return style.Render(fmt.Sprintf("%s  %s  %s", sortLabel, viewLabel, count))
+	return oneLine(m.width, style, fmt.Sprintf("%s  %s  %s", sortLabel, viewLabel, count))
 }
 
 func (m PipelineModel) renderBody() string {
@@ -1590,11 +1819,10 @@ func (m PipelineModel) renderBody() string {
 // without rendering the rows outside the window. View used to render every
 // filtered row on each keypress and then keep a screenful.
 //
-// A row or group header that is not rendered counts as one line. That holds for
-// both: every cell is truncated to its column and neither sets a width that
-// could wrap. The selected row is the exception, since it is padded to the
-// screen width and can wrap on a narrow terminal, so it is always rendered and
-// counted by its real line count.
+// A row or group header counts as one line. Cells are truncated to their
+// column, and column widths shrink until the row fits the terminal, so the
+// selected row stays one line too. The split below still counts a real wrap
+// if one ever slips through.
 func (m PipelineModel) renderBodyWindow(start, height int) []string {
 	lines := make([]string, 0, min(height, len(m.filtered)+8))
 	line := 0 // index of the next display line
@@ -1632,10 +1860,13 @@ func (m PipelineModel) renderBodyWindow(start, height int) []string {
 				headerStyle := lipgloss.NewStyle().
 					Bold(true).
 					Foreground(m.theme.Subtext)
-				if !emit(padStyle.Render(
-					headerStyle.Render(fmt.Sprintf("── %s (%d) %s",
-						strings.ToUpper(statusLabel(norm)), count,
-						strings.Repeat("─", max(0, m.width-30-len(statusLabel(norm)))))),
+				label := fmt.Sprintf("── %s (%d) ", strings.ToUpper(statusLabel(norm)), count)
+				room := m.width - 4 - lipgloss.Width(label)
+				if room < 0 {
+					room = 0
+				}
+				if !emit(padStyle.MaxWidth(max(1, m.width)).MaxHeight(1).Render(
+					headerStyle.Render(label + strings.Repeat("─", room)),
 				)) {
 					break
 				}
@@ -1676,33 +1907,83 @@ func (m PipelineModel) colVisible(id ColumnID) bool {
 }
 
 func (m PipelineModel) columnWidths() colWidths {
-	c := colWidths{num: 5, score: 5, company: 16, status: 16}
-	if m.colVisible(ColDate) {
+	company, status, roleFloor := 16, 16, 15
+	show := map[ColumnID]bool{}
+	for _, col := range getOptionalCols() {
+		if m.colVisible(col.id) {
+			show[col.id] = true
+		}
+	}
+	// A non-positive width cannot be fitted; keep the historical floor so a
+	// caller that has not been resized yet still renders something.
+	if m.width <= 0 {
+		c := m.widthsFor(show, company, status)
+		if c.role < roleFloor {
+			c.role = roleFloor
+		}
+		return c
+	}
+	// Drop the least identifying columns first, then give company and status
+	// back to the role column, then lower the role floor. Stopping at a role
+	// that still meets the floor keeps the row on one line.
+	dropOrder := []ColumnID{ColPosted, ColLastContact, ColHasPDF, ColHasReport, ColPay, ColLocation, ColDate}
+	for {
+		c := m.widthsFor(show, company, status)
+		if c.role >= roleFloor {
+			return c
+		}
+		dropped := false
+		for _, id := range dropOrder {
+			if show[id] {
+				show[id] = false
+				dropped = true
+				break
+			}
+		}
+		if dropped {
+			continue
+		}
+		switch {
+		case company > 8:
+			company--
+		case status > 8:
+			status--
+		case roleFloor > 6:
+			roleFloor--
+		default:
+			if c.role < 1 {
+				c.role = 1
+			}
+			return c
+		}
+	}
+}
+
+func (m PipelineModel) widthsFor(show map[ColumnID]bool, company, status int) colWidths {
+	c := colWidths{num: 5, score: 5, company: company, status: status}
+	if show[ColDate] {
 		c.date = 10
 	}
-	if m.colVisible(ColLocation) {
+	if show[ColLocation] {
 		c.loc = 20
 	}
-	if m.colVisible(ColPay) {
+	if show[ColPay] {
 		c.pay = 16
 	}
-	if m.colVisible(ColHasReport) {
+	if show[ColHasReport] {
 		c.rpt = 4
 	}
-	if m.colVisible(ColHasPDF) {
+	if show[ColHasPDF] {
 		c.pdf = 4
 	}
-	if m.colVisible(ColLastContact) {
+	if show[ColLastContact] {
 		c.last = 10
 	}
-	if m.colVisible(ColPosted) {
+	if show[ColPosted] {
 		c.posted = 10
 	}
 	fixed := c.num + c.score + c.date + c.company + c.status + c.loc + c.pay + c.rpt + c.pdf + c.last + c.posted
 	c.role = m.width - fixed - m.rowOverhead(c)
-	if c.role < 15 {
-		c.role = 15
-	}
 	return c
 }
 
@@ -1884,7 +2165,7 @@ func (m PipelineModel) renderColumnHeader() string {
 		segments = append(segments, cell(i18n.Current.ColPosted, cw.posted))
 	}
 
-	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	padStyle := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
 	return padStyle.Render(" " + strings.Join(segments, " "))
 }
 
@@ -1916,8 +2197,9 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	// row keeps its measured width.
 	score := scoreStyle.Width(3).Render(scoreText)
 
-	// Company (truncate)
-	company := truncateRunes(app.Company, cw.company)
+	// Company and role are measured in terminal cells. A rune count leaves a
+	// wide character wider than the column, and the row wraps under MaxHeight(1).
+	company := truncateCells(app.Company, cw.company)
 	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(cw.company)
 
 	// Date (fixed width): latest status change when the ledger has one, else
@@ -1929,7 +2211,7 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	dateStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.date)
 
 	// Role (truncate)
-	role := truncateRunes(app.Role, cw.role)
+	role := truncateCells(app.Role, cw.role)
 	roleStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.role)
 
 	// Status with color -- fixed column
@@ -1979,12 +2261,17 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	line := " " + strings.Join(segments, " ")
 
 	if selected {
+		inner := m.width - 4
+		if inner < 1 {
+			inner = 1
+		}
 		selStyle := lipgloss.NewStyle().
 			Background(m.theme.Overlay).
-			Width(m.width - 4)
-		return padStyle.Render(selStyle.Render(line))
+			Width(inner).
+			MaxHeight(1)
+		return padStyle.MaxWidth(max(1, m.width)).MaxHeight(1).Render(selStyle.Render(line))
 	}
-	return padStyle.Render(line)
+	return padStyle.MaxWidth(max(1, m.width)).MaxHeight(1).Render(line)
 }
 
 func (m PipelineModel) renderPreview() string {
@@ -1993,11 +2280,15 @@ func (m PipelineModel) renderPreview() string {
 		return ""
 	}
 
-	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	padStyle := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
 	divider := lipgloss.NewStyle().Foreground(m.theme.Overlay)
 
 	var lines []string
-	lines = append(lines, padStyle.Render(divider.Render(strings.Repeat("─", m.width-4))))
+	dashes := m.width - 4
+	if dashes < 0 {
+		dashes = 0
+	}
+	lines = append(lines, padStyle.Render(divider.Render(strings.Repeat("─", dashes))))
 
 	labelStyle := lipgloss.NewStyle().Foreground(m.theme.Sky).Bold(true)
 	valueStyle := lipgloss.NewStyle().Foreground(m.theme.Text)
@@ -2131,41 +2422,59 @@ func (m PipelineModel) renderHelp() string {
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Subtext).
 		Background(m.theme.Surface).
-		Width(m.width).
 		Padding(0, 1)
 
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Text)
 	descStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
+	budget := m.width - 2
+	if budget < 1 {
+		budget = 1
+	}
 
 	if m.flash != "" {
 		flashStyle := lipgloss.NewStyle().
 			Foreground(m.theme.Yellow).
 			Background(m.theme.Surface).
-			Width(m.width).
 			Padding(0, 1)
-		return flashStyle.Render(sanitizeFlash(m.flash))
+		return oneLine(m.width, flashStyle, fitPlain(budget, sanitizeFlash(m.flash)))
+	}
+
+	piece := func(key, desc string, pin bool) helpPiece {
+		return helpPiece{text: keyStyle.Render(key) + descStyle.Render(desc), pin: pin}
+	}
+
+	// The key list takes q and Esc as "close", so the footer must not offer
+	// q as quit while it is open.
+	if m.keysHelp {
+		return oneLine(m.width, style, joinHelp(budget, []helpPiece{
+			piece("↑↓/jk", i18n.Current.HelpScroll, false),
+			piece("q/Esc/?", i18n.Current.HelpClose, true),
+		}, "", ""))
 	}
 
 	if m.colPicker {
-		return style.Render(
-			keyStyle.Render("↑↓/jk") + descStyle.Render(i18n.Current.HelpNavigate) +
-				keyStyle.Render("SPACE") + descStyle.Render(i18n.Current.HelpToggle) +
-				keyStyle.Render("Esc/C") + descStyle.Render(i18n.Current.HelpClose))
+		return oneLine(m.width, style, joinHelp(budget, []helpPiece{
+			piece("↑↓/jk", i18n.Current.HelpNavigate, false),
+			piece("SPACE", i18n.Current.HelpToggle, false),
+			piece("Esc/C", i18n.Current.HelpClose, true),
+		}, "", ""))
 	}
 
 	if m.statusPicker || m.pdfPicker {
-		return style.Render(
-			keyStyle.Render("↑↓/jk") + descStyle.Render(i18n.Current.HelpNavigate) +
-				keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpConfirm) +
-				keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpCancel))
+		return oneLine(m.width, style, joinHelp(budget, []helpPiece{
+			piece("↑↓/jk", i18n.Current.HelpNavigate, false),
+			piece("Enter", i18n.Current.HelpConfirm, false),
+			piece("Esc", i18n.Current.HelpCancel, true),
+		}, "", ""))
 	}
 
 	if m.searchInput {
-		return style.Render(
-			keyStyle.Render("type") + descStyle.Render(i18n.Current.HelpFilterLive) +
-				keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpKeep) +
-				keyStyle.Render("Ctrl+U") + descStyle.Render(i18n.Current.HelpClear) +
-				keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpCancel))
+		return oneLine(m.width, style, joinHelp(budget, []helpPiece{
+			piece("type", i18n.Current.HelpFilterLive, false),
+			piece("Enter", i18n.Current.HelpKeep, false),
+			piece("Ctrl+U", i18n.Current.HelpClear, false),
+			piece("Esc", i18n.Current.HelpCancel, true),
+		}, "", ""))
 	}
 
 	// The manifesto segment is an OSC 8 hyperlink (utm_source=dashboard);
@@ -2175,30 +2484,104 @@ func (m PipelineModel) renderHelp() string {
 	manifestoLink := "\x1b]8;;https://career-ops.org/manifesto?utm_source=dashboard\x1b\\built on the CareerOps Manifesto\x1b]8;;\x1b\\"
 	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render(manifestoLink + " · career-ops by santifer.io")
 
-	keys := keyStyle.Render("↑↓/jk") + descStyle.Render(i18n.Current.HelpNav) +
-		keyStyle.Render("←→/hl") + descStyle.Render(i18n.Current.HelpTabs) +
-		keyStyle.Render("/") + descStyle.Render(i18n.Current.HelpSearch) +
-		keyStyle.Render("s") + descStyle.Render(i18n.Current.HelpSort) +
-		keyStyle.Render("r") + descStyle.Render(i18n.Current.HelpRefresh) +
-		keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpReport) +
-		keyStyle.Render("o") + descStyle.Render(i18n.Current.HelpOpenURL) +
-		keyStyle.Render("d") + descStyle.Render(i18n.Current.HelpOpenPDF) +
-		keyStyle.Render("D") + descStyle.Render(i18n.Current.HelpRegenPDF) +
-		keyStyle.Render("c") + descStyle.Render(i18n.Current.HelpChange) +
-		keyStyle.Render("C") + descStyle.Render(i18n.Current.HelpColumns) +
-		keyStyle.Render("v") + descStyle.Render(i18n.Current.HelpView) +
-		keyStyle.Render("p") + descStyle.Render(i18n.Current.HelpProgress) +
-		keyStyle.Render("S") + descStyle.Render(i18n.Current.HelpStats) +
-		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) +
-		keyStyle.Render("m") + descStyle.Render(i18n.Current.HelpManifesto) +
-		keyStyle.Render("q") + descStyle.Render(i18n.Current.HelpQuit)
+	keys := joinHelp(budget, []helpPiece{
+		piece("↑↓/jk", i18n.Current.HelpNav, false),
+		piece("←→/hl", i18n.Current.HelpTabs, false),
+		piece("/", i18n.Current.HelpSearch, false),
+		piece("s", i18n.Current.HelpSort, false),
+		piece("r", i18n.Current.HelpRefresh, false),
+		piece("Enter", i18n.Current.HelpReport, false),
+		piece("o", i18n.Current.HelpOpenURL, false),
+		piece("d", i18n.Current.HelpOpenPDF, false),
+		piece("y", i18n.Current.HelpCopyPDF, false),
+		piece("D", i18n.Current.HelpRegenPDF, false),
+		piece("c", i18n.Current.HelpChange, false),
+		piece("C", i18n.Current.HelpColumns, false),
+		piece("v", i18n.Current.HelpView, false),
+		piece("p", i18n.Current.HelpProgress, false),
+		piece("S", i18n.Current.HelpStats, false),
+		piece("t", i18n.Current.HelpLanguage, false),
+		piece("m", i18n.Current.HelpManifesto, false),
+		piece("g/G", i18n.Current.HelpTopEnd, false),
+		piece("?", i18n.Current.HelpKeys, true),
+		piece("q", i18n.Current.HelpQuit, true),
+	}, brandPlain, brand)
+	return oneLine(m.width, style, keys)
+}
 
-	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brandPlain) - 2
-	if gap < 1 {
-		gap = 1
+// renderKeysHelp draws the bindings the footer had to drop. Two columns once
+// the terminal is wide enough that a single column would waste the row.
+func (m PipelineModel) renderKeysHelp(maxLines int) string {
+	type kv struct{ key, desc string }
+	items := []kv{
+		{"↑↓/jk", strings.TrimSpace(i18n.Current.HelpNav)},
+		{"←→/hl", strings.TrimSpace(i18n.Current.HelpTabs)},
+		{"/", strings.TrimSpace(i18n.Current.HelpSearch)},
+		{"s", strings.TrimSpace(i18n.Current.HelpSort)},
+		{"r", strings.TrimSpace(i18n.Current.HelpRefresh)},
+		{"Enter", strings.TrimSpace(i18n.Current.HelpReport)},
+		{"o", strings.TrimSpace(i18n.Current.HelpOpenURL)},
+		{"d", strings.TrimSpace(i18n.Current.HelpOpenPDF)},
+		{"y", strings.TrimSpace(i18n.Current.HelpCopyPDF)},
+		{"D", strings.TrimSpace(i18n.Current.HelpRegenPDF)},
+		{"c", strings.TrimSpace(i18n.Current.HelpChange)},
+		{"C", strings.TrimSpace(i18n.Current.HelpColumns)},
+		{"v", strings.TrimSpace(i18n.Current.HelpView)},
+		{"p", strings.TrimSpace(i18n.Current.HelpProgress)},
+		{"S", strings.TrimSpace(i18n.Current.HelpStats)},
+		{"t", strings.TrimSpace(i18n.Current.HelpLanguage)},
+		{"m", strings.TrimSpace(i18n.Current.HelpManifesto)},
+		{"g/G", strings.TrimSpace(i18n.Current.HelpTopEnd)},
+		{"?", strings.TrimSpace(i18n.Current.HelpKeys)},
+		{"q", strings.TrimSpace(i18n.Current.HelpQuit)},
 	}
-
-	return style.Render(keys + strings.Repeat(" ", gap) + brand)
+	pad := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
+	var rows []string
+	if m.width >= 56 {
+		colW := (m.width - 4) / 2
+		if colW < 8 {
+			colW = 8
+		}
+		for i := 0; i < len(items); i += 2 {
+			left := fitPlain(colW, items[i].key+"  "+items[i].desc)
+			line := left
+			if i+1 < len(items) {
+				right := fitPlain(colW, items[i+1].key+"  "+items[i+1].desc)
+				gap := colW - lipgloss.Width(left)
+				if gap < 1 {
+					gap = 1
+				}
+				line += strings.Repeat(" ", gap) + right
+			}
+			rows = append(rows, pad.Render(line))
+		}
+	} else {
+		budget := m.width - 4
+		if budget < 1 {
+			budget = 1
+		}
+		for _, it := range items {
+			rows = append(rows, pad.Render(fitPlain(budget, it.key+"  "+it.desc)))
+		}
+	}
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	start := m.keysHelpOffset
+	if start < 0 {
+		start = 0
+	}
+	if len(rows) > maxLines && start > len(rows)-maxLines {
+		start = len(rows) - maxLines
+	}
+	if start > len(rows) {
+		start = 0
+	}
+	end := start + maxLines
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return strings.Join(rows[start:end], "\n")
 }
 
 func (m PipelineModel) overlayStatusPicker(body string) string {
@@ -2206,7 +2589,7 @@ func (m PipelineModel) overlayStatusPicker(body string) string {
 	bodyLines := strings.Split(body, "\n")
 
 	pickerWidth := 30
-	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	padStyle := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
 	borderStyle := lipgloss.NewStyle().
 		Foreground(m.theme.Blue).
 		Bold(true)
@@ -2288,7 +2671,7 @@ func (m PipelineModel) overlayPDFPicker(body string) string {
 	if pickerWidth < 30 {
 		pickerWidth = 30
 	}
-	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	padStyle := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
 	borderStyle := lipgloss.NewStyle().
 		Foreground(m.theme.Blue).
 		Bold(true)
@@ -2318,7 +2701,7 @@ func (m PipelineModel) overlayPDFPicker(body string) string {
 func (m PipelineModel) overlayColPicker(body string) string {
 	bodyLines := strings.Split(body, "\n")
 	pickerWidth := 36
-	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	padStyle := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
 	borderStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
@@ -2400,6 +2783,14 @@ func formatTimeAgo(dateStr string) string {
 	return i18n.Current.FormatTimeAgo(dateStr)
 }
 
+// truncateCells cuts s to width terminal cells. Wide characters count as two.
+func truncateCells(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return ansi.Truncate(s, width, "...")
+}
+
 // truncateRunes truncates a string to at most maxRunes runes, appending "..." if truncated.
 func truncateRunes(s string, maxRunes int) string {
 	runes := []rune(s)
@@ -2427,7 +2818,7 @@ func (m PipelineModel) overlayDiscardPicker(body string) string {
 	if pickerWidth < 36 {
 		pickerWidth = 36
 	}
-	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	padStyle := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
 	titleStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true)
 	hintStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 	inputStyle := lipgloss.NewStyle().Foreground(m.theme.Yellow).Bold(true)
@@ -2438,7 +2829,15 @@ func (m PipelineModel) overlayDiscardPicker(body string) string {
 		// Free-text sub-mode
 		picker = append(picker, padStyle.Render(titleStyle.Render("─── Reason (type + Enter) ───────────────")))
 		cursor := lipgloss.NewStyle().Foreground(m.theme.Blue).Render("█")
-		picker = append(picker, padStyle.Render(inputStyle.Render("> "+m.discardCustomText+cursor)))
+		// Show the end of a long reason so the text being typed and the cursor
+		// stay on screen. Room is the row minus padding, "> ", and the cursor.
+		typed := m.discardCustomText
+		if room := m.width - 4 - 2 - 1; room > 0 {
+			if w := ansi.StringWidth(typed); w > room {
+				typed = lastCells(typed, w, room)
+			}
+		}
+		picker = append(picker, padStyle.Render(inputStyle.Render("> "+typed+cursor)))
 		picker = append(picker, padStyle.Render(hintStyle.Render("Enter: confirm   Esc: back")))
 	} else {
 		numPredicted := m.discardPredictedCount
@@ -2464,6 +2863,9 @@ func (m PipelineModel) overlayDiscardPicker(body string) string {
 			if i < numPredicted {
 				label = "★ " + opt
 			}
+			// A label wider than the row would wrap, and MaxHeight(1) would keep
+			// only its first line. Cut it to the row instead.
+			label = ansi.Truncate(label, max(1, pickerWidth-2), "...")
 			picker = append(picker, padStyle.Render(style.Render(prefix+label)))
 		}
 	}
