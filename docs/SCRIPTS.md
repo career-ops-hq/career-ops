@@ -1554,11 +1554,14 @@ These have no `npm run` binding — modes and agents call them with
 | `node generate-latex.mjs <input.tex> [output.pdf] [--compile-only] [--source <path>] [--skip-fact-check] [--help]` | Fact-check, validate and compile a generated `.tex` CV via tectonic or pdflatex. The CV fact gate runs first whenever the data root has a `cv.md`, and a blocked document is not compiled; `--source` adds an evidence file (repeatable; `latex-tex` passes the user's own `.tex`). `--compile-only` skips career-ops template validation so a user-owned `.tex` compiles as-is (`latex-tex` mode) |
 | `node install-latex-engine.mjs [--check] [--force] [--json] [--help]` | Opt-in local LaTeX engine: downloads a pinned tectonic release for this platform, verifies its SHA-256 before extracting, and places it in the repo root (gitignored) where `generate-latex.mjs` looks first. Downloads are bounded by a timeout and a size cap. No-op when tectonic is already available (a pdflatex-only host still gets tectonic, which the CJK template needs); `--check` never downloads |
 | `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
+| `node templates.mjs [list \| available \| add <id\|owner/repo> [--sha <commit> --confirm] [--force] \| remove <id> [--force]]` | List, install and remove community template packs: a registered pack installs at its pinned SHA after `validate-template-pack.mjs` passes, into `templates/<id>/`, with a sha256 per file in `templates.lock` |
+| `node validate-template-pack.mjs <pack-dir>` | Structural gate for a template pack: `pack.json` shape, declared files and previews inside the pack, placeholders, `renderLint` (any finding fails) and `atsLint` for a template that claims `ats: true` |
 | `node ats-payload.mjs <payload.json> [--summary]` | ATS payload transform: folds `competencies[]` into `skills[]` (one safe, idempotent transform) and reports three judgement calls it deliberately does not apply. Payload on stdout, findings on stderr |
 | `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |
 | `node plugin-install.mjs [--help]` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA); the engine behind the `plugins.mjs` new/add commands, which `--help` points at |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
+| `node validate-template-registry.mjs [--root <dir>]` | Shape gate for `templates-registry/<id>.json` files |
 
 ---
 

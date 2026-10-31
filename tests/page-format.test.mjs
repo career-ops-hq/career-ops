@@ -264,8 +264,9 @@ function coverSandbox() {
   // cv-templates.mjs decodes HTML entities when it reads a template's meta
   // block, so the sandbox needs this too. Without it the copied script dies at
   // module load with ERR_MODULE_NOT_FOUND and the format assertion below never
-  // runs. The module imports nothing, so it closes the graph on its own.
+  // runs. The module imports only the entity table, which is copied next.
   copyFileSync(join(ROOT, 'providers', '_html-entities.mjs'), join(dir, 'providers', '_html-entities.mjs'));
+  copyFileSync(join(ROOT, 'providers', '_html-entity-table.mjs'), join(dir, 'providers', '_html-entity-table.mjs'));
   // Same reason: cv-templates.mjs reads the template manifest block and the
   // section vocabulary from here, so the sandbox dies at module load without it.
   copyFileSync(join(ROOT, 'lib', 'template-manifest.mjs'), join(dir, 'lib', 'template-manifest.mjs'));

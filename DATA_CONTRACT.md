@@ -34,6 +34,8 @@ These files contain your personal data, customizations, and work product. Update
 | `opencode.json` | Your OpenCode project config (MCP servers, model, formatter, LSP) — gitignored, copy `opencode.example.json` to start |
 | `plugins.local/` | Your own / private plugins (never auto-updated) |
 | `plugins.lock` | Integrity pins + recorded consent for your enabled plugins (generated; never auto-updated) |
+| `templates.lock` | Which template packs `templates.mjs` installed, from where, with a sha256 per file (generated; never auto-updated) |
+| `templates/<id>/*` | Files `templates.mjs` installed from a template pack, each listed in `templates.lock`. They are yours once installed: never auto-updated, and the updater's stale-file prune only deletes files upstream once shipped, which these never were. `templates.mjs add` refuses an `<id>` whose directory already exists unless the lock says it installed it. |
 | `data/applications.md` | Your application tracker (source of truth) |
 | `data/career-profile.yml` | Your source-backed Master Career Profile; written only after explicit review of imported CV facts |
 | `data/applications.db` | Derived query index over `applications.md` and `status-log.tsv` (SQLite, rebuilt by `node tracker.mjs sync`). Its `status_events` table, read by `tracker.mjs history`, is derived from the ledger: every sync rebuilds a row's events from `status-log.tsv` folded through `foldObservations()` in `funnel-velocity.mjs`, so `correction` and retraction lines apply. The one thing it adds is a status the ledger does not explain (a hand edit in `applications.md`, which writes no ledger row), recorded as observed at the sync that saw it and shown by `history` as `(no ledger row; observed at sync)`. Safe to delete: the next sync rebuilds every ledger-derived event exactly, and only those hand-edit observations are lost |
@@ -167,6 +169,9 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `plugins.mjs` | Plugin CLI (list/run/available/add/new/enable/skill/trust/remove) |
 | `plugins-registry/` | Curated community plugins, one `<id>.json` per plugin (the trust root) |
 | `plugin-install.mjs` / `plugin-audit.mjs` / `validate-plugin-registry.mjs` | Plugin install/audit/registry-validation utilities |
+| `templates-registry/` | Curated community template packs, one `<id>.json` per pack (the trust root) |
+| `validate-template-registry.mjs` / `lib/templates-registry.mjs` | Template-pack registry shape gate and loader |
+| `templates.mjs` / `lib/templates-install.mjs` | Template-pack CLI (list/available/add/remove) and its installer |
 | `config/plugins.example.yml` | Plugin activation template (seed for `config/plugins.yml`) |
 | `opencode.example.json` | OpenCode project config template (seed for `opencode.json`; ships Playwright MCP registration) |
 | `batch/batch-prompt.md` | Batch worker prompt |
