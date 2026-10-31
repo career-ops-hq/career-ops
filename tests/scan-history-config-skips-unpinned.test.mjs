@@ -11,9 +11,10 @@
 // posting it had once dropped.
 //
 // The census below reads every literal status any scanner passes to
-// appendToScanHistory() and asks the dedup rules what they do with it. A
-// status that pins a URL for good must be listed here with its reason, so the
-// next scanner that invents a status cannot pin by accident.
+// appendToScanHistory() or appendUnrecordedToScanHistory() and asks the dedup
+// rules what they do with it. A status that pins a URL for good must be listed
+// here with its reason, so the next scanner that invents a status cannot pin by
+// accident.
 import { pass, fail, ROOT, codeMask } from './helpers.mjs';
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
@@ -53,9 +54,10 @@ ok('premise: a status the rules do not know still pins for good', () => {
 });
 
 /**
- * Every literal status passed to `appendToScanHistory(…)` in tracked code,
- * mapped to the files that write it. The call name must sit at a code
- * position, so a mention in a comment or a string is not a call.
+ * Every literal status passed to `appendToScanHistory(…)` or, for a skip bucket,
+ * `appendUnrecordedToScanHistory(…)` in tracked code, mapped to the files that
+ * write it. The call name must sit at a code position, so a mention in a comment
+ * or a string is not a call.
  */
 function writtenStatuses() {
   const written = new Map();
@@ -63,7 +65,7 @@ function writtenStatuses() {
     const rel = relative(ROOT, abs).split('\\').join('/');
     const src = readFileSync(abs, 'utf-8');
     const isCode = codeMask(src);
-    for (const m of src.matchAll(/(?<!function )\bappendToScanHistory\s*\(/g)) {
+    for (const m of src.matchAll(/(?<!function )\b(?:appendToScanHistory|appendUnrecordedToScanHistory)\s*\(/g)) {
       if (!isCode[m.index]) continue;
       const end = src.indexOf(';', m.index);
       const call = src.slice(m.index, end === -1 ? undefined : end);
