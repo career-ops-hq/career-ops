@@ -2087,6 +2087,16 @@
         "infra",
         "plugin"
       ]
+    },
+    {
+      "login": "EngrHarris",
+      "name": "Engr. Haris PMP",
+      "avatar_url": "https://avatars.githubusercontent.com/u/340830909?v=4",
+      "profile": "http://harisarshad.site",
+      "contributions": [
+        "doc",
+        "example"
+      ]
     }
   ]
 }
