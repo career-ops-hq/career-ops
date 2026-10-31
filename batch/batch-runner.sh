@@ -467,15 +467,33 @@ acquire_state_lock() {
   fi
 
   local waited=0
+  local owner_file=""
   local max_waits=$((STATE_LOCK_TIMEOUT_SECONDS * 10))
 
   while true; do
     if mkdir "$STATE_LOCK_DIR" 2>/dev/null; then
-      if printf '%s\t%s\n' "${BASHPID:-$$}" "$(date +%s)" > "$STATE_LOCK_PID_FILE"; then
+      # A unique metadata path binds cleanup to this acquisition, not its successor.
+      if owner_file=$(mktemp "$STATE_LOCK_DIR/owner.XXXXXXXXXXXX") &&
+          printf '%s\t%s\n' "${BASHPID:-$$}" "$(date +%s)" > "$owner_file"; then
+        # mkdir may have belonged to a generation reclaimed before mktemp.
+        # Register first, then decline if another owner is still registered.
+        local competing_owner=false registered
+        for registered in "$STATE_LOCK_PID_FILE" "$STATE_LOCK_DIR"/owner.*; do
+          if [[ -f "$registered" && "$registered" != "$owner_file" ]]; then
+            competing_owner=true
+            break
+          fi
+        done
+        if [[ "$competing_owner" == "true" ]]; then
+          rm -f "$owner_file" 2>/dev/null || true
+          rmdir "$STATE_LOCK_DIR" 2>/dev/null || true
+          continue
+        fi
+        STATE_LOCK_OWNED_FILE="$owner_file"
         STATE_LOCK_OWNED=1
         return 0
       fi
-      rm -f "$STATE_LOCK_PID_FILE" 2>/dev/null || true
+      if [[ -n "$owner_file" ]]; then rm -f "$owner_file" 2>/dev/null || true; fi
       rmdir "$STATE_LOCK_DIR" 2>/dev/null || true
       echo "ERROR: Failed to initialize state lock metadata at $STATE_LOCK_DIR" >&2
       return 1
@@ -492,10 +510,15 @@ acquire_state_lock() {
       return 1
     fi
 
-    if [[ -f "$STATE_LOCK_PID_FILE" ]]; then
+    local lock_file="" candidate
+    # Accept a dead lock left by the older fixed-name protocol as well.
+    for candidate in "$STATE_LOCK_PID_FILE" "$STATE_LOCK_DIR"/owner.*; do
+      if [[ -f "$candidate" ]]; then lock_file="$candidate"; break; fi
+    done
+    if [[ -n "$lock_file" ]]; then
       local lock_pid lock_epoch
-      lock_pid=$(cut -f1 "$STATE_LOCK_PID_FILE" 2>/dev/null || true)
-      lock_epoch=$(cut -f2 "$STATE_LOCK_PID_FILE" 2>/dev/null || true)
+      lock_pid=$(cut -f1 "$lock_file" 2>/dev/null || true)
+      lock_epoch=$(cut -f2 "$lock_file" 2>/dev/null || true)
       local stale=false
       local stale_reason=""
 
@@ -535,7 +558,7 @@ acquire_state_lock() {
       fi
 
       if [[ "$stale" == "true" ]]; then
-        rm -f "$STATE_LOCK_PID_FILE"
+        rm -f "$lock_file"
         if rmdir "$STATE_LOCK_DIR" 2>/dev/null; then
           echo "WARN: Recovered stale state lock ($stale_reason)." >&2
           continue
@@ -558,7 +581,7 @@ release_state_lock() {
   if [[ "${STATE_LOCK_OWNED:-0}" -ne 1 ]]; then
     return
   fi
-  rm -f "$STATE_LOCK_PID_FILE" 2>/dev/null || true
+  rm -f "$STATE_LOCK_OWNED_FILE" 2>/dev/null || true
   rmdir "$STATE_LOCK_DIR" 2>/dev/null || true
   STATE_LOCK_OWNED=0
 }
