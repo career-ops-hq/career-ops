@@ -285,6 +285,7 @@ function coverSandbox() {
     "import { writeFileSync } from 'node:fs';",
     "import { dirname, join } from 'node:path';",
     "import { fileURLToPath } from 'node:url';",
+    'export const normalizeTextForATS = (html) => ({ html, replacements: {} });',
     'export async function renderHtmlToPdf(html, outputPath, opts = {}) {',
     "  const here = dirname(fileURLToPath(import.meta.url));",
     "  writeFileSync(join(here, 'render-opts.json'), JSON.stringify({ format: opts.format ?? null }));",

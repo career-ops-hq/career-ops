@@ -505,9 +505,11 @@ Usage:
     }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.
-    const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
+    const { normalizeTextForATS, renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
-    await renderHtmlToPdf(html, outputPath, {
+    // The pass a CV gets before it prints. Without it a letter kept its em
+    // dashes and curly quotes, and printed a draft's **bold** with the asterisks.
+    await renderHtmlToPdf(normalizeTextForATS(html).html, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.
