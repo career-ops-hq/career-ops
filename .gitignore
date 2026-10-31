@@ -131,6 +131,7 @@ voice-dna.md
 config/plugins.yml
 plugins.local/
 plugins.lock
+templates.lock
 
 # Secrets (never commit — use .env.example as template)
 .env

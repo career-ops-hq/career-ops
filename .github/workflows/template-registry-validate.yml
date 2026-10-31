@@ -1,0 +1,80 @@
+name: 'Template registry validate'
+
+# Runs on PRs that touch the curated template-pack registry. Uses `pull_request`
+# (NOT pull_request_target), read-only permissions, and NO secrets, so a
+# submitter's change can never reach a token or write the repo. This job reads
+# only the registry entries: no pack content is fetched or executed.
+on:
+  pull_request:
+    paths:
+      - 'templates-registry/**'
+
+permissions:
+  contents: read
+
+# Cancel superseded runs when the same PR is pushed again.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate registry entries
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 so the "One pack per PR" diff below has the base
+      # branch's history and merge-base available.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # The job only reads a public repository. A PR can change the
+          # validator it runs, so it should not hold a token.
+          persist-credentials: false
+
+      # The validator that judges a registry PR must not be one the PR can edit.
+      # Check the BASE branch out next to the PR and run its copy of the validator
+      # against the PR's files. Unlike the plugin validator, this one defaults its
+      # root to its own directory, so it must be pointed at the PR with --root;
+      # without it the base copy would validate the base registry and always pass.
+      # Keep this step after the PR checkout: checkout cleans the workspace, and
+      # would delete base/.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      # Deterministic shape gate (no network). The base copy runs whenever the
+      # base branch has one. The only PR it cannot run for is the one that first
+      # adds validate-template-registry.mjs: there is no trusted copy yet, so that
+      # PR's own copy runs. A PR cannot remove the file from the base branch, so
+      # every registry PR after it is judged by the base copy.
+      - name: Validate registry shape
+        run: |
+          VALIDATOR=base/validate-template-registry.mjs
+          if [ ! -f "$VALIDATOR" ]; then
+            echo "::notice::validate-template-registry.mjs is not on the base branch yet, so this PR's copy runs"
+            VALIDATOR=validate-template-registry.mjs
+          fi
+          node "$VALIDATOR" --root .
+
+      - name: One pack per PR
+        # base_ref goes through env, never ${{ }}-spliced into the script:
+        # anything expanded inside run: is literal shell code.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          # --no-renames: a rename would otherwise count as one change and let a
+          # PR swap one pack for another.
+          # :(glob) keeps * inside one path segment: the registry reads direct
+          # children only, so a nested file is not a second pack.
+          CHANGED=$(git diff --no-renames --name-only "origin/$BASE_REF"...HEAD -- ':(glob)templates-registry/*.json' | wc -l)
+          if [ "$CHANGED" -gt 1 ]; then echo "A registry PR may add or bump exactly one templates-registry/<id>.json file"; exit 1; fi
+          # A deletion is not an add or a bump, so a delete-only PR must not pass.
+          DELETED=$(git diff --no-renames --name-only --diff-filter=D "origin/$BASE_REF"...HEAD -- ':(glob)templates-registry/*.json' | wc -l)
+          if [ "$DELETED" -gt 0 ]; then echo "A registry PR may add or bump a templates-registry/<id>.json file, not delete one"; exit 1; fi

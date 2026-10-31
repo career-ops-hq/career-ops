@@ -287,6 +287,7 @@ export function legacyParentManifest() {
     'cv-templates.mjs',
     'path-resolver.mjs',
     'providers/_html-entities.mjs',
+    'providers/_html-entity-table.mjs',
     'lib/is-main-module.mjs',
     'lib/yaml-document.mjs',
     'lib/template-manifest.mjs',

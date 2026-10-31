@@ -1,0 +1,14 @@
+{
+  "name": "career-ops-template-reactive",
+  "id": "reactive",
+  "repo": "https://github.com/rubicon/career-ops-template-reactive",
+  "kind": [
+    "cv",
+    "cover"
+  ],
+  "themes": 15,
+  "ats": true,
+  "license": "MIT",
+  "version": "0.1.1",
+  "sha": "73fe777d08e59429001e3f0eb37d009e45aa3dd0"
+}
