@@ -25,6 +25,7 @@
  *   0  guard active and usable (including the documented "no config" state)
  *   1  the guard could not be loaded (config present but unreadable/malformed)
  *   2  the guard is explicitly bypassed for this process
+ *   3  the guard is explicitly disabled by configuration (enabled: false)
  */
 
 import { existsSync } from 'node:fs';
@@ -39,6 +40,7 @@ import {
   getPrivacyConfigPath,
   getPrivacyExamplePath,
   loadPrivacyGuard,
+  normalizeValue,
   readPrivacyConfig,
 } from './lib/privacy-guard.mjs';
 import { LLM_HOSTS } from './lib/llm-outbound.mjs';
@@ -90,8 +92,8 @@ function collect() {
       report.state = 'disabled-by-config';
       return report;
     }
-    report.configuredCount = guard.configuredCount;
     report.rawConfiguredCount = config.values?.length ?? 0;
+    report.configuredCount = config.values.filter((v) => normalizeValue(v) !== null).length;
     return report;
   } catch (err) {
     if (err instanceof PrivacyConfigError) {
@@ -182,4 +184,5 @@ if (asJson) {
 
 if (report.state === 'config-error') process.exit(1);
 if (report.state === 'bypassed') process.exit(2);
+if (report.state === 'disabled-by-config') process.exit(3);
 process.exit(0);

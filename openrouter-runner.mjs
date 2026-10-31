@@ -527,7 +527,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       return { content, usage };
 
     } catch (e) {
-      if (e?.code === 'PRIVACY_GUARD_BLOCKED') throw e;
+      if (e?.code === 'PRIVACY_GUARD_BLOCKED' || e?.code === 'PRIVACY_GUARD_CONFIG') throw e;
       if (e instanceof QuotaExhaustedError || e.name === 'QuotaExhaustedError') {
         console.log(`FAILED (${e.message})`);
         throw e;
@@ -1002,6 +1002,10 @@ async function cmdEvaluate(input, ctx) {
     if (e.name === 'QuotaExhaustedError' || e instanceof QuotaExhaustedError) {
       throw e;
     }
+    if (e?.code === 'PRIVACY_GUARD_CONFIG') {
+      console.error(`Privacy configuration error: ${e.message}`);
+      return { success: false, error: 'PRIVACY_GUARD_CONFIG' };
+    }
     console.error(`OpenRouter error: ${e.message}`);
     return null;
   }
@@ -1117,6 +1121,9 @@ async function cmdPipeline(ctx, options = {}) {
       if (res && res.success === true) {
         await markPipelineDone(item.url);
         console.log(`  Marked complete in pipeline: ${item.company} — ${item.role}`);
+      } else if (res?.error === 'PRIVACY_GUARD_CONFIG') {
+        console.error('Stopping pipeline immediately due to invalid privacy configuration.');
+        break;
       } else {
         console.warn(`  Evaluation incomplete or failed. Listing preserved as pending in pipeline.md for retry.`);
       }

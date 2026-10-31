@@ -86,6 +86,17 @@ test('1. a configured value in a request is blocked, and the request is not rewr
   assert.ok(body.includes(FAKE.name), 'the caller still holds the original body');
 });
 
+test('1b. configured text containing quotes is detected when JSON-escaped in serialized payload', () => {
+  const guard = new PrivacyGuard({
+    values: ['Jordan "JD" Placeholder'],
+  });
+  const body = JSON.stringify({
+    messages: [{ role: 'user', content: 'Candidate nickname is Jordan "JD" Placeholder' }],
+  });
+  assert.ok(body.includes('Jordan \\"JD\\" Placeholder'), 'payload is JSON-escaped');
+  assert.throws(() => guard.assertSafe(body), PrivacyGuardError);
+});
+
 // ---------------------------------------------------------------------------
 // 2. Ordinary professional information is allowed (no false blocks).
 // ---------------------------------------------------------------------------
@@ -400,9 +411,34 @@ test('9c. a Buffer body is scanned as text, not as a byte array', () => {
     PrivacyGuardError,
     'Uint8Array'
   );
+  const nameBuf = Buffer.from(FAKE.name.length % 2 === 0 ? FAKE.name : `${FAKE.name} `);
+  assert.throws(
+    () => guard.assertSafe(new Uint16Array(nameBuf.buffer, nameBuf.byteOffset, nameBuf.byteLength / 2)),
+    PrivacyGuardError,
+    'Uint16Array'
+  );
 
   // And a clean Buffer still passes, so this is not a false-positive machine.
   assert.equal(guard.assertSafe(Buffer.from('an ordinary job posting')), true);
+});
+
+test('9d. replaceBinaryViews honors custom toJSON() implementations', () => {
+  const guard = fakeGuard();
+  const customPayload = {
+    _secretInternal: 'clean',
+    toJSON() {
+      return { data: Buffer.from(FAKE.name) };
+    },
+  };
+  assert.throws(() => guard.assertSafe(customPayload), PrivacyGuardError);
+
+  const strippedPayload = {
+    _hiddenSecret: FAKE.name,
+    toJSON() {
+      return { safeField: 'public content' };
+    },
+  };
+  assert.equal(guard.assertSafe(strippedPayload), true);
 });
 
 // ---------------------------------------------------------------------------
@@ -560,24 +596,27 @@ test('11c. assertGoogleRequestAllowed inspects systemInstruction and every turn'
 
   // Clean request passes.
   assert.doesNotThrow(() =>
-    assertGoogleRequestAllowed({ systemInstruction: 'You are a helpful evaluator.', turns: ['A job posting.'] }, { guard })
+    assertGoogleRequestAllowed(
+      { systemInstruction: 'You are a helpful evaluator.', turns: ['A job posting.'] },
+      { guard, allowRedact: false }
+    )
   );
 
   // A value in the user turn is blocked.
   assert.throws(
-    () => assertGoogleRequestAllowed({ turns: [`Contact me at ${FAKE.email}`] }, { guard }),
+    () => assertGoogleRequestAllowed({ turns: [`Contact me at ${FAKE.email}`] }, { guard, allowRedact: false }),
     PrivacyGuardError
   );
 
   // A value in the systemInstruction is blocked too, not just the turns.
   assert.throws(
-    () => assertGoogleRequestAllowed({ systemInstruction: `Candidate: ${FAKE.name}`, turns: ['ok'] }, { guard }),
+    () => assertGoogleRequestAllowed({ systemInstruction: `Candidate: ${FAKE.name}`, turns: ['ok'] }, { guard, allowRedact: false }),
     PrivacyGuardError
   );
 
   // A value in the SECOND turn of a multi-turn request is found as well.
   assert.throws(
-    () => assertGoogleRequestAllowed({ turns: ['first', `call ${FAKE.phone}`] }, { guard }),
+    () => assertGoogleRequestAllowed({ turns: ['first', `call ${FAKE.phone}`] }, { guard, allowRedact: false }),
     PrivacyGuardError
   );
 });
@@ -693,6 +732,56 @@ test('12d. rehydration restores the configured spelling', async () => {
   assert.ok(!sentBody.toLowerCase().includes(FAKE.name.toLowerCase()));
   // ...but the restored value is the configured spelling, not the match key.
   assert.ok((await response.text()).includes(FAKE.name), 'restores "Jordan A. Placeholder"');
+});
+
+test('12e. redact mode scrubs JSON-escaped values and response.json restores valid JSON', async () => {
+  const quotedName = 'Jordan "JD" Placeholder';
+  const guard = new PrivacyGuard({ values: [quotedName] });
+  let sentBody = null;
+  const mockFetch = async (input, init) => {
+    sentBody = init?.body;
+    return {
+      ok: true,
+      text: async () => `{"echo": "${sentBody.match(/\{\{PRIVACY_REDACTED_\d+\}\}/)[0]}"}`,
+      json: async () => ({}),
+    };
+  };
+
+  const redacting = wrapFetch(mockFetch, { guard, redact: true });
+  const response = await redacting('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ candidate: quotedName }),
+  });
+
+  assert.match(sentBody, /PRIVACY_REDACTED_/);
+  assert.ok(!sentBody.includes('Jordan \\"JD\\" Placeholder'));
+
+  // response.json() parses successfully without syntax errors from unescaped quotes
+  const parsed = await response.json();
+  assert.equal(parsed.echo, quotedName);
+
+  // response.text() restores the raw value
+  const rawText = await response.text();
+  assert.ok(rawText.includes(quotedName));
+});
+
+test('12f. redact mode and redactPreview process configured text values longest first', async () => {
+  const guard = new PrivacyGuard({ values: ['Jordan', 'Jordan Placeholder'] });
+
+  let sentBody = null;
+  const mockFetch = async (input, init) => {
+    sentBody = init?.body;
+    return { ok: true, text: async () => 'echo', json: async () => ({}) };
+  };
+
+  const redacting = wrapFetch(mockFetch, { guard, redact: true });
+  await redacting('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ q: 'Jordan Placeholder' }),
+  });
+
+  const parsed = JSON.parse(sentBody);
+  assert.match(parsed.q, /^\{\{PRIVACY_REDACTED_\d+\}\}$/);
 });
 
 // ---------------------------------------------------------------------------
@@ -937,3 +1026,4 @@ test('privacy-status error message reflects actual reason for top-level non-mapp
     assert.ok(parsed.error.includes(path));
   });
 });
+
