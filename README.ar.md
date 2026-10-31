@@ -201,6 +201,10 @@ career-ops مجاني للمرشحين، إلى الأبد. هذه الشركا�
 
 </details>
 
+## كيف يعمل النظام؟
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+
 ## البدء السريع
 
 **أسرع طريقة، بأمر واحد:**
@@ -245,13 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline
-# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
-# In Codex, ask for the same mode in plain language, e.g.:
-# "Run the career-ops scan mode"
-# "Run the career-ops pipeline mode for data/pipeline.md"
-# "Run the career-ops pdf mode for the latest evaluated role"
-# "Run the career-ops tracker mode and summarize the current statuses"
+# Paste a job URL or JD text to trigger auto-pipeline.
+# Every other mode, and how to ask for it in your CLI: see Usage below.
 ```
 
 </details>
@@ -268,187 +267,131 @@ npm i -g @santifer/career-ops
 - `npx @santifer/career-ops init`: الأفضل للاستخدام الأول؛ ينشئ مجلد مشروع مخصصًا.
 - `npm i -g @santifer/career-ops`: إذا كنت تفضّل كتابة `career-ops init` بدلًا من صيغة `npx`. لا يضيف أي أوامر أخرى.
 
+### طرق أخرى للتشغيل
+
+- **من أي مجلد، كإضافة Claude Code:** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **بدون واجهة أوامر ذكاء اصطناعي:** تقيّم سكربتات Gemini وOllama والسكربتات المتوافقة مع OpenAI وصفًا وظيفيًا بمفردها. راجع [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval).
+
 > **النظام مصمم ليخصّصه وكيل واجهة الذكاء الاصطناعي نفسه.** الأوضاع والأنماط وأوزان التقييم ونصوص التفاوض: اطلب منه تغييرها فحسب. إنه يقرأ الملفات نفسها التي يستخدمها، لذا يعرف تمامًا ما الذي يجب تحريره.
 
 انظر [docs/SETUP.md](docs/SETUP.md) لدليل الإعداد الكامل، و[docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) لتشغيل career-ops بتكلفة منخفضة باستخدام نماذج مخصصة أو محلية (و[docs/FREE_TIER.md](docs/FREE_TIER.md) لتشغيله دون تكلفة على الطبقة المجانية من Antigravity CLI)، و[docs/AUTOMATION.md](docs/AUTOMATION.md) لجدولة عمليات الفحص المتكررة ووصفة الفرز إلى قائمة مختصرة دون استهلاك رموز، و[docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) لتفاصيل تدفق التعبئة التلقائية لنماذج ATS، و[docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) لمقارنة تصدير جهات اتصالك في LinkedIn مع الشركات في قمعك، و[docs/FAQ.md](docs/FAQ.md) لإجابات أسئلة الإعداد الشائعة، بما فيها [كيف يمنع تتبع مصدر القصص الأرقام المختلقة](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). مبادئ التصميم في [ARCHITECTURE.md](ARCHITECTURE.md)؛ وتدفقات التشغيل في [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## الاستخدام
 
-يستخدم career-ops موجّه أوامر مشتركًا. في الواجهات التي تسجّل أوامر الشرطة المائلة، يبدو الأمر هكذا:
+الصق رابط وظيفة أو وصفها في واجهة الذكاء الاصطناعي لديك. يتحقق career-ops من أن الوظيفة ذات الرابط ما زالت متاحة (النص الملصوق ليس له رابط للتحقق منه)، ويقيّمها مقابل سيرتك الذاتية، ويكتب تقريرًا، ويكيّف سيرتك الذاتية (بصيغة PDF افتراضيًا)، ويضيف صفًا إلى متتبّعك. هذا يكفي في معظم الأيام. وكل ما عدا ذلك وضع تطلبه باسمه. إذا تعذّرت قراءة الإعلان، يتوقف خط المعالجة ويطلب منك لصق النص.
 
-```
-/career-ops           → عرض كل الأوامر المتاحة
-/career-ops {JD}      → خط العمل التلقائي: تقييم + تقرير + PDF + متتبع (الصق نصًا أو رابطًا)
-/career-ops pipeline  → معالجة الروابط المعلّقة من صندوق الوارد (data/pipeline.md)
-/career-ops oferta    → تقييم فقط، الكتل من A إلى H (بدون PDF تلقائي)
-/career-ops ofertas   → مقارنة عدة عروض وترتيبها
-/career-ops contacto  → حركة LinkedIn الذكية: إيجاد جهات الاتصال + صياغة رسالة
-/career-ops deep      → أمر بحث معمّق عن الشركة
-/career-ops interview-prep → إنشاء مستند تحضير لمقابلة خاص بالشركة
-/career-ops interview    → مقابلة تفاعلية لإعداد الملف والسيرة الذاتية
-/career-ops master-profile → استيراد ملفك المهني الرئيسي (Master Career Profile) ومراجعته والتحقق منه
-/career-ops eu-swe    → معايرة طلب SWE أوروبي قبل السيرة الذاتية أو التقديم أو المقابلة
-/career-ops interview/plan → خطة تحضير بكتل زمنية لمقابلة قادمة
-/career-ops interview/practice → مقابلة تدريبية، سؤال واحد في كل مرة مع ملاحظات
-/career-ops interview/debrief → مراجعة ما بعد المقابلة: سد الثغرات وتوقع الجولة التالية
-/career-ops interview-redflag → تحليل إشارات التحذير لدى جهة التوظيف قبل الانضمام
-/career-ops pdf       → PDF فقط، سيرة ذاتية محسّنة لأنظمة ATS
-/career-ops text      → سيرة ذاتية مخصّصة بصيغة markdown (تعكس cv.md، بدون PDF)
-/career-ops latex     → تصدير السيرة الذاتية بصيغة LaTeX/Overleaf .tex
-/career-ops latex-tex → تخصيص ملف resume.tex الخاص بك في مكانه (اختياري؛ يبقى cv.md الافتراضي)
-/career-ops cover     → خطاب تقديم: وصف ملصق مستقل أو /career-ops cover {slug}
-/career-ops email     → مسودة رسالة تقديم رسمية (مسودة فقط؛ لا يرسل ولا يقدّم ولا ينقر أبدًا)
-/career-ops add       → إضافة مشروع/ورقة/دور إلى سيرتك الذاتية (جلب + معاينة + تأكيد)
-/career-ops expand    → اكتشاف الكفاءات الناقصة وإضافتها تلقائيًا من روابط الملف
-/career-ops training  → تقييم دورة/شهادة مقابل هدفك الأساسي (North Star)
-/career-ops project   → تقييم فكرة مشروع لملف الأعمال
-/career-ops tracker   → نظرة عامة على حالة الطلبات
-/career-ops agent-inbox → وضع الطلبات في الطابور/تفريغها للجلسة القادمة (data/agent-inbox.md)
-/career-ops apply     → مساعد تقديم مباشر (يقرأ النموذج + يولّد الإجابات)
-/career-ops scan      → فحص البوابات واكتشاف عروض جديدة
-/career-ops discover  → تحويل قائمة شركات إلى لوحات ATS قابلة للفحص + إضافتها إلى portals.yml (بدون رموز)
-/career-ops batch     → معالجة جماعية بعمّال متوازين
-/career-ops patterns  → تحليل أنماط الرفض وتحسين الاستهداف
-/career-ops offer-prep → قراءة عرض/عقد مستلم مع المرشح: مرور على البنود + أسئلة للمحامي (ليست استشارة قانونية)
-/career-ops titles    → اقتراح مسميات وظيفية مجاورة من سيرتك الذاتية لتوسيع البحث
-/career-ops upskill   → تحليل مجمّع لفجوات المهارات من تقاريرك المقيّمة
-/career-ops followup  → متتبع إيقاع المتابعة: تعليم المتأخر وإنشاء مسودات
-/career-ops reply-watch → تصنيف ردود جهات التوظيف واقتراح تحديثات للمتتبع
-/career-ops outcome   → تسجيل نتيجة الطلب وأرشفة المخرجات
-/career-ops calibrate → تقرير استشاري: هل تتنبأ درجات تقييمك بنتائجك الفعلية؟ يقرأ بيانات /outcome؛ ولا يغيّر التقييم أبدًا
-/career-ops update    → تحديث ملفات نظام career-ops مع معاينة الفروقات + فحص التوافق
-```
+### كيف تطلب وضعًا
 
-أو الصق رابط الوظيفة أو وصفها مباشرة: يكتشفه career-ops تلقائيًا ويشغّل خط العمل الكامل.
+| الواجهة | كيف تطلب `scan` |
+| --- | --- |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Pi | `/skill:career-ops scan` |
+| Codex أو Qwen أو Cursor أو أي واجهة أخرى مدعومة | لغة عادية: "Run the career-ops scan mode" |
 
-في Codex، أوامر الشرطة المائلة غير مضمونة. استخدم أسماء الأوضاع نفسها في الأمر النصي بدلًا من ذلك، أو استدعِها من `codex exec`.
+كتابة `/career-ops` وحدها تعرض قائمة الأوامر في الواجهات التي تستخدمه. واللغة العادية تعمل في كل واجهة مدعومة. عند استخدامه كإضافة لـ Claude Code يكون الأمر `/career-ops:career-ops`.
 
-## كيف يعمل النظام؟
+تشترك كلها في موجّه واحد هو `.agents/skills/career-ops/SKILL.md` وفي ملفات `modes/*.md` نفسها، لذا يتصرف الوضع بالطريقة نفسها أيًّا كانت الواجهة التي تشغّله. أوامر الشرطة المائلة غير مضمونة في Codex: اطلب بلغة عادية، أو شغّل موجّهًا واحدًا دون واجهة عبر `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). وتجد كيفية التشغيل في كل واجهة مدعومة، وأوامر التشغيل دون واجهة حيث تتوفر، وملاحظات الإعداد الخاصة بكل واجهة، في [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+### أوامر الاستخدام اليومي
 
-## تكامل Antigravity CLI
+| الأمر | ماذا يفعل |
+| --- | --- |
+| *الصق رابطًا أو وصفًا وظيفيًا* | خط المعالجة الكامل: التحقق من أن الوظيفة ما زالت متاحة (للروابط فقط)، تقييم A-G مع H عند الدرجات المرتفعة، تقرير، سيرة ذاتية مُكيَّفة (PDF افتراضيًا)، صف في المتتبّع |
+| `scan` | يفحص بواباتك بحثًا عن وظائف جديدة ويضيفها إلى صندوق الوارد (`data/pipeline.md`) |
+| `pipeline` | يقيّم كل رابط ينتظر في صندوق الوارد |
+| `apply` | يملأ نموذج التقديم معك حقلًا بحقل. ويتوقف قبل الإرسال |
+| `tracker` | أين وصل كل طلب |
+| `followup` | أي الطلبات حان موعد متابعتها، مع مسودات |
 
-يدعم career-ops واجهة Antigravity CLI أصلًا، بالطريقة نفسها التي يدعم بها Claude Code و OpenCode. جميع أوامر الشرطة المائلة متاحة عبر نقطة دخول المهارة المشتركة، باستخدام منطق التقييم نفسه في `modes/*.md`.
+<details>
+<summary><b>كل الأوامر، حسب مرحلة البحث</b></summary>
 
-نقلت Google وصول المستهلكين إلى Gemini CLI نحو Antigravity CLI. أصبح `GEMINI.md` الآن حارس توافق بلا تأثير، حتى لا يكرر Antigravity تعليمات المشروع الكاملة عندما يقرأ `AGENTS.md` و`GEMINI.md` معًا.
+تحتفظ `oferta` و`ofertas` و`contacto` بأسمائها الإسبانية الأصلية: عرض، عروض، جهة اتصال.
 
-### Antigravity CLI الأصلي
+**إيجاد وظائف**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-agy
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`scan`](modes/scan.md) | فحص البوابات واكتشاف عروض جديدة |
+| [`discover`](modes/discover.md) | تحويل قائمة أسماء شركات إلى لوحات ATS قابلة للفحص وإضافتها إلى `portals.yml` (بدون رموز) |
+| [`pipeline`](modes/pipeline.md) | معالجة الروابط المعلّقة من صندوق الوارد (`data/pipeline.md`) |
+| [`triage`](modes/triage.md) | فرز أولي سريع (يستحق/لا يستحق) استنادًا إلى `modes/_brief.md`، قبل التقييم الكامل (لا يكتب أي ملفات) |
+| [`batch`](modes/batch.md) | تقييم وظائف كثيرة بعمّال متوازين دون واجهة |
+| [`titles`](modes/titles.md) | اقتراح مسميات وظيفية قريبة من سيرتك الذاتية لتوسيع البحث |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
+**تقييم وظيفة**
 
-المهارة معرّفة وفق المعيار المفتوح في `.agents/skills/career-ops/SKILL.md` ومربوطة برابط رمزي أو مُشار إليها لكل واجهة مدعومة (مثل `.claude/` و`.qwen/` و`.antigravitycli/` و`.grok/`). يكتشف Cursor المهارة المشتركة تلقائيًا في `.agents/skills/`.
+| الأمر | ماذا يفعل |
+| --- | --- |
+| *الصق رابطًا أو وصفًا وظيفيًا* | [Auto-pipeline](modes/auto-pipeline.md): تقييم + تقرير + سيرة ذاتية مُكيَّفة (PDF افتراضيًا) + إدخال في المتتبّع |
+| [`oferta`](modes/oferta.md) | تقييم فقط، الكتل من A إلى G مع H عند الدرجات المرتفعة (بدون PDF) |
+| [`ofertas`](modes/ofertas.md) | مقارنة عدة عروض وترتيبها |
+| [`deep`](modes/deep.md) | موجّه بحث معمّق عن الشركة |
+| [`eu-swe`](modes/regional/eu-swe.md) | معايرة طلب أوروبي في هندسة البرمجيات قبل السيرة الذاتية أو التقديم أو المقابلة |
 
-## تكامل Codex
+**التقديم**
 
-يدعم career-ops واجهة Codex عبر الموجّه المشترك نفسه، لكن نموذج الاستدعاء يختلف عن الواجهات التي تسجّل أوامر الشرطة المائلة تلقائيًا. للدليل الكامل انظر [docs/CODEX.md](docs/CODEX.md).
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`pdf`](modes/pdf.md) | سيرة ذاتية محسّنة لأنظمة ATS بصيغة PDF |
+| [`ats`](modes/ats.md) | فحص ملاءمة سيرة ذاتية مولَّدة لأنظمة ATS: الدرجة والمشكلات القابلة للإصلاح |
+| [`text`](modes/text.md) | سيرة ذاتية مُكيَّفة بصيغة markdown (تعكس `cv.md`، بدون PDF) |
+| [`latex`](modes/latex.md) | تصدير السيرة الذاتية بصيغة LaTeX/Overleaf `.tex` |
+| [`latex-tex`](modes/latex-tex.md) | تكييف ملف `resume.tex` الخاص بك في مكانه (اختياري؛ ويبقى `cv.md` هو الافتراضي) |
+| [`cover`](modes/cover.md) | خطاب تغطية، من وصف وظيفي ملصوق أو من تقرير مقيَّم (`cover {slug}`) |
+| [`email`](modes/email.md) | مسودة بريد تقديم رسمي. مسودة فقط: لا يرسل ولا يقدّم ولا ينقر أبدًا |
+| [`contacto`](modes/contacto.md) | إيجاد مدير التوظيف أو المسؤول عن الاستقطاب أو زميل في المجال، وصياغة رسالة LinkedIn |
+| [`apply`](modes/apply.md) | مساعد تقديم مباشر (Playwright من هذا المستودع). لا يرسل الطلب |
 
-### Codex التفاعلي
+**المقابلة**
 
-```bash
-cd career-ops
-codex
-```
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`interview-prep`](modes/interview-prep.md) | مستند تحضير للمقابلة خاص بالشركة |
+| [`interview/plan`](modes/interview/plan.md) | خطة تحضير مقسّمة إلى فترات زمنية لمقابلة قادمة |
+| [`interview/practice`](modes/interview/practice.md) | مقابلة تدريبية، سؤال واحد في كل مرة، مع ملاحظات |
+| [`interview/debrief`](modes/interview/debrief.md) | مراجعة ما بعد المقابلة: سدّ الثغرات وتوقّع الجولة التالية |
+| [`interview-redflag`](modes/interview-redflag.md) | تحليل علامات التحذير لدى جهة العمل قبل الانضمام إليها |
 
-أوامر الشرطة المائلة غير مضمونة في Codex. إذا لم يكن `/career-ops` متاحًا، اطلب من Codex تشغيل الوضع مباشرة بلغة عادية:
+**بعد التقديم**
 
-```text
-Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
-Run the career-ops scan mode and summarize new matches.
-Run the career-ops pipeline mode for data/pipeline.md.
-Run the career-ops pdf mode for the latest evaluated role.
-Run the career-ops tracker mode and summarize the current statuses.
-```
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`tracker`](modes/tracker.md) | نظرة عامة على حالة الطلبات |
+| [`followup`](modes/followup.md) | إيقاع المتابعة: تمييز الطلبات المتأخرة وتوليد مسودات |
+| [`reply-watch`](modes/reply-watch.md) | تصنيف ردود جهات العمل واقتراح تحديثات للمتتبّع |
+| [`outcome`](modes/outcome.md) | تسجيل نتيجة الطلب وأرشفة مخرجاته |
+| [`offer-prep`](modes/offer-prep.md) | قراءة عرض أو عقد وصلك معك: مرور على البنود وأسئلة للمحامي (ليست استشارة قانونية) |
 
-### Codex بضربة واحدة (`codex exec`)
+**ملفك وسيرتك الذاتية**
 
-```bash
-codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-codex exec "Run career-ops scan mode in this repo and summarize new matches."
-codex exec "Run career-ops pipeline mode for data/pipeline.md."
-codex exec "Run career-ops pdf mode for the latest evaluated role."
-codex exec "Run career-ops tracker mode and summarize the current statuses."
-```
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`interview`](modes/interview.md) | إعداد الملف: مقابلة تفاعلية عن خبرتك تبني سيرتك الذاتية وملفك (وليست تدريبًا على المقابلات) |
+| [`intake`](modes/intake.md) | بناء ملفك أو إثراؤه من الملفات الموجودة في `documents/` (السيرة الذاتية الرئيسية، تصدير LinkedIn). لا يُكتب شيء دون تأكيدك |
+| [`master-profile`](modes/master-profile.md) | استيراد Master Career Profile ومراجعته والتحقق منه، وتجهيز حقائق مختارة كنقاط في السيرة الذاتية |
+| [`add`](modes/add.md) | إضافة مشروع أو ورقة بحثية أو منصب إلى سيرتك الذاتية (جلب، معاينة، تأكيد) |
+| [`expand`](modes/expand.md) | اكتشاف الكفاءات الناقصة في سيرتك الذاتية من روابط ملفك |
+| [`retro`](modes/retro.md) | مراجعة هذه الجلسة وحفظ ما علّمته إياه كقواعد (لا يكتب إلا ما تقبله) |
 
-## تكامل Grok Build CLI
+**تحسين استهدافك**
 
-يدعم career-ops واجهة Grok Build CLI أصلًا، بالطريقة نفسها التي يدعم بها Claude Code و OpenCode. يُحمَّل `AGENTS.md` تلقائيًا كقواعد للمشروع، وجميع أوامر الشرطة المائلة متاحة عبر نقطة دخول المهارة المشتركة.
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`patterns`](modes/patterns.md) | تحليل أنماط الرفض وتحسين الاستهداف |
+| [`calibrate`](modes/calibrate.md) | التحقق مما إذا كانت درجات تقييمك تتنبأ بنتائجك الفعلية. استشاري: لا يغيّر التقييم أبدًا |
+| [`upskill`](modes/upskill.md) | تحليل فجوات المهارات عبر تقاريرك المقيَّمة |
+| [`training`](modes/training.md) | تقييم دورة أو شهادة مقابل North Star الخاصة بك |
+| [`project`](modes/project.md) | تقييم فكرة مشروع لمحفظة الأعمال |
 
-### Grok Build CLI الأصلي
+**النظام**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-grok
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`agent-inbox`](modes/agent-inbox.md) | وضع الطلبات في قائمة انتظار للجلسة التالية ومعالجتها حينها (`data/agent-inbox.md`). ويعمل `inbox` أيضًا |
+| [`update`](modes/update.md) | تحديث ملفات نظام career-ops، مع معاينة الفروقات وفحص التوافق |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-لعمّال المعالجة الجماعية بلا واجهة، استخدم `grok -p "prompt"` (أضف `--yolo` للموافقة التلقائية على تنفيذ الأدوات).
-
-## تكامل Pi
-
-يدعم career-ops واجهة [Pi](https://github.com/earendil-works/pi) أصلًا، دون أي ملف غلاف يحتاج إلى صيانة: يقرأ Pi ملف `AGENTS.md` من جذر المستودع كسياق للمشروع، ويكتشف بنفسه المهارة المشتركة في `.agents/skills/career-ops/SKILL.md`. بعد ذلك يصبح الموجّه متاحًا باسم `/skill:career-ops`.
-
-### Pi الأصلي
-
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-pi
-
-# 2. Use the shared skill with subcommands:
-/skill:career-ops "Senior AI Engineer at Anthropic..."
-/skill:career-ops pipeline
-/skill:career-ops scan
-/skill:career-ops pdf
-/skill:career-ops tracker
-```
-
-### Pi بضربة واحدة (`pi -p`)
-
-```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
-```
-
-إذا كان أحد إصدارات Pi يشترط قرار ثقة قبل إتاحة موارد المشروع، فشغّل `/trust` مرة واحدة داخل المستودع وأعد تشغيل `pi` لتُحمَّل مهارة المشروع (ينطبق `/trust` على عمليات Pi اللاحقة)، أو ابدأ بالخيار `-a` الذي يمنح الثقة لتشغيل واحد فقط ولا يحتاج إلى إعادة تشغيل.
-
-### سكربت Gemini API مستقل (لا يحتاج تثبيت واجهة)
-
-```bash
-# 1. Get a free API key at https://aistudio.google.com/apikey
-cp .env.example .env
-# Edit .env, set GEMINI_API_KEY=your_key_here
-
-# 2. Install dependencies
-npm install
-
-# 3. Evaluate a job description
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-node agent-inbox.mjs add "..."   # queue a request for the next session
-npm run gemini:eval -- "JD text here"
-```
-
-> **الطبقة المجانية:** يعمل الخياران دون فوترة. تستخدم الواجهة الأصلية Google OAuth؛ ويستخدم سكربت API نموذج `gemini-3.6-flash` (حدود المعدل تعتمد على النموذج والطبقة؛ راجع وثائق Google AI للحصص الحالية).
+</details>
 
 ## بوابات التوظيف المهيأة مسبقًا
 
