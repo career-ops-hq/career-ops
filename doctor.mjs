@@ -75,7 +75,9 @@ try {
   ]);
 } catch (err) {
   let missing = [];
-  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: rethrow below */ }
+  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: the error still names the package */ }
+  const name = /Cannot find package '((?:@[^/'\\:]+\/)?[^/'\\:]+)'/.exec(err?.message)?.[1];
+  if (name && !missing.includes(name)) missing.unshift(name);
   if (err?.code !== 'ERR_MODULE_NOT_FOUND' || missing.length === 0) throw err;
   console.error(`career-ops dependencies are not installed in ${__dirname} (missing: ${missing.join(', ')}), so doctor cannot run its checks.\nFix: run \`npm install\` in ${__dirname}, then run doctor again.`);
   process.exit(1);
