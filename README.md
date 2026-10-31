@@ -615,6 +615,7 @@ The Go dashboard TUI, Node.js scripts, and AI agent modes all automatically resp
   <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
   <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
   <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
+  <img src="https://img.shields.io/badge/Oh_My_Pi-4B3F72?style=flat" alt="Oh My Pi">
   <br>
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">

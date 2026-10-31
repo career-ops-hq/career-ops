@@ -16,6 +16,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | GitHub Copilot CLI | `AGENTS.md` | Headless/Batch: `copilot -p "prompt"` |
 | Gemini | `GEMINI.md` | Legacy wrapper redirecting to `AGENTS.md` (transitioned to Antigravity CLI). |
 | Hermes Agent | `AGENTS.md` | Interactive: `hermes` (then ask for a career-ops task). Web read-only workers: `hermes chat -q "prompt" --oneshot -Q --no-restore-cwd`. Batch ranking: unsupported. |
+| Oh My Pi | `.omp/AGENTS.md` | Interactive: `omp` (then `/skill:career-ops`). Headless/Batch: `omp -p "prompt"` |
 
 ## Hermes Agent
 
@@ -29,4 +30,14 @@ Pi needs no wrapper file: it reads `AGENTS.md` from the working directory as pro
 cd career-ops
 pi                                          # interactive
 pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+```
+
+## Oh My Pi (omp)
+
+Oh My Pi discovers `.agents/skills/career-ops/SKILL.md` automatically via its `agents` discovery provider, exposing `/skill:career-ops`. `.omp/AGENTS.md` imports `AGENTS.md` (`@../AGENTS.md`), ensuring OMP's `native` project-context provider (priority 100) wins over `.github/copilot-instructions.md` (priority 30) so the career-ops contract is loaded and respected.
+
+```bash
+cd career-ops
+omp                                          # interactive
+omp -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
 ```
