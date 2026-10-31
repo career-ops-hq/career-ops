@@ -1265,6 +1265,8 @@ search_queries:
 #   join            join.com/companies/<slug>
 #   icims           careers-<tenant>.icims.com / *.icims.com
 #   jazzhr          <tenant>.applytojob.com or <tenant>.applytojob.com/apply
+#   applicantpro    <tenant>.applicantpro.com (ApplicantPro / isolved Talent Acquisition; also a
+#                   www.applicantpro.com/openings/<tenant>/… link. One entry per tenant subdomain)
 #   pythonorg       python.org/jobs
 #   generalist-world generalist.world/jobs/  (curated generalist / operator roles board; SSR HTML, one fetch; or provider: generalist-world)
 #   applitrack      www.applitrack.com/<district>/onlineapp/  (Frontline AppliTrack K-12 board; optional default_location: "City, ST" is appended to site names that name no place)
@@ -1576,6 +1578,17 @@ search_queries:
 #   jazzhr:
 #     fetchDetails: false # optional: true fetches each posting's JSON-LD detail page (description, posted date)
 #     detailLimit: 25     # optional max detail calls when fetchDetails=true (max 100)
+#   enabled: true
+#
+# - name: Example ApplicantPro Co
+#   # ApplicantPro / isolved Talent Acquisition tenant. Auto-detects any
+#   # <tenant>.applicantpro.com host. A scan is two requests (the site id, cached
+#   # after the first scan, then one JSON list of every open posting).
+#   careers_url: https://exampleco.applicantpro.com/jobs/
+#   applicantpro:
+#     fetchDetails: false # optional: true fetches each posting's JSON-LD page for the description
+#     detailLimit: 25     # optional max detail calls when fetchDetails=true (max 100)
+#     # domainId: 12345   # optional: pin the site id instead of reading it from /jobs/
 #   enabled: true
 #
 # - name: Example PeopleSoft Co
