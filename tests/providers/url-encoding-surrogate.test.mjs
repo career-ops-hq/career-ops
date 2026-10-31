@@ -282,6 +282,22 @@ try {
     ([bad, good]) => bad === null && good === 'https://arbetsformedlingen.se/platsbanken/annonser/31581608',
   );
 
+  // polymer.parsePolymerPage — a job_post_url off jobs.polymer.co is rebuilt
+  // from the posting id, so a lone surrogate in that id drops one row.
+  const { parsePolymerPage } = await load('polymer.mjs');
+  check(
+    'polymer.parsePolymerPage',
+    () => parsePolymerPage(
+      { items: [
+        { id: `${LONE}bad`, title: 'Bad Id', job_post_url: 'https://evil.example/nope' },
+        { id: 1008, title: 'Good Id', job_post_url: 'https://evil.example/nope' },
+      ], meta: { is_last: true, count: 2 } },
+      'Acme',
+      'acme',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://jobs.polymer.co/acme/1008',
+  );
+
   // zoho-recruit.parseZohoJobsPage — for…of over the id="jobs" records; id feeds the posting URL.
   const { parseZohoJobsPage } = await load('zoho-recruit.mjs');
   const zohoRecord = (id, title) => ({ id, Posting_Title: title, Is_Locked: false, Publish: true });
@@ -332,7 +348,7 @@ try {
   const CONVERTED = [
     'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
     'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
-    'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
+    'polymer.mjs', 'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
 
   // Bare `encodeURIComponent` on a url line that is reviewed as safe: the value
