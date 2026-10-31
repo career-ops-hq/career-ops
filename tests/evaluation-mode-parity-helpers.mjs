@@ -126,6 +126,16 @@ function reportTemplates(text) {
     .filter(isReportTemplate);
 }
 
+/** H2 section titles of the single fenced report template, in order.
+ * @param {string} text Mode documentation.
+ * @returns {string[]} Titles without the `## ` marker; empty without exactly one template.
+ */
+export function reportSectionTitles(text) {
+  const templates = reportTemplates(text);
+  if (templates.length !== 1) return [];
+  return templates[0].map(line => line.match(/^ {0,3}##[ \t]+(.*?)[ \t]*$/)?.[1]).filter(Boolean);
+}
+
 /** Missing or malformed parts of the single fenced report-format template.
  * @param {string} text Mode documentation, whose template H1 may be localized.
  * @returns {string[]} Empty only when the template satisfies the shared contract.
