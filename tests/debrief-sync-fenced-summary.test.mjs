@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadYaml } from '../lib/yaml-document.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../debrief-sync.mjs', import.meta.url));
 const SENTENCE = 'On-site relocation is not possible';
@@ -71,7 +72,7 @@ for (const outer of ['````', '~~~']) {
       try {
         const tracker = readFileSync(f.tracker, 'utf8');
         const result = run(f.root);
-        assert.notEqual(result.status, 0, 'missing real summary must fail');
+        assert.ok(exitedNonZero(result), describeSpawn(result, 'missing real summary must fail'));
         assert.match(result.stderr, /no Machine Summary YAML/);
         assert.equal(readFileSync(f.reportPath, 'utf8'), original);
         assert.equal(readFileSync(f.tracker, 'utf8'), tracker);
