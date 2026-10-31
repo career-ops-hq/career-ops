@@ -331,7 +331,7 @@ Trong Codex, slash command không được đảm bảo. Hãy dùng cùng tên m
 
 ## Cách hoạt động
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-vi-dark.svg"><img src="docs/how-it-works-vi-light.svg" alt="Bạn dán URL hoặc mô tả tin tuyển dụng → Archetype Detection (Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation) → A-H Evaluation (reads cv.md; Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy) → Report (reports/*.md), PDF (output/*.pdf), Tracker (data/applications.md)" width="760"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-vi-dark.svg"><img src="docs/how-it-works-vi-light.svg" alt="Bạn dán URL hoặc mô tả tin tuyển dụng → Archetype Detection (Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation) → A-H Evaluation (reads cv.md; Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy) → Report (reports/*.md), CV tùy chỉnh (PDF by default), Tracker (data/applications.md)" width="760"></picture></p>
 
 ## Tích hợp Antigravity CLI
 
