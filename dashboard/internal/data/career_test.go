@@ -413,6 +413,40 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 	}
 }
 
+// The width a row must have comes from the header, as parseTrackerRow in
+// tracker-parse.mjs derives it, not from a fixed 8. Fixed, it dropped every row
+// of a narrower tracker without an error, and read a row that is missing an
+// interior cell with every later column shifted one to the left.
+func TestParseApplicationsRowWidthFollowsTheHeader(t *testing.T) {
+	narrow, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | Report |
+|---|---|---|---|---|---|---|
+| 1 | 2026-08-28 | Acme | Platform Engineer | 4.0/5 | Applied | — |
+| 2 | 2026-08-29 | Globex | Data Engineer | 4.2/5 | Evaluated | — |
+`)
+	apps := mustParseApplications(t, narrow)
+	if len(apps) != 2 {
+		t.Fatalf("7-column tracker parsed %d rows, want 2", len(apps))
+	}
+	if apps[0].Status != "Applied" || apps[1].Company != "Globex" {
+		t.Errorf("7-column tracker read as %q/%q, want Applied/Globex", apps[0].Status, apps[1].Company)
+	}
+
+	// The second row lost its Score cell: read anyway, its status would be ❌.
+	wide, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-08-28 | Acme | Platform Engineer | 4.0/5 | Applied | ❌ | — | ok | https://jobs.example.com/1 |
+| 2 | 2026-08-29 | Globex | Data Engineer | Evaluated | ❌ | — | missing score | https://jobs.example.com/2 |
+`)
+	apps = mustParseApplications(t, wide)
+	if len(apps) != 1 || apps[0].Company != "Acme" {
+		t.Fatalf("a row missing an interior cell must be skipped, got %d rows: %+v", len(apps), apps)
+	}
+}
+
 // A URL cell that names no posting is not a JobURL: the "—" empty-cell marker
 // a hand-added row carries, "N/A", or a local:jds/ pointer. Kept as one, it
 // switched off every enrichment tier, since each runs only for an empty

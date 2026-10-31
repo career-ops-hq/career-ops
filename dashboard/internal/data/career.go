@@ -213,6 +213,7 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 	// reader. Falls back to the legacy fixed layout when no header is present.
 	// This matches the Node tracker tooling, which became header-aware in #954.
 	cols := resolveTrackerColumns(lines)
+	width := trackerRowWidth(cols)
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -229,7 +230,14 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 		}
 
 		fields := splitTrackerRow(line)
-		if len(fields) < 8 {
+		// A complete row has a cell for every column the header maps, as
+		// parseTrackerRow in tracker-parse.mjs requires. The guard was a fixed 8,
+		// which got both directions wrong: a tracker narrower than that (a
+		// 7-column `# … Status | Report` layout the header detection accepts)
+		// lost every row and read as an empty pipeline with no error, and a row
+		// missing an interior cell under a wider header was read with every
+		// later column shifted one to the left.
+		if len(fields) < width {
 			continue
 		}
 		for i, field := range fields {
@@ -1022,6 +1030,20 @@ func detectTrackerColumns(lines []string) map[string]int {
 		}
 	}
 	return nil
+}
+
+// trackerRowWidth is how many cells a complete row has under cols: one per
+// column up to the highest one mapped. The Go twin of parseTrackerRow's
+// dynamic width guard; splitTrackerRow drops the outer pipes, so no edge cells
+// are counted.
+func trackerRowWidth(cols map[string]int) int {
+	width := 0
+	for _, idx := range cols {
+		if idx+1 > width {
+			width = idx + 1
+		}
+	}
+	return width
 }
 
 // resolveTrackerColumns returns the header-detected column map, falling back to
