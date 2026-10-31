@@ -1,4 +1,5 @@
 import * as yaml from "js-yaml";
+import { machineSummarySection } from "./machine-summary-section.mjs";
 
 /**
  * @typedef {"critical"|"high"|"meaningful"|"preferred"|"low_signal"} Importance
@@ -26,7 +27,7 @@ const EVIDENCE_LABEL = {
   red_flags: "Red flags",
 };
 
-const FENCE = /##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
+const FENCE = /^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
 
 const strings = (v) => (Array.isArray(v) ? v.map((s) => String(s ?? "").trim()).filter(Boolean) : []);
 
@@ -37,7 +38,7 @@ const strings = (v) => (Array.isArray(v) ? v.map((s) => String(s ?? "").trim()).
  * @returns {MachineSummary | null}
  */
 export function readMachineSummary(report) {
-  const fence = String(report ?? "").match(FENCE)?.[1];
+  const fence = machineSummarySection(report).match(FENCE)?.[1];
   if (!fence) return null;
   let raw;
   try {

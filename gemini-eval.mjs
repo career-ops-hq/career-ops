@@ -46,6 +46,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
+import { redactIfEnabled } from './utils/privacy-filter.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
@@ -80,6 +81,13 @@ import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-res
 import { localToday } from './lib/local-today.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
+import { assertGoogleRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+
+// The Google Generative AI SDK calls global fetch directly, so this ambient
+// install is what covers its requests with no SDK-specific code. The explicit
+// gate at the generateContent() call site is the primary layer.
+installPiiInterceptor();
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -370,9 +378,12 @@ for (const extraDir of extraModesDirs) {
   const extraContent = readFile(join(CODE_ROOT, extraDir, '_shared.md'), extraLabel);
   sharedContext += `\n\n--- Additional declared market: ${extraDir} (${extraLabel}) ---\n${extraContent}`;
 }
-const cvContent      = readFile(PATHS.cv,          'cv.md');
-const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
-const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
+// Opt-in privacy filter (privacy.redact_contact_info in config/profile.yml):
+// keep name/contact details out of the prompt sent to the model.
+const profileYmlRaw  = readFile(PATHS.profileYml,  'config/profile.yml');
+const cvContent      = redactIfEnabled(readFile(PATHS.cv,      'cv.md'),            profileYmlRaw);
+const profileContent = redactIfEnabled(readFile(PATHS.profile, 'modes/_profile.md'), profileYmlRaw);
+const profileYml     = redactIfEnabled(profileYmlRaw, profileYmlRaw);
 // _custom.md is optional: an absent file is a valid end state, so no warning.
 const customContent  = existsSync(PATHS.custom) ? stripBom(readFileSync(PATHS.custom, 'utf-8')).trim() : '';
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
@@ -465,7 +476,17 @@ const model = genAI.getGenerativeModel({
 
 let evaluationText;
 try {
-  const result = await model.generateContent(`JOB DESCRIPTION TO EVALUATE:\n\n${jdText}`);
+  // Privacy gate. `assertGoogleRequestAllowed` builds the request body from the
+  // same systemInstruction and user turn the SDK receives, so the inspected
+  // payload and the transmitted one are the same request. The SDK issues its own
+  // global fetch, so the ambient interceptor is the backstop for anything this
+  // reconstruction misses.
+  const userTurn = `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}`;
+  assertGoogleRequestAllowed({
+    systemInstruction: systemPrompt,
+    turns: [userTurn],
+  });
+  const result = await model.generateContent(userTurn);
   evaluationText = result.response.text();
   const usage = {
     prompt_tokens: result.response.usageMetadata?.promptTokenCount ?? 0,

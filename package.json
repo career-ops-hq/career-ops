@@ -68,6 +68,7 @@
     "ics-interview": "node ics-interview.mjs",
     "panelist-roles": "node panelist-roles.mjs",
     "paste-reply": "node paste-reply.mjs",
+    "privacy:status": "node privacy-status.mjs",
     "gemini:eval": "node gemini-eval.mjs",
     "ollama:eval": "node ollama-eval.mjs",
     "openai:eval": "node openai-eval.mjs",

@@ -15,6 +15,7 @@ import {
   verdictReason,
 } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
+import { BackLink } from "@/components/back-link";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { ScoreLevers } from "@/components/score-levers";
@@ -50,7 +51,8 @@ export function ReportView({
   app,
   report,
   canDelete = false,
-  pdfReadyFromIndex = false,
+  pdfFileReady = false,
+  trackerMarkedPdf = false,
   coverReady = false,
   backHref = "/pipeline",
   applyHref,
@@ -63,7 +65,10 @@ export function ReportView({
    *  the raw .md filename is a dev artifact, not header content. */
   file?: string | null;
   canDelete?: boolean;
-  pdfReadyFromIndex?: boolean;
+  /** A tailored CV file is on disk (index or a matching cv-* name). Not the tracker mark. */
+  pdfFileReady?: boolean;
+  /** The tracker cell has a PDF mark. That mark can exist with no file. */
+  trackerMarkedPdf?: boolean;
   /** A tailored cover letter for THIS application exists in output/ (resolved by
    *  the page, see resolveTailoredCover). The page drafts letters through the
    *  cover run but does not render them, so this link only finds CLI PDFs. */
@@ -83,18 +88,19 @@ export function ReportView({
   const recommended = line === "Recommended";
   const quietApply = applyCtaQuiet({ score, legitimacy: meta?.legitimacy });
   const applyUrl = httpUrl(url);
-  const pdfReady = (app?.pdf ?? "").includes("✅") || pdfReadyFromIndex;
+  const pdfReady = pdfFileReady;
+  const pdfMarkedWithoutFile = trackerMarkedPdf && !pdfFileReady;
   const company = app ? companyPresentation(app) : null;
   const companyName = company?.label ?? app?.company ?? meta?.title ?? id;
 
   return (
     <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
-      <Link
+      <BackLink
         href={backHref}
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text"
       >
         <ArrowLeft className="size-4" /> Pipeline
-      </Link>
+      </BackLink>
 
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
@@ -111,23 +117,28 @@ export function ReportView({
 
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
           {app && <StatusSelect n={id} current={app.status} />}
-          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          <GeneratePdfButton n={id} company={app?.company || meta?.title || id} pdfReady={pdfReady} />
           {app && report && <CoverDraftButton n={id} company={companyName} />}
           {applyHref && (
             <Link
               href={applyHref}
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
             >
               Apply checklist
             </Link>
           )}
-          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} />
+          <MarkPdfReadyButton reportNum={reportNum} ready={pdfFileReady || trackerMarkedPdf} />
+          {pdfMarkedWithoutFile && (
+            <p className="basis-full text-sm text-muted">
+              The tracker marks a tailored CV, but there is no file in output/. Choose Generate tailored CV.
+            </p>
+          )}
           {coverReady && (
             <a
               href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-800 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
             >
               <FileText className="size-3.5" /> View cover
             </a>
@@ -149,7 +160,7 @@ export function ReportView({
                 href={applyUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
+                className="inline-flex items-center justify-center gap-1 text-brand-text hover:underline max-sm:min-h-[44px]"
               >
                 posting <ExternalLink className="size-3" />
               </a>

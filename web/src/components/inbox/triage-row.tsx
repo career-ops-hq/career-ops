@@ -26,6 +26,8 @@ function agoLabel(age: number | null): string | null {
 // "not scored" (CRUDA) — never a fake match%. Once its shortlist eval finishes it
 // flips to EVALUADA (a real A–F badge). Save→shortlist / Skip→hidden are free + undoable.
 export function TriageRow({
+  index,
+  cursor,
   job,
   source,
   age,
@@ -36,6 +38,8 @@ export function TriageRow({
   onSave,
   onSkip,
 }: {
+  index: number;
+  cursor: boolean;
   job: InboxJob;
   source: AtsSource | null;
   age: number | null;
@@ -59,9 +63,11 @@ export function TriageRow({
 
   return (
     <li
+      data-triage-index={index}
       className={cn(
         "flex items-center gap-2.5 px-3 py-2.5 transition-colors sm:gap-3 sm:px-4",
         selected ? "bg-brand-soft/50" : "hover:bg-surface-hover",
+        cursor && "ring-2 ring-inset ring-brand",
         evaluated && "opacity-95",
       )}
     >
@@ -79,7 +85,7 @@ export function TriageRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">
           {postingHref ? (
-            <a href={postingHref} target="_blank" rel="noreferrer" className="hover:text-brand">
+            <a href={postingHref} target="_blank" rel="noreferrer" className="hover:text-brand-text">
               {title}
             </a>
           ) : (
@@ -100,13 +106,13 @@ export function TriageRow({
         <Link href={target.href} className="flex shrink-0 items-center gap-1.5 text-xs">
           {scored!.running ? (
             <>
-              <Loader2 className="size-3.5 animate-spin text-brand" />
-              <span className="text-brand max-sm:hidden">Scoring…</span>
+              <Loader2 className="size-3.5 animate-spin text-brand-text" />
+              <span className="text-brand-text max-sm:hidden">Scoring…</span>
             </>
           ) : target.showScore ? (
             <Badge tone={scored!.tone}>{scored!.score}/5</Badge>
           ) : (
-            <span className="text-brand">Report</span>
+            <span className="text-brand-text">Report</span>
           )}
         </Link>
       ) : (
@@ -118,7 +124,7 @@ export function TriageRow({
             aria-pressed={shortlisted}
             className={cn(
               "inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px] max-sm:min-w-[44px]",
-              shortlisted ? "text-brand" : "text-muted hover:bg-surface-hover hover:text-brand",
+              shortlisted ? "text-brand-text" : "text-muted hover:bg-surface-hover hover:text-brand-text",
             )}
           >
             {shortlisted ? <BookmarkCheck className="size-4" /> : <Bookmark className="size-4" />}

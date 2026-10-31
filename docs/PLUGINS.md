@@ -13,7 +13,7 @@ core runs exactly as it always has.
 ```bash
 node plugins.mjs list          # what's installed + its trust badge
 node plugins.mjs available     # bundled + community plugins we've approved
-node plugins.mjs add <name>    # install an approved community plugin
+node plugins.mjs add <name>    # install an approved community plugin (`install` does the same)
 node plugins.mjs enable <id>   # show the capability card (then add --confirm)
 node plugins.mjs skill <id>    # print a plugin's how-to (if it ships one)
 ```

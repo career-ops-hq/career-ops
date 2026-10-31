@@ -128,6 +128,7 @@ type Catalog struct {
 	HelpReport     string
 	HelpOpenURL    string
 	HelpOpenPDF    string
+	HelpCopyPDF    string
 	HelpRegenPDF   string
 	HelpChange     string
 	HelpColumns    string
@@ -135,6 +136,7 @@ type Catalog struct {
 	HelpProgress   string
 	HelpStats      string
 	HelpQuit       string
+	HelpKeys       string
 	HelpScroll     string
 	HelpPage       string
 	HelpTopEnd     string
@@ -427,6 +429,7 @@ var En = Catalog{
 	HelpReport:     " report  ",
 	HelpOpenURL:    " open URL  ",
 	HelpOpenPDF:    " open PDF  ",
+	HelpCopyPDF:    " copy PDF path  ",
 	HelpRegenPDF:   " regen PDF  ",
 	HelpChange:     " change  ",
 	HelpColumns:    " columns  ",
@@ -434,6 +437,7 @@ var En = Catalog{
 	HelpProgress:   " progress  ",
 	HelpStats:      " stats  ",
 	HelpQuit:       " quit",
+	HelpKeys:       " keys  ",
 	HelpScroll:     " scroll  ",
 	HelpPage:       " page  ",
 	HelpTopEnd:     " top/end  ",
@@ -594,6 +598,7 @@ var Tr = Catalog{
 	HelpReport:     " rapor  ",
 	HelpOpenURL:    " URL aç  ",
 	HelpOpenPDF:    " PDF'i aç  ",
+	HelpCopyPDF:    " PDF yolunu kopyala  ",
 	HelpRegenPDF:   " PDF üret  ",
 	HelpChange:     " durum  ",
 	HelpColumns:    " sütunlar  ",
@@ -601,6 +606,7 @@ var Tr = Catalog{
 	HelpProgress:   " ilerleme  ",
 	HelpStats:      " istatistik  ",
 	HelpQuit:       " çıkış",
+	HelpKeys:       " tuşlar  ",
 	HelpScroll:     " kaydır  ",
 	HelpPage:       " sayfa  ",
 	HelpTopEnd:     " baş/son  ",
@@ -761,6 +767,7 @@ var Es = Catalog{
 	HelpReport:     " informe  ",
 	HelpOpenURL:    " abrir URL  ",
 	HelpOpenPDF:    " abrir PDF  ",
+	HelpCopyPDF:    " copiar ruta del PDF  ",
 	HelpRegenPDF:   " regenerar PDF  ",
 	HelpChange:     " cambiar  ",
 	HelpColumns:    " columnas  ",
@@ -768,6 +775,7 @@ var Es = Catalog{
 	HelpProgress:   " progreso  ",
 	HelpStats:      " estadísticas  ",
 	HelpQuit:       " salir",
+	HelpKeys:       " teclas  ",
 	HelpScroll:     " desplazar  ",
 	HelpPage:       " página  ",
 	HelpTopEnd:     " inicio/fin  ",

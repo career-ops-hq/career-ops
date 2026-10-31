@@ -12,7 +12,14 @@
  * relaunching per document. One failing document is isolated and recorded; the
  * rest still render. Results are written to <manifest>.results.json and the
  * process exits non-zero if any document failed (#2384). Relative input and
- * output paths resolve against the manifest's folder, not process.cwd().
+ * output paths in the manifest resolve against the manifest's folder, not
+ * process.cwd().
+ *
+ * A single-file relative path is different. It is taken from the current
+ * directory when that location is already inside the tracker workspace, and
+ * otherwise from the workspace root. `output/cv.html` then finds the file
+ * whether you launch from the repo or from a checkout whose data root lives
+ * elsewhere. Absolute paths stay absolute.
  *
  * --report links the generated PDF to its tracker/report number and records
  * the linkage in data/pdf-index.tsv so downstream tools (e.g. the TUI
@@ -176,6 +183,31 @@ function assertInsideWorkspace(absPath, label) {
     );
   }
   return absPath;
+}
+
+/**
+ * Resolve one single-file input or output argument.
+ *
+ * A relative path that already lands inside the workspace keeps the current
+ * directory, so launching from the repo is unchanged. A relative path that
+ * would land outside is read from the workspace root instead. That is the
+ * split-layout case: the shell is in the checkout, CAREER_OPS_ROOT points at
+ * the data directory, and `output/cv.html` means the workspace file. An
+ * absolute path is unchanged. The containment guard below still runs on the
+ * result, so a `..` segment cannot escape.
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+function resolvePdfCliPath(p) {
+  if (isAbsolute(p)) return resolve(p);
+  const fromCwd = resolve(p);
+  try {
+    return assertInsideWorkspace(fromCwd, 'input');
+  } catch (err) {
+    if (!/escapes the tracker workspace/.test(err?.message || '')) throw err;
+    return resolve(workspaceRoot, p);
+  }
 }
 
 // Ensure output directory exists (fresh setup)
@@ -1505,6 +1537,32 @@ export function resolveArtifactKind(explicit, outputPath) {
 }
 
 /**
+ * Infer the report number from the output or input file name when --report is
+ * missing. The number is a run of exactly three digits bounded by `-` or `_`
+ * in the file's basename (`cv-ana-042-acme-2026-10-30.pdf` -> `042`); the
+ * output name is tried first, then the input name. Directories are ignored.
+ *
+ * An ATS variant (an `ats` token in the name) is never inferred: modes/pdf.md
+ * renders it without --report on purpose, because an indexed ATS PDF would
+ * replace the styled CV the dashboard opens for that report.
+ *
+ * @param {string} [outputPath] - Destination PDF path.
+ * @param {string} [inputPath] - Source HTML path.
+ * @returns {{reportNum: string, from: string}|null} The number and the path it
+ *   came from, or null when neither name carries one.
+ */
+export function inferReportNumber(outputPath, inputPath) {
+  for (const p of [outputPath, inputPath]) {
+    const name = basename(p || '');
+    if (!name) continue;
+    if (/(^|[-_])ats([-_.]|$)/i.test(name)) return null;
+    const m = name.match(/[-_](\d{3})[-_]/);
+    if (m) return { reportNum: m[1], from: p };
+  }
+  return null;
+}
+
+/**
  * Merge one generated-PDF row into the manifest's existing data lines.
  *
  * The manifest holds one row per report number AND artifact kind, so a CV and
@@ -1832,13 +1890,25 @@ async function generatePDF() {
     process.exit(1);
   }
 
+  // No --report: take the 3-digit report number from the file names, the way
+  // modes/pdf.md names them (output/cv-{candidate}-{report}-{company}-...).
+  // Only for a single render; a batch carries reportNum per entry. Printed, so
+  // a wrong guess is visible; --report always wins.
+  if (!reportSupplied) {
+    const inferred = inferReportNumber(outputPath, inputPath);
+    if (inferred) {
+      reportNum = inferred.reportNum;
+      console.warn(`⚠️  No --report given: using report ${inferred.reportNum} from the file name "${basename(inferred.from)}". Pass --report=NNN to set it explicitly.`);
+    }
+  }
+
   if (reportNum && !/^\d+$/.test(reportNum)) {
     console.error(`Invalid --report "${reportNum}". Use the numeric tracker/report number, e.g. --report=018`);
     process.exit(1);
   }
 
-  inputPath = resolve(inputPath);
-  outputPath = resolve(outputPath);
+  inputPath = resolvePdfCliPath(inputPath);
+  outputPath = resolvePdfCliPath(outputPath);
 
   // Path-traversal guard: keep the PDF write inside the tracker-owned workspace
   // so a crafted output argument cannot escape into another user's directory.

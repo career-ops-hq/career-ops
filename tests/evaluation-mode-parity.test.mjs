@@ -126,8 +126,9 @@ test('batch/batch-prompt.md puts the archived JD where modes/oferta.md does', ()
   const prompt = readModeText(ROOT, 'batch/batch-prompt.md');
   const step3 = prompt.slice(prompt.indexOf('### Step 3'), prompt.indexOf('### Step 4'));
   const template = step3.slice(step3.indexOf('Report header:'), step3.indexOf('`**Decision:**` is Machine Summary'));
-  const placeholder = template.indexOf('{the sections listed below, from `## A) Role Summary` to `## Keyword Coverage`');
-  assert.ok(placeholder >= 0, 'template placeholder for A) to Keyword Coverage');
+  const PLACEHOLDER = '{the sections listed below, from `## A) Role Summary` to `## Keyword Coverage`';
+  assert.equal(template.split(PLACEHOLDER).length - 1, 1, 'one template placeholder for A) to Keyword Coverage');
+  const placeholder = template.indexOf(PLACEHOLDER);
   assert.ok(placeholder < template.indexOf(`## ${JD}`), 'template puts the JD after A) to Keyword Coverage');
   const list = step3.slice(step3.indexOf("The report's sections, in this order:"));
   const listed = list.split('\n\n')[1].split('\n')
