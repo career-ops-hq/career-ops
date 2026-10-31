@@ -8,10 +8,11 @@
 // skipped_no_apply_control.
 //
 // A custom element with a shadow root needs a real DOM, so this file launches
-// Chromium and is skipped with a warning where it cannot launch. The page is
+// Chromium and is skipped with a warning where it cannot launch (a failure under
+// `test-all.mjs --needs browser`, which the tool-suites CI job runs). The page is
 // served by a route registered after the liveness guard's, which makes it run
 // first: nothing is resolved or fetched.
-import { pass, fail, warn } from './helpers.mjs';
+import { pass, fail, toolUnavailable } from './helpers.mjs';
 import { checkUrlLiveness, installLivenessRouteGuard, newLivenessPage } from '../liveness-browser.mjs';
 
 console.log('\nliveness-browser — custom-element buttons');
@@ -35,7 +36,7 @@ try {
   try {
     browser = await chromium.launch({ headless: true });
   } catch (e) {
-    warn(`custom-element button checks skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
+    toolUnavailable('browser', `custom-element button checks skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
   }
   if (browser) {
     const check = async (body) => {

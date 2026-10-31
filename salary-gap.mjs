@@ -607,7 +607,7 @@ export function fold(observations, apps, profileDesired) {
   for (const a of applications) {
     if (!a.actual) continue;
     const cur = a.actual.currency || 'UNKNOWN';
-    byCurrency[cur] ??= { confirmed: 0, advGaps: [], atOrAboveAdvertised: 0, atOrAboveDesired: 0, newestActual: null };
+    byCurrency[cur] ??= { confirmed: 0, advGaps: [], atOrAboveAdvertised: 0, desiredCompared: 0, atOrAboveDesired: 0, newestActual: null };
     const agg = byCurrency[cur];
     agg.confirmed += 1;
     agg.newestActual = [agg.newestActual, a.actual.date].filter(Boolean).sort().pop();
@@ -617,7 +617,10 @@ export function fold(observations, apps, profileDesired) {
       agg.advGaps.push(a.advToActPct);
       if (a.actual.value >= a.advertised.value) agg.atOrAboveAdvertised += 1;
     }
-    if (a.desiredToActPct !== null && a.actual.value >= a.desired.value) agg.atOrAboveDesired += 1;
+    if (a.desiredToActPct !== null) {
+      agg.desiredCompared += 1;
+      if (a.actual.value >= a.desired.value) agg.atOrAboveDesired += 1;
+    }
 
     // Legacy reports (no Machine Summary) fold with null company/role — without
     // a fallback every legacy row would collapse into one shared "null|null"
@@ -632,6 +635,14 @@ export function fold(observations, apps, profileDesired) {
     if (a.advToActPct !== null) byCompanyRole[key].advToActPcts.push(a.advToActPct);
   }
   for (const agg of Object.values(byCurrency)) {
+    // The mean, the median and atOrAboveAdvertised cover only the actuals that
+    // also have an advertised figure in the same currency, usually a minority
+    // (most reports carry no advertised_comp), so their n is kept beside them.
+    // `confirmed` counts every actual and is not their denominator; with the
+    // list deleted it was the only count left, and a mean over one offer read
+    // as a mean over all of them. desiredCompared does the same for
+    // atOrAboveDesired.
+    agg.advertisedCompared = agg.advGaps.length;
     agg.meanAdvToActPct = agg.advGaps.length ? agg.advGaps.reduce((s, v) => s + v, 0) / agg.advGaps.length : null;
     agg.medianAdvToActPct = agg.advGaps.length ? median(agg.advGaps) : null;
     delete agg.advGaps;
@@ -1569,7 +1580,7 @@ function printSummary(result) {
     if (currencies.length) {
       console.log('\n  Aggregates (per currency — no FX conversion):');
       for (const [cur, agg] of currencies) {
-        console.log(`  ${cur}: mean advertised→actual ${fmtPct(agg.meanAdvToActPct)}, median ${fmtPct(agg.medianAdvToActPct)}, at/above advertised ${agg.atOrAboveAdvertised}, at/above desired ${agg.atOrAboveDesired}`);
+        console.log(`  ${cur}: ${agg.confirmed} confirmed actual${agg.confirmed === 1 ? '' : 's'} | advertised→actual over ${agg.advertisedCompared}: mean ${fmtPct(agg.meanAdvToActPct)}, median ${fmtPct(agg.medianAdvToActPct)}, at/above advertised ${agg.atOrAboveAdvertised} of ${agg.advertisedCompared} | at/above desired ${agg.atOrAboveDesired} of ${agg.desiredCompared}`);
       }
     }
     const companyRoles = Object.entries(aggregates.byCompanyRole);

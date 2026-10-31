@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { ROOT, rmSync } from './helpers.mjs';
-import { FROZEN_EVALUATION_MODES, KNOWN_EVALUATION_MODES, discoverEvaluationModes, readModeText, structuralGaps } from './evaluation-mode-parity-helpers.mjs';
+import { FROZEN_EVALUATION_MODES, KNOWN_EVALUATION_MODES, discoverEvaluationModes, keywordCoverageGaps, readModeText, structuralGaps } from './evaluation-mode-parity-helpers.mjs';
 
 const REPORT = `# 評価: {Company} — {Role}
 
@@ -66,6 +66,35 @@ test('every evaluation mode, frozen ones included, writes the exact **URL:** lab
   for (const file of ['oferta.md', ...discoverEvaluationModes(ROOT)]) {
     assert.ok(!structuralGaps(readModeText(ROOT, `modes/${file}`)).includes('**URL:** in report header'), file);
   }
+});
+
+// keyword-match.mjs reads every locale's keyword heading; a mode without the
+// block and its step never asks for the coverage check at all.
+test('canonical and re-synced locales embed ## Keyword Coverage and run keyword-match', () => {
+  const synced = discoverEvaluationModes(ROOT).filter(file => !FROZEN_EVALUATION_MODES.has(file));
+  for (const file of ['oferta.md', ...synced]) {
+    assert.deepEqual(keywordCoverageGaps(readModeText(ROOT, `modes/${file}`)), [], file);
+  }
+});
+
+test('keyword coverage: the template placeholder, prose and comments cannot stand in', () => {
+  const step = '\n```bash\nnode --input-type=module -e \'const args = ["keyword-match.mjs", p.report];\' {json-file}\n```\n';
+  const block = '## Keyword Coverage\n(from `keyword-match.mjs` (1b))\n';
+  assert.deepEqual(keywordCoverageGaps(mode(REPORT + block) + step), []);
+  assert.deepEqual(keywordCoverageGaps(mode(REPORT + block)), ['keyword-match.mjs step']);
+  // The report template is output, so a command written only there is no step.
+  assert.deepEqual(keywordCoverageGaps(mode(REPORT + block + step.replace(/```(bash)?/g, ''))), ['keyword-match.mjs step']);
+  // The command's text quoted in prose is not a runnable step.
+  assert.deepEqual(keywordCoverageGaps(
+    `${mode(REPORT + block)}\nThe command builds \`["keyword-match.mjs", p.report]\`.\n`), ['keyword-match.mjs step']);
+  // The old form, a report path typed into the command line, is not the step (#5853).
+  assert.deepEqual(keywordCoverageGaps(
+    `${mode(REPORT + block)}\nRun \`node keyword-match.mjs reports/{###}-{slug}-{date}.md\`.\n`), ['keyword-match.mjs step']);
+  assert.deepEqual(keywordCoverageGaps(mode(REPORT) + step), ['## Keyword Coverage']);
+  assert.deepEqual(keywordCoverageGaps(`${mode(REPORT)}\n${block}${step}`), ['## Keyword Coverage']);
+  assert.deepEqual(keywordCoverageGaps(mode(REPORT + block + block) + step), ['duplicate ## Keyword Coverage']);
+  assert.deepEqual(keywordCoverageGaps(mode(`${REPORT}<!-- ${block} -->\n`) + `<!-- ${step} -->`),
+    ['## Keyword Coverage', 'keyword-match.mjs step']);
 });
 
 test('a missing H answers section is reported', () => {

@@ -247,7 +247,7 @@ I nomi dei campi dell'intestazione (`Date`, `URL`, `Archetype`, `Score`, `Legiti
 (15-20 parole chiave estratte dall'annuncio per il superamento dei filtri ATS)
 
 ## Keyword Coverage
-(generato da `node keyword-match.mjs <report>` -- copertura in %, present, thin, missing)
+(generato da `keyword-match.mjs` (1b) -- copertura in %, present, thin, missing)
 
 ## Job Description (archived verbatim)
 (il testo completo dell'annuncio, incollato alla lettera -- vedi il requisito più sotto)
@@ -257,11 +257,44 @@ I nomi dei campi dell'intestazione (`Date`, `URL`, `Archetype`, `Score`, `Legiti
 
 **Machine Summary (obbligatoria):** blocco YAML subito dopo l'intestazione, con schema, nomi esatti dei campi e regole di `batch/batch-prompt.md` (la fonte; non duplicarla qui). Contiene `advertised_comp` (la cifra dell'annuncio alla lettera, oppure `null`), `risk_summary` e `requirement_importance` (Blocco B riga per riga; il limite `inferred` vale anche qui).
 
-**Archiviazione dell'annuncio (obbligatoria, #2789):** ogni report DEVE avere una sezione `## Job Description (archived verbatim)` con il testo completo dell'annuncio, mai riassunto né riformulato. Il titolo resta in inglese: `check-jd-archive.mjs` lo cerca per nome. La prima riga è la data di pubblicazione visibile (`Posted: {data o testo relativo}`, oppure `Posted: not visible in source`), mai la data del file del report. Se l'annuncio è troppo lungo o non si può citare per intero, salvarlo con `archive-posting.mjs <url> --company={company-slug} --report={num}` e scrivere nella sezione **esattamente** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, senza altro testo. Se non è possibile alcun salvataggio automatico (per esempio un testo lungo incollato senza URL), rinominare la sezione in `## Job Description (not archived)` e indicarne il motivo. Mai una parafrasi al suo posto; la regola completa è in `modes/oferta.md` (**JD archival**).
+**Archiviazione dell'annuncio (obbligatoria, #2789):** ogni report DEVE avere una sezione `## Job Description (archived verbatim)` con il testo completo dell'annuncio, mai riassunto né riformulato. Il titolo resta in inglese: `check-jd-archive.mjs` lo cerca per nome. La prima riga è la data di pubblicazione visibile (`Posted: {data o testo relativo}`, oppure `Posted: not visible in source`), mai la data del file del report. Se l'annuncio è troppo lungo o non si può citare per intero, salvarlo con `archive-posting.mjs` (comando qui sotto) e scrivere nella sezione **esattamente** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, senza altro testo. Se non è possibile alcun salvataggio automatico (per esempio un testo lungo incollato senza URL), rinominare la sezione in `## Job Description (not archived)` e indicarne il motivo. Mai una parafrasi al suo posto; la regola completa è in `modes/oferta.md` (**JD archival**).
+
+**Argomenti dei comandi (#5853):** non scrivere mai l'URL dell'annuncio, lo slug dell'azienda o il percorso del report in una riga di comando, nemmeno tra virgolette. Scrivere i valori in un file JSON con lo strumento dei file (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) ed eseguire il comando qui sotto: controlla ogni valore (lo slug deve corrispondere a `^[a-z0-9-]+$`) e passa ciascuno allo script come argomento a sé, senza shell. Un valore che non supera il controllo ferma l'esecuzione: correggere il valore, mai il controllo. La regola completa è in `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 1b. Inserire la copertura delle parole chiave ATS
 
-Dopo il salvataggio, eseguire `node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md` e incollare il blocco `## Keyword Coverage` sotto le parole chiave estratte. Solo diagnostica: aggiungere una parola chiave solo se corrisponde a un'esperienza reale.
+Dopo il salvataggio, eseguire `keyword-match.mjs` (comando qui sotto) e incollare il blocco `## Keyword Coverage` sotto le parole chiave estratte. Solo diagnostica: aggiungere una parola chiave solo se corrisponde a un'esperienza reale.
+
+Per farlo, scrivere `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` in un file JSON (vedi **Argomenti dei comandi** sopra) ed eseguire:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Registrare nel tracker
 

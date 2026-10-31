@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, pass, fail } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 const root = mkdtempSync(join(tmpdir(), 'career-ops-outcome-commit-'));
 mkdirSync(join(root, 'data'), { recursive: true });
 const tracker = join(root, 'data', 'applications.md');
@@ -27,20 +28,20 @@ try {
   let result;
   try { result = run([]); } finally { lock.release(); }
   check('failed real tracker lock leaves the prior outcome journal unchanged', () => {
-    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.status, 1, describeSpawn(result));
     assert.equal(readFileSync(tracker, 'utf8'), initial);
     assert.equal(readFileSync(journal, 'utf8'), previous);
   });
   const success = run([]);
   check('confirmed tracker transition appends one committed outcome', () => {
-    assert.equal(success.status, 0, success.stderr);
+    assert.equal(success.status, 0, describeSpawn(success));
     assert.match(readFileSync(tracker, 'utf8'), /Hired/);
     assert.ok(readFileSync(journal, 'utf8').startsWith(previous));
     assert.equal((readFileSync(journal, 'utf8').match(/\*\*Outcome Type\*\*: hired/g) || []).length, 1);
   });
   const retry = run([]);
   check('retry does not duplicate the same outcome entry', () => {
-    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(retry.status, 0, describeSpawn(retry));
     assert.equal((readFileSync(journal, 'utf8').match(/\*\*Outcome Type\*\*: hired/g) || []).length, 1);
   });
 } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10 }); }

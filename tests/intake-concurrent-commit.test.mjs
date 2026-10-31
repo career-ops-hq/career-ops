@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { ROOT, pass, fail } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 const root = mkdtempSync(join(tmpdir(), 'career-ops-state-writers-'));
 mkdirSync(join(root, 'data'), { recursive: true });
 const hook = join(root, 'slow-ledger-read.mjs');
@@ -50,24 +51,24 @@ writeFileSync(statePath, JSON.stringify({ ingested: { 'cv/old.md': previous } })
 try {
   const writers = await Promise.all(sources.map(s => child('intake.mjs', ['--commit', s])));
   check('all concurrent per-source confirmations and old entries persist', () => {
-    for (const r of writers) assert.equal(r.status, 0, r.stderr);
+    for (const r of writers) assert.equal(r.status, 0, describeSpawn(r));
     const state = JSON.parse(readFileSync(statePath, 'utf8')).ingested;
     for (const s of sources) assert.ok(state[s]?.hash, `lost confirmation ${s}`);
     assert.deepEqual(state['cv/old.md'], previous);
   });
   const scan = spawnSync(process.execPath, [join(ROOT, 'intake.mjs')], { env, encoding: 'utf8' });
   check('the next scan never proposes confirmed documents again', () => {
-    assert.equal(scan.status, 0, scan.stderr);
+    assert.equal(scan.status, 0, describeSpawn(scan));
     for (const s of JSON.parse(scan.stdout).sources) assert.equal(s.status, 'ingested', s.path);
   });
   const again = await Promise.all([child('intake.mjs', ['--commit', sources[0]]), child('intake.mjs', ['--commit', sources[0]])]);
   check('a repeated confirmation is recomputed against the guarded ledger', () => {
-    for (const r of again) { assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Recorded 0 source/); }
+    for (const r of again) { assert.equal(r.status, 0, describeSpawn(r)); assert.match(r.stdout, /Recorded 0 source/); }
   });
   const before = readFileSync(statePath, 'utf8');
   const empty = await child('intake.mjs', ['--commit', '--summary']);
   check('an empty confirmation remains rejected without a ledger write', () => {
-    assert.equal(empty.status, 1);
+    assert.equal(empty.status, 1, describeSpawn(empty));
     assert.equal(readFileSync(statePath, 'utf8'), before);
   });
   const ready = join(root, 'scan-ready'), resume = join(root, 'scan-resume');
@@ -81,13 +82,13 @@ try {
     }
     writeFileSync(join(root, 'documents', sources[0]), '# Newly confirmed fictional source\n');
     const updated = await child('intake.mjs', ['--commit', sources[0]]);
-    assert.equal(updated.status, 0, updated.stderr);
+    assert.equal(updated.status, 0, describeSpawn(updated));
     assert.match(updated.stdout, /Recorded 1 source/);
     newer = JSON.parse(readFileSync(statePath, 'utf8')).ingested;
   } finally { writeFileSync(resume, 'resume'); }
   const staleResult = await stale;
   check('a source already ingested at scan time cannot replace a newer confirmation', () => {
-    assert.equal(staleResult.status, 0, staleResult.stderr);
+    assert.equal(staleResult.status, 0, describeSpawn(staleResult));
     assert.deepEqual(JSON.parse(readFileSync(statePath, 'utf8')).ingested, newer);
   });
   check('a stale ingested scan records no source after waiting for a newer writer', () => {

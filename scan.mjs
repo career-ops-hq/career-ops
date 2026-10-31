@@ -76,12 +76,13 @@ import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } from './lib/scan-history-columns.mjs';
+import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
+import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -1284,6 +1285,27 @@ export function loadCandidateCountry(profilePath = PROFILE_PATH) {
   }
 }
 
+// config/profile.yml `candidate.years_of_experience`, the candidate's side of
+// experience_filter. Unset reads as undefined, and resolveExperienceFilter then
+// keeps the filter off and says why. A value that is set but not a number, or
+// a profile that does not parse, is named here: "no years are set" would send
+// the user looking for a key they already wrote.
+export function loadCandidateYears(profilePath = PROFILE_PATH) {
+  if (!existsSync(profilePath)) return undefined;
+  let raw;
+  try {
+    raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+  } catch (err) {
+    console.warn(`⚠️  experience_filter could not read ${profilePath}: ${String(err?.message ?? err).split('\n')[0]}`);
+    return undefined;
+  }
+  const years = raw?.candidate?.years_of_experience;
+  if (years === undefined || years === null) return undefined;
+  if (typeof years === 'number' && Number.isFinite(years)) return years;
+  console.warn(`⚠️  candidate.years_of_experience in ${profilePath} must be a number, got ${JSON.stringify(years)}`);
+  return undefined;
+}
+
 export function loadReApplyWindows(profilePath = PROFILE_PATH) {
   if (!existsSync(profilePath)) return {};
   try {
@@ -1505,6 +1527,13 @@ const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
  * learns each board, since a posting that reads `active` gets an `added` row
  * and stops coming back.
  *
+ * `skipped_content`, `skipped_visa` and `skipped_country_eligibility` are
+ * scan-dayforce.mjs's rows for its `content_filter`, visa and
+ * `country_eligibility_filter` cuts: CONFIG again, by the same reasoning as the
+ * first three. They were missing here, so they fell through to the permanent
+ * pin, and widening one of those filters never handed back a Dayforce posting
+ * it had dropped. (scan.mjs counts the same cuts and records no row for them.)
+ *
  * `collectSeenCompanyRoles` needs no companion change — it already seeds from
  * `added` rows alone.
  */
@@ -1513,6 +1542,10 @@ const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
   'skipped_location',
   'skipped_age',
   'skipped_no_apply_control',
+  'skipped_content',
+  'skipped_visa',
+  'skipped_country_eligibility',
+  'skipped_experience',
 ]);
 
 /**
@@ -1531,7 +1564,7 @@ const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
  */
 export function unrecordedOffers(offers, status, scanHistoryText = '') {
   const recorded = new Set();
-  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     const [url, , , , , rowStatus] = line.split('\t');
     if (url && rowStatus === status) recorded.add(normalizeUrlForDedup(url));
   }
@@ -1857,7 +1890,7 @@ const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
 
 /**
  * A labeled trailing segment of a pipeline entry, as written by the two writers
- * that emit one: `formatPipelineOffer` here (`posted:`, `trust:`, `note:`) and
+ * that emit one: `formatPipelineOffer` here (`posted:`, `trust:`, `yrs:`, `note:`) and
  * `appendRankAnnotation` in `rank-pipeline.mjs` (`rank:`).
  *
  * Labeled segments are appended after the positional columns, so one slides into
@@ -1884,7 +1917,7 @@ const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
  * segment invents a city for a role and lets it resurface, while a genuine
  * location beginning `Posted: ` / `Rank: ` does not occur.
  */
-const PIPELINE_LABELED_SEGMENT_RE = /^(?:posted|trust|note|rank):\s/iu;
+const PIPELINE_LABELED_SEGMENT_RE = /^(?:posted|trust|yrs|note|rank):\s/iu;
 
 /**
  * The `~~…~~` wrapper an expired entry is written with.
@@ -1984,9 +2017,9 @@ function extractPipelineUrl(line) {
  *   writes — is it the location. A report-led processed entry (`#143 | {url} |
  *   … | 4.2/5 | PDF ✅`) puts the SCORE in that position, and keying on it would
  *   invent a city for an already-processed role.
- * - A labeled segment (`posted:` / `trust:` / `note:` / `rank:`) slides into that
+ * - A labeled segment (`posted:` / `trust:` / `yrs:` / `note:` / `rank:`) slides into that
  *   position when the offer carried no location and no compensation, so it is
- *   skipped too. Only those four labels count — see
+ *   skipped too. Only those five labels count — see
  *   {@link PIPELINE_LABELED_SEGMENT_RE} for why a bare `word:` prefix does not.
  *
  * Both fall back to `''` (location unknown), which `companyRoleDedupKey` reads as
@@ -2045,10 +2078,8 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   };
 
   // scan-history.tsv
-  // Skip line 0 only when it is the header; a headerless legacy file starts with a data row.
-  const historyLines = scanHistoryText.split('\n');
-  if (historyLines[0].startsWith('url\t')) historyLines.shift();
-  for (const line of historyLines) {
+  // Line 0 only when it is the header; a headerless legacy file starts with a data row.
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     const { url, first_seen: firstSeen, portal, status: rawStatus, title, language, listing_key: listingKey } = parseScanHistoryLine(line);
     const status = rawStatus || 'added';
     if (!url) continue;
@@ -2892,7 +2923,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   // and (trailing) requisition_id + language. This is the source that carries a
   // location for every scanned posting, and so the one that makes the opt-in key
   // discriminate between two cities of one role.
-  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     const row = parseScanHistoryLine(line);
     const status = row.status || 'added';
     if (!row.url) continue;
@@ -2935,7 +2966,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
  */
 export function collectPostingAttributes(scanHistoryText) {
   const attributes = new Map();
-  for (const line of scanHistoryText.split('\n').slice(1)) {
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     const row = parseScanHistoryLine(line);
     const requisitionId = row.requisition_id.trim();
     const language = row.language.trim();
@@ -3098,6 +3129,11 @@ export function formatPipelineOffer(offer) {
   // posted:, before note:, for a stable serialization.
   const trust = formatTrustSegment(offer);
   if (trust) line = `${line} | ${trust}`;
+  // Labeled years-of-experience segment (experience_filter): the JD's stated
+  // requirement ("5+", "3-5", "none stated", "unread"). Absent when the filter
+  // is off, so such a row stays byte-identical. After trust:, before note:.
+  const yrs = typeof offer.years?.label === 'string' ? sanitizeMarkdownField(offer.years.label) : '';
+  if (yrs) line = `${line} | yrs: ${yrs}`;
   // Optional free-text ranking signal (e.g. a curated-list flag an importer
   // attaches). Labeled — not positional like location/compensation — so it can
   // ride on any row shape (bare URL, 3-, 4-, or 5-column) without a reader
@@ -3708,6 +3744,38 @@ export async function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH
   });
 }
 
+/**
+ * Apply an entry's `max_response_mb` to the ctx a provider fetches with.
+ *
+ * fetchJson / fetchText / fetchResponse refuse a body over
+ * DEFAULT_MAX_BODY_BYTES (_http.mjs) unless the call passes `maxBytes`. A
+ * board that is legitimately bigger sets `max_response_mb` on its own
+ * portals.yml entry; the setting is the user's, so it wins over a `maxBytes`
+ * the provider passes, and every other entry keeps the default. An entry
+ * without the key leaves the ctx as it is. So does a value that is not a YAML
+ * number (a quoted string, a boolean, a list) or that does not come to a whole
+ * positive finite byte count, with a warning naming the entry.
+ *
+ * @param {object} ctx - The per-entry ctx; its fetchers are replaced in place.
+ * @param {{ name?: string, max_response_mb?: unknown }} entry
+ * @returns {object} The same ctx.
+ */
+export function applyEntryResponseCap(ctx, entry) {
+  const raw = entry?.max_response_mb;
+  if (raw === undefined || raw === null) return ctx;
+  const maxBytes = typeof raw === 'number' ? Math.floor(raw * 1024 * 1024) : NaN;
+  if (!Number.isFinite(maxBytes) || maxBytes < 1) {
+    console.error(`⚠️  ${entry?.name}: max_response_mb must be a positive number, got ${JSON.stringify(raw)} — ignored`);
+    return ctx;
+  }
+  for (const method of ['fetchJson', 'fetchText', 'fetchResponse']) {
+    const original = ctx[method];
+    if (typeof original !== 'function') continue;
+    ctx[method] = (url, opts = {}) => original(url, { ...opts, maxBytes });
+  }
+  return ctx;
+}
+
 export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
   if (!existsSync(filePath)) return [];
   const lines = readFileSync(filePath, 'utf-8').split('\n');
@@ -3845,10 +3913,12 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
     : checkUrlLiveness(page, url);
 
   // Two permanent buckets, one observational, one transient passthrough:
-  //   verified  → active pages and transient nav errors (retry next scan)
+  //   verified  → active pages, transient nav errors and a still-empty page
+  //               (empty_page)
   //   expired   → classifier-confirmed dead postings (HTTP 4xx, redirect markers,
-  //               body patterns, listing pages, insufficient content)
-  //   dropped   → page loaded but classifier saw no Apply control. --verify is an
+  //               body patterns, listing pages)
+  //   dropped   → page loaded but classifier saw no Apply control, including a
+  //               page too short to read (insufficient_content). --verify is an
   //               opt-in stricter filter; keeping these defeats the purpose. Not
   //               proof the posting is closed, so the row never pins the URL and
   //               the next --verify scan loads the page again (#4832).
@@ -3907,8 +3977,9 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
         // with a precise status, dedup-blocking them on subsequent scans.
         invalid.push({ ...offer, code, reason });
         console.log(`  ⛔ invalid   ${offer.company} | ${offer.title} (${reason})`);
-      } else if (result === 'uncertain' && code === 'no_apply_control') {
-        // Page loaded but classifier could not find an Apply control. Drop from
+      } else if (result === 'uncertain' && (code === 'no_apply_control' || code === 'insufficient_content')) {
+        // Page loaded but classifier could not find an Apply control (or too
+        // little text to hold one: insufficient_content). Drop from
         // pipeline and record in scan-history for visibility only: the row does
         // not pin the URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so the next
         // --verify scan checks it again rather than losing a live posting whose
@@ -4122,6 +4193,18 @@ async function main() {
   const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
   const visaEnabled = Boolean(config.visa_filter) && config.visa_filter.enabled !== false;
+  // Stated years of experience (jd-years.mjs). Runs on the new offers only,
+  // after every other cut, so it costs at most one JD request per posting
+  // that would otherwise reach pipeline.md. Independent of skip_tiers: that
+  // reads the title, this reads the JD body.
+  // The profile is read only when an enabled block needs its years, so a
+  // profile problem is never reported for a filter that is off.
+  const experienceBlock = config.experience_filter;
+  const needsProfileYears = experienceBlock !== null && typeof experienceBlock === 'object'
+    && !Array.isArray(experienceBlock) && (experienceBlock.enabled === undefined || experienceBlock.enabled === true)
+    && experienceBlock.years == null;
+  const experienceFilter = resolveExperienceFilter(experienceBlock, needsProfileYears ? loadCandidateYears() : undefined);
+  if (!experienceFilter.enabled && experienceFilter.reason) console.warn(`⚠️  ${experienceFilter.reason}`);
 
   // 3. Resolve a provider for each enabled company / board
   const targets = [];
@@ -4400,6 +4483,7 @@ async function main() {
       ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => titleFilter(title) } : {}),
       idCache: idCaches.forProvider(provider.id),
     };
+    applyEntryResponseCap(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
       let jobs;
@@ -4571,7 +4655,15 @@ async function main() {
         // the prebuilt aggregate of located rows. An unknown ID keeps the
         // historical duplicate decision. Aggregators use URL dedup only.
         const baseKey = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
-        const key = company.aggregator === true
+        // No employer, no company+role identity. A board that cannot name a
+        // posting's employer returns `company: ''` (providers/_types.js allows
+        // it; builtin, platsbanken, justjoin and vdab do it), and `::{title}`
+        // then stood for every unnamed employer at once: a second "Senior
+        // Software Engineer" from a different company was dropped as a
+        // duplicate of the first. Seeding already skips such rows
+        // (collectSeenCompanyRoles), so they dedup by URL only, as an
+        // aggregator's do.
+        const key = company.aggregator === true || !canonicalizeCompany(job.company)
           ? null
           : (dedupIncludeLocation
             ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
@@ -4715,6 +4807,22 @@ async function main() {
     verifiedOffers = acceptedOffers;
   }
 
+  // 5.6. Experience filter: read each new offer's stated years. Only a required
+  // overall bar whose lowest reading is beyond the band drops (action: drop);
+  // an unread JD, or one with no such bar, is kept and labelled.
+  let experienceDropped = [];
+  if (experienceFilter.enabled && verifiedOffers.length > 0) {
+    console.log(`\nReading stated years of experience for ${verifiedOffers.length} new offer(s)...`);
+    // A first scan with the filter on can read hundreds of JDs; say how far along.
+    const { kept, dropped } = await applyExperienceFilter(verifiedOffers, experienceFilter, {
+      onProgress: (done, total) => {
+        if (done % PROGRESS_EVERY === 0 || done === total) process.stderr.write(`[${new Date().toTimeString().slice(0, 8)}] scan: ${done}/${total} JDs read\n`);
+      },
+    });
+    verifiedOffers = kept;
+    experienceDropped = dropped;
+  }
+
   // 5.7. Cross-listing check (#1597): fingerprint each new offer's JD body and
   // compare against recent history rows from a DIFFERENT company — the same
   // requirements text under two names is usually an agency re-post of a direct
@@ -4732,6 +4840,13 @@ async function main() {
   if (!dryRun && verifiedOffers.length > 0) {
     await appendToPipeline(verifiedOffers);
     await appendToScanHistory(verifiedOffers, date);
+  }
+  // Postings the experience filter dropped: recorded for visibility, no dedup
+  // weight (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so changing your years or
+  // stretch_years hands them back on the next scan. Once per posting.
+  if (!dryRun && experienceDropped.length > 0) {
+    const newRows = unrecordedOffers(experienceDropped, 'skipped_experience', readIfExists(SCAN_HISTORY_PATH));
+    if (newRows.length > 0) await appendToScanHistory(newRows, date, 'skipped_experience');
   }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};
@@ -4838,6 +4953,12 @@ async function main() {
   if (Object.keys(windows).length > 0 || totalFilteredCooldown > 0) {
     console.log(`Filtered by cooldown:  ${totalFilteredCooldown} removed`);
   }
+  if (experienceFilter.enabled) {
+    const band = `${experienceFilter.years} yrs + ${experienceFilter.stretchYears} stretch`;
+    console.log(experienceFilter.action === 'drop'
+      ? `Filtered by experience: ${experienceDropped.length} removed (band: JD minimum ≤ ${band})`
+      : `Experience filter:     label only, nothing removed (band: JD minimum ≤ ${band})`);
+  }
   console.log(`Duplicates:            ${totalDupes} skipped`);
   if (blacklist.size > 0) {
     if (includeBlacklisted) {
@@ -4845,6 +4966,20 @@ async function main() {
     } else {
       console.log(`Blacklisted:           ${totalFilteredBlacklist} skipped (blacklist)`);
     }
+  }
+  if (experienceDropped.length > 0) {
+    console.log(`\nRemoved by experience_filter (the JD's lowest stated requirement is above your band):`);
+    for (const offer of experienceDropped) {
+      console.log(`  - ${offer.company} — ${offer.title}: requires ${offer.years.req?.display}`);
+      console.log(`    "${offer.years.req?.mentions.find(m => m.kind === 'required' && m.scope === 'overall' && m.floor === offer.years.req?.min)?.quote ?? ''}"`);
+      console.log(`    ${offer.url}`);
+    }
+  }
+  if (experienceFilter.enabled && verifiedOffers.length > 0) {
+    const counts = { in: 0, out: 0, unknown: 0 };
+    for (const o of verifiedOffers) if (o.years) counts[o.years.verdict]++;
+    const unread = verifiedOffers.filter(o => o.years && !o.years.req).length;
+    console.log(`Stated years (kept):   ${counts.in} in band, ${counts.unknown} unknown (${unread} unread)${counts.out ? `, ${counts.out} above band (labelled)` : ''}`);
   }
   if (crossListings.length > 0) {
     console.log(`\n⚠️  Possible cross-listings (same JD text, different company) — warn only, nothing was dropped:`);

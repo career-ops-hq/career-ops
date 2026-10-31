@@ -227,15 +227,23 @@ try {
   if (probeCalls === 1 && probeOpts?.redirect === 'error') pass('dover.fetch() honors ctx.maxPages: 1 (one request, redirect:"error")');
   else fail(`dover.fetch() probe made ${probeCalls} calls, opts ${JSON.stringify(probeOpts)}`);
 
-  class FakeProbeBudget extends Error {}
+  // A plain Error has no status, so isRetryableError() treats it as retryable.
+  // The probe must still make exactly one call and rethrow that same error
+  // (providers/magneto.mjs's health-probe check).
+  const probeErr = new Error('budget');
+  let failProbeCalls = 0;
   let unwrapped = false;
   try {
-    await dover.fetch(big, { maxPages: 1, fetchJson: async () => { throw new FakeProbeBudget('budget'); } });
+    await dover.fetch(big, {
+      maxPages: 1,
+      sleep: async () => {},
+      fetchJson: async () => { failProbeCalls++; throw probeErr; },
+    });
   } catch (e) {
-    unwrapped = e instanceof FakeProbeBudget;
+    unwrapped = e === probeErr;
   }
-  if (unwrapped) pass('dover.fetch() propagates a ctx.fetch* rejection unwrapped while probing');
-  else fail('dover.fetch() must not swallow/rewrap a rejection while probing');
+  if (unwrapped && failProbeCalls === 1) pass('dover.fetch() propagates a status-less rejection unwrapped after exactly one call while probing');
+  else fail(`dover.fetch() probe failure: unwrapped=${unwrapped}, calls=${failProbeCalls}`);
 
   // A first-page failure is a broken board, not an empty one: it throws.
   let firstFailThrew = false;

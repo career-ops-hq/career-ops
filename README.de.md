@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Erstellt von <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Erstellt von <a href="https://github.com/santifer"><strong>@santifer</strong></a>, mit&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.de.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.de.md#builders">700+ Mitwirkenden</a></p>
 
 <p align="center">
 <strong>Monatelang Lebensläufe ins Leere&nbsp;geschickt.</strong><br>
@@ -62,6 +62,7 @@ Es schneidet deinen Lebenslauf zu und entwirft deine&nbsp;Antworten. <strong>Du&
 </p>
 
 <p align="center"><a href="#du-bist-dran">Probier es mit einer Stelle&nbsp;aus&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Die ganze Geschichte&nbsp;lesen&nbsp;→</a></p>
+<p align="center"><sub>Lieber ohne Terminal arbeiten? <a href="https://career-ops.org/de/waitlist?ref=readme-de">Trag dich in die Warteliste für eine Web-Version ein&nbsp;→</a></sub></p>
 
 <br>
 
@@ -125,6 +126,8 @@ Die Stille nach dem Absenden hat nichts mit dir zu tun. Genug Leute haben dassel
 <br>
 
 Das Recruiting repariert sich nicht von selbst. Die Leute, die es durchmachen, können das, und sie sind schon im Raum, tauschen Notizen aus und reparieren sich gegenseitig die Setups.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=de" alt="Animierte Wand mit den GitHub-Avataren der Mitwirkenden, die sich seit April 2026 in der Reihenfolge ihrer Ankunft füllt; das nächste Feld bleibt frei." width="100%"></a></p>
 
@@ -324,25 +327,7 @@ In Codex sind Slash Commands nicht garantiert. Nutze stattdessen dieselben Modus
 
 ## Wie es funktioniert
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity-CLI-Integration
 

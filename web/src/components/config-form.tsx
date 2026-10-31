@@ -69,25 +69,26 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // Highlight + persist the default installed CLI when Config was never
-        // saved. Highlight-only looks configured while jobs still read empty
-        // localStorage -- so whatever is rendered as selected must be written.
-        // This applies at ANY installed count: restricting it to a SOLE install
-        // left every multi-CLI machine (claude + codex, say) in exactly the
-        // broken state the highlight was meant to avoid.
         setCliId((prev) => {
           // A restored id whose CLI is no longer installed must not stick: it
           // would stay selected and save() would write it straight back, so
           // "open Config and click Save config" could never clear it (#4012).
           if (keepIfInstalled(prev, list)) return prev;
-          const auto = pickDefaultInstalled(list, typeof d.remembered === "string" ? d.remembered : null);
-          if (!auto) return "";
-          if (!readSavedCliId()) persistCliId(auto);
-          return auto;
+          return pickDefaultInstalled(list, typeof d.remembered === "string" ? d.remembered : null) ?? "";
         });
       })
       .catch(() => setClis([]));
   }, []);
+
+  // Persist the highlighted CLI when Config was never saved. Highlight-only
+  // looks configured while jobs still read empty localStorage, so whatever is
+  // rendered as selected must be written, at ANY installed count. The write
+  // lives here and not in the setCliId updater: React runs updaters during
+  // render, and the config-changed event it fires makes AssistantConsole set
+  // state mid-render.
+  useEffect(() => {
+    if (clis && cliId && !readSavedCliId()) persistCliId(cliId);
+  }, [clis, cliId]);
 
   function save() {
     // The API key is deliberately NOT persisted: nothing reads it yet (the
@@ -151,7 +152,7 @@ export function ConfigForm() {
             ) : installed.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
                 No AI tool yet? Free options like <span className="text-foreground">OpenCode</span> with Qwen or GLM work great.{" "}
-                <a href="https://career-ops.org/docs/free-ai-engine" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
+                <a href="https://career-ops.org/docs/free-ai-engine" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand-text hover:underline">
                   Get one free <ExternalLink className="size-3" />
                 </a>
               </div>
@@ -211,7 +212,7 @@ export function ConfigForm() {
                         href={c.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex shrink-0 items-center justify-center gap-1 text-xs text-brand hover:underline max-sm:min-h-[44px]"
+                        className="inline-flex shrink-0 items-center justify-center gap-1 text-xs text-brand-text hover:underline max-sm:min-h-[44px]"
                       >
                         Install <ExternalLink className="size-3" />
                       </a>
@@ -360,7 +361,7 @@ function ModeCard({
             : "border-border bg-surface/50 hover:bg-surface-hover",
       )}
     >
-      <Icon className={cn("size-4", active && !disabled ? "text-brand" : "text-muted")} />
+      <Icon className={cn("size-4", active && !disabled ? "text-brand-text" : "text-muted")} />
       <span className="text-sm font-medium text-foreground">{title}</span>
       <span className="text-xs text-faint">{hint}</span>
     </button>

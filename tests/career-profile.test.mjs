@@ -69,7 +69,7 @@ test('preview does not create a profile, and validation rejects missing evidence
     const invalidPath = join(root, 'invalid.yml');
     writeFileSync(invalidPath, `schema_version: 1\ncandidate: {}\nsummary: []\nexperiences: []\nprojects: []\neducation: []\ncertifications: []\nskills:\n  - id: skill-1\n    text: SQL\n    review_status: verified\n    evidence:\n      source: cv.md\n`);
     const invalid = runCli(root, ['validate', invalidPath]);
-    assert.equal(invalid.status, 1);
+    assert.equal(invalid.status, 1, describeSpawn(invalid));
     assert.match(invalid.stderr, /evidence requires source, positive line, and quote/);
   });
 });
@@ -214,7 +214,7 @@ test('a failed save removes its temporary file and reports the original error', 
       env: { ...process.env, CAREER_OPS_ROOT: root },
       encoding: 'utf8', input: 'y\ny\ny\ny\n', timeout: 5000,
     });
-    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.status, 1, describeSpawn(result));
     assert.match(result.stderr, /simulated rename failure/);
     const profilePath = join(root, 'data', 'career-profile.yml');
     assert.equal(existsSync(`${profilePath}.tmp`), false, 'temporary file is removed after a failed save');

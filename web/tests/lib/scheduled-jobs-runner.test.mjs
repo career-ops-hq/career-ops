@@ -683,6 +683,21 @@ test("scan failure messages skip progress, stack frames and the Node banner", ()
     "Node.js v22.13.0",
   ].join("\n");
   assert.equal(stderrCause(uncaught), "TypeError: Cannot read properties of undefined (reading 'positive')");
+  const missingPackage = [
+    "node:internal/modules/esm/resolve:873",
+    "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
+    "        ^",
+    "",
+    "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'js-yaml' imported from /repo/scan-ats-full.mjs",
+    "    at packageResolve (node:internal/modules/esm/resolve:873:9)",
+    "    at moduleResolve (node:internal/modules/esm/resolve:946:18)",
+    "    at defaultResolve (node:internal/modules/esm/resolve:1188:11) {",
+    "  code: 'ERR_MODULE_NOT_FOUND'",
+    "}",
+    "",
+    "Node.js v22.13.0",
+  ].join("\n");
+  assert.equal(stderrCause(missingPackage), "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'js-yaml' imported from /repo/scan-ats-full.mjs");
   assert.equal(stderrCause("starting\nboard list unavailable\n"), "board list unavailable");
   assert.equal(stderrCause(""), "");
   assert.equal(scanFailureMessage({ status: 2, stderr: "" }), "scanner exit 2");

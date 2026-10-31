@@ -64,8 +64,8 @@ function useElapsed(running: boolean, startedAt: number): number {
 // visually identical. TONE + pillTone live here (the canonical source).
 
 export const TONE = {
-  good: { bar: "bg-emerald-500/70", chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400", icon: "text-emerald-500" },
-  warn: { bar: "bg-amber-500/70", chip: "bg-amber-500/15 text-amber-700 dark:text-amber-400", icon: "text-amber-500" },
+  good: { bar: "bg-emerald-500/70", chip: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-400", icon: "text-emerald-500" },
+  warn: { bar: "bg-amber-500/70", chip: "bg-amber-500/15 text-amber-800 dark:text-amber-400", icon: "text-amber-500" },
   bad: { bar: "bg-red-400/70", chip: "bg-red-500/15 text-red-700 dark:text-red-400", icon: "text-red-400" },
   muted: { bar: "bg-zinc-400/50", chip: "bg-surface-hover text-muted", icon: "text-zinc-400" },
 } as const;
@@ -101,7 +101,7 @@ export function WorkerCard({
     <div role="group" aria-label={workerIdentity(job)} className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
       <div className="flex items-center gap-2">
         {job.status === "running" ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-brand" />
+          <Loader2 className="size-3 shrink-0 animate-spin text-brand-text" />
         ) : job.status === "error" ? (
           <AlertTriangle className={cn("size-3 shrink-0", tone.icon)} />
         ) : (
@@ -139,12 +139,12 @@ export function WorkerCard({
         </div>
       )}
       {errorHint && (
-        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+        <div className={cn("mt-1 text-amber-800 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           {errorHint.text}
         </div>
       )}
       {fencing && (
-        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+        <div className={cn("mt-1 text-amber-800 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           {fencing}
         </div>
       )}

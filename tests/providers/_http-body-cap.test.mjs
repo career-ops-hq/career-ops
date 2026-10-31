@@ -89,12 +89,18 @@ const server = createServer(async (req, res) => {
     // The marker sits in the last bytes that still fit under the cap, and it
     // arrives in a piece that crosses the ceiling: the chunk that straddles
     // the cap has to keep the part that fits, or the marker is lost.
+    //
+    // Two writes, not many small ones: every timer wait costs up to the
+    // platform's timer resolution (on some Windows machines about 15ms), and
+    // enough of them push the read past fetchText's default timeout, which
+    // reports the body as empty. If the two writes arrive as one chunk, that chunk still
+    // crosses the cap with the marker in it.
     res.writeHead(500, { 'content-type': 'text/html' });
     const body = 'x'.repeat(MAX_ERROR_BODY_BYTES - 3) + 'END' + 'z'.repeat(600);
-    for (let i = 0; i < body.length; i += 300) {
-      res.write(body.slice(i, i + 300));
-      await new Promise((r) => setTimeout(r, 1));
-    }
+    const split = MAX_ERROR_BODY_BYTES - 300;
+    res.write(body.slice(0, split));
+    await new Promise((r) => setTimeout(r, 20));
+    res.write(body.slice(split));
     res.end();
     return;
   }

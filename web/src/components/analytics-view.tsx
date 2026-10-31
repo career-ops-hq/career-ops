@@ -37,7 +37,7 @@ export function AnalyticsShell({ total, view, children }: {
     <PageFrame>
       <header className="flex flex-col gap-5 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-brand">Operations / Analytics</p>
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-brand-text">Operations / Analytics</p>
           <h1 className="mt-2 font-display text-3xl tracking-tight text-landing sm:text-4xl">Search intelligence</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
             A read on the roles you are pursuing, the funnel they move through, and the patterns worth acting on.
@@ -152,7 +152,7 @@ export function StatsPanel({ metrics, insights }: { metrics: StatsMetrics; insig
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
         <Panel eyebrow="Archetypes" title="Where the search is pointed" description="Canonical role families, ranked by volume and annotated with fit.">
-          {metrics.archetypes.length ? <div className="mt-4 space-y-3">{metrics.archetypes.map((row, index) => <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_minmax(100px,0.8fr)_auto] items-center gap-3 text-sm"><div className="min-w-0"><div className="break-words text-foreground">{row.label}</div><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-hover"><div className={`h-full rounded-full ${BAR_TONES[index % BAR_TONES.length]}`} style={{ width: `${Math.max(row.pct, row.count ? 3 : 0)}%` }} /></div></div><div className="text-right text-xs text-muted tabular-nums">{row.count} <span className="text-faint">({Math.round(row.pct)}%)</span></div><div className="min-w-14 text-right text-xs font-semibold tabular-nums text-brand">{row.avgScore ? `★ ${row.avgScore.toFixed(1)}` : "—"}</div></div>)}</div> : <EmptyData label="No archetype data" detail="Reports with archetype metadata will populate this view." />}
+          {metrics.archetypes.length ? <div className="mt-4 space-y-3">{metrics.archetypes.map((row, index) => <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_minmax(100px,0.8fr)_auto] items-center gap-3 text-sm"><div className="min-w-0"><div className="break-words text-foreground">{row.label}</div><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-hover"><div className={`h-full rounded-full ${BAR_TONES[index % BAR_TONES.length]}`} style={{ width: `${Math.max(row.pct, row.count ? 3 : 0)}%` }} /></div></div><div className="text-right text-xs text-muted tabular-nums">{row.count} <span className="text-faint">({Math.round(row.pct)}%)</span></div><div className="min-w-14 text-right text-xs font-semibold tabular-nums text-brand-text">{row.avgScore ? `★ ${row.avgScore.toFixed(1)}` : "—"}</div></div>)}</div> : <EmptyData label="No archetype data" detail="Reports with archetype metadata will populate this view." />}
         </Panel>
         <Panel eyebrow="Seniority" title="Role mix" icon={<BriefcaseBusiness className="size-4" />}>
           <Distribution rows={metrics.seniorityMix} emptyLabel="No role seniority data" />
@@ -181,18 +181,20 @@ export function StatsPanel({ metrics, insights }: { metrics: StatsMetrics; insig
 }
 
 function Panel({ eyebrow, title, description, icon, children }: { eyebrow: string; title: string; description?: string; icon?: React.ReactNode; children: React.ReactNode }) {
-  return <section className="rounded-2xl border border-border bg-surface/55 p-4 sm:p-5"><div className="flex items-start justify-between gap-4"><div><p className="flex items-center gap-2 font-mono text-[11px] font-semibold uppercase tracking-[0.17em] text-brand">{icon}{eyebrow}</p><h2 className="mt-2 font-display text-xl tracking-tight text-landing">{title}</h2>{description && <p className="mt-1 max-w-xl text-xs leading-5 text-muted">{description}</p>}</div></div>{children}</section>;
+  return <section className="rounded-2xl border border-border bg-surface/55 p-4 sm:p-5"><div className="flex items-start justify-between gap-4"><div><p className="flex items-center gap-2 font-mono text-[11px] font-semibold uppercase tracking-[0.17em] text-brand-text">{icon}{eyebrow}</p><h2 className="mt-2 font-display text-xl tracking-tight text-landing">{title}</h2>{description && <p className="mt-1 max-w-xl text-xs leading-5 text-muted">{description}</p>}</div></div>{children}</section>;
 }
 
 function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
-  return <div className="rounded-xl border border-border bg-surface/45 p-4"><div className="flex items-center justify-between text-brand"><span className="font-mono text-[10px] font-semibold uppercase tracking-[0.15em] text-muted">{label}</span>{icon}</div><div className="mt-3 font-display text-3xl tracking-tight text-landing tabular-nums">{value}</div></div>;
+  return <div className="rounded-xl border border-border bg-surface/45 p-4"><div className="flex items-center justify-between text-brand-text"><span className="font-mono text-[10px] font-semibold uppercase tracking-[0.15em] text-muted">{label}</span>{icon}</div><div className="mt-3 font-display text-3xl tracking-tight text-landing tabular-nums">{value}</div></div>;
 }
+
+const NO_RATE_EXPLANATION = "No applications sent yet, so this rate has nothing to measure";
 
 function RateRow({ label, value }: { label: string; value: number | null }) {
   // An em dash for a rate taken over nothing. `0.0%` here would be the view
   // stating a measurement it never made — see computeProgressMetrics.
   const absent = value === null;
-  return <div className="flex items-center justify-between gap-3 border-b border-border py-3 last:border-0 xl:first:pt-0"><span className="text-sm text-muted">{label} rate</span><span className="font-mono text-lg font-semibold tabular-nums text-foreground" title={absent ? "No applications sent yet, so this rate has nothing to measure" : undefined}>{absent ? "—" : `${value.toFixed(1)}%`}</span></div>;
+  return <div className="flex items-center justify-between gap-3 border-b border-border py-3 last:border-0 xl:first:pt-0"><span className="text-sm text-muted">{label} rate</span><span className="font-mono text-lg font-semibold tabular-nums text-foreground" title={absent ? NO_RATE_EXPLANATION : undefined}>{absent ? <><span aria-hidden="true">—</span><span className="sr-only">{NO_RATE_EXPLANATION}</span></> : `${value.toFixed(1)}%`}</span></div>;
 }
 
 function BarRow({ label, count, pct, widthPct, tone }: { label: string; count: number; pct?: number; widthPct: number; tone: string }) {
@@ -207,7 +209,7 @@ function Distribution({ rows, emptyLabel = "No distribution data" }: { rows: { l
 
 function BreakdownList({ rows, icon, emptyLabel }: { rows: { label: string; count: number; pct: number }[]; icon: React.ReactNode; emptyLabel: string }) {
   if (!rows.length) return <EmptyData label={emptyLabel} detail="Add an explicit work mode or location to the tracker notes to populate this dimension." />;
-  return <div className="mt-4 space-y-3">{rows.map((row, index) => <div key={row.label} className="flex items-center gap-2 text-sm"><span className="text-brand">{icon}</span><span className="min-w-0 flex-1 break-words text-muted">{row.label}</span><span className="font-mono text-xs tabular-nums text-foreground">{row.count}</span><span className="w-12 text-right font-mono text-[11px] tabular-nums text-faint">{Math.round(row.pct)}%</span></div>)}</div>;
+  return <div className="mt-4 space-y-3">{rows.map((row, index) => <div key={row.label} className="flex items-center gap-2 text-sm"><span className="text-brand-text">{icon}</span><span className="min-w-0 flex-1 break-words text-muted">{row.label}</span><span className="font-mono text-xs tabular-nums text-foreground">{row.count}</span><span className="w-12 text-right font-mono text-[11px] tabular-nums text-faint">{Math.round(row.pct)}%</span></div>)}</div>;
 }
 
 function PayStat({ label, value }: { label: string; value: string | number }) { return <div><p className="text-[11px] text-faint">{label}</p><p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">{value}</p></div>; }

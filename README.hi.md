@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> द्वारा बनाया गया</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> द्वारा बनाया गया,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.hi.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.hi.md#builders">700+ योगदानकर्ताओं</a> के साथ</p>
 
 <p align="center">
 <strong>महीनों तक CV भेजता रहा, जवाब में सिर्फ़&nbsp;खामोशी।</strong><br>
@@ -60,6 +60,7 @@
 </p>
 
 <p align="center"><a href="#अब-आपकी-बारी">एक नौकरी पर आज़माएँ&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">पूरी कहानी&nbsp;पढ़ें&nbsp;→</a></p>
+<p align="center"><sub>टर्मिनल इस्तेमाल नहीं करना चाहते? <a href="https://career-ops.org/waitlist?ref=readme-hi">वेब वर्ज़न की वेटलिस्ट में शामिल हों&nbsp;→</a></sub></p>
 
 <br>
 
@@ -123,6 +124,8 @@ npx @santifer/career-ops init
 <br>
 
 हायरिंग अपने आप ठीक नहीं होगी। जो लोग इससे गुज़र रहे हैं, वे इसे ठीक कर सकते हैं, और वे पहले से उस कमरे में हैं: नोट्स मिला रहे हैं और एक-दूसरे का सेटअप ठीक कर रहे हैं।
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=hi" alt="योगदानकर्ताओं के GitHub अवतारों की एनिमेटेड दीवार, जो अप्रैल 2026 से आने के क्रम में भरती जाती है, और अगला खाना खुला छोड़ा गया है।" width="100%"></a></p>
 
@@ -322,25 +325,7 @@ Codex में स्लैश कमांड की गारंटी नह
 
 ## यह कैसे काम करता है
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI Integration
 

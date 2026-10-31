@@ -169,14 +169,8 @@ func (m StatsModel) renderBody() string {
 	archetypes := m.renderArchetypeChart()
 	// showQualityBadge=true for the Fit Quality pie (score metric belongs there),
 	// false for Seniority Mix (the badge would be semantically meaningless).
-	pieChart := m.renderPieChart(i18n.Current.FitQualityDistribution, i18n.Current.QualityBreakdown, m.metrics.ScoreTiers, []lipgloss.Color{
-		m.theme.Green,  // Elite (>=4.5)
-		m.theme.Sky,    // Strong (4.0-4.4)
-		m.theme.Yellow, // Viable (3.5-3.9)
-		m.theme.Peach,  // Moderate (3.0-3.4)
-		m.theme.Red,    // Below Bar (<3.0)
-		m.theme.Mauve,
-	}, true)
+	pieChart := m.renderPieChart(i18n.Current.FitQualityDistribution, i18n.Current.QualityBreakdown, m.metrics.ScoreTiers,
+		scoreTierColors(m.theme, m.metrics.ScoreTiers), true)
 	seniorityPieChart := m.renderPieChart(i18n.Current.SeniorityMix, i18n.Current.SeniorityMix, m.metrics.SeniorityMix, []lipgloss.Color{
 		m.theme.Mauve,
 		m.theme.Peach,
@@ -282,20 +276,12 @@ func (m StatsModel) renderHeader() string {
 		Bold(true).
 		Foreground(m.theme.Text).
 		Background(m.theme.Surface).
-		Width(m.width).
 		Padding(0, 2)
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Mauve).Render("📊 " + i18n.Current.StatsTitle)
-
 	right := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 	info := right.Render(fmt.Sprintf(i18n.Current.StatsSummary, m.evaluated, len(m.metrics.Archetypes)))
-
-	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
-	if gap < 1 {
-		gap = 1
-	}
-
-	return style.Render(title + strings.Repeat(" ", gap) + info)
+	return oneLine(m.width, style, fitTitleBar(m.width, title, info))
 }
 
 func (m StatsModel) renderInsights() string {
@@ -326,6 +312,30 @@ func (m StatsModel) renderInsights() string {
 	}
 
 	return padStyle.Render(boxStyle.Render(strings.Join(bulletLines, "\n")))
+}
+
+// scoreTierColors returns one colour per tier in tiers, chosen by the tier's
+// label. The palette was positional, but ScoreTiers omits empty tiers, so with
+// only Viable and Below Bar present the Viable wedge took Elite's green and
+// Below Bar took Strong's blue; the yellow and red that say "weak fit" never
+// appeared. An unknown label gets the neutral Mauve.
+func scoreTierColors(t theme.Theme, tiers []model.LabelCountStat) []lipgloss.Color {
+	palette := []lipgloss.Color{t.Green, t.Sky, t.Yellow, t.Peach, t.Red} // in data.ScoreTierLabels order
+	byLabel := make(map[string]lipgloss.Color, len(data.ScoreTierLabels))
+	for i, label := range data.ScoreTierLabels {
+		if i < len(palette) {
+			byLabel[label] = palette[i]
+		}
+	}
+	colors := make([]lipgloss.Color, len(tiers))
+	for i, tier := range tiers {
+		if c, ok := byLabel[tier.Label]; ok {
+			colors[i] = c
+		} else {
+			colors[i] = t.Mauve
+		}
+	}
+	return colors
 }
 
 // renderPieChart draws a high-definition radial terminal pie chart with aspect ratio correction and legend.
@@ -658,25 +668,23 @@ func (m StatsModel) renderHelp() string {
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Subtext).
 		Background(m.theme.Surface).
-		Width(m.width).
 		Padding(0, 1)
 
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Text)
 	descStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
-
-	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render("career-ops by santifer.io")
-
-	keys := keyStyle.Render("↑↓") + descStyle.Render(i18n.Current.HelpScroll) +
-		keyStyle.Render("PgUp/Dn") + descStyle.Render(i18n.Current.HelpPage) +
-		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) +
-		keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack)
-
-	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brand) - 2
-	if gap < 1 {
-		gap = 1
+	brandPlain := "career-ops by santifer.io"
+	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render(brandPlain)
+	budget := m.width - 2
+	if budget < 1 {
+		budget = 1
 	}
-
-	return style.Render(keys + strings.Repeat(" ", gap) + brand)
+	keys := joinHelp(budget, []helpPiece{
+		{keyStyle.Render("↑↓") + descStyle.Render(i18n.Current.HelpScroll), false},
+		{keyStyle.Render("PgUp/Dn") + descStyle.Render(i18n.Current.HelpPage), false},
+		{keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage), false},
+		{keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack), true},
+	}, brandPlain, brand)
+	return oneLine(m.width, style, keys)
 }
 
 // scoreColor returns a color based on the fit score value, matching

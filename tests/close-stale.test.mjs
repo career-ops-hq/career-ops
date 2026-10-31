@@ -142,6 +142,28 @@ test('later signals skip a row: active interview, status-log transition, open fo
   });
 });
 
+test('an active interview under another legal form of the company still skips the row', () => {
+  const rows = [
+    row(1, OLD, 'Kestrel Payments', 'Applied'),
+    row(2, OLD, 'Copperline Freight, Inc.', 'Applied'),
+    row(3, OLD, 'Kestrel Robotics', 'Applied'),
+  ];
+  const extra = {
+    'active-interviews.md': [
+      '| Company | Role | Round | Date/Time | Interviewer | Status | Notes |',
+      '|---|---|---|---|---|---|---|',
+      '| Kestrel Payments Inc. | Analyst | 1 | 2026-10-20 | x | Scheduled | |',
+      '| Copperline Freight | Analyst | 2 | 2026-10-21 | x | Scheduled | |',
+      '',
+    ].join('\n'),
+  };
+  withRoot(rows, extra, ({ root }) => {
+    const r = run(root);
+    assert.deepEqual(closedNums(r.json), [3]);
+    assert.deepEqual(r.json.skipped.map((s) => [s.num, s.reason]), [[1, 'active-interview'], [2, 'active-interview']]);
+  });
+});
+
 test('age is measured from the latest of Date, an Applied date in Notes and the ledger', () => {
   const rows = [
     row(1, OLD, 'Notes Co', 'Applied', 'Applied 2026-10-15 via Ashby'),

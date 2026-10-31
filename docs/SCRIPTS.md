@@ -44,7 +44,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run find` | `find.mjs` | Resolve a report#/tracker#/company query to its full pipeline identity |
 | `npm run ics-interview -- invite.ics` | `ics-interview.mjs` | Read an interview invite's `.ics` (first VEVENT: start/end/length, time zone, link, organizer) and print a row to paste into `data/active-interviews.md` (read-only) |
 | `npm run panelist-roles -- invite.txt` | `panelist-roles.mjs` | Classify the panelists named in an interview invite (pasted text or `.ics`) by title into recruiter / hiring manager / privacy-compliance / technical / peer / executive, with a one-line prep focus per role (offline, read-only) |
-| `npm run invite-match` | `invite-match.mjs` | Fuzzy-match a pasted interview-invite email against `data/applications.md` |
+| `npm run invite-match` | `invite-match.mjs` | Fuzzy-match a pasted interview-invite email against `data/applications.md`; invites also get a draft-only clarification email (`--no-clarification-draft` to omit) |
 | `npm run application:init` | `application-artifacts.mjs` | Initialize one versioned application-scoped JD/CV/PDF artifact bundle |
 | `npm run paste-reply` | `paste-reply.mjs` | Manual/no-Gmail input into the `reply-watch.mjs` classification pipeline |
 | `npm run closing-soon` | `closing-soon.mjs` | List tracker rows whose Notes (or matching `jds/` capture) carry a closing date within N days, plus separate `overdue` and `unparsed` groups (read-only) |
@@ -77,7 +77,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 
 ## doctor
 
-Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
+Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
 
 ```bash
 npm run doctor
@@ -576,10 +576,11 @@ tracker row, so a contact cannot be attached across companies.
 
 Optional GitHub evidence step of the `expand` mode (#5295). Reads the pull
 requests you authored through your existing `gh auth` (no new token) and checks
-what `cv.md` claims against them. Read-only, metadata only (PR title, state,
-repository, stars, visibility, document file names); it never reads source
-code or file contents and never writes
-`cv.md`. Candidates reach `cv.md` only through `expand`'s confirm gate and
+what `cv.md` claims against them. Read-only: PR title, state, repository,
+stars, visibility, commit counts/dates, and document file names. README reading
+is separately opt-in through `github_evidence.read_readmes: true`; it never
+reads source code or file contents and never writes `cv.md`. Candidates reach
+`cv.md` only through `expand`'s confirm gate and
 `add-entry.mjs`.
 
 ```bash
@@ -595,6 +596,13 @@ node github-evidence.mjs --skip-document-listing # omit document names and tree 
   `github_evidence.private_allowlist: ["owner/repo"]` (empty by default). Any
   other private repo, or one whose visibility could not be read, appears by
   name and count only, never with PR titles.
+- `readmes` (only when `github_evidence.read_readmes: true`): the README of
+  each allowlisted repo, your own private repos
+  included, read with `gh api repos/<owner>/<repo>/readme` (raw), control
+  characters dropped and capped at 6000 characters (`truncated` says when).
+  A fork, or a repo whose visibility could not be read, is skipped; a repo
+  without a README is skipped too. `own` marks your own repos. The text is in
+  the JSON only; the Markdown report lists which READMEs were read.
 - `claimCheck.mergedNotNamed`: third-party repos with merged PRs that `cv.md`
   does not name. `claimCheck.namedNoMerge`: repos `cv.md` names where you have
   no merged PR. Matching is literal and case-insensitive (`owner/repo`, then
@@ -737,7 +745,7 @@ node check-jd-archive.mjs --self-test
 
 ## rejection-latency
 
-Post-interview response-latency signal. Cross-references `data/active-interviews.md` (latest interview date per application — company + role, fuzzy role match via `role-matcher.mjs`) with `data/applications.md` (rows still in `Interview` state — i.e. no `Responded`/`Offer`/`Rejected` transition recorded since) and flags applications whose silence exceeds a soft **courtesy** threshold (30-day default, no legal claim attached) from `rejection_latency.courtesy_days` or `--courtesy-days`. (An earlier revision also shipped a jurisdiction-backed statutory tier; it was removed — the underlying legal threshold could change and the script has no way to re-verify it.) Each flag carries a ready-to-copy `data/blacklist.md` row (same suggestion-only bridge as `modes/interview-redflag.md`, #1854/#1856) — the script never writes to `data/blacklist.md`, `data/applications.md`, or `data/active-interviews.md` (#1742 opt-in guarantee). Surfaced by the `followup` mode.
+Post-interview response-latency signal. Cross-references `data/active-interviews.md` (latest interview date per application — company + role, fuzzy role match via `role-matcher.mjs`, and the company also matches with or without its legal form, so `Acme, Inc.` finds an `Acme` row) with `data/applications.md` (rows still in `Interview` state — i.e. no `Responded`/`Offer`/`Rejected` transition recorded since) and flags applications whose silence exceeds a soft **courtesy** threshold (30-day default, no legal claim attached) from `rejection_latency.courtesy_days` or `--courtesy-days`. (An earlier revision also shipped a jurisdiction-backed statutory tier; it was removed — the underlying legal threshold could change and the script has no way to re-verify it.) Each flag carries a ready-to-copy `data/blacklist.md` row (same suggestion-only bridge as `modes/interview-redflag.md`, #1854/#1856) — the script never writes to `data/blacklist.md`, `data/applications.md`, or `data/active-interviews.md` (#1742 opt-in guarantee). Surfaced by the `followup` mode.
 
 ```bash
 node rejection-latency.mjs             # JSON
@@ -748,6 +756,20 @@ node rejection-latency.mjs --self-test
 ```
 
 **Exit codes:** `0` always (missing data files produce an explanatory empty result), `1` self-test failure.
+
+---
+
+## role-clarity
+
+Six-point role-clarity check on one posting's text (#6091). For each of: direct supervisor and department, scope of work, deliverables and their format, success measure in the first 3-6 months, teams or people the role coordinates with, and delivery cadence, it reports `present`, `partial` or `missing` with the quoted evidence (always an exact substring of the posting). A separate soft-verb signal lists wording such as "participate in", "support", "potential implementation" and "other duties as assigned"; three or more hits mark it `heavy`. When three or more points are `missing`, `askBeforeYouCommit` is true and `questions` lists one question per missing or partial point, which `modes/oferta.md` (Block G, Role-clarity check) turns into a recruiter question draft. Advisory only: it never changes the 1-5 score, never sends anything and never writes a file. The posting is treated as data and only pattern-matched. English keyword matching only; locale mode sets can pass `extraSoftVerbs` to `analyzeRoleClarity()` to extend the soft-verb list.
+
+```bash
+node role-clarity.mjs jds/{slug}.md             # JSON
+node role-clarity.mjs jds/{slug}.md --summary   # human-readable
+node role-clarity.mjs --self-test
+```
+
+**Exit codes:** `0` on success (an empty posting returns `emptyInput: true`), `1` for a missing file, an unrecognized flag, or a self-test failure.
 
 ---
 
@@ -782,7 +804,7 @@ A row is a candidate when its status resolves to `Applied` (aliases such as `Sen
 
 | Reason | Meaning |
 |--------|---------|
-| `active-interview` | the company has an entry in `data/active-interviews.md` (company match only, so a role-title mismatch never closes an application you are interviewing for) |
+| `active-interview` | the company has an entry in `data/active-interviews.md` (company match only, with or without the legal form, so `Acme, Inc.` covers an `Acme` row and a role-title mismatch never closes an application you are interviewing for) |
 | `status-log` | `data/status-log.tsv` holds a transition after Applied |
 | `open-follow-up` | `data/follow-ups.md` has a follow-up logged for this row within the last `--days` days, or an uncleared `next #N` pin dated today or later (the pin `followup-seed.mjs` writes at apply time is long past on a stale row and does not count) |
 | `previously-auto-closed` | the note tag or a `close-stale` ledger line is already present: a row you reopened stays open |
@@ -913,7 +935,7 @@ npm run rollback
 
 Tests whether job posting URLs are still live. Two rungs: a zero-token API check first (`liveness-api.mjs` — Greenhouse, Lever, Ashby, Workday, LinkedIn), falling back to headless Chromium (`liveness-browser.mjs`) for everything else or when the API is inconclusive. The browser rung detects expired patterns (e.g. "job no longer available"), HTTP 404/410, ATS redirect patterns, and apply-button presence, and supports multi-language expired patterns (English, German, French).
 
-Many ATS are single-page apps that render the posting after the HTML has loaded, so the browser rung reads the page straight away and again every 250 ms until the verdict is decisive, giving up after 4 s; a page that still has no recognised apply control or still shows too little text at that point keeps that verdict. Same-origin iframes are read on every pass as part of the page, since iCIMS renders the whole posting inside one; if the poll gives up while such a frame is present, the check waits up to 6 s more for the frames to fill and reads the page once more. A page with no text at all by then reads `uncertain` (`empty_page`), not `expired`: it shows no posting, no closure notice and no error page. A posting whose own host has no usable address reads `uncertain` with the DNS outcome as its code: `dns_no_addresses` when the lookup returns nothing, `dns_sinkhole` when a DNS filter answers `0.0.0.0` or `::`. Neither proves the posting is gone, since an outage or the user's own filter looks the same, so `scan --verify` keeps it; a host that resolves into private space reads `blocked_host`, which `--verify` records for good.
+Many ATS are single-page apps that render the posting after the HTML has loaded, so the browser rung reads the page straight away and again every 250 ms until the verdict is decisive, giving up after 4 s; a page that still has no recognised apply control or still shows too little text at that point keeps that verdict. Same-origin iframes are read on every pass as part of the page, since iCIMS renders the whole posting inside one; if the poll gives up while such a frame is present, the check waits up to 6 s more for the frames to fill and reads the page once more. A page with no text at all by then reads `uncertain` (`empty_page`): it shows no posting, no closure notice and no error page. A page with a little text but no closure notice reads `uncertain` too (`insufficient_content`). A posting whose own host has no usable address reads `uncertain` with the DNS outcome as its code: `dns_no_addresses` when the lookup returns nothing, `dns_sinkhole` when a DNS filter answers `0.0.0.0` or `::`. Neither proves the posting is gone, since an outage or the user's own filter looks the same, so `scan --verify` keeps it; a host that resolves into private space reads `blocked_host`, which `--verify` records for good.
 
 The LinkedIn rung reads the guest posting endpoint, which returns the rendered posting as HTML and answers HTTP 200 for closed postings as well as live ones. Liveness therefore comes from two independent signals in the body — the "No longer accepting applications" banner and the apply control — and the rung only concludes when they agree: banner without apply control is expired, apply control without banner is live, a body carrying both or neither is `uncertain`. That `uncertain` is final rather than a fall-through, because a headless fetch of `linkedin.com/jobs/view/{id}` lands on a generic search page rather than the posting, so the browser rung has nothing better to offer. The endpoint is unauthenticated and rate-limited, so the rung spaces its own requests.
 
@@ -932,7 +954,7 @@ npm run liveness -- --no-record https://a.com/job/1     # check without writing 
 
 Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
 
-An `expired` verdict is also written to `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead stops resurfacing in the web "new matches this week" feed. Only URLs the history already knows get a row, and each gets one until it is relisted. An `uncertain` verdict writes nothing, and neither does an `expired` one that only reads as an unrendered page (`insufficient_content`). `--no-record` makes the run leave no trace.
+An `expired` verdict is also written to `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead stops resurfacing in the web "new matches this week" feed. Only URLs the history already knows get a row, and each gets one until it is relisted. An `uncertain` verdict writes nothing. That includes a short page with no closure notice, no 404/410 and no apply control (`insufficient_content`): it is usually a posting that has not rendered yet, so it reads `uncertain`, not `expired`. `--no-record` makes the run leave no trace.
 
 **Exit codes:** `0` all URLs active, `1` any expired or uncertain.
 
@@ -1172,6 +1194,7 @@ node tracker.mjs query --company acme --json
 node tracker.mjs query --since 2026-09-01 --csv > output/tracker.csv  # open in a spreadsheet
 node tracker.mjs query --status Evaluated --min-score 4  # scored 4.0/5 or higher, not yet applied to
 node tracker.mjs history --id 42          # status transitions from status-log.tsv (Applied → Interview → ...)
+node tracker.mjs history 42               # same read as --id 42
 node tracker.mjs export                   # inverse: index → markdown table on stdout
 node tracker.mjs export --out repaired.md # write to a file (existing file backed up to .bak first)
 node tracker.mjs export --out repaired.md --force  # write even when columns would be dropped
@@ -1534,7 +1557,7 @@ npm run prepare:application -- --url https://boards.greenhouse.io/acme/jobs/123
 Cross-platform build wrapper for the Go TUI dashboard: picks the
 platform-correct output name (`career-dashboard.exe` on Windows, else
 `career-dashboard`), since a bare `go build -o` writes an extension-less
-binary on Windows. Requires Go 1.24+.
+binary on Windows. Requires Go 1.26+.
 
 ```bash
 npm run build:dashboard

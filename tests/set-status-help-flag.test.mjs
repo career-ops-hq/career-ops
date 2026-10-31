@@ -93,20 +93,20 @@ test('"--help" in a VALUE position is not a help request', () => {
   // Must stay the pre-existing "never consume a flag as a value" error: a help
   // screen exiting 0 would read as success to a script checking only the code.
   const r = runSetStatus('--report', '1', 'Applied', '--note', '--help');
-  assert.equal(r.status, 1, `--note --help should exit 1, got ${r.status}: ${r.all}`);
+  assert.equal(r.status, 1, describeSpawn(r, `--note --help should exit 1, got ${r.status}`));
   assert.match(r.all, /Missing value for --note/);
   assert.doesNotMatch(r.all, /Canonical states \(aliases/, 'a value position triggered the help screen');
 });
 
 test('an unrecognized flag still exits 1 and does not print help', () => {
   const r = runSetStatus('--bogus');
-  assert.equal(r.status, 1, `unknown flag should exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `unknown flag should exit 1, got ${r.status}`));
   assert.match(r.all, /Unknown flag: --bogus/);
   assert.doesNotMatch(r.all, NO_TRACKER_FOUND, 'unknown flag reached the tracker check');
 });
 
 test('bare invocation still reports a usage error rather than succeeding', () => {
   const r = runSetStatus();
-  assert.equal(r.status, 1, `bare invocation should exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `bare invocation should exit 1, got ${r.status}`));
   assert.match(r.all, /Usage: node set-status\.mjs/);
 });
