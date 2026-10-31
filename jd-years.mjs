@@ -170,7 +170,10 @@ function toLines(input) {
   // [^<>]: '<a<a<a…' fails each start at once instead of scanning to the end.
   const text = /<[a-z!/][^<>]*>/i.test(raw) ? jdHtmlToText(raw) : raw;
   // Runs of spaces collapse first: the sentence split is quadratic on them.
-  return text.replace(/[’‘]/g, "'").replace(/[^\S\r\n]+/g, ' ').split(/\r?\n/).map(l => l.replace(/^\s*(?:[-*•·]|\d+[.)])\s+/, '').trim()).filter(Boolean);
+  // A marker may also end its line: `<li>\n<p>text` and `<li></li>` arrive as a
+  // bare "-", and headingKind would take it for a heading and hide the real one
+  // above it. In a 2026-10-30 sample, 654 of 3,573 postings had such a line.
+  return text.replace(/[’‘]/g, "'").replace(/[^\S\r\n]+/g, ' ').split(/\r?\n/).map(l => l.replace(/^\s*(?:[-*•·]|\d+[.)])(?:\s+|$)/, '').trim()).filter(Boolean);
 }
 
 /**
