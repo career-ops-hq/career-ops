@@ -106,6 +106,23 @@ The pass rate is each channel's editorial shape, not noise: @data_science_job 77
 
 **The bar for the next channel proposal**, so it is written down: measure the channel (share of posts naming an employer, share linking a vacancy page, what survives both), name its operator, and expect the provider to drop the rest. A channel below roughly a quarter passing is the channel's editorial choice, and the provider will read it correctly and emit little.
 
+**Re-measured 2026-10-31: positional employer shapes and the Habr Career fix.** 51 public RU/CIS channels, 3 preview pages each, 2,973 posts, saved once and replayed before and after the change. Two things kept posts that already met rules 1 and 2 from being emitted:
+
+- Every `career.habr.com` vacancy link was refused. `habr.com` is on the non-apply list as a long-read host, and the subdomain matched it before the board list was checked. All the Proglib channels link there. The board list is now checked first: 107 of the newly emitted posts link to Habr Career.
+- Many channel templates name the employer by position, not by label: `Employer ищет …` (Proglib, POSTER), `Title в Employer` on the title line (offerclaw, Remocate and Sparkles mirrors), `Title / Employer`, `Title — Employer`, a second line `Employer is a …` (the EN template of @geekjobs and its siblings), and a finder.work mirror's employer on the line after the salary. These six shapes run only after the five marked shapes find nothing. Because a position is weaker evidence than a label, each capture is also refused when it reads as a role, a sector or unit ("в FinTech", "в команду CDP"), a department ("– Ecosystem"), a work format ("Удаленно (Москва)"), a contract term, a person (a Russian patronymic), a year, a destination ("с переездом в Дубай"), a declined place name ("в Лиссабоне"), a phrase ("в Чехии или Испании"), or a `в` or slash inside a quoted title.
+
+A post is also dropped when it says, anywhere in the text, that the employer's name is withheld ("название компании-заказчика не раскрыто", "неназванной финтех-организации"). On Proglib that sentence follows a first line naming the agency. A post that withholds something else ("Зарплата не раскрыта") is kept.
+
+| | before | after |
+|---|---|---|
+| posts emitted | 284 | 833 |
+| previously emitted posts with the same company, url and title | — | 283 of 284 |
+| previously emitted posts now refused | — | 1 (`Custom Software Development`, a line of business read as the employer) |
+
+The 550 new posts name 316 distinct employers. Each employer name was reviewed by hand against its post, and the false attributions found were turned into the refusals above, each with a test. The links were not opened one by one: they pass the same `classifyLink()` rules as before, plus five mirror hosts added to the board list (remocate.app, offerclaw.app, hellowehire.com, ingamejob.com, vseti.app).
+
+Still out of reach by design: posts whose only application path is a Telegram contact or an e-mail address, digests carrying several vacancy links, and channels that link only through teletype or telegra.ph.
+
 ---
 
 ## Computrabajo
