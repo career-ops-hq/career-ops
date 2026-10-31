@@ -49,6 +49,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run paste-reply` | `paste-reply.mjs` | Manual/no-Gmail input into the `reply-watch.mjs` classification pipeline |
 | `npm run closing-soon` | `closing-soon.mjs` | List tracker rows whose Notes (or matching `jds/` capture) carry a closing date within N days, plus separate `overdue` and `unparsed` groups (read-only) |
 | `npm run close-stale` | `close-stale.mjs` | Close long-silent `Applied` rows in bulk (dry run by default; `--confirm` writes through the locked tracker path, tags the note and logs each transition) |
+| `npm run import-tracker -- export.csv` | `import-tracker.mjs` | Add the applications in a CSV export from another tracker (Teal, Huntr, Simplify, a spreadsheet) to the tracker (dry run by default; `--confirm` adds the rows through `merge-tracker.mjs`) |
 | `npm run reeval-candidates` | `reeval-candidates.mjs` | List `Evaluated` tracker rows whose last evaluation predates the latest change to `cv.md`, `article-digest.md`, `config/profile.yml` or `modes/_profile.md` (read-only) |
 | `npm run freshness` | `check-table-freshness.mjs` | Staleness validator for jurisdiction data tables (`as_of` / `next_effective` watchdog) |
 | `npm run jd-archive` | `check-jd-archive.mjs` | Validate every `reports/*.md` has an archived JD (embedded section or `jds/` capture) — flags `missing-jd-archive` |
@@ -791,6 +792,39 @@ node close-stale.mjs --today 2026-10-17    # deterministic runs/tests
 Paths follow `CAREER_OPS_ROOT` / `CAREER_OPS_DATA_DIR` / `CAREER_OPS_TRACKER`. Dates are compared as `YYYY-MM-DD` strings at UTC midnight, so the result does not depend on the host timezone.
 
 **Exit codes:** `0` on a report, `1` unrecognized flag, `2` invalid `--days` / `--today` / `--status` value or a tracker with no Notes column, `4` tracker lock timeout (nothing written).
+
+---
+
+## import-tracker
+
+Adds the applications in another tracker's CSV export to `data/applications.md`. It is for a user who already kept a search in Teal, Huntr, Simplify or a spreadsheet: export that tracker as CSV and import it once, instead of adding each row by hand. Zero-LLM, no network.
+
+**Dry run by default**: nothing is written without `--confirm`. The preview names the column it read for each field, the columns it ignores, and what happens to every row.
+
+Columns are matched by header name, so their order does not matter. The file needs a company column (`Company`, `Company Name`, `Employer`) and a role column (`Job Position`, `Job Title`, `Position Title`, `Title`, `Role`). Status, date, posting URL, location and notes are optional; `--help` lists every recognized header. Stage names resolve through `templates/states.yml` first, then through a small table of other trackers' stages (`Interviewing` becomes `Interview`, `Negotiating` becomes `Offer`, `Not Selected` becomes `Rejected`, `No Response`, `Withdrawn` and `Archived` become `Discarded`). A row with an empty stage is read as `Applied`.
+
+| Outcome | Meaning |
+|---------|---------|
+| to import | a new application, added with the `N/A` score, `—` report and `❌` PDF that a hand-added row carries |
+| already in the tracker | same posting URL as a row, or the same company and role when either side has no URL. The tracked row is never changed. Use `set-status.mjs` to move it |
+| repeated in this file | the same posting appears on an earlier row |
+| not applied yet | `Bookmarked`, `Wishlist`, `Saved`, `Applying` and similar. In career-ops these postings go in the pipeline, where they get evaluated |
+| unknown stage | a stage neither table knows. Rename it in the file to a tracker state and run again |
+| missing company or role | the row is left out |
+
+Dates are read as `YYYY-MM-DD` (a time part is dropped), `Jul 3, 2026`, `3 Jul 2026`, or a slash date. Slash dates are read month first unless a date in the file has a first part above 12, which proves day first; `--day-first` forces it. A file that proves both orders is refused. A row with no readable date gets today's date and `no date in source` in Notes. Notes also carry `imported from <file>` and the source stage when it differs from the tracker state.
+
+`--confirm` reserves numbers with `reserve-report-num.mjs`, writes one headed tracker-addition TSV per row, runs `merge-tracker.mjs` and releases the numbers. A missing tracker is created first, with a `URL` column when the file has posting links. On a tracker with no `URL` column the links are not kept; the preview says so, and `node merge-tracker.mjs --backfill-urls` adds the column. Re-running the same file adds nothing.
+
+```bash
+node import-tracker.mjs teal-export.csv              # preview
+node import-tracker.mjs teal-export.csv --confirm    # add the rows
+node import-tracker.mjs sheet.csv --day-first        # 03/04/2026 is 3 April
+```
+
+Paths follow `CAREER_OPS_ROOT` / `CAREER_OPS_DATA_DIR` / `CAREER_OPS_TRACKER`.
+
+**Exit codes:** `0` on a preview or a completed import, `1` for a usage error, an unreadable file, a file with no company or role column, or a date column that mixes both orders. Under `--confirm` the exit code is `merge-tracker.mjs`'s.
 
 ---
 
