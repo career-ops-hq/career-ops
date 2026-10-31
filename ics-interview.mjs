@@ -26,8 +26,9 @@
  *   - `;TZID=Area/City`          wall time in that zone, converted to an instant
  *   - no zone and no `Z`         floating: a wall time with NO zone; not converted
  *   - `;VALUE=DATE`              all-day: reported as a date, never as a time
- *   - a TZID that is not an IANA zone (e.g. a Windows zone name) is reported as
- *     `unknown-tzid` and not converted
+ *   - a TZID that is not an IANA zone (e.g. Outlook's "Eastern Standard Time")
+ *     is converted with the file's own VTIMEZONE block; without a readable
+ *     one it is reported as `unknown-tzid` and not converted
  *   - RRULE is ignored (only the first occurrence is read; a warning says so)
  *
  * Display zone: --tz, else config/profile.yml `location.timezone` (when it is
@@ -168,8 +169,110 @@ export function firstEvent(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Time zones (Intl only)
+// Time zones (Intl, else the file's own VTIMEZONE)
 // ---------------------------------------------------------------------------
+
+const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+function parseUtcOffset(value) {
+  const m = /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(String(value ?? '').trim());
+  if (!m) return null;
+  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
+}
+
+/**
+ * One STANDARD or DAYLIGHT block. Only the yearly BYMONTH + BYDAY rule that
+ * Outlook, Exchange and most generators write is read; anything else is null.
+ */
+function parseObservance(props) {
+  const get = (name) => props.find((p) => p.name === name)?.value;
+  const start = parseIcsDate(get('DTSTART'));
+  const from = parseUtcOffset(get('TZOFFSETFROM'));
+  const to = parseUtcOffset(get('TZOFFSETTO'));
+  if (!start || start.kind !== 'floating' || from === null || to === null) return null;
+  const rrule = get('RRULE');
+  if (!rrule) return { start, from, to, rule: null };
+  const parts = Object.fromEntries(rrule.split(';').map((kv) => kv.split('=').map((x) => x.trim().toUpperCase())));
+  const allowed = new Set(['FREQ', 'INTERVAL', 'BYMONTH', 'BYDAY', 'UNTIL', 'WKST']);
+  if (parts.FREQ !== 'YEARLY' || (parts.INTERVAL ?? '1') !== '1' || Object.keys(parts).some((k) => !allowed.has(k))) return null;
+  const day = /^([+-]?[1-5])(SU|MO|TU|WE|TH|FR|SA)$/.exec(parts.BYDAY ?? '');
+  const month = Number(parts.BYMONTH);
+  if (!day || !Number.isInteger(month) || month < 1 || month > 12) return null;
+  const until = parts.UNTIL ? parseIcsDate(parts.UNTIL) : null;
+  if (parts.UNTIL && !until) return null;
+  return { start, from, to, rule: { month, nth: Number(day[1]), weekday: WEEKDAYS.indexOf(day[2]), until } };
+}
+
+/** Every VTIMEZONE in the body, keyed by TZID. A zone with any unreadable block is left out. */
+export function parseVtimezones(text) {
+  const zones = new Map();
+  let tzid = null;
+  let blocks = null;
+  let block = null;
+  for (const line of unfoldLines(text)) {
+    const p = parseContentLine(line);
+    if (!p) continue;
+    const value = p.value.trim().toUpperCase();
+    if (p.name === 'BEGIN' && value === 'VTIMEZONE') { tzid = null; blocks = []; continue; }
+    if (!blocks) continue;
+    if (p.name === 'BEGIN' && (value === 'STANDARD' || value === 'DAYLIGHT')) { block = []; continue; }
+    if (p.name === 'END' && block && (value === 'STANDARD' || value === 'DAYLIGHT')) { blocks.push(parseObservance(block)); block = null; continue; }
+    if (p.name === 'END' && value === 'VTIMEZONE') {
+      if (tzid && blocks.length > 0 && blocks.every(Boolean)) zones.set(tzid, blocks);
+      blocks = null;
+      continue;
+    }
+    if (block) block.push(p);
+    else if (p.name === 'TZID') tzid = p.value.trim();
+  }
+  return zones;
+}
+
+/** Wall-clock ms (the wall time read as if it were UTC) when an observance starts in `year`, or null. */
+function onsetIn(obs, year) {
+  const { start, rule } = obs;
+  const at = (y, mo, d) => Date.UTC(y, mo - 1, d, start.h, start.mi, start.s);
+  const first = at(start.y, start.mo, start.d);
+  if (!rule) return first;
+  let day;
+  if (rule.nth > 0) {
+    const firstWeekday = new Date(Date.UTC(year, rule.month - 1, 1)).getUTCDay();
+    day = 1 + ((rule.weekday - firstWeekday + 7) % 7) + (rule.nth - 1) * 7;
+  } else {
+    const last = new Date(Date.UTC(year, rule.month, 0)).getUTCDate();
+    const lastWeekday = new Date(Date.UTC(year, rule.month - 1, last)).getUTCDay();
+    day = last - ((lastWeekday - rule.weekday + 7) % 7) + (rule.nth + 1) * 7;
+  }
+  if (day < 1 || day > new Date(Date.UTC(year, rule.month, 0)).getUTCDate()) return null;
+  const onset = at(year, rule.month, day);
+  if (onset < first) return null;
+  if (rule.until) {
+    const u = rule.until;
+    const untilMs = Date.UTC(u.y, u.mo - 1, u.d, u.h, u.mi, u.s) + (u.kind === 'utc' ? obs.from * 60000 : 0);
+    if (onset > untilMs) return null;
+  }
+  return onset;
+}
+
+/**
+ * Wall-clock time -> epoch ms through a VTIMEZONE, with the same overlap and
+ * gap rules as wallToInstant. Null when no observance covers the time.
+ */
+export function vtimezoneToInstant(d, observances) {
+  const wallMs = Date.UTC(d.y, d.mo - 1, d.d, d.h, d.mi, d.s);
+  let best = null;
+  for (const obs of observances) {
+    for (const year of [d.y - 1, d.y]) {
+      const onset = onsetIn(obs, year);
+      if (onset !== null && onset <= wallMs && (!best || onset > best.onset)) best = { onset, obs };
+    }
+  }
+  if (!best) return null;
+  const { onset, obs } = best;
+  // Inside a spring-forward gap the pre-gap offset applies (RFC 5545 3.3.5).
+  const offset = wallMs < onset + (obs.to - obs.from) * 60000 ? obs.from : obs.to;
+  return wallMs - offset * 60000;
+}
 
 export function isValidZone(zone) {
   if (typeof zone !== 'string' || !zone.trim()) return false;
@@ -227,14 +330,18 @@ const wallString = (d) => `${d.y}-${pad(d.mo)}-${pad(d.d)}T${pad(d.h)}:${pad(d.m
  * Describe one parsed DTSTART/DTEND: the time as stated, plus its instant when
  * one can be established without assuming anything.
  */
-function describeTime(t, warnings, label) {
+function describeTime(t, warnings, label, vtimezones = new Map()) {
   if (!t) return null;
   const out = { raw: t.raw, kind: t.kind, tzid: t.tzid, local: t.kind === 'date' ? `${t.y}-${pad(t.mo)}-${pad(t.d)}` : wallString(t), utc: null, epochMs: null };
   if (t.kind === 'utc') {
     out.epochMs = Date.UTC(t.y, t.mo - 1, t.d, t.h, t.mi, t.s);
   } else if (t.kind === 'zoned') {
+    const viaVtimezone = isValidZone(t.tzid) ? null : vtimezones.get(t.tzid);
+    const fromVtimezone = viaVtimezone ? vtimezoneToInstant(t, viaVtimezone) : null;
     if (isValidZone(t.tzid)) {
       out.epochMs = wallToInstant(t, t.tzid);
+    } else if (fromVtimezone !== null) {
+      out.epochMs = fromVtimezone;
     } else {
       out.kind = 'unknown-tzid';
       warnings.push({ code: 'unknown-tzid', message: `${label} TZID "${t.tzid}" is not an IANA time zone this tool can read; the time is shown as written and not converted.` });
@@ -288,13 +395,14 @@ export function parseIcs(text, { displayZone } = {}) {
 
   if (get('RRULE')) warnings.push({ code: 'rrule-ignored', message: 'RRULE present and ignored; only the first occurrence is read.' });
 
+  const vtimezones = parseVtimezones(text);
   const dtstartProp = get('DTSTART');
-  const start = describeTime(dtstartProp ? parseIcsDate(dtstartProp.value, dtstartProp.params) : null, warnings, 'DTSTART');
+  const start = describeTime(dtstartProp ? parseIcsDate(dtstartProp.value, dtstartProp.params) : null, warnings, 'DTSTART', vtimezones);
   if (!start) warnings.push({ code: 'no-start', message: dtstartProp ? `DTSTART "${dtstartProp.value}" is not readable.` : 'No DTSTART.' });
 
   const dtendProp = get('DTEND');
   const durProp = get('DURATION');
-  let end = describeTime(dtendProp ? parseIcsDate(dtendProp.value, dtendProp.params) : null, warnings, 'DTEND');
+  let end = describeTime(dtendProp ? parseIcsDate(dtendProp.value, dtendProp.params) : null, warnings, 'DTEND', vtimezones);
   if (dtendProp && !end) warnings.push({ code: 'bad-end', message: `DTEND "${dtendProp.value}" is not readable.` });
 
   let durationMinutes = null;
