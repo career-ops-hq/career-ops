@@ -269,6 +269,20 @@
 #   min: 100000
 #   max: 0
 #   currency: "USD"
+#
+# Searching across markets? A single min + currency cannot do it: currency
+# "USD" rejects every job quoted in another currency, and leaving currency
+# empty compares a EUR figure against a USD floor. Use min_by_currency instead,
+# one annual floor per currency:
+#   - a job is compared only against the floor for its own currency
+#   - a job in a currency you did not list passes
+#   - a job with no salary data passes
+#   - when min_by_currency is set, min/max/currency are not used
+# salary_filter:
+#   min_by_currency:
+#     USD: 100000
+#     EUR: 80000
+#     GBP: 70000
 
 # Read-only portal housekeeping: `node stats.mjs --prune --summary`.
 # Uses exact-lowercase company names, scan history and recent health evidence.

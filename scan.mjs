@@ -1055,10 +1055,41 @@ export function buildVisaFilter(visaFilter) {
 //   - If no salary data exists on a job, it passes (conservative behavior)
 //   - If both currencies are known and mismatch (e.g., USD filter, EUR job), it fails
 //   - Partial ranges (min only or max only) work correctly via overlap logic
+//   - min_by_currency (map of currency -> annual floor) replaces min/max/currency
+//     when present: a job is compared only against the floor for its own
+//     currency, and a job with no salary or an unlisted currency passes
 // Uses null-safe checks (!= null, ??) to preserve 0 values correctly.
 
 export function buildSalaryFilter(salaryFilter) {
   if (!salaryFilter) return () => true;
+
+  // `min_by_currency`: one floor per currency, for searches across markets.
+  // The flat `min`/`currency` pair cannot express that. With `currency` set,
+  // every job quoted in another currency is rejected by the mismatch rule; with
+  // it empty, a figure in one currency is compared numerically against a floor
+  // in another. Either way those roles drop out of the scan silently.
+  // Here a job in a currency with no listed floor passes, the same conservative
+  // default as a job with no salary data.
+  if (salaryFilter.min_by_currency && typeof salaryFilter.min_by_currency === 'object') {
+    const floors = new Map();
+    for (const [cur, val] of Object.entries(salaryFilter.min_by_currency)) {
+      const n = Number(val);
+      if (!Number.isFinite(n) || n < 0) {
+        console.error(`Warning: salary_filter.min_by_currency.${cur} must be a non-negative number, entry ignored`);
+        continue;
+      }
+      floors.set(String(cur).trim().toUpperCase(), n);
+    }
+    if (floors.size === 0) return () => true;
+    return (salary) => {
+      if (!salary) return true;
+      const jobMax = salary.max ?? salary.min ?? null;
+      if (jobMax == null) return true;
+      const cur = (salary.currency || '').trim().toUpperCase();
+      if (!cur || !floors.has(cur)) return true;
+      return jobMax >= floors.get(cur);
+    };
+  }
 
   // Coerce and validate bounds — malformed YAML must not silently mis-filter
   const min = Number(salaryFilter.min ?? 0);
