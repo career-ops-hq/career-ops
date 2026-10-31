@@ -7,7 +7,7 @@ that turns a pile of freshly-scanned URLs into a short "worth a look" list —
 *before* you spend any tokens evaluating them — and an unattended **follow-up
 sweep** that drafts (never sends) chase-up emails for aging applications.
 
-Three independent pieces, smallest first. You can use any of them on their own.
+Four independent pieces, smallest first. You can use any of them on their own.
 
 - **[1. Schedule the scan](#1-schedule-the-scan)** — run `node scan.mjs` on cron /
   launchd / Windows Task Scheduler. Zero tokens: the scanner only reads public
@@ -21,6 +21,9 @@ Three independent pieces, smallest first. You can use any of them on their own.
   `scripts/followup-sweep.sh`, that drafts follow-ups for overdue applications
   to a file for you to review. Costs tokens (it's LLM-driven, not a script),
   but never sends anything on its own.
+- **[4. Run the full ATS sweep on a laptop](#4-run-the-full-ats-sweep-on-a-laptop)**
+  — the long `scan-ats-full.mjs` sweep with `--resume` and a keep-awake wrapper, so
+  a sleep mid-run does not restart it from board 0.
 
 > Everything here is **local-first**: your CV, profile, and pipeline stay on your
 > machine — none of your data is uploaded. The scan does reach out to *public*
@@ -340,6 +343,62 @@ score among your historical positive outcomes. Add a rule to your own
 
 This keeps low-probability matches out of your active pipeline without
 silently discarding the evaluation itself.
+
+---
+
+## 4. Run the full ATS sweep on a laptop
+
+`node scan-ats-full.mjs` (the reverse ATS sweep, `npm run scan:full`) reads
+every board in the ATS directories, so a full run takes tens of minutes. That is
+long enough for a laptop to sleep underneath it, and a scheduler that starts it
+at a fixed time can catch the machine in a short wake that ends mid-run.
+
+The sweep saves a checkpoint to `data/cache/ats-full-checkpoint.json` every 500
+boards and deletes it when the sweep finishes. `--resume` continues from that
+file. A plain rerun does not: it starts at board 0 and overwrites the checkpoint.
+So a scheduled retry needs to pass `--resume` when a checkpoint exists, and the
+machine needs to stay awake long enough to reach the next one.
+
+`--resume` exits 1 straight away when it cannot continue: there is no
+checkpoint, or the checkpoint was written with different flags (`--ats`,
+`--limit`, `--include-undated`) or before a `portals.yml` filter changed. The
+retry has to handle that case by starting a fresh sweep. Pass `--resume` the same
+flags as the original run, or it will refuse for the second reason.
+
+A wrapper to point cron or launchd at (save it as
+`scripts/scan-ats-full-resume.sh` in your own checkout, or anywhere you like):
+
+```bash
+#!/bin/sh
+cd /path/to/career-ops || exit 1
+SWEEP="node scan-ats-full.mjs --since 3"   # your usual flags, identical every run
+
+# Keep the machine awake while the sweep runs.
+case "$(uname)" in
+  Darwin) AWAKE="caffeinate -i" ;;
+  *)      AWAKE="systemd-inhibit --what=sleep --why=career-ops-ats-sweep" ;;
+esac
+
+if [ -f data/cache/ats-full-checkpoint.json ]; then
+  $AWAKE $SWEEP --resume
+  rc=$?
+  # Exit 1 means --resume refused at startup (settings or filters changed), so
+  # run a fresh sweep. Any other code, including a signal from a sleep or a
+  # kill (above 128), keeps the checkpoint for the next attempt.
+  [ "$rc" -eq 1 ] && exec $AWAKE $SWEEP
+  exit "$rc"
+fi
+exec $AWAKE $SWEEP
+```
+
+`caffeinate -i` stops idle sleep on macOS while the command runs, and
+`systemd-inhibit --what=sleep` does the same on Linux. Neither stops a closed lid
+from sleeping a laptop on battery, so leave the lid open or run this on power.
+
+Two limits to know about. The checkpoint is written every 500 boards, so a kill
+costs up to 499 boards of progress, not the whole run. And exit 1 also covers an
+unexpected fatal error, in which case the fallback starts a fresh sweep, which is
+the right retry for that too.
 
 ---
 
