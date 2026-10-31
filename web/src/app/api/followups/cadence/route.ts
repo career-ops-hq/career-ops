@@ -7,7 +7,7 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
-import { patchProfileText } from "@/lib/profile-yaml-edit.mjs";
+import { firstProfileText, patchProfileText } from "@/lib/profile-yaml-edit.mjs";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 import { readJsonObject } from "@/lib/json-body";
 import { followupsEnabledFromProfile } from "@/lib/followups-setting.mjs";
@@ -130,7 +130,7 @@ export async function POST(req: Request) {
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a cadence-only profile.
     try {
-      source = fs.readFileSync(path.join(resolveCodeRoot(process.cwd(), process.env), "config", "profile.example.yml"), "utf8");
+      source = firstProfileText(fs.readFileSync(path.join(resolveCodeRoot(process.cwd(), process.env), "config", "profile.example.yml"), "utf8"));
       const seeded = yaml.load(source);
       base = isObj(seeded) ? seeded : {};
     } catch {

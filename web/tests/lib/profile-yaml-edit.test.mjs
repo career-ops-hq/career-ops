@@ -123,13 +123,18 @@ test("a non-default child indent is followed", () => {
   assert.equal(edit(source, { followup_cadence: { applied_max_followups: 1 } }), "followup_cadence:\n    applied_first_days: 7\n    applied_max_followups: 1\n");
 });
 
+test("a list of mappings is replaced whole, nested keys included", () => {
+  const source = "target_roles:\n  primary:\n    - name: a\n      level: b\n    - name: c\n      level: d\n  other: e\n";
+  assert.equal(edit(source, { target_roles: { primary: ["f"] } }), "target_roles:\n  primary:\n    - \"f\"\n  other: e\n");
+  assert.equal(edit(source, { target_roles: { primary: [] } }), "target_roles:\n  primary: []\n  other: e\n");
+});
+
 test("shapes the line edit does not place return null, so the route falls back to yaml.dump", () => {
   for (const [shape, source, patch] of [
     ["flow section", "candidate: { full_name: A }\n", { candidate: { full_name: "B" } }],
     ["scalar section", "follow_ups: off\n", { follow_ups: { enabled: true } }],
     ["block scalar value", "candidate:\n  full_name: |\n    A\n", { candidate: { full_name: "B" } }],
     ["mapping value", "candidate:\n  location:\n    city: A\n", { candidate: { location: "B" } }],
-    ["multi-line list items", "target_roles:\n  primary:\n    - name: a\n      level: b\n", { target_roles: { primary: ["c"] } }],
     ["document end marker", "candidate:\n  full_name: A\n...\n", { follow_ups: { enabled: true } }],
   ]) {
     const expected = merged(source, patch);
