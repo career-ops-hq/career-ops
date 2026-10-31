@@ -690,19 +690,20 @@ export async function loadDotenvOnce(root = null) {
  *
  * @param {string} kind
  * @param {*} payload   For provider this is unused; for ingest none; search a query; export a snapshot; notify a payload.
- * @param {{ root: string, dataRoot?: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string }} opts
+ * @param {{ root: string, dataRoot?: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string, admitJobs?: (jobs: object[]) => object[] }} opts
  * @returns {Promise<Array<{ id: string, ok: boolean, result?: any, error?: string }>>}
  */
-export async function runHook(kind, payload, { root, dataRoot = root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null }) {
+export async function runHook(kind, payload, { root, dataRoot = root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null, admitJobs = null }) {
   await loadDotenvOnce(dataRoot);
   const loaded = await loadPlugins(kind, { root, dataRoot, dryRun, pluginId });
   const results = [];
   for (const { id, hook, ctx } of loaded) {
+    const hookCtx = admitJobs ? { ...ctx, admitJobs } : ctx;
     const invoke = kind === 'search'
-      ? Promise.resolve().then(() => hook(payload, ctx))
+      ? Promise.resolve().then(() => hook(payload, hookCtx))
       : kind === 'export' || kind === 'notify'
-        ? Promise.resolve().then(() => hook(payload, ctx))
-        : Promise.resolve().then(() => hook(ctx)); // ingest
+        ? Promise.resolve().then(() => hook(payload, hookCtx))
+        : Promise.resolve().then(() => hook(hookCtx)); // ingest
     let timer;
     const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs); });
     try {
