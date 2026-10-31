@@ -5,7 +5,7 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
-import { getProfilePath } from "@/lib/core/profile-path.mjs";
+import { getProfilePath, coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
 import { patchProfileText } from "@/lib/profile-yaml-edit.mjs";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
@@ -47,7 +47,7 @@ async function readCoreDefaults(): Promise<Partial<Record<ProfileCadenceKey, num
   const stdout = await new Promise<string>((resolve) => {
     // process.execPath + windowsHide: see api/doctor/route.ts — a stale inherited
     // console kills every child with 0xC0000142 on Windows; never inherit one.
-    execFile(process.execPath, [script, "--json"], { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 12_000, windowsHide: true }, (_e, out) =>
+    execFile(process.execPath, [script, "--json"], { cwd: resolveCodeRoot(process.cwd(), process.env), env: coreProfileEnv(careerOpsRoot()), timeout: 12_000, windowsHide: true }, (_e, out) =>
       resolve(out || ""),
     );
   });

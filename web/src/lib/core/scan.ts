@@ -6,7 +6,7 @@ import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { writeTempPortals, cleanupTempPortals } from "./portals";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
-import { getProfilePath } from "@/lib/core/profile-path.mjs";
+import { getProfilePath, coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { titleFit } from "@/lib/title-fit.mjs";
 import { resolveScanTimeoutMs, scanTimeoutMessage } from "./scan-timeout.mjs";
 import { ATS_LABEL, ATS_SOURCES, type AtsSource, type DiscoveredOffer, type ExploreFilters, type FitBand, type ScanEvent } from "@/lib/explore";
@@ -205,7 +205,7 @@ function runScanner(
 
     const child = spawn(process.execPath, args, {
       cwd: resolveCodeRoot(process.cwd(), process.env),
-      env: { ...process.env, CAREER_OPS_PORTALS: tempPortals },
+      env: { ...coreProfileEnv(careerOpsRoot()), CAREER_OPS_PORTALS: tempPortals },
       // windowsHide: see api/doctor/route.ts — a stale inherited console kills
       // every child with 0xC0000142 on Windows; never inherit one.
       windowsHide: true,
