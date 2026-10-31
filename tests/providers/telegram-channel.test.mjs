@@ -422,6 +422,11 @@ try {
   const agencyJob = postToJob(parseChannelPage(page(post(12460, '2026-09-04T10:00:00+00:00', `💻 Top Selection ищет Angular-разработчика<br/>Удалённо · зарплата не указана<br/>Подбор ведёт агентство Top Selection, название компании-заказчика не раскрыто.<br/>${A(HABR, 'Откликнуться')}`)), 'devjobs').posts[0]);
   if (agencyJob === null) pass('a post saying the employer\'s name is withheld ("название компании-заказчика не раскрыто") is dropped, wherever the line sits');
   else fail(`agency post = ${JSON.stringify(agencyJob)}`);
+  for (const withheld of ['название компании заказчика не раскрыто', 'наименование компании не раскрывается']) {
+    const job = postToJob(parseChannelPage(page(post(12461, '2026-09-04T10:00:00+00:00', `💻 Top Selection ищет Angular-разработчика<br/>Подбор ведёт агентство Top Selection, ${withheld}.<br/>${A(HABR, 'Откликнуться')}`)), 'devjobs').posts[0]);
+    if (job === null) pass(`a post saying "${withheld}" is dropped too`);
+    else fail(`"${withheld}" post = ${JSON.stringify(job)}`);
+  }
   const salaryHidden = postToJob(parseChannelPage(page(post(12459, '2026-09-04T10:00:00+00:00', `💻 YADRO ищет C++ разработчика для серверных прошивок<br/>Нижний Новгород. Зарплата не раскрыта.<br/>${A(HABR, 'Откликнуться')}`)), 'devjobs').posts[0]);
   if (salaryHidden?.company === 'YADRO' && salaryHidden.url === HABR) pass('a post that withholds only the salary ("Зарплата не раскрыта") keeps its employer and Habr Career link');
   else fail(`salary-hidden post = ${JSON.stringify(salaryHidden)}`);

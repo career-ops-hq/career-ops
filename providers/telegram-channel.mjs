@@ -83,8 +83,11 @@ const ANONYMOUS_RE = /(?:название скрыто|компания скры
 // over the whole post: unlike "наш клиент", none of these phrases appears in
 // an employer's own description of itself. Each one names the employer as
 // what is withheld: "Зарплата не раскрыта" and "Оценка компании не
-// раскрывается" (both measured) withhold something else.
-const DISCLOSED_HIDDEN_RE = /(назван\p{L}*\s+(?:компании|работодателя|заказчика|клиента)(?:-заказчика)?\s+не\s+(?:раскры|называ)|компани[яию]-заказчик|неназванн\p{L}*\s+(?:\p{L}+\s+){0,2}(?:компани|организаци|фирм|финтех|клиент|заказчик|работодател))/iu;
+// раскрывается" (both measured) withhold something else. "компании
+// заказчика" with a space and "наименование" say the same; "не указано" is
+// left out: it is the salary's phrase, and "название заказчика проекта не
+// указано" (measured) follows an employer that is named.
+const DISCLOSED_HIDDEN_RE = /((?:назван|наименован)\p{L}*\s+(?:компании|работодателя|заказчика|клиента)(?:[-\s]+заказчика)?\s+не\s+(?:раскры|называ)|компани[яию]-заказчик|неназванн\p{L}*\s+(?:\p{L}+\s+){0,2}(?:компани|организаци|фирм|финтех|клиент|заказчик|работодател))/iu;
 const LOCATIONISH_RE = /\b(remote|удал[её]нк\w*|hybrid|onsite|office|офис|full[- ]?time|part[- ]?time|москва|спб|berlin|london|germany|europe|usa)\b/i;
 const DATE_LIKE_RE = /\b(19|20)\d{2}\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\b/i;
 const ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/g;
