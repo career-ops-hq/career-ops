@@ -127,6 +127,20 @@ export function computeProgressMetrics(applications = [], achievements) {
   };
 }
 
+/**
+ * Width of one funnel bar. The count is cumulative. The width is that count
+ * out of everything tracked. The conversion rate stays on the rates card.
+ * Printing the rate here made 15 roles read as 38% of the pipeline.
+ */
+export function funnelBarModel(stage, tracked) {
+  const count = Number(stage?.count) || 0;
+  const whole = Number(tracked) || 0;
+  return {
+    count,
+    widthPct: whole > 0 ? (count / whole) * 100 : 0,
+  };
+}
+
 /** Match main's URL-driven views; unknown/missing values keep Progress useful. */
 export function resolveAnalyticsView(raw) {
   const value = Array.isArray(raw) ? raw[0] : raw;
