@@ -192,6 +192,31 @@ try {
   eq('parseJobviteXml returns [] for an empty feed', parseJobviteXml('<result></result>', 'X').length, 0);
   eq('parseJobviteXml returns [] for non-string input', parseJobviteXml(null, 'X').length, 0);
 
+  // One posting is fanned out as several <job> rows that share a detail URL
+  // and differ only in <location>. A repeated city must collapse, feed order
+  // must survive, and a different URL must stay its own row.
+  {
+    const shared = 'https://app.jobvite.com/CompanyJobs/Job.aspx?c=aa11bb22&amp;j=cc33dd44';
+    const fanout = `<?xml version="1.0" encoding="UTF-8"?><result>
+<job><id>row1</id><title>Field Coordinator</title><location>Cedar Falls, IA</location><date>1/2/2026</date><detail-url>${shared}</detail-url></job>
+<job><id>row2</id><title>Field Coordinator</title><location>Bend, OR</location><detail-url><![CDATA[https://app.jobvite.com/CompanyJobs/Job.aspx?c=aa11bb22&j=cc33dd44]]></detail-url></job>
+<job><id>row3</id><title>Other Title Same Page</title><location>Cedar Falls, IA</location><detail-url>${shared}</detail-url></job>
+<job><id>row4</id><title>Depot Lead</title><location>Remote</location><detail-url><![CDATA[https://app.jobvite.com/CompanyJobs/Job.aspx?c=aa11bb22&j=ee55ff66]]></detail-url></job>
+</result>`;
+    const folded = parseJobviteXml(fanout, 'Pinetar Logistics');
+    eq('parseJobviteXml folds rows that share a detail URL', folded.length, 2);
+    eq('parseJobviteXml joins distinct locations in feed order',
+      folded[0].location, 'Cedar Falls, IA · Bend, OR');
+    eq('parseJobviteXml keeps the first title when sibling rows share a URL',
+      folded[0].title, 'Field Coordinator');
+    eq('parseJobviteXml keeps the first date when sibling rows share a URL',
+      typeof folded[0].postedAt === 'number' && new Date(folded[0].postedAt).getUTCFullYear() === 2026, true);
+    eq('parseJobviteXml leaves a different URL as its own posting',
+      folded[1].location, 'Remote');
+    eq('parseJobviteXml stamps the folded posting with the entry company',
+      folded[0].company, 'Pinetar Logistics');
+  }
+
   // ── host pinning ───────────────────────────────────────────────
   // A tenant whose configured api: host is foreign must not be fetched. The
   // eId resolver rejects it, so fetch falls through to slug discovery and — with
