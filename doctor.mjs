@@ -12,7 +12,7 @@ import { delimiter, join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
-import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
+import { discoverPlugins, pluginRoots, pluginStatus, resolveSuccessorIds } from './plugins/_engine.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy } from './path-resolver.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
@@ -1166,9 +1166,28 @@ function readPluginConfigSync(root) {
 
 // Plugin layer health: list discovered plugins + whether each enabled one's keys
 // are present. WARN-not-FAIL so a half-configured plugin never blocks setup.
+// plugins.mjs loads the data root .env before it checks plugin keys. Doctor
+// skips that load when --cli or CAREER_OPS_CLI picks the CLI, so the file is
+// read here without touching process.env.
+function pluginState(manifest, cfg) {
+  const s = pluginStatus(manifest, cfg);
+  let fileEnv = {};
+  try { fileEnv = dotenv.parse(readFileSync(join(projectRoot, '.env'))); } catch { /* no .env */ }
+  const missingEnv = s.missingEnv.filter((name) => !fileEnv[name]);
+  return { ...s, missingEnv, enabled: s.configured && missingEnv.length === 0 };
+}
+
+function activePlugins(root) {
+  return discoverPlugins(pluginRoots(root), resolveSuccessorIds(root));
+}
+
 function checkPlugins(root) {
   let manifests;
-  try { manifests = discoverPlugins(pluginRoots(root)); } catch { return { pass: true, label: 'Plugins: none' }; }
+  // Plugin files live in the code checkout. config/plugins.yml lives in the
+  // data root. Reading plugins from the data root reports "none installed"
+  // while `node plugins.mjs list` on the same install lists them. --target
+  // sets codeRoot to the directory it was given.
+  try { manifests = activePlugins(codeRoot); } catch { return { pass: true, label: 'Plugins: none' }; }
   if (manifests.length === 0) return { pass: true, label: 'Plugins: none installed' };
   const { cfg, error: cfgError } = readPluginConfigSync(root);
   // Reported before the per-plugin lines, because when the config did not parse
@@ -1184,7 +1203,7 @@ function checkPlugins(root) {
   const lines = [];
   const fixes = [];
   for (const m of manifests) {
-    const s = pluginStatus(m, cfg);
+    const s = pluginState(m, cfg);
     lines.push(`${m.id} (${s.enabled ? 'enabled' : s.configured ? `missing ${s.missingEnv.join(', ')}` : 'off'})`);
     if (s.configured && s.missingEnv.length) fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
   }
@@ -1617,8 +1636,8 @@ function onboardingState(root) {
     // Travels in the JSON so a consumer can tell "nothing enabled" from "the
     // config did not parse" — the two used to be the same empty list.
     pluginConfigError = error;
-    plugins = discoverPlugins(pluginRoots(root)).map((m) => {
-      const s = pluginStatus(m, cfg);
+    plugins = activePlugins(codeRoot).map((m) => {
+      const s = pluginState(m, cfg);
       return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };
     });
   } catch { plugins = []; }
