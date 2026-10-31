@@ -53,7 +53,7 @@ test('a checkout with every setup file still reads as ready', () => {
   try {
     const { status, out } = runDoctor(dir);
     assert.equal(status, 0, out);
-    assert.match(out, /You're ready to go! Open your AI CLI in this folder \(claude, codex, gemini, opencode, qwen, agy or grok\)/);
+    assert.match(out, /You're ready to go! Open your AI CLI in this folder \(claude, codex, opencode, qwen, agy or grok\)/);
     assert.doesNotMatch(out, /setup is not finished/i);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -85,7 +85,7 @@ test('a failing check still reports the missing setup files', () => {
     assert.match(out, /✗ data\/pipeline\.md could not be created/);
     assert.match(out, /Result: 1 issue found\./);
     assert.match(out, /Setup is not finished \(4 files missing: cv\.md, config\/profile\.yml, modes\/_profile\.md, portals\.yml\)\./);
-    assert.match(out, /Open your AI CLI in this folder \(claude, codex, gemini, opencode, qwen, agy or grok\) and it walks you through setup by chatting\./);
+    assert.match(out, /Open your AI CLI in this folder \(claude, codex, opencode, qwen, agy or grok\) and it walks you through setup by chatting\./);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

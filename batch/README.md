@@ -1,6 +1,6 @@
 # Batch Processing
 
-Process multiple job offers via headless workers. Each worker runs the full evaluation pipeline (A-F report + PDF + tracker line) autonomously. Workers are `claude -p` by default; `--cli NAME` selects `opencode`, `gemini`, `qwen` or `grok` instead (`--model NAME` picks that CLI's model). Only `claude` workers run in parallel; the other CLIs run one offer at a time. The **Headless / Batch Mode** table in `AGENTS.md` is not the runner's `--cli` list: it includes CLIs the runner does not launch, and it has no Gemini row because Gemini CLI is now a legacy wrapper (see `docs/SUPPORTED_CLIS.md`).
+Process multiple job offers via headless workers. By default (`--mode full`) each worker runs the full evaluation pipeline (A-G report + PDF + tracker line) autonomously. With `--mode match` it runs a single-pass CV match instead: a condensed report and a tracker line, no PDF (the tracker PDF column gets ❌). Workers are `claude -p` by default; `--cli NAME` selects `opencode`, `gemini`, `qwen` or `grok` instead (`--model NAME` picks that CLI's model). Only `claude` workers run in parallel; the other CLIs run one offer at a time. The **Headless / Batch Mode** table in `AGENTS.md` is not the runner's `--cli` list: it includes CLIs the runner does not launch, and it has no Gemini row because Gemini CLI is now a legacy wrapper (see `docs/SUPPORTED_CLIS.md`).
 
 ## Quick Start
 
@@ -43,6 +43,8 @@ Process multiple job offers via headless workers. Each worker runs the full eval
 | `--skip-pdf` | off | Skip PDF generation; the tracker PDF column gets ❌ |
 | `--max-retries N` | `2` | Max retry attempts per offer before giving up |
 | `--worker-timeout N` | `1800` | Stop a worker that runs longer than N seconds and mark the offer failed (0 = no limit) |
+| `--mode NAME` | `full` | Evaluation mode: `full` (A-G report + PDF + tracker line) or `match` (condensed single-pass CV match: report + tracker line, no PDF; implies `--skip-pdf`) |
+| `--single-pass` | off | Alias for `--mode match` |
 | `--thin-action MODE` | `webfetch` | What to do when no usable JD text could be fetched (JS-rendered page, empty shell). `webfetch`: the worker tries WebFetch. `skip`: record the offer as skipped (`needs-playwright`), spawn no worker. `browser-extract`: render the page with `browser-extract.mjs` (headless Chromium, no model tokens) and give the text to the worker. Retryable outcomes are recorded as `failed` and picked up again by `--retry-failed` (each spends one of `--max-retries`): no HTTP response from the fetch (DNS, refused, timeout, TLS), and for `browser-extract` a missing Playwright, `empty_text` or `navigation_error`. Anything else is terminal `skipped` |
 | `--rate-limit-sleep N` | `300` | Maximum adaptive retry delay in seconds (0–2147483647); use `0` to pause the batch immediately |
 
@@ -86,7 +88,8 @@ the `rate_limited` state note; the TSV schema is unchanged.
 ```
 batch/
   batch-runner.sh          # Orchestrator script
-  batch-prompt.md          # Prompt template sent to each worker
+  batch-prompt.md          # Full multi-step prompt template for workers
+  batch-prompt-match.md    # Condensed single-pass match prompt template
   batch-input.tsv          # Input offers (you create this)
   batch-state.tsv          # Processing state (auto-managed, resumable)
   logs/                    # Per-offer worker logs ({report_num}-{id}.log)
@@ -98,7 +101,7 @@ batch/
 
 1. **batch-runner.sh** reads `batch-input.tsv` and `batch-state.tsv` to determine which offers need processing.
 2. For each pending offer, it assigns a report number and launches a headless worker with `batch-prompt.md` as the system prompt. Placeholders like `{{URL}}`, `{{REPORT_NUM}}` resolve to stable labels (e.g. `<URL from the job message>`), not the concrete value, so the resolved system prompt is byte-identical across offers and prompt caching can reuse it. The actual URL, JD file, report number, date and batch ID are passed separately in the per-job message the worker also receives.
-3. Each worker evaluates the offer, writes a report to `reports/`, generates a PDF to `output/`, and writes a tracker TSV to `tracker-additions/`.
+3. Each worker evaluates the offer, writes a report to `reports/`, generates a PDF to `output/` (full mode only; `--mode match` writes no PDF), and writes a tracker TSV to `tracker-additions/`. The run shares one Chromium, started on the first PDF and stopped when the run ends.
    A worker whose posting breaks one of your hard rules (a dealbreaker or `compensation.minimum`, stated in the JD) stops before evaluating. It writes only a SKIP tracker row that quotes the rule and the JD line. The runner records it as `skipped`, merges the row, moves the posting out of the pipeline inbox, and lists it under "Dealbreaker skips" in the batch summary. To evaluate one anyway, run it in a session and say "evaluate anyway".
 4. After all workers finish, batch-runner calls `merge-tracker.mjs` to merge TSVs into `data/applications.md`, `reconcile-pipeline.mjs` to move processed offers out of the `data/pipeline.md` inbox, and `verify-pipeline.mjs` to check integrity.
 

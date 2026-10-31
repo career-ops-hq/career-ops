@@ -60,6 +60,7 @@ Dopasowuje twoje CV i pisze szkice twoich&nbsp;odpowiedzi. <strong>Ty&nbsp;klika
 </p>
 
 <p align="center"><a href="#twoja-kolej">Wypróbuj na jednej&nbsp;ofercie&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Przeczytaj całą&nbsp;historię&nbsp;→</a></p>
+<p align="center"><sub>Wolisz nie używać terminala? <a href="https://career-ops.org/waitlist?ref=readme-pl">Zapisz się na listę oczekujących na wersję webową&nbsp;→</a></sub></p>
 
 <br>
 

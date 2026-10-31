@@ -26,6 +26,12 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
       <PipelineProvider>
       <ApplyProvider>
       <ExploreProvider>
+      <a
+        href="#main-content"
+        className="sr-only rounded-md bg-brand text-sm font-medium text-brand-foreground focus:not-sr-only focus:fixed focus:px-3 focus:py-2 focus:left-3 focus:top-3 focus:z-[100] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50"
+      >
+        Skip to content
+      </a>
       <MobileNav followupsEnabled={followupsEnabled} />
       <div className="flex min-h-screen">
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
@@ -77,7 +83,7 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
             </div>
           </div>
         </aside>
-        <main className="flex-1 overflow-x-hidden">{children}</main>
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden focus:outline-none">{children}</main>
         <AssistantConsole />
         <BackToTop />
         <FirstScoreView />

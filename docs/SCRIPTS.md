@@ -44,7 +44,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run find` | `find.mjs` | Resolve a report#/tracker#/company query to its full pipeline identity |
 | `npm run ics-interview -- invite.ics` | `ics-interview.mjs` | Read an interview invite's `.ics` (first VEVENT: start/end/length, time zone, link, organizer) and print a row to paste into `data/active-interviews.md` (read-only) |
 | `npm run panelist-roles -- invite.txt` | `panelist-roles.mjs` | Classify the panelists named in an interview invite (pasted text or `.ics`) by title into recruiter / hiring manager / privacy-compliance / technical / peer / executive, with a one-line prep focus per role (offline, read-only) |
-| `npm run invite-match` | `invite-match.mjs` | Fuzzy-match a pasted interview-invite email against `data/applications.md` |
+| `npm run invite-match` | `invite-match.mjs` | Fuzzy-match a pasted interview-invite email against `data/applications.md`; invites also get a draft-only clarification email (`--no-clarification-draft` to omit) |
 | `npm run application:init` | `application-artifacts.mjs` | Initialize one versioned application-scoped JD/CV/PDF artifact bundle |
 | `npm run paste-reply` | `paste-reply.mjs` | Manual/no-Gmail input into the `reply-watch.mjs` classification pipeline |
 | `npm run closing-soon` | `closing-soon.mjs` | List tracker rows whose Notes (or matching `jds/` capture) carry a closing date within N days, plus separate `overdue` and `unparsed` groups (read-only) |
@@ -77,7 +77,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 
 ## doctor
 
-Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
+Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
 
 ```bash
 npm run doctor
@@ -512,7 +512,7 @@ Default silence window: `templates/benchmarks.yml` `days_first_response.range_da
 
 ## contacts
 
-Your job-search phonebook, exportable to your phone. Reads `data/contacts.tsv` (one contact per line — the schema is the vCard fields, nothing more) and emits vCard 3.0 (`VERSION:3.0` for iOS/Android import compatibility) with CRLF line endings, byte-safe 75-octet line folding, and a stable deterministic UID `careerops-{uidPart(name)}--{uidPart(company)}` (double-dash boundary between the two parts). Each `uidPart` is the lowercase slug of the raw value (non-alphanumeric runs collapsed to single dashes, ends trimmed) suffixed with an 8-hex sha1 of the *raw* value — e.g. `jane-doe-cac7bbb6`; when the slug is empty — a fully non-ASCII value such as a CJK name — the part is the bare 8-hex hash. Hashing the raw value (not the lossy slug) keeps distinct inputs that slug identically — e.g. `José` and `Josè` both slug to `jos` (the accented char drops out), and `Acme Inc` and `Acme, Inc.` both to `acme-inc` — from colliding into one UID. Re-importing updates existing entries instead of duplicating them on platforms that honor vCard UID (iOS fallback: assign imports to a group, delete the group to bulk-remove). `--caller-id` renders the display name as `Jane Doe (Acme recruiter)` so the lock screen tells you which recruiter is calling — useful when a phone number is known (often it isn't). Malformed rows are reported in a `quality` block, never dropped silently.
+Your job-search phonebook, exportable to your phone. Reads `data/contacts.tsv` (one contact per line — the schema is the vCard fields, nothing more) and emits vCard 3.0 (`VERSION:3.0` for iOS/Android import compatibility) with CRLF line endings, byte-safe 75-octet line folding, and a stable deterministic UID `careerops-{uidPart(name)}--{uidPart(company)}` (double-dash boundary between the two parts). Each `uidPart` starts from the value with letter case, whitespace and Unicode composition (NFC vs NFD) folded and accents kept; the part is that value's lowercase slug (non-alphanumeric runs collapsed to single dashes, ends trimmed) suffixed with an 8-hex sha1 of the same folded value — e.g. `jane-doe-bc225ac5`; when the slug is empty — a fully non-ASCII value such as a CJK name — the part is the bare 8-hex hash. Hashing the folded value (not the lossy slug) keeps distinct inputs that slug identically — e.g. `José` and `Josè` both slug to `jos` (the accented char drops out), and `Acme Inc` and `Acme, Inc.` both to `acme-inc` — from colliding into one UID. Re-importing updates existing entries instead of duplicating them on platforms that honor vCard UID (iOS fallback: assign imports to a group, delete the group to bulk-remove). Exports made before composition was folded into the slug gave an NFD spelling (an `e` plus a combining accent rather than `é`) a different UID, so the first re-import after updating can add a second card for that contact; remove or merge the old card by hand. `--caller-id` renders the display name as `Jane Doe (Acme recruiter)` so the lock screen tells you which recruiter is calling — useful when a phone number is known (often it isn't). Malformed rows are reported in a `quality` block, never dropped silently.
 
 ```bash
 node contacts.mjs                    # JSON (contacts + quality + total)
@@ -722,6 +722,20 @@ node rejection-latency.mjs --self-test
 ```
 
 **Exit codes:** `0` always (missing data files produce an explanatory empty result), `1` self-test failure.
+
+---
+
+## role-clarity
+
+Six-point role-clarity check on one posting's text (#6091). For each of: direct supervisor and department, scope of work, deliverables and their format, success measure in the first 3-6 months, teams or people the role coordinates with, and delivery cadence, it reports `present`, `partial` or `missing` with the quoted evidence (always an exact substring of the posting). A separate soft-verb signal lists wording such as "participate in", "support", "potential implementation" and "other duties as assigned"; three or more hits mark it `heavy`. When three or more points are `missing`, `askBeforeYouCommit` is true and `questions` lists one question per missing or partial point, which `modes/oferta.md` (Block G, Role-clarity check) turns into a recruiter question draft. Advisory only: it never changes the 1-5 score, never sends anything and never writes a file. The posting is treated as data and only pattern-matched. English keyword matching only; locale mode sets can pass `extraSoftVerbs` to `analyzeRoleClarity()` to extend the soft-verb list.
+
+```bash
+node role-clarity.mjs jds/{slug}.md             # JSON
+node role-clarity.mjs jds/{slug}.md --summary   # human-readable
+node role-clarity.mjs --self-test
+```
+
+**Exit codes:** `0` on success (an empty posting returns `emptyInput: true`), `1` for a missing file, an unrecognized flag, or a self-test failure.
 
 ---
 
@@ -1146,6 +1160,7 @@ node tracker.mjs query --company acme --json
 node tracker.mjs query --since 2026-09-01 --csv > output/tracker.csv  # open in a spreadsheet
 node tracker.mjs query --status Evaluated --min-score 4  # scored 4.0/5 or higher, not yet applied to
 node tracker.mjs history --id 42          # status transitions from status-log.tsv (Applied → Interview → ...)
+node tracker.mjs history 42               # same read as --id 42
 node tracker.mjs export                   # inverse: index → markdown table on stdout
 node tracker.mjs export --out repaired.md # write to a file (existing file backed up to .bak first)
 node tracker.mjs export --out repaired.md --force  # write even when columns would be dropped
@@ -1508,7 +1523,7 @@ npm run prepare:application -- --url https://boards.greenhouse.io/acme/jobs/123
 Cross-platform build wrapper for the Go TUI dashboard: picks the
 platform-correct output name (`career-dashboard.exe` on Windows, else
 `career-dashboard`), since a bare `go build -o` writes an extension-less
-binary on Windows. Requires Go 1.24+.
+binary on Windows. Requires Go 1.26+.
 
 ```bash
 npm run build:dashboard

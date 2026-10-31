@@ -16,7 +16,13 @@
  *                                                         use the tailored CV to
  *                                                         verify the sent document)
  *      node keyword-match.mjs <report-file> --json        (structured JSON)
+ *      node keyword-match.mjs --url <posting-url> [--cv path] [--json]
+ *      node keyword-match.mjs --jd-text <file> [--cv path] [--json]
  *      node keyword-match.mjs --self-test                 (built-in assertions)
+ *
+ * Exactly one JD source per run: a report path, --url, or --jd-text. URL fetch
+ * uses fetchJdViaKnownApi only (no browser). Thin / unreachable / zero-skill
+ * bodies refuse to score (stderr + exit 1, no coverage on stdout).
  */
 
 import { readFileSync, existsSync, statSync  } from 'fs';
@@ -474,6 +480,320 @@ export function formatCoverageMarkdown(result, sourceLabel, keywordNote) {
   return out.join('\n');
 }
 
+// Same caps as fetch-jd.mjs.
+const TEXT_CAP = 20_000;
+const TIMEOUT_MS = 15_000;
+
+const USAGE =
+  'Usage: node keyword-match.mjs <report-file> | --url <posting-url> | --jd-text <file> [--cv <path>] [--json]';
+
+const MIXED_SOURCES =
+  'use exactly one of <report>, --url, --jd-text';
+
+const REFUSE_BETTER_SOURCE =
+  'Provide a better link, or pass --jd-text <file> with the pasted description.';
+
+/**
+ * @typedef {{ kind: 'report', reportPath: string }
+ *   | { kind: 'url', url: string }
+ *   | { kind: 'jd-text', textPath: string }} MatchInput
+ */
+
+/**
+ * @typedef {'report' | 'archived-jd' | 'url' | 'jd-text'} KeywordSource
+ */
+
+/**
+ * @typedef {{ ok: true, text: string, title: string | null, ats: string | null }
+ *   | { ok: false, code: 'fetch-miss' | 'insufficient' | 'unavailable' | 'empty-input',
+ *       message: string, url?: string }} JdBody
+ */
+
+/**
+ * @typedef {{
+ *   input: MatchInput | null,
+ *   cvPath: string | null,
+ *   jsonMode: boolean,
+ *   selfTest: boolean,
+ * }} CliArgs
+ */
+
+/**
+ * @param {string} jdText
+ * @returns {string[]}
+ */
+export function keywordsFromJdText(jdText) {
+  return [...extractSkills(jdText)].sort();
+}
+
+/**
+ * @param {string} url
+ * @param {null | { text: string, title?: string, ats?: string }} fetchResult
+ * @param {{ code: string, error?: string } | null} [failure]
+ * @returns {JdBody}
+ */
+export function gateUrlJdResult(url, fetchResult, failure = null) {
+  if (!fetchResult) {
+    return {
+      ok: false,
+      code: 'fetch-miss',
+      url,
+      message:
+        'Could not read JD text from that link via a known ATS API. ' +
+        'Provide a direct posting URL that serves JD text, or pass --jd-text <file>.',
+    };
+  }
+  if (failure) {
+    if (failure.code === 'unavailable') {
+      return {
+        ok: false,
+        code: 'unavailable',
+        url,
+        message: `Posting looks unavailable (${failure.error}).`,
+      };
+    }
+    return {
+      ok: false,
+      code: 'insufficient',
+      url,
+      message: `JD text from ${url} is too thin to score (${failure.error}). ${REFUSE_BETTER_SOURCE}`,
+    };
+  }
+  return {
+    ok: true,
+    text: fetchResult.text,
+    title: fetchResult.title || null,
+    ats: fetchResult.ats || null,
+  };
+}
+
+/**
+ * Fetch JD body for a posting URL through the shared known-API dispatcher.
+ * Applies the same sufficiency floor as jd mode (jdFailure). Never opens a browser.
+ *
+ * @param {string} url
+ * @param {{ textCap?: number, timeoutMs?: number }} [opts]
+ * @returns {Promise<JdBody>}
+ */
+export async function resolveUrlJdBody(url, { textCap = TEXT_CAP, timeoutMs = TIMEOUT_MS } = {}) {
+  // Dynamic import: browser-extract pulls Playwright via liveness-browser.
+  const { fetchJdViaKnownApi, jdFailure } = await import('./browser-extract.mjs');
+  const result = await fetchJdViaKnownApi(url, textCap, timeoutMs);
+  const failure = result ? jdFailure(result, textCap) : null;
+  return gateUrlJdResult(url, result, failure);
+}
+
+/**
+ * Load --jd-text from a file and apply the same char floor via jdFailure.
+ *
+ * @param {string} textPath
+ * @param {{ textCap?: number }} [opts]
+ * @returns {Promise<JdBody>}
+ */
+export async function resolveJdTextFile(textPath, { textCap = TEXT_CAP } = {}) {
+  if (!existsSync(textPath) || !statSync(textPath).isFile()) {
+    return {
+      ok: false,
+      code: 'empty-input',
+      message: `JD text file not found: ${textPath}`,
+    };
+  }
+  let text;
+  try {
+    text = readFileSync(textPath, 'utf-8');
+  } catch {
+    return {
+      ok: false,
+      code: 'empty-input',
+      message: `Unable to read JD text file: ${textPath}`,
+    };
+  }
+  if (!String(text).trim()) {
+    return {
+      ok: false,
+      code: 'empty-input',
+      message: `JD text file is empty: ${textPath}`,
+    };
+  }
+  const { jdFailure } = await import('./browser-extract.mjs');
+  const synthetic = { url: textPath, text, bodyText: text, title: '' };
+  return gateUrlJdResult(textPath, synthetic, jdFailure(synthetic, textCap));
+}
+
+/**
+ * @param {string} flag
+ * @param {string[]} argv
+ * @param {number} i
+ * @returns {{ value: string, next: number }}
+ */
+function takeFlagValue(flag, argv, i) {
+  const a = argv[i];
+  const eq = a.indexOf('=');
+  if (eq !== -1) {
+    const value = a.slice(eq + 1);
+    if (!value) throw new Error(`Missing value for ${flag}`);
+    return { value, next: i };
+  }
+  const next = argv[i + 1];
+  if (!next || next.startsWith('--')) throw new Error(`Missing value for ${flag}`);
+  return { value: next, next: i + 1 };
+}
+
+/**
+ * @param {string[]} argv
+ * @returns {CliArgs}
+ */
+export function parseMatchArgs(argv) {
+  let jsonMode = false;
+  let cvPath = null;
+  let selfTest = false;
+  let reportPath = null;
+  let url = null;
+  let jdTextPath = null;
+
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--self-test') {
+      selfTest = true;
+      continue;
+    }
+    if (a === '--json') {
+      jsonMode = true;
+      continue;
+    }
+    if (a === '--cv' || a.startsWith('--cv=')) {
+      const got = takeFlagValue('--cv', argv, i);
+      cvPath = got.value;
+      i = got.next;
+      continue;
+    }
+    if (a === '--url' || a.startsWith('--url=')) {
+      const got = takeFlagValue('--url', argv, i);
+      if (url !== null) throw new Error(MIXED_SOURCES);
+      url = got.value;
+      i = got.next;
+      continue;
+    }
+    if (a === '--jd-text' || a.startsWith('--jd-text=')) {
+      const got = takeFlagValue('--jd-text', argv, i);
+      if (jdTextPath !== null) throw new Error(MIXED_SOURCES);
+      jdTextPath = got.value;
+      i = got.next;
+      continue;
+    }
+    if (a.startsWith('--')) throw new Error(`Unknown option: ${a}`);
+    if (reportPath !== null) throw new Error(`Unexpected argument: ${a}`);
+    reportPath = a;
+  }
+
+  const sourceCount = [reportPath, url, jdTextPath].filter((v) => v != null).length;
+  if (!selfTest) {
+    if (sourceCount > 1) throw new Error(MIXED_SOURCES);
+    if (sourceCount === 0) throw new Error(USAGE);
+  }
+
+  /** @type {MatchInput | null} */
+  let input = null;
+  if (reportPath != null) input = { kind: 'report', reportPath };
+  else if (url != null) input = { kind: 'url', url };
+  else if (jdTextPath != null) input = { kind: 'jd-text', textPath: jdTextPath };
+
+  return { input, cvPath, jsonMode, selfTest };
+}
+
+/**
+ * @param {string} sourceLabel
+ * @returns {never}
+ */
+function refuseNoSkills(sourceLabel) {
+  console.error(`No known skills found in JD text from ${sourceLabel}. ${REFUSE_BETTER_SOURCE}`);
+  process.exit(1);
+}
+
+/**
+ * Resolve keywords + provenance for any MatchInput.
+ *
+ * @param {MatchInput} input
+ * @param {string} root
+ * @returns {Promise<{ keywords: string[], keywordSource: KeywordSource,
+ *                     keywordNote: string | null, sourceUrl?: string,
+ *                     reportArg?: string }>}
+ */
+export async function resolveKeywords(input, root) {
+  if (input.kind === 'url') {
+    const body = await resolveUrlJdBody(input.url);
+    if (!body.ok) {
+      console.error(body.message);
+      process.exit(1);
+    }
+    const keywords = keywordsFromJdText(body.text);
+    if (!keywords.length) refuseNoSkills(input.url);
+    return {
+      keywords,
+      keywordSource: 'url',
+      keywordNote:
+        `Keywords: ${keywords.length} taken from the posting JD text (skill vocabulary).`,
+      sourceUrl: input.url,
+    };
+  }
+
+  if (input.kind === 'jd-text') {
+    const textPath = isAbsolute(input.textPath) ? input.textPath : join(process.cwd(), input.textPath);
+    const body = await resolveJdTextFile(textPath);
+    if (!body.ok) {
+      console.error(body.message);
+      process.exit(1);
+    }
+    const keywords = keywordsFromJdText(body.text);
+    if (!keywords.length) refuseNoSkills(textPath);
+    return {
+      keywords,
+      keywordSource: 'jd-text',
+      keywordNote:
+        `Keywords: ${keywords.length} taken from pasted JD text (skill vocabulary).`,
+    };
+  }
+
+  const reportArg = input.reportPath;
+  const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
+  if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
+    console.error(`Report not found: ${reportArg}`);
+    process.exit(1);
+  }
+
+  let reportText;
+  try {
+    reportText = readFileSync(reportPath, 'utf-8');
+  } catch {
+    console.error(`Unable to read report: ${reportArg}`);
+    process.exit(1);
+  }
+
+  let keywords = extractKeywords(reportText);
+  /** @type {KeywordSource} */
+  let keywordSource = 'report';
+  let keywordNote = null;
+
+  if (keywords.length === 0) {
+    keywords = keywordsFromJdText(archivedJdText(reportText, root));
+    if (keywords.length === 0) {
+      console.error(
+        'No "## Keywords extracted" block found (or it is empty), and no known skills were found under ' +
+        '"## Job Description (archived verbatim)". Add the 15-20 keyword section to the report and rerun.');
+      process.exit(1);
+    }
+    keywordSource = 'archived-jd';
+    keywordNote =
+      `Keywords: ${keywords.length} taken from the archived job description, because the report has no ` +
+      'keyword section. Only names in the skill vocabulary are found, so add the 15-20 keyword section to the report.';
+    console.error(
+      `⚠️  ${reportArg} has no "## Keywords extracted" section. Scoring ${keywords.length} skills read from the archived ` +
+      'job description instead. Tell the user, and add the keyword section to the report.');
+  }
+
+  return { keywords, keywordSource, keywordNote, reportArg };
+}
+
 /**
  * Built-in deterministic assertions (no I/O, no network). Exits 0 on success,
  * 1 on failure. Used by CI via `node keyword-match.mjs --self-test`.
@@ -506,6 +826,34 @@ function runSelfTest() {
     failures.push('htmlToText strip/decode');
   }
 
+  const fromJd = keywordsFromJdText('Experience with Python and Docker required.');
+  if (!fromJd.includes('Python') || !fromJd.includes('Docker')) {
+    failures.push('keywordsFromJdText misses known skills');
+  }
+  if (JSON.stringify(fromJd) !== JSON.stringify([...fromJd].sort())) {
+    failures.push('keywordsFromJdText must sort');
+  }
+
+  const thinGate = gateUrlJdResult(
+    'https://example.com/jobs/1',
+    { text: 'x', title: '' },
+    { code: 'empty_text', error: 'extracted 1 chars of JD text (minimum 200)' },
+  );
+  if (thinGate.ok || thinGate.code !== 'insufficient') failures.push('gateUrlJdResult must refuse thin body');
+  if (!thinGate.ok && /ashby|greenhouse|lever/i.test(thinGate.message)) {
+    failures.push('gate refuse copy must stay vendor-agnostic');
+  }
+
+  const nullGate = gateUrlJdResult('https://example.com/jobs/1', null, null);
+  if (nullGate.ok || nullGate.code !== 'fetch-miss') failures.push('gateUrlJdResult must refuse null fetch');
+
+  try {
+    parseMatchArgs(['report.md', '--url', 'https://example.com/j']);
+    failures.push('parseMatchArgs must reject mixed sources');
+  } catch (err) {
+    if (!/exactly one/i.test(err?.message || '')) failures.push('parseMatchArgs mixed-source message');
+  }
+
   if (failures.length) {
     console.error(`keyword-match self-test FAILED: ${failures.join('; ')}`);
     process.exit(1);
@@ -514,109 +862,64 @@ function runSelfTest() {
   process.exit(0);
 }
 
-// --- CLI (guarded so importing this module never runs it) ---
-if (isMainModule(import.meta.url)) {
-  const args = process.argv.slice(2);
-
-  if (args.includes('--self-test')) {
+/**
+ * @param {CliArgs} args
+ * @returns {Promise<void>}
+ */
+async function runKeywordMatch(args) {
+  if (args.selfTest) {
     runSelfTest();
-  } else {
-    let jsonMode = false;
-    let cvArg = null;
-    let reportArg = null;
-    for (let i = 0; i < args.length; i++) {
-      const a = args[i];
-
-      if (a === '--json') {
-        jsonMode = true;
-      } 
-      else if (a === '--cv') {
-        const next = args[i + 1];
-
-        if (!next || next.startsWith('--')) {
-          console.error('Missing value for --cv');
-          process.exit(1);
-        }
-
-        cvArg = next;
-        i++;
-      } 
-      else if (a.startsWith('--')) {
-        console.error(`Unknown option: ${a}`);
-        process.exit(1);
-      }
-      else if (reportArg === null) {
-        reportArg = a;
-      }
-      else {
-        console.error(`Unexpected argument: ${a}`);
-        process.exit(1);
-      }
-    }
-
-    if (!reportArg) {
-      console.error('Usage: node keyword-match.mjs <report-file> [--cv <path>] [--json]');
-      process.exit(1);
-    }
-
-    const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
-
-    if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
-      console.error(`Report not found: ${reportArg}`);
-      process.exit(1);
-    }
-
-    let reportText;
-    try {
-      reportText = readFileSync(reportPath, 'utf-8');
-    } catch {
-      console.error(`Unable to read report: ${reportArg}`);
-      process.exit(1);
-    }
-
-    let keywords = extractKeywords(reportText);
-    let keywordSource = 'report';
-    let keywordNote = null;
-
-    if (keywords.length === 0) {
-      keywords = [...extractSkills(archivedJdText(reportText, getCareerOpsRoot()))].sort();
-      if (keywords.length === 0) {
-        console.error(
-          'No "## Keywords extracted" block found (or it is empty), and no known skills were found under ' +
-          '"## Job Description (archived verbatim)". Add the 15-20 keyword section to the report and rerun.');
-        process.exit(1);
-      }
-      keywordSource = 'archived-jd';
-      keywordNote =
-        `Keywords: ${keywords.length} taken from the archived job description, because the report has no ` +
-        'keyword section. Only names in the skill vocabulary are found, so add the 15-20 keyword section to the report.';
-      console.error(
-        `⚠️  ${reportArg} has no "## Keywords extracted" section. Scoring ${keywords.length} skills read from the archived ` +
-        'job description instead. Tell the user, and add the keyword section to the report.');
-    }
-
-    const cvPath = cvArg
-      ? (isAbsolute(cvArg) ? cvArg : join(process.cwd(), cvArg))
-      : join(getCareerOpsRoot(), 'cv.md');
-
-    if (!existsSync(cvPath) || !statSync(cvPath).isFile()) {
-      console.error(`CV not found: ${cvPath}. Pass --cv <path> to point at your CV.`);
-      process.exit(1);
-    }
-
-    let rawCv;
-    try {
-      rawCv = readFileSync(cvPath, 'utf-8');
-    } catch {
-      console.error(`Unable to read CV: ${cvPath}`);
-      process.exit(1);
-    }
-    const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : rawCv;
-    const sourceLabel = cvArg ? basename(cvPath) : 'cv.md (base CV, before per-role tailoring)';
-
-    const result = analyzeCoverage(keywords, cvText);
-    console.log(jsonMode
-      ? JSON.stringify({ ...result, keywordSource }, null, 2)
-      : formatCoverageMarkdown(result, sourceLabel, keywordNote));
+    return;
   }
+  if (!args.input) {
+    console.error(USAGE);
+    process.exit(1);
+  }
+
+  const resolved = await resolveKeywords(args.input, getCareerOpsRoot());
+  const { keywords, keywordSource, keywordNote, sourceUrl } = resolved;
+
+  const cvArg = args.cvPath;
+  const cvPath = cvArg
+    ? (isAbsolute(cvArg) ? cvArg : join(process.cwd(), cvArg))
+    : join(getCareerOpsRoot(), 'cv.md');
+
+  if (!existsSync(cvPath) || !statSync(cvPath).isFile()) {
+    console.error(`CV not found: ${cvPath}. Pass --cv <path> to point at your CV.`);
+    process.exit(1);
+  }
+
+  let rawCv;
+  try {
+    rawCv = readFileSync(cvPath, 'utf-8');
+  } catch {
+    console.error(`Unable to read CV: ${cvPath}`);
+    process.exit(1);
+  }
+  const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : rawCv;
+  const sourceLabel = cvArg ? basename(cvPath) : 'cv.md (base CV, before per-role tailoring)';
+
+  const result = analyzeCoverage(keywords, cvText);
+  const payload = {
+    ...result,
+    keywordSource,
+    ...(sourceUrl ? { sourceUrl } : {}),
+  };
+  console.log(args.jsonMode
+    ? JSON.stringify(payload, null, 2)
+    : formatCoverageMarkdown(result, sourceLabel, keywordNote));
+}
+
+if (isMainModule(import.meta.url)) {
+  let args;
+  try {
+    args = parseMatchArgs(process.argv.slice(2));
+  } catch (err) {
+    console.error(err?.message || err);
+    process.exit(1);
+  }
+  runKeywordMatch(args).catch((err) => {
+    console.error(`keyword-match: unexpected error — ${err?.message || err}`);
+    process.exit(1);
+  });
 }

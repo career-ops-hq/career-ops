@@ -54,7 +54,7 @@ export function CreateJobModal({
     <ScheduledOverlay isOpen={isOpen} onClose={onClose} titleId="create-scheduled-scan-title" initialFocusRef={nameRef} panelClassName="max-w-2xl">
         <div className="flex items-center justify-between border-b border-border pb-4">
           <div className="flex items-center gap-2.5">
-            <div className="grid size-9 place-items-center rounded-xl bg-brand-soft text-brand">
+            <div className="grid size-9 place-items-center rounded-xl bg-brand-soft text-brand-text">
               <CalendarPlus className="size-5" />
             </div>
             <div>

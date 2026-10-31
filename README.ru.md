@@ -60,6 +60,7 @@
 </p>
 
 <p align="center"><a href="#ваша-очередь">Попробуйте на одной вакансии&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Прочитайте всю&nbsp;историю&nbsp;→</a></p>
+<p align="center"><sub>Не хотите работать в терминале? <a href="https://career-ops.org/waitlist?ref=readme-ru">Запишитесь в лист ожидания веб-версии&nbsp;→</a></sub></p>
 
 <br>
 
