@@ -11,7 +11,7 @@ Conduza uma entrevista simulada realista — uma pergunta de cada vez — e dê 
 3. **Lista de perguntas** (opcional) — perguntas específicas a cobrir; se não fornecida, gere a partir do tipo de rodada
 4. **CV** em `cv.md` + `article-digest.md` (se existir) — para verificar alegações nas respostas e ancorar versões mais fortes em experiência real
 5. **Perfil** em `config/profile.yml` + `modes/_profile.md` — narrativa do candidato, deal-breakers, objetivos de remuneração
-6. **Story bank** em `interview-prep/story-bank.md` — para verificar a exatidão das histórias no feedback
+6. **Story bank** em `interview-prep/story-bank.md` — para verificar a exatidão das histórias no feedback (seus números seguem a regra de proveniência em Rules)
 7. **Question bank** em `interview-prep/question-bank.md` — para atualizar o status após cada resposta
 8. **Arquivo de preparação específico da vaga** — para informações sobre a empresa, perguntas pesquisadas, estratégia de remuneração
 9. **Alegações retiradas** em `interview-prep/retracted-claims.md` (se existir) — alegações que o candidato rejeitou explicitamente como indefensáveis; trate como barreira rígida
@@ -99,7 +99,7 @@ Mantenha o feedback enxuto. Um ou dois pontos a aprimorar por resposta — não 
 
 **Verifique alegações suspeitas antes de treiná-las.** Quando o candidato afirma uma métrica ou alegação de escopo específica (número de pessoas gerenciadas, AUM, faturamento, percentual de melhoria) que você não consegue confirmar pelo contexto anterior, verifique-a em `cv.md`, `article-digest.md` e `interview-prep/retracted-claims.md` antes de dar feedback. Se a alegação não tiver respaldo, sinalize: "Não encontro esse número no seu CV — ele é defensável se pressionarem? Se não, aqui está uma versão que não depende dele." Nunca treine um candidato a repetir uma alegação que não consegue sustentar.
 
-**Nunca invente experiência ou métricas.** A versão mais forte só pode usar fatos que o candidato realmente declarou, ou alegações que existam em `cv.md`, `article-digest.md` ou na story bank. Apertar o enquadramento é o trabalho — acrescentar conquistas é fabricação. Se uma alegação aparecer em `interview-prep/retracted-claims.md`, não a use em uma versão mais forte, mesmo que o candidato a tenha dito.
+**Nunca invente experiência ou métricas.** A versão mais forte só pode usar fatos que o candidato realmente declarou, ou alegações que existam em `cv.md`, `article-digest.md` ou na story bank (um número da story bank só sob a regra de proveniência em Rules). Apertar o enquadramento é o trabalho — acrescentar conquistas é fabricação. Se uma alegação aparecer em `interview-prep/retracted-claims.md`, não a use em uma versão mais forte, mesmo que o candidato a tenha dito.
 
 **Ofereça-se para registrar retratações.** Quando o candidato admite no meio da sessão que uma alegação não é defensável ("você tem razão, não consigo sustentar isso"), ofereça-se para acrescentá-la a `interview-prep/retracted-claims.md`: "Quer que eu adicione isso à sua lista de retiradas, para que não apareça de novo?" Se sim, acrescente: `**"[claim]"** ([context]). Reason: [one-line reason + correct framing if applicable].`
 
@@ -247,6 +247,7 @@ Inclua pelo menos 2 perguntas situacionais / voltadas ao futuro do conjunto abai
 - **Sem dicas antes da resposta.** Não prepare o candidato com "isto é sobre X". Pergunte sem aviso.
 - **Apenas feedback honesto.** O falso encorajamento é pior que o silêncio — manda o candidato despreparado para uma entrevista real.
 - **Sem alegações fabricadas nas respostas sugeridas.** As versões mais fortes recorrem apenas ao que o candidato disse ou ao que está em `cv.md`, `article-digest.md` ou na story bank — nunca experiências ou métricas inventadas.
+- **Números da story bank exigem proveniência.** A story bank fornece narrativa e fraseado; seus números não equivalem a `cv.md` (AGENTS.md, Source-of-Truth Boundary). Antes que um número da story bank entre em uma versão mais forte ou em uma nota de feedback, execute `node story-provenance-check.mjs --summary` e siga a categoria (bucket) que ele indica para esse número: `existing` pode ser usado; `supportedByResume` e `derived-unverified` nunca são reapresentados como fato, então deixe o número de fora ou pergunte ao candidato com os quatro desfechos do AGENTS.md (confirmar como está, informar o número correto, apenas narrativa, "não sei") em vez de um confirmar/negar que induz a resposta; `user-cannot-confirm` nunca é usado como número, apenas como narrativa. Este modo não escreve o marcador `**Provenance:**`; a resposta do candidato vale para esta sessão.
 - **Alegações retiradas são uma barreira rígida.** Se uma alegação aparecer em `interview-prep/retracted-claims.md`, nunca a use em uma versão mais forte — mesmo que o candidato a tenha dito na resposta. Sinalize-a em vez disso.
 - **Acompanhe o status.** Atualize `interview-prep/question-bank.md` após a sessão, se ele existir.
 - **Pare quando pedirem.** Se o candidato disser "vamos pausar" ou "por hoje chega", respeite. Não insista por mais uma pergunta.

@@ -12,7 +12,7 @@ Dada uma descrição da vaga e a data/hora da entrevista, monte um plano de prep
 4. **Tipo de rodada** (se souber) — triagem, técnica/específica da área, design/estudo de caso, painel comportamental
 5. **CV** em `cv.md` + `article-digest.md` (se existir) — leia para experiência, competências, pontos de prova
 6. **Perfil** em `config/profile.yml` + `modes/_profile.md` — leia para narrativa, arquétipos e objetivos
-7. **Story bank** em `interview-prep/story-bank.md` — histórias STAR+R já existentes
+7. **Story bank** em `interview-prep/story-bank.md` — histórias STAR+R já existentes (seus números seguem a regra de proveniência em Rules)
 8. **Question bank** em `interview-prep/question-bank.md` — lacunas já conhecidas (se o arquivo existir)
 
 ---
@@ -149,4 +149,5 @@ Salve o plano em `interview-prep/{company-slug}-{role-slug}.md` se o arquivo nã
 - **Um tópico por bloco.** Misturar tópicos em um único bloco reduz a retenção.
 - **Sempre inclua tempo de descanso.** Um candidato descansado tem melhor desempenho do que um que estuda até o último minuto.
 - **Nunca gere informações falsas sobre a empresa.** Se você não tem pesquisa, diga isso — não invente alegações sobre a cultura ou detalhes técnicos da empresa.
-- **Nunca invente alegações para o candidato.** A frase-âncora e os pontos de fala pré-entrevista do resumo (Step 4) devem se basear no que o candidato realmente tem — `cv.md`, `article-digest.md` ou a story bank. Não redija alegações que dependam de experiências ou métricas que o candidato não possui. Se uma alegação aparecer em `interview-prep/retracted-claims.md`, nunca a inclua.
+- **Nunca invente alegações para o candidato.** A frase-âncora e os pontos de fala pré-entrevista do resumo (Step 4) devem se basear no que o candidato realmente tem — `cv.md`, `article-digest.md` ou a story bank, sob a regra de proveniência abaixo. Não redija alegações que dependam de experiências ou métricas que o candidato não possui. Se uma alegação aparecer em `interview-prep/retracted-claims.md`, nunca a inclua.
+- **Números da story bank exigem proveniência.** A story bank fornece narrativa e fraseado; seus números não equivalem a `cv.md` (AGENTS.md, Source-of-Truth Boundary). Antes que um número da story bank entre na frase-âncora, em um ponto de fala ou em um bloco de estudo, execute `node story-provenance-check.mjs --summary` e siga a categoria (bucket) que ele indica para esse número: `existing` pode ser usado; `supportedByResume` e `derived-unverified` nunca são reapresentados como fato, então deixe o número de fora ou pergunte ao candidato com os quatro desfechos do AGENTS.md (confirmar como está, informar o número correto, apenas narrativa, "não sei") em vez de um confirmar/negar que induz a resposta; `user-cannot-confirm` nunca é usado como número, apenas como narrativa. Este modo não escreve o marcador `**Provenance:**`; a resposta do candidato vale para esta sessão.
