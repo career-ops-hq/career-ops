@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { statsModel } from "@/lib/analytics/view-model.mjs";
 import type { StatsModel, BreakdownSection, ThresholdSection, VendorSection } from "@/lib/analytics/view-model.mjs";
+import { sentRateLabel } from "@/lib/analytics/sent-rate-label.mjs";
 
 // The "Insights" view: analyze-patterns.mjs, rendered.
 //
@@ -142,8 +143,8 @@ function Breakdown({ section }: { section: BreakdownSection }) {
                 <div className="h-full rounded-full bg-brand/60" style={{ width: `${(total / top) * 100}%` }} />
               </div>
               <span className="w-10 shrink-0 text-right text-sm tabular-nums">{total}</span>
-              <span className="w-12 shrink-0 text-right text-xs tabular-nums text-faint">
-                {conv !== null && Number.isFinite(conv) ? `${conv}%` : "—"}
+              <span className="w-24 shrink-0 text-right text-xs tabular-nums text-faint">
+                {sentRateLabel(conv)}
               </span>
             </div>
           );
