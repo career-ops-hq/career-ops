@@ -57,6 +57,7 @@ import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { findColumn } from './process-quality.mjs';
@@ -77,14 +78,10 @@ const DEFAULT_INTERVIEWS_FILE = existsSync(join(DATA_ROOT, 'data/active-intervie
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
-const appsFileIdx = args.indexOf('--apps-file');
-const APPS_FILE = appsFileIdx !== -1 && args[appsFileIdx + 1] !== undefined
-  ? args[appsFileIdx + 1]
-  : DEFAULT_APPS_FILE;
-const interviewsFileIdx = args.indexOf('--interviews-file');
-const INTERVIEWS_FILE = interviewsFileIdx !== -1 && args[interviewsFileIdx + 1] !== undefined
-  ? args[interviewsFileIdx + 1]
-  : DEFAULT_INTERVIEWS_FILE;
+// flagValue reads `--flag value` and `--flag=value`; indexOf() cannot see the
+// second spelling and quietly fell back to the default file.
+const APPS_FILE = flagValue(args, '--apps-file') || DEFAULT_APPS_FILE;
+const INTERVIEWS_FILE = flagValue(args, '--interviews-file') || DEFAULT_INTERVIEWS_FILE;
 
 // --- Canonical lifecycle (templates/states.yml) ---
 // Non-terminal states are strictly ordered; terminal states have no order
@@ -758,23 +755,25 @@ function runSelfTest() {
 // Derived from the flags this file actually accepts, so `--help` cannot
 // describe an option that does not exist.
 const USAGE = `Usage:
-  node tracker-sync-check.mjs [--summary] [--porcelain] [--apps-file <path>] [--interviews-file <path>] [--self-test]
+  node tracker-sync-check.mjs [--summary] [--apps-file <path>] [--interviews-file <path>] [--self-test]
 
   --summary                 human-readable table instead of JSON
-  --porcelain               machine-readable lines
   --apps-file <path>        override the tracker path
   --interviews-file <path>  override the active-interviews path
   --self-test               run the built-in checks
   --help, -h   print this and exit`;
 
 if (isMainModule(import.meta.url)) {
-  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
-  // script printed a full report for it, which is not what the flag asks for
-  // and hides that it was never recognised.
-  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
+  // BEFORE any work. An unknown flag (`--sumary`) used to be ignored and a
+  // `--help` fell through to the analysis; validateFlags rejects the first and
+  // answers the second. requireOperand: `--apps-file` with nothing after it
+  // must not silently fall back to the default tracker.
+  validateFlags(
+    process.argv.slice(2),
+    ['--summary', '--self-test', '--apps-file', '--interviews-file', '--help', '-h'],
+    USAGE,
+    { valueFlags: ['--apps-file', '--interviews-file'], requireOperand: true },
+  );
   if (selfTestMode) {
     runSelfTest();
   }

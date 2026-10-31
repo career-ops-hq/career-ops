@@ -144,7 +144,12 @@ export function structuralGaps(text) {
   if (gaps.length === 0 && headings.join('|') !== REQUIRED_HEADINGS.join('|')) {
     gaps.push('report section order A)–G) → Risk Summary → H)');
   }
-  // Machine Summary can precede A), so stop at the first H2, not just at A).
+  // Scripts find the Machine Summary by its heading, so it goes last (#6156)
+  // instead of standing between the reader and A). Not every locale has one.
+  const sections = lines.filter(line => /^ {0,3}##[ \t]+/.test(line));
+  const machine = sections.findIndex(line => /^ {0,3}##[ \t]+Machine Summary[ \t]*$/.test(line));
+  if (machine >= 0 && machine !== sections.length - 1) gaps.push('## Machine Summary is not the last report section');
+  // The header ends at the first H2, whatever it is, not just at A).
   const firstSection = lines.findIndex(line => /^ {0,3}##[ \t]+/.test(line));
   const header = lines.slice(0, firstSection);
   for (const label of REQUIRED_LABELS) {

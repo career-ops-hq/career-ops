@@ -1,0 +1,92 @@
+# career-ops privacy guard — sample configuration
+#
+# Copy this file to `config/privacy.yml` and fill in YOUR values:
+#
+#   cp config/privacy.example.yml config/privacy.yml
+#
+# `config/privacy.yml` is gitignored (see .gitignore) — it holds real personal
+# data and must never be committed. This sample file is committed and must
+# contain only FICTIONAL placeholder values.
+#
+# WHAT THIS DOES
+# --------------
+# Every outbound LLM request (OpenRouter, OpenAI-compatible endpoints, Gemini,
+# Ollama, and any other provider the guard recognises) is inspected immediately
+# before the network call. If a value below appears anywhere in the request —
+# system messages, user messages, nested content, tool definitions, any string
+# field — the request is ABORTED and an error names the category, never the
+# value. Nothing is silently removed or rewritten.
+#
+# See docs/PRIVACY.md for the full explanation, coverage list and limitations.
+
+# Master switch. `true` (default) enforces the guard. Setting this to `false`
+# disables configured-value AND pattern checking in this file.
+#
+# This is deliberately awkward to use: it is a config-file flag, it does not
+# disable the process-level bypass protection, and you should prefer narrowing
+# `protected` or `auto_detect` over turning the guard off.
+enabled: true
+
+# Which automatically detected PII patterns to block.
+#
+# These are heuristics, not a guarantee — see "Known limitations" in
+# docs/PRIVACY.md. Turn one off if it blocks something legitimate (for example,
+# a job description that legitimately contains a recruiter's email address).
+auto_detect:
+  # Email addresses anywhere in the request. Omitted keys default to off.
+  email: true
+  # Phone-like numbers. The loosest pattern; turn it off first if you get
+  # false positives on posting text.
+  phone: true
+  # Personal profile URLs (linkedin.com/in/..., github.com/<user>, ...).
+  # Some CVs legitimately cite a personal project repo.
+  profile_url: false
+
+# ---------------------------------------------------------------------------
+# CONFIGURED PROTECTED VALUES
+# ---------------------------------------------------------------------------
+# Exact values that must never leave the machine. Matching is:
+#   * case-insensitive for text
+#   * digits-only for numbers and phones, so "+1 555 010 0199" also matches
+#     "15550100199" and "(555) 010-0199"
+#   * values shorter than 5 characters (or 5 digits) are ignored on purpose —
+#     they would match ordinary prose. Store salary as an absolute annual
+#     amount (2500000) rather than a short form (25) so it stays guardable.
+#
+# The values below are FICTIONAL EXAMPLES. Replace them with your own, or
+# delete the keys you do not need. Any key you leave out is simply not guarded.
+protected:
+  # Your name, as it appears in cv.md. Kept here as an example of the
+  # free-form case — a name is not pattern-detectable, so if you want it
+  # blocked you must list it.
+  full_name: "Jordan A. Placeholder"
+
+  # Contact details. Also caught by auto_detect when that is enabled; listing
+  # them here keeps them blocked if you turn auto_detect off.
+  email: "jordan.placeholder@example.com"
+  phone: "+1 555 010 0199"
+
+  # Home / mailing address. Add the whole string; also add distinctive parts
+  # (street name, unit) if you want partial addresses caught.
+  address: "123 Fictional Avenue, Springfield"
+
+  # Personal profile URLs. The bare handle is guarded too, so
+  # "linkedin.com/in/jordan-placeholder" blocks "jordan-placeholder" on its own.
+  linkedin: "https://linkedin.com/in/jordan-placeholder"
+  github: "https://github.com/jordan-placeholder"
+  portfolio: "https://jordan-placeholder.example.dev"
+
+  # Compensation. Use the ABSOLUTE ANNUAL figure(s) — short forms are not
+  # guarded. List each figure you never want to disclose.
+  salary:
+    current_base: 145000
+    target_floor: 165000
+
+  # Any other string you consider sensitive. These are matched verbatim
+  # (case-insensitive). Useful for: a legal name you do not use professionally,
+  # a former employer you have agreed not to name, a client name, a
+  # government identifier, an internal project codename.
+  custom:
+    - "Placeholder Consulting Group"
+    - "Project Nightingale"
+    - "555-01-0199"

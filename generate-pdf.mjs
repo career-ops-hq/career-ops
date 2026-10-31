@@ -12,7 +12,14 @@
  * relaunching per document. One failing document is isolated and recorded; the
  * rest still render. Results are written to <manifest>.results.json and the
  * process exits non-zero if any document failed (#2384). Relative input and
- * output paths resolve against the manifest's folder, not process.cwd().
+ * output paths in the manifest resolve against the manifest's folder, not
+ * process.cwd().
+ *
+ * A single-file relative path is different. It is taken from the current
+ * directory when that location is already inside the tracker workspace, and
+ * otherwise from the workspace root. `output/cv.html` then finds the file
+ * whether you launch from the repo or from a checkout whose data root lives
+ * elsewhere. Absolute paths stay absolute.
  *
  * --report links the generated PDF to its tracker/report number and records
  * the linkage in data/pdf-index.tsv so downstream tools (e.g. the TUI
@@ -176,6 +183,31 @@ function assertInsideWorkspace(absPath, label) {
     );
   }
   return absPath;
+}
+
+/**
+ * Resolve one single-file input or output argument.
+ *
+ * A relative path that already lands inside the workspace keeps the current
+ * directory, so launching from the repo is unchanged. A relative path that
+ * would land outside is read from the workspace root instead. That is the
+ * split-layout case: the shell is in the checkout, CAREER_OPS_ROOT points at
+ * the data directory, and `output/cv.html` means the workspace file. An
+ * absolute path is unchanged. The containment guard below still runs on the
+ * result, so a `..` segment cannot escape.
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+function resolvePdfCliPath(p) {
+  if (isAbsolute(p)) return resolve(p);
+  const fromCwd = resolve(p);
+  try {
+    return assertInsideWorkspace(fromCwd, 'input');
+  } catch (err) {
+    if (!/escapes the tracker workspace/.test(err?.message || '')) throw err;
+    return resolve(workspaceRoot, p);
+  }
 }
 
 // Ensure output directory exists (fresh setup)
@@ -1875,8 +1907,8 @@ async function generatePDF() {
     process.exit(1);
   }
 
-  inputPath = resolve(inputPath);
-  outputPath = resolve(outputPath);
+  inputPath = resolvePdfCliPath(inputPath);
+  outputPath = resolvePdfCliPath(outputPath);
 
   // Path-traversal guard: keep the PDF write inside the tracker-owned workspace
   // so a crafted output argument cannot escape into another user's directory.

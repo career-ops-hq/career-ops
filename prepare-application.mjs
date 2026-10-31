@@ -5,6 +5,9 @@
  *
  * Detects the ATS from the apply URL, reads candidate data from
  * config/profile.yml, and prints a prefill summary to stdout.
+ * Identity fields come from the candidate block (profile.example.yml).
+ * A root scalar of the same name is only a fallback for older flat files.
+ * The root location mapping (country, city, timezone) is not a form value.
  * Never POSTs anything — the user reviews the output, opens the apply URL,
  * and submits themselves.
  *
@@ -144,14 +147,23 @@ function readProfile() {
     console.error(`Error: invalid profile YAML at ${profilePath}: ${err.message}`);
     process.exit(1);
   }
+  const candidate = profile.candidate;
+  const hasCandidate = candidate != null && typeof candidate === 'object' && !Array.isArray(candidate);
   const pick = key => {
-    const value = profile[key];
-    if (value == null) return '';
-    if (typeof value === 'object') {
+    const sources = hasCandidate ? [candidate, profile] : [profile];
+    for (const source of sources) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+      const value = source[key];
+      if (value == null) return '';
+      if (typeof value !== 'object') return String(value).trim();
+      // Root location is a mapping in the example profile. Skip it when the
+      // candidate block is the place identity lives. A collection with no
+      // candidate block, or a collection inside candidate, is still a mistake.
+      if (source === profile && hasCandidate) continue;
       console.error(`Error: profile field "${key}" in ${profilePath} must be a scalar value`);
       process.exit(1);
     }
-    return String(value).trim();
+    return '';
   };
 
   const fullName = pick('full_name');

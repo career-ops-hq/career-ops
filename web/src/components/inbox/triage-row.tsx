@@ -26,6 +26,8 @@ function agoLabel(age: number | null): string | null {
 // "not scored" (CRUDA) — never a fake match%. Once its shortlist eval finishes it
 // flips to EVALUADA (a real A–F badge). Save→shortlist / Skip→hidden are free + undoable.
 export function TriageRow({
+  index,
+  cursor,
   job,
   source,
   age,
@@ -36,6 +38,8 @@ export function TriageRow({
   onSave,
   onSkip,
 }: {
+  index: number;
+  cursor: boolean;
   job: InboxJob;
   source: AtsSource | null;
   age: number | null;
@@ -59,9 +63,11 @@ export function TriageRow({
 
   return (
     <li
+      data-triage-index={index}
       className={cn(
         "flex items-center gap-2.5 px-3 py-2.5 transition-colors sm:gap-3 sm:px-4",
         selected ? "bg-brand-soft/50" : "hover:bg-surface-hover",
+        cursor && "ring-2 ring-inset ring-brand",
         evaluated && "opacity-95",
       )}
     >

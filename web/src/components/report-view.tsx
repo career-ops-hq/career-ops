@@ -15,6 +15,7 @@ import {
   verdictReason,
 } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
+import { BackLink } from "@/components/back-link";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { ScoreLevers } from "@/components/score-levers";
@@ -94,12 +95,12 @@ export function ReportView({
 
   return (
     <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
-      <Link
+      <BackLink
         href={backHref}
         className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text"
       >
         <ArrowLeft className="size-4" /> Pipeline
-      </Link>
+      </BackLink>
 
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
@@ -137,7 +138,7 @@ export function ReportView({
               href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-800 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
             >
               <FileText className="size-3.5" /> View cover
             </a>

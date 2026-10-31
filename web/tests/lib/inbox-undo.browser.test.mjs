@@ -174,5 +174,44 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
       await page.unrouteAll({ behavior: "wait" });
     }
   });
+
+  await t.test("a failed bulk skip returns that row before the other request settles", async () => {
+    await resetInbox();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    let releaseBeta;
+    const betaGate = new Promise((resolve) => { releaseBeta = resolve; });
+    release = () => releaseBeta();
+    let betaSeen = false;
+    let betaFinished = false;
+    await page.route("**/api/inbox/skip", async (route) => {
+      const body = route.request().postDataJSON();
+      const target = String(body.url);
+      if (body.done === true && target.endsWith("fixture-alpha")) {
+        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Fixture skip busy" }) });
+      }
+      if (body.done === true && target.endsWith("fixture-beta")) {
+        betaSeen = true;
+        await betaGate;
+        betaFinished = true;
+        return route.continue();
+      }
+      return route.continue();
+    });
+    try {
+      await row("Fixture Alpha").getByRole("checkbox").click();
+      await row("Fixture Beta").getByRole("checkbox").click();
+      await page.getByRole("button", { name: "Skip selected", exact: true }).click();
+      // The same sentence is on the page and on the Undo notice. Either one
+      // shows that the failed skip was reported. first() keeps the locator strict.
+      await page.getByRole("alert").filter({ hasText: "Could not skip every selected role." }).first().waitFor();
+      await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").waitFor();
+      await until(() => betaSeen);
+      assert.equal(await row("Fixture Beta").count(), 0);
+      assert.equal(betaFinished, false);
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
   assert.deepEqual(errors, []);
 });

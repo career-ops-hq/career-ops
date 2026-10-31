@@ -204,9 +204,6 @@ Die Feldnamen im Kopf (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 
 ---
 
-## Machine Summary
-(YAML-Block für nachgelagerte Skripte — siehe Anforderung unten)
-
 ## A) Rollen-Zusammenfassung
 (vollständiger Inhalt von Block A)
 
@@ -250,11 +247,14 @@ Die Feldnamen im Kopf (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 
 ## Job Description (archived verbatim)
 (der vollständige Text der Stellenanzeige, wortgleich eingefügt — siehe Anforderung unten)
+
+## Machine Summary
+(YAML-Block für nachgelagerte Skripte — siehe Anforderung unten)
 ```
 
 **Entscheidungszeile (Pflicht):** `**Entscheidung:**` ist `final_decision` aus der Machine Summary, und die Zeile unter dem Kopf ist der Satz aus `## Fazit (lead)`, wortgleich kopiert. Beide zuletzt ausfüllen. Nie `Verdict:` als Feldname verwenden: die Web-App liest das erste `VERDICT:` als Score-Zeile.
 
-**Machine Summary (Pflicht):** YAML-Block direkt nach dem Kopf, mit Schema, exakten Feldnamen und Regeln aus `batch/batch-prompt.md` (die Quelle; hier nicht duplizieren). Enthält `advertised_comp` (die Gehaltszahl der Anzeige wortgleich, oder `null`), `risk_summary` und `requirement_importance` (Block B Zeile für Zeile; die `inferred`-Grenze gilt auch hier).
+**Machine Summary (Pflicht):** YAML-Block am Ende des Reports, nach `## Job Description (archived verbatim)`, mit Schema, exakten Feldnamen und Regeln aus `batch/batch-prompt.md` (die Quelle; hier nicht duplizieren). Enthält `advertised_comp` (die Gehaltszahl der Anzeige wortgleich, oder `null`), `risk_summary` und `requirement_importance` (Block B Zeile für Zeile; die `inferred`-Grenze gilt auch hier).
 
 **Archivierung der Stellenanzeige (Pflicht, #2789):** Jeder Report MUSS einen Abschnitt `## Job Description (archived verbatim)` mit dem vollständigen Text der Anzeige enthalten, nie zusammengefasst oder umformuliert. Die Überschrift bleibt auf Englisch: `check-jd-archive.mjs` sucht sie über den Namen. Die erste Zeile ist das sichtbare Veröffentlichungsdatum (`Posted: {Datum oder relativer Text}`, oder `Posted: not visible in source`), nie das Dateidatum des Reports. Ist die Anzeige zu lang oder nicht vollständig zitierbar, mit `archive-posting.mjs` (Befehl unten) sichern und in den Abschnitt **genau** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` schreiben, ohne weiteren Text. Ist keine maschinelle Sicherung möglich (etwa ein langer eingefügter Text ohne URL), den Abschnitt in `## Job Description (not archived)` umbenennen und den Grund nennen. Nie eine Paraphrase an seiner Stelle; die vollständige Regel steht in `modes/oferta.md` (**JD archival**).
 

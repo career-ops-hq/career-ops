@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { estimateCost } from '../utils/token-tracker.mjs';
+import { estimateCost, formatK } from '../utils/token-tracker.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,9 +23,6 @@ export function parseTokenVal(str) {
   return parseInt(str, 10) || 0;
 }
 
-function formatK(tokens) {
-  return (tokens / 1000).toFixed(1) + 'k';
-}
 
 function main() {
   if (!fs.existsSync(STATE_FILE)) {

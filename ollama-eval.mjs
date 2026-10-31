@@ -34,9 +34,15 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+
+// Ambient guard over global fetch (idempotent); the explicit gate below is the
+// primary layer.
+installPiiInterceptor();
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -312,28 +318,33 @@ console.log(`🤖  Calling Ollama (${modelName})... this may take a minute.\n`);
 
 let evaluationText;
 try {
+  // Privacy gate: inspect the complete serialized request before the network
+  // call. Ollama may be local, but it may equally be a remote host set via
+  // OLLAMA_BASE_URL — either way the payload is checked.
+  const requestBody = JSON.stringify({
+    model:    modelName,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
+    ],
+    // stream:true so response headers arrive with the FIRST token. With stream:false
+    // Ollama sends nothing until the whole report is generated, and Node's undici client
+    // gives up at its own 300s headersTimeout — a deadline neither OLLAMA_TIMEOUT_MS nor
+    // AbortSignal.timeout controls, which surfaced as a bare "fetch failed" at 5:01.
+    stream: true,
+    // Ollama's native /api/chat reads generation params from `options` only.
+    // This call targets that endpoint (NOT the OpenAI-compatible /v1 route,
+    // which ignores `options` and has no num_ctx equivalent), so both the
+    // deterministic temperature and the enlarged context window actually take
+    // effect. Without num_ctx here Ollama defaults to a 2048-token context and
+    // silently truncates the prompt; without temperature it runs at 0.8.
+    options: { temperature: 0.4, num_ctx: numCtx },
+  });
+  assertLlmRequestAllowed(endpoint, requestBody);
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model:    modelName,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
-      ],
-      // stream:true so response headers arrive with the FIRST token. With stream:false
-      // Ollama sends nothing until the whole report is generated, and Node's undici client
-      // gives up at its own 300s headersTimeout — a deadline neither OLLAMA_TIMEOUT_MS nor
-      // AbortSignal.timeout controls, which surfaced as a bare "fetch failed" at 5:01.
-      stream: true,
-      // Ollama's native /api/chat reads generation params from `options` only.
-      // This call targets that endpoint (NOT the OpenAI-compatible /v1 route,
-      // which ignores `options` and has no num_ctx equivalent), so both the
-      // deterministic temperature and the enlarged context window actually take
-      // effect. Without num_ctx here Ollama defaults to a 2048-token context and
-      // silently truncates the prompt; without temperature it runs at 0.8.
-      options: { temperature: 0.4, num_ctx: numCtx },
-    }),
+    body: requestBody,
     signal: AbortSignal.timeout(timeoutMs),
   });
 

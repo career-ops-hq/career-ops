@@ -18,3 +18,16 @@ export function inboxScoreTarget(scored) {
   }
   return { evaluated: true, href: `/pipeline/${scored.reportN}`, showScore };
 }
+
+/**
+ * The selected jobs a bulk skip may hide. An evaluated row has no Skip
+ * button, so a bulk skip leaves it in place too.
+ *
+ * @template {{ url: string }} J
+ * @param {J[]} jobs
+ * @param {Map<string, Parameters<typeof inboxScoreTarget>[0]>} scoreByUrl
+ * @returns {J[]}
+ */
+export function skippableJobs(jobs, scoreByUrl) {
+  return jobs.filter((job) => !inboxScoreTarget(scoreByUrl.get(job.url)).evaluated);
+}

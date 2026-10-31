@@ -2680,6 +2680,8 @@ const exactAllowedFiles = new Set([
   // The OpenAI plugin directory listing names its developer, like the
   // claude-directory manifest that '.claude-plugin/plugin.json' above covers.
   'openai-directory/plugin.json',
+  // The Antigravity Marketplace manifest credits its author the same way.
+  'antigravity-directory/plugin.json',
   // Hired Wall: celebrates a hire with a link back to the project, and the
   // scripts/tests that build and cover that feature necessarily carry the
   // same URL (#4131).
@@ -15577,12 +15579,16 @@ try {
 // contents. Source-level, since gemini-eval runs on import.
 console.log('\n44d. gemini-eval — static prefix as systemInstruction (#1709)');
 try {
-  const src = readFileSync(join(ROOT, 'gemini-eval.mjs'), 'utf-8');
+  const rawSrc = readFileSync(join(ROOT, 'gemini-eval.mjs'), 'utf-8');
+  const src = stripCommentLines(rawSrc);
   const usesSystemInstruction = /getGenerativeModel\(\{[\s\S]*?systemInstruction:\s*systemPrompt/.test(src);
   // the per-request call must NOT re-embed the full systemPrompt inline (that
   // would defeat stable-prefix caching and duplicate the context)
   const noInlinePrefix = !/generateContent\(\[[\s\S]*?\{\s*text:\s*systemPrompt\s*\}/.test(src);
-  const carriesJdTurn = /generateContent\(`JOB DESCRIPTION TO EVALUATE/.test(src);
+  // inline template, or a named turn (#5571 hands the same turn to the PII guard first in the same block)
+  const carriesJdTurn =
+    /generateContent\(`JOB DESCRIPTION TO EVALUATE/.test(src) ||
+    /(?:const|let|var)\s+(\w+)\s*=\s*`JOB DESCRIPTION TO EVALUATE[^`]*`[^{}]*?assertGoogleRequestAllowed\(\s*\{[^{}]*?\bturns:\s*\[\s*\1\s*\][^{}]*?\}\s*\);?[^{}]*?await\s+(?:\w+\.)?generateContent\(\s*\1\s*\)/.test(src);
   if (usesSystemInstruction && noInlinePrefix && carriesJdTurn) {
     pass('gemini-eval moves the static prefix to systemInstruction and sends only the JD turn (#1709)');
   } else {

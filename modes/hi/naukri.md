@@ -209,9 +209,6 @@ Header के field names (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `P
 
 ---
 
-## Machine Summary
-(scripts के लिए YAML block -- नीचे requirement देखें)
-
 ## A) Role Summary
 (Block A का पूरा content)
 
@@ -255,11 +252,14 @@ Header के field names (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `P
 
 ## Job Description (archived verbatim)
 (offer का पूरा text, word-for-word paste किया हुआ -- नीचे requirement देखें)
+
+## Machine Summary
+(scripts के लिए YAML block -- नीचे requirement देखें)
 ```
 
 **Decision line (अनिवार्य):** `**निर्णय:**` Machine Summary का `final_decision` है, और header के नीचे की line `## निष्कर्ष (lead)` का sentence है, ज्यों का त्यों copy किया हुआ। दोनों सबसे आखिर में भरें। `Verdict:` को field name के रूप में कभी use न करें: web app पहले `VERDICT:` को score line के रूप में पढ़ता है।
 
-**Machine Summary (अनिवार्य):** header के ठीक बाद YAML block, `batch/batch-prompt.md` के schema, exact field names और rules के साथ (वही source है; यहाँ duplicate न करें)। इसमें `advertised_comp` (offer का salary figure word-for-word, या `null`), `risk_summary` और `requirement_importance` (Block B row by row; `inferred` की limit यहाँ भी लागू) शामिल हैं।
+**Machine Summary (अनिवार्य):** report के अंत में, `## Job Description (archived verbatim)` के बाद YAML block, `batch/batch-prompt.md` के schema, exact field names और rules के साथ (वही source है; यहाँ duplicate न करें)। इसमें `advertised_comp` (offer का salary figure word-for-word, या `null`), `risk_summary` और `requirement_importance` (Block B row by row; `inferred` की limit यहाँ भी लागू) शामिल हैं।
 
 **JD archival (अनिवार्य, #2789):** हर report में `## Job Description (archived verbatim)` section होना चाहिए जिसमें offer का पूरा text हो, कभी summarized या paraphrased नहीं। Heading English में रहती है: `check-jd-archive.mjs` उसे नाम से ढूँढता है। पहली line दिखाई देने वाली posting date है (`Posted: {date या relative text}`, या `Posted: not visible in source`), कभी report file की date नहीं। यदि offer बहुत लंबा हो या पूरा quote न हो सके, तो उसे `archive-posting.mjs` (नीचे वाला command) से capture करें और section में **ठीक यही** लिखें: `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, बिना किसी और text के। यदि machine capture संभव न हो (जैसे बिना URL के paste किया गया लंबा text), तो section का नाम `## Job Description (not archived)` कर दें और कारण बताएँ। इसकी जगह कभी paraphrase नहीं; पूरा rule `modes/oferta.md` (**JD archival**) में है।
 

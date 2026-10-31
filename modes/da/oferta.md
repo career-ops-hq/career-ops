@@ -205,9 +205,6 @@ Feltnavnene i hovedet (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 
 ---
 
-## Machine Summary
-(YAML-blok til scripts -- se kravet nedenfor)
-
 ## A) Rolleopsummering
 (fuldt indhold af blok A)
 
@@ -251,11 +248,14 @@ Feltnavnene i hovedet (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 
 ## Job Description (archived verbatim)
 (opslagets fulde tekst, indsat ordret -- se kravet nedenfor)
+
+## Machine Summary
+(YAML-blok til scripts -- se kravet nedenfor)
 ```
 
 **Beslutningslinje (obligatorisk):** `**Beslutning:**` er Machine Summary `final_decision`, og linjen under hovedet er sætningen fra `## Konklusion (lead)`, kopieret ordret. Begge udfyldes til sidst. Brug aldrig `Verdict:` som feltnavn: webappen læser det første `VERDICT:` som score-linje.
 
-**Machine Summary (obligatorisk):** YAML-blok lige efter hovedet, med skema, eksakte feltnavne og regler fra `batch/batch-prompt.md` (kilden; gentages ikke her). Indeholder `advertised_comp` (opslagets lønbeløb ordret, eller `null`), `risk_summary` og `requirement_importance` (blok B række for række; `inferred`-grænsen gælder også her).
+**Machine Summary (obligatorisk):** YAML-blok sidst i rapporten, efter `## Job Description (archived verbatim)`, med skema, eksakte feltnavne og regler fra `batch/batch-prompt.md` (kilden; gentages ikke her). Indeholder `advertised_comp` (opslagets lønbeløb ordret, eller `null`), `risk_summary` og `requirement_importance` (blok B række for række; `inferred`-grænsen gælder også her).
 
 **Arkivering af opslaget (obligatorisk, #2789):** Hver rapport SKAL have et afsnit `## Job Description (archived verbatim)` med opslagets fulde tekst, aldrig opsummeret eller omskrevet. Overskriften forbliver på engelsk: `check-jd-archive.mjs` finder den ved navn. Første linje er den synlige opslagsdato (`Posted: {dato eller relativ tekst}`, eller `Posted: not visible in source`), aldrig rapportfilens dato. Er opslaget for langt eller kan ikke citeres helt, så gem det med `archive-posting.mjs` (kommandoen nedenfor) og skriv **præcis** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` i afsnittet, uden anden tekst. Er ingen maskinel sikring mulig (fx en lang indsat tekst uden URL), så omdøb afsnittet til `## Job Description (not archived)` og skriv hvorfor. Aldrig en parafrase i stedet; den fulde regel står i `modes/oferta.md` (**JD archival**).
 
