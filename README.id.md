@@ -330,7 +330,7 @@ Di Codex, ketersediaan *slash command* tidak selalu dijamin. Gunakan nama mode y
 
 ## Cara Kerjanya
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-id-dark.svg"><img src="docs/how-it-works-id-light.svg" alt="Anda menempelkan URL atau deskripsi lowongan → Deteksi Arketipe (Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation) → Evaluasi A-H (membaca cv.md; Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan) → Laporan (reports/*.md), PDF (output/*.pdf), Entri Tracker (data/applications.md)" width="760"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-id-dark.svg"><img src="docs/how-it-works-id-light.svg" alt="Anda menempelkan URL atau deskripsi lowongan → Deteksi Arketipe (Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation) → Evaluasi A-H (membaca cv.md; Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan) → Laporan (reports/*.md), CV yang disesuaikan (PDF by default), Entri Tracker (data/applications.md)" width="760"></picture></p>
 
 ## Integrasi Antigravity CLI
 
