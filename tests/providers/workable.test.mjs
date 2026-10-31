@@ -189,7 +189,7 @@ try {
   }
 
   const implRole = fanOutJobs.find(j => j.title === 'Implementation Engineer');
-  if (implRole?.location === 'London, United Kingdom · Romania · Poland · Croatia') {
+  if (implRole?.location === 'London, United Kingdom · Romania · Poland · Croatia · Remote') {
     pass('parseWorkableWidget joins every fanned-out location in payload order');
   } else {
     fail(`fanned-out location was ${JSON.stringify(implRole?.location)}, expected all four countries joined`);
@@ -197,10 +197,10 @@ try {
 
   // The interleaved second posting must not absorb the first one's locations.
   const solutionsRole = fanOutJobs.find(j => j.title === 'Solutions Engineer');
-  if (solutionsRole?.location === 'Romania · Portugal') {
+  if (solutionsRole?.location === 'Romania · Portugal · Remote') {
     pass('parseWorkableWidget keeps interleaved fan-outs separate (keyed on URL, not adjacency)');
   } else {
-    fail(`interleaved fan-out location was ${JSON.stringify(solutionsRole?.location)}, expected "Romania · Portugal"`);
+    fail(`interleaved fan-out location was ${JSON.stringify(solutionsRole?.location)}, expected "Romania · Portugal · Remote"`);
   }
 
   // Everything except location still comes from the first entry.
@@ -225,6 +225,38 @@ try {
     pass('parseWorkableWidget dedups repeated locations and ignores empty siblings');
   } else {
     fail(`noisy fan-out produced ${JSON.stringify(noisyFanOut.map(j => j.location))}, expected ["Spain · Italy"]`);
+  }
+
+  // telecommuting is a per-job flag. A city-filled role used to keep only
+  // "Bend, United States", and a state with no city collapsed to the country.
+  // Hybrid is not this flag: telecommuting false stays city-only. A sibling
+  // that already contributed "Remote" must not be doubled.
+  const placeFlags = parseWorkableWidget({
+    jobs: [
+      { title: 'Field Coordinator', shortlink: 'https://apply.workable.com/j/B1', city: 'Bend', state: 'Oregon', country: 'United States', telecommuting: true },
+      { title: 'Regional Lead', shortlink: 'https://apply.workable.com/j/B2', city: '', state: 'Oregon', country: 'United States', telecommuting: true },
+      { title: 'Desk Analyst', shortlink: 'https://apply.workable.com/j/B3', city: 'Vancouver', state: 'British Columbia', country: 'Canada', telecommuting: false },
+      { title: 'State Only', shortlink: 'https://apply.workable.com/j/B4', city: '', state: 'Queensland', country: 'Australia', telecommuting: true },
+      { title: 'Already Remote', shortlink: 'https://apply.workable.com/j/B5', city: 'Oslo', country: 'Norway', telecommuting: true },
+      { title: 'Already Remote', shortlink: 'https://apply.workable.com/j/B5', telecommuting: true },
+      { title: 'Mixed Desk', shortlink: 'https://apply.workable.com/j/B6', city: 'Ghent', country: 'Belgium', telecommuting: false },
+      { title: 'Mixed Desk', shortlink: 'https://apply.workable.com/j/B6', city: 'Oslo', country: 'Norway', telecommuting: true },
+    ],
+  }, 'Acme');
+  const byTitle = Object.fromEntries(placeFlags.map(j => [j.title, j.location]));
+  const expectPlaces = {
+    'Field Coordinator': 'Bend, United States · Remote',
+    'Regional Lead': 'Oregon, United States · Remote',
+    'Desk Analyst': 'Vancouver, Canada',
+    'State Only': 'Queensland, Australia · Remote',
+    'Already Remote': 'Oslo, Norway · Remote',
+    'Mixed Desk': 'Ghent, Belgium · Oslo, Norway · Remote',
+  };
+  const placeMismatches = Object.entries(expectPlaces).filter(([title, loc]) => byTitle[title] !== loc);
+  if (placeMismatches.length === 0 && placeFlags.length === 6) {
+    pass('parseWorkableWidget keeps telecommuting and a state-only place on the folded location');
+  } else {
+    fail(`telecommuting locations = ${JSON.stringify(byTitle)}`);
   }
 
   // The point of the fix: ask the real consumer, not a reimplementation of it.

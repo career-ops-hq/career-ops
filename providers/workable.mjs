@@ -210,11 +210,24 @@ const LOCATION_SEPARATOR = ' · ';
  * Build the location string for ONE widget entry. The markdown feed rendered
  * "<city>, <country>"; we match that shape so location_filter behaves
  * identically across both paths.
+ *
+ * State is the place only when the city is blank. A state with no city
+ * (Queensland, New South Wales) otherwise collapses to the country. When a
+ * city is set, state stays off the string: adding it would rewrite history
+ * keys that already stored "city, country".
+ *
+ * telecommuting with a place is applied once by the fold below. Here it is
+ * only the fallback for a row that has no place at all.
  */
 function formatLocation(job) {
-  const parts = [job?.city, job?.country].filter(v => typeof v === 'string' && v.trim());
-  const joined = parts.map(v => v.trim()).join(', ');
-  if (joined) return joined;
+  const city = typeof job?.city === 'string' ? job.city.trim() : '';
+  const state = typeof job?.state === 'string' ? job.state.trim() : '';
+  const country = typeof job?.country === 'string' ? job.country.trim() : '';
+  const parts = [];
+  if (city) parts.push(city);
+  else if (state) parts.push(state);
+  if (country) parts.push(country);
+  if (parts.length) return parts.join(', ');
   return job?.telecommuting ? 'Remote' : '';
 }
 
@@ -263,7 +276,7 @@ function toPlainText(html) {
 export function parseWorkableWidget(payload, companyName) {
   if (!payload || !Array.isArray(payload.jobs)) return [];
   const jobs = [];
-  /** @type {Map<string, {job: any, locations: Set<string>}>} */
+  /** @type {Map<string, {job: any, locations: Set<string>, tele: boolean}>} */
   const byUrl = new Map();
   for (const raw of payload.jobs) {
     const title = typeof raw?.title === 'string' ? raw.title.trim() : '';
@@ -275,13 +288,17 @@ export function parseWorkableWidget(payload, companyName) {
     if (!url) continue;
 
     const location = formatLocation(raw);
+    // Same truthiness as the empty-place fallback above. Any sibling can carry
+    // the flag; the folded posting says Remote once.
+    const tele = Boolean(raw?.telecommuting);
 
     const merged = byUrl.get(url);
     if (merged) {
       // Fanned-out sibling of a posting already emitted: it contributes its
-      // location and nothing else. Empty locations add nothing; a repeated one
-      // collapses, so the cell never says "Romania · Romania".
+      // location and the telecommuting flag. Empty locations add nothing; a
+      // repeated one collapses, so the cell never says "Romania · Romania".
       if (location) merged.locations.add(location);
+      if (tele) merged.tele = true;
       continue;
     }
 
@@ -295,13 +312,19 @@ export function parseWorkableWidget(payload, companyName) {
     if (Number.isFinite(stamp)) job.postedAt = stamp;
 
     jobs.push(job);
-    byUrl.set(url, { job, locations: new Set(location ? [location] : []) });
+    byUrl.set(url, { job, locations: new Set(location ? [location] : []), tele });
   }
 
   // A Set iterates in insertion order, so the joined cell follows payload order
   // and a single-location posting re-joins to the exact string it already had.
-  for (const { job, locations } of byUrl.values()) {
-    job.location = [...locations].join(LOCATION_SEPARATOR);
+  // Remote is appended once, after the join, and only when no place already
+  // says it — an empty-place row already contributed the word "Remote".
+  for (const { job, locations, tele } of byUrl.values()) {
+    let location = [...locations].join(LOCATION_SEPARATOR);
+    if (tele && !/remote/i.test(location)) {
+      location = location ? `${location}${LOCATION_SEPARATOR}Remote` : 'Remote';
+    }
+    job.location = location;
   }
   return jobs;
 }
