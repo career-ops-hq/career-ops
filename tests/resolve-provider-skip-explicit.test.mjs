@@ -92,7 +92,7 @@ try {
 
   parserRuns = 0;
   const auditRows = await auditCompanies([explicit], { providers: reg, httpCtx });
-  if (parserRuns === 0 && auditRows.length === 1 && auditRows[0].provider !== 'local-parser') {
+  if (parserRuns === 0 && auditRows.length === 1 && auditRows[0].verdict === 'ok' && /does not run/.test(auditRows[0].detail || '')) {
     pass('audit-portals does not execute an explicit local-parser entry');
   } else {
     fail(`audit-portals ran the local parser ${parserRuns} time(s): ${JSON.stringify(auditRows)}`);
