@@ -201,6 +201,10 @@ career-ops விண்ணப்பதாரர்களுக்கு எப�
 
 </details>
 
+## எப்படி செயல்படுகிறது
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+
 ## Quick Start
 
 **விரைவான வழி, ஒரே கட்டளையில்:**
@@ -245,13 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline
-# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
-# In Codex, ask for the same mode in plain language, e.g.:
-# "Run the career-ops scan mode"
-# "Run the career-ops pipeline mode for data/pipeline.md"
-# "Run the career-ops pdf mode for the latest evaluated role"
-# "Run the career-ops tracker mode and summarize the current statuses"
+# Paste a job URL or JD text to trigger auto-pipeline.
+# Every other mode, and how to ask for it in your CLI: see Usage below.
 ```
 
 </details>
@@ -268,187 +267,131 @@ npm i -g @santifer/career-ops
 - `npx @santifer/career-ops init`: முதல் பயன்பாட்டிற்கு சிறந்தது; தனி project folder-ஐ உருவாக்குகிறது.
 - `npm i -g @santifer/career-ops`: `npx` வடிவத்தை விட `career-ops init` என்று தட்டச்சு செய்ய விரும்பினால். இது வேறு எந்தக் கட்டளையையும் சேர்க்காது.
 
+### இயக்க வேறு வழிகள்
+
+- **எந்த folder-இலிருந்தும், Claude Code plugin ஆக:** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **AI CLI இல்லாமல்:** தனித்து இயங்கும் Gemini, Ollama மற்றும் OpenAI-இணக்கமான script-கள் ஒரு JD-ஐத் தாமாகவே மதிப்பிடும். [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval) பார்க்கவும்.
+
 > **இந்த அமைப்பு உங்கள் AI கோடிங் CLI-யாலேயே தனிப்பயனாக்கப்பட வடிவமைக்கப்பட்டது.** Modes, archetypes, scoring weights, பேச்சுவார்த்தை ஸ்கிரிப்ட்கள்: மாற்றச் சொன்னால் போதும். அது பயன்படுத்தும் அதே கோப்புகளையே படிக்கிறது, எனவே எதைத் திருத்த வேண்டும் என்பது அதற்குச் சரியாகத் தெரியும்.
 
 முழு அமைப்பு வழிகாட்டிக்கு [docs/SETUP.md](docs/SETUP.md), தனிப்பயன் அல்லது லோக்கல் மாடல்களைப் பயன்படுத்தி career-ops-ஐ மலிவாக இயக்க [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) (Antigravity CLI-யின் இலவச அடுக்கில் செலவின்றி இயக்க [docs/FREE_TIER.md](docs/FREE_TIER.md)), தொடர் ஸ்கேன்களைத் திட்டமிடவும் token செலவின்றி triage-to-shortlist செய்யவும் [docs/AUTOMATION.md](docs/AUTOMATION.md), ATS auto-fill ஓட்டத்தின் விவரங்களுக்கு [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md), உங்கள் LinkedIn தொடர்புகளின் export-ஐ உங்கள் funnel-இல் உள்ள நிறுவனங்களுடன் ஒப்பிட [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md), பொதுவான அமைப்புக் கேள்விகளுக்கான பதில்களுக்கு [docs/FAQ.md](docs/FAQ.md) ஆகியவற்றைப் பார்க்கவும்; இதில் [கதை மூலப் பதிவு எப்படிப் புனையப்பட்ட எண்களைத் தடுக்கிறது](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank) என்பதும் அடங்கும். வடிவமைப்புக் கொள்கைகள் [ARCHITECTURE.md](ARCHITECTURE.md)-இல்; இயக்க நேர ஓட்டங்கள் [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)-இல்.
 
 ## Usage
 
-career-ops ஒரு பகிரப்பட்ட command router-ஐப் பயன்படுத்துகிறது. Slash கட்டளைகளைப் பதிவு செய்யும் CLI-களில் இது இப்படித் தெரியும்:
+உங்கள் AI CLI-இல் ஒரு வேலை URL-ஐயோ விவரத்தையோ ஒட்டுங்கள். இணைப்புடன் உள்ள வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா என career-ops சரிபார்க்கும் (ஒட்டிய உரைக்குச் சரிபார்க்க இணைப்பு இல்லை), உங்கள் CV-க்கு எதிராக மதிப்பெண் இடும், ஒரு report எழுதும், உங்கள் CV-ஐ ஏற்றவாறு தயாரிக்கும் (இயல்பாக PDF), உங்கள் tracker-இல் ஒரு வரியைச் சேர்க்கும். பெரும்பாலான நாட்களுக்கு இது போதும். மற்றதெல்லாம் பெயர் சொல்லிக் கேட்கும் mode-கள். ஒரு வேலை அறிவிப்பைப் படிக்க முடியாவிட்டால், pipeline நின்று உரையை ஒட்டச் சொல்லும்.
 
-```
-/career-ops           → கிடைக்கும் அனைத்து கட்டளைகளையும் காட்டு
-/career-ops {JD}      → AUTO-PIPELINE: மதிப்பீடு + அறிக்கை + PDF + tracker (உரை அல்லது URL ஒட்டவும்)
-/career-ops pipeline  → inbox-இல் நிலுவையிலுள்ள URL-களைச் செயலாக்கு (data/pipeline.md)
-/career-ops oferta    → மதிப்பீடு மட்டும், A முதல் H வரையிலான பகுதிகள் (தானியங்கி PDF இல்லை)
-/career-ops ofertas   → பல வாய்ப்புகளை ஒப்பிட்டுத் தரவரிசைப்படுத்து
-/career-ops contacto  → LinkedIn power move: தொடர்புகளைக் கண்டறி + செய்தி வரைவு
-/career-ops deep      → நிறுவனம் பற்றிய ஆழமான ஆய்வு ப்ராம்ப்ட்
-/career-ops interview-prep → நிறுவனத்திற்கே உரிய நேர்காணல் தயாரிப்பு ஆவணத்தை உருவாக்கு
-/career-ops interview    → ஊடாடும் சுயவிவர/CV onboarding நேர்காணல்
-/career-ops master-profile → உங்கள் Master Career Profile-ஐ இறக்குமதி செய், மதிப்பாய்வு செய், சரிபார்
-/career-ops eu-swe    → CV/apply/interview-க்கு முன் ஐரோப்பிய SWE விண்ணப்பத்தை அளவீடு செய்
-/career-ops interview/plan → வரவிருக்கும் நேர்காணலுக்கு நேரப் பிரிவுகளிலான தயாரிப்புத் திட்டம்
-/career-ops interview/practice → பயிற்சி நேர்காணல், பின்னூட்டத்துடன் ஒரு நேரத்தில் ஒரு கேள்வி
-/career-ops interview/debrief → நேர்காணலுக்குப் பிந்தைய ஆய்வு: இடைவெளிகளை மூடு, அடுத்த சுற்றைக் கணி
-/career-ops interview-redflag → நிறுவனத்தில் சேரும் முன் முதலாளியின் எச்சரிக்கை அறிகுறிகளை ஆய்வு செய்
-/career-ops pdf       → PDF மட்டும், ATS-optimized CV
-/career-ops text      → தனிப்பயனாக்கப்பட்ட markdown CV (cv.md-ஐப் பிரதிபலிக்கும், PDF இல்லை)
-/career-ops latex     → CV-ஐ LaTeX/Overleaf .tex ஆக export செய்
-/career-ops latex-tex → உங்கள் சொந்த resume.tex-ஐ அதே இடத்தில் தனிப்பயனாக்கு (opt-in; cv.md இயல்பாகவே இருக்கும்)
-/career-ops cover     → Cover letter: தனி JD ஒட்டல் அல்லது /career-ops cover {slug}
-/career-ops email     → முறையான விண்ணப்ப மின்னஞ்சல் வரைவு (வரைவு மட்டும்; ஒருபோதும் அனுப்பாது, சமர்ப்பிக்காது, கிளிக் செய்யாது)
-/career-ops add       → உங்கள் CV-இல் ஒரு project/paper/பதவியைச் சேர் (fetch + preview + confirm)
-/career-ops expand    → சுயவிவர இணைப்புகளிலிருந்து விடுபட்ட திறன்களைத் தானாகக் கண்டறிந்து சேர்
-/career-ops training  → North Star-ஐ வைத்து course/cert-ஐ மதிப்பிடு
-/career-ops project   → Portfolio project யோசனையை மதிப்பிடு
-/career-ops tracker   → விண்ணப்ப நிலை மேலோட்டம்
-/career-ops agent-inbox → அடுத்த அமர்வுக்கான கோரிக்கைகளை வரிசையில் சேர்/வெளியேற்று (data/agent-inbox.md)
-/career-ops apply     → நேரடி விண்ணப்ப உதவியாளர் (படிவத்தைப் படித்து + பதில்களை உருவாக்கும்)
-/career-ops scan      → தளங்களை ஸ்கேன் செய்து புதிய வாய்ப்புகளைக் கண்டறி
-/career-ops discover  → நிறுவனப் பட்டியலை ஸ்கேன் செய்யக்கூடிய ATS boards ஆகத் தீர்த்து portals.yml-இல் சேர் (token இல்லை)
-/career-ops batch     → இணையான workers மூலம் தொகுப்புச் செயலாக்கம்
-/career-ops patterns  → நிராகரிப்பு முறைகளை ஆய்வு செய்து இலக்கை மேம்படுத்து
-/career-ops offer-prep → பெற்ற offer/ஒப்பந்தத்தை விண்ணப்பதாரருடன் படி: விதிகள் வழியாக நடை + வழக்கறிஞர் கேள்விகள் (சட்ட ஆலோசனை அல்ல)
-/career-ops titles    → தேடலை விரிவாக்க உங்கள் CV-யிலிருந்து தொடர்புடைய பதவிப் பெயர்களைப் பரிந்துரை
-/career-ops upskill   → உங்கள் மதிப்பிடப்பட்ட அறிக்கைகளிலிருந்து ஒட்டுமொத்த திறன் இடைவெளி பகுப்பாய்வு
-/career-ops followup  → தொடர்பு கால அளவு tracker: தாமதமானவற்றைக் குறி, வரைவுகளை உருவாக்கு
-/career-ops reply-watch → முதலாளியின் பதில்களை வகைப்படுத்தி tracker புதுப்பிப்புகளைப் பரிந்துரை
-/career-ops outcome   → விண்ணப்ப முடிவைப் பதிவு செய்து artifacts-ஐ காப்பகப்படுத்து
-/career-ops calibrate → ஆலோசனை அறிக்கை: உங்கள் மதிப்பீட்டு மதிப்பெண்கள் உண்மையான முடிவுகளைக் கணிக்கின்றனவா? /outcome தரவைப் படிக்கும்; scoring-ஐ ஒருபோதும் மாற்றாது
-/career-ops update    → diff preview + compat check உடன் career-ops அமைப்புக் கோப்புகளைப் புதுப்பி
-```
+### ஒரு mode-ஐக் கேட்பது எப்படி
 
-அல்லது ஒரு வேலை URL-ஐயோ விளக்கத்தையோ நேரடியாக ஒட்டுங்கள்: career-ops தானாகக் கண்டறிந்து முழு பைப்லைனை இயக்கும்.
+| CLI | `scan`-ஐக் கேட்பது எப்படி |
+| --- | --- |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Pi | `/skill:career-ops scan` |
+| Codex, Qwen, Cursor அல்லது ஆதரிக்கப்படும் வேறு எந்த CLI | சாதாரண மொழியில்: "Run the career-ops scan mode" |
 
-Codex-இல் slash கட்டளைகள் உத்தரவாதமில்லை. அதற்குப் பதிலாக அதே mode பெயர்களை ஒரு ப்ராம்ப்டில் பயன்படுத்துங்கள், அல்லது `codex exec` மூலம் அழைக்கவும்.
+பின்னால் எதுவும் இல்லாத `/career-ops` கட்டளை மெனுவைக் காட்டும் அதைப் பயன்படுத்தும் CLI-களில். சாதாரண மொழி ஆதரிக்கப்படும் எல்லா CLI-களிலும் வேலை செய்யும். Claude Code plugin ஆக இருந்தால் கட்டளை `/career-ops:career-ops`.
 
-## எப்படி செயல்படுகிறது
+இவை அனைத்தும் ஒரே router-ஆன `.agents/skills/career-ops/SKILL.md`-ஐயும் அதே `modes/*.md` கோப்புகளையும் பகிர்கின்றன; எனவே எந்த CLI இயக்கினாலும் ஒரு mode ஒரே மாதிரி நடந்துகொள்ளும். Codex-இல் slash கட்டளைகளுக்கு உத்தரவாதம் இல்லை: சாதாரண மொழியில் கேளுங்கள், அல்லது `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` மூலம் ஒரு prompt-ஐ headless-ஆக இயக்குங்கள் ([docs/CODEX.md](docs/CODEX.md)). ஆதரிக்கப்படும் ஒவ்வொரு CLI-யிலும் இதை எப்படி இயக்குவது, headless கட்டளை உள்ள CLI-களுக்கு அந்தக் கட்டளைகள், CLI-வாரியான அமைப்புக் குறிப்புகள் ஆகியவை [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)-இல் உள்ளன.
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+### அன்றாடக் கட்டளைகள்
 
-## Antigravity CLI Integration
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| *URL அல்லது JD-ஐ ஒட்டு* | முழு pipeline: வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா எனச் சரிபார்த்தல் (URL-களுக்கு மட்டும்), A-G மதிப்பீடு மற்றும் உயர் மதிப்பெண்ணில் H, report, ஏற்றவாறு தயாரித்த CV (இயல்பாக PDF), tracker வரி |
+| `scan` | உங்கள் portal-களில் புதிய அறிவிப்புகளைத் தேடி inbox-இல் (`data/pipeline.md`) சேர் |
+| `pipeline` | inbox-இல் காத்திருக்கும் ஒவ்வொரு URL-ஐயும் மதிப்பிடு |
+| `apply` | ஒரு விண்ணப்பப் படிவத்தை உங்களுடன் சேர்ந்து, புலம் புலமாக நிரப்பு. Submit-க்கு முன் நின்றுவிடும் |
+| `tracker` | ஒவ்வொரு விண்ணப்பமும் எந்த நிலையில் உள்ளது |
+| `followup` | எந்த விண்ணப்பங்களுக்கு follow-up செய்ய வேண்டும், வரைவுகளுடன் |
 
-Claude Code மற்றும் OpenCode-ஐ ஆதரிப்பது போலவே, career-ops Antigravity CLI-ஐயும் நேரடியாக ஆதரிக்கிறது. அனைத்து slash கட்டளைகளும் பகிரப்பட்ட skill entrypoint வழியாக, அதே `modes/*.md` மதிப்பீட்டு தர்க்கத்துடன் கிடைக்கின்றன.
+<details>
+<summary><b>எல்லாக் கட்டளைகளும், தேடலின் கட்டம் வாரியாக</b></summary>
 
-Google நுகர்வோர் Gemini CLI அணுகலை Antigravity CLI-க்கு மாற்றியுள்ளது. Antigravity `AGENTS.md` மற்றும் `GEMINI.md` இரண்டையும் படிக்கும்போது முழு project வழிமுறைகளை இரட்டிப்பாக்காமல் இருக்க, `GEMINI.md` இப்போது செயலற்ற இணக்கக் காவலாக உள்ளது.
+`oferta`, `ofertas`, `contacto` ஆகியவை தங்கள் அசல் ஸ்பானிஷ் பெயர்களையே வைத்திருக்கின்றன: வாய்ப்பு, வாய்ப்புகள், தொடர்பு.
 
-### Native Antigravity CLI
+**பணிகளைக் கண்டறி**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-agy
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| [`scan`](modes/scan.md) | தளங்களை ஸ்கேன் செய்து புதிய வாய்ப்புகளைக் கண்டறி |
+| [`discover`](modes/discover.md) | நிறுவனப் பெயர்களின் பட்டியலை ஸ்கேன் செய்யக்கூடிய ATS board-களாக மாற்றி `portals.yml`-இல் சேர் (token செலவு இல்லை) |
+| [`pipeline`](modes/pipeline.md) | inbox-இல் (`data/pipeline.md`) நிலுவையிலுள்ள URL-களைச் செயலாக்கு |
+| [`triage`](modes/triage.md) | முழு மதிப்பீட்டுக்கு முன், `modes/_brief.md`-ஐ அடிப்படையாகக் கொண்ட விரைவான முதல் வடிகட்டல் (தொடரலாம்/வேண்டாம்) (கோப்புகளை எழுதாது) |
+| [`batch`](modes/batch.md) | இணையான headless worker-களுடன் பல அறிவிப்புகளை மதிப்பிடு |
+| [`titles`](modes/titles.md) | தேடலை விரிவாக்க, உங்கள் CV அடிப்படையில் தொடர்புடைய பணிப் பெயர்களைப் பரிந்துரை |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
+**ஒரு பணியை மதிப்பிடு**
 
-இந்த skill திறந்த தரநிலைப்படி `.agents/skills/career-ops/SKILL.md`-இல் வரையறுக்கப்பட்டு, ஆதரிக்கப்படும் ஒவ்வொரு CLI-க்கும் (எ.கா. `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`) symlink அல்லது குறிப்பு செய்யப்பட்டுள்ளது. Cursor, `.agents/skills/`-இல் உள்ள பகிரப்பட்ட skill-ஐ தானாகக் கண்டறிகிறது.
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| *URL அல்லது JD-ஐ ஒட்டு* | [Auto-pipeline](modes/auto-pipeline.md): மதிப்பீடு + report + ஏற்றவாறு தயாரித்த CV (இயல்பாக PDF) + tracker பதிவு |
+| [`oferta`](modes/oferta.md) | மதிப்பீடு மட்டும், A முதல் G வரையிலான பகுதிகள் மற்றும் உயர் மதிப்பெண்ணில் H (PDF இல்லை) |
+| [`ofertas`](modes/ofertas.md) | பல வாய்ப்புகளை ஒப்பிட்டுத் தரவரிசைப்படுத்து |
+| [`deep`](modes/deep.md) | நிறுவனம் பற்றிய ஆழமான ஆராய்ச்சி prompt |
+| [`eu-swe`](modes/regional/eu-swe.md) | CV, விண்ணப்பம் அல்லது நேர்காணலுக்கு முன், ஐரோப்பிய மென்பொருள் பொறியியல் விண்ணப்பத்தைச் சீரமை |
 
-## Codex Integration
+**விண்ணப்பி**
 
-career-ops Codex-ஐ அதே பகிரப்பட்ட router வழியாக ஆதரிக்கிறது, ஆனால் slash கட்டளைகளைத் தானாகப் பதிவு செய்யும் CLI-களிலிருந்து அழைப்பு முறை வேறுபடுகிறது. முழு வழிகாட்டிக்கு [docs/CODEX.md](docs/CODEX.md) பார்க்கவும்.
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| [`pdf`](modes/pdf.md) | ATS-optimized CV, PDF ஆக |
+| [`ats`](modes/ats.md) | உருவாக்கிய CV ATS-க்கு ஏற்றதா எனச் சரிபார்: மதிப்பெண்ணும் சரிசெய்யக்கூடிய சிக்கல்களும் |
+| [`text`](modes/text.md) | markdown ஆக ஏற்றவாறு தயாரித்த CV (`cv.md`-ஐப் பிரதிபலிக்கும், PDF இல்லை) |
+| [`latex`](modes/latex.md) | CV-ஐ LaTeX/Overleaf `.tex` ஆக ஏற்றுமதி செய் |
+| [`latex-tex`](modes/latex-tex.md) | உங்கள் சொந்த `resume.tex`-ஐ அங்கேயே ஏற்றவாறு மாற்று (விருப்பத்தேர்வு; இயல்புநிலை `cv.md` தான்) |
+| [`cover`](modes/cover.md) | ஒட்டிய JD அல்லது மதிப்பிடப்பட்ட report-இலிருந்து cover letter (`cover {slug}`) |
+| [`email`](modes/email.md) | முறையான விண்ணப்ப மின்னஞ்சல் வரைவு. வரைவு மட்டும்: ஒருபோதும் அனுப்பாது, சமர்ப்பிக்காது, கிளிக் செய்யாது |
+| [`contacto`](modes/contacto.md) | hiring manager, recruiter அல்லது சக ஊழியரைக் கண்டறிந்து LinkedIn செய்தி வரைவு எழுது |
+| [`apply`](modes/apply.md) | நேரடி விண்ணப்ப உதவியாளர் (இந்த checkout-இலிருந்து Playwright). சமர்ப்பிக்காது |
 
-### ஊடாடும் Codex
+**நேர்காணல்**
 
-```bash
-cd career-ops
-codex
-```
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| [`interview-prep`](modes/interview-prep.md) | நிறுவனத்துக்கே உரிய நேர்காணல் தயாரிப்பு ஆவணம் |
+| [`interview/plan`](modes/interview/plan.md) | வரவிருக்கும் நேர்காணலுக்கான நேரத் தொகுதிகளாகப் பிரித்த தயாரிப்புத் திட்டம் |
+| [`interview/practice`](modes/interview/practice.md) | பயிற்சி நேர்காணல், ஒரு நேரத்தில் ஒரு கேள்வி, பின்னூட்டத்துடன் |
+| [`interview/debrief`](modes/interview/debrief.md) | நேர்காணலுக்குப் பிந்தைய மதிப்பாய்வு: குறைகளை நிரப்பு, அடுத்த சுற்றை முன்கணி |
+| [`interview-redflag`](modes/interview-redflag.md) | சேருவதற்கு முன் ஒரு முதலாளியின் எச்சரிக்கை அறிகுறிகளை ஆராய் |
 
-Codex-இல் slash கட்டளைகள் உத்தரவாதமில்லை. `/career-ops` கிடைக்கவில்லை என்றால், சாதாரண மொழியில் அந்த mode-ஐ நேரடியாக இயக்கச் சொல்லுங்கள்:
+**விண்ணப்பித்த பிறகு**
 
-```text
-Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
-Run the career-ops scan mode and summarize new matches.
-Run the career-ops pipeline mode for data/pipeline.md.
-Run the career-ops pdf mode for the latest evaluated role.
-Run the career-ops tracker mode and summarize the current statuses.
-```
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| [`tracker`](modes/tracker.md) | விண்ணப்ப நிலை மேலோட்டம் |
+| [`followup`](modes/followup.md) | Follow-up தாளம்: தாமதமான விண்ணப்பங்களைக் குறி, வரைவுகளை உருவாக்கு |
+| [`reply-watch`](modes/reply-watch.md) | முதலாளிகளின் பதில்களை வகைப்படுத்தி tracker புதுப்பிப்புகளைப் பரிந்துரை |
+| [`outcome`](modes/outcome.md) | ஒரு விண்ணப்பத்தின் முடிவைப் பதிவுசெய்து அதன் artifact-களை காப்பகப்படுத்து |
+| [`offer-prep`](modes/offer-prep.md) | பெற்ற வாய்ப்பு அல்லது ஒப்பந்தத்தை உங்களுடன் சேர்ந்து படி: பிரிவு வாரியாகப் பார்வையிடலும் வழக்கறிஞருக்கான கேள்விகளும் (சட்ட ஆலோசனை அல்ல) |
 
-### ஒரே முறை Codex (`codex exec`)
+**உங்கள் சுயவிவரமும் CV-யும்**
 
-```bash
-codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-codex exec "Run career-ops scan mode in this repo and summarize new matches."
-codex exec "Run career-ops pipeline mode for data/pipeline.md."
-codex exec "Run career-ops pdf mode for the latest evaluated role."
-codex exec "Run career-ops tracker mode and summarize the current statuses."
-```
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| [`interview`](modes/interview.md) | சுயவிவர அமைப்பு: உங்கள் அனுபவம் பற்றிய ஊடாடும் நேர்காணல், இது உங்கள் CV-யையும் சுயவிவரத்தையும் உருவாக்குகிறது (நேர்காணல் பயிற்சி அல்ல) |
+| [`intake`](modes/intake.md) | `documents/`-இல் உள்ள கோப்புகளிலிருந்து (master CV, LinkedIn ஏற்றுமதி) உங்கள் சுயவிவரத்தை உருவாக்கு அல்லது செறிவாக்கு. உங்கள் உறுதிப்படுத்தல் இல்லாமல் எதுவும் எழுதப்படாது |
+| [`master-profile`](modes/master-profile.md) | உங்கள் Master Career Profile-ஐ இறக்குமதி செய்து, மதிப்பாய்வு செய்து, சரிபார்த்து, தேர்ந்தெடுத்த உண்மைகளை CV புள்ளிகளாகத் தயாரி |
+| [`add`](modes/add.md) | CV-இல் ஒரு project, கட்டுரை அல்லது பணியைச் சேர் (fetch, முன்னோட்டம், உறுதிப்படுத்தல்) |
+| [`expand`](modes/expand.md) | உங்கள் சுயவிவர இணைப்புகளிலிருந்து, CV-இல் விடுபட்ட திறன்களைக் கண்டறி |
+| [`retro`](modes/retro.md) | இந்த session-ஐ மதிப்பாய்வு செய்து, நீங்கள் கற்றுத்தந்ததை விதிகளாக வைத்துக்கொள் (நீங்கள் ஏற்றுக்கொண்டவற்றை மட்டுமே எழுதும்) |
 
-## Grok Build CLI Integration
+**உங்கள் இலக்கு நிர்ணயத்தை மேம்படுத்து**
 
-Claude Code மற்றும் OpenCode-ஐ ஆதரிப்பது போலவே, career-ops Grok Build CLI-ஐயும் நேரடியாக ஆதரிக்கிறது. `AGENTS.md` project விதிகளாகத் தானாக ஏற்றப்படுகிறது, அனைத்து slash கட்டளைகளும் பகிரப்பட்ட skill entrypoint வழியாகக் கிடைக்கின்றன.
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| [`patterns`](modes/patterns.md) | நிராகரிப்பு முறைகளை ஆராய்ந்து இலக்கு நிர்ணயத்தை மேம்படுத்து |
+| [`calibrate`](modes/calibrate.md) | உங்கள் மதிப்பீட்டு மதிப்பெண்கள் உண்மையான முடிவுகளை முன்கணிக்கின்றனவா எனச் சரிபார். ஆலோசனை மட்டும்: மதிப்பெண் முறையை ஒருபோதும் மாற்றாது |
+| [`upskill`](modes/upskill.md) | மதிப்பிடப்பட்ட உங்கள் எல்லா report-களிலும் திறன் இடைவெளி பகுப்பாய்வு |
+| [`training`](modes/training.md) | ஒரு பாடநெறி அல்லது சான்றிதழை உங்கள் North Star-க்கு எதிராக மதிப்பிடு |
+| [`project`](modes/project.md) | ஒரு portfolio project யோசனையை மதிப்பிடு |
 
-### Native Grok Build CLI
+**அமைப்பு**
 
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-grok
+| கட்டளை | என்ன செய்கிறது |
+| --- | --- |
+| [`agent-inbox`](modes/agent-inbox.md) | அடுத்த session-க்கான கோரிக்கைகளை வரிசையில் வை, அப்போது அவற்றைச் செயல்படுத்து (`data/agent-inbox.md`). `inbox` என்பதும் வேலை செய்யும் |
+| [`update`](modes/update.md) | diff முன்னோட்டத்துடனும் இணக்கச் சரிபார்ப்புடனும் career-ops அமைப்புக் கோப்புகளைப் புதுப்பி |
 
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-Headless batch workers-க்கு `grok -p "prompt"` பயன்படுத்துங்கள் (கருவி இயக்கங்களைத் தானாக அனுமதிக்க `--yolo` சேர்க்கவும்).
-
-## Pi Integration
-
-career-ops [Pi](https://github.com/earendil-works/pi)-ஐ நேரடியாக ஆதரிக்கிறது, பராமரிக்க எந்த wrapper கோப்பும் தேவையில்லை: Pi, repo root-இல் உள்ள `AGENTS.md`-ஐ project context-ஆகப் படித்து, `.agents/skills/career-ops/SKILL.md`-இல் உள்ள பகிரப்பட்ட skill-ஐத் தானாகவே கண்டறிகிறது. அதன் பிறகு router `/skill:career-ops` ஆகக் கிடைக்கிறது.
-
-### Native Pi
-
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-pi
-
-# 2. Use the shared skill with subcommands:
-/skill:career-ops "Senior AI Engineer at Anthropic..."
-/skill:career-ops pipeline
-/skill:career-ops scan
-/skill:career-ops pdf
-/skill:career-ops tracker
-```
-
-### ஒரே முறை Pi (`pi -p`)
-
-```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
-```
-
-ஒரு Pi build, project resources-ஐ ஒரு நம்பிக்கை முடிவுக்குப் பின்னால் வைத்திருந்தால், repo-க்குள் ஒரு முறை `/trust` இயக்கி, project skill ஏறும்படி `pi`-ஐ மறுதொடக்கம் செய்யுங்கள் (`/trust` இனி வரும் Pi processes-க்குப் பொருந்தும்), அல்லது `-a` உடன் தொடங்குங்கள்; அது ஒரே ஒரு இயக்கத்தை மட்டும் நம்புகிறது, மறுதொடக்கம் தேவையில்லை.
-
-### தனித்த Gemini API ஸ்கிரிப்ட் (CLI நிறுவல் தேவையில்லை)
-
-```bash
-# 1. Get a free API key at https://aistudio.google.com/apikey
-cp .env.example .env
-# Edit .env, set GEMINI_API_KEY=your_key_here
-
-# 2. Install dependencies
-npm install
-
-# 3. Evaluate a job description
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-node agent-inbox.mjs add "..."   # queue a request for the next session
-npm run gemini:eval -- "JD text here"
-```
-
-> **இலவச அடுக்கு:** இரண்டு விருப்பங்களும் கட்டணமின்றி வேலை செய்கின்றன. Native CLI Google OAuth-ஐப் பயன்படுத்துகிறது; API ஸ்கிரிப்ட் `gemini-3.6-flash`-ஐப் பயன்படுத்துகிறது (rate limits மாடலையும் அடுக்கையும் பொறுத்தது; தற்போதைய quota-க்களுக்கு Google AI ஆவணங்களைப் பார்க்கவும்).
+</details>
 
 ## முன்கூட்டியே அமைக்கப்பட்ட வேலைவாய்ப்பு தளங்கள்
 
