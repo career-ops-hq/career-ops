@@ -49,7 +49,7 @@ version: 1.0.0
   }
 
   body {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: var(--font-size, 11px);
     line-height: 1.5;
     color: #1a1a2e;
@@ -74,7 +74,7 @@ version: 1.0.0
   }
 
   .header h1 {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 28px;
     font-weight: 700;
     color: #1a1a2e;
@@ -109,7 +109,7 @@ version: 1.0.0
     display: flex;
     flex-wrap: wrap;
     gap: 8px 14px;
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: var(--font-size, 10.5px);
     line-height: 1.4;
     color: #555;
@@ -150,7 +150,7 @@ version: 1.0.0
   }
 
   .section-title {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -188,7 +188,7 @@ version: 1.0.0
   }
 
   .competency-tag {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 10px;
     font-weight: 500;
     color: var(--tag-color);
@@ -211,7 +211,7 @@ version: 1.0.0
   }
 
   .job-company {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 12.5px;
     font-weight: 600;
     color: var(--secondary-color, hsl(270, 70%, 45%));
@@ -266,7 +266,7 @@ version: 1.0.0
   }
 
   .project-title {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 11.5px;
     font-weight: 600;
     color: var(--secondary-color, hsl(270, 70%, 45%));
@@ -549,7 +549,7 @@ version: 1.0.0
      browser's per-glyph fallback picks the first installed CJK face for kana
      and kanji. Mirrors the lang="ar" precedent above. */
   html[lang="ja"] body {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Arial Unicode MS', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
       Meiryo, 'MS PGothic', sans-serif;
   }
@@ -560,7 +560,7 @@ version: 1.0.0
   html[lang="ja"] .project-title,
   html[lang="ja"] .competency-tag,
   html[lang="ja"] .skill-category {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Arial Unicode MS', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
       Meiryo, 'MS PGothic', sans-serif;
   }
@@ -582,11 +582,12 @@ version: 1.0.0
     /* Keep Chinese and Latin text in one font run where possible. Splitting
        mixed-language lines across Liberation Sans plus a CJK fallback makes
        Chromium PDFs look correct while text extractors reorder Latin tokens.
-       A profile font replaces only the var() default: PingFang SC is repeated
-       so the Simplified Chinese fallback chain stays intact behind it. */
-    font-family: var(--font-family, 'PingFang SC'), 'PingFang SC', 'Hiragino Sans GB',
+       A profile font replaces only the var() default. Arial Unicode MS comes
+       before PingFang, because headless Chromium embeds that face and does not
+       embed PingFang when it is only named. */
+    font-family: var(--font-family, 'Arial Unicode MS'), 'Arial Unicode MS', 'PingFang SC', 'Hiragino Sans GB',
       'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC',
-      'Arial Unicode MS', sans-serif;
+      sans-serif;
     color: var(--zhm-text);
     line-break: strict;
     word-break: normal;
@@ -600,7 +601,7 @@ version: 1.0.0
      minimal template, not a general one.) */
   html[lang="zh-TW"] body,
   html[lang="zh-TW"] .contact-row {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'PingFang TC',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Arial Unicode MS', 'PingFang TC',
       'Microsoft JhengHei', 'Noto Sans CJK TC',
       'Noto Sans TC', 'Source Han Sans TC', sans-serif;
   }
