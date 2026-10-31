@@ -1887,11 +1887,6 @@ async function main() {
   // Persist (unless dry-run, or nothing to save).
   let saved = false;
   if (offers.length && !opts.dryRun) {
-    // appendToPipeline assumes the file exists (onboarding creates it) — cover fresh setups.
-    if (!existsSync(PIPELINE_PATH)) {
-      mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
-      writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
-    }
     await appendToPipeline(offers);
     await appendToScanHistory(offers, date);
     saved = true;
