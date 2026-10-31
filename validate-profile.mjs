@@ -16,11 +16,14 @@
  * the default tier. The user's only signal is noticing the wrong language in
  * finished work.
  *
- * WARN, never FAIL. career-ops is meant to work out of the box and an unknown
- * key is not a broken install — it is almost always a typo, and the right
- * response is to name it, not to refuse to run. `portals.yml` gets
- * validate-portals.mjs and the plugin registry gets validate-plugin-registry.mjs;
- * this is the same family for the one file that had none.
+ * Unknown keys WARN, never FAIL. career-ops is meant to work out of the box
+ * and an unknown key is not a broken install. It is almost always a typo,
+ * and the right response is to name it, not to refuse to run. A known key
+ * set to a value its reader ignores is an error: spend_tier, language.output,
+ * and cv.output_format otherwise fall back with no signal.
+ * `portals.yml` gets validate-portals.mjs and the plugin registry gets
+ * validate-plugin-registry.mjs; this is the same family for the one file
+ * that had none.
  *
  * The known-key set is DERIVED from config/profile.example.yml rather than
  * hardcoded, so a key added to the example is understood here on the same
@@ -32,16 +35,16 @@
  *   node validate-profile.mjs [--profile <path>] [--json] [--self-test]
  *
  * Exit codes:
- *   0  clean, or findings (they are warnings)
+ *   0  clean, or warnings only (unknown keys)
  *   1  usage error
- *   2  the profile exists and does not parse
+ *   2  the profile does not parse, or a known key is set to a value readers ignore
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
-import { getProfilePath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -116,7 +119,93 @@ function editDistance(a, b) {
  * @param {string} exampleText - Raw config/profile.example.yml.
  * @returns {{findings: object[], parsed: object|null}}
  */
-export function validateProfile(profileText, exampleText) {
+const SPEND_TIERS = new Set(['economy', 'standard', 'premium']);
+const CV_FORMATS = new Set(['html', 'latex', 'text']);
+
+function shownValue(value) {
+  return typeof value === 'string' ? JSON.stringify(value.trim()) : typeof value;
+}
+
+/**
+ * Known keys whose readers silently substitute a default. Missing keys stay
+ * valid. A present value that those readers will not use is an error.
+ *
+ * @param {object} parsed
+ * @param {object[]} findings
+ * @param {string} file
+ */
+function checkKnownValues(parsed, findings, file) {
+  if ('spend_tier' in parsed) {
+    const raw = parsed.spend_tier;
+    const ok = typeof raw === 'string' && SPEND_TIERS.has(raw.trim().toLowerCase());
+    if (!ok) {
+      findings.push({
+        level: 'error',
+        code: 'bad-value',
+        key: 'spend_tier',
+        message: `${file}: spend_tier is ${shownValue(raw)}. Use economy, standard, or premium. Example: spend_tier: standard`,
+      });
+    }
+  }
+
+  if ('language' in parsed) {
+    const language = parsed.language;
+    const mapping = language != null && typeof language === 'object' && !Array.isArray(language);
+    if (!mapping) {
+      findings.push({
+        level: 'error',
+        code: 'bad-value',
+        key: 'language',
+        message: `${file}: language must be a mapping. Example: output: en`,
+      });
+    } else if ('output' in language) {
+      const output = language.output;
+      const ok = typeof output === 'string'
+        && output.trim().length > 0
+        && output.trim().length <= 64
+        && !/[\r\n\0]/.test(output);
+      if (!ok) {
+        findings.push({
+          level: 'error',
+          code: 'bad-value',
+          key: 'language.output',
+          message: `${file}: language.output must be one line of at most 64 characters. Example: output: en`,
+        });
+      }
+    }
+  }
+
+  if ('cv' in parsed) {
+    const cv = parsed.cv;
+    const mapping = cv != null && typeof cv === 'object' && !Array.isArray(cv);
+    if (!mapping) {
+      findings.push({
+        level: 'error',
+        code: 'bad-value',
+        key: 'cv',
+        message: `${file}: cv must be a mapping. Example: output_format: html`,
+      });
+    } else if ('output_format' in cv) {
+      const format = cv.output_format;
+      const ok = typeof format === 'string' && CV_FORMATS.has(format.trim().toLowerCase());
+      if (!ok) {
+        findings.push({
+          level: 'error',
+          code: 'bad-value',
+          key: 'cv.output_format',
+          message: `${file}: cv.output_format is ${shownValue(format)}. Use html, latex, or text. Example: output_format: html`,
+        });
+      }
+    }
+  }
+}
+
+// The CLI passes the real path. Library callers (doctor) get the resolved
+// profile relative to the data root, so an overridden profile path is named
+// as it is, not as the default. Forward slashes on every platform.
+const DEFAULT_PROFILE_LABEL = relative(getCareerOpsRoot(), DEFAULT_PROFILE_PATH).split(sep).join('/') || DEFAULT_PROFILE_PATH;
+
+export function validateProfile(profileText, exampleText, profileLabel = DEFAULT_PROFILE_LABEL) {
   const findings = [];
   if (!hasYamlContent(profileText)) return { parsed: null, findings };
 
@@ -173,6 +262,8 @@ export function validateProfile(profileText, exampleText) {
     }
   }
 
+  checkKnownValues(parsed, findings, profileLabel);
+
   return { parsed, findings };
 }
 
@@ -219,7 +310,15 @@ if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) runSelfTest();
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: node validate-profile.mjs [--profile <path>] [--json] [--self-test]');
+    console.log(`Usage: node validate-profile.mjs [--profile <path>] [--json] [--self-test]
+
+Unknown keys are warnings and the command exits 0.
+A known key set to a value readers ignore exits 2.
+
+Examples:
+  node validate-profile.mjs --json
+  node validate-profile.mjs --profile config/profile.yml
+  node validate-profile.mjs --self-test`);
     process.exit(0);
   }
   const pi = args.indexOf('--profile');
@@ -229,7 +328,7 @@ if (isMainModule(import.meta.url)) {
     process.exit(0);
   }
   const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
-  const { findings } = validateProfile(readFileSync(profilePath, 'utf-8'), example);
+  const { findings } = validateProfile(readFileSync(profilePath, 'utf-8'), example, profilePath);
   if (args.includes('--json')) {
     console.log(JSON.stringify({ profile: profilePath, findings }, null, 2));
   } else if (findings.length === 0) {
@@ -237,5 +336,5 @@ if (isMainModule(import.meta.url)) {
   } else {
     for (const f of findings) console.log(`  ${f.level === 'error' ? '✗' : '⚠'} ${f.message}`);
   }
-  process.exit(findings.some(f => f.code === 'unparseable' || f.code === 'not-a-mapping') ? 2 : 0);
+  process.exit(findings.some((f) => f.level === 'error') ? 2 : 0);
 }
