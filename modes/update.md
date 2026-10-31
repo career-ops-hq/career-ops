@@ -7,7 +7,7 @@ When the user runs `/career-ops update`, execute this interactive update flow.
 Run `node update-system.mjs check --force` and parse the JSON output. `--force` because the user asked: a release they said no to earlier is shown too.
 
 - If `up-to-date`: Tell the user "career-ops is up to date (v{version})." and stop.
-- If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop.
+- If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop. If the JSON carries a `detail` field, show it verbatim after that sentence: it is a fixed-English diagnostic naming what failed (for example `ENOENT` when curl is not installed, or a proxy or TLS error), and that is what the user needs to fix it.
 - If `no-remote-version`: Tell the user "Couldn't determine the latest career-ops release right now. Try again later." and stop.
 - If `update-available`: Continue to Step 2.
 
