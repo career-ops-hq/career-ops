@@ -194,14 +194,7 @@ export function jdHtmlToText(html) {
   const stripped = decodeEntities(html)
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<br\s*\/?>/gi, '\n')
-    // The bullet goes on the item's first text. Line breaks and markup ahead of
-    // it (`<li>\n<p>text`) would otherwise leave a line holding only "-", and
-    // jd-years.mjs takes such a line for a heading, which hides the real one
-    // above it ("Preferred qualifications"). In a 2026-10-30 sample, 518 of
-    // 2,864 Greenhouse and 117 of 393 Lever descriptions had such lines. The
-    // skip stops at a list tag, so an empty item keeps its own line rather than
-    // taking the next item's text, or the text after the list.
-    .replace(/<li[^>]*>(?:\s|<(?!\/?(?:li|ul|ol)\b)[^>]*>)*/gi, '\n- ')
+    .replace(/<li[^>]*>/gi, '\n- ')
     .replace(BLOCK_END_RE, '\n')
     .replace(/<[^>]+>/g, ' ');
   return decodeEntities(stripped)
