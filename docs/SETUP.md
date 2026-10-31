@@ -124,6 +124,12 @@ npx playwright install chromium
 
 On NixOS, skip this step: the browsers it downloads can't run there. Use the flake dev shell instead, as described in [NIXOS.md](NIXOS.md).
 
+On macOS releases where Playwright fails to install or launch bundled Chromium (e.g. macOS 12 Monterey), point Playwright to your system Google Chrome installation:
+
+```bash
+export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+```
+
 ## Available Commands
 
 | Action | How |
