@@ -57,6 +57,9 @@
 # The registry is one file per plugin under plugins-registry/ (#1401).
 /plugins-registry/             @santifer
 /validate-plugin-registry.mjs  @santifer
+/templates-registry/           @santifer
+/validate-template-registry.mjs @santifer
+/lib/templates-registry.mjs   @santifer
 /plugin-install.mjs            @santifer
 /plugin-audit.mjs              @santifer
 /plugins/_engine.mjs           @santifer

@@ -1559,6 +1559,7 @@ These have no `npm run` binding — modes and agents call them with
 | `node plugin-install.mjs [--help]` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA); the engine behind the `plugins.mjs` new/add commands, which `--help` points at |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
+| `node validate-template-registry.mjs [--root <dir>]` | Shape gate for `templates-registry/<id>.json` files |
 
 ---
 
