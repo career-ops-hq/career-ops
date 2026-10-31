@@ -32,6 +32,7 @@ const USAGE = `
     "compensation": { "target_range", "currency"?, "minimum"?, "location_flexibility"? },
     "location": { "country", "timezone", "city"?, "visa_status"?, "authorized_in"?, "needs_sponsorship"? },
     "spend_tier": "economy" | "standard" | "premium",
+    "cv"?: { "max_pages"?: 1, "strict_pages"?: true },
     "archetypes": [{ "name", "level", "fit": "primary" | "secondary" | "adjacent" }]?,
     "narrative": { "headline"?, "exit_story"?, "superpowers"?: ["..."], "proof_points"?: [{ "name", "url"?, "hero_metric"? }] }?,
     "portals": {
@@ -125,6 +126,17 @@ export function normalizeAnswers(raw) {
     if (action !== 'drop' && action !== 'label') throw new AnswerError('portals.experience_filter.action must be drop or label');
     experienceFilter = { stretch_years: stretch, action };
   }
+  // #6326: an optional CV page budget, asked for during onboarding when the
+  // candidate is early-career. Absent keys stay commented out in the profile.
+  const cv = a.cv && typeof a.cv === 'object' ? a.cv : {};
+  const maxPages = cv.max_pages ?? null;
+  if (maxPages !== null && (!Number.isInteger(maxPages) || maxPages < 1)) {
+    throw new AnswerError('cv.max_pages must be a whole number of pages, 1 or more');
+  }
+  const strictPages = cv.strict_pages ?? null;
+  if (strictPages !== null && typeof strictPages !== 'boolean') {
+    throw new AnswerError('cv.strict_pages must be true or false');
+  }
   const negative = list(portals.negative);
   for (const n of negative) {
     const matches = compileKeyword(foldTitle(n));
@@ -155,6 +167,7 @@ export function normalizeAnswers(raw) {
       needs_sponsorship: location.needs_sponsorship === true,
     },
     spend_tier: tier,
+    cv: { max_pages: maxPages, strict_pages: strictPages },
     archetypes,
     narrative: {
       headline: narrative.headline?.trim() || '',
@@ -246,6 +259,14 @@ export function buildProfile(template, a) {
   const tier = lines.findIndex((l) => l.startsWith('spend_tier:'));
   if (tier < 0) throw new Error('template has no spend_tier');
   lines[tier] = `spend_tier: ${a.spend_tier}`;
+  // #6326: uncomment the page-budget lines the example profile ships under cv:.
+  for (const key of ['max_pages', 'strict_pages']) {
+    const value = a.cv?.[key];
+    if (value === null || value === undefined) continue;
+    const at = lines.findIndex((l) => l.startsWith(`  # ${key}: `));
+    if (at < 0) throw new Error(`template has no "# ${key}" line`);
+    lines[at] = `  ${key}: ${value}`;
+  }
   return lines.join('\n');
 }
 
@@ -320,7 +341,8 @@ function checkProfile(text, a) {
     && JSON.stringify(p.target_roles.primary) === JSON.stringify(a.target_roles)
     && p.location.country === a.location.country
     && p.spend_tier === a.spend_tier
-    && (a.years_of_experience === null || a.years_of_experience === undefined || p.candidate.years_of_experience === a.years_of_experience);
+    && (a.years_of_experience === null || a.years_of_experience === undefined || p.candidate.years_of_experience === a.years_of_experience)
+    && ['max_pages', 'strict_pages'].every((k) => a.cv?.[k] === null || a.cv?.[k] === undefined || p.cv?.[k] === a.cv[k]);
   if (!ok) throw new Error('profile.yml did not read back as written');
 }
 

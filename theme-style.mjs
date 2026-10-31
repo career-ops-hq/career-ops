@@ -174,6 +174,58 @@ export function cvSectionOrderFrom(cv) {
 }
 
 /**
+ * Read the CV page budget from a profile file (#6326):
+ *
+ *   cv:
+ *     max_pages: 1
+ *     strict_pages: true
+ *
+ * Missing file / absent block / bad YAML → {}, same as readCvSectionOrder. A
+ * key that is present but unusable comes back in `invalid`, and the caller
+ * decides what that means for the document it is rendering.
+ * @param {string} [profilePath]
+ * @returns {{maxPages?: number, strictPages?: boolean, invalid?: {key: string, message: string}[]}}
+ */
+export function readCvPageBudget(profilePath = getProfilePath()) {
+  try {
+    if (!existsSync(profilePath)) return {};
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+    return cvPageBudgetFrom(raw?.cv);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Map a parsed `cv:` block to the page-budget keys it sets. A key that is
+ * present but unusable is reported in `invalid` instead of being guessed at:
+ * a typo in a stated budget must not quietly become the 2-page default. An
+ * empty key (`max_pages:`, which parses as null) reads as unset. A quoted
+ * whole number ("1") is accepted, since YAML users quote values by habit.
+ * Exported for tests.
+ * @param {unknown} cv
+ * @returns {{maxPages?: number, strictPages?: boolean, invalid?: {key: string, message: string}[]}}
+ */
+export function cvPageBudgetFrom(cv) {
+  if (!cv || typeof cv !== 'object' || Array.isArray(cv)) return {};
+  const budget = {};
+  const invalid = [];
+  if (cv.max_pages != null) {
+    const value = typeof cv.max_pages === 'string' && /^\s*\d+\s*$/.test(cv.max_pages)
+      ? Number(cv.max_pages)
+      : cv.max_pages;
+    if (Number.isInteger(value) && value >= 1) budget.maxPages = value;
+    else invalid.push({ key: 'max_pages', message: `cv.max_pages "${cv.max_pages}" is not a positive integer` });
+  }
+  if (cv.strict_pages != null) {
+    if (typeof cv.strict_pages === 'boolean') budget.strictPages = cv.strict_pages;
+    else invalid.push({ key: 'strict_pages', message: `cv.strict_pages "${cv.strict_pages}" is not true or false` });
+  }
+  if (invalid.length > 0) budget.invalid = invalid;
+  return budget;
+}
+
+/**
  * Build a `<style>` block declaring the custom properties on :root, or '' when
  * there is nothing to declare. Values containing CSS/HTML control characters
  * (`; { } < >`) are dropped — a custom-property value can't legitimately contain
