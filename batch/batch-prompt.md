@@ -182,6 +182,12 @@ Then return this as the final real fenced `json` block, serialized as in Step 6.
 }
 ```
 
+### Step 1.7 — GitHub evidence freshness
+
+Do this after Step 1.6 and before Step 2. It never stops the worker.
+
+The check is opt-in (`config/profile.yml` → `evidence_freshness.enabled: true`) and runs once per batch run, not once per worker: before the first offer, `batch-runner.sh` runs `node evidence-freshness.mjs` and, when the check is on, appends its JSON to this prompt under **Runtime: GitHub evidence freshness**. Do not run the script yourself; read `status`, `stale`, `reason` and the one-line `notice` from that section. They say how old the newest `output/github-evidence-*.json` from `expand` is, and how many PRs the candidate authored and merged since then in repos they do not own. This worker is unattended, so ask nothing, never run `expand` or `github-evidence.mjs`, and never change the score or decision because of it. Record it in the report instead: Machine Summary `evidence_freshness`, and, only when `stale` is true, the header line `**GitHub evidence:** {notice}` with the notice (printed in English) translated into `language.output`. With no such section (the check is off, which is the default, or it could not run), record `not_evaluated` and continue.
+
 ### Step 2 — Evaluate A-G
 
 Before deriving public facts, follow **Local job-facts cache (#1025)** below when a strong identity and current verified liveness are available. A cache miss continues with normal evaluation. All personal fit and judgments are recomputed.
@@ -498,6 +504,7 @@ score_evidence:
   culture: "{supported | partial | unknown}"
   red_flags: "{supported | partial | unknown}"
 confidence_gaps: []
+evidence_freshness: "{fresh | stale | not_evaluated}"
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
@@ -538,6 +545,7 @@ Rules:
 - `reports_to` is the reporting line the JD itself states, in the JD's own wording; `null` when the JD names none — never infer it from the title, the team size, or company research. It records the seat's altitude, which the title alone does not: an IC seat reporting to a Head of Marketing and one reporting to the CEO are different roles.
 - `posting_location` is the JD's **own** stated work location, verbatim (e.g. `"Halifax, NS"`); `null` when the JD states no specific location, or is fully remote with no base jurisdiction named. Feeds the relocation purchasing-power comparison (Block G Signal 17, #4694) — `salary-gap.mjs` reads it the same way it already reads `advertised_comp`. Never infer it from the company's HQ or from company research; only the JD's own words.
 - Do not invent missing data. Derive `confidence` from `score_evidence` using the Score Evidence tier rules above; the report's evidence table and `confidence_gaps` must explain the tier. Do not confuse it with `legitimacy_tier`.
+- `evidence_freshness` is the Step 1.7 check (`node evidence-freshness.mjs`, opt-in; the batch runner runs it once per run, and interactive runs reach it through `modes/oferta.md` → GitHub evidence freshness): `stale` when it printed `"stale": true`, `fresh` when it printed `"status": "ok"` with `"stale": false`, and `not_evaluated` for every other status (`no-github`, `gh-unavailable`, `gh-query-failed`, `disabled`), when the check is off, or when it could not run. It says the GitHub evidence behind `cv.md` may be out of date; it never changes `score` or `final_decision`.
 - `work_auth` reflects the Block A work-authorization tier: `no_sponsorship` only when the JD **explicitly** refuses sponsorship for a role outside the candidate's `authorized_in`; `unstated` when the JD is silent (neutral, not a blocker); `not_needed` when the role is within `authorized_in` or sponsorship isn't required; `sponsors` when the JD explicitly offers it.
 - `requirement_importance` mirrors Block B's table row by row — same rows, same verdicts, snake_cased. `evidence: stated` **requires** a non-null verbatim `jd_signal`; `jd_signal: null` is legal only for `structural` and `inferred`. `importance` is never `critical` or `high` when `evidence: inferred` — that is Block B's gate, machine-checkable here. `match` is `strong | partial | missing | na`, mirroring ✅ / ⚠️ / ❌ / ➖. Use `[]` when the JD yields no usable requirement list. `upskill.mjs` reads it through `skip-blockers.mjs` to rank the requirements behind recent skips.
 - `risk_summary` mirrors the `## Risk Summary` block row by row — same source verdicts, snake_cased: `legitimacy` from the Block G tier (`high_confidence` / `proceed_with_caution` / `suspicious`), `culture` from the Block A Culture screen (`pass` / `caution` / `fail`), `interview_redflags` from the red-flag file's warning level (`none` / `caution` / `warning`), `ai_screening_disclosure` from the Block G AI-screening disclosure signal (`disclosed` when the posting names AI/automated screening, `corroborating_only` when the jurisdiction requires disclosure and the posting is silent, `no_match` when the candidate's jurisdiction has no table row), `fixed_term` from Signal 16 (`detected` / `not_detected`), and `relocation_purchasing_power` from the Block G relocation signal (Signal 17, #4694) — `computed` when `node salary-gap.mjs --relocation` resolved both jurisdictions and returned `ok: true`; `no_jurisdiction_match` ONLY when the script's `reason` is specifically `no-jurisdiction-match` (the posting's or candidate's jurisdiction has no row in `templates/jurisdiction-relocation-tax.yml`); `not_evaluated` for every other `ok: false` reason — `same-jurisdiction`, `cross-country-not-supported`, `currency-mismatch` (the gross figure's currency didn't match the matched jurisdiction's table currency), or a data-level reason like `no-gross-amount`/`no-table` — as well as when the Risk Summary row itself renders `— not evaluated` (or `— no interview sessions yet`). A `same-jurisdiction` or `currency-mismatch` result must never be written as `no_jurisdiction_match`; both jurisdictions resolved fine, the comparison itself just didn't apply. Also `vacancy_disclosure` from Signal 19: `states_vacancy` / `states_no_vacancy` when the posting states its vacancy status, `silent_corroborating_only` only when the posting is silent, the candidate's jurisdiction has a table row AND the posting's date (or today's date when it has none) is on or after that row's `effective` date, so the silence note was actually produced; `no_match` when it is silent and the jurisdiction has no row; `not_evaluated` otherwise, including a silent posting dated before the row's `effective` date. Also `unpaid_placement` from Signal 20: `states_unpaid` when the posting states the role is unpaid, `school_placement` only when it says the role is credit-bearing or a school placement and does not state it is unpaid (both stated: `states_unpaid`), `not_evaluated` otherwise, including every posting with neither statement (there is no `no_match` value: a missing jurisdiction row only drops the law description, not the note). Also `candidate_fees` from Signal 21: `states_fee` when the posting or message asks the candidate to pay a fee, `not_evaluated` otherwise, including every posting silent about fees (there is no `no_match` value: a missing jurisdiction row only drops the law description, not the scam-pattern note). Also `accommodation_notice` from Signal 22: `states_accommodation` when the posting states that accommodation is available, `silent_corroborating_only` only when the posting is silent, the candidate's jurisdiction has a table row AND the posting's date (or today's date when it has none) is on or after that row's `effective` date, so the silence note was actually produced; `no_match` when it is silent and the jurisdiction has no row; `not_evaluated` otherwise, including a silent posting dated before the row's `effective` date. The stage hint is a separate note and has no Machine Summary value. Never invent a value the block does not show.
@@ -600,6 +608,7 @@ Report header:
 **URL:** {{URL}}
 **PDF:** {output/cv-candidate-{{REPORT_NUM}}-{company-slug}-{{DATE}}.pdf if score >= resolved auto_pdf_score_threshold, otherwise a localized equivalent of `not generated — run /career-ops pdf {company-slug} to create on demand` in `language.output`}
 **Batch ID:** {{ID}}
+**GitHub evidence:** {the Step 1.7 `notice`, translated into `language.output`; this line only when it reported stale}
 
 {the `## Verdict (lead)` sentence, copied verbatim}
 
@@ -636,6 +645,7 @@ score_evidence:
   culture: "{supported | partial | unknown}"
   red_flags: "{supported | partial | unknown}"
 confidence_gaps: []
+evidence_freshness: "{fresh | stale | not_evaluated}"
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
