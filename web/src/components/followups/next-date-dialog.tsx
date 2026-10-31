@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Loader2, Pin, PinOff, X } from "lucide-react";
 import { localISODate, type CadenceEntry } from "@/lib/followups";
 import { cn } from "@/lib/cn";
+import { Modal } from "@/components/ui/modal";
 
 /** Local today + N days, as YYYY-MM-DD. */
 function plusDays(n: number): string {
@@ -31,14 +32,8 @@ export function NextDateDialog({
   );
   const [busy, setBusy] = useState<"set" | "clear" | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const dateRef = useRef<HTMLInputElement>(null);
+  const id = useId();
 
   const call = async (method: "POST" | "DELETE", body: Record<string, unknown>, kind: "set" | "clear") => {
     setBusy(kind);
@@ -67,22 +62,18 @@ export function NextDateDialog({
     "w-full rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <Modal
+      isOpen
+      onClose={onClose}
+      labelledBy={`${id}-title ${id}-subtitle`}
+      initialFocusRef={dateRef}
+      overlayClassName="bg-black/50 backdrop-blur-none"
+      panelClassName="max-w-sm p-5 shadow-xl"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Pin next follow-up date for ${entry.company}`}
-        className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-xl"
-      >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="font-display text-lg">Pin next follow-up</h2>
-            <p className="mt-0.5 text-sm text-muted">
+            <h2 id={`${id}-title`} className="font-display text-lg">Pin next follow-up</h2>
+            <p id={`${id}-subtitle`} className="mt-0.5 text-sm text-muted">
               {entry.company} · {entry.role} <span className="text-faint">(#{entry.num})</span>
             </p>
           </div>
@@ -100,7 +91,7 @@ export function NextDateDialog({
         >
           <label className="block text-xs font-medium text-muted">
             Next follow-up date
-            <input type="date" required value={date} min={today} onChange={(e) => setDate(e.target.value)} className={cn(inputCls, "mt-1")} />
+            <input ref={dateRef} type="date" required value={date} min={today} onChange={(e) => setDate(e.target.value)} className={cn(inputCls, "mt-1")} />
           </label>
           <div className="flex gap-2">
             {[3, 7, 14].map((n) => (
@@ -145,7 +136,6 @@ export function NextDateDialog({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

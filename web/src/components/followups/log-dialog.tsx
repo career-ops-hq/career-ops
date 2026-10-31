@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { CHANNELS, localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
 import { cn } from "@/lib/cn";
+import { Modal } from "@/components/ui/modal";
 
 // "Log" — the full-fidelity FollowUp entry (date, channel enum, contact,
 // notes). Appends one table row via /api/followups/log.
@@ -24,14 +25,8 @@ export function LogDialog({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const dateRef = useRef<HTMLInputElement>(null);
+  const id = useId();
 
   // Keep free text single-line and pipe-free BEFORE it leaves the client
   // (the API's cell() normalizes again server-side — defense in depth): the
@@ -75,22 +70,18 @@ export function LogDialog({
     "w-full rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <Modal
+      isOpen
+      onClose={onClose}
+      labelledBy={`${id}-title ${id}-subtitle`}
+      initialFocusRef={dateRef}
+      overlayClassName="bg-black/50 backdrop-blur-none"
+      panelClassName="max-w-md p-5 shadow-xl"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Log follow-up for ${entry.company}`}
-        className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-xl"
-      >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="font-display text-lg">Log follow-up</h2>
-            <p className="mt-0.5 text-sm text-muted">
+            <h2 id={`${id}-title`} className="font-display text-lg">Log follow-up</h2>
+            <p id={`${id}-subtitle`} className="mt-0.5 text-sm text-muted">
               {entry.company} · {entry.role} <span className="text-faint">(#{entry.num})</span>
             </p>
           </div>
@@ -103,7 +94,7 @@ export function LogDialog({
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs font-medium text-muted">
               Date
-              <input type="date" required value={date} max={localISODate()} onChange={(e) => setDate(e.target.value)} className={cn(inputCls, "mt-1")} />
+              <input ref={dateRef} type="date" required value={date} max={localISODate()} onChange={(e) => setDate(e.target.value)} className={cn(inputCls, "mt-1")} />
             </label>
             <label className="block text-xs font-medium text-muted">
               Channel
@@ -159,7 +150,6 @@ export function LogDialog({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

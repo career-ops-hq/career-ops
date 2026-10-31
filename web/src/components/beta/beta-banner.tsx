@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bug, X, ShieldCheck, ThumbsUp, Search, Loader2 } from "lucide-react";
 import { collect, fingerprint, issueBody, issueUrl, type Diag } from "@/lib/report/report";
 import { searchIssues } from "@/lib/beta/issue-search.mjs";
+import { Modal } from "@/components/ui/modal";
 import "@/lib/report/logbuf"; // install the client error ring-buffer (side-effect)
 
 type SimilarIssue = { number: number; title: string; url: string };
@@ -30,6 +31,7 @@ export function BetaBanner() {
   // Distinct from "similar is empty": one means we looked and found nothing,
   // the other means we could not look. Merging them is the bug this fixes.
   const [searchFailed, setSearchFailed] = useState(false);
+  const descRef = useRef<HTMLTextAreaElement>(null);
 
   // Text search is behind an EXPLICIT click, never as-you-type: the user's
   // words (which can name a company) must not reach api.github.com at keystroke
@@ -62,13 +64,6 @@ export function BetaBanner() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
-
   const openReport = async () => {
     const d = await collect();
     setDiag(d);
@@ -98,20 +93,26 @@ export function BetaBanner() {
       </aside>
 
       {open && diag && (
-        <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Report a bug" onClick={() => setOpen(false)}>
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-[var(--bg)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <Modal
+          isOpen
+          onClose={() => setOpen(false)}
+          labelledBy="bug-report-title"
+          initialFocusRef={descRef}
+          overlayClassName="z-[96] bg-black/60 backdrop-blur-sm"
+          panelClassName="max-w-lg bg-[var(--bg)] p-5"
+        >
             <div className="mb-3 flex items-center gap-2">
               <Bug className="size-4 text-brand-text" />
-              <h2 className="text-sm font-semibold text-foreground">Report a bug · {diag.channel}</h2>
+              <h2 id="bug-report-title" className="text-sm font-semibold text-foreground">Report a bug · {diag.channel}</h2>
               <button onClick={() => setOpen(false)} aria-label="Close" className="ml-auto text-faint transition-colors hover:text-foreground">
                 <X className="size-4" />
               </button>
             </div>
             <textarea
+              ref={descRef}
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
               rows={4}
-              autoFocus
               placeholder="What were you doing, and what went wrong?"
               className="w-full resize-none rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
             />
@@ -168,8 +169,7 @@ export function BetaBanner() {
                 <Bug className="size-4" /> Open GitHub issue
               </a>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );
