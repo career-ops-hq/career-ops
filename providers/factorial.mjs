@@ -86,7 +86,10 @@ const POSTING_HREF_RE = /\/job_posting\/[a-z0-9-]+/i;
 export function parseFactorialBoard(html, origin, company) {
   const page = String(html ?? '');
   const host = new URL(origin).hostname;
-  /** @type {Map<string, Job>} */
+  // One entry per posting URL. Offices and the remote flag are kept apart and
+  // the location is rendered once at the end, so a posting listed under a
+  // second office cannot repeat a place already in its location.
+  /** @type {Map<string, { job: Job, offices: string[], remote: boolean }>} */
   const byUrl = new Map();
 
   // Each office group starts at its marker; a card's office is the heading of
@@ -112,25 +115,29 @@ export function parseFactorialBoard(html, origin, company) {
 
       const remote = attr(tag, 'data-is-remote') === 'true';
       const office = heading || attr(tag, 'data-location-key').replace(/^city:/, '');
-      const places = [office];
-      if (remote && !/\bremote\b/i.test(office)) places.push('Remote');
 
       const key = url.href;
-      const seen = byUrl.get(key);
-      if (seen) {
-        // The same posting listed under a second office: keep one row, both places.
-        if (office && !seen.location.split(' / ').includes(office)) seen.location = `${seen.location} / ${office}`;
-        continue;
+      let entry = byUrl.get(key);
+      if (!entry) {
+        /** @type {Job} */
+        const job = { title, url: key, company, location: '' };
+        const id = /-(\d+)\/?$/.exec(url.pathname);
+        if (id) job.externalId = id[1];
+        entry = { job, offices: [], remote: false };
+        byUrl.set(key, entry);
       }
-      /** @type {Job} */
-      const job = { title, url: key, company, location: places.filter(Boolean).join(' · ') };
-      const id = /-(\d+)\/?$/.exec(url.pathname);
-      if (id) job.externalId = id[1];
-      byUrl.set(key, job);
+      // The same posting listed under a second office: one row, both places.
+      if (office && !entry.offices.includes(office)) entry.offices.push(office);
+      entry.remote ||= remote;
     }
   }
 
-  const jobs = [...byUrl.values()];
+  const jobs = [...byUrl.values()].map(({ job, offices, remote }) => {
+    const places = [offices.join(' / ')];
+    if (remote && !offices.some((o) => /\bremote\b/i.test(o))) places.push('Remote');
+    job.location = places.filter(Boolean).join(' · ');
+    return job;
+  });
   if (jobs.length === 0 && POSTING_HREF_RE.test(page)) {
     throw new Error(`factorial: ${origin} links to job postings but none could be parsed — the board markup changed`);
   }

@@ -127,6 +127,14 @@ try {
   if (ungrouped.length === 1 && ungrouped[0].location === 'valencia') pass('a card outside an office group takes its place from data-location-key');
   else fail(`ungrouped card = ${JSON.stringify(ungrouped)}`);
 
+  // A remote posting listed under an office and under the Remote group names Remote once.
+  const twice = parseFactorialBoard(page(
+    group('Barcelona', [card({ url: `${ORIGIN}/job_posting/r-7`, title: 'R', remote: 'true' })])
+    + group('Remote', [card({ url: `${ORIGIN}/job_posting/r-7`, title: 'R', remote: 'true', loc: 'remote' })]),
+  ), ORIGIN, 'Acme');
+  if (twice.length === 1 && twice[0].location === 'Barcelona / Remote') pass('a remote posting under an office and the Remote group names Remote once');
+  else fail(`remote posting under two groups = ${JSON.stringify(twice)}`);
+
   // Empty board vs changed markup.
   const empty = parseFactorialBoard(page('<p>No open positions right now.</p>'), ORIGIN, 'Acme');
   if (Array.isArray(empty) && empty.length === 0) pass('a board page with no posting links is an empty board → []');
