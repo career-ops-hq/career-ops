@@ -23,7 +23,7 @@ import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
-import { moveCursor, rangeKeys, trackerCommand, typingFromTarget } from "@/lib/tracker-keys.mjs";
+import { moveCursor, rangeKeys, selectionAfterFailedSave, trackerCommand, typingFromTarget } from "@/lib/tracker-keys.mjs";
 import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 import { listEntrySync } from "@/lib/history-back.mjs";
@@ -294,7 +294,7 @@ export function PipelineView({
       const { saved, failed } = await saveStatuses(rows, status);
       const failedNums = new Set(failed.map((f) => f.n));
       const savedNums = new Set(saved);
-      setSelected(new Set(rows.filter((r) => failedNums.has(r.n)).map(applicationKey)));
+      setSelected(new Set(selectionAfterFailedSave([...selected], rows, failedNums, applicationKey)));
       if (failed.length > 0) {
         setBulkError(`${failed.length} not saved: ${failed.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
       }
@@ -311,8 +311,8 @@ export function PipelineView({
     }
   }
 
-  const keyState = useRef({ visibleTab, filtered, cursor, selectedRows });
-  keyState.current = { visibleTab, filtered, cursor, selectedRows };
+  const keyState = useRef({ visibleTab, filtered, cursor, selectedRows, isPending });
+  keyState.current = { visibleTab, filtered, cursor, selectedRows, isPending };
   const commitRef = useRef(commitStatus);
   commitRef.current = commitStatus;
   useEffect(() => {
@@ -333,6 +333,7 @@ export function PipelineView({
         metaKey: event.metaKey,
         ctrlKey: event.ctrlKey,
         altKey: event.altKey,
+        pending: state.isPending,
       });
       if (!command) return;
       if (command.name === "next" || command.name === "prev") {

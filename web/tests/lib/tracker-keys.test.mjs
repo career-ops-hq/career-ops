@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { moveCursor, rangeKeys, trackerCommand, typingFromTarget } from "../../src/lib/tracker-keys.mjs";
+import { moveCursor, rangeKeys, selectionAfterFailedSave, trackerCommand, typingFromTarget } from "../../src/lib/tracker-keys.mjs";
 
 test("digits set a canonical status and 7 archives as Discarded", () => {
   assert.deepEqual(trackerCommand({ key: "1" }), { name: "status", status: "Evaluated" });
@@ -21,6 +21,8 @@ test("j and k move the focused tracker row", () => {
 });
 
 test("status keys do nothing while typing or with a modifier", () => {
+  assert.equal(trackerCommand({ key: "1", pending: true }), null);
+  assert.equal(trackerCommand({ key: "j", pending: true }), null);
   assert.equal(trackerCommand({ key: "7", typing: true }), null);
   assert.equal(trackerCommand({ key: "j", composing: true }), null);
   assert.equal(trackerCommand({ key: "2", ctrlKey: true }), null);
@@ -34,6 +36,15 @@ test("shift-click selects the inclusive range between two rows", () => {
   assert.deepEqual(rangeKeys(keys, "d", "b"), ["b", "c", "d"]);
   assert.equal(rangeKeys(keys, "missing", "b"), null);
   assert.equal(rangeKeys(keys, "a", "missing"), null);
+});
+
+test("a failed save keeps only selected failures, not the cursor row", () => {
+  const keyOf = (row) => `n:${row.n}`;
+  const cursorOnly = [{ n: 4 }];
+  assert.deepEqual(selectionAfterFailedSave([], cursorOnly, new Set([4]), keyOf), []);
+  const selected = ["n:2", "n:4", "n:9"];
+  const attempted = [{ n: 2 }, { n: 4 }];
+  assert.deepEqual(selectionAfterFailedSave(selected, attempted, new Set([4]), keyOf), ["n:4"]);
 });
 
 test("the cursor stays on a real row", () => {

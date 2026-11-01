@@ -9,9 +9,10 @@ const STATUS_KEY = {
   "8": "SKIP",
 };
 
-/** @param {{ key?: string, metaKey?: boolean, ctrlKey?: boolean, altKey?: boolean, typing?: boolean, composing?: boolean }} input */
+/** @param {{ key?: string, metaKey?: boolean, ctrlKey?: boolean, altKey?: boolean, typing?: boolean, composing?: boolean, pending?: boolean }} input */
 export function trackerCommand(input) {
-  if (!input || input.typing || input.composing || input.metaKey || input.ctrlKey || input.altKey) return null;
+  // pending: the list is mid-navigation and the rows on screen are the previous tab.
+  if (!input || input.typing || input.composing || input.metaKey || input.ctrlKey || input.altKey || input.pending) return null;
   // Arrow keys stay with the browser so the page still scrolls.
   if (input.key === "j") return { name: "next" };
   if (input.key === "k") return { name: "prev" };
@@ -39,6 +40,23 @@ export function moveCursor(index, count, delta) {
   if (count <= 0) return -1;
   const start = index < 0 ? (delta < 0 ? count - 1 : 0) : index + delta;
   return Math.max(0, Math.min(count - 1, start));
+}
+
+/**
+ * Selection after a status save. Keep a selected row only when that save failed.
+ * A cursor row that was not selected stays unselected, including when its save fails.
+ * @param {string[]} selectedKeys
+ * @param {{ n: number }[]} attempted
+ * @param {Set<number>} failedNums
+ * @param {(row: { n: number }) => string} keyOf
+ * @returns {string[]}
+ */
+export function selectionAfterFailedSave(selectedKeys, attempted, failedNums, keyOf) {
+  const failed = new Set();
+  for (const row of attempted) {
+    if (failedNums.has(row.n)) failed.add(keyOf(row));
+  }
+  return selectedKeys.filter((key) => failed.has(key));
 }
 
 export function rangeKeys(keys, anchor, target) {
