@@ -349,10 +349,7 @@ function NarrativeCard({ meta, entries }: { meta: CadenceMetadata; entries: Cade
   const due = meta.overdue + meta.urgent;
   if (due <= 0) return null;
 
-  const pressing = [...entries]
-    .filter((e) => e.urgency === "overdue" || e.urgency === "urgent")
-    .sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || b.daysSinceApplication - a.daysSinceApplication)
-    .slice(0, 4);
+  const pressing = entries.filter((e) => e.urgency === "overdue" || e.urgency === "urgent").slice(0, 4);
 
   const parts: string[] = [];
   if (meta.overdue > 0) parts.push(`Overdue follow-ups: ${meta.overdue}`);

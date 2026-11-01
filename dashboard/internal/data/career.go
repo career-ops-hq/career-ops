@@ -1073,6 +1073,11 @@ func cleanTableCell(s string) string {
 // StatusPriority returns the sort priority for a status (lower = higher priority).
 func StatusPriority(status string) int {
 	switch NormalizeStatus(status) {
+	// Hired sorts first, as in statusGroupOrder (screens/pipeline.go), the
+	// order the group headers and the metrics strip use. -1 keeps the other
+	// values as they are.
+	case "hired":
+		return -1
 	case "interview":
 		return 0
 	case "offer":
