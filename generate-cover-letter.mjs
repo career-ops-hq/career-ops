@@ -378,7 +378,7 @@ export function buildHtml(payload, templatePath) {
   // the same sequence appearing inside a substituted value, which is exactly
   // what the single pass above is careful to leave literal.
   const unresolved = new Set();
-  const rendered = html.replace(/\{\{[A-Z_]+\}\}/g, (token) => {
+  const rendered = html.replace(/\{\{[^{}]*\}\}/g, (token) => {
     const value = replacements[token];
     if (value == null) {
       unresolved.add(token);

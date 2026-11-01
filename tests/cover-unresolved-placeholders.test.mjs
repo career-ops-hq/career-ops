@@ -70,3 +70,15 @@ test('the shipped template still renders clean', () => {
   assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}/, 'bundled template must be fully mapped');
   assert.match(html, /Jane Doe/);
 });
+
+test('catches lowercase, digit-bearing, hyphenated and padded placeholder tokens', () => {
+  const tokens = ['{{role_title}}', '{{OPENING2}}', '{{ COMPANY }}', '{{Name}}', '{{NAME2}}', '{{PROFILE-INTRO}}'];
+  for (const token of tokens) {
+    const tpl = writeTemplate(`<p>{{OPENING}}</p><p>${token}</p>`);
+    assert.throws(
+      () => buildHtml(payload(), tpl),
+      new RegExp(`Unresolved placeholders:.*\\${token.slice(0, 2)}`),
+      `expected ${token} to be detected as unresolved placeholder`
+    );
+  }
+});

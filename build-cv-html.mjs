@@ -52,7 +52,7 @@ const DATA_ROOT = getCareerOpsRoot();
 const trackerPath = resolveTrackerPath(DATA_ROOT);
 const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
-const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
+const PLACEHOLDER_RE = /\{\{[^{}]*\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
 const PROFILE_PATH = getProfilePath();
