@@ -27,6 +27,7 @@ test("status keys do nothing while typing or with a modifier", () => {
   assert.equal(trackerCommand({ key: "j", composing: true }), null);
   assert.equal(trackerCommand({ key: "2", ctrlKey: true }), null);
   assert.equal(trackerCommand({ key: "2", metaKey: true }), null);
+  assert.equal(trackerCommand({ key: "2", altKey: true }), null);
   assert.equal(trackerCommand({ key: "a" }), null);
 });
 
@@ -49,6 +50,7 @@ test("a failed save keeps only selected failures, not the cursor row", () => {
 
 test("the cursor stays on a real row", () => {
   assert.equal(moveCursor(-1, 4, 1), 0);
+  assert.equal(moveCursor(-1, 4, -1), 3);
   assert.equal(moveCursor(0, 4, -1), 0);
   assert.equal(moveCursor(3, 4, 1), 3);
   assert.equal(moveCursor(1, 0, 1), -1);
@@ -62,5 +64,6 @@ test("a row checkbox keeps the keys, a text field or dialog takes them", () => {
   assert.equal(typingFromTarget({ tagName: "TEXTAREA" }), true);
   assert.equal(typingFromTarget({ tagName: "BUTTON", closestDialog: true }), true);
   assert.equal(typingFromTarget({ tagName: "BUTTON" }), false);
+  assert.equal(typingFromTarget({ tagName: "DIV", isContentEditable: true }), true);
   assert.equal(typingFromTarget(null), false);
 });

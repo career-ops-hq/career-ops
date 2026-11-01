@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
@@ -312,9 +312,11 @@ export function PipelineView({
   }
 
   const keyState = useRef({ visibleTab, filtered, cursor, selectedRows, isPending });
-  keyState.current = { visibleTab, filtered, cursor, selectedRows, isPending };
   const commitRef = useRef(commitStatus);
-  commitRef.current = commitStatus;
+  useLayoutEffect(() => {
+    keyState.current = { visibleTab, filtered, cursor, selectedRows, isPending };
+    commitRef.current = commitStatus;
+  });
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const state = keyState.current;

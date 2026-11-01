@@ -40,11 +40,14 @@ test("shift-click two rows, then a number key sets their status", { skip: liveSe
   const scrollBefore = await page.evaluate(() => window.scrollY);
 
   // Focus stays on the checkbox after a click. The number key must still work there.
+  const outsideBefore = statusOf(10);
   await row(11).getByRole("checkbox").click();
   await row(13).getByRole("checkbox").click({ modifiers: ["Shift"] });
   for (const n of [11, 12, 13]) assert.equal(await row(n).getByRole("checkbox").isChecked(), true, `#${n} is in the shift-click range`);
+  assert.equal(await row(10).getByRole("checkbox").isChecked(), false, "#10 is outside the shift-click range");
   await page.keyboard.press("6");
   await until(() => [11, 12, 13].every((n) => statusOf(n) === "Rejected"));
+  assert.equal(statusOf(10), outsideBefore, "#10 stays Applied");
 
   // Arrow keys keep scrolling the page; j and k move the row cursor.
   await page.locator("h1").first().click();
