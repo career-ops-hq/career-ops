@@ -121,7 +121,10 @@ export function parseRemoteJobs(json) {
   const out = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
-    if (row.accepting_applications === false) continue;
+    // Either flag closes a posting. Every live row read on 2026-11-01 was
+    // status "open" with accepting_applications true, so only "closed" is
+    // matched: an unseen status value is not taken to mean closed.
+    if (row.accepting_applications === false || row.status === 'closed') continue;
     const title = typeof row.title === 'string' ? row.title.trim() : '';
     if (!title) continue;
     const id = typeof row.public_id === 'string' ? row.public_id.trim() : '';

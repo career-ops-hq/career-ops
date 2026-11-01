@@ -119,6 +119,7 @@ try {
     jobs: [
       row({ title: '  Operations Lead  ', location: 'EMEA, NORAM' }),
       row({ title: 'Closed Role', public_id: 'aaaaaaaa-0000-4000-8000-000000000002', accepting_applications: false }),
+      row({ title: 'Closed Status', public_id: 'aaaaaaaa-0000-4000-8000-000000000005', status: 'closed', accepting_applications: true }),
       row({ title: '', public_id: 'aaaaaaaa-0000-4000-8000-000000000003' }),
       row({ title: 'No Id', public_id: undefined }),
       row({ title: 'Numeric Id', public_id: 7 }),
@@ -143,7 +144,7 @@ try {
     fail(`parseRemoteJobs first row = ${JSON.stringify(jobs)}`);
   }
   if (jobs.length === 2 && jobs[1].title === 'Bad Date' && !('postedAt' in jobs[1])) {
-    pass('parseRemoteJobs drops closed, title-less, id-less and non-object rows; an unparseable date is omitted, not NaN');
+    pass('parseRemoteJobs drops closed (by either flag), title-less, id-less and non-object rows; an unparseable date is omitted, not NaN');
   } else {
     fail(`parseRemoteJobs filtering = ${JSON.stringify(jobs.map((j) => j.title))}`);
   }
