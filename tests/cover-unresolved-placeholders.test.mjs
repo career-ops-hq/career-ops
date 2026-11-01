@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildHtml } from '../generate-cover-letter.mjs';
+import { buildHtml, replaceBalancedTokens } from '../generate-cover-letter.mjs';
 
 const writeTemplate = (body) => {
   const dir = mkdtempSync(join(tmpdir(), 'cover-placeholder-'));
@@ -77,6 +77,8 @@ for (const token of [
   '{{role_title}}', '{{OPENING2}}', '{{ COMPANY }}', '{{Name}}', '{{PROFILE-INTRO}}', '{{}}',
   // Brace-bearing expressions (CodeRabbit on #6382): a [^{}] class never matched these.
   '{{ config | default({}) }}', '{{ items.map(i => ({ id: i })) }}',
+  // Nested tokens are reported whole (CodeRabbit on #6382), not cut at the inner }}.
+  '{{ outer {{ inner }} }}',
 ]) {
   test(`throws on the non-UPPER_SNAKE token ${token}`, () => {
     const tpl = writeTemplate(`<p>{{OPENING}}</p><p>${token}</p>`);
@@ -98,4 +100,35 @@ test('user text shaped like a non-UPPER_SNAKE token stays literal and is not fla
   p.letter.opening = 'I maintain the {{role_title}} and {{ company }} Jinja macros.';
   const html = buildHtml(p, writeTemplate('<p>{{OPENING}}</p>'));
   assert.ok(html.includes('{{role_title}}') && html.includes('{{ company }}'));
+});
+
+test('a nested token is reported as one token, with no stray }} left over', () => {
+  const tpl = writeTemplate('<p>{{OPENING}}</p><p>{{ outer {{ inner }} }}</p>');
+  assert.throws(() => buildHtml(payload(), tpl), (err) => {
+    assert.equal(err.message, 'Unresolved placeholders: {{ outer {{ inner }} }}');
+    return true;
+  });
+});
+
+test('an unterminated {{ does not stop later tokens from being filled or reported', () => {
+  // A scanner that gave up at the first unclosed {{ would leave {{OPENING}}
+  // unfilled and {{COMPANY}} unreported.
+  const ok = buildHtml(payload(), writeTemplate('<p>stray {{ here</p><p>{{OPENING}}</p>'));
+  assert.ok(ok.includes('stray {{ here') && ok.includes('I am applying for this role.'));
+  assert.throws(
+    () => buildHtml(payload(), writeTemplate('<p>stray {{ here</p><p>{{COMPANY}}</p>')),
+    /Unresolved placeholders: \{\{COMPANY\}\}/,
+  );
+});
+
+test('replaceBalancedTokens: spans, depth and literal output', () => {
+  const seen = [];
+  const out = replaceBalancedTokens('a {{X}} b {{ f({}) }} c {{ o {{ i }} }} d {{ open', (t) => {
+    seen.push(t);
+    return `<${seen.length}>`;
+  });
+  assert.deepEqual(seen, ['{{X}}', '{{ f({}) }}', '{{ o {{ i }} }}']);
+  assert.equal(out, 'a <1> b <2> c <3> d {{ open');
+  // Replacement values are never re-scanned.
+  assert.equal(replaceBalancedTokens('{{A}}', () => '{{B}}'), '{{B}}');
 });
