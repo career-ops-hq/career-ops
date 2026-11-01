@@ -13,6 +13,21 @@ function placed(el) {
   return { top, bottom: top + height };
 }
 
+// A footer can sit after .page. The body's own scroll height cannot be used
+// for this: it repeats the iframe viewport, which is the bug the page count
+// was changed to avoid.
+function heightAfterPages(body, pages) {
+  const kids = body.children;
+  if (!kids || typeof kids[Symbol.iterator] !== "function") return 0;
+  let extra = 0;
+  for (const el of kids) {
+    if (!el || pages.includes(el)) continue;
+    if (typeof el.contains === "function" && pages.some((page) => el.contains(page))) continue;
+    extra += Math.max(el.offsetHeight || 0, el.scrollHeight || 0);
+  }
+  return extra;
+}
+
 /**
  * Height of the CV content.
  *
@@ -30,14 +45,16 @@ export function contentHeightPx(doc) {
   // The page count is the distance from the first box to the last, so a
   // margin above the first page does not add a page.
   const pages = pageBoxes(body);
+  const extra = heightAfterPages(body, pages);
   if (pages.length > 1) {
     const boxes = pages.map(placed);
     const extent = Math.max(...boxes.map((b) => b.bottom)) - Math.min(...boxes.map((b) => b.top));
-    return extent > 0 ? extent : 0;
+    const height = extent + extra;
+    return height > 0 ? height : 0;
   }
   const page = pages[0] || (typeof body.querySelector === "function" ? body.querySelector(".page") : null);
   const box = page || body;
-  const height = box.scrollHeight || box.offsetHeight || 0;
+  const height = (box.scrollHeight || box.offsetHeight || 0) + (page ? extra : 0);
   return height > 0 ? height : 0;
 }
 
@@ -58,7 +75,7 @@ export function frameHeightPx(doc) {
   if (!body) return 0;
   const pages = pageBoxes(body);
   if (pages.length > 0) {
-    const bottom = Math.max(...pages.map((page) => placed(page).bottom));
+    const bottom = Math.max(...pages.map((page) => placed(page).bottom)) + heightAfterPages(body, pages);
     return bottom > 0 ? bottom : 0;
   }
   const height = body.scrollHeight || body.offsetHeight || 0;
