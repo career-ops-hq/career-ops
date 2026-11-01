@@ -268,6 +268,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     }
 
     // 4j. doctor treats OMP_PROFILE=default as default profile and honors PI_CODING_AGENT_DIR
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
     writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
       mcpServers: {
         playwright: { command: 'mcp-server-playwright' },
@@ -286,6 +287,87 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
       pass('doctor normalizes OMP_PROFILE=default and honors PI_CODING_AGENT_DIR');
     } else {
       fail(`doctor failed with OMP_PROFILE=default: ${JSON.stringify(resDefaultProfile)}`);
+    }
+
+    // 4k. user-level disabledServers suppresses project-defined Playwright server
+    rmSync(join(isolatedAgentDir, 'mcp.json'), { force: true });
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      disabledServers: ['playwright'],
+    }));
+    writeFileSync(join(dir, '.omp', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+
+    const resUserDisabledProjectServer = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resUserDisabledProjectServer.playwright_mcp?.omp === false
+        && resUserDisabledProjectServer.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
+      pass('doctor applies user-level disabledServers across project-level definitions');
+    } else {
+      fail(`doctor failed to suppress project server with user disabledServers: ${JSON.stringify(resUserDisabledProjectServer)}`);
+    }
+
+    // 4l. project-level disabled server (enabled: false) shadows enabled user-level Playwright definition
+    rmSync(join(dir, '.omp', 'mcp.json'), { force: true });
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+    writeFileSync(join(dir, '.omp', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { enabled: false },
+      },
+    }));
+
+    const resProjectDisabledShadows = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resProjectDisabledShadows.playwright_mcp?.omp === false
+        && resProjectDisabledShadows.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
+      pass('doctor respects project-level enabled: false shadowing user-level Playwright server');
+    } else {
+      fail(`doctor failed when project shadows user server with enabled: false: ${JSON.stringify(resProjectDisabledShadows)}`);
+    }
+
+    // 4m. project-level Playwright server overrides user-level disabled server
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { enabled: false },
+      },
+    }));
+    writeFileSync(join(dir, '.omp', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+
+    const resProjectOverridesUserDisabled = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resProjectOverridesUserDisabled.playwright_mcp?.omp === true
+        && !resProjectOverridesUserDisabled.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor respects project-level Playwright server overriding user-level disabled definition');
+    } else {
+      fail(`doctor failed when project overrides user-level disabled server: ${JSON.stringify(resProjectOverridesUserDisabled)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
