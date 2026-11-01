@@ -1,6 +1,6 @@
 // tests/token-tracker.test.mjs — token tracking & cost estimation unit tests
 import { pass, fail } from './helpers.mjs';
-import { estimateCost, TokenAccumulator, formatBreakdown } from '../utils/token-tracker.mjs';
+import { estimateCost, TokenAccumulator, formatBreakdown, formatK } from '../utils/token-tracker.mjs';
 import { parseTokenVal } from '../batch/aggregate-tokens.mjs';
 
 console.log('\ntoken-tracker.mjs & aggregate-tokens.mjs unit tests');
@@ -94,6 +94,14 @@ try {
     } else {
       fail(`estimateCost for ${model} failed: expected ${expected}, got ${actual}`);
     }
+  }
+
+  // 9. formatK returns '12.4k' for 12400
+  const formatted = formatK(12400);
+  if (formatted === '12.4k') {
+    pass('formatK(12400) returns "12.4k"');
+  } else {
+    fail(`formatK failed: expected "12.4k", got "${formatted}"`);
   }
 } catch (e) {
   fail(`token-tracker tests crashed: ${e.message}`);

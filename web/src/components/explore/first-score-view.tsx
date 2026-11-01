@@ -156,7 +156,7 @@ export function FirstScoreView() {
             <div
               className={cn(
                 "mt-4 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
-                legitimacyTone(legit) === "good" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                legitimacyTone(legit) === "good" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-400",
               )}
             >
               <ShieldCheck className="size-3" /> Legitimacy: {legit}
