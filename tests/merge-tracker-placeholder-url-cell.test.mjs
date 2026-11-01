@@ -42,6 +42,11 @@ function merge(env, url) {
     CAREER_OPS_TRACKER: env.tracker,
     CAREER_OPS_ADDITIONS: env.addDir,
     CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.addDir),
+    // Blanked so the child falls back to this fixture: merge-tracker reads the
+    // PDF manifest on every run and can re-key a row in it.
+    CAREER_OPS_FOLLOWUPS: '',
+    CAREER_OPS_REPORTS_DIR: '',
+    CAREER_OPS_PDF_INDEX: '',
   };
   delete childEnv.CAREER_OPS_DATA_DIR;
   delete childEnv.CAREER_OPS_CODE_ROOT;
