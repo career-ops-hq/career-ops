@@ -384,8 +384,13 @@ export function buildHtml(payload, templatePath) {
   // `{{ COMPANY }}`) was never visited, so it was neither filled nor reported
   // and shipped verbatim in the PDF (#6374). Lookup stays exact on purpose:
   // `{{ COMPANY }}` is not `{{COMPANY}}`, and guessing would hide the typo.
+  //
+  // The match is lazy up to the first `}}` rather than excluding braces, so a
+  // token that itself contains braces — `{{ config | default({}) }}`, a
+  // template-engine expression pasted into a custom template — is visited and
+  // reported too, instead of slipping past a `[^{}]` class.
   const unresolved = new Set();
-  const rendered = html.replace(/\{\{[^{}]*\}\}/g, (token) => {
+  const rendered = html.replace(/\{\{[\s\S]*?\}\}/g, (token) => {
     const value = replacements[token];
     if (value == null) {
       unresolved.add(token);
