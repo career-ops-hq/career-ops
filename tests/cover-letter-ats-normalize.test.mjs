@@ -8,20 +8,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CAPTURE = pathToFileURL(join(ROOT, 'tests', 'fixtures', 'cover-pdf-capture-register.mjs')).href;
 
-/** The body of the HTML generate-cover-letter.mjs hands to the renderer. */
-function printed(fields) {
+/** Runs the script on a letter. `html` is what reached the renderer, if anything did. */
+function letter(fields, { cv = 'Jane Doe builds systems.\n', facts } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-cover-ats-'));
   try {
     mkdirSync(join(dir, 'output'));
-    writeFileSync(join(dir, 'cv.md'), 'Jane Doe builds systems.\n');
+    writeFileSync(join(dir, 'cv.md'), cv);
+    if (facts) {
+      mkdirSync(join(dir, 'config'));
+      writeFileSync(join(dir, 'config', 'cv-facts.json'), JSON.stringify(facts));
+    }
     const payload = {
       candidate: { name: 'Jane Doe' },
       letter: { role_title: 'Engineer', opening: 'Opening.', profile_intro: 'Profile.', ...fields },
@@ -37,14 +42,19 @@ function printed(fields) {
       cwd: dir,
       encoding: 'utf-8',
       timeout: 60_000,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', COVER_HTML_CAPTURE: capture },
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: '', COVER_HTML_CAPTURE: capture },
     });
-    assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
-    const html = readFileSync(capture, 'utf-8');
-    return html.slice(html.indexOf('<body'));
+    return { run, html: existsSync(capture) ? readFileSync(capture, 'utf-8') : null };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** The body of the HTML generate-cover-letter.mjs hands to the renderer. */
+function printed(fields, options) {
+  const { run, html } = letter(fields, options);
+  assert.equal(run.status, 0, describeSpawn(run));
+  return html.slice(html.indexOf('<body'));
 }
 
 test('markdown bold prints as bold, not as asterisks', () => {
@@ -72,4 +82,20 @@ test('every letter field gets the pass, not only the opening', () => {
 test('text in another language is left alone', () => {
   const body = printed({ language_closing: 'Espero alcanzar el nivel B2 a finales de año.' });
   assert.match(body, /Espero alcanzar el nivel B2 a finales de año\./);
+});
+
+test('a forbidden phrase only the pass spells out is refused before it prints', () => {
+  const { run, html } = letter({ opening: 'I am a self–starter.' }, { facts: { forbidden_phrases: ['self-starter'] } });
+  assert.equal(run.status, 1, describeSpawn(run));
+  assert.match(run.stderr, /forbidden phrases found: self-starter/);
+  assert.equal(html, null, 'a refused letter must not reach the renderer');
+});
+
+test('a figure the pass rewrites still prints when a source backs it', () => {
+  const body = printed(
+    { opening: 'I saved €50k a year.', profile_intro: 'I took p99 from 900ms → 200ms.' },
+    { cv: 'I saved €50k a year.\nI took p99 from 900ms → 200ms.\n', facts: { forbidden_phrases: ['self-starter'] } },
+  );
+  assert.match(body, /I saved EUR 50k a year\./);
+  assert.match(body, /from 900ms to 200ms\./);
 });
