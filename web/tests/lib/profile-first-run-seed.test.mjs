@@ -61,6 +61,8 @@ const request = (patch) => new Request("http://fixture.invalid/api/save", {
 });
 const post = (patch) => saveProfile(request(patch));
 const uncommented = (text) => text.split("\n").filter((line) => !line.trim().startsWith("#")).join("\n");
+/** Every comment in a YAML text, whole-line or trailing a value. */
+const comments = (text) => text.split("\n").map((line) => /(?:^|\s)(#.*)$/.exec(line)?.[1].trim()).filter(Boolean);
 
 /** Every leaf under a value, as [dotted key, value]. */
 function leaves(value, at) {
@@ -136,6 +138,8 @@ test("a first run keeps the template's settings and its comments", async () => {
     assert.deepEqual(written.cv, example.cv);
     assert.match(text, /# Optional profile photo for the PDF CV/, "the opt-in keys are documented in comments");
     assert.match(text, /# Archetypes help the evaluation system score fit/);
+    assert.ok(comments(template).length > 100, "the template's comments were not found");
+    for (const comment of comments(template)) assert.ok(text.includes(comment), `lost the comment: ${comment}`);
   });
 });
 

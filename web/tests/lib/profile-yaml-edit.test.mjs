@@ -100,6 +100,12 @@ test("a replaced list item's trailing comment is kept as a comment line ahead of
   assert.equal(edit(source, { target_roles: { primary: ["New"] } }), 'target_roles:\n  primary:\n    # user note\n    - "New"\n');
 });
 
+test("any line of a replaced mapping item keeps its trailing comment, and a # in a value is not one", () => {
+  const source = 'target_roles:\n  archetypes:\n    - name: "Role #1" # first\n      fit: "primary"   # primary = dream role\n    - name: "Role #2"\n      fit: "Tier #3"\n';
+  const out = edit(source, { target_roles: { archetypes: [] } });
+  assert.equal(out, "target_roles:\n  archetypes: []\n    # first\n    # primary = dream role\n");
+});
+
 test("block list items are replaced, with comments between them kept ahead of the new items", () => {
   const source = "target_roles:\n  primary:\n    - \"Old One\"\n    # a note\n    - \"Old Two\"\n  # after the list\n  archetypes: []\n";
   const out = edit(source, { target_roles: { primary: ["New One", "New Two"] } });
