@@ -679,6 +679,34 @@ closureVerdict('Salary data is not available at this time. Apply now.', ['Apply 
   ? pass('an availability mention on a live posting stays active')
   : fail('the new pattern over-triggered on a live posting');
 
+console.log('\nliveness-core — Built In\'s "Sorry, this job was removed" banner beats its APPLY control (#6327)');
+
+// Built In keeps a removed posting's whole JD and its APPLY control, and says
+// it is gone only in a banner under the title. Before the pattern the APPLY
+// control won and the posting read active.
+const builtInUrl = 'https://builtin.com/job/director-software-engineering/11667112';
+const builtInJd = 'What you will do\nLead the platform engineering organization and own delivery across teams.\n'.repeat(4);
+const builtIn = (banner, applyControls = ['APPLY']) => classifyLiveness({
+  status: 200,
+  requestedUrl: builtInUrl,
+  finalUrl: builtInUrl,
+  bodyText: `JPMorganChase\nDirector of Software Engineering\n${banner}Be an Early Applicant\n${builtInJd}`,
+  applyControls,
+});
+
+// The reported page, banner as browser-extract read it.
+const removedBuiltIn = builtIn('Sorry, this job was removed\n Sorry, this job was removed at 08:47 p.m. (UTC) on Wednesday, Oct 14, 2026\n');
+removedBuiltIn.result === 'expired' && removedBuiltIn.code === 'expired_body'
+  ? pass('Built In "Sorry, this job was removed" -> expired, despite its APPLY')
+  : fail(`removed Built In posting classified ${removedBuiltIn.result}/${removedBuiltIn.code}, expected expired/expired_body`);
+
+// Negative control: a live posting stays active, including one whose
+// "Similar Jobs" list shows a "Job removed" badge on another listing.
+const liveBuiltIn = builtIn('Similar Jobs\nStaff Engineer\nJob removed\n');
+liveBuiltIn.result === 'active'
+  ? pass('a live Built In posting with a sibling "Job removed" badge stays active')
+  : fail(`live Built In posting classified ${liveBuiltIn.result}/${liveBuiltIn.code}, expected active`);
+
 console.log('\nliveness-core — CareerViet: Vietnamese Apply label, and the deadline that closes a posting (#4832)');
 
 // A CareerViet page as the browser reads it: the info block carries the
