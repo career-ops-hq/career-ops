@@ -44,6 +44,7 @@ import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
 import { loadCanonicalStates } from './tracker-utils.mjs';
 import { checkJdArchive } from './check-jd-archive.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
 
 const USAGE = `Usage: node verify-pipeline.mjs [--no-hints]
 
@@ -359,7 +360,7 @@ const normalizeKey = normalizeTextKey;
 // skipped rather than grouped by company alone, which would false-positive
 // on two different roles at the same company.
 function extractRole(reportContent) {
-  const fence = reportContent.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+  const fence = machineSummarySection(reportContent).match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (fence) {
     const m = fence[1].match(/^role:\s*["']?(.+?)["']?\s*$/m);
     if (m && m[1].trim()) return m[1].trim();

@@ -368,7 +368,7 @@ function tagText(block, name) {
  *   title    ← `<title>`                          (required; posting dropped when absent)
  *   url      ← `<detail-url>`, else `<apply-url>` (required; must be http(s))
  *   company  ← `entry.name`                       (the feed carries no company name)
- *   location ← `<location>`
+ *   location ← `<location>`                       (rows that share a URL are joined with ` · `)
  *   postedAt ← `<date>` (M/D/YYYY) → epoch ms     (omitted when absent/unparseable)
  *
  * `<detail-url>` is preferred over `<apply-url>` because it is the human-readable
@@ -387,6 +387,10 @@ export function parseJobviteXml(xml, companyName) {
   if (typeof xml !== 'string' || !xml) return [];
 
   const out = [];
+  // One posting is several <job> rows that share a detail URL and differ in
+  // <location>. Keyed by the URL we store, so a later city is not a second job.
+  /** @type {Map<string, {job: {location: string}, locations: Set<string>}>} */
+  const byUrl = new Map();
 
   // Cursor scan rather than `xml.matchAll(/<job>([\s\S]*?)<\/job>/gi)`, for the
   // same reason tagText() avoids a regex. On a feed carrying many `<job>` starts
@@ -432,12 +436,29 @@ export function parseJobviteXml(xml, companyName) {
 
     const location = decodeEntities(tagText(block, 'location'));
 
+    const merged = byUrl.get(url);
+    if (merged) {
+      // Sibling of a posting already emitted. It contributes a location only.
+      // An empty one adds nothing; a repeat collapses, so the cell never says
+      // the same city twice. The first title and date stay.
+      if (location) merged.locations.add(location);
+      continue;
+    }
+
     /** @type {import('./_types.js').Job & {postedAt?: number}} */
     const job = { title, url, company: companyName, location };
     const postedAt = toEpochMs(tagText(block, 'date'));
     if (postedAt !== undefined) job.postedAt = postedAt;
 
     out.push(job);
+    byUrl.set(url, { job, locations: new Set(location ? [location] : []) });
+  }
+
+  // Set insertion order is feed order. A single location re-joins to the same
+  // string. ` · ` is the separator location_filter already treats as a list
+  // (see workable).
+  for (const { job, locations } of byUrl.values()) {
+    job.location = [...locations].join(' · ');
   }
   return out;
 }

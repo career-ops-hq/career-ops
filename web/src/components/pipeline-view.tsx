@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
@@ -25,6 +25,7 @@ import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
 import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
+import { listEntrySync } from "@/lib/history-back.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
 type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
@@ -105,9 +106,25 @@ export function PipelineView({
     },
     [params, router, pathname, startNavigation],
   );
-  const { q, setQ, setParams } = useListSearch(params, commitParams, qRef);
+  const { q, setQ, setParams, cancelPendingSearch } = useListSearch(params, commitParams, qRef);
   // Typing stays local until the URL catches up, so include it when leaving.
   const detailQuery = pipelineQuery(params.toString(), q);
+  // The list entry has to carry that search too. Otherwise Back compares the
+  // return link with an older URL and opens a fresh list at the top.
+  function syncTypedSearch(event: MouseEvent<HTMLAnchorElement>) {
+    // A modified click leaves Pipeline open and opens the link elsewhere.
+    // replaceState would show the typed search while Next still has the old
+    // params, so the next sort deletes it. The other tab already has the href.
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1) return;
+    // The search timer would router.replace this list and can steal the click
+    // if the list is still mounted while the next page loads.
+    cancelPendingSearch();
+    const next = listEntrySync(pathname, params.toString(), q);
+    if (!next) return;
+    const state = window.history.state;
+    if (!state || state.__NA !== true) return;
+    window.history.replaceState(state, "", next);
+  }
 
   useEffect(() => {
     if (!isPending) setPendingTab(null);
@@ -435,7 +452,8 @@ export function PipelineView({
           </button>
           {selectedRows.length >= 2 && selectedRows.length <= COMPARE_MAX && (
             <Link
-              href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}`}
+              href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}${detailQuery ? `&${detailQuery}` : ""}`}
+              onClick={syncTypedSearch}
               className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand-text"
             >
               Compare
@@ -525,19 +543,19 @@ export function PipelineView({
                       />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
-                      <Link href={detailHref} tabIndex={-1} className="transition-colors group-hover:text-brand-text">
+                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch} className="transition-colors group-hover:text-brand-text">
                         #{r.n}
                       </Link>
                     </td>
                     <td className="px-4 py-3 font-medium">
-                      <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
+                      <Link href={detailHref} onClick={syncTypedSearch} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
                         <CompanyLogo name={company.logoName} size={20} />
                         {company.label}
                       </Link>
                     </td>
                   <td className="px-4 py-3 text-muted">
                     <div className="flex items-center gap-2">
-                      <Link href={detailHref} tabIndex={-1}>{r.role}</Link>
+                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch}>{r.role}</Link>
                       {posting && (
                         <a
                           href={posting}

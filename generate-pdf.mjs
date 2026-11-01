@@ -2254,9 +2254,14 @@ export async function inlineLocalFonts(html) {
   return html.replace(FONT_REF, (match, _quote, name) => dataUrls.get(name) || match);
 }
 
-async function launchChromium(options) {
+export async function launchChromium(options) {
   const { chromium } = await import('playwright');
-  return chromium.launch(options);
+  const launchOptions = { ...options };
+  const envPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
+  if (!launchOptions.executablePath && envPath) {
+    launchOptions.executablePath = envPath;
+  }
+  return chromium.launch(launchOptions);
 }
 
 /**
