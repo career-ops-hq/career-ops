@@ -53,7 +53,7 @@ function fixture() {
   return { dir, lane };
 }
 
-const BASE_ENV = { CAREER_OPS_DATA_DIR: undefined, CAREER_OPS_TRACKER: undefined };
+const BASE_ENV = { CAREER_OPS_DATA_DIR: undefined, CAREER_OPS_TRACKER: undefined, CAREER_OPS_SCAN_HISTORY: undefined };
 
 test('with CAREER_OPS_PIPELINE set, de-dup and export read the lane file', (t) => {
   const { dir, lane } = fixture();
