@@ -94,6 +94,18 @@ try {
     ['an irregular past', 'At Globex, I ran the team.'],
     ['a present verb of running work', 'At Globex, I manage a team of engineers.'],
     ['"currently" with a verb outside the list', 'At Globex, I currently tackle fraud.'],
+    ['"was responsible for"', 'At Globex, I was responsible for billing.'],
+    ['"was part of"', 'At Globex, I was part of the billing team.'],
+    ['"were" with "we"', 'At Globex, we were responsible for billing.'],
+    ['"was" with an adverb', 'At Globex, I was deeply involved in the migration.'],
+    ['"have been responsible for"', 'In my current role at Globex, I have been responsible for billing.'],
+    ['"have been" with a verb of running work', 'At Globex, I have been leading the team.'],
+    ['"where I have been for"', 'I am currently working as a Data Scientist at Globex, where I have been for the past two years.'],
+    ['"had the opportunity"', 'As a Data Scientist at Globex, I had the opportunity to lead the team.'],
+    ['"have had the privilege"', 'Currently, as a Data Scientist at Globex, I have had the privilege of leading the team.'],
+    ['"had the distinct pleasure"', 'During my tenure at Globex, I had the distinct pleasure of leading the team.'],
+    ['"your" only after the clause', 'At Globex, I honed my skills, which I would bring to your team.'],
+    ['"your" only in the next sentence', 'At Globex, I led the team. I would bring that to your team.'],
   ]) {
     claims(`${label} claims the employer`, sentence, ['globex']);
   }
@@ -144,6 +156,21 @@ try {
     'At Stripe, I noticed your team moved to a monorepo.',
     'At Stripe, I admired how your team writes.',
     'At Stripe, I have appreciated how your team writes.',
+    'At Stripe, I wanted to help the billing team.',
+    'At Stripe, I hoped to help the billing team.',
+    'At Stripe, I wished to help the billing team.',
+    "At Stripe, I'd hoped to help the billing team.",
+    'At Stripe, I was impressed by your Radar launch.',
+    'At Stripe, I have been following your team.',
+    'At Stripe, I learned how your team ships.',
+    'At Stripe, I built a small demo for you.',
+    'At Stripe, I had the pleasure of meeting your team.',
+    'At Stripe, I was impressed by the Radar launch.',
+    'At Stripe, I was deeply impressed by the Radar launch.',
+    'At Stripe, I was drawn to the mission.',
+    'At Stripe, I have been following the team.',
+    'At Stripe, I have been reading the engineering blog.',
+    'At Stripe, I had a chat with the team.',
     'At Stripe, you run payments for millions.',
     'At Stripe, your team runs payments for millions.',
     'At Stripe, the billing team moved to a monorepo.',
@@ -165,15 +192,16 @@ try {
     'Having followed your team at Stripe, I learned how it ships.',
     'To show how I would improve developer experience at Stripe, I built a small demo.',
     'For the Data Scientist position at Stripe, I have prepared a small demo.',
-    'I am interested in the role at Stripe, where I have wanted to work.',
+    'I am interested in the role at Stripe, where I have applied twice.',
     'As a candidate for the role at Stripe, I have prepared a small demo.',
     'As an applicant to the team at Stripe, I have prepared a small demo.',
     'As a long-time user of the tools built at Stripe, I have written about them.',
     'As a result of the work at Stripe, I have changed how I test.',
     'As I read about the team at Stripe, I built a small demo.',
-    'I see myself as a strong fit for the team at Stripe, where I have wanted to work.',
-    'I am a strong candidate for the team at Stripe, where I have wanted to work.',
-    'I am a big fan of the team at Stripe, where I have wanted to work.',
+    'I see myself as a strong fit for the team at Stripe, where I have applied twice.',
+    'I am a strong candidate for the team at Stripe, where I have applied twice.',
+    'I am a big fan of the team at Stripe, where I have applied twice.',
+    'As a developer impressed by your work at Stripe, I built a small demo.',
     'My interest in the role at Stripe, I have explained below.',
     'In my application for the role at Stripe, I have included a demo.',
     'Given my experience with payments and the team at Stripe, I have prepared a demo.',
@@ -227,6 +255,16 @@ try {
   noClaim('known limit: "my role" after the name', 'At Globex, my role involved billing.');
   noClaim('known limit: a descriptor after the name', 'At Globex in Berlin, I led the team.');
   noClaim('known limit: a present verb outside the list', 'As a Data Scientist at Globex, I tackle fraud.');
+  noClaim('known limit: "was" with a word outside the list', 'At Globex, I was the lead engineer.');
+  noClaim('known limit: "your" in the clause that states the work', 'At Globex, I built the kind of tool your team uses.');
+
+  // A page of hundreds of thousands of statements is read without overflowing the
+  // call stack.
+  try {
+    claims('200,000 job statements are read without throwing', 'At Globex, I led the team. '.repeat(200000), ['globex']);
+  } catch (error) {
+    fail(`200,000 job statements threw: ${String(error.message).slice(0, 80)}`);
+  }
 
   // Growth, not a wall-clock limit, as in verify-cv-facts-tool-fragments. Ten times
   // the input may take about ten times as long, and quadratic growth a hundred.
