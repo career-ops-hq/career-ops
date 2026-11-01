@@ -1688,6 +1688,16 @@ export async function mergeTracker(options = {}) {
     let updated = 0;
     let skipped = 0;
     let missingReports = 0;
+    let unwrittenNotes = 0;
+    // set-status.mjs refuses --note on a tracker with no Notes column, because a
+    // note is all that command writes. A merge carries a whole evaluation, so it
+    // goes ahead, like a row whose report is missing, and says what it left out.
+    const warnNoteUnwritten = (file, addition, notes) => {
+      const text = String(notes ?? '').trim();
+      if (COLMAP.notes != null || !text) return;
+      console.warn(`⚠️  ${file}: ${addition.company} — ${addition.role}: this tracker has no Notes column, so its note was not written: ${text}`);
+      unwrittenNotes++;
+    };
     const pdfIndex = loadPdfIndex();
     const pdfSynced = syncPdfFlags(existingApps, appLines, pdfIndex);
     updated += pdfSynced;
@@ -2173,6 +2183,8 @@ export async function mergeTracker(options = {}) {
         const pdf = reportNum && pdfIndex.has(String(reportNum))
           ? '✅'
           : (reportChanged ? '❌' : duplicate.pdf);
+        const updatedNotes = mergeNotes(duplicate.notes, addition, oldScore, newScore, supersededNote);
+        warnNoteUnwritten(file, addition, updatedNotes);
         const updatedLine = buildRow({
           num: duplicate.num, date: addition.date,
           // A corporate-form match (#3665) pairs the row with a VARIANT spelling of
@@ -2193,7 +2205,7 @@ export async function mergeTracker(options = {}) {
           location: addition.location || duplicate.location || '—',
           score: addition.score, status: duplicate.status, pdf,
           report: addition.report,
-          notes: mergeNotes(duplicate.notes, addition, oldScore, newScore, supersededNote),
+          notes: updatedNotes,
           // Preserve the row's unmapped custom-column cells across the rebuild.
           raw: duplicate.raw,
           // Carry the key forward. Without this the update path rewrites the row
@@ -2249,6 +2261,7 @@ export async function mergeTracker(options = {}) {
         if (entryNum > maxNum) maxNum = entryNum;
 
         const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : addition.pdf;
+        warnNoteUnwritten(file, addition, addition.notes);
         const newLine = buildRow({
           num: entryNum, date: addition.date, company: addition.company, role: addition.role,
           via: addition.via || '—',
@@ -2342,6 +2355,7 @@ export async function mergeTracker(options = {}) {
 
     console.log(`\n📊 Summary: +${added} added, 🔄${updated} updated, ⏭️${skipped} skipped${failedAdditions.length ? `, ❌${failedAdditions.length} NOT merged` : ''}`);
     if (missingReports > 0) console.log(`⚠️  ${missingReports} row(s) link to a report that is not on disk (see warnings above)`);
+    if (unwrittenNotes > 0) console.log(`⚠️  ${unwrittenNotes} note(s) not written: this tracker has no Notes column (see warnings above)`);
     if (refusedAdditions.length > 0 && !DRY_RUN) {
       console.warn(
         `⚠️  ${refusedAdditions.length} skipped addition(s) left in ${ADDITIONS_DIR} for a re-run: ` +
