@@ -35,6 +35,7 @@ test("opening a row reads the current search without passing it into every row",
   assert.ok(followDetailEnd > followDetailStart, "followDetail must end before stampDetail");
   const followDetail = src.slice(followDetailStart, followDetailEnd);
   assert.match(followDetail, /trackerDetailHref\(n, paramsRef\.current, qRef\.current\)/);
+  assert.match(followDetail, /syncSearchRef\.current\(event\)/);
   assert.doesNotMatch(followDetail, /pipelineQuery\(params\.toString\(\), q\)/);
   assert.match(followDetail, /\[\]\);/);
 });

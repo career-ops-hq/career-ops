@@ -51,7 +51,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run close-stale` | `close-stale.mjs` | Close long-silent `Applied` rows in bulk (dry run by default; `--confirm` writes through the locked tracker path, tags the note and logs each transition) |
 | `npm run reeval-candidates` | `reeval-candidates.mjs` | List `Evaluated` tracker rows whose last evaluation predates the latest change to `cv.md`, `article-digest.md`, `config/profile.yml` or `modes/_profile.md` (read-only) |
 | `npm run freshness` | `check-table-freshness.mjs` | Staleness validator for jurisdiction data tables (`as_of` / `next_effective` watchdog) |
-| `npm run jd-archive` | `check-jd-archive.mjs` | Validate every `reports/*.md` has an archived JD (embedded section or `jds/` capture) — flags `missing-jd-archive` |
+| `npm run jd-archive` | `check-jd-archive.mjs` | Validate every `reports/*.md` has an archived JD (embedded section, numbered `jds/` capture, or a capture its tracker row links) — `missing-jd-archive` with no tracker to join, `jd-archive-review-due` for a live row |
 | `npm run openai:tailor` | `openai-tailor.mjs` | Tailor a CV via any OpenAI-compatible endpoint (headless companion to `openai-eval.mjs`) |
 | `npm run or` | `openrouter-runner.mjs` | Run scan/evaluate/pipeline/apply on OpenRouter free models — no Claude CLI required |
 | `npm run reconcile` | `reconcile-pipeline.mjs` | Remove batch-evaluated offers from pipeline.md "Pendientes" |
@@ -512,7 +512,7 @@ Default silence window: `templates/benchmarks.yml` `days_first_response.range_da
 
 ## contacts
 
-Your job-search phonebook, exportable to your phone. Reads `data/contacts.tsv` (one contact per line — the schema is the vCard fields, nothing more) and emits vCard 3.0 (`VERSION:3.0` for iOS/Android import compatibility) with CRLF line endings, byte-safe 75-octet line folding, and a stable deterministic UID `careerops-{uidPart(name)}--{uidPart(company)}` (double-dash boundary between the two parts). Each `uidPart` is the lowercase slug of the raw value (non-alphanumeric runs collapsed to single dashes, ends trimmed) suffixed with an 8-hex sha1 of the *raw* value — e.g. `jane-doe-cac7bbb6`; when the slug is empty — a fully non-ASCII value such as a CJK name — the part is the bare 8-hex hash. Hashing the raw value (not the lossy slug) keeps distinct inputs that slug identically — e.g. `José` and `Josè` both slug to `jos` (the accented char drops out), and `Acme Inc` and `Acme, Inc.` both to `acme-inc` — from colliding into one UID. Re-importing updates existing entries instead of duplicating them on platforms that honor vCard UID (iOS fallback: assign imports to a group, delete the group to bulk-remove). `--caller-id` renders the display name as `Jane Doe (Acme recruiter)` so the lock screen tells you which recruiter is calling — useful when a phone number is known (often it isn't). Malformed rows are reported in a `quality` block, never dropped silently.
+Your job-search phonebook, exportable to your phone. Reads `data/contacts.tsv` (one contact per line — the schema is the vCard fields, nothing more) and emits vCard 3.0 (`VERSION:3.0` for iOS/Android import compatibility) with CRLF line endings, byte-safe 75-octet line folding, and a stable deterministic UID `careerops-{uidPart(name)}--{uidPart(company)}` (double-dash boundary between the two parts). Each `uidPart` starts from the value with letter case, whitespace and Unicode composition (NFC vs NFD) folded and accents kept; the part is that value's lowercase slug (non-alphanumeric runs collapsed to single dashes, ends trimmed) suffixed with an 8-hex sha1 of the same folded value — e.g. `jane-doe-bc225ac5`; when the slug is empty — a fully non-ASCII value such as a CJK name — the part is the bare 8-hex hash. Hashing the folded value (not the lossy slug) keeps distinct inputs that slug identically — e.g. `José` and `Josè` both slug to `jos` (the accented char drops out), and `Acme Inc` and `Acme, Inc.` both to `acme-inc` — from colliding into one UID. Re-importing updates existing entries instead of duplicating them on platforms that honor vCard UID (iOS fallback: assign imports to a group, delete the group to bulk-remove). Exports made before composition was folded into the slug gave an NFD spelling (an `e` plus a combining accent rather than `é`) a different UID, so the first re-import after updating can add a second card for that contact; remove or merge the old card by hand. `--caller-id` renders the display name as `Jane Doe (Acme recruiter)` so the lock screen tells you which recruiter is calling — useful when a phone number is known (often it isn't). Malformed rows are reported in a `quality` block, never dropped silently.
 
 ```bash
 node contacts.mjs                    # JSON (contacts + quality + total)
@@ -689,12 +689,27 @@ node check-table-freshness.mjs --self-test
 
 Validator for JD archival (#2789). A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes, which reliably happens somewhere between applying and a later interview round. `modes/oferta.md` and `modes/pdf.md` require every report to archive the JD's verbatim text, primarily as an embedded `## Job Description (archived verbatim)` section (the report is the one artifact guaranteed to get written and tracked), with a `jds/{file}` capture as an acceptable alternative. This script is the watchdog: zero LLM, zero network, zero writes.
 
-A report counts as archived when EITHER holds:
+A report counts as archived when ANY of these holds:
 
-- it carries a `## Job Description` section (with or without the `(archived verbatim)` suffix) containing at least 40 non-whitespace characters after stripping HTML comments — enough to reject an empty placeholder or a "TBD" stub, or
-- a corresponding `jds/` capture exists for it, resolved via `jd-capture.mjs`'s `findCaptureForReport` (the same report-number lookup `outcome.mjs` already relies on) using the report number and company slug parsed straight from the report's own filename (`{###}-{company-slug}-{YYYY-MM-DD}.md`). Only captures written with a numeric report-number prefix (`archive-posting.mjs --report=N`) are resolvable this way — the other `jds/` naming conventions in play (date-prefixed, sha1-suffixed, bare company-role slugs; see "JD captures (`jds/`)" below) have no report number to key on, so they cannot be credited here. Prefer `--report=N` when archiving to a side file for this reason.
+- it carries a `## Job Description` section (with or without the `(archived verbatim)` suffix) at least 40 characters long once HTML comments are stripped and its ends trimmed (whitespace inside the text counts), and the section is none of the shapes below, which are rejected however long they are:
+  - the unfilled placeholder from `modes/oferta.md` or a localized evaluation mode (the set is read from the templates), alone or under a filled-in `Posted:` line;
+  - the pointer sentence alone (`See jds/{file} for the full archive.`): the capture it names has to resolve through one of the next two rules instead;
+  - a page that was never the posting: a sign-in/login wall, a 404 shell, a paywall, a "please enable JavaScript" shell, or a bot-verification page;
+  - a paraphrase or restatement that says so, in the section or in its heading (`## Job Description (paraphrase, not verbatim)`);
+- a `jds/` capture with a numeric report-number prefix exists for it, resolved via `jd-capture.mjs`'s `findCaptureForReport` (the same report-number lookup `outcome.mjs` already relies on) using the report number and company slug parsed straight from the report's own filename (`{###}-{company-slug}-{YYYY-MM-DD}.md`). `archive-posting.mjs --report=N` writes captures this way; or
+- the report's tracker row links a `jds/` capture ending in `.md`, `.txt` or `.pdf`, under any name, in its Report or Notes cell (`local:jds/acme-senior-engineer.md`). The file has to exist, and a link that leads outside the data root is ignored. This is how the date-prefixed, sha1-suffixed and bare company-role captures (see "JD captures (`jds/`)" below) are credited, since they have no report number to key on.
 
-Reports missing both are flagged `missing-jd-archive`.
+A report with none of these gets a finding, and its severity depends on the report's own tracker row:
+
+| Tracker | Finding |
+|---------|---------|
+| none to join against: no tracker file, an unreadable tracker or `templates/states.yml`, or `--no-tracker` | `missing-jd-archive`, which fails the run |
+| the row is in a terminal state: Rejected, Discarded, SKIP or Hired | none |
+| the row is in a live state (Evaluated, Applied, Responded, Assessment, Interview, Offer), no row links the report, two rows do, or the status is not a canonical state | `jd-archive-review-due`, a warning that never fails the run |
+
+Offer counts as live even though `templates/states.yml` marks it terminal, since the JD may still be needed for negotiation or comparison. When the section was rejected as a page that was never the posting, or as a paraphrase, the finding's `detail` names the reason ("looks like a sign-in/login wall, not a posting").
+
+The JSON output (and the `--summary` table) also carries `unarchivedApplications`: tracker rows in a sent state (Applied, Responded, Interview, Offer, Hired, Rejected) with no report file and no linked capture, each typed `application-no-archive`. The report scan never sees these rows, since they have no report to scan. They never change the exit code.
 
 ```bash
 npm run jd-archive
@@ -702,10 +717,13 @@ node check-jd-archive.mjs                      # JSON
 node check-jd-archive.mjs --summary             # human-readable table
 node check-jd-archive.mjs --reports-dir <path>  # override reports/ (testing)
 node check-jd-archive.mjs --jds-dir <path>      # override jds/ (testing)
+node check-jd-archive.mjs --tracker <path>      # override data/applications.md (testing)
+node check-jd-archive.mjs --no-tracker          # skip the tracker join: every miss is missing-jd-archive
 node check-jd-archive.mjs --self-test
+node check-jd-archive.mjs --help
 ```
 
-**Exit codes:** `1` if any `missing-jd-archive` finding, `0` otherwise (including the empty-repo case — `reports/*.md` is gitignored, so a fresh checkout has nothing to scan). Wired into `test-all.mjs`'s `--self-test` invocation; backfilling JD text for pre-existing reports that predate this validator is explicitly out of scope (#2789) — this only prevents the gap going forward.
+**Exit codes:** `1` if any `missing-jd-archive` finding, `0` otherwise: with only `jd-archive-review-due` findings, and in the empty-repo case (`reports/*.md` is gitignored, so a fresh checkout has nothing to scan). Wired into `test-all.mjs`'s `--self-test` invocation; backfilling JD text for pre-existing reports that predate this validator is explicitly out of scope (#2789) — this only prevents the gap going forward.
 
 ---
 
@@ -1235,6 +1253,7 @@ node ics-interview.mjs < invite.ics
 
 - Display zone: `--tz`, else `config/profile.yml` `location.timezone` (when Intl recognizes it), else the machine zone. A value that is not a zone is reported, not guessed.
 - Unreadable fields are an em dash in the row. All-day events are reported as a date, floating times (no zone, no `Z`) as written without conversion, and a `TZID` that is not an IANA name (e.g. a Windows zone name) as `unknown-tzid` without conversion. `RRULE` is ignored with a warning.
+- A cancellation (`METHOD:CANCEL` or `STATUS:CANCELLED`) gives no row and a `cancelled` warning, since it carries the same start and end as the invite it cancels.
 - `--match` hands the invite text (or a file holding it) to `invite-match.mjs` to suggest the tracker row; Company and Role are filled in only when exactly one candidate matches the company exactly. The length shown comes from the `.ics`.
 - Hand-written parser for the handful of properties needed; zero-LLM, no dependency.
 
