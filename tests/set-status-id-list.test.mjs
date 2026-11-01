@@ -12,6 +12,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -170,7 +171,7 @@ describe('set-status rejects a list of tracker numbers', () => {
       assert.match(listed.stderr, /node set-status\.mjs --row 14 Applied/);
       assert.match(listed.stderr, /node set-status\.mjs --row 78 Applied/);
       const bare = spawn(sb, ['14', 'Applied', '--dry-run']);
-      assert.notEqual(bare.status, 0, bare.stdout);
+      assert.ok(exitedNonZero(bare), describeSpawn(bare, 'a bare 14 should have been refused'));
       assert.match(bare.stderr, /report ID/);
       const explicit = spawn(sb, ['--row', '14', 'Applied', '--dry-run']);
       assert.equal(explicit.status, 0, explicit.stderr);
