@@ -633,39 +633,97 @@ function ompUserConfigFiles() {
   return [join(dir, 'settings.json')];
 }
 
+function ompConfigEnableProjectState(cfg) {
+  if (!cfg || typeof cfg !== 'object') return undefined;
+  if (isExplicitlyDisabled(cfg['mcp.enableProjectConfig'])) return false;
+  if (isExplicitlyEnabled(cfg['mcp.enableProjectConfig'])) return true;
+  if (cfg.mcp && typeof cfg.mcp === 'object') {
+    if (isExplicitlyDisabled(cfg.mcp.enableProjectConfig)) return false;
+    if (isExplicitlyEnabled(cfg.mcp.enableProjectConfig)) return true;
+  }
+  return undefined;
+}
+
+// OMP allows disabling project MCP configuration via mcp.enableProjectConfig: false
+// in project settings (.omp/config.yml, .omp/settings.json) or user settings
+// (~/.omp/agent/config.yml, ~/.omp/settings.json). When false, project-level MCP
+// sources are excluded from discovery (docs/mcp-config.md). Defaults to true.
+function isOmpProjectMcpEnabled(root) {
+  const projectFiles = root ? [
+    join(root, '.omp', 'config.yml'),
+    join(root, '.omp', 'config.yaml'),
+    join(root, '.omp', 'settings.json'),
+  ] : [];
+  for (const file of projectFiles) {
+    const state = ompConfigEnableProjectState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state;
+  }
+  for (const file of ompUserConfigFiles()) {
+    const state = ompConfigEnableProjectState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state;
+  }
+  return true;
+}
+
 // OMP merges MCP definitions across user agent directory and project files.
 // Project definitions override/shadow user definitions with the same name.
 // User-level disabledServers acts as an explicit denylist across all sources (docs/mcp-config.md).
 // User-level enabledServers force-enables a server definition unless disabledServers also lists it.
 function getOmpEffectivePlaywright(root) {
+  const projectEnabled = isOmpProjectMcpEnabled(root);
+
+  // Read Claude user config if present (~/.claude.json)
+  const claudeDir = process.env.CLAUDE_CONFIG_DIR || homedir();
+  const claudeJson = readConfigIfPresent(join(claudeDir, '.claude.json'));
+  let claudeProjectCfg = null;
+  if (projectEnabled && root && claudeJson?.projects && typeof claudeJson.projects === 'object') {
+    const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    const target = norm(root);
+    for (const [key, proj] of Object.entries(claudeJson.projects)) {
+      if (norm(key) === target && proj && typeof proj === 'object') {
+        claudeProjectCfg = proj;
+        break;
+      }
+    }
+  }
+
   const sources = [
+    // Imported Claude user config (.claude.json user scope)
+    ...(claudeJson ? [{ cfg: claudeJson, source: 'the Claude user .claude.json' }] : []),
+    // Imported Claude project configs (.claude.json local project scope, .claude/mcp.json)
+    ...(projectEnabled && claudeProjectCfg ? [{ cfg: claudeProjectCfg, source: 'the Claude project .claude.json' }] : []),
+    ...(projectEnabled && root ? [{ file: join(root, '.claude', 'mcp.json'), source: '.claude/mcp.json' }] : []),
     // Root fallback files (ascending precedence: .mcp.json, then mcp.json)
-    { file: root ? join(root, '.mcp.json') : '.mcp.json', source: '.mcp.json' },
-    { file: root ? join(root, 'mcp.json') : 'mcp.json', source: 'mcp.json' },
+    ...(projectEnabled ? [
+      { file: root ? join(root, '.mcp.json') : '.mcp.json', source: '.mcp.json' },
+      { file: root ? join(root, 'mcp.json') : 'mcp.json', source: 'mcp.json' },
+    ] : []),
     // User files (ascending precedence: .mcp.json, then mcp.json)
-    { file: join(ompAgentDir(), '.mcp.json'), source: 'the OMP user mcp.json', user: true },
-    { file: join(ompAgentDir(), 'mcp.json'), source: 'the OMP user mcp.json', user: true },
+    { file: join(ompAgentDir(), '.mcp.json'), source: 'the OMP user mcp.json' },
+    { file: join(ompAgentDir(), 'mcp.json'), source: 'the OMP user mcp.json', userOverrides: true },
     // OMP project files (ascending precedence: .omp/.mcp.json, then .omp/mcp.json)
-    { file: root ? join(root, '.omp', '.mcp.json') : join('.omp', '.mcp.json'), source: '.omp/.mcp.json' },
-    { file: root ? join(root, '.omp', 'mcp.json') : join('.omp', 'mcp.json'), source: '.omp/mcp.json' },
+    ...(projectEnabled ? [
+      { file: root ? join(root, '.omp', '.mcp.json') : join('.omp', '.mcp.json'), source: '.omp/.mcp.json' },
+      { file: root ? join(root, '.omp', 'mcp.json') : join('.omp', 'mcp.json'), source: '.omp/mcp.json' },
+    ] : []),
   ];
 
   const disabledServers = new Set();
   const forcedEnabled = new Set();
   const effectiveServers = new Map();
 
-  for (const { file, source, user } of sources) {
-    const cfg = readConfigIfPresent(file);
+  for (const { file, cfg: directCfg, source, userOverrides } of sources) {
+    const cfg = directCfg ?? (file ? readConfigIfPresent(file) : null);
     if (!cfg || typeof cfg !== 'object') continue;
 
-    if (user && Array.isArray(cfg.disabledServers)) {
+    if (userOverrides && Array.isArray(cfg.disabledServers)) {
       for (const s of cfg.disabledServers) {
         if (typeof s === 'string' && s.trim()) {
           disabledServers.add(s.trim().toLowerCase());
         }
       }
     }
-    if (user && Array.isArray(cfg.enabledServers)) {
+    if (userOverrides && Array.isArray(cfg.enabledServers)) {
       for (const s of cfg.enabledServers) {
         if (typeof s === 'string' && s.trim()) {
           forcedEnabled.add(s.trim().toLowerCase());

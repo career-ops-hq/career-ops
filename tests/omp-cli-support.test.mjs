@@ -443,6 +443,82 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     } else {
       fail(`doctor failed to prioritize disabledServers over enabledServers: ${JSON.stringify(resDisabledWins)}`);
     }
+
+    // 4q. user .mcp.json is not an override source (disabledServers only read from active mcp.json)
+    rmSync(join(dir, '.omp', 'mcp.json'), { force: true });
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+    writeFileSync(join(isolatedAgentDir, '.mcp.json'), JSON.stringify({
+      disabledServers: ['playwright'],
+    }));
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+
+    const resDotMcpNotOverride = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resDotMcpNotOverride.playwright_mcp?.omp === true
+        && !resDotMcpNotOverride.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor reads disabledServers only from active user mcp.json, not .mcp.json');
+    } else {
+      fail(`doctor failed to ignore disabledServers in .mcp.json: ${JSON.stringify(resDotMcpNotOverride)}`);
+    }
+
+    // 4r. mcp.enableProjectConfig: false disables project MCP sources
+    rmSync(join(isolatedAgentDir, 'mcp.json'), { force: true });
+    rmSync(join(isolatedAgentDir, '.mcp.json'), { force: true });
+    writeFileSync(join(dir, '.omp', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+    writeFileSync(join(dir, '.omp', 'settings.json'), JSON.stringify({
+      mcp: { enableProjectConfig: false },
+    }));
+
+    const resProjectMcpDisabled = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resProjectMcpDisabled.playwright_mcp?.omp === false
+        && resProjectMcpDisabled.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
+      pass('doctor respects mcp.enableProjectConfig: false and excludes project MCP sources');
+    } else {
+      fail(`doctor failed when mcp.enableProjectConfig is false: ${JSON.stringify(resProjectMcpDisabled)}`);
+    }
+
+    // 4s. OMP discovers Playwright MCP from Claude project config (.claude/mcp.json)
+    rmSync(join(dir, '.omp', 'mcp.json'), { force: true });
+    rmSync(join(dir, '.omp', 'settings.json'), { force: true });
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    writeFileSync(join(dir, '.claude', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+
+    const resClaudeImported = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resClaudeImported.playwright_mcp?.omp === true
+        && !resClaudeImported.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor discovers Playwright MCP for OMP from imported Claude project config');
+    } else {
+      fail(`doctor failed to discover Playwright MCP from Claude config: ${JSON.stringify(resClaudeImported)}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(isolatedHome, { recursive: true, force: true });
