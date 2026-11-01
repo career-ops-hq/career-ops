@@ -93,7 +93,8 @@ try {
     ['"have" with an adverb', 'At Globex, I have also shipped three models.'],
     ['an irregular past', 'At Globex, I ran the team.'],
     ['a present verb of running work', 'At Globex, I manage a team of engineers.'],
-    ['"currently" with a verb outside the list', 'At Globex, I currently tackle fraud.'],
+    ['"currently" with a verb of running work', 'At Globex, I currently lead the team.'],
+    ['"where I currently" with any verb', 'At Globex, where I currently excel as a Data Scientist, I have shipped.'],
     ['"was responsible for"', 'At Globex, I was responsible for billing.'],
     ['"was part of"', 'At Globex, I was part of the billing team.'],
     ['"were" with "we"', 'At Globex, we were responsible for billing.'],
@@ -171,6 +172,9 @@ try {
     'At Stripe, I have been following the team.',
     'At Stripe, I have been reading the engineering blog.',
     'At Stripe, I had a chat with the team.',
+    'At Stripe, I currently see an opportunity to contribute.',
+    'At Stripe, I currently admire how the team writes.',
+    'At Stripe, where I currently see your team shipping, the work is public.',
     'At Stripe, you run payments for millions.',
     'At Stripe, your team runs payments for millions.',
     'At Stripe, the billing team moved to a monorepo.',
@@ -255,6 +259,7 @@ try {
   noClaim('known limit: "my role" after the name', 'At Globex, my role involved billing.');
   noClaim('known limit: a descriptor after the name', 'At Globex in Berlin, I led the team.');
   noClaim('known limit: a present verb outside the list', 'As a Data Scientist at Globex, I tackle fraud.');
+  noClaim('known limit: "currently" with a present verb outside the list', 'At Globex, I currently tackle fraud.');
   noClaim('known limit: "was" with a word outside the list', 'At Globex, I was the lead engineer.');
   noClaim('known limit: "your" in the clause that states the work', 'At Globex, I built the kind of tool your team uses.');
 
