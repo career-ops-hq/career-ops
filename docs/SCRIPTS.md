@@ -1816,7 +1816,7 @@ Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)
 `scan.mjs` appends one row to this file after each non-dry scan run, recording how many companies/boards it checked, how many postings it found vs. filtered out vs. flagged as duplicates vs. added, and how many errors occurred. `--dry-run` scans never write to this file. The columns, in header order:
 
 * `timestamp` — ISO timestamp of the scan
-* `status` — `completed` for a run that finished, `failed` for one that died after the sweep started (#2643). `stats.mjs` counts every row in `totalRuns`, `failedRuns` and `lastRunDate`, and only `completed` rows in `avgFoundPerRun`, `avgNewPerRun` and `filterRemovalPct`
+* `status` — `completed` for a run that finished, `failed` for one that died after the sweep started (#2643). `stats.mjs` counts every accepted row in `totalRuns`, `failedRuns` and `lastRunDate`, and only `completed` rows in `avgFoundPerRun`, `avgNewPerRun` and `filterRemovalPct`
 * `companies` — number of companies scanned this run
 * `boards` — number of job boards scanned this run
 * `found` — total postings found
