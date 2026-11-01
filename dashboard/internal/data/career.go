@@ -786,8 +786,10 @@ func splitTrackerRow(line string) []string {
 			fields = append(fields, strings.TrimSpace(strings.Trim(p, "|")))
 		}
 	} else {
-		// Pure pipe format.
-		line = strings.Trim(line, "|")
+		// Pure pipe format. Only the two outer pipes come off: in a row ending in
+		// `||` the first of them closes an empty last cell, which parseTrackerRow
+		// keeps and the width guard counts.
+		line = strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|")
 		for _, p := range strings.Split(line, "|") {
 			fields = append(fields, strings.TrimSpace(p))
 		}
