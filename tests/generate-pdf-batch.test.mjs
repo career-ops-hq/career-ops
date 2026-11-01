@@ -322,7 +322,7 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     fail(`all-success batch did not exit clean: status=${okBatch.status}\n${okBatch.output.trim()}`);
   }
 
-  // --- Test 3b (#6326): cv.max_pages / cv.strict_pages reach batch CV entries,
+  // --- Test 3b (#6325): cv.max_pages / cv.strict_pages reach batch CV entries,
   // the path batch workers use, and leave a cover letter on the default budget.
   // The stub renders every document at 2 pages.
   const budgetProfile = join(sandbox, 'budget-profile.yml');
@@ -347,7 +347,7 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     fail(`profile page budget did not reach the batch path as expected: status=${budgetBatch.status}\n${budgetBatch.output.trim()}`);
   }
 
-  // --- Test 3c (#6326): an unusable profile budget fails only the CV entries;
+  // --- Test 3c (#6325): an unusable profile budget fails only the CV entries;
   // the cover letter in the same batch, which never reads cv.*, still renders.
   const badBudgetProfile = join(sandbox, 'bad-budget-profile.yml');
   writeFileSync(badBudgetProfile, 'name: Test Candidate\ncv:\n  max_pages: none\n', 'utf-8');

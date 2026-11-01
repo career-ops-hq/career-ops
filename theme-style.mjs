@@ -174,7 +174,7 @@ export function cvSectionOrderFrom(cv) {
 }
 
 /**
- * Read the CV page budget from a profile file (#6326):
+ * Read the CV page budget from a profile file (#6325):
  *
  *   cv:
  *     max_pages: 1

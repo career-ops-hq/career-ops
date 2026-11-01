@@ -242,7 +242,7 @@ cv:
   # rendered CV against it, and still fails if they disagree.
   # sections: [skills, education, certifications, awards]
   #
-  # (Optional) Page budget for every rendered CV PDF (#6326). Without it a CV
+  # (Optional) Page budget for every rendered CV PDF (#6325). Without it a CV
   # may run to 2 pages, with a warning past that. Students, new graduates and
   # early-career candidates usually want 1. strict_pages: true turns an
   # overflow into a failed render instead of a warning. A --max-pages or

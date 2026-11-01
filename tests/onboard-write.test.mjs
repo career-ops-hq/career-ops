@@ -405,7 +405,7 @@ test('experience_filter with no action is written as label', () => {
   } finally { cleanup(dir); }
 });
 
-test('no cv answer leaves the page budget commented out (#6326)', () => {
+test('no cv answer leaves the page budget commented out (#6325)', () => {
   const { dir, res, read } = run(ANSWERS);
   try {
     assert.equal(res.status, 0, describeSpawn(res));
@@ -416,7 +416,7 @@ test('no cv answer leaves the page budget commented out (#6326)', () => {
   } finally { cleanup(dir); }
 });
 
-test('an early-career cv answer writes a one-page budget (#6326)', () => {
+test('an early-career cv answer writes a one-page budget (#6325)', () => {
   const answers = {
     ...ANSWERS,
     candidate: { ...ANSWERS.candidate, years_of_experience: 1 },
@@ -432,7 +432,7 @@ test('an early-career cv answer writes a one-page budget (#6326)', () => {
   } finally { cleanup(dir); }
 });
 
-test('an unusable cv answer exits 1 and writes nothing (#6326)', () => {
+test('an unusable cv answer exits 1 and writes nothing (#6325)', () => {
   for (const cv of [{ max_pages: 0 }, { max_pages: 1.5 }, { strict_pages: 'yes' }]) {
     const { dir, res } = run({ ...ANSWERS, cv });
     try {

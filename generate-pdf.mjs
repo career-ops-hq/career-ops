@@ -1748,7 +1748,7 @@ async function generatePDF() {
     } else if (arg === '--max-pages') {
       // A flag missing its operand, not an absent flag. Left alone it falls
       // through to the positional arms, and cv.max_pages from the profile would
-      // then set the budget the caller meant to set here (#6326). Marked
+      // then set the budget the caller meant to set here (#6325). Marked
       // supplied and made invalid, so the check below rejects it by name.
       maxPagesSupplied = true;
       maxPagesInput = '';
@@ -1795,7 +1795,7 @@ async function generatePDF() {
     process.exit(1);
   }
 
-  // #6326: cv.max_pages / cv.strict_pages in config/profile.yml, read once and
+  // #6325: cv.max_pages / cv.strict_pages in config/profile.yml, read once and
   // applied per document by pageBudgetFor().
   const flagBudget = { maxPages, maxPagesSupplied, strictPages };
   const profileBudget = readCvPageBudget(workspaceProfilePath());
@@ -1831,7 +1831,7 @@ async function generatePDF() {
   // Batch mode (#2384): render every document in the manifest through one
   // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
   // --allow-nonchronological to all entries (a CV entry with no page flag
-  // takes the profile's cv.max_pages/cv.strict_pages, #6326); each entry supplies its own
+  // takes the profile's cv.max_pages/cv.strict_pages, #6325); each entry supplies its own
   // input/output and may override format/reportNum. Takes no positional
   // input/output.
   if (batchManifestPath) {
@@ -1981,7 +1981,7 @@ async function generatePDF() {
 }
 
 /**
- * The page budget for one document (#6326). A flag always wins. With none, a
+ * The page budget for one document (#6325). A flag always wins. With none, a
  * CV takes cv.max_pages / cv.strict_pages from config/profile.yml, so a
  * one-page preference holds on every render path: agents, batch workers and
  * the web UI all spawn this CLI, and none of them could remember the flag. A
@@ -2490,7 +2490,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     // caller that restores its own inputs on failure (CV Studio restores the
     // edited HTML) would otherwise hold an HTML and a PDF from two revisions,
     // and cv.strict_pages makes strict renders reachable from the web UI
-    // (#6326). The rejected render goes to a sibling draft for inspection and
+    // (#6325). The rejected render goes to a sibling draft for inspection and
     // stops before success logs and manifest publication.
     if (budget.strictPages && pageCount > budget.maxPages) {
       const hadPrevious = existsSync(outputPath);

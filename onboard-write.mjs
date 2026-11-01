@@ -126,7 +126,7 @@ export function normalizeAnswers(raw) {
     if (action !== 'drop' && action !== 'label') throw new AnswerError('portals.experience_filter.action must be drop or label');
     experienceFilter = { stretch_years: stretch, action };
   }
-  // #6326: an optional CV page budget, asked for during onboarding when the
+  // #6325: an optional CV page budget, asked for during onboarding when the
   // candidate is early-career. Absent keys stay commented out in the profile.
   const cv = a.cv && typeof a.cv === 'object' ? a.cv : {};
   const maxPages = cv.max_pages ?? null;
@@ -259,7 +259,7 @@ export function buildProfile(template, a) {
   const tier = lines.findIndex((l) => l.startsWith('spend_tier:'));
   if (tier < 0) throw new Error('template has no spend_tier');
   lines[tier] = `spend_tier: ${a.spend_tier}`;
-  // #6326: uncomment the page-budget lines the example profile ships under cv:.
+  // #6325: uncomment the page-budget lines the example profile ships under cv:.
   for (const key of ['max_pages', 'strict_pages']) {
     const value = a.cv?.[key];
     if (value === null || value === undefined) continue;

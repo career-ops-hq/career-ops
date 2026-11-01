@@ -275,7 +275,7 @@ try {
   const strictOverflow = runPdf([input, strictOverflowPdf, '--max-pages=1', '--strict-pages']);
   if (
     strictOverflow.status !== 0 &&
-    // #6326: the rejected render is kept as a sibling draft, never at the
+    // #6325: the rejected render is kept as a sibling draft, never at the
     // output path, so a previous good PDF there would survive.
     !existsSync(strictOverflowPdf) &&
     existsSync(strictOverflowDraft) &&
@@ -346,7 +346,7 @@ try {
     fail(`a bare --max-pages was not rejected: ${bareFlag.output.trim()}`);
   }
 
-  // #6326: with no flag, cv.max_pages / cv.strict_pages in config/profile.yml set
+  // #6325: with no flag, cv.max_pages / cv.strict_pages in config/profile.yml set
   // the budget, so a one-page preference holds on every render path. Each case
   // writes its own profile and points CAREER_OPS_PROFILE at it.
   const profileDir = join(sandbox, 'profiles');
