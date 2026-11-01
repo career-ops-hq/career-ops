@@ -60,6 +60,7 @@
 </p>
 
 <p align="center" dir="rtl"><a href="#دورك">جرّبه على وظيفة&nbsp;واحدة&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">اقرأ القصة&nbsp;كاملة&nbsp;←</a></p>
+<p align="center" dir="rtl"><sub>تفضّل ألّا تستخدم الطرفية؟ <a href="https://career-ops.org/waitlist?ref=readme-ar">انضم إلى قائمة الانتظار لنسخة الويب&nbsp;←</a></sub></p>
 
 <br>
 
@@ -324,7 +325,7 @@ npm i -g @santifer/career-ops
 
 ## كيف يعمل النظام؟
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), the tailored CV in the format set by cv.output_format — a PDF by default — and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## تكامل Antigravity CLI
 

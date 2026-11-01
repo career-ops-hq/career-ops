@@ -6,11 +6,11 @@
 // go.mod required 1.26.0). Every place that pins a Go version must satisfy the
 // floor, so a go.mod bump fails here instead of inside the container.
 
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 
-console.log('\n🔎 Go floor (Dockerfile and workflow pins satisfy dashboard/go.mod)');
+console.log('\n🔎 Go floor (Dockerfile, workflow pins and install docs satisfy dashboard/go.mod)');
 
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf-8');
 
@@ -58,4 +58,24 @@ if (!floor) {
     else if (atLeast(v, floor)) pass(`${where} (${v}) satisfies dashboard/go.mod's go ${floor}`);
     else fail(`${where} is ${v} but dashboard/go.mod requires go ${floor} — bump it`);
   }
+
+  // ── The install docs ───────────────────────────────────────────────
+  // A "Go X.Y+" minimum in prose. build-dashboard.mjs reads go.mod for its
+  // own message, so it is checked for a hard-coded one sneaking back.
+  const docs = [
+    ...readdirSync(ROOT).filter((f) => /^README[\w.-]*\.md$/.test(f)),
+    ...readdirSync(join(ROOT, 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`),
+    'dashboard/README.md',
+    'build-dashboard.mjs',
+  ].filter((rel) => existsSync(join(ROOT, rel)));
+  let claims = 0;
+  for (const rel of docs) {
+    for (const m of read(rel).matchAll(/\bGo (\d+\.\d+(?:\.\d+)?)\+/g)) {
+      claims++;
+      if (atLeast(m[1], floor)) pass(`${rel} says Go ${m[1]}+, which meets dashboard/go.mod's go ${floor}`);
+      else fail(`${rel} tells users to install Go ${m[1]}+ but dashboard/go.mod requires go ${floor} — update it`);
+    }
+  }
+  if (claims > 0) pass(`checked ${claims} stated Go minimums across ${docs.length} files`);
+  else fail('found no "Go X.Y+" minimum in the README, docs/ or dashboard/README.md — the scan matched nothing, so it checked nothing');
 }
