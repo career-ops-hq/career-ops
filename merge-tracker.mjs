@@ -846,6 +846,10 @@ export async function mergeTracker(options = {}) {
       for (let i = 0; i < cells.length; i++) {
         if (prev[i + 1] !== undefined) cells[i] = prev[i + 1];
       }
+      // A row can run wider than its header. Those cells are the user's too, and
+      // no field of ours claims them, so the rebuild has no reason to drop them.
+      const closed = String(o.raw).trimEnd().endsWith('|');
+      cells.push(...prev.slice(cells.length + 1, closed ? -1 : undefined));
     }
     const put = (key, value) => {
       const idx = COLMAP[key];
