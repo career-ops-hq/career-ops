@@ -176,7 +176,7 @@ function BulletRow({ n, bullet, parent, siblings, first, last, movable, edits, h
       )}
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {bullet.change === "new" && shown.source === "tailored" && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-300" title="No matching bullet in cv.md. Make sure it is true before you send it.">
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-800 dark:text-amber-300" title="No matching bullet in cv.md. Make sure it is true before you send it.">
             <TriangleAlert className="size-3" /> Not in your base CV
           </span>
         )}

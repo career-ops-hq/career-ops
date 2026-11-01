@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 const mod = await import(pathToFileURL(join(ROOT, 'assessment-log.mjs')).href);
@@ -172,7 +172,7 @@ ok('open --tz with no value fails instead of falling back silently', () => {
     const r = spawnSync(NODE, [join(ROOT, 'assessment-log.mjs'), 'open', '--tz'], {
       cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root },
     });
-    assert.notEqual(r.status, 0, describeSpawn(r));
+    assert.ok(exitedNonZero(r), describeSpawn(r, 'expected a non-zero exit'));
     assert.match(r.stderr, /--tz requires/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

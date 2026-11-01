@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fixReportLinks } from '../fix-report-links.mjs';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const CODE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const HEADER = [
@@ -261,7 +261,7 @@ test('unknown flag is rejected; --help prints usage', withRoot((root) => {
   writeTracker(root, [...HEADER, row(1, 'Acme Widgets', DEAD)]);
   const before = tracker(root);
   const bad = run(root, ['--dryrun']);
-  assert.notEqual(bad.status, 0, describeSpawn(bad));
+  assert.ok(exitedNonZero(bad), describeSpawn(bad, 'expected a non-zero exit'));
   assert.match(bad.out, /--dryrun/);
   assert.equal(tracker(root), before, 'a mistyped flag must not fall through to a live run');
   const help = run(root, ['--help']);
