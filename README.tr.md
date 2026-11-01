@@ -60,6 +60,7 @@ CV'ni uyarlar ve cevaplarının taslağını&nbsp;yazar. <strong>Gönder'e&nbsp;
 </p>
 
 <p align="center"><a href="#sıra-sende">Tek bir ilanla&nbsp;dene&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Hikâyenin tamamını&nbsp;oku&nbsp;→</a></p>
+<p align="center"><sub>Terminal kullanmamayı mı tercih edersin? <a href="https://career-ops.org/tr/waitlist?ref=readme-tr">Web sürümü için bekleme listesine katıl&nbsp;→</a></sub></p>
 
 <br>
 
@@ -324,7 +325,7 @@ Codex'te eğik çizgi komutları garanti değildir. Bunun yerine aynı mod adlar
 
 ## Nasıl Çalışır
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), the tailored CV in the format set by cv.output_format — a PDF by default — and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI Entegrasyonu
 
