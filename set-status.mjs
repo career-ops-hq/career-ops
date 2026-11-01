@@ -18,6 +18,8 @@
  *     assign the same # to two rows), --role narrows it, otherwise it fails
  *     ambiguous with a candidate list instead of silently editing whichever
  *     row was found first
+ *   - a comma-separated list of numbers is not a company. The command updates
+ *     one row, so it exits usage and prints one command per number
  *   - otherwise → company match (normalized, same key as merge-tracker dedup);
  *     multiple hits are narrowed with --role (fuzzy, role-matcher.mjs), and
  *     anything still ambiguous fails with a numbered candidate list.
@@ -152,6 +154,7 @@ const USAGE = `Usage: node set-status.mjs <tracker#|company> <state> [--note "..
        node set-status.mjs <tracker#|company> --undo [--dry-run] [--json]
 
   <tracker#|company> Row selector: tracker # (exact) or company name (normalized match)
+                     A list such as 14,78 is not a company. Run one command per row.
   <state>            Canonical state from templates/states.yml (aliases accepted)
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
@@ -387,6 +390,35 @@ const requestedStatus = flags.undo ? null : resolveCanonicalState(stateInput, st
 if (!flags.undo && !requestedStatus) {
   const valid = states.map(s => s.label).join(' · ');
   failWith(EXIT_USAGE, 'invalid-state', `"${stateInput}" is not a canonical state. Valid states: ${valid}`);
+}
+
+// "14,78" is one argv token. It is not a company, and this command writes one
+// row. Checked after the state is known, so a bad state still wins, and before
+// the tracker is opened, so a missing file does not hide the usage error.
+// "Acme, Inc." stays a company name: a non-numeric piece is not an id list.
+function trackerIdList(value) {
+  if (typeof value !== 'string' || !value.includes(',')) return null;
+  const parts = value.split(',').map((part) => part.trim());
+  if (parts.length < 2) return null;
+  if (!parts.every((part) => part === '' || /^\d+$/.test(part))) return null;
+  if (!parts.some((part) => /^\d+$/.test(part))) return null;
+  return parts;
+}
+
+if (selector !== null) {
+  const idList = trackerIdList(selector);
+  if (idList) {
+    const nums = idList.filter((part) => /^\d+$/.test(part));
+    const shown = nums.slice(0, 8);
+    const action = flags.undo ? '--undo' : requestedStatus;
+    // These numbers are tracker rows. A bare `14 Applied` is rejected when that
+    // row's report id differs, so the command that means "tracker row" is --row.
+    const lines = shown.map((id) => `node set-status.mjs --row ${id} ${action}`);
+    const extra = nums.length - shown.length;
+    const more = extra > 0 ? `\n... and ${extra} more` : '';
+    const empty = idList.some((part) => part === '') ? ' The list has an empty slot.' : '';
+    failUsage(`set-status updates one row.${empty} Run one command per tracker number:\n${lines.join('\n')}${more}`);
+  }
 }
 
 // ── tracker access ───────────────────────────────────────────────

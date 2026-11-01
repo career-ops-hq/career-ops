@@ -53,7 +53,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 7. Detect role archetype → adapt framing
 8. Before tailoring, optionally compare the new JD with the latest tailored CV or JD. Resolve the application/report first with `node find.mjs {report-or-tracker-number}`. Use the resolved report/JD snapshot as `{new-jd.txt}` and the referenced prior CV or prior JD as `{previous-jd-or-cv.txt}`; if either source cannot be located, do not silently reuse a CV. Run `npm run jd:similarity -- {new-jd.txt} {previous-jd-or-cv.txt}` and display the `decision` and `score`. Reuse is allowed only when the recommendation is `reuse` or the user explicitly overrides it; `reuse-with-edits` still requires the listed edits, and `regenerate` requires the normal tailoring flow.
 9. Build an internal recruiter-side risk map from the JD using `modes/heuristics/recruiter-side.md`: likely doubts, matching evidence, and which document section should address each doubt
-10. Rewrite Professional Summary by injecting JD keywords + exit narrative bridge ("Built and sold a business. Now applying systems thinking to [JD domain].")
+10. Rewrite Professional Summary by injecting JD keywords + the candidate's exit narrative from config/profile.yml → narrative.exit_story and the "Your Exit Narrative" section in modes/_profile.md; use the populated user source(s), adapted to the target role domain, and never invent an exit or founder story
 11. Select top 3-4 most relevant projects for the job. If `cv.md` carries an Awards / Honors section, populate `awards[]` with the entries that support this role — for an early-career candidate a contest medal or dean's list often outranks a thin project. Omit the key when there is nothing to list and the section disappears entirely; never invent an award to fill it
 12. Reorder experience bullets by JD relevance and by the risk map: strongest matching evidence first
 13. Build competency grid from JD requirements (6-8 keyword phrases), prioritizing `existing` and `supportedByResume` skills from Step 4 — never a `gap` skill
@@ -153,11 +153,10 @@ The `ats` mode also has an earlier, **payload**-level stage (`ats-payload.mjs`),
 
 ## PDF Design
 
-- **Fonts**: Space Grotesk (headings, 600-700) + DM Sans (body, 400-500)
-- **Fonts self-hosted**: `fonts/`
-- **Header**: name in Space Grotesk 24px bold + gradient line `linear-gradient(to right, hsl(187,74%,32%), hsl(270,70%,45%))` 2px + contact row
-- **Section headers**: Space Grotesk 13px, uppercase, letter-spacing 0.05em, color cyan primary
-- **Body**: DM Sans 11px, line-height 1.5
+- **Fonts**: ATS-safe system sans stack (`"Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif`) to ensure clean PDF text extraction without artificial word spacing; overridable via `config/profile.yml` `style:`
+- **Header**: name in 28px bold + gradient line `linear-gradient(to right, hsl(187,74%,32%), hsl(270,70%,45%))` 2px + contact row
+- **Section headers**: 12px, uppercase, letter-spacing 0.06em, color cyan primary (`hsl(187, 74%, 32%)`)
+- **Body**: 11px, line-height 1.5
 - **Company names**: accent purple color `hsl(270,70%,45%)`
 - **Margins**: 0.6in
 - **Background**: pure white
@@ -176,10 +175,9 @@ The `ats` mode also has an earlier, **payload**-level stage (`ats-payload.mjs`),
 
 Examples of legitimate reformulation:
 - JD says "RAG pipelines" and CV says "LLM workflows with retrieval" → change to "RAG pipeline design and LLM orchestration workflows"
-- JD says "MLOps" and CV says "observability, evals, error handling" → change to "MLOps and observability: evals, error handling, cost monitoring"
-- JD says "stakeholder management" and CV says "collaborated with team" → change to "stakeholder management across engineering, operations, and business"
+- JD says "reusable UI components" and CV says "reusable React components" → change to "reusable UI components with React"
 
-**NEVER add skills that the candidate does not have. Only reword real experience using the exact JD vocabulary.**
+**NEVER add skills that the candidate does not have. Only reword real experience using the exact JD vocabulary — a swapped or mapped term must mean the same thing and be backed by the same role, never broadening the candidate's actual scope.**
 
 ## Template HTML
 
