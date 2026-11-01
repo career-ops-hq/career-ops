@@ -157,22 +157,27 @@ if (guardErr && /cannot derive the client name/.test(guardErr.message) && guardC
   if (
     jobs.length === 150 && urls.length === 2 &&
     urls[0] === `${API}&limit=100&offset=0` &&
-    urls[1] === `${API}&limit=100&offset=100`
-  ) pass('trakstar.fetch() walks offset until meta.total, 100 per page');
-  else fail(`trakstar.fetch() pagination: ${jobs.length} jobs, ${JSON.stringify(urls)}`);
+    urls[1] === `${API}&limit=100&offset=100` &&
+    !jobs.trakstarTruncated
+  ) pass('trakstar.fetch() walks offset until a short page and leaves a complete board untagged');
+  else fail(`trakstar.fetch() pagination: ${jobs.length} jobs, truncated=${jobs.trakstarTruncated}, ${JSON.stringify(urls)}`);
   if (opts.length > 0 && opts.every((o) => o?.redirect === 'error')) pass('trakstar.fetch() passes redirect:"error" on every request');
   else fail(`trakstar.fetch() redirect opts: ${JSON.stringify(opts)}`);
 }
 
 {
   let calls = 0;
-  const jobs = await trakstar.fetch({ name: 'Acme', careers_url: BOARD }, ctxOf(async () => {
+  const { result: jobs, errors } = await captureConsoleErrors(() => trakstar.fetch({ name: 'Acme', careers_url: BOARD }, ctxOf(async () => {
     calls++;
     return calls === 1 ? page(many(1, 100), 40) : page(many(201, 100), 40);
-  }));
-  if (jobs.length === 100 && calls === 1 && !jobs.trakstarTruncated) {
-    pass('trakstar.fetch() stops when seen rows reach meta.total even if the page is full');
-  } else fail(`trakstar.fetch() total stop: ${jobs.length} jobs, ${calls} calls`);
+  })));
+  if (
+    jobs.length === 100 && calls === 1 && jobs.trakstarTruncated === true &&
+    errors.some((w) => /reported total was reached on a full page/.test(w)) &&
+    !errors.some((w) => /Raise max_pages/.test(w))
+  ) {
+    pass('trakstar.fetch() tags a full page that stops on the reported total');
+  } else fail(`trakstar.fetch() total stop: ${jobs.length} jobs, ${calls} calls, truncated=${jobs.trakstarTruncated}, ${JSON.stringify(errors)}`);
 }
 
 {
@@ -192,13 +197,17 @@ if (guardErr && /cannot derive the client name/.test(guardErr.message) && guardC
 
 {
   let calls = 0;
-  const jobs = await trakstar.fetch({ name: 'Acme', careers_url: BOARD }, ctxOf(async () => {
+  const { result: jobs, errors } = await captureConsoleErrors(() => trakstar.fetch({ name: 'Acme', careers_url: BOARD }, ctxOf(async () => {
     calls++;
     return page(many(1, 100), 9000);
-  }));
-  if (jobs.length === 100 && calls === 2 && !jobs.trakstarTruncated) {
-    pass('trakstar.fetch() stops when a page repeats');
-  } else fail(`trakstar.fetch() repeated page: ${jobs.length} jobs, ${calls} calls, truncated=${jobs.trakstarTruncated}`);
+  })));
+  if (
+    jobs.length === 100 && calls === 2 && jobs.trakstarTruncated === true &&
+    errors.some((w) => /same page came back twice/.test(w)) &&
+    !errors.some((w) => /Raise max_pages/.test(w))
+  ) {
+    pass('trakstar.fetch() tags a full page that repeats');
+  } else fail(`trakstar.fetch() repeated page: ${jobs.length} jobs, ${calls} calls, truncated=${jobs.trakstarTruncated}, ${JSON.stringify(errors)}`);
 }
 
 {

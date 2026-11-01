@@ -201,8 +201,12 @@ export default {
         jobs.push(job);
       }
       const counted = total !== null && seenRaw >= total;
+      const fullPage = parsed.rawCount >= PAGE_SIZE;
+      // A short or empty page is the walk's own end. meta.total and a repeated
+      // page can both stop early on a full page, and neither is that end.
       if (parsed.rawCount === 0 || parsed.rawCount < PAGE_SIZE || repeated || counted) {
-        endedNaturally = true;
+        if ((repeated || counted) && fullPage) stopReason = repeated ? 'repeated' : 'counted';
+        else endedNaturally = true;
         break;
       }
       offset += parsed.rawCount;
@@ -215,6 +219,12 @@ export default {
     }
     if (stopReason === 'cap') {
       console.error(`⚠️  trakstar: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs). Raise max_pages on this entry for more`);
+    }
+    if (stopReason === 'counted' || stopReason === 'repeated') {
+      const why = stopReason === 'counted'
+        ? 'the reported total was reached on a full page'
+        : 'the same page came back twice';
+      console.error(`⚠️  trakstar: ${entry.name} may be incomplete (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs): ${why}`);
     }
     if (stopReason !== 'complete') /** @type {any} */ (jobs).trakstarTruncated = true;
     return jobs;
