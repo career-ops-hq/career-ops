@@ -753,7 +753,11 @@ export function resolveTemplate(kind, name, opts = {}) {
   assertFormat(format);
 
   const explicit = Boolean(name && String(name).trim());
-  let chosen = kebab(explicit ? name : loadProfileDefault(kind, { profilePath, strict }) || 'standard');
+  // Strict callers parse the profile even when a name was passed, so a broken
+  // config/profile.yml is reported on every strict path rather than only when
+  // the profile happens to supply the name.
+  const profileDefault = (!explicit || strict) ? loadProfileDefault(kind, { profilePath, strict }) : null;
+  let chosen = kebab(explicit ? name : profileDefault || 'standard');
   const fileFor = (n) => (n === 'standard' ? `${cfg.prefix}.${format}` : `${cfg.prefix}.${n}.${format}`);
 
   // Resolution goes through the same discovery as listTemplates, so a name that

@@ -312,8 +312,11 @@ function buildSignatureBlock(signature, candidateName) {
 // the candidate's letterhead, signature or layout silently dropped. That
 // contradicts modes/cover.md Step 8 and `cv-templates.mjs resolve cover`,
 // which both surface the error. main() already prints a buildHtml error and
-// exits 1. A caller that really wants the silent fallback can still pass
-// `{ fallback: true }` in opts.
+// exits 1. A caller can still pass `{ fallback: true }` in opts, but that only
+// covers a template NAME that does not exist (it then resolves `standard`). A
+// malformed profile or an invalid template is an error either way: falling
+// back over those is exactly the silent substitution this function stopped
+// doing.
 export function resolveCoverTemplatePath(payload = {}, opts = {}) {
   return resolveTemplate("cover", payload.template, { format: "html", strict: true, ...opts });
 }

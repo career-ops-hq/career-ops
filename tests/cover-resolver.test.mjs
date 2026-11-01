@@ -83,8 +83,40 @@ test('resolveCoverTemplatePath: a missing profile still resolves the base templa
   assert.equal(basename(p), 'cover-letter-template.html');
 });
 
-test('resolveCoverTemplatePath: an explicit fallback opt-in keeps the old behaviour', () => {
+test('resolveCoverTemplatePath: fallback: true still resolves the base template for a missing name', () => {
   const { dir, profile } = coverFixture('nonexistent');
   const p = resolveCoverTemplatePath({}, { dir, profilePath: profile, fallback: true });
   assert.equal(basename(p), 'cover-letter-template.html');
+});
+
+// The fallback opt-in is narrow on purpose: it answers "that name does not
+// exist", never "the profile or the template is broken" (CodeRabbit on #6383).
+test('resolveCoverTemplatePath: fallback: true does not hide a malformed profile', () => {
+  const { dir, profile } = coverFixture(null);
+  writeFileSync(profile, 'cover_letter:\n  template: [unclosed\n');
+  assert.throws(
+    () => resolveCoverTemplatePath({}, { dir, profilePath: profile, fallback: true }),
+    /Failed to parse profile YAML/,
+  );
+});
+
+test('resolveCoverTemplatePath: fallback: true does not hide an invalid template', () => {
+  const { dir, profile } = coverFixture('broken');
+  writeFileSync(
+    join(dir, 'cover-letter-template.broken.html'),
+    '<!-- career-ops-template\nname: Broken\nversion: 1.0.0\n-->\n{{NAME}}',
+  );
+  assert.throws(
+    () => resolveCoverTemplatePath({}, { dir, profilePath: profile, fallback: true }),
+    /missing required placeholders/,
+  );
+});
+
+test('resolveCoverTemplatePath: a malformed profile is reported even with an explicit payload.template', () => {
+  const { dir, profile } = coverFixture(null);
+  writeFileSync(profile, 'cover_letter:\n  template: [unclosed\n');
+  assert.throws(
+    () => resolveCoverTemplatePath({ template: 'Formal' }, { dir, profilePath: profile }),
+    /Failed to parse profile YAML/,
+  );
 });
