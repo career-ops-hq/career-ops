@@ -1026,14 +1026,16 @@ export function isAtsPosting(url) {
 // greenhouse-embedded (a company careers page carrying only `?gh_jid=`) reaches
 // the same per-job Greenhouse endpoint once its embed redirect names the board.
 // Zoho Recruit has no JSON API; the posting page resolveAtsApi() points at
-// embeds the record with its HTML `Job_Description`.
+// embeds the record with its HTML `Job_Description`. UltiPro is the same: its
+// detail page embeds the `CandidateOpportunityDetail` record with its HTML
+// `Description`.
 // Workable canonical and share links expose description, requirements and benefits
 // on the per-posting v2 API, after the existing guarded account-resolution hop.
 // Microsoft and LinkedIn are on ATS_PROVIDERS
 // for liveness only — their public endpoints answer search/status, never body
 // text — so they are deliberately excluded here; see fetch-jd.mjs / the
 // fetch*Jd() family in browser-extract.mjs for the per-provider fetchers.
-export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters', 'zoho-recruit', 'workable', 'workable-short']);
+export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters', 'zoho-recruit', 'workable', 'workable-short', 'ultipro']);
 
 /**
  * Zero-token liveness check via the posting's ATS API.
