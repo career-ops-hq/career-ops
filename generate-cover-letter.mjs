@@ -154,9 +154,10 @@ function buildDateline(letter, hasRecipientBlock = false) {
   // one; either way, dropping company and city would lose them with nothing
   // taking their place. The shipped base template is the second case, so it
   // keeps the full join exactly as before.
+  const company = typeof letter.company === "string" ? letter.company : "";
   const parts = hasRecipientBlock
     ? [letter.date]
-    : [letter.company, letter.city, letter.date];
+    : [company, letter.city, letter.date];
   return parts.filter(Boolean).map(escapeHtml).join(" &nbsp;&nbsp; ");
 }
 
