@@ -175,6 +175,7 @@ try {
     'At Stripe, I currently see an opportunity to contribute.',
     'At Stripe, I currently admire how the team writes.',
     'At Stripe, where I currently see your team shipping, the work is public.',
+    'At Stripe, I did see an opening to help the billing team.',
     'At Stripe, you run payments for millions.',
     'At Stripe, your team runs payments for millions.',
     'At Stripe, the billing team moved to a monorepo.',
@@ -186,6 +187,29 @@ try {
   ]) {
     noClaim(`intent, or a statement about the company, claims nothing: "${sentence}"`, sentence);
   }
+
+  // A denial says the candidate did not work there, so blocking it would stop a
+  // truthful letter. The last four use "not" or "n't", which the reader never accepted.
+  for (const sentence of [
+    'At Stripe, I have never worked as an employee.',
+    'At Stripe, I never worked as an employee.',
+    "At Stripe, I've never worked as an employee.",
+    "At Stripe, I'd never worked as an employee.",
+    'At Stripe, we never worked with the billing team.',
+    'At Stripe, where I never worked, the work is public.',
+    'As a contractor at Stripe, I never worked as an employee.',
+    'At Stripe, I was never part of the team.',
+    'At Stripe, I have never been part of the team.',
+    'At Stripe, I did not work as an employee.',
+    'At Stripe, we did not build the product.',
+    'At Stripe, I have not worked as an employee.',
+    "At Stripe, I haven't worked as an employee.",
+    'At Stripe, I was not part of the team.',
+    "At Stripe, I didn't work as an employee.",
+  ]) {
+    noClaim(`a denial claims nothing: "${sentence}"`, sentence);
+  }
+  passes('a denial about a company cv.md never names passes', 'At Stripe, I have never worked as an employee.');
 
   // A job word has to be what leads to the name. The first of these is from a
   // real letter: past tense, first person, and still about the addressed company.
@@ -262,6 +286,10 @@ try {
   noClaim('known limit: "currently" with a present verb outside the list', 'At Globex, I currently tackle fraud.');
   noClaim('known limit: "was" with a word outside the list', 'At Globex, I was the lead engineer.');
   noClaim('known limit: "your" in the clause that states the work', 'At Globex, I built the kind of tool your team uses.');
+  noClaim('known limit: "never" with a verb that reports work', 'At Globex, I never missed a deadline.');
+  noClaim('known limit: "never worked" on a subject, not for the company', 'At Globex, I never worked on payments.');
+  noClaim('known limit: "did" with a plain object', 'At Globex, I did the migration.');
+  claims('known limit: "nearly" is read like any other adverb', 'At Stripe, I nearly joined the team.', ['stripe']);
 
   // A page of hundreds of thousands of statements is read without overflowing the
   // call stack.
