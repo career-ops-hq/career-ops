@@ -20,12 +20,12 @@ Resolve every path in this router against one of these two roots, never against 
 
 ### Skill installed without career-ops
 
-A skills catalog (for example `npx skills add career-ops-hq/career-ops`) copies only this `SKILL.md`. The modes, scripts and `AGENTS.md` it routes to live in the career-ops repository, so no mode can run until career-ops is installed. Never improvise a mode from this file alone: an evaluation without the repo's modes and the user's CV is not a career-ops evaluation.
+A skills catalog, or the career-ops plugin from a plugin directory (Claude or OpenAI), installs only this `SKILL.md`. The modes, scripts and `AGENTS.md` it routes to live in the career-ops repository, so no mode can run until career-ops is installed. Never improvise a mode from this file alone: an evaluation without the repo's modes and the user's CV is not a career-ops evaluation.
 
-1. Look for an existing install before offering a new one: the directory in `CAREER_OPS_ROOT` if it is set, then `./career-ops`, then `~/career-ops`. The first one that contains both `AGENTS.md` and `modes/` is `PROJECT_ROOT`; tell the user which one you are using and continue with their request.
-2. If there is none, tell the user in a few lines that career-ops runs from its own folder, and offer to set it up with `npx @santifer/career-ops init`. It needs Node.js, downloads the latest release from https://github.com/career-ops-hq/career-ops into `./career-ops` and installs its dependencies. Ask before running it: it downloads and installs software.
+1. Look for an existing install before offering a new one: the directory in `CAREER_OPS_ROOT` if it is set, then `./career-ops`, then `~/career-ops`. The first one that contains both `AGENTS.md` and `modes/` is `PROJECT_ROOT`; tell the user which one you are using, read `PROJECT_ROOT/AGENTS.md` in full, and continue with their request.
+2. If there is none, tell the user in a few lines that career-ops runs from its own folder, and offer to set it up with `npx @santifer/career-ops@1.38.0 init`. It needs Node.js, downloads the latest release from https://github.com/career-ops-hq/career-ops into `./career-ops` and installs its dependencies. Ask before running it: it downloads and installs software. <!-- x-release-please-version -->
 3. With a yes, run it from the current directory (or the folder the user picks). Then treat the new `career-ops` folder as `PROJECT_ROOT`: read its `AGENTS.md` in full, run every script from it, and pick up the user's original request (a pasted job URL or JD included). If their CV and profile are not there yet, the first-run setup in `AGENTS.md` comes first: it walks them through it by chatting. Tell them that next time they can open their AI CLI inside that folder.
-4. If they prefer to install it themselves, give the one command (`npx @santifer/career-ops init`, then `cd career-ops` and open the AI CLI there) and, for Claude Code, the plugin alternative: `/plugin marketplace add career-ops-hq/career-ops` then `/plugin install career-ops@career-ops`. Then stop.
+4. If they prefer to install it themselves, give the one command (`npx @santifer/career-ops@1.38.0 init`, then `cd career-ops` and open the AI CLI there) and, for Claude Code, the plugin alternative: `/plugin marketplace add career-ops-hq/career-ops` then `/plugin install career-ops@career-ops`. Then stop. <!-- x-release-please-version -->
 
 ### Claude Code plugin install
 
@@ -160,7 +160,7 @@ career-ops -- AI Job Search Agent
 Available commands:
   /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
   /career-ops pipeline  → Process pending URLs from inbox (data/pipeline.md)
-  /career-ops oferta    → Evaluation only A-F (no auto PDF)
+  /career-ops oferta    → Evaluation only A-H (no auto PDF)
   /career-ops ofertas   → Compare and rank multiple offers
   /career-ops contacto  → LinkedIn power move: find contacts + draft message
   /career-ops deep      → Deep research prompt about company
@@ -173,6 +173,7 @@ Available commands:
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
   /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round
+  /career-ops interview-redflag → Analyze employer warning signs before joining a company
   /career-ops pdf       → PDF only, ATS-optimized CV
   /career-ops ats       → ATS-friendliness check of a generated CV (score + fixable issues)
   /career-ops text      → Tailored markdown CV (mirrors cv.md, no PDF)
@@ -197,6 +198,7 @@ Available commands:
   /career-ops titles    → Suggest adjacent job titles from your CV to broaden the search
   /career-ops upskill   → Aggregate skill-gap analysis from your evaluated reports
   /career-ops followup  → Follow-up cadence tracker: flag overdue, generate drafts
+  /career-ops reply-watch → Classify employer replies and suggest tracker updates
   /career-ops outcome   → Record application outcome & archive artifacts
   /career-ops update    → Update career-ops system files with diff preview + compat check
 
@@ -239,7 +241,7 @@ For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as a wor
 ```python
 Agent(
   subagent_type="general-purpose",
-  prompt="[output language directive]\n\n[content of modes/_shared.md, or resolved shared context: every declared _shared.md once]\n\n[content of modes/_profile.md if exists]\n\n[content of modes/_custom.md if exists]\n\n[content of modes/{mode}.md, or resolved selected mode file; primary evaluation file for Blocks A-F]\n\n[invocation-specific data]",
+  prompt="[output language directive]\n\nPROJECT_ROOT: [resolved absolute PROJECT_ROOT]\nDATA_ROOT: [resolved absolute DATA_ROOT]\nRun every script from PROJECT_ROOT. Resolve User Layer paths against DATA_ROOT and every other path against PROJECT_ROOT.\n\n[content of modes/_shared.md, or resolved shared context: every declared _shared.md once]\n\n[content of modes/_profile.md if exists]\n\n[content of modes/_custom.md if exists]\n\n[content of modes/{mode}.md, or resolved selected mode file; primary evaluation file for Blocks A-F]\n\n[invocation-specific data]",
   description="career-ops {mode}"
 )
 ```
