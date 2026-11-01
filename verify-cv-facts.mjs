@@ -961,6 +961,64 @@ function tidyToolName(name) {
   return Array.from(stem).length < 2 ? '' : stem;
 }
 
+// An employer is also named by where the work happened, with no "worked at":
+//
+//   "At Globex Corporation, I cut claim-form rendering 92%"
+//   "In my current role as a Data Scientist at Globex, I have shipped ..."
+//
+// The employer pattern in factClaims never read either, so a made-up employer in
+// the sentence a cover letter is built around was not compared with cv.md
+// (#6371). On 1,162 public letters that record each applicant's jobs, the pattern
+// read an employer in 54, and 575 hold this shape, only 24 of them with "At"
+// opening a sentence.
+//
+// A company named this way is often not an employer, because a letter also talks
+// about the company it is addressed to, which cv.md never names: "At Stripe, I
+// would ...", "the standards expected at Facebook, I have prepared ...". Blocking
+// those would stop a truthful letter, so a claim needs two things. The words
+// before the name state a job, or the name opens the clause. The verb after it
+// reports work, so intent ("I would", "I am eager", "I hope") claims nothing.
+// A sentence that misses either stays unread, as all of these were before.
+// A dot only inside a word ("Booking.com"): "at Amazon. I have ..." ends a sentence.
+const AT_NAME_CHAR = "[\\p{L}\\p{N}_&'\\u2019-]";
+const AT_NAME_WORD = `\\p{Lu}${AT_NAME_CHAR}*(?:\\.${AT_NAME_CHAR}+)*`;
+const AT_NAME = `${AT_NAME_WORD}(?: (?:of |& )?${AT_NAME_WORD}){0,4}`;
+const WORK_ADVERBS = '(?:[a-z]+ly |also |then |further |first |later |once |often |since |still |even |never |not only )*';
+// Verbs a letter uses about a company it has only read about. The -eed words are
+// here because the pattern below is reading "-ed" as the past tense.
+const NOT_WORK_VERBS = 'need|feed|proceed|succeed|exceed|speed|embed|shed|noticed|admired|appreciated|watched|visited|interviewed|attended|followed';
+const WORK_VERBS = `(?:(?!(?:${NOT_WORK_VERBS})\\b)[a-z-]+ed|been|was|were|had|led|built|ran|run|grew|grown|wrote|written|made|won|drove|driven|took|taken|set|cut|taught|spent|oversaw|overseen|began|begun|became|become|kept|held|got|gotten|brought|sold|did|done|gave|given|currently|manage|lead|oversee|own|handle|serve|work|design|build|develop|maintain|supervise|head|direct|spearhead)`;
+const AT_EMPLOYER_RE = new RegExp(`\\b[Aa]t (?:The )?(${AT_NAME}(?: and ${AT_NAME})?)(?:\\.?, | (?=(?:I|we)\\b))(?:where )?(?:I|we)(?:(?:['\u2019]ve| have)? ${WORK_ADVERBS}${WORK_VERBS}|['\u2019]d ${WORK_ADVERBS}[a-z-]+ed)\\b`, 'gu');
+// The name opens the sentence, a list item, or a clause joined to the last one.
+const AT_OPENS_CLAUSE_RE = /(?:^|[;:]\s*|\b(?:and|but|then|later|while|whilst|previously|recently|currently),?\s*)[\s•‣◦⁃∙*+-]*$/iu;
+// Words that turn "as a ..." or "I am a ..." into something other than a job.
+const NOT_A_JOB = "(?:(?!\\b(?:candidate|applicant|user|customer|admirer|fan|follower|reader|visitor|believer|result|fit|interest|who|for)\\b)[^.;!?])*";
+const AT_JOB_LEAD_RE = new RegExp([
+  // The words between "my" and the job noun describe it ("my most recent role"). A
+  // function word means they lead somewhere else ("my interest in the role").
+  `\\b[Mm]y (?:(?!(?:in|for|of|the|to|at|with|on|an?) )[\\w-]+ ){0,3}?(?:roles?|positions?|job|tenures?|time|stint|years|experience|career)(?: as [^.;!?]*)?$`,
+  `(?<!such |well )\\b[Aa]s (?:(?:an?|the) |(?!I\\b)\\p{Lu})${NOT_A_JOB}$`,
+  `\\bI(?:['\u2019]m| am)(?: currently| presently| now)? (?:(?:an?|the) |employed\\b)${NOT_A_JOB}$`,
+  `\\bI (?:currently |presently |have )?(?:serve|served|hold|held|work|worked)\\b${NOT_A_JOB}$`,
+  '\\b(?:roles|tenures?|years|months)$',
+].join('|'), 'u');
+
+/** Employers named by "at <Name>, I ..." where the sentence states a job there. */
+function atEmployerClaims(text) {
+  const clean = stripMarkup(text, { keepLineBreaks: true });
+  const claims = [];
+  for (const match of clean.matchAll(AT_EMPLOYER_RE)) {
+    // A letter's job statement fits well inside this, and the cap keeps a page
+    // with no sentence break from being rescanned for every match.
+    const before = clean.slice(Math.max(0, match.index - 200), match.index);
+    const lead = before.slice(Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? '), before.lastIndexOf('\n')) + 1).trim();
+    if (!AT_OPENS_CLAUSE_RE.test(lead) && !AT_JOB_LEAD_RE.test(lead)) continue;
+    // Without its "'s", so "Macy’s" here matches a cv.md that says "Macy's".
+    for (const name of match[1].split(' and ')) claims.push({ kind: 'employer', value: normalizeFact(name.replace(POSSESSIVE_SUFFIX_RE, '')) });
+  }
+  return claims;
+}
+
 /**
  * Extract explicitly asserted employer, title, and tool claims from text.
  *
@@ -1080,6 +1138,7 @@ export function factClaims(text, sourceNormalized = null) {
       }
     }
   }
+  claims.push(...atEmployerClaims(text));
   // Report each claim once. Both tool patterns read most names, so without
   // this every tool would be listed twice. Repeated employer and title claims
   // collapse too, as they already did in verifyFacts.
