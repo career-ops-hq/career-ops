@@ -55,11 +55,24 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 // 4. doctor.mjs resolution and MCP detection for omp
 {
   const dir = mkdtempSync(join(tmpdir(), 'co-omp-doctor-'));
-  const userConfigDir = mkdtempSync(join(tmpdir(), 'co-omp-user-'));
+  const isolatedHome = mkdtempSync(join(tmpdir(), 'co-omp-home-'));
+  const isolatedAgentDir = join(isolatedHome, '.omp', 'agent');
+  mkdirSync(isolatedAgentDir, { recursive: true });
+
+  const isolatedEnv = {
+    ...process.env,
+    HOME: isolatedHome,
+    USERPROFILE: isolatedHome,
+    PI_CODING_AGENT_DIR: isolatedAgentDir,
+    OMP_PROFILE: '',
+    PI_PROFILE: '',
+  };
+
   try {
     // 4a. doctor without config yields warning
     const resWithoutMcp = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
+      env: isolatedEnv,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }));
@@ -86,6 +99,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 
     const resFiltered = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
+      env: isolatedEnv,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }));
@@ -107,6 +121,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 
     const resWithDisabledBrowser = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
+      env: isolatedEnv,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }));
@@ -133,6 +148,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 
     const resWithDotMcp = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
+      env: isolatedEnv,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }));
@@ -146,25 +162,65 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 
     // 4e. doctor with user-level config disabling native browser
     rmSync(join(dir, '.omp', 'config.yml'), { force: true });
-    mkdirSync(join(userConfigDir, 'agent'), { recursive: true });
-    writeFileSync(join(userConfigDir, 'agent', 'config.yml'), 'browser:\n  enabled: false\n');
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
 
     const resWithUserConfig = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
-      env: { ...process.env, OMP_CONFIG_DIR: userConfigDir },
+      env: isolatedEnv,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }));
 
     if (resWithUserConfig.playwright_mcp?.omp === true
         && !resWithUserConfig.warnings.some((w) => w.includes('Playwright MCP'))) {
-      pass('doctor detects Playwright MCP when user config ($OMP_CONFIG_DIR) disables native browser');
+      pass('doctor detects Playwright MCP when user config ($PI_CODING_AGENT_DIR) disables native browser');
     } else {
       fail(`doctor failed with user config: ${JSON.stringify(resWithUserConfig)}`);
     }
+
+    // 4f. doctor with user-level MCP config and disabled browser
+    rmSync(join(dir, '.omp', '.mcp.json'), { force: true });
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: {
+          command: 'mcp-server-playwright',
+        },
+      },
+    }));
+
+    const resWithUserMcp = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resWithUserMcp.playwright_mcp?.omp === true
+        && !resWithUserMcp.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor detects Playwright MCP in user-level mcp.json');
+    } else {
+      fail(`doctor failed with user-level mcp.json: ${JSON.stringify(resWithUserMcp)}`);
+    }
+
+    // 4g. doctor with user-level MCP config when native browser is enabled
+    rmSync(join(isolatedAgentDir, 'config.yml'), { force: true });
+
+    const resUserMcpFiltered = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resUserMcpFiltered.playwright_mcp?.omp === false
+        && resUserMcpFiltered.warnings.some((w) => w.includes('Playwright MCP server defined in the OMP user mcp.json, but filtered by OMP native browser'))) {
+      pass('doctor warns when user-level Playwright MCP is filtered by native browser');
+    } else {
+      fail(`doctor failed to report filtered user-level MCP: ${JSON.stringify(resUserMcpFiltered)}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
-    rmSync(userConfigDir, { recursive: true, force: true });
+    rmSync(isolatedHome, { recursive: true, force: true });
   }
 }
 
