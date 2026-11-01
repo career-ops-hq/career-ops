@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Check, FileText, Loader2, RotateCcw, Undo2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { BackLink } from "@/components/back-link";
+import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { arrange, renderBlocks, type BlockTree } from "@/lib/cv-studio/html-blocks.mjs";
 import { applyRecordedEdit, emptyEdits, isStudioUndoKey, resolveStudio, studioReducer, type StudioAction, type StudioDoc, type StudioEdits } from "@/lib/cv-studio/studio.mjs";
 import { editSaveStatus, inflightEdits, postWroteEdits, shouldPutAfterPost, shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
@@ -31,6 +33,8 @@ const KEEPALIVE_BYTES = 60_000;
 const SAVE_ERRORS: Record<string, string> = { stale: STALE, busy: "This CV is already being saved. Wait for that save to finish." };
 
 export function CvStudio({ n }: { n: string }) {
+  const listQuery = pipelineQuery(useSearchParams().toString());
+  const reportHref = `/pipeline/${encodeURIComponent(n)}${listQuery ? `?${listQuery}` : ""}`;
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   useEffect(() => {
     let live = true;
@@ -45,9 +49,9 @@ export function CvStudio({ n }: { n: string }) {
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-      <Link href={`/pipeline/${n}`} className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text">
+      <BackLink href={reportHref} className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text">
         <ArrowLeft className="size-4" /> Report #{n}
-      </Link>
+      </BackLink>
       {load.kind === "loading" && <div className="mt-6 h-[70vh] animate-pulse rounded-2xl bg-muted/15" aria-label="Loading the CV Studio" />}
       {load.kind === "error" && (
         <div className="mt-8 max-w-xl rounded-2xl border border-border bg-surface/40 px-6 py-5">

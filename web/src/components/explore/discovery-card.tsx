@@ -92,7 +92,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
         {(fresh || employer) && <span className="text-faint">{fresh || "Posting date unknown"}</span>}
         {unverified && (
           <span
-            className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-300"
+            className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-800 dark:text-amber-300"
             title="Found by AI on the public web — we can't confirm it's still live without opening it. Evaluating runs a real browser check and sets the verdict."
           >
             <ShieldQuestion className="size-3" /> unverified
@@ -108,7 +108,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
             className={cn(
               "rounded border px-1 py-0.5 text-[11px] font-medium",
               offer.fit.band === "strong"
-                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400"
                 : "text-faint",
             )}
             title="Free keyword-level estimate: posting title vs your profile's target roles (config/profile.yml). Not an evaluation — Evaluate still gives the real A–F fit score."
@@ -147,7 +147,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
               onClick={() => addToPipeline([offer])}
               className={cn(
                 "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                isAdded ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand-text",
+                isAdded ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand-text",
               )}
             >
               {isAdding ? <Loader2 className="size-3.5 animate-spin" /> : isAdded ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}

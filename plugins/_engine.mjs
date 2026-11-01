@@ -55,6 +55,60 @@ export const RESERVED_ENV = new Set([
 export const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_HOOK_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
+// Same ceiling as the scanner's DEFAULT_MAX_BODY_BYTES (providers/_http.mjs):
+// one hostile or broken endpoint must not be able to pin the process's memory
+// with a single endless response. Not imported from there so this engine keeps
+// its small dependency surface. A plugin that really needs more asks per call
+// with `opts.maxBytes`. An error body is only a snippet, so it gets less.
+const MAX_PLUGIN_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_PLUGIN_ERROR_BODY_BYTES = 256 * 1024;
+
+function bodyTooLarge(maxBytes, declared) {
+  const err = new Error(`plugin response exceeded maxBytes of ${maxBytes}${declared != null ? ` (content-length ${declared})` : ''}`);
+  // @ts-ignore
+  err.code = 'response_too_large';
+  return err;
+}
+
+/**
+ * Return `res` with its body capped at `maxBytes`: a declared content-length
+ * over the cap is refused before a byte is read, and a stream that grows past it
+ * errors the read (the source is cancelled, so the socket is released). Works for
+ * every way a plugin consumes the Response (.json(), .text(), .body).
+ * @param {Response} res
+ * @param {number} maxBytes
+ * @returns {Response}
+ */
+function capResponseBody(res, maxBytes) {
+  // No body (HEAD, 204, 304): nothing to cap, and a HEAD's content-length describes
+  // the resource a GET would send, not bytes we would read.
+  if (!res.body) return res;
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    res.body.cancel?.().catch(() => {});
+    throw bodyTooLarge(maxBytes, declared);
+  }
+  let total = 0;
+  const limiter = new TransformStream({
+    transform(chunk, controller) {
+      total += chunk.byteLength;
+      if (total > maxBytes) controller.error(bodyTooLarge(maxBytes, null));
+      else controller.enqueue(chunk);
+    },
+  });
+  const capped = new Response(res.body.pipeThrough(limiter), { status: res.status, statusText: res.statusText, headers: res.headers });
+  // A new Response has no url: keep the original's, so a plugin resolving relative
+  // links against res.url keeps working.
+  Object.defineProperty(capped, 'url', { value: res.url, enumerable: true });
+  Object.defineProperty(capped, 'redirected', { value: res.redirected, enumerable: true });
+  return capped;
+}
+
+/** A caller's `maxBytes` when it is a positive finite number, else the default. */
+function resolveBodyCap(value) {
+  const n = typeof value === 'number' ? Math.floor(value) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : MAX_PLUGIN_BODY_BYTES;
+}
 
 function isReservedEnv(name) {
   return RESERVED_ENV.has(name) || /^AWS_/.test(name);
@@ -434,6 +488,7 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
   };
   return async function guardedFetch(url, opts = {}) {
     const { timeoutMs = 10_000, headers = {}, method = 'GET', body = null } = opts;
+    const bodyCap = resolveBodyCap(opts.maxBytes);
     let current = new URL(url);
     hostOk(current);
     // SSRF: reject a host that resolves to a private/loopback/metadata address
@@ -452,6 +507,7 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
         clearTimeout(timer);
       }
       if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+        res.body?.cancel?.().catch(() => {});
         const next = new URL(res.headers.get('location'), current);
         hostOk(next); // re-validate the redirect target before following it
         await resolveAndValidate(next.hostname, { allowsLocalhost });
@@ -464,13 +520,17 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
         continue;
       }
       if (!res.ok) {
-        const snippet = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 300);
+        // Capped like any other body: an error page is a diagnostic snippet, and a
+        // refused (over-cap) one just loses the snippet, never the status.
+        let errText = '';
+        try { errText = await capResponseBody(res, MAX_PLUGIN_ERROR_BODY_BYTES).text(); } catch { /* over the cap: the status is the answer */ }
+        const snippet = errText.replace(/\s+/g, ' ').trim().slice(0, 300);
         const err = new Error(snippet ? `HTTP ${res.status}: ${snippet}` : `HTTP ${res.status}`);
         // @ts-ignore
         err.status = res.status;
         throw err;
       }
-      return res;
+      return capResponseBody(res, bodyCap);
     }
     throw new Error(`too many redirects (>${MAX_REDIRECTS}) for ${url}`);
   };
