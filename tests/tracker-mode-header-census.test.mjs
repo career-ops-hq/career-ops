@@ -48,7 +48,7 @@ for (const { mode, header } of shipped) {
 
 const FULL_ENV = ['CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_PIPELINE', 'CAREER_OPS_SCAN_HISTORY',
   'CAREER_OPS_PORTALS', 'CAREER_OPS_PROFILE', 'CAREER_OPS_FOLLOWUPS', 'CAREER_OPS_REPORTS', 'CAREER_OPS_CV',
-  'CAREER_OPS_JDS', 'CAREER_OPS_ADDITIONS'];
+  'CAREER_OPS_JDS', 'CAREER_OPS_ADDITIONS', 'CAREER_OPS_ACTIVITY_DIR'];
 
 function withTracker(header, fn) {
   const root = mkdtempSync(join(tmpdir(), 'tracker-mode-header-'));
