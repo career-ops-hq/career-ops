@@ -302,17 +302,20 @@ function buildSignatureBlock(signature, candidateName) {
 
 // Resolve the cover-letter template through the shared resolver so a
 // `cover_letter.template` profile default, an explicit `payload.template`, and
-// installed template packs are all honored. Any resolver failure (no profile,
-// no templates dir, bad config) falls back to the base template, preserving the
-// original hardcoded behavior.
+// installed template packs are all honored. With nothing configured the
+// resolver returns the base template (its default name is `standard`).
+//
+// Resolver errors propagate (#6370). This used to pass `fallback: true` and
+// catch everything, returning the base template, so a malformed
+// config/profile.yml, a template name that does not exist, or a template
+// missing required placeholders all rendered a plain letter with no warning:
+// the candidate's letterhead, signature or layout silently dropped. That
+// contradicts modes/cover.md Step 8 and `cv-templates.mjs resolve cover`,
+// which both surface the error. main() already prints a buildHtml error and
+// exits 1. A caller that really wants the silent fallback can still pass
+// `{ fallback: true }` in opts.
 export function resolveCoverTemplatePath(payload = {}, opts = {}) {
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const base = resolve(scriptDir, "templates", "cover-letter-template.html");
-  try {
-    return resolveTemplate("cover", payload.template, { format: "html", fallback: true, ...opts });
-  } catch {
-    return base;
-  }
+  return resolveTemplate("cover", payload.template, { format: "html", strict: true, ...opts });
 }
 
 export function buildHtml(payload, templatePath) {

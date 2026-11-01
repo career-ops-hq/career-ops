@@ -745,11 +745,15 @@ export function resolveTemplate(kind, name, opts = {}) {
     format = 'html',
     profilePath = DEFAULT_PROFILE_PATH,
     fallback = false,
+    // strict: a profile that exists but is not valid YAML throws instead of
+    // reading as "no default configured". Off by default so existing callers
+    // keep their behaviour; the cover-letter renderer opts in (#6370).
+    strict = false,
   } = opts;
   assertFormat(format);
 
   const explicit = Boolean(name && String(name).trim());
-  let chosen = kebab(explicit ? name : loadProfileDefault(kind, { profilePath }) || 'standard');
+  let chosen = kebab(explicit ? name : loadProfileDefault(kind, { profilePath, strict }) || 'standard');
   const fileFor = (n) => (n === 'standard' ? `${cfg.prefix}.${format}` : `${cfg.prefix}.${n}.${format}`);
 
   // Resolution goes through the same discovery as listTemplates, so a name that

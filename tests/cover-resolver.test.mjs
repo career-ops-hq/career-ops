@@ -38,8 +38,53 @@ test('resolveCoverTemplatePath: base template when nothing configured (backward-
   assert.equal(basename(p), 'cover-letter-template.html');
 });
 
-test('resolveCoverTemplatePath: falls back to base when the configured template is missing', () => {
+// #6370: each of these used to return the base template silently, so the
+// letter rendered without the candidate's chosen layout and nobody was told.
+test('resolveCoverTemplatePath: a configured template that does not exist throws', () => {
   const { dir, profile } = coverFixture('nonexistent');
-  const p = resolveCoverTemplatePath({}, { dir, profilePath: profile });
+  assert.throws(
+    () => resolveCoverTemplatePath({}, { dir, profilePath: profile }),
+    /Template not found for kind=cover name=nonexistent/,
+  );
+});
+
+test('resolveCoverTemplatePath: an explicit payload.template that does not exist throws', () => {
+  const { dir, profile } = coverFixture(null);
+  assert.throws(
+    () => resolveCoverTemplatePath({ template: 'nope' }, { dir, profilePath: profile }),
+    /Template not found for kind=cover name=nope/,
+  );
+});
+
+test('resolveCoverTemplatePath: a malformed profile throws and names the file', () => {
+  const { dir, profile } = coverFixture(null);
+  writeFileSync(profile, 'cover_letter:\n  template: [unclosed\n');
+  assert.throws(
+    () => resolveCoverTemplatePath({}, { dir, profilePath: profile }),
+    (err) => err.message.includes('Failed to parse profile YAML') && err.message.includes(profile),
+  );
+});
+
+test('resolveCoverTemplatePath: a template missing required placeholders throws', () => {
+  const { dir, profile } = coverFixture('broken');
+  writeFileSync(
+    join(dir, 'cover-letter-template.broken.html'),
+    '<!-- career-ops-template\nname: Broken\nversion: 1.0.0\n-->\n{{NAME}}',
+  );
+  assert.throws(
+    () => resolveCoverTemplatePath({}, { dir, profilePath: profile }),
+    /missing required placeholders/,
+  );
+});
+
+test('resolveCoverTemplatePath: a missing profile still resolves the base template', () => {
+  const { dir } = coverFixture(null);
+  const p = resolveCoverTemplatePath({}, { dir, profilePath: join(dir, 'absent.yml') });
+  assert.equal(basename(p), 'cover-letter-template.html');
+});
+
+test('resolveCoverTemplatePath: an explicit fallback opt-in keeps the old behaviour', () => {
+  const { dir, profile } = coverFixture('nonexistent');
+  const p = resolveCoverTemplatePath({}, { dir, profilePath: profile, fallback: true });
   assert.equal(basename(p), 'cover-letter-template.html');
 });
