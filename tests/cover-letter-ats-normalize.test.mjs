@@ -91,6 +91,17 @@ test('a forbidden phrase only the pass spells out is refused before it prints', 
   assert.equal(html, null, 'a refused letter must not reach the renderer');
 });
 
+test('an advisory phrase only the pass spells out is reported, and a drafted one only once', () => {
+  const { run, html } = letter(
+    { opening: 'I am a self–starter.', profile_intro: 'I can maybe help.' },
+    { facts: { warn_phrases: ['self-starter', 'maybe'] } },
+  );
+  assert.equal(run.status, 0, describeSpawn(run));
+  assert.ok(html, 'an advisory phrase must not stop the letter');
+  assert.equal(run.stderr.match(/advisory phrase: self-starter/g)?.length, 1, run.stderr);
+  assert.equal(run.stderr.match(/advisory phrase: maybe/g)?.length, 1, run.stderr);
+});
+
 test('a figure the pass rewrites still prints when a source backs it', () => {
   const body = printed(
     { opening: 'I saved €50k a year.', profile_intro: 'I took p99 from 900ms → 200ms.' },
