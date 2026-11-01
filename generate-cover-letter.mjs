@@ -481,8 +481,13 @@ Usage:
   }
 
   if (!payload.output_path) {
-    const company = (payload.letter?.company || "company").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
+    const company = (typeof payload.letter?.company === "string" ? payload.letter.company : "company")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-");
+    const role = (typeof payload.letter?.role_title === "string" ? payload.letter.role_title : "role")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 30);
     payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
   } else {
     try {

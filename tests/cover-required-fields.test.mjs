@@ -1,5 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ROOT, NODE } from './helpers.mjs';
 import { buildHtml } from '../generate-cover-letter.mjs';
 
 const baseTemplate = './templates/cover-letter-template.html';
@@ -62,4 +67,25 @@ test('buildHtml succeeds when all required fields are valid non-empty strings', 
   assert.ok(html.includes('Jane Doe'));
   assert.ok(html.includes('Software Engineer'));
   assert.ok(html.includes('I am excited to apply'));
+});
+
+test('CLI without --out rejects truthy non-string role_title and reports missing field without throwing TypeError', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'cover-required-cli-'));
+  try {
+    const payloadPath = join(tmpDir, 'payload.json');
+    writeFileSync(payloadPath, JSON.stringify({
+      candidate: validCandidate,
+      letter: { ...validLetter, role_title: 123 },
+    }));
+
+    const res = spawnSync(NODE, [join(ROOT, 'generate-cover-letter.mjs'), '--payload', payloadPath], {
+      encoding: 'utf-8',
+    });
+
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /Missing required field: letter\.role_title/);
+    assert.doesNotMatch(res.stderr, /TypeError/);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
