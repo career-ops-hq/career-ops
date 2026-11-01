@@ -77,8 +77,18 @@ test('catches lowercase, digit-bearing, hyphenated and padded placeholder tokens
     const tpl = writeTemplate(`<p>{{OPENING}}</p><p>${token}</p>`);
     assert.throws(
       () => buildHtml(payload(), tpl),
-      new RegExp(`Unresolved placeholders:.*\\${token.slice(0, 2)}`),
+      new RegExp(`Unresolved placeholders:.*${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
       `expected ${token} to be detected as unresolved placeholder`
     );
   }
+});
+
+test('preserves arbitrary literal {{...}} text inside a replacement value without reporting it as unresolved', () => {
+  const p = payload();
+  p.letter.opening = 'Worked with {{lowercase_var}}, {{ custom-token }}, and {{metric_1}} in templates.';
+  const tpl = writeTemplate('<p>{{OPENING}}</p>');
+  const html = buildHtml(p, tpl);
+  assert.match(html, /\{\{lowercase_var\}\}/);
+  assert.match(html, /\{\{ custom-token \}\}/);
+  assert.match(html, /\{\{metric_1\}\}/);
 });
