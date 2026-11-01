@@ -4738,7 +4738,7 @@ async function main() {
   } else {
     const ttlMs = resolveHttpCacheTtlMs(process.env.CAREER_OPS_HTTP_CACHE_TTL_MS);
     await withHttpCache({
-      dir: path.join(DATA_ROOT, 'data', 'http-cache'),
+      dir: path.join(DATA_ROOT, 'data', 'cache', 'http'),
       ttlMs,
       write: !dryRun,
     }, async () => {

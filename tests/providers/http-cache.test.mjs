@@ -112,4 +112,20 @@ const board = `${origin}/v1/boards/northwind/jobs`;
   else fail(`error was saved or not retried (first=${firstThrew}, second=${secondThrew}, hits=${missingHits})`);
 }
 
+{
+  const url = `${origin}/postings/keyed`;
+  const read = (apiKey) => via(() => cache(() => fetchText(url, {
+    method: 'POST',
+    body: '{"offset":0}',
+    headers: { 'content-type': 'application/json', 'x-algolia-api-key': apiKey },
+  })));
+  const before = hits.length;
+  await read('key-a');
+  await read('key-b');
+  await read('key-a');
+  const got = hits.slice(before).filter((hit) => hit.url === '/postings/keyed');
+  if (got.length === 2) pass('two API keys for one URL are two saved responses');
+  else fail(`API keys shared a cache entry (${got.length} requests)`);
+}
+
 server.close();

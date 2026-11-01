@@ -71,11 +71,6 @@ export function httpCacheStats() {
   return { ...store.stats };
 }
 
-function headerValue(headers, name) {
-  if (!headers) return '';
-  return new Headers(headers).get(name) || '';
-}
-
 function bodyText(body) {
   if (body == null) return '';
   if (typeof body === 'string') return body;
@@ -84,10 +79,22 @@ function bodyText(body) {
   return null;
 }
 
+function isCredentialHeader(name) {
+  return name === 'authorization' || name === 'cookie' || name === 'proxy-authorization'
+    || name.includes('api-key') || name.includes('apikey');
+}
+
+function credentialMaterial(headers) {
+  const parts = [];
+  for (const [name, value] of new Headers(headers || {}).entries()) {
+    if (isCredentialHeader(name)) parts.push(`${name}=${value}`);
+  }
+  parts.sort();
+  return parts.join('\n');
+}
+
 function cacheKey(method, url, opts, body) {
-  const auth = headerValue(opts.headers, 'authorization');
-  const cookie = headerValue(opts.headers, 'cookie');
-  return createHash('sha256').update(`${method}\n${url}\n${auth}\n${cookie}\n${body}`).digest('hex');
+  return createHash('sha256').update(`${method}\n${url}\n${credentialMaterial(opts.headers)}\n${body}`).digest('hex');
 }
 
 function isFresh(entry, store) {
