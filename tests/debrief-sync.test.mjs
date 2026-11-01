@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { replaceNextPin } from '../followup-seed.mjs';
 import { ROOT, pass, fail } from './helpers.mjs';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'debrief-sync.mjs');
 const SENTENCE = 'No on-site roles outside the home city';
@@ -213,7 +213,7 @@ function refuses(label, args, mutate = {}) {
     const before = snapshot(root);
     const result = run(root, args);
     check(label, () => {
-      assert.notEqual(result.status, 0, describeSpawn(result));
+      assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
       assert.deepEqual(snapshot(root), before);
     });
   } finally {
