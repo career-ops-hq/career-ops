@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { resolveCoverTemplatePath } from '../generate-cover-letter.mjs';
@@ -119,4 +119,34 @@ test('resolveCoverTemplatePath: a malformed profile is reported even with an exp
     () => resolveCoverTemplatePath({ template: 'Formal' }, { dir, profilePath: profile }),
     /Failed to parse profile YAML/,
   );
+});
+
+// CodeRabbit on #6383: existsSync() answers false for a profile that exists but
+// cannot be read, so strict resolution must not treat "unreadable" as "absent".
+test('resolveCoverTemplatePath: a profile path that cannot be read as a file throws', () => {
+  const { dir } = coverFixture(null);
+  const profileDir = join(dir, 'profile-is-a-dir.yml');
+  mkdirSync(profileDir);
+  assert.throws(
+    () => resolveCoverTemplatePath({}, { dir, profilePath: profileDir }),
+    (err) => err.message.includes('Failed to read profile') && err.message.includes(profileDir),
+  );
+});
+
+const canDropPermissions = process.platform !== 'win32' && process.getuid?.() !== 0;
+test('resolveCoverTemplatePath: a profile in an unsearchable directory throws, not falls back', { skip: !canDropPermissions && 'needs a non-root POSIX user' }, () => {
+  const { dir } = coverFixture(null);
+  const locked = join(dir, 'locked');
+  mkdirSync(locked);
+  const profile = join(locked, 'profile.yml');
+  writeFileSync(profile, 'cover_letter:\n  template: formal\n');
+  chmodSync(locked, 0o000);
+  try {
+    assert.throws(
+      () => resolveCoverTemplatePath({}, { dir, profilePath: profile }),
+      /Failed to read profile/,
+    );
+  } finally {
+    chmodSync(locked, 0o700);
+  }
 });

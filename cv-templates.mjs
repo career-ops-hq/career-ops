@@ -718,10 +718,26 @@ export function auditUserTemplates({ dir = DEFAULT_TEMPLATES_DIR, userDir = DEFA
 export function loadProfileDefault(kind, { profilePath = DEFAULT_PROFILE_PATH, strict = false } = {}) {
   const cfg = KINDS[kind];
   if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
-  if (!existsSync(profilePath)) return null;
+  // Read first and treat only ENOENT as "no profile". existsSync() also
+  // answers false when the file exists but cannot be reached (e.g. its parent
+  // directory is not searchable), and a strict caller would then silently get
+  // the base template for a profile that names another one.
+  let source;
+  try {
+    source = readFileSync(profilePath, 'utf-8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    if (strict) {
+      throw new Error(
+        `Failed to read profile at ${profilePath} (${err?.code || 'unknown error'}). Check that the file is readable. ${err?.message || err}`,
+        { cause: err },
+      );
+    }
+    return null;
+  }
   let doc;
   try {
-    doc = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+    doc = loadYaml(source) || {};
   } catch (err) {
     if (strict) {
       throw new Error(
