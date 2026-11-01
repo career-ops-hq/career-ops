@@ -305,6 +305,14 @@ try {
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/101',
   );
+
+  // remote-com.parseRemoteJobs — for…of over jobs[]; public_id feeds the posting URL.
+  const { parseRemoteJobs } = await load('remote-com.mjs');
+  check(
+    'remote-com.parseRemoteJobs',
+    () => parseRemoteJobs({ jobs: [{ title: 'Bad Id', public_id: `${LONE}bad` }, { title: 'Good Id', public_id: 'good-1' }] }),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://apply.remote.com/jobs/good-1',
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -331,7 +339,7 @@ try {
   // regression this list catches.
   const CONVERTED = [
     'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
-    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
+    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs', 'remote-com.mjs',
     'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
 

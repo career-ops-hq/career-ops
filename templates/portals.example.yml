@@ -1288,6 +1288,7 @@ search_queries:
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
+#   remote-com      apply.remote.com  (Remote's own ATS, single company; any path, the board is always read whole)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1666,6 +1667,11 @@ search_queries:
 #   careers_url: https://www.heckler-koch.com/de/Karriere/Stellenangebote
 #   provider: hecklerkoch                 # optional — heckler-koch.com host also auto-detects
 #   enabled: true
+#
+# - name: Remote                          # single-company; Remote's own ATS, public JSON list
+#   careers_url: https://apply.remote.com/jobs   # auto-detects on apply.remote.com
+#   provider: remote-com                  # optional — apply.remote.com host also auto-detects
+#   enabled: true                         # location keeps the region codes: "Remote · EMEA (Europe, Middle East & Africa)"
 #
 # - name: Rheinmetall                     # single-company; SSR Nuxt vacancy list
 #   careers_url: https://www.rheinmetall.com/en/career/vacancies
@@ -2595,6 +2601,11 @@ tracked_companies:
   - name: Shiji Group
     careers_url: https://shijigroup.zohorecruit.com/jobs/Careers
     notes: "Katowice / Barcelona. International hubs of a Beijing-based hospitality technology group."
+    enabled: true
+
+  - name: Remote
+    careers_url: https://apply.remote.com/jobs
+    notes: "Fully remote. Employer-of-record / global HR platform. Each posting names its hiring regions (EMEA, NORAM, LATAM, APAC)."
     enabled: true
 
   # -- DACH & European AI ecosystem --
