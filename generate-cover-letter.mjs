@@ -377,8 +377,15 @@ export function buildHtml(payload, templatePath) {
   // scanning the result: a scan of the output cannot tell a template token from
   // the same sequence appearing inside a substituted value, which is exactly
   // what the single pass above is careful to leave literal.
+  //
+  // The pass visits EVERY `{{…}}` sequence, not only `{{UPPER_SNAKE}}` ones.
+  // Matching only the shape the map uses meant a lowercase, digit-bearing,
+  // hyphenated or space-padded token (`{{role_title}}`, `{{OPENING2}}`,
+  // `{{ COMPANY }}`) was never visited, so it was neither filled nor reported
+  // and shipped verbatim in the PDF (#6374). Lookup stays exact on purpose:
+  // `{{ COMPANY }}` is not `{{COMPANY}}`, and guessing would hide the typo.
   const unresolved = new Set();
-  const rendered = html.replace(/\{\{[A-Z_]+\}\}/g, (token) => {
+  const rendered = html.replace(/\{\{[^{}]*\}\}/g, (token) => {
     const value = replacements[token];
     if (value == null) {
       unresolved.add(token);

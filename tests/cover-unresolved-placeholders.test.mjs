@@ -67,6 +67,31 @@ test('the shipped template still renders clean', () => {
   // Guards the fix itself: if the bundled template ever gains a token the
   // renderer does not map, this fails instead of every user's render failing.
   const html = buildHtml(payload(), 'templates/cover-letter-template.html');
-  assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}/, 'bundled template must be fully mapped');
+  assert.doesNotMatch(html, /\{\{[^{}]*\}\}/, 'bundled template must be fully mapped');
   assert.match(html, /Jane Doe/);
+});
+
+// #6374: the pass used to match only {{UPPER_SNAKE}}, so any other token shape
+// was never visited: not filled, not reported, shipped verbatim in the PDF.
+for (const token of ['{{role_title}}', '{{OPENING2}}', '{{ COMPANY }}', '{{Name}}', '{{PROFILE-INTRO}}', '{{}}']) {
+  test(`throws on the non-UPPER_SNAKE token ${token}`, () => {
+    const tpl = writeTemplate(`<p>{{OPENING}}</p><p>${token}</p>`);
+    assert.throws(
+      () => buildHtml(payload(), tpl),
+      (err) => err.message.startsWith('Unresolved placeholders:') && err.message.includes(token),
+    );
+  });
+}
+
+test('a space-padded known token is not silently treated as the known token', () => {
+  // Lookup stays exact: {{ OPENING }} is a typo to report, not {{OPENING}}.
+  const tpl = writeTemplate('<p>{{ OPENING }}</p>');
+  assert.throws(() => buildHtml(payload(), tpl), /Unresolved placeholders: \{\{ OPENING \}\}/);
+});
+
+test('user text shaped like a non-UPPER_SNAKE token stays literal and is not flagged', () => {
+  const p = payload();
+  p.letter.opening = 'I maintain the {{role_title}} and {{ company }} Jinja macros.';
+  const html = buildHtml(p, writeTemplate('<p>{{OPENING}}</p>'));
+  assert.ok(html.includes('{{role_title}}') && html.includes('{{ company }}'));
 });
