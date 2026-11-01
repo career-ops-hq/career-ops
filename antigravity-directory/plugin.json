@@ -1,0 +1,33 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "career-ops",
+  "displayName": "career-ops",
+  "version": "1.38.0",
+  "description": "Open-source AI job search agent: finds openings, scores each job posting against your CV, tailors your CV and cover letter, and tracks applications.",
+  "logo": "assets/logo.png",
+  "suggestedPrompts": [
+    "Score this job posting against my CV and tell me if it's worth applying",
+    "Scan the companies I follow for new openings that fit my profile",
+    "Prepare me for my interview for this role"
+  ],
+  "author": {
+    "name": "santifer",
+    "url": "https://santifer.io"
+  },
+  "homepage": "https://career-ops.org",
+  "repository": "https://github.com/career-ops-hq/career-ops",
+  "license": "MIT",
+  "keywords": [
+    "job-search",
+    "ai-job-search",
+    "job-search-agent",
+    "career",
+    "cv",
+    "resume",
+    "ats",
+    "cover-letter",
+    "interview-prep",
+    "job-application",
+    "open-source"
+  ]
+}

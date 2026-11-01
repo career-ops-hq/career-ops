@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { contentHeightPx, frameHeightAfterProbe, frameHeightPx, PREVIEW_PAGE_PX, previewPageCount } from "@/lib/cv-studio/page-estimate.mjs";
+import { previewHtml } from "@/lib/cv-studio/preview-html.mjs";
 
 const PAGE_WIDTH = 816;
 
@@ -50,7 +51,7 @@ export function CvPreview({ html }: { html: string }) {
           <iframe
             ref={frame}
             title="Tailored CV preview"
-            srcDoc={html}
+            srcDoc={previewHtml(html)}
             onLoad={measure}
             sandbox="allow-same-origin"
             style={{ width: PAGE_WIDTH, height: frameHeight, transform: `scale(${scale})`, transformOrigin: "top left", border: 0 }}
