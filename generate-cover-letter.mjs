@@ -79,10 +79,20 @@ function containedInOutput(absPath) {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-/** Assert that a payload object contains the required keys. */
+/** Assert that a payload object contains the required keys and that their values are non-empty strings. */
 function _require(obj, keys, context) {
   for (const key of keys) {
-    if (!obj || typeof obj !== "object" || !(key in obj)) {
+    const value = obj && typeof obj === "object" ? obj[key] : undefined;
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(`Missing required field: ${context}.${key}`);
+    }
+  }
+}
+
+/** Assert that a payload contains the required object-shaped fields. */
+function _requireObject(obj, keys, context) {
+  for (const key of keys) {
+    if (!obj || typeof obj !== "object" || !(key in obj) || typeof obj[key] !== "object" || obj[key] === null) {
       throw new Error(`Missing required field: ${context}.${key}`);
     }
   }
@@ -316,7 +326,7 @@ export function resolveCoverTemplatePath(payload = {}, opts = {}) {
 }
 
 export function buildHtml(payload, templatePath) {
-  _require(payload, ["candidate", "letter"], "payload");
+  _requireObject(payload, ["candidate", "letter"], "payload");
   const candidate = payload.candidate;
   const letter = payload.letter;
   _require(candidate, ["name"], "candidate");
