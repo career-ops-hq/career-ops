@@ -325,7 +325,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     }));
     writeFileSync(join(dir, '.omp', 'mcp.json'), JSON.stringify({
       mcpServers: {
-        playwright: { enabled: false },
+        playwright: { enabled: false, command: 'mcp-server-playwright' },
       },
     }));
 
@@ -347,7 +347,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
     writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
       mcpServers: {
-        playwright: { enabled: false },
+        playwright: { enabled: false, command: 'mcp-server-playwright' },
       },
     }));
     writeFileSync(join(dir, '.omp', 'mcp.json'), JSON.stringify({
@@ -368,6 +368,80 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
       pass('doctor respects project-level Playwright server overriding user-level disabled definition');
     } else {
       fail(`doctor failed when project overrides user-level disabled server: ${JSON.stringify(resProjectOverridesUserDisabled)}`);
+    }
+
+    // 4n. user-level Playwright definition shadows root fallback mcp.json disabled definition
+    rmSync(join(dir, '.omp', 'mcp.json'), { force: true });
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { enabled: false, command: 'mcp-server-playwright' },
+      },
+    }));
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+
+    const resUserOverridesRootFallback = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resUserOverridesRootFallback.playwright_mcp?.omp === true
+        && !resUserOverridesRootFallback.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor respects user-level Playwright server overriding root fallback mcp.json');
+    } else {
+      fail(`doctor failed when user overrides root fallback mcp.json: ${JSON.stringify(resUserOverridesRootFallback)}`);
+    }
+
+    // 4o. active-profile enabledServers force-enables a project-level disabled server
+    rmSync(join(dir, 'mcp.json'), { force: true });
+    writeFileSync(join(dir, '.omp', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { enabled: false, command: 'mcp-server-playwright' },
+      },
+    }));
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      enabledServers: ['playwright'],
+    }));
+
+    const resForcedEnabled = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resForcedEnabled.playwright_mcp?.omp === true
+        && !resForcedEnabled.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor respects active-profile enabledServers force-enabling disabled server');
+    } else {
+      fail(`doctor failed with active-profile enabledServers: ${JSON.stringify(resForcedEnabled)}`);
+    }
+
+    // 4p. disabledServers takes precedence over enabledServers when both present
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      enabledServers: ['playwright'],
+      disabledServers: ['playwright'],
+    }));
+
+    const resDisabledWins = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resDisabledWins.playwright_mcp?.omp === false
+        && resDisabledWins.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
+      pass('doctor gives disabledServers precedence over enabledServers in user config');
+    } else {
+      fail(`doctor failed to prioritize disabledServers over enabledServers: ${JSON.stringify(resDisabledWins)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
