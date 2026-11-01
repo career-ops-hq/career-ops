@@ -55,6 +55,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 // 4. doctor.mjs resolution and MCP detection for omp
 {
   const dir = mkdtempSync(join(tmpdir(), 'co-omp-doctor-'));
+  const userConfigDir = mkdtempSync(join(tmpdir(), 'co-omp-user-'));
   try {
     // 4a. doctor without config yields warning
     const resWithoutMcp = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
@@ -72,7 +73,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
       fail(`doctor unexpectedly handled missing MCP: ${JSON.stringify(resWithoutMcp)}`);
     }
 
-    // 4b. doctor with .omp/mcp.json detects Playwright MCP
+    // 4b. doctor with .omp/mcp.json but native browser enabled warns that server is filtered
     mkdirSync(join(dir, '.omp'), { recursive: true });
     writeFileSync(join(dir, '.omp', 'mcp.json'), JSON.stringify({
       mcpServers: {
@@ -83,22 +84,44 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
       },
     }));
 
-    const resWithMcp = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+    const resFiltered = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }));
 
-    if (resWithMcp.active_cli === 'omp'
-        && resWithMcp.playwright_mcp?.omp === true
-        && !resWithMcp.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
-      pass('doctor detects Playwright MCP in .omp/mcp.json');
+    if (resFiltered.active_cli === 'omp'
+        && resFiltered.playwright_mcp?.omp === false
+        && resFiltered.warnings.some((w) => w.includes('filtered by OMP native browser'))) {
+      pass('doctor warns when Playwright MCP in .omp/mcp.json is filtered by native browser');
     } else {
-      fail(`doctor failed to detect Playwright MCP in .omp/mcp.json: ${JSON.stringify(resWithMcp)}`);
+      fail(`doctor failed to report filtered browser MCP: ${JSON.stringify(resFiltered)}`);
     }
 
-    // 4c. doctor with .omp/.mcp.json detects Playwright MCP
+    // 4c. doctor with .omp/settings.json disabling browser detects Playwright MCP
+    writeFileSync(join(dir, '.omp', 'settings.json'), JSON.stringify({
+      browser: {
+        enabled: false,
+      },
+    }));
+
+    const resWithDisabledBrowser = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resWithDisabledBrowser.active_cli === 'omp'
+        && resWithDisabledBrowser.playwright_mcp?.omp === true
+        && !resWithDisabledBrowser.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor detects Playwright MCP when .omp/settings.json disables native browser');
+    } else {
+      fail(`doctor failed with settings.json browser.enabled: false: ${JSON.stringify(resWithDisabledBrowser)}`);
+    }
+
+    // 4d. doctor with .omp/.mcp.json and .omp/config.yml detects Playwright MCP
     rmSync(join(dir, '.omp', 'mcp.json'), { force: true });
+    rmSync(join(dir, '.omp', 'settings.json'), { force: true });
     writeFileSync(join(dir, '.omp', '.mcp.json'), JSON.stringify({
       mcpServers: {
         playwright: {
@@ -106,6 +129,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
         },
       },
     }));
+    writeFileSync(join(dir, '.omp', 'config.yml'), 'browser:\n  enabled: false\n');
 
     const resWithDotMcp = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
@@ -114,12 +138,33 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     }));
 
     if (resWithDotMcp.playwright_mcp?.omp === true
-        && !resWithDotMcp.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
-      pass('doctor detects Playwright MCP in .omp/.mcp.json');
+        && !resWithDotMcp.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor detects Playwright MCP in .omp/.mcp.json with config.yml');
     } else {
-      fail(`doctor failed to detect Playwright MCP in .omp/.mcp.json: ${JSON.stringify(resWithDotMcp)}`);
+      fail(`doctor failed with .omp/.mcp.json and config.yml: ${JSON.stringify(resWithDotMcp)}`);
+    }
+
+    // 4e. doctor with user-level config disabling native browser
+    rmSync(join(dir, '.omp', 'config.yml'), { force: true });
+    mkdirSync(join(userConfigDir, 'agent'), { recursive: true });
+    writeFileSync(join(userConfigDir, 'agent', 'config.yml'), 'browser:\n  enabled: false\n');
+
+    const resWithUserConfig = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: { ...process.env, OMP_CONFIG_DIR: userConfigDir },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resWithUserConfig.playwright_mcp?.omp === true
+        && !resWithUserConfig.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor detects Playwright MCP when user config ($OMP_CONFIG_DIR) disables native browser');
+    } else {
+      fail(`doctor failed with user config: ${JSON.stringify(resWithUserConfig)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(userConfigDir, { recursive: true, force: true });
   }
 }
+

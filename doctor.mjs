@@ -605,6 +605,102 @@ function hasPlaywrightInMergedOpenCode(configs) {
     .some((def) => def && def.enabled !== false && isPlaywrightServer(def));
 }
 
+// OMP's USER-level config sources (docs/mcp-config.md): ~/.omp/agent/config.yml,
+// ~/.omp/agent/config.yaml, ~/.omp/agent/settings.json, ~/.omp/config.yml, etc.
+// $OMP_CONFIG_DIR and $OMP_CONFIG are honored as environment overrides.
+function ompUserConfigFiles() {
+  const files = [];
+  if (process.env.OMP_CONFIG) files.push(process.env.OMP_CONFIG);
+  const dirs = [];
+  if (process.env.OMP_CONFIG_DIR) {
+    dirs.push(join(process.env.OMP_CONFIG_DIR, 'agent'));
+    dirs.push(process.env.OMP_CONFIG_DIR);
+  }
+  const home = homedir();
+  dirs.push(join(home, '.omp', 'agent'));
+  dirs.push(join(home, '.omp'));
+  for (const dir of dirs) {
+    files.push(join(dir, 'config.yml'));
+    files.push(join(dir, 'config.yaml'));
+    files.push(join(dir, 'settings.json'));
+  }
+  return files;
+}
+
+function readOmpConfigIfPresent(file) {
+  if (!existsSync(file)) return null;
+  try {
+    const content = readFileSync(file, 'utf8');
+    if (file.endsWith('.json') || file.endsWith('.jsonc')) {
+      try {
+        return parseConfigByExtension(file, content);
+      } catch {
+        return loadYaml(content);
+      }
+    }
+    return loadYaml(content) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isExplicitlyDisabled(val) {
+  if (val === false) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'false' || s === 'off' || s === 'disabled' || s === 'no';
+  }
+  return false;
+}
+
+function isExplicitlyEnabled(val) {
+  if (val === true) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === 'on' || s === 'enabled' || s === 'yes';
+  }
+  return false;
+}
+
+// Inspect a parsed OMP config object for its native browser setting.
+// Returns false if browser is explicitly disabled, true if explicitly enabled,
+// or undefined if unspecified.
+function ompConfigBrowserState(cfg) {
+  if (!cfg || typeof cfg !== 'object') return undefined;
+  if (isExplicitlyDisabled(cfg.browser)) return false;
+  if (isExplicitlyEnabled(cfg.browser)) return true;
+  if (isExplicitlyDisabled(cfg['browser.enabled'])) return false;
+  if (isExplicitlyEnabled(cfg['browser.enabled'])) return true;
+  if (cfg.browser && typeof cfg.browser === 'object') {
+    if (isExplicitlyDisabled(cfg.browser.enabled)) return false;
+    if (isExplicitlyEnabled(cfg.browser.enabled)) return true;
+  }
+  return undefined;
+}
+
+// OMP drops recognized browser MCP servers (playwright, puppeteer, etc.) by
+// default when its native browser prelude is active (browser.enabled defaults
+// to true). A Playwright MCP definition is only usable if the native browser
+// is explicitly disabled in project settings (.omp/config.yml, .omp/settings.json)
+// or user settings (~/.omp/agent/config.yml, ~/.omp/settings.json).
+function isOmpBrowserDisabled(root) {
+  const projectFiles = [
+    join(root, '.omp', 'config.yml'),
+    join(root, '.omp', 'config.yaml'),
+    join(root, '.omp', 'settings.json'),
+    join(root, '.omp', 'omp.json'),
+  ];
+  for (const file of projectFiles) {
+    const state = ompConfigBrowserState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state === false;
+  }
+  for (const file of ompUserConfigFiles()) {
+    const state = ompConfigBrowserState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state === false;
+  }
+  return false;
+}
+
 // A Claude Code plugin declares its MCP servers in its own .mcp.json, which
 // lives under the user's config dir - never in the project root. The
 // project-root scan below therefore reports "not detected" on a machine where
@@ -690,6 +786,9 @@ function isPlaywrightMcpConfigured(root, activeCli) {
     const file = join(root, ...rel.split('/'));
     return hasPlaywrightIn(readConfigIfPresent(file));
   });
+  if (activeCli === 'omp') {
+    return inProject && isOmpBrowserDisabled(root);
+  }
   if (inProject) return true;
   // Gated behind the project scan, so an already-configured project pays no
   // extra I/O and non-plugin CLIs never touch the user config dir.
@@ -770,7 +869,23 @@ function checkPlaywrightMcp(root, activeCli) {
   if (isPlaywrightMcpConfigured(root, activeCli)) {
     return { pass: true, label: `Playwright MCP server configured (${activeCli})` };
   }
-  // Active CLI is known (flag/env/.env) but its MCP isn't configured.
+  // Active CLI is known (flag/env/.env) but its MCP isn't configured or is filtered.
+  if (activeCli === 'omp') {
+    const definedRel = entry.files.find((rel) => {
+      const file = join(root, ...rel.split('/'));
+      return hasPlaywrightIn(readConfigIfPresent(file));
+    });
+    if (definedRel) {
+      return {
+        warn: true,
+        label: `Playwright MCP server defined in ${definedRel}, but filtered by OMP native browser`,
+        fix: [
+          'OMP drops browser MCP servers by default when its native browser is active.',
+          'To use Playwright MCP in OMP, disable the built-in browser by setting "browser": { "enabled": false } in .omp/settings.json or .omp/config.yml (or run "omp config set browser.enabled false").',
+        ],
+      };
+    }
+  }
   return {
     warn: true,
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
