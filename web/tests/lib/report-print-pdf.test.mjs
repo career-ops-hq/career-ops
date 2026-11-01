@@ -41,6 +41,7 @@ endbfrange
 endcmap
 `;
 
+// ActualText below is U+FB01 (ﬁ) as UTF-16BE with a BOM. ASCII "(fi)" never reaches expandLigatures.
 const page1 = `BT
 /F1 12 Tf
 1 0 0 1 72 700 Tm
@@ -48,7 +49,7 @@ ${hex("Paragraph 8 of notes")} Tj
 1 0 0 1 400 700 Tm
 ${hex("https://fixture-print.example/evidence/3")} Tj
 1 0 0 1 72 640 Tm
-/Span << /ActualText (fi) >> BDC
+/Span << /ActualText <FEFFFB01> >> BDC
 <00C0> Tj
 EMC
 ${hex("ctional")} Tj

@@ -48,6 +48,10 @@ test("A printed report shows its content without app chrome in either theme", { 
       assert.equal(await asides.nth(i).isVisible(), false, `${theme}: sidebar does not print`);
     }
 
+    const shellWidgets = page.locator("main + div");
+    assert.equal(await shellWidgets.count(), 1, `${theme}: shell widgets are rendered`);
+    assert.equal(await shellWidgets.isVisible(), false, `${theme}: shell widgets do not print`);
+
     const controls = page.locator("main button, main select");
     const shown = [];
     for (let i = 0; i < await controls.count(); i++) {
