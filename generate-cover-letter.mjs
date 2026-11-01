@@ -490,10 +490,11 @@ Usage:
     // Cover letters are candidate-facing documents too. Reuse the CV fact
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
-    const factCheck = assertFacts(html, {
+    const factOptions = {
       label: "cover letter",
       planTexts: letterInputTexts(payload),
-    });
+    };
+    const factCheck = assertFacts(html, factOptions);
     // Ahead of the verdict, because it qualifies it: with no config the phrase
     // lists are empty, so a silent gate here covers metrics and facts only.
     if (factCheck.configMissing) {
@@ -509,7 +510,12 @@ Usage:
     const outputPath = resolve(payload.output_path);
     // The pass a CV gets before it prints. Without it a letter kept its em
     // dashes and curly quotes, and printed a draft's **bold** with the asterisks.
-    await renderHtmlToPdf(normalizeTextForATS(html).html, outputPath, {
+    const printed = normalizeTextForATS(html).html;
+    // As for a CV, the gate also reads the document that prints: the pass can
+    // spell out a forbidden phrase the draft hid, as `self–starter` prints as
+    // `self-starter`.
+    assertFacts(printed, factOptions);
+    await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.
