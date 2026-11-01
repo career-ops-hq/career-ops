@@ -445,6 +445,21 @@ func TestParseApplicationsRowWidthFollowsTheHeader(t *testing.T) {
 	if len(apps) != 1 || apps[0].Company != "Acme" {
 		t.Fatalf("a row missing an interior cell must be skipped, got %d rows: %+v", len(apps), apps)
 	}
+
+	// The second row's Notes cell is empty and flush against the closing pipe.
+	// That row is complete, and Node reads it: a guard counting a cell short
+	// would lose it.
+	flush, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-08-28 | Acme | Platform Engineer | 4.0/5 | Applied | ❌ | — | ok |
+| 2 | 2026-08-29 | Globex | Data Engineer | 4.2/5 | Evaluated | ❌ | — ||
+`)
+	apps = mustParseApplications(t, flush)
+	if len(apps) != 2 || apps[1].Company != "Globex" || apps[1].Status != "Evaluated" {
+		t.Fatalf("a row with an empty last cell must be kept, got %d rows: %+v", len(apps), apps)
+	}
 }
 
 // A URL cell that names no posting is not a JobURL: the "—" empty-cell marker
