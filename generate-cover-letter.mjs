@@ -512,9 +512,15 @@ Usage:
     // dashes and curly quotes, and printed a draft's **bold** with the asterisks.
     const printed = normalizeTextForATS(html).html;
     // As for a CV, the gate also reads the document that prints: the pass can
-    // spell out a forbidden phrase the draft hid, as `self–starter` prints as
-    // `self-starter`.
-    assertFacts(printed, factOptions);
+    // spell out a phrase the draft hid, as `self–starter` prints as
+    // `self-starter`. A forbidden one stops here. An advisory one is reported,
+    // unless the check above already named it.
+    const printedCheck = assertFacts(printed, factOptions);
+    const spelledOut = printedCheck.warnings.filter((phrase) => !factCheck.warnings.includes(phrase));
+    if (spelledOut.length > 0) {
+      console.error(`CV fact check warning: cover letter`);
+      printFactWarnings({ warnings: spelledOut }, console.error);
+    }
     await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
