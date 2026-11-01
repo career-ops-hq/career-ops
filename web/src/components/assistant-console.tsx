@@ -871,8 +871,8 @@ export function AssistantConsole() {
             <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void renameChat()}>Rename</button>
             <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void removeChat()}>Delete</button>
           </div>
-          {chatWarnings.map(warning => <div key={warning.id} role="alert" className="px-4 py-2 text-sm text-amber-600">{warning.error}. Other conversations are still available.</div>)}
-          {saveError && <div role="alert" className="space-y-2 px-4 py-2 text-sm text-amber-600">
+          {chatWarnings.map(warning => <div key={warning.id} role="alert" className="px-4 py-2 text-sm text-amber-800 dark:text-amber-400">{warning.error}. Other conversations are still available.</div>)}
+          {saveError && <div role="alert" className="space-y-2 px-4 py-2 text-sm text-amber-800 dark:text-amber-400">
             <p>{saveError}</p>
             {chatReady ? <div className="flex flex-wrap gap-3">
               <button className="underline" disabled={busy || chatPending} onClick={() => void flushChat().catch(() => {})}>Retry save</button>
@@ -1128,7 +1128,7 @@ function ConfirmationCard({ part, onConfirm }: {
         </div>
       ) : (
         <div ref={resultRef} tabIndex={-1} aria-labelledby={`${summaryId} ${resultId}`} className="mt-1 rounded text-xs text-faint focus-visible:outline-2 focus-visible:outline-brand">
-          <span id={resultId} role={part.state === "failed" ? "alert" : undefined} className={part.state === "failed" ? "text-red-600 dark:text-red-400" : undefined}>
+          <span id={resultId} role={part.state === "failed" ? "alert" : undefined} className={part.state === "failed" ? "text-red-700 dark:text-red-400" : undefined}>
             {part.state === "done" ? "✓ started" : part.state === "saving" ? "saving…" : part.state === "failed" ? part.message : "cancelled"}
           </span>
         </div>
