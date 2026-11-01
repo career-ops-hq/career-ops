@@ -15,6 +15,7 @@ import {
   verdictReason,
 } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
+import { BackLink } from "@/components/back-link";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { ScoreLevers } from "@/components/score-levers";
@@ -94,12 +95,12 @@ export function ReportView({
 
   return (
     <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
-      <Link
+      <BackLink
         href={backHref}
         className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text"
       >
         <ArrowLeft className="size-4" /> Pipeline
-      </Link>
+      </BackLink>
 
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
