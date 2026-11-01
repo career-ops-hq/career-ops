@@ -508,7 +508,7 @@ const MCP_CONFIGS = [
   // there, and JSON.parse throwing on them used to read as "no MCP server
   // configured" (#2252).
   { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'], userFiles: () => opencodeUserConfigFiles() },
-  { cli: 'omp',      files: ['.omp/mcp.json', '.omp/.mcp.json'] },
+  { cli: 'omp',      files: ['.omp/mcp.json', '.omp/.mcp.json', 'mcp.json', '.mcp.json'] },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package,
@@ -517,6 +517,7 @@ const MCP_CONFIGS = [
 // NixOS config names the command and never mentions the npm package.
 function isPlaywrightServer(server) {
   if (!server || typeof server !== 'object') return false;
+  if (server.enabled === false || server.enabled === 'false') return false;
   const blob = JSON.stringify(server).toLowerCase();
   return blob.includes('@playwright/mcp') || blob.includes('mcp-server-playwright');
 }
@@ -608,49 +609,49 @@ function hasPlaywrightInMergedOpenCode(configs) {
 // Resolve OMP's active agent directory using supported selectors:
 // named profile ($OMP_PROFILE / $PI_PROFILE), explicit $PI_CODING_AGENT_DIR
 // override, or the default ~/.omp/agent directory (docs/settings.md).
+// Honors $PI_CONFIG_DIR when set, and treats 'default' as the default profile.
 function ompAgentDir() {
-  const profile = process.env.OMP_PROFILE || process.env.PI_PROFILE;
-  if (profile) {
-    return join(homedir(), '.omp', 'profiles', profile, 'agent');
+  const profile = (process.env.OMP_PROFILE || process.env.PI_PROFILE || '').trim();
+  const configDirName = process.env.PI_CONFIG_DIR || '.omp';
+  if (profile && profile !== 'default') {
+    return join(homedir(), configDirName, 'profiles', profile, 'agent');
   }
   if (process.env.PI_CODING_AGENT_DIR) {
     return process.env.PI_CODING_AGENT_DIR;
   }
-  return join(homedir(), '.omp', 'agent');
+  return join(homedir(), configDirName, 'agent');
 }
 
 // OMP's USER-level config sources for settings (docs/settings.md):
-// active agent directory first (config.yml, config.yaml, settings.json),
-// then fallback to legacy ~/.omp root settings.
+// active agent directory (config.yml > config.yaml > settings.json).
 function ompUserConfigFiles() {
-  const agentDir = ompAgentDir();
-  const dirs = [agentDir];
-  const legacyDir = join(homedir(), '.omp');
-  if (legacyDir !== agentDir) dirs.push(legacyDir);
-
-  const files = [];
-  for (const dir of dirs) {
-    files.push(join(dir, 'config.yml'));
-    files.push(join(dir, 'config.yaml'));
-    files.push(join(dir, 'settings.json'));
-  }
-  return files;
+  const dir = ompAgentDir();
+  const configYml = join(dir, 'config.yml');
+  const configYaml = join(dir, 'config.yaml');
+  if (existsSync(configYml)) return [configYml];
+  if (existsSync(configYaml)) return [configYaml];
+  return [join(dir, 'settings.json')];
 }
 
 // OMP's USER-level MCP configuration files (docs/mcp-config.md):
-// mcp.json / .mcp.json in the active agent directory, then fallback to ~/.omp.
+// mcp.json / .mcp.json in the active agent directory.
 function ompUserMcpFiles() {
-  const agentDir = ompAgentDir();
-  const dirs = [agentDir];
-  const legacyDir = join(homedir(), '.omp');
-  if (legacyDir !== agentDir) dirs.push(legacyDir);
+  const dir = ompAgentDir();
+  return [join(dir, 'mcp.json'), join(dir, '.mcp.json')];
+}
 
-  const files = [];
-  for (const dir of dirs) {
-    files.push(join(dir, 'mcp.json'));
-    files.push(join(dir, '.mcp.json'));
-  }
-  return files;
+// OMP-specific server detection: respects server.enabled: false and user-level disabledServers list.
+function hasPlaywrightInOmp(cfg) {
+  if (!cfg || typeof cfg !== 'object') return false;
+  const disabled = new Set(Array.isArray(cfg.disabledServers) ? cfg.disabledServers.map((s) => String(s).toLowerCase()) : []);
+  const buckets = [cfg.mcpServers, cfg.mcp].filter((b) => b && typeof b === 'object');
+  return buckets.some((servers) =>
+    Object.entries(servers).some(([name, server]) => {
+      if (disabled.has(name.toLowerCase())) return false;
+      if (server && (server.enabled === false || server.enabled === 'false')) return false;
+      return isPlaywrightServer(server);
+    })
+  );
 }
 
 function readOmpConfigIfPresent(file) {
@@ -714,7 +715,6 @@ function isOmpBrowserDisabled(root) {
     join(root, '.omp', 'config.yml'),
     join(root, '.omp', 'config.yaml'),
     join(root, '.omp', 'settings.json'),
-    join(root, '.omp', 'omp.json'),
   ];
   for (const file of projectFiles) {
     const state = ompConfigBrowserState(readOmpConfigIfPresent(file));
@@ -813,8 +813,12 @@ function isPlaywrightMcpConfigured(root, activeCli) {
     return hasPlaywrightIn(readConfigIfPresent(file));
   });
   if (activeCli === 'omp') {
-    const inUser = ompUserMcpFiles().some((file) => hasPlaywrightIn(readConfigIfPresent(file)));
-    return (inProject || inUser) && isOmpBrowserDisabled(root);
+    const inProjectOmp = entry.files.some((rel) => {
+      const file = join(root, ...rel.split('/'));
+      return hasPlaywrightInOmp(readConfigIfPresent(file));
+    });
+    const inUserOmp = ompUserMcpFiles().some((file) => hasPlaywrightInOmp(readConfigIfPresent(file)));
+    return (inProjectOmp || inUserOmp) && isOmpBrowserDisabled(root);
   }
   if (inProject) return true;
   // Gated behind the project scan, so an already-configured project pays no
@@ -900,9 +904,9 @@ function checkPlaywrightMcp(root, activeCli) {
   if (activeCli === 'omp') {
     const definedRel = entry.files.find((rel) => {
       const file = join(root, ...rel.split('/'));
-      return hasPlaywrightIn(readConfigIfPresent(file));
+      return hasPlaywrightInOmp(readConfigIfPresent(file));
     });
-    const userDefined = ompUserMcpFiles().some((file) => hasPlaywrightIn(readConfigIfPresent(file)));
+    const userDefined = ompUserMcpFiles().some((file) => hasPlaywrightInOmp(readConfigIfPresent(file)));
     if (definedRel || userDefined) {
       return {
         warn: true,

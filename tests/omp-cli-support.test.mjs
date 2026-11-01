@@ -218,9 +218,79 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     } else {
       fail(`doctor failed to report filtered user-level MCP: ${JSON.stringify(resUserMcpFiltered)}`);
     }
+
+    // 4h. doctor with root fallback mcp.json and disabled browser
+    rmSync(join(isolatedAgentDir, 'mcp.json'), { force: true });
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+    writeFileSync(join(dir, '.omp', 'config.yml'), 'browser:\n  enabled: false\n');
+
+    const resWithRootFallback = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resWithRootFallback.playwright_mcp?.omp === true
+        && !resWithRootFallback.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor detects Playwright MCP in project-root fallback mcp.json');
+    } else {
+      fail(`doctor failed with project-root fallback mcp.json: ${JSON.stringify(resWithRootFallback)}`);
+    }
+
+    // 4i. doctor respects user-level disabledServers override
+    rmSync(join(dir, 'mcp.json'), { force: true });
+    rmSync(join(dir, '.omp', 'config.yml'), { force: true });
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      disabledServers: ['playwright'],
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+
+    const resWithDisabledServer = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resWithDisabledServer.playwright_mcp?.omp === false
+        && resWithDisabledServer.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
+      pass('doctor respects disabledServers in user-level mcp.json');
+    } else {
+      fail(`doctor failed to respect disabledServers: ${JSON.stringify(resWithDisabledServer)}`);
+    }
+
+    // 4j. doctor treats OMP_PROFILE=default as default profile and honors PI_CODING_AGENT_DIR
+    writeFileSync(join(isolatedAgentDir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+
+    const resDefaultProfile = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: { ...isolatedEnv, OMP_PROFILE: 'default' },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resDefaultProfile.playwright_mcp?.omp === true
+        && !resDefaultProfile.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor normalizes OMP_PROFILE=default and honors PI_CODING_AGENT_DIR');
+    } else {
+      fail(`doctor failed with OMP_PROFILE=default: ${JSON.stringify(resDefaultProfile)}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(isolatedHome, { recursive: true, force: true });
   }
 }
+
 
