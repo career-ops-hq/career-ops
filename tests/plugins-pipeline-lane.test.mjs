@@ -22,9 +22,15 @@ import { ROOT, rmSync } from './helpers.mjs';
 const PROBE = `
 const m = await import(${JSON.stringify(pathToFileURL(join(ROOT, 'plugins.mjs')).href)});
 const snap = m._testBuildSnapshot();
+// The same de-dup path cmdRun's ingest/search branch takes: the lane's URLs
+// feed admitPluginJobs(), which keeps only leads the lane does not hold yet.
+const found = ['https://example.com/lane/1', 'https://example.com/main/1', 'https://example.com/new/1']
+  .map((url) => ({ title: 'Engineer', company: 'Example', url }));
+const { jobs } = m.admitPluginJobs(found, { id: 'probe', pipelineUrls: m._testExistingPipelineUrls() });
 process.stdout.write(JSON.stringify({
   pipelinePath: m._testPaths.PIPELINE_PATH,
   snapshotUrls: snap.pipeline.map((e) => e.url),
+  admittedUrls: jobs.map((j) => j.url),
 }));
 `;
 
@@ -55,6 +61,8 @@ test('with CAREER_OPS_PIPELINE set, de-dup and export read the lane file', (t) =
   const got = probe({ ...BASE_ENV, CAREER_OPS_ROOT: dir, CAREER_OPS_PIPELINE: lane });
   assert.equal(got.pipelinePath, lane);
   assert.deepEqual(got.snapshotUrls, ['https://example.com/lane/1', 'https://example.com/lane/2']);
+  // A lead already in the lane is skipped; one only the main pipeline holds is admitted to the lane.
+  assert.deepEqual(got.admittedUrls, ['https://example.com/main/1', 'https://example.com/new/1']);
 });
 
 test('without CAREER_OPS_PIPELINE, the data-root pipeline is used', (t) => {
@@ -63,4 +71,5 @@ test('without CAREER_OPS_PIPELINE, the data-root pipeline is used', (t) => {
   const got = probe({ ...BASE_ENV, CAREER_OPS_ROOT: dir, CAREER_OPS_PIPELINE: undefined });
   assert.equal(got.pipelinePath, join(dir, 'data', 'pipeline.md'));
   assert.deepEqual(got.snapshotUrls, ['https://example.com/main/1']);
+  assert.deepEqual(got.admittedUrls, ['https://example.com/lane/1', 'https://example.com/new/1']);
 });

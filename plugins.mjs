@@ -691,7 +691,7 @@ async function main() {
 
 // Named exports for the test suite — not part of the CLI API.
 export const _testPaths = Object.freeze({ APPLICATIONS_PATH, PIPELINE_PATH });
-export { buildSnapshot as _testBuildSnapshot };
+export { buildSnapshot as _testBuildSnapshot, existingPipelineUrls as _testExistingPipelineUrls };
 
 if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });
