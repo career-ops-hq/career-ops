@@ -90,9 +90,9 @@ function findSection(lines, section) {
 
 /**
  * The block-list items under the key at `at`. Comment lines between them, and
- * the trailing comment of an item line (`- "Old" # note`, which has no new
- * item to stay on), are returned as comment lines to keep ahead of the new
- * items.
+ * the trailing comment of any line of an item (`- "Old" # note`, or a mapping
+ * item's `fit: "primary" # note`, which have no new item to stay on), are
+ * returned as comment lines to keep ahead of the new items.
  * @param {string[]} lines
  * @param {number} at
  * @param {number} end
@@ -112,13 +112,17 @@ function listItems(lines, at, end, indent) {
       last = i;
     } else break;
   }
+  const firstItem = lines.slice(at + 1, last + 1).find((line) => /^\s*- /.test(line));
+  const itemIndent = firstItem ? indentOf(firstItem) : `${indent}  `;
   const kept = lines.slice(at + 1, last + 1).flatMap((line) => {
     if (line.trim().startsWith("#")) return [line];
-    const comment = /^\s*- /.test(line) ? trailingComment(line.replace(/^\s*-/, "")).trim() : "";
-    return comment ? [`${indentOf(line)}${comment}`] : [];
+    // trailingComment reads a value, so the list marker and any key come off
+    // first: left on, `name: "Role #1"` would read as holding a comment.
+    const value = line.replace(/^\s*(?:-\s+)?/, "").replace(/^[^\s"'#:]+:(?=\s|$)/, "");
+    const comment = trailingComment(value).trim();
+    return comment ? [`${itemIndent}${comment}`] : [];
   });
-  const itemIndent = lines.slice(at + 1, last + 1).find((line) => /^\s*- /.test(line));
-  return { last, kept, itemIndent: itemIndent ? indentOf(itemIndent) : `${indent}  ` };
+  return { last, kept, itemIndent };
 }
 
 /**
