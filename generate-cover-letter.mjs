@@ -478,8 +478,15 @@ export function parseCoverArgs(argv) {
   if (values.country !== undefined && !pageFormatForCountry(values.country)) {
     return { ok: false, error: `Invalid country "${values.country}". Use a two-letter ISO 3166-1 code, e.g. --country=DE.` };
   }
-  if (values.report !== undefined && !/^\d+$/.test(values.report.trim())) {
+  // Checked as typed, not trimmed: `--report=' 42 '` is not a report number.
+  if (values.report !== undefined && !/^\d+$/.test(values.report)) {
     return { ok: false, error: `Invalid --report "${values.report}". Use a numeric report number, e.g. --report=42.` };
+  }
+  // An empty --out= would otherwise be read as "not given" by main(), which
+  // then writes to the payload's own destination: a flag the caller typed,
+  // silently ignored.
+  if (values.out !== undefined && values.out.trim() === "") {
+    return { ok: false, error: 'Invalid --out "". Give a path inside output/, e.g. --out output/acme-cover.pdf.' };
   }
   const maxPagesInput = values["max-pages"];
   const maxPages = maxPagesInput === undefined ? DEFAULT_COVER_MAX_PAGES : Number(maxPagesInput);
@@ -490,7 +497,7 @@ export function parseCoverArgs(argv) {
     ok: true,
     args: {
       ...values,
-      report: values.report?.trim(),
+      report: values.report,
       maxPages,
       strictPages: Boolean(values["strict-pages"]),
     },
