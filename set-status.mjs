@@ -120,7 +120,7 @@ import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
   resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate,
-  prependNote, normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
+  prependNote, hasNoteEntry, normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
   appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot, resolveTrackerPathForWrite } from './path-resolver.mjs';
@@ -806,11 +806,12 @@ try {
   if (statusChanged) replaceCellValue(colmap.status, newStatus);
 
   // Text after a date in the old cell is no part of any state, and replacing the
-  // cell would lose it. It moves to Notes, as normalize-statuses.mjs moves it.
+  // cell would lose it. It moves to Notes, as normalize-statuses.mjs moves it,
+  // unless a whole Notes entry already holds it.
   if (statusChanged && colmap.notes != null && statusTextAfterDate(oldStatus)) {
     const kept = (parts[colmap.notes] ?? '').trim();
     const moved = oldStatus.trim();
-    if (!kept.includes(moved)) replaceCellValue(colmap.notes, prependNote(kept, moved));
+    if (!hasNoteEntry(kept, moved)) replaceCellValue(colmap.notes, prependNote(kept, moved));
   }
 
   if (note) {
@@ -842,11 +843,7 @@ try {
       // suppress a genuinely new note. Matching the full note text at entry
       // boundaries (instead of splitting the field into segments) keeps retries
       // idempotent even when the note itself contains "; ".
-      const hasNote = existing === note
-        || existing.startsWith(`${note}; `)
-        || existing.endsWith(`; ${note}`)
-        || existing.includes(`; ${note}; `);
-      if (!hasNote) {
+      if (!hasNoteEntry(existing, note)) {
         replaceCellValue(colmap.notes, existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note);
         noteChanged = true;
       }

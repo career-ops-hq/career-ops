@@ -103,6 +103,21 @@ test('moved text is its own Notes entry, so the note beside it can still be foun
   }, 'call booked');
 });
 
+test('moved text inside a longer note is still moved, so replacing that note keeps it', () => {
+  withRow('Applied 2026-10-02 via referral', ({ run, notes }) => {
+    assert.equal(run('set-status.mjs', '1', 'Interview').status, 0);
+    assert.equal(notes(), 'Applied 2026-10-02 via referral; Reviewed Applied 2026-10-02 via referral');
+    const replaced = run('set-status.mjs', '1', 'Interview', '--note', 'Recruiter replied',
+      '--replace-note', 'Reviewed Applied 2026-10-02 via referral');
+    assert.equal(replaced.status, 0, replaced.stderr || replaced.stdout);
+    assert.equal(notes(), 'Applied 2026-10-02 via referral; Recruiter replied');
+  }, 'Reviewed Applied 2026-10-02 via referral');
+  withRow('Applied 2026-10-02 via referral', ({ run, notes }) => {
+    assert.equal(run('set-status.mjs', '1', 'Interview').status, 0);
+    assert.equal(notes(), 'call booked; Applied 2026-10-02 via referral', 'a whole entry already holding it is enough');
+  }, 'call booked; Applied 2026-10-02 via referral');
+});
+
 test('a "—" in Notes is no note, and the moved text replaces it', () => {
   withRow('Applied 2026-10-02 via referral', ({ run, notes }) => {
     assert.equal(run('set-status.mjs', '1', 'Interview').status, 0);

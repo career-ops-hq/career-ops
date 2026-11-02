@@ -174,10 +174,15 @@ ok('moved text is its own Notes entry, and a "—" placeholder gives way to it',
       '|---|---|---|---|---|---|---|---|---|',
       '| 1 | 2026-01-04 | Initech | Analyst | 3.5/5 | Applied 2026-01-04 via referral | ❌ | — | call booked |',
       '| 2 | 2026-01-04 | Globex | Analyst | 3.5/5 | Applied 2026-01-04 via referral | ❌ | — | — |',
+      '| 3 | 2026-01-04 | Hooli | Analyst | 3.5/5 | Applied 2026-01-04 via referral | ❌ | — | Reviewed Applied 2026-01-04 via referral |',
+      '| 4 | 2026-01-04 | Umbrella | Analyst | 3.5/5 | Applied 2026-01-04 via referral | ❌ | — | x; Applied 2026-01-04 via referral |',
       ''].join('\n'));
     const notes = () => readFileSync(tracker, 'utf-8').split('\n').filter(l => /^\|\s*\d+\s*\|/.test(l)).map(l => l.split('|')[9].trim());
     assert.strictEqual(run('normalize-statuses.mjs').status, 0);
-    assert.deepStrictEqual(notes(), ['Applied 2026-01-04 via referral; call booked', 'Applied 2026-01-04 via referral']);
+    assert.deepStrictEqual(notes(), ['Applied 2026-01-04 via referral; call booked', 'Applied 2026-01-04 via referral',
+      // Inside a longer note it is no entry of its own, so it is still moved.
+      'Applied 2026-01-04 via referral; Reviewed Applied 2026-01-04 via referral',
+      'x; Applied 2026-01-04 via referral']);
     const replaced = run('set-status.mjs', '1', 'Applied', '--note', 'call done', '--replace-note', 'call booked');
     assert.strictEqual(replaced.status, 0, replaced.stderr || replaced.stdout);
     assert.strictEqual(notes()[0], 'Applied 2026-01-04 via referral; call done');

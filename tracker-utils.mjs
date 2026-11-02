@@ -1030,6 +1030,20 @@ export function prependNote(notes, entry) {
 }
 
 /**
+ * Whether `entry` is already a whole "; "-separated entry of a Notes cell, or
+ * the whole cell. Text inside a longer entry ("sent" in "sent CV") is not:
+ * --replace-note can replace that entry, and the text would go with it.
+ *
+ * @param {*} notes - The Notes cell as it stands.
+ * @param {string} entry - Text to look for.
+ * @returns {boolean}
+ */
+export function hasNoteEntry(notes, entry) {
+  const kept = String(notes ?? '').trim();
+  return kept === entry || kept.startsWith(`${entry}; `) || kept.endsWith(`; ${entry}`) || kept.includes(`; ${entry}; `);
+}
+
+/**
  * Resolve a raw tracker status CELL to its canonical lowercase state id.
  *
  * The read-side twin of resolveCanonicalState(): scripts that bucket or compare

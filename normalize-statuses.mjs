@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   openTrackerTransaction, rebuildRow,
-  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId, statusTextAfterDate, prependNote,
+  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId, statusTextAfterDate, prependNote, hasNoteEntry,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -223,7 +223,7 @@ for (let i = 0; i < lines.length; i++) {
   // table has no header for.
   if (result.moveToNotes && COLS.notes != null) {
     const existing = parts[COLS.notes] || '';
-    if (!existing.includes(result.moveToNotes)) {
+    if (!hasNoteEntry(existing, result.moveToNotes)) {
       parts[COLS.notes] = prependNote(existing, result.moveToNotes);
     }
   }
