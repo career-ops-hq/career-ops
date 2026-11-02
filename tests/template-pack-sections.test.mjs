@@ -22,8 +22,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail, run, NODE, ROOT, lastRunFailure } from './helpers.mjs';
 import {
-  PARTIAL_SECTIONS, parseMeta, declaredSections, checkDeclaredSections, listTemplates, resolveTemplate,
-} from '../cv-templates.mjs';
+  PARTIAL_SECTIONS, parseMeta, declaredSections, checkDeclaredSections, listTemplates, resolveTemplate, DEFAULT_TEMPLATES_DIR } from '../cv-templates.mjs';
 
 console.log('\nCV template packs — declared sections and completeness (#3852)');
 
@@ -317,7 +316,7 @@ function build(dir, template, payload = PAYLOAD) {
 // checked claim — and every pack that declares anything must be complete.
 
 {
-  const shipped = listTemplates('cv').filter((t) => t.pack);
+  const shipped = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.pack);
   const ats = shipped.find((t) => t.name === 'ats');
   if (!ats) {
     fail('the shipped ATS pack (templates/ats/) is missing');

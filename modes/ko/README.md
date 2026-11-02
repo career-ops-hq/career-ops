@@ -42,7 +42,7 @@ language:
 | 파일 | 번역 기준 | 역할 |
 |---------|----------------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | 공통 컨텍스트, archetype, 전역 규칙, 한국 채용 시장 특화 맥락 |
-| `gonggo.md` | `modes/oferta.md` (ES) | 채용 공고 전체 평가 (블록 A-F) |
+| `gonggo.md` | `modes/oferta.md` (ES) | 채용 공고 전체 평가 (블록 A-H) |
 | `jiwon.md` | `modes/apply.md` (EN) | 지원서 입력 폼을 채우는 live assistant |
 | `pipeline.md` | `modes/pipeline.md` (ES) | 수집한 채용 공고 URL inbox / Second Brain |
 
@@ -103,5 +103,5 @@ language:
 1. 제안을 담은 Issue를 엽니다 (`CONTRIBUTING.md` 참고)
 2. 위 용어집을 따라 문체를 일관되게 유지합니다
 3. 직역이 아니라 자연스러운 한국어로 번역합니다
-4. 구조 요소(블록 A-F, 표, 코드블록, 도구 지시문)는 그대로 유지합니다
+4. 구조 요소(블록 A-H, 표, 코드블록, 도구 지시문)는 그대로 유지합니다
 5. 실제 한국어 채용 공고(원티드, 리멤버, 잡코리아, 사람인, LinkedIn KR 등)로 테스트한 뒤 PR을 보냅니다

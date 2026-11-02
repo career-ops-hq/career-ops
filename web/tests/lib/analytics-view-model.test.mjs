@@ -9,6 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { progressModel, statsModel, rateOrNull, isUnlabelled } from "../../src/lib/analytics/view-model.mjs";
+import { scoreThresholdFrom } from "../../../analyze-patterns.mjs";
 
 test("a rate over nothing is absent, not zero", () => {
   // The failure this prevents: a user who has not applied yet being shown
@@ -108,6 +109,34 @@ test("an unsupported threshold keeps its reasoning but loses its number", () => 
   assert.equal(t2.note, "because", "the reasoning is still worth showing");
 });
 
+test("the threshold panel shows the core's reasoning when it recommends nothing", () => {
+  // Real core output, not a hand-built shape: scoreThresholdFrom() sets
+  // `recommended` only for a sufficient sample with a rejection below the
+  // cutoff, so a panel gated on a finite `recommended` never appeared for a
+  // thin sample, and never as provisional.
+  const thin = statsModel({ scoreThreshold: scoreThresholdFrom([4.2, 3.9], [3.1]) });
+  const t1 = thin.sections.find((s) => s.key === "threshold");
+  assert.ok(t1, "two positive scored outcomes: the panel must still explain itself");
+  assert.equal(t1.value, null);
+  assert.equal(t1.provisional, true);
+  assert.match(t1.note, /only 2 positive outcome\(s\) carry a score/);
+
+  // Enough positives, but no rejection below the lowest: no cutoff to
+  // recommend, and not for want of a sample.
+  const noContrast = statsModel({ scoreThreshold: scoreThresholdFrom([4.2, 3.9, 4.0], [4.5]) });
+  const t2 = noContrast.sections.find((s) => s.key === "threshold");
+  assert.ok(t2);
+  assert.equal(t2.value, null);
+  assert.equal(t2.provisional, false);
+  assert.match(t2.note, /nothing shows that lower scores fail/);
+
+  // And the recommendation itself still comes through.
+  const solid = statsModel({ scoreThreshold: scoreThresholdFrom([4.2, 3.9, 4.0], [3.1]) });
+  const t3 = solid.sections.find((s) => s.key === "threshold");
+  assert.equal(t3.value, 3.9);
+  assert.equal(t3.provisional, false);
+});
+
 test("an Unknown-only breakdown is not rendered as an insight", () => {
   const m = statsModel({
     archetypeBreakdown: [{ archetype: "Unknown", total: 9, conversionRate: 38 }],
@@ -125,6 +154,24 @@ test("an Unknown-only breakdown is not rendered as an insight", () => {
   assert.ok(remote);
   assert.equal(remote.rows.length, 2);
   assert.equal(remote.partial, true);
+});
+
+test("a breakdown bucket nothing was submitted from has no conversion rate", () => {
+  // The core's withOutcomeRates() reports conversionRate 0 over submitted 0: a
+  // bucket of only Evaluated and SKIP rows. Rendered, that is a confident "0%"
+  // beside buckets with real outcomes. The row and its count stay; the rate is
+  // absent.
+  const m = statsModel({
+    archetypeBreakdown: [
+      { archetype: "AI & ML Engineering", total: 5, submitted: 5, positive: 2, conversionRate: 40 },
+      { archetype: "Data & Analytics", total: 7, submitted: 0, positive: 0, conversionRate: 0 },
+    ],
+  });
+  const rows = m.sections.find((s) => s.key === "archetype").rows;
+  assert.equal(rows.length, 2, "the empty bucket still shows its count");
+  assert.equal(rows[0].conversionRate, 40);
+  assert.equal(rows[1].conversionRate, null);
+  assert.equal(rows[1].total, 7);
 });
 
 test("the ATS panel makes no claim below the core's own sample bar", () => {

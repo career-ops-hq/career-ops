@@ -59,7 +59,7 @@ const SCRIPTS = [
 for (const [script, typo] of SCRIPTS) {
   test(`${script} rejects ${typo} instead of falling back to its default`, () => {
     const r = runScript(script, typo, 'some-value');
-    assert.equal(r.status, 1, `${script} ${typo} exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `${script} ${typo} exited ${r.status}, want 1`));
     assert.match(r.all, /unrecognized flag/i, `${script} did not name the unrecognized flag`);
     assert.ok(r.all.includes(typo), `${script} did not echo ${typo} back`);
   });
@@ -80,7 +80,7 @@ test('fix-slugs.mjs -h exits 0 and prints usage', () => {
 
 test('fix-slugs.mjs --help --bogus still errors', () => {
   const r = runScript('fix-slugs.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `fix-slugs.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `fix-slugs.mjs --help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
 });
 
@@ -99,7 +99,7 @@ test('application-artifacts.mjs -h exits 0 and prints usage', () => {
 
 test('application-artifacts.mjs --help --bogus still errors', () => {
   const r = runScript('application-artifacts.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `application-artifacts.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `application-artifacts.mjs --help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
 });
 
@@ -126,7 +126,7 @@ test('clean-markers.mjs -h exits 0 and prints usage', () => {
 
 test('clean-markers.mjs --help --bogus still errors', () => {
   const r = runScript('clean-markers.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `clean-markers.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `clean-markers.mjs --help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
 });
 
@@ -134,7 +134,7 @@ test('clean-markers.mjs --help --bogus still errors', () => {
 // A pre-send gate needs both codes to stay distinct.
 test('clean-markers.mjs still exits 2 with usage when given no files', () => {
   const r = runScript('clean-markers.mjs');
-  assert.equal(r.status, 2, `no-args exited ${r.status}, want 2`);
+  assert.equal(r.status, 2, describeSpawn(r, `no-args exited ${r.status}, want 2`));
   assert.match(r.all, /Usage:/i);
 });
 
@@ -164,13 +164,13 @@ test('clean-markers.mjs audits a dash-leading path after --', () => {
 
 test('clean-markers.mjs still rejects an unknown flag before --', () => {
   const r = runScript('clean-markers.mjs', 'audit', '--dryrun', '--', 'x.md');
-  assert.equal(r.status, 1, `unknown flag before -- exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `unknown flag before -- exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag\(s\): --dryrun/);
 });
 
 test('fix-slugs rejects unknown flags before checking or reading portals file', () => {
   const r = runScript('fix-slugs.mjs', '--file', join(tmpdir(), 'non-existent-portals.yml'), '--unknown-flag');
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.match(r.all, /unrecognized flag\(s\): --unknown-flag/);
   assert.doesNotMatch(r.all, /no portals file at/i);
 });
@@ -191,32 +191,32 @@ test('fix-slugs honours both --file <path> and --file=<path> syntax', () => {
 
 test('fix-slugs rejects missing --file values (bare, empty, or next-is-flag)', () => {
   const rBare = runScript('fix-slugs.mjs', '--file');
-  assert.equal(rBare.status, 1, 'bare --file must exit 1');
+  assert.equal(rBare.status, 1, describeSpawn(rBare, 'bare --file must exit 1'));
   assert.match(rBare.all, /--file requires a value/);
 
   const rEmpty = runScript('fix-slugs.mjs', '--file=');
-  assert.equal(rEmpty.status, 1, '--file= must exit 1');
+  assert.equal(rEmpty.status, 1, describeSpawn(rEmpty, '--file= must exit 1'));
   assert.match(rEmpty.all, /--file requires a value/);
 
   const rFlag = runScript('fix-slugs.mjs', '--file', '--fix');
-  assert.equal(rFlag.status, 1, '--file --fix must exit 1 without treating --fix as a filename');
+  assert.equal(rFlag.status, 1, describeSpawn(rFlag, '--file --fix must exit 1 without treating --fix as a filename'));
   assert.match(rFlag.all, /--file requires a value/);
 
   const rApply = runScript('fix-slugs.mjs', '--file', '--apply');
-  assert.equal(rApply.status, 1, '--file --apply must exit 1');
+  assert.equal(rApply.status, 1, describeSpawn(rApply, '--file --apply must exit 1'));
   assert.match(rApply.all, /--file requires a value/);
 
   const rDryRun = runScript('fix-slugs.mjs', '--file', '--dry-run');
-  assert.equal(rDryRun.status, 1, '--file --dry-run must exit 1');
+  assert.equal(rDryRun.status, 1, describeSpawn(rDryRun, '--file --dry-run must exit 1'));
   assert.match(rDryRun.all, /--file requires a value/);
 
   const rShortFlag = runScript('fix-slugs.mjs', '--file', '-h');
-  assert.equal(rShortFlag.status, 1, '--file -h must exit 1 without treating -h as a filename');
+  assert.equal(rShortFlag.status, 1, describeSpawn(rShortFlag, '--file -h must exit 1 without treating -h as a filename'));
   assert.match(rShortFlag.all, /--file requires a value/);
   assert.doesNotMatch(rShortFlag.all, /no portals file at/i);
 
   const rShortFlagEq = runScript('fix-slugs.mjs', '--file=-h');
-  assert.equal(rShortFlagEq.status, 1, '--file=-h must exit 1 without treating -h as a filename');
+  assert.equal(rShortFlagEq.status, 1, describeSpawn(rShortFlagEq, '--file=-h must exit 1 without treating -h as a filename'));
   assert.match(rShortFlagEq.all, /--file requires a value/);
   assert.doesNotMatch(rShortFlagEq.all, /no portals file at/i);
 });
@@ -231,7 +231,7 @@ for (const [form, args] of [
 ]) {
   test(`analyze-patterns rejects ${form} threshold values`, () => {
     const r = runScript('analyze-patterns.mjs', ...args);
-    assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `exited ${r.status}, want 1`));
     assert.match(r.all, /--min-threshold requires a non-negative integer, got/);
   });
 }
@@ -245,20 +245,20 @@ for (const [form, args] of [
 ]) {
   test(`analyze-patterns rejects ${form} vendor sample values`, () => {
     const r = runScript('analyze-patterns.mjs', ...args);
-    assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `exited ${r.status}, want 1`));
     assert.match(r.all, /--min-vendor-n requires a positive integer, got/);
   });
 }
 
 test('analyze-patterns rejects a trailing --min-threshold without an operand', () => {
   const r = runScript('analyze-patterns.mjs', '--min-threshold');
-  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `exited ${r.status}, want 1`));
   assert.match(r.all, /--min-threshold requires a value/);
 });
 
 test('analyze-patterns rejects a trailing --min-vendor-n without an operand', () => {
   const r = runScript('analyze-patterns.mjs', '--min-vendor-n');
-  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `exited ${r.status}, want 1`));
   assert.match(r.all, /--min-vendor-n requires a value/);
 });
 
@@ -276,67 +276,67 @@ test('analyze-patterns rejects a trailing --min-vendor-n without an operand', ()
 
 test('doctor: --target --json does not diagnose a directory named "--json"', () => {
   const r = runScript('doctor.mjs', '--target', '--json');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--target requires a value/);
 });
 
 test('detect-reposts: --window --summary does not silently fall back to the default window', () => {
   const r = runScript('detect-reposts.mjs', '--window', '--summary');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--window requires a value/);
 });
 
 test('process-quality: --file --min-threshold does not read --min-threshold as a path', () => {
   const r = runScript('process-quality.mjs', '--file', '--min-threshold');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--file requires a value/);
 });
 
 test('process-quality: --min-threshold --summary does not silently fall back to threshold 1', () => {
   const r = runScript('process-quality.mjs', '--min-threshold', '--summary');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--min-threshold requires a value/);
 });
 
 test('weekly-digest: --dir --summary does not scan a directory named "--summary"', () => {
   const r = runScript('weekly-digest.mjs', '--dir', '--summary');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--dir requires a value/);
 });
 
 test('upskill: --min-reports --summary does not silently fall back to 5 reports', () => {
   const r = runScript('upskill.mjs', '--min-reports', '--summary');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--min-reports requires a value/);
 });
 
 test('upskill: --url-text --help reports the missing operand instead of printing usage at exit 0', () => {
   const r = runScript('upskill.mjs', '--url-text', '--help');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--url-text requires a value/);
 });
 
 test('audit-portals: --help --bogus still reports the unrecognized flag', () => {
   const r = runScript('audit-portals.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /unrecognized flag\(s\): --bogus/);
 });
 
 test('audit-portals: --file --help reports the missing operand, not usage at exit 0', () => {
   const r = runScript('audit-portals.mjs', '--file', '--help');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--file requires a value/);
 });
 
 test('audit-portals: --company --strict does not audit every board instead of one', () => {
   const r = runScript('audit-portals.mjs', '--company', '--strict');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--company requires a value/);
 });
 
 test('audit-portals: a trailing --baseline does not silently skip the comparison', () => {
   const r = runScript('audit-portals.mjs', '--baseline');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--baseline requires a value/);
 });
 
@@ -351,13 +351,13 @@ test('audit-portals: --help alone still prints usage and exits 0', () => {
 // check (the same class of bug through a different door — see archive-posting.mjs).
 test('archive-posting: --company --pipeline does not set the company slug to "--pipeline"', () => {
   const r = runScript('archive-posting.mjs', 'https://example.com/job', '--company', '--pipeline');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--company requires a value/);
 });
 
 test('archive-posting: --role --dry-run does not set the role slug to "--dry-run"', () => {
   const r = runScript('archive-posting.mjs', 'https://example.com/job', '--role', '--dry-run');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--role requires a value/);
 });
 
@@ -368,20 +368,20 @@ test('archive-posting: --role --dry-run does not set the role slug to "--dry-run
 test('application-artifacts.mjs rejects a value flag with no operand', () => {
   for (const flag of ['--report', '--company', '--role', '--version', '--root']) {
     const r = runScript('application-artifacts.mjs', flag);
-    assert.equal(r.status, 1, `bare ${flag} exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `bare ${flag} exited ${r.status}, want 1`));
     assert.ok(r.all.includes(`${flag} requires a value`), `bare ${flag} was not reported`);
   }
 });
 
 test('application-artifacts: --report --help does not print usage at exit 0', () => {
   const r = runScript('application-artifacts.mjs', '--report', '--help');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--report requires a value/);
 });
 
 test('application-artifacts: --report --company does not read "--company" as the value', () => {
   const r = runScript('application-artifacts.mjs', '--report', '--company', 'Acme');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.equal(r.status, 1, describeSpawn(r, `want exit 1, got ${r.status}`));
   assert.match(r.all, /--report requires a value/);
 });
 
@@ -391,14 +391,14 @@ test('application-artifacts: --report --company does not read "--company" as the
 // typo-only table would not catch.
 test('linkedin-join.mjs honours the --flag=value form', () => {
   const r = runScript('linkedin-join.mjs', '--csv=/nonexistent/probe.csv', '--summary');
-  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `exited ${r.status}, want 1`));
   assert.ok(r.all.includes('/nonexistent/probe.csv'),
     'the supplied path was discarded — the script fell back to its default export');
 });
 
 test('linkedin-join.mjs rejects a value flag with no operand', () => {
   const r = runScript('linkedin-join.mjs', '--csv', '--summary');
-  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `exited ${r.status}, want 1`));
   assert.match(r.all, /--csv requires a value/i);
 });
 
@@ -410,7 +410,7 @@ test('linkedin-join.mjs --help exits 0 and prints usage', () => {
 
 test('linkedin-join.mjs --help --bogus still errors', () => {
   const r = runScript('linkedin-join.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `--help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `--help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
 });
 
@@ -430,14 +430,14 @@ test('normalize-statuses.mjs -h exits 0 and prints usage', () => {
 
 test('normalize-statuses.mjs rejects --bogus and lists the valid flags', () => {
   const r = runScript('normalize-statuses.mjs', '--bogus');
-  assert.equal(r.status, 1, `normalize-statuses.mjs --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `normalize-statuses.mjs --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag\(s\): --bogus/i);
   assert.match(r.all, /--help, -h, --dry-run/, 'the valid flags were not listed');
 });
 
 test('normalize-statuses.mjs --help --bogus still errors', () => {
   const r = runScript('normalize-statuses.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `normalize-statuses.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `normalize-statuses.mjs --help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
 });
 
@@ -498,7 +498,7 @@ test('rank-pipeline.mjs rejects --dryrun instead of writing data/pipeline.md', (
     const before = '## Pending\n- [ ] https://x.test/1 | Acme | Backend Engineer\n';
     writeFileSync(pipeline, before);
     const r = runRankPipeline(root, '--dryrun');
-    assert.equal(r.status, 1, `rank-pipeline.mjs --dryrun exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `rank-pipeline.mjs --dryrun exited ${r.status}, want 1`));
     assert.match(r.all, /unrecognized flag\(s\): --dryrun/, 'rank-pipeline.mjs did not name --dryrun');
     assert.equal(readFileSync(pipeline, 'utf-8'), before, '--dryrun changed data/pipeline.md');
   } finally {
@@ -558,7 +558,7 @@ test('merge-tracker.mjs rejects --dryrun instead of merging into the tracker', (
     const tsv = join(root, 'tracker-additions', '2-globex.tsv');
     writeFileSync(tsv, '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\tnew row\n');
     const r = runMergeTracker(root, '--dryrun');
-    assert.equal(r.status, 1, `merge-tracker.mjs --dryrun exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `merge-tracker.mjs --dryrun exited ${r.status}, want 1`));
     assert.match(r.all, /unrecognized flag\(s\): --dryrun/, 'merge-tracker.mjs did not name --dryrun');
     assert.equal(readFileSync(tracker, 'utf-8'), before, '--dryrun changed applications.md');
     assert.equal(readFileSync(tsv, 'utf-8').startsWith('2\t'), true, '--dryrun moved the TSV out of tracker-additions');
@@ -598,7 +598,7 @@ test('cv-sync-check.mjs -h exits 0 and prints usage', () => {
 
 test('cv-sync-check.mjs --help --bogus still errors', () => {
   const r = runScript('cv-sync-check.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `cv-sync-check.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `cv-sync-check.mjs --help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
 });
 
@@ -616,13 +616,13 @@ test('scan-interamt.mjs --help exits 0 and prints usage without scanning', () =>
 
 test('scan-interamt.mjs -h exits 0 and prints usage', () => {
   const r = runScript('scan-interamt.mjs', '-h');
-  assert.equal(r.status, 0, `scan-interamt.mjs -h exited ${r.status}, want 0`);
+  assert.equal(r.status, 0, describeSpawn(r, `scan-interamt.mjs -h exited ${r.status}, want 0`));
   assert.match(r.all, /Usage:/i, 'scan-interamt.mjs -h printed no usage block');
 });
 
 test('scan-interamt.mjs --help --bogus still errors', () => {
   const r = runScript('scan-interamt.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `scan-interamt.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `scan-interamt.mjs --help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
 });
 
@@ -635,7 +635,7 @@ for (const [form, args] of [
 ]) {
   test(`scan-interamt.mjs rejects ${form} instead of scanning`, () => {
     const r = runScript('scan-interamt.mjs', ...args);
-    assert.equal(r.status, 1, `scan-interamt.mjs ${args.join(' ')} exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `scan-interamt.mjs ${args.join(' ')} exited ${r.status}, want 1`));
     assert.match(r.all, /--keyword requires a value/);
   });
 }
@@ -648,7 +648,7 @@ for (const [form, args] of [
 // lib/cli-flags.mjs exists to end.
 test('validate-portals.mjs --help exits 0 and prints usage without validating', () => {
   const r = runScript('validate-portals.mjs', '--help');
-  assert.equal(r.status, 0, `validate-portals.mjs --help exited ${r.status}, want 0`);
+  assert.equal(r.status, 0, describeSpawn(r, `validate-portals.mjs --help exited ${r.status}, want 0`));
   assert.match(r.all, /Usage:/i, 'validate-portals.mjs --help printed no usage block');
   assert.match(r.all, /--self-test/, 'validate-portals.mjs --help does not list --self-test');
   assert.doesNotMatch(r.all, /errors, \d+ warnings/, '--help still ran the validation');
@@ -656,13 +656,13 @@ test('validate-portals.mjs --help exits 0 and prints usage without validating', 
 
 test('validate-portals.mjs -h exits 0 and prints usage', () => {
   const r = runScript('validate-portals.mjs', '-h');
-  assert.equal(r.status, 0, `validate-portals.mjs -h exited ${r.status}, want 0`);
+  assert.equal(r.status, 0, describeSpawn(r, `validate-portals.mjs -h exited ${r.status}, want 0`));
   assert.match(r.all, /Usage:/i, 'validate-portals.mjs -h printed no usage block');
 });
 
 test('validate-portals.mjs --help --bogus still errors', () => {
   const r = runScript('validate-portals.mjs', '--help', '--bogus');
-  assert.equal(r.status, 1, `validate-portals.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `validate-portals.mjs --help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
 });
 
@@ -678,7 +678,7 @@ for (const [form, args] of [
 ]) {
   test(`validate-portals.mjs rejects ${form} instead of validating`, () => {
     const r = runScript('validate-portals.mjs', ...args);
-    assert.equal(r.status, 1, `validate-portals.mjs ${args.join(' ')} exited ${r.status}, want 1`);
+    assert.equal(r.status, 1, describeSpawn(r, `validate-portals.mjs ${args.join(' ')} exited ${r.status}, want 1`));
     assert.match(r.all, /--file requires a value/);
     assert.doesNotMatch(r.all, /errors, \d+ warnings/, 'a missing operand still ran the validation');
   });
@@ -687,7 +687,7 @@ for (const [form, args] of [
 // An explicit but empty `--file=` is rejected as a missing operand by requireOperand (#5127).
 test('validate-portals.mjs rejects an empty --file= as a missing operand', () => {
   const r = runScript('validate-portals.mjs', '--file=');
-  assert.equal(r.status, 1, `validate-portals.mjs --file= exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `validate-portals.mjs --file= exited ${r.status}, want 1`));
   assert.match(r.all, /--file requires a value/, 'the empty --file= must report a missing operand');
   assert.doesNotMatch(r.all, /unrecognized flag/i, '--file= must not read as an unrecognized flag');
 });
@@ -701,7 +701,7 @@ for (const [form, args] of [
 ]) {
   test(`validate-portals.mjs still validates the example file with ${form}`, () => {
     const r = runScript('validate-portals.mjs', ...args);
-    assert.equal(r.status, 0, `validate-portals.mjs ${args.join(' ')} exited ${r.status}, want 0`);
+    assert.equal(r.status, 0, describeSpawn(r, `validate-portals.mjs ${args.join(' ')} exited ${r.status}, want 0`));
     assert.match(r.all, /portals\.example\.yml/, 'the named file was not the one read');
     assert.doesNotMatch(r.all, /unrecognized flag|requires a value/i);
   });
@@ -709,6 +709,6 @@ for (const [form, args] of [
 
 test('validate-portals.mjs --self-test still runs the self-test', () => {
   const r = runScript('validate-portals.mjs', '--self-test');
-  assert.equal(r.status, 0, `validate-portals.mjs --self-test exited ${r.status}, want 0`);
+  assert.equal(r.status, 0, describeSpawn(r, `validate-portals.mjs --self-test exited ${r.status}, want 0`));
   assert.doesNotMatch(r.all, /unrecognized flag|Usage:/i, '--self-test no longer reaches the self-test');
 });

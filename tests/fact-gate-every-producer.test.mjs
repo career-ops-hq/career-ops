@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listTree } from '../lib/walk-tree.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -131,7 +132,7 @@ test('generate-latex blocks an unsupported claim and does not compile', (t) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'output', 'cv.tex'), tex('Google', String.raw`Reduced latency by 95\%.`));
   const result = runLatex(root, 'output/cv.tex', 'output/cv.pdf');
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.equal(result.report?.factCheck?.verdict, 'block', result.stdout + result.stderr);
   assert.match(result.report.factCheck.reason, /95%/);
   assert.match(result.report.factCheck.reason, /organization=google/);
@@ -171,7 +172,7 @@ test('generate-latex names a --source file that does not exist', (t) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'output', 'cv.tex'), tex('Acme Corp', 'Led a team of 4 engineers.'));
   const result = runLatex(root, 'output/cv.tex', '--compile-only', '--source', 'no-such.tex');
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.equal(result.report?.factCheck?.verdict, 'block', result.stdout + result.stderr);
   assert.match(result.report.factCheck.reason, /--source file not found: .*no-such\.tex/);
   assert.equal(result.report.compileError, undefined, 'compilation was attempted after a missing --source');

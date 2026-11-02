@@ -42,7 +42,7 @@ Ta pierwsza iteracja obejmuje cztery tryby o najwyższym wpływie:
 | Plik | Przetłumaczony z | Rola |
 |---------|----------------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | Wspólny kontekst, archetypy, reguły globalne, specyfika polskiego rynku |
-| `oferta.md` | `modes/oferta.md` (ES) | Pełna ocena oferty (Bloki A-F) |
+| `oferta.md` | `modes/oferta.md` (ES) | Pełna ocena oferty (Bloki A-H) |
 | `aplikuj.md` | `modes/apply.md` (EN) | Asystent na żywo do wypełniania formularzy aplikacyjnych |
 | `pipeline.md` | `modes/pipeline.md` (ES) | Inbox URL-i / Second Brain dla zebranych ofert |
 
@@ -102,5 +102,5 @@ Aby ulepszyć tłumaczenie lub dodać tryb:
 1. Otwórz Issue z propozycją (zobacz `CONTRIBUTING.md`)
 2. Trzymaj się powyższego słownika, aby zachować spójny ton
 3. Tłumacz idiomatycznie -- bez tłumaczenia słowo w słowo
-4. Zachowaj elementy strukturalne (Bloki A-F, tabele, bloki kodu, instrukcje narzędzi) identycznie
+4. Zachowaj elementy strukturalne (Bloki A-H, tabele, bloki kodu, instrukcje narzędzi) identycznie
 5. Przetestuj na prawdziwej polskiej ofercie (Pracuj.pl, No Fluff Jobs, Just Join IT) przed wysłaniem PR-a

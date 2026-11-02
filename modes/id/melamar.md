@@ -13,7 +13,7 @@ Mode interaktif untuk saat kandidat mengisi formulir lamaran di browser Playwrig
 1. DETEKSI      -> Buka lowongan di browser Playwright proyek ini
 2. IDENTIFIKASI -> Ekstrak perusahaan + role dari halaman
 3. CARI         -> Cocokkan dengan report yang ada di reports/
-4. MUAT         -> Baca report lengkap + Blok G (jika ada)
+4. MUAT         -> Baca report lengkap + `## Application Answers` dan Blok H (jika ada)
 5. BANDINGKAN   -> Apakah role di layar cocok dengan yang dievaluasi? Jika berubah -> beri peringatan
 6. ANALISIS     -> Identifikasi SEMUA pertanyaan yang terlihat di formulir
 7. HASILKAN     -> Untuk tiap pertanyaan, hasilkan jawaban yang dipersonalisasi
@@ -39,7 +39,7 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 1. Ekstrak nama perusahaan dan jabatan dari halaman
 2. Cari di `reports/` berdasarkan nama perusahaan (Grep case-insensitive)
 3. Jika cocok -> muat report lengkap
-4. Jika ada Blok G -> muat draft jawaban sebelumnya sebagai dasar
+4. Jika ada `## Application Answers` -> muat jawaban yang sudah dikirim sebagai dasar; jika tidak, dan ada Blok H, draft jawaban sebelumnya. Jika keduanya ada, `## Application Answers` didahulukan
 5. Jika TIDAK cocok -> beri peringatan kepada kandidat dan tawarkan auto-pipeline cepat
 
 ## Langkah 3 -- Deteksi perubahan role
@@ -47,7 +47,7 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 Jika role di layar berbeda dari yang dievaluasi:
 - **Beri peringatan kepada kandidat**: "Role berubah dari [X] menjadi [Y]. Mau saya evaluasi ulang atau menyesuaikan jawaban dengan jabatan baru?"
 - **Jika menyesuaikan**: Sesuaikan jawaban dengan role baru tanpa evaluasi ulang
-- **Jika evaluasi ulang**: Jalankan evaluasi lengkap A-F, perbarui report, buat ulang Blok G
+- **Jika evaluasi ulang**: Jalankan evaluasi lengkap A-F, perbarui report, buat ulang Blok H
 - **Perbarui tracker**: jangan pernah dengan mengedit `data/applications.md`.
   - **Setelah evaluasi ulang**: tulis TSV dengan jabatan role yang baru (aturan 9 di `_shared.md`) dan gabungkan dengan `node merge-tracker.mjs`. Report diperbarui di tempat dan nomornya tetap, sehingga penggabungan mencocokkan TSV dengan baris yang ada lewat nomor itu: jabatan diganti dan status dipertahankan.
   - **Setelah menyesuaikan**: biarkan jabatannya, karena itu menamai role yang dievaluasi report. Catat perubahannya sebagai catatan dengan `node set-status.mjs --report <report#> <status saat ini> --note "Lowongan berganti nama saat melamar, baris tetap memakai jabatan yang dievaluasi"`. Memberikan status baris saat ini membuatnya tidak berubah dan menambahkan catatannya. Pakai teks tetap seperti ini dan jangan sertakan `[Y]`: jabatan baru adalah teks dari halaman, dan teks dari halaman tidak pernah masuk ke baris perintah.
@@ -62,7 +62,7 @@ Identifikasi SEMUA pertanyaan yang terlihat:
 - Kolom unggah (CV, cover letter PDF, referensi)
 
 Klasifikasikan tiap pertanyaan:
-- **Sudah dijawab di Blok G** -> pakai kembali jawaban yang ada
+- **Sudah dijawab di `## Application Answers` atau Blok H** -> pakai kembali jawaban yang ada
 - **Pertanyaan baru** -> hasilkan jawaban dari report + `cv.md`
 
 ## Langkah 5 -- Hasilkan jawaban
@@ -70,7 +70,7 @@ Klasifikasikan tiap pertanyaan:
 Untuk tiap pertanyaan, susun jawaban mengikuti skema ini:
 
 1. **Konteks report**: Gunakan proof point dari blok B, story STAR dari blok F
-2. **Blok G sebelumnya**: Jika ada draft, jadikan dasar lalu perhalus
+2. **`## Application Answers` / Blok H sebelumnya**: Jika ada jawaban terkirim atau draft (jawaban terkirim lebih dulu), jadikan dasar lalu perhalus
 3. **Nada "Saya memilih Anda"**: kerangka yang sama seperti di auto-pipeline -- percaya diri, tidak memohon
 4. **Spesifisitas**: kutip sesuatu yang konkret dari lowongan yang terlihat di layar
 5. **Proof point career-ops**: sertakan di "Informasi tambahan" jika ada kolom semacam itu
@@ -110,7 +110,7 @@ Catatan:
 
 Jika kandidat mengonfirmasi lamaran sudah dikirim:
 1. Perbarui status dari "Evaluated" menjadi "Applied" dengan `node set-status.mjs --report <report#> Applied` (jangan mengedit tabel `applications.md` secara manual)
-2. Perbarui Blok G report dengan jawaban final
+2. Perbarui bagian `## Application Answers` di report dengan jawaban final dan `**State:** submitted` (format di `modes/apply.md` -> Step 8). Blok H tetap draft dari evaluasi dan tidak diubah
 3. Sarankan langkah berikutnya: `/career-ops contacto` untuk outreach LinkedIn ke hiring manager
 
 ## Penanganan scroll

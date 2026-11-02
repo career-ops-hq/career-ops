@@ -34,6 +34,19 @@ try {
     fail('ashby.detect() should return null for non-ashby URLs');
   }
 
+  // A careers_url that only MENTIONS an Ashby board names none. A regex over the
+  // raw string read the slug out of another site's path or query and scanned
+  // othercorp's board under this entry's name.
+  const mentions = [
+    'https://careers.acme.com/apply/jobs.ashbyhq.com/othercorp',
+    'https://example.com/?next=https://jobs.ashbyhq.com/othercorp',
+  ].filter((careers_url) => ashby.detect({ name: 'Acme', careers_url }) !== null);
+  if (mentions.length === 0) {
+    pass('ashby.detect() ignores a jobs.ashbyhq.com/<slug> that only appears inside another site\'s URL');
+  } else {
+    fail(`ashby.detect() resolved a board from another site's URL: ${JSON.stringify(mentions)}`);
+  }
+
   if (ashby.detect({ name: 'X' }) === null && ashby.detect({ name: 'X', careers_url: null }) === null) {
     pass('ashby.detect() returns null for missing / null careers_url');
   } else {

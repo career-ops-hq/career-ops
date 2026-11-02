@@ -143,12 +143,19 @@ export function statsModel(patterns) {
   // Quality threshold. Shown as a recommendation only when the core says the
   // sample supports one; otherwise the reasoning is shown WITHOUT the number,
   // because a "recommended 4.7" off three outcomes reads as a rule.
+  //
+  // Gated on the core having REASONED about one, not on it recommending one.
+  // scoreThresholdFrom() sets `recommended` only when the sample is sufficient
+  // and a rejection scored below the cutoff, so gating on a finite
+  // `recommended` dropped the panel in exactly the cases the number-less
+  // branch is for: "only 2 positive outcome(s) carry a score (3 needed…)"
+  // never reached the page, and `provisional` could never be true.
   const t = patterns.scoreThreshold;
-  if (t && Number.isFinite(t.recommended)) {
+  if (t && (Number.isFinite(t.recommended) || typeof t.reasoning === "string")) {
     sections.push({
       key: "threshold",
       label: "Quality threshold",
-      value: t.sufficientSample ? t.recommended : null,
+      value: t.sufficientSample === true && Number.isFinite(t.recommended) ? t.recommended : null,
       note: typeof t.reasoning === "string" ? t.reasoning : null,
       sampleSize: Number.isFinite(t.sampleSize) ? t.sampleSize : null,
       provisional: t.sufficientSample !== true,
@@ -167,7 +174,16 @@ export function statsModel(patterns) {
     const list = Array.isArray(rows) ? rows.filter((r) => Number.isFinite(r?.total) && r.total > 0) : [];
     const named = list.filter((r) => !isUnlabelled(r?.[dim]));
     if (named.length === 0) continue;
-    sections.push({ key, label, rows: list, dimension: dim, partial: named.length < list.length });
+    // A bucket nothing was submitted from has no conversion rate. The core
+    // (withOutcomeRates in analyze-patterns.mjs) reports `conversionRate: 0`
+    // over `submitted: 0`, so a bucket of only Evaluated and SKIP rows read as
+    // a confident "0%" beside buckets with real outcomes. The row stays, with
+    // its count, and the rate is absent, as the vendor rows below do it.
+    const withRates = list.map((r) => ({
+      ...r,
+      conversionRate: Number(r?.submitted) > 0 ? r.conversionRate : NO_RATE,
+    }));
+    sections.push({ key, label, rows: withRates, dimension: dim, partial: named.length < list.length });
   }
 
   // Per-ATS advance rate. The core states the sample it needs and how much of

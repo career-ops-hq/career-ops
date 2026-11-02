@@ -8,8 +8,11 @@
 // a hand-maintained copy is what drifted in #2249 and again after #2705.
 import { canonStatus } from "@/lib/status-alias.mjs";
 import { readReport } from "./report-header.mjs";
+// Block-G legitimacy tier → tone. Lives in report-sections.mjs, beside the
+// apply-line classifier, so a `node --test` unit test can assert it.
+import { legitimacyTone } from "./report-sections.mjs";
 
-export { canonStatus };
+export { canonStatus, legitimacyTone };
 
 export const CANONICAL_STATES = [
   "Evaluated",
@@ -57,15 +60,6 @@ export function scoreTone(score: string): "good" | "warn" | "bad" | "muted" {
   if (g === "B") return "warn";
   if (g === "C") return "muted";
   if (g === "D" || g === "E" || g === "F") return "bad";
-  return "muted";
-}
-
-/** Block-G legitimacy tier → tone. */
-export function legitimacyTone(l: string): "good" | "warn" | "bad" | "muted" {
-  const s = l.toLowerCase();
-  if (s.includes("high") || s.includes("confian") || s.includes("legit")) return "good";
-  if (s.includes("caution") || s.includes("precau") || s.includes("caut")) return "warn";
-  if (s.includes("suspic") || s.includes("sospech") || s.includes("scam") || s.includes("fake")) return "bad";
   return "muted";
 }
 

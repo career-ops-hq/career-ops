@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,9 @@ export async function GET() {
   // unavailable — the user would see an empty box instead of "4/5 applications
   // sent". A crash still yields no parseable JSON and falls through below.
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script], { cwd: careerOpsRoot(), timeout: 30_000, maxBuffer: 8 << 20 }, (_err, out) =>
+    // process.execPath + windowsHide: see api/doctor/route.ts — a stale inherited
+    // console kills every child with 0xC0000142 on Windows; never inherit one.
+    execFile(process.execPath, [script], { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 30_000, maxBuffer: 8 << 20, windowsHide: true }, (_err, out) =>
       resolve(out || ""),
     );
   });

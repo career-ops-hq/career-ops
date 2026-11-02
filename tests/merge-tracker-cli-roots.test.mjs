@@ -10,6 +10,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const CODE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TRACKER_HEADER = [
@@ -52,7 +53,7 @@ test('merge-tracker --help exits before mutating tracker or additions', () => {
 
     const result = runMergeTrackerCli(dataRoot, '--help');
 
-    assert.equal(result.status, 0, result.output);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.match(result.output, /Usage: node merge-tracker\.mjs/);
     assert.equal(readFileSync(tracker, 'utf-8'), trackerBefore, '--help rewrote the tracker');
     assert.equal(readFileSync(addition, 'utf-8'), additionBefore, '--help rewrote or archived the pending TSV');
@@ -83,7 +84,7 @@ test('merge-tracker resolves executable post-hook from code root and PDF data fr
     const result = runMergeTrackerCli(dataRoot);
     const trackerAfter = readFileSync(tracker, 'utf-8');
 
-    assert.equal(result.status, 0, result.output);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.doesNotMatch(result.output, /Failed to sync PDF flags/);
     assert.match(trackerAfter, /\| ✅ \| \[12\]\(\.\.\/reports\/012-acme\.md\) \|/);
   } finally {

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="568" viewBox="0 0 760 568" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-labelledby="system-overview-title">
+  <title id="system-overview-title">System overview: an AI coding CLI agent reads AGENTS.md and modes/*.md and runs one of three flows. Single evaluation (modes/auto-pipeline.md) goes straight to output. Portal scan (scan.mjs and modes/scan.md) fills the URL inbox, data/pipeline.md, which pipeline mode then evaluates. Batch processing (batch/batch-runner.sh) runs N headless workers, one per offer: claude -p workers run in parallel, other CLIs one offer at a time. All three feed the output pipeline: a report (reports/NNN-*.md, the A-H evaluation), a PDF (generate-pdf.mjs, HTML through Playwright) and a tracker TSV (batch/tracker-additions/, merged by merge-tracker.mjs) into the canonical tracker, data/applications.md.</title>
+  <rect width="760" height="568" rx="12" fill="#ffffff"/>
+  <rect x="200" y="16" width="360" height="64" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="so-agent"><rect x="200" y="16" width="360" height="64" rx="10"/></clipPath>
+  <rect x="200" y="16" width="6" height="64" fill="#DD7627" clip-path="url(#so-agent)"/>
+  <text x="380" y="43" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">AI coding CLI agent</text>
+  <text x="380" y="64" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">reads AGENTS.md + modes/*.md</text>
+  <line x1="380" y1="80" x2="380" y2="100" stroke="#8c959f" stroke-width="2"/>
+  <line x1="140" y1="100" x2="620" y2="100" stroke="#8c959f" stroke-width="2" stroke-linecap="round"/>
+  <line x1="140" y1="100" x2="140" y2="117" stroke="#8c959f" stroke-width="2"/><path d="M134 115 L146 115 L140 124 Z" fill="#8c959f"/><line x1="380" y1="100" x2="380" y2="117" stroke="#8c959f" stroke-width="2"/><path d="M374 115 L386 115 L380 124 Z" fill="#8c959f"/><line x1="620" y1="100" x2="620" y2="117" stroke="#8c959f" stroke-width="2"/><path d="M614 115 L626 115 L620 124 Z" fill="#8c959f"/>
+  <rect x="35" y="124" width="210" height="64" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="so-single"><rect x="35" y="124" width="210" height="64" rx="10"/></clipPath>
+  <rect x="35" y="124" width="6" height="64" fill="#DD7627" clip-path="url(#so-single)"/>
+  <text x="140" y="151" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">Single evaluation</text>
+  <text x="140" y="172" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">modes/auto-pipeline.md</text>
+  <rect x="275" y="124" width="210" height="64" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="so-scan"><rect x="275" y="124" width="210" height="64" rx="10"/></clipPath>
+  <rect x="275" y="124" width="6" height="64" fill="#DD7627" clip-path="url(#so-scan)"/>
+  <text x="380" y="151" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">Portal scan</text>
+  <text x="380" y="172" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">scan.mjs + modes/scan.md</text>
+  <rect x="515" y="124" width="210" height="64" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="so-batch"><rect x="515" y="124" width="210" height="64" rx="10"/></clipPath>
+  <rect x="515" y="124" width="6" height="64" fill="#DD7627" clip-path="url(#so-batch)"/>
+  <text x="620" y="151" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">Batch processing</text>
+  <text x="620" y="172" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">batch/batch-runner.sh</text>
+  <line x1="380" y1="188" x2="380" y2="213" stroke="#8c959f" stroke-width="2"/><path d="M374 211 L386 211 L380 220 Z" fill="#8c959f"/><line x1="620" y1="188" x2="620" y2="213" stroke="#8c959f" stroke-width="2"/><path d="M614 211 L626 211 L620 220 Z" fill="#8c959f"/>
+  <rect x="275" y="220" width="210" height="64" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="so-inbox"><rect x="275" y="220" width="210" height="64" rx="10"/></clipPath>
+  <rect x="275" y="220" width="6" height="64" fill="#DD7627" clip-path="url(#so-inbox)"/>
+  <text x="380" y="247" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">URL inbox</text>
+  <text x="380" y="268" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">data/pipeline.md</text>
+  <rect x="515" y="220" width="210" height="64" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="so-workers"><rect x="515" y="220" width="210" height="64" rx="10"/></clipPath>
+  <rect x="515" y="220" width="6" height="64" fill="#DD7627" clip-path="url(#so-workers)"/>
+  <text x="620" y="247" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">N headless workers</text>
+  <text x="620" y="268" text-anchor="middle" font-size="13" fill="#59636e">parallel only with claude -p</text>
+  <line x1="140" y1="188" x2="140" y2="309" stroke="#8c959f" stroke-width="2"/><path d="M134 307 L146 307 L140 316 Z" fill="#8c959f"/><line x1="380" y1="284" x2="380" y2="309" stroke="#8c959f" stroke-width="2"/><path d="M374 307 L386 307 L380 316 Z" fill="#8c959f"/><line x1="620" y1="284" x2="620" y2="309" stroke="#8c959f" stroke-width="2"/><path d="M614 307 L626 307 L620 316 Z" fill="#8c959f"/>
+  <text x="388" y="304" font-size="12" fill="#59636e">pipeline mode</text>
+  <rect x="30" y="316" width="700" height="136" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="380" y="344" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">Output pipeline</text>
+  <rect x="40" y="360" width="200" height="76" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
+  <text x="140" y="384" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">Report</text>
+  <text x="140" y="404" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">reports/NNN-*.md</text>
+  <text x="140" y="423" text-anchor="middle" font-size="12.5" fill="#59636e">A-H evaluation</text>
+  <rect x="280" y="360" width="200" height="76" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
+  <text x="380" y="384" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">PDF</text>
+  <text x="380" y="404" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">generate-pdf.mjs</text>
+  <text x="380" y="423" text-anchor="middle" font-size="12.5" fill="#59636e">HTML → Playwright</text>
+  <rect x="520" y="360" width="200" height="76" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
+  <text x="620" y="384" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">Tracker TSV</text>
+  <text x="620" y="404" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">batch/tracker-additions/</text>
+  <text x="620" y="423" text-anchor="middle" font-size="12.5" fill="#59636e">merged by merge-tracker.mjs</text>
+  <line x1="380" y1="452" x2="380" y2="481" stroke="#8c959f" stroke-width="2"/><path d="M374 479 L386 479 L380 488 Z" fill="#8c959f"/>
+  <rect x="230" y="488" width="300" height="64" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
+  <text x="380" y="515" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">Canonical tracker</text>
+  <text x="380" y="536" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">data/applications.md</text>
+</svg>

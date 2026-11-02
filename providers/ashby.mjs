@@ -179,10 +179,30 @@ function resolveApiUrl(entry) {
     assertAshbyUrl(entry.api);
     return entry.api;
   }
-  const url = entry.careers_url || '';
-  const match = url.match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
-  if (!match) return null;
-  return `https://api.ashbyhq.com/posting-api/job-board/${match[1]}?includeCompensation=true`;
+  const slug = boardSlugFromCareersUrl(entry.careers_url || '');
+  if (!slug) return null;
+  return `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`;
+}
+
+/**
+ * The board slug a careers_url names on Ashby's own host, read from the PARSED
+ * url. A regex over the raw string also matched `jobs.ashbyhq.com/<slug>`
+ * inside another site's path or query (a redirect wrapper, an employer page
+ * that links its board) and scanned that slug's board under this entry's name.
+ * Same rule as greenhouse.mjs. http: is still accepted, as the regex accepted
+ * it; every request this provider makes is https.
+ *
+ * @param {string} url
+ * @returns {string|null}
+ */
+function boardSlugFromCareersUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if ((parsed.protocol !== 'https:' && parsed.protocol !== 'http:') || parsed.hostname !== EMBED_HOST) return null;
+    return parsed.pathname.split('/').find(Boolean) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 const EMBED_HOST = 'jobs.ashbyhq.com';
@@ -195,8 +215,7 @@ const EMBED_HOST = 'jobs.ashbyhq.com';
 function resolveBoardSlug(entry) {
   const explicit = /** @type {any} */ (entry).ashby?.board;
   if (typeof explicit === 'string' && explicit.trim()) return explicit.trim();
-  const match = (entry.careers_url || '').match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
-  return match ? match[1] : null;
+  return boardSlugFromCareersUrl(entry.careers_url || '');
 }
 
 /**

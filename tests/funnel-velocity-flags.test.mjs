@@ -54,28 +54,28 @@ test('help exits before reading report inputs', () => {
 
 test('an unknown flag exits 1 and names the flag', () => {
   const result = runFunnel('--bogus');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /unrecognized flag\(s\): --bogus/);
   assert.match(result.stderr, /Valid flags:/);
 });
 
 test('--help plus an unknown flag still fails', () => {
   const result = runFunnel('--help', '--bogus');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /unrecognized flag\(s\): --bogus/);
   assert.doesNotMatch(result.stdout, /Usage:/);
 });
 
 test('--benchmarks=value is recognized and reaches normal validation', () => {
   const result = runFunnel(`--benchmarks=${NO_BENCHMARKS}`);
-  assert.equal(result.status, 1, `expected missing benchmark to fail, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected missing benchmark to fail, got ${result.status}`));
   assert.match(result.stderr, /Cannot read benchmarks/i);
   assert.doesNotMatch(result.stderr, /unrecognized flag/i);
 });
 
 test('--benchmarks without a value is rejected instead of using the default', () => {
   const result = runFunnel('--benchmarks');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /--benchmarks requires a value/);
 });
 

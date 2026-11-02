@@ -42,7 +42,7 @@ Denne første iteration dækker de fire modes med størst effekt:
 | Fil | Oversat fra | Rolle |
 |-----|-------------|-------|
 | `_shared.md` | `modes/_shared.md` (EN) | Delt kontekst, arketyper, globale regler, særtræk ved det danske marked |
-| `oferta.md` | `modes/oferta.md` (ES) | Fuld evaluering af et opslag (Blok A-F) |
+| `oferta.md` | `modes/oferta.md` (ES) | Fuld evaluering af et opslag (Blok A-H) |
 | `apply.md` | `modes/apply.md` (EN) | Live-assistent til udfyldelse af ansøgningsformularer |
 | `pipeline.md` | `modes/pipeline.md` (ES) | URL-indbakke / Second Brain til indsamlede opslag |
 
@@ -99,5 +99,5 @@ For at forbedre en oversættelse eller tilføje en mode:
 1. Åbn en Issue med dit forslag (se `CONTRIBUTING.md`)
 2. Følg ordlisten ovenfor for at holde tonen konsistent
 3. Oversæt idiomatisk -- ingen ord-for-ord-oversættelse
-4. Bevar de strukturelle elementer (Blok A-F, tabeller, kodeblokke, værktøjsinstruktioner) uændret
+4. Bevar de strukturelle elementer (Blok A-H, tabeller, kodeblokke, værktøjsinstruktioner) uændret
 5. Test med et rigtigt dansk opslag (Jobindex, The Hub, LinkedIn DK), før du sender din PR

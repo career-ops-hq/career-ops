@@ -29,19 +29,19 @@
  *   node rank-pipeline.mjs --self-test         # in-memory suite; spawns no subprocess
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'fs';
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
-import { dirname, extname, join, win32 } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { flagValue, hasFlag, safeIntFlag, validateFlags } from './lib/cli-flags.mjs';
 import { sanitizeMarkdownField } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readRememberedCli } from './lib/agent-cli.mjs';
-import { prepareCliLaunch } from './lib/cli-launch.mjs';
-import { statSync } from 'fs';
+import { resolveCliLaunch } from './lib/agent-launch.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -242,53 +242,6 @@ export function detectCli(candidates = CLI_CANDIDATES, probe = defaultProbe) {
     if (probe(candidate.bin)) return candidate;
   }
   return null;
-}
-
-const WIN_EXTS = ['.com', '.exe', '.bat', '.cmd'];
-
-// Find `bin` the way cmd.exe does: each PATH directory in order, each PATHEXT
-// extension in order. A name with a directory in it is taken as given.
-function findOnWindowsPath(bin, env) {
-  const isFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
-  if (/[\\/]/.test(bin)) return isFile(bin) ? bin : null;
-  const exts = (env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';')
-    .map(e => e.trim().toLowerCase()).filter(e => WIN_EXTS.includes(e));
-  const names = WIN_EXTS.includes(extname(bin).toLowerCase()) ? [bin] : exts.map(e => bin + e);
-  // win32.delimiter, not the host's: the test simulates Windows on POSIX too.
-  for (const dir of (env.PATH ?? env.Path ?? '').split(win32.delimiter).filter(Boolean)) {
-    for (const name of names) {
-      if (isFile(join(dir, name))) return join(dir, name);
-    }
-  }
-  return null;
-}
-
-/**
- * The command and argv that run `bin` with `args`.
- *
- * On Windows an npm-installed CLI is a `.cmd` shim (with a `.ps1` and an
- * extensionless POSIX script beside it). execFileSync('codex') runs none of
- * them: CreateProcess only adds `.exe`, and a `.cmd` needs a shell, which would
- * split the prompt at its spaces and run whatever follows an `&` in a posting
- * as a command. So the binary is found on PATH and the `.js` or `.exe` the shim
- * wraps is launched directly, as the web UI does (lib/cli-launch.mjs is a copy
- * of web/src/lib/cli-launch.mjs). Elsewhere the bare name is passed through.
- *
- * @param {string} bin
- * @param {string[]} args
- * @param {{platform?: string, env?: NodeJS.ProcessEnv}} [opts]
- * @returns {{command: string, args: string[]}}
- */
-export function resolveCliLaunch(bin, args, { platform = process.platform, env = process.env } = {}) {
-  if (platform !== 'win32') return { command: bin, args };
-  const found = findOnWindowsPath(bin, env);
-  if (!found) return { command: bin, args };
-  try {
-    return prepareCliLaunch(found, args, platform);
-  } catch (err) {
-    err.code = 'ERR_CLI_LAUNCH';
-    throw err;
-  }
 }
 
 function defaultProbe(bin) {
@@ -531,7 +484,7 @@ async function main(args) {
       const current = readFileSync(PIPELINE_PATH, 'utf-8');
       const result = applyAnnotations(current, annotations, original);
       written = result.written;
-      if (written) writeFileSync(PIPELINE_PATH, result.text);
+      if (written) replaceUserFile(PIPELINE_PATH, result.text);
     });
   }
 

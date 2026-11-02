@@ -51,9 +51,9 @@ try {
     fail(`parseArbeitsagenturConfig sanitized = ${JSON.stringify(cfg)}`);
   }
 
-  // buildLocation — reads the first entry of the v6 `stellenlokationen` array.
-  // v6's `region` is an uppercase federal-state enum (BADEN_WUERTTEMBERG), not a
-  // display name, so it is deliberately dropped rather than joined onto the city.
+  // buildLocation — reads the v6 `stellenlokationen` array. The address `region`
+  // is an uppercase federal-state enum (BADEN_WUERTTEMBERG), not a display name,
+  // so it is deliberately dropped rather than joined onto the city.
   if (buildLocation([{ adresse: { ort: 'Berlin', region: 'BERLIN', land: 'DEUTSCHLAND' } }]) === 'Berlin') {
     pass('buildLocation takes the city and omits Germany and the region enum');
   } else {
@@ -64,12 +64,21 @@ try {
   } else {
     fail(`buildLocation non-DE = ${JSON.stringify(buildLocation([{ adresse: { ort: 'Wien', land: 'OESTERREICH' } }]))}`);
   }
-  // 11% of a sampled page carried more than one location; the downstream shape is
-  // a single string, so the first is used — matching v4's single `arbeitsort`.
-  if (buildLocation([{ adresse: { ort: 'Hamburg', land: 'DEUTSCHLAND' } }, { adresse: { ort: 'Bremen' } }]) === 'Hamburg') {
-    pass('buildLocation uses the first of several locations');
+  // A posting can list several addresses: every place is kept in API order,
+  // deduped, " · "-joined, with a non-German country on its own place only, and
+  // an address without a usable place is skipped.
+  const multi = buildLocation([
+    { adresse: { ort: 'Hamburg', land: 'DEUTSCHLAND' } },
+    { adresse: { ort: 'Bremen' } },
+    { adresse: { ort: 'Hamburg', land: 'DEUTSCHLAND' } },
+    {},
+    { adresse: { land: 'DEUTSCHLAND' } },
+    { adresse: { ort: 'Wien', land: 'OESTERREICH' } },
+  ]);
+  if (multi === 'Hamburg · Bremen · Wien, OESTERREICH') {
+    pass('buildLocation joins every distinct place with " · "');
   } else {
-    fail(`buildLocation multi = ${JSON.stringify(buildLocation([{ adresse: { ort: 'Hamburg' } }, { adresse: { ort: 'Bremen' } }]))}`);
+    fail(`buildLocation multi = ${JSON.stringify(multi)}`);
   }
   if (buildLocation(null) === '' && buildLocation('x') === '' && buildLocation([]) === '' && buildLocation([{}]) === '') {
     pass('buildLocation returns "" for missing/garbage input');
@@ -157,12 +166,12 @@ try {
     fail(`parseArbeitsagenturConfig remote defaults = ${JSON.stringify({ m: rdef.remoteMatch, p: rdef.remoteMaxPages })}`);
   }
 
-  // fetch() — remoteMatch:'filter' narrows server-side with homeoffice=nv_true and
-  // paginates, but still requires the posting's own title to claim remote before
-  // tagging it. v6 exposes only a boolean `homeofficemoeglich`, which is exactly
-  // what nv_true already filtered on, so it cannot separate a fully-remote role
-  // from an office-anchored hybrid (#2494). Tagging on nv_true alone would smuggle
-  // hybrids past the commute filter, so unproven candidates keep their real city.
+  // fetch() — remoteMatch:'filter' narrows server-side with homeoffice=prozentual_0;nv_true and
+  // paginates, but still requires proof (here: the posting's own title) before
+  // tagging it. The boolean `homeofficemoeglich` is true for every hit of that
+  // query, so it cannot separate a fully-remote role from an office-anchored
+  // hybrid. Tagging on it would smuggle hybrids past the commute filter, so
+  // unproven candidates keep their real city.
   let usedHomeoffice = false;
   const pagesSeen = new Set();
   const filterFetched = await aa.fetch(
@@ -171,7 +180,7 @@ try {
       fetchJson: async (url) => {
         const sp = new URL(url).searchParams;
         if (sp.has('wo')) return page(v6('L', 'ML Engineer', 'Berlin'));
-        usedHomeoffice = usedHomeoffice || sp.get('homeoffice') === 'nv_true';
+        usedHomeoffice = usedHomeoffice || sp.get('homeoffice') === 'prozentual_0;nv_true';
         pagesSeen.add(sp.get('page'));
         return Number(sp.get('page')) === 1
           ? page( // full page (== size) → pagination continues
@@ -187,14 +196,14 @@ try {
   const koeln = filterFetched.find(j => j.url.endsWith('R3'));
   const TAG = /Deutschlandweit \(Homeoffice\)/;
   if (usedHomeoffice && pagesSeen.has('1') && pagesSeen.has('2') && munich && TAG.test(munich.location)) {
-    pass('aa.fetch() remoteMatch:filter sends homeoffice=nv_true, paginates, and tags titles that claim remote');
+    pass('aa.fetch() remoteMatch:filter sends homeoffice=prozentual_0;nv_true, paginates, and tags titles that claim remote');
   } else {
     fail(`aa.fetch() filter mode = ${JSON.stringify({ usedHomeoffice, pages: [...pagesSeen], munichLoc: munich?.location })}`);
   }
   if (stuttgart && !TAG.test(stuttgart.location) && stuttgart.location === 'Stuttgart') {
-    pass('aa.fetch() leaves a nv_true hit untagged when its title does not claim remote (hybrid stays commute-filtered)');
+    pass('aa.fetch() leaves a home-office hit untagged when nothing proves remote (hybrid stays commute-filtered)');
   } else {
-    fail(`aa.fetch() unproven nv_true hit = ${JSON.stringify({ loc: stuttgart?.location })}`);
+    fail(`aa.fetch() unproven home-office hit = ${JSON.stringify({ loc: stuttgart?.location })}`);
   }
   if (koeln && TAG.test(koeln.location)) {
     pass('aa.fetch() tags remote-titled hits found on later pages');
@@ -207,6 +216,85 @@ try {
     pass('aa.fetch() never tags on homeofficemoeglich alone');
   } else {
     fail(`aa.fetch() tagged on the boolean alone: ${JSON.stringify({ loc: stuttgart?.location })}`);
+  }
+
+  // fetch() — a stated 100 % home-office share is remote evidence on its own,
+  // in both modes, and is applied once; a lower share is not evidence.
+  const pctJobs = (sp) => sp.has('wo')
+    ? page(v6('L', 'QA Engineer', 'Berlin'))
+    : page(
+      v6('P100', 'QA Engineer', 'Hamburg', { homeofficemoeglich: true, homeofficetyp: 'ANGABE_IN_PROZENT', homeofficeprozent: 100 }),
+      v6('P80', 'Test Engineer', 'Köln', { homeofficemoeglich: true, homeofficetyp: 'ANGABE_IN_PROZENT', homeofficeprozent: 80 }),
+    );
+  for (const remoteMatch of ['filter', 'title']) {
+    const got = await aa.fetch(
+      { name: 'AA', arbeitsagentur: { keywords: ['QA'], wo: 'Berlin', remoteNationwide: true, remoteMatch, size: 100 } },
+      { fetchJson: async (url) => pctJobs(new URL(url).searchParams) },
+    );
+    const p100 = got.find(j => j.url.endsWith('P100'));
+    const p80 = got.find(j => j.url.endsWith('P80'));
+    const p80ok = remoteMatch === 'filter' ? p80 && p80.location === 'Köln' : !p80;
+    if (p100 && p100.location === 'Hamburg · Deutschlandweit (Homeoffice)' && p80ok) {
+      pass(`aa.fetch() remoteMatch:${remoteMatch} tags a homeofficeprozent:100 hit and not an 80 % one`);
+    } else {
+      fail(`aa.fetch() remoteMatch:${remoteMatch} homeofficeprozent = ${JSON.stringify(got)}`);
+    }
+  }
+
+  // normalizeJob — a stated 100 % home-office share appends the remote marker
+  // to the company's city; a lower share leaves the city alone.
+  const r100 = normalizeJob(v6('A1', 'QA Engineer', 'Augsburg', { homeofficetyp: 'ANGABE_IN_PROZENT', homeofficeprozent: 100 }));
+  const r80 = normalizeJob(v6('A2', 'QA Engineer', 'Augsburg', { homeofficetyp: 'ANGABE_IN_PROZENT', homeofficeprozent: 80 }));
+  const rNone = normalizeJob(v6('A3', 'QA Engineer', 'Augsburg', { homeofficemoeglich: true, homeofficetyp: 'NACH_VEREINBARUNG' }));
+  if (r100?.location === 'Augsburg · Deutschlandweit (Homeoffice)' && r80?.location === 'Augsburg' && rNone?.location === 'Augsburg') {
+    pass('normalizeJob appends the remote marker only for homeofficeprozent:100');
+  } else {
+    fail(`normalizeJob remote locations = ${JSON.stringify([r100?.location, r80?.location, rNone?.location])}`);
+  }
+
+  // The marker claims "anywhere in Germany": a posting tied only to addresses
+  // abroad never gets it, a posting with any German (or country-less) address does.
+  const { hasGermanAddress } = arbeitsagenturModule;
+  const at = (ort) => ({ adresse: { ort, land: 'OESTERREICH' } });
+  const de = (ort) => ({ adresse: { ort, land: 'DEUTSCHLAND' } });
+  if (hasGermanAddress([de('Berlin')]) && hasGermanAddress([at('Wien'), de('Berlin')])
+      && hasGermanAddress([{ adresse: { ort: 'Bremen' } }]) && hasGermanAddress([]) && hasGermanAddress(undefined)
+      && !hasGermanAddress([at('Wien')]) && !hasGermanAddress([at('Wien'), at('Graz')])) {
+    pass('hasGermanAddress: German, country-less or missing addresses count; abroad-only does not');
+  } else {
+    fail('hasGermanAddress classified a case wrongly');
+  }
+  const wien100 = normalizeJob({ referenznummer: 'W1', stellenangebotsTitel: 'QA Engineer', stellenlokationen: [at('Wien')], homeofficeprozent: 100 });
+  const mixed100 = normalizeJob({ referenznummer: 'W2', stellenangebotsTitel: 'QA Engineer', stellenlokationen: [at('Wien'), de('Berlin')], homeofficeprozent: 100 });
+  if (wien100?.location === 'Wien, OESTERREICH' && mixed100?.location === 'Wien, OESTERREICH · Berlin · Deutschlandweit (Homeoffice)') {
+    pass('normalizeJob marks a 100 % home-office posting only when it has a German address');
+  } else {
+    fail(`normalizeJob abroad 100 % = ${JSON.stringify([wien100?.location, mixed100?.location])}`);
+  }
+  const abroadTitle = await aa.fetch(
+    { name: 'AA', arbeitsagentur: { keywords: ['QA'], wo: 'Berlin', remoteNationwide: true, remoteMatch: 'title' } },
+    {
+      fetchJson: async (url) => new URL(url).searchParams.has('wo')
+        ? page()
+        : page({ referenznummer: 'T1', stellenangebotsTitel: 'QA Engineer (Remote)', firma: 'Co', stellenlokationen: [at('Wien')] }),
+    },
+  );
+  if (abroadTitle.length === 1 && abroadTitle[0].location === 'Wien, OESTERREICH' && !('inGermany' in abroadTitle[0])) {
+    pass('aa.fetch() does not mark a remote-titled posting tied only to an address abroad');
+  } else {
+    fail(`aa.fetch() abroad remote title = ${JSON.stringify(abroadTitle)}`);
+  }
+
+  // fetch() — the primary (radius) pass carries the same marker, not only the
+  // nationwide remote pass.
+  const primaryRemote = await aa.fetch(
+    { name: 'AA', arbeitsagentur: { keywords: ['QA'], wo: 'Augsburg' } },
+    { fetchJson: async () => page(v6('A1', 'QA Engineer', 'Augsburg', { homeofficeprozent: 100 })) },
+  );
+  if (primaryRemote.length === 1 && primaryRemote[0].location === 'Augsburg · Deutschlandweit (Homeoffice)') {
+    pass('aa.fetch() marks a 100 % home-office hit in the primary pass');
+  } else {
+    fail(`aa.fetch() primary-pass remote = ${JSON.stringify(primaryRemote)}`);
   }
 
   // fetch() — a duplicate reference number across pagination pages is kept once.

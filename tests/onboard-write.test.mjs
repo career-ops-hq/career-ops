@@ -6,6 +6,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import * as yaml from 'js-yaml';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(ROOT, 'onboard-write.mjs');
@@ -47,7 +48,7 @@ function cleanup(dir) { rmSync(dir, { recursive: true, force: true }); }
 test('writes the profile from answers and keeps the template comments', () => {
   const { dir, res, read } = run(ANSWERS);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const text = read('config/profile.yml');
     const p = yaml.load(text);
     assert.equal(p.candidate.full_name, 'Avery Quinn');
@@ -68,7 +69,7 @@ test('writes the profile from answers and keeps the template comments', () => {
 test('contact fields the user did not give are blanked, not left as the example person', () => {
   const { dir, res, read } = run(ANSWERS);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const p = yaml.load(read('config/profile.yml'));
     for (const key of ['phone', 'portfolio_url', 'github', 'twitter']) {
       assert.equal(p.candidate[key], '', `${key} should be blank`);
@@ -80,7 +81,7 @@ test('contact fields the user did not give are blanked, not left as the example 
 test('portals.yml gets the user titles, keeps the shipped negatives, and keeps every company', () => {
   const { dir, res, read } = run(ANSWERS);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const c = yaml.load(read('portals.yml'));
     assert.deepEqual(c.title_filter.positive, ['Data Analyst', 'Analytics Engineer', 'BI Analyst']);
     const neg = c.title_filter.negative;
@@ -95,7 +96,7 @@ test('portals.yml gets the user titles, keeps the shipped negatives, and keeps e
 test('portals.yml keeps the template title-keyword guidance comments', () => {
   const { dir, res, read } = run(ANSWERS);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const portals = read('portals.yml');
     assert.match(portals, /word:Intern/);
     assert.match(portals, /Healthcare example/);
@@ -112,7 +113,7 @@ test('a shipped negative that conflicts with a user positive is dropped', () => 
   };
   const { dir, res, read } = run(answers);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const neg = yaml.load(read('portals.yml')).title_filter.negative.map((n) => String(n).toLowerCase());
     assert.equal(neg.includes('junior'), false);
     assert.ok(neg.includes('word:intern') || neg.includes('internship'));
@@ -126,7 +127,7 @@ test('a user negative that rejects a user positive exits 1 and writes nothing', 
   };
   const { dir, res } = run(answers);
   try {
-    assert.equal(res.status, 1, res.stdout);
+    assert.equal(res.status, 1, describeSpawn(res));
     assert.match(res.stderr, /"Analyst"/);
     assert.match(res.stderr, /"Data Analyst"/);
     assert.equal(existsSync(join(dir, 'config', 'profile.yml')), false);
@@ -141,7 +142,7 @@ test('a user negative that does not reject a user positive is written', () => {
   };
   const { dir, res, read } = run(answers);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     assert.ok(yaml.load(read('portals.yml')).title_filter.negative.includes('Intern'));
   } finally { cleanup(dir); }
 });
@@ -177,7 +178,7 @@ test('an accented negative rejects the same title without accents', () => {
   };
   const { dir, res } = run(answers);
   try {
-    assert.equal(res.status, 1, res.stdout);
+    assert.equal(res.status, 1, describeSpawn(res));
     assert.match(res.stderr, /"Producción"/);
     assert.match(res.stderr, /"Produccion"/);
     assert.equal(existsSync(join(dir, 'portals.yml')), false);
@@ -193,7 +194,7 @@ test('AGENTS.md states remote-only location labels will not match a country allo
 test('countries become an allow-list, and posting age defaults to 45 days', () => {
   const { dir, res, read } = run(ANSWERS);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const c = yaml.load(read('portals.yml'));
     assert.deepEqual(c.location_filter.always_allow, ['United States']);
     assert.deepEqual(c.location_filter.allow, ['United States']);
@@ -206,7 +207,7 @@ test('cities go to allow only, and max_posting_age_days 0 leaves the age filter 
   const answers = { ...ANSWERS, portals: { ...ANSWERS.portals, countries: [], cities: ['Berlin', 'Hamburg'], max_posting_age_days: 0 } };
   const { dir, res, read } = run(answers);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const c = yaml.load(read('portals.yml'));
     assert.deepEqual(c.location_filter.allow, ['Berlin', 'Hamburg']);
     assert.equal(c.location_filter.always_allow, undefined);
@@ -218,7 +219,7 @@ test('no location answer leaves location_filter off', () => {
   const answers = { ...ANSWERS, portals: { positive: ['Data Analyst'] } };
   const { dir, res, read } = run(answers);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     assert.equal(yaml.load(read('portals.yml')).location_filter, undefined);
   } finally { cleanup(dir); }
 });
@@ -226,18 +227,18 @@ test('no location answer leaves location_filter off', () => {
 test('existing files are kept unless --force, and the summary says which', () => {
   const { dir, res } = run(ANSWERS);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     writeFileSync(join(dir, 'portals.yml'), 'title_filter:\n  positive: ["Mine"]\n');
     const env = { ...process.env };
     delete env.CAREER_OPS_ROOT;
     const again = spawnSync(process.execPath, [SCRIPT, '--answers', join(dir, 'answers.json'), '--target', dir], { encoding: 'utf8', env });
-    assert.equal(again.status, 0, again.stderr);
+    assert.equal(again.status, 0, describeSpawn(again));
     const out = JSON.parse(again.stdout);
     assert.deepEqual(out.written, []);
     assert.deepEqual(out.kept.sort(), ['config/profile.yml', 'portals.yml']);
     assert.match(readFileSync(join(dir, 'portals.yml'), 'utf8'), /Mine/);
     const forced = spawnSync(process.execPath, [SCRIPT, '--answers', join(dir, 'answers.json'), '--target', dir, '--force'], { encoding: 'utf8', env });
-    assert.equal(forced.status, 0, forced.stderr);
+    assert.equal(forced.status, 0, describeSpawn(forced));
     assert.deepEqual(JSON.parse(forced.stdout).written.sort(), ['config/profile.yml', 'portals.yml']);
   } finally { cleanup(dir); }
 });
@@ -245,16 +246,16 @@ test('existing files are kept unless --force, and the summary says which', () =>
 test('--force --only rewrites one file and leaves the other as the user edited it', () => {
   const { dir, res } = run(ANSWERS);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     writeFileSync(join(dir, 'config', 'profile.yml'), 'candidate:\n  full_name: "Edited By Hand"\n');
     const env = { ...process.env };
     delete env.CAREER_OPS_ROOT;
     const again = spawnSync(process.execPath, [SCRIPT, '--answers', join(dir, 'answers.json'), '--target', dir, '--force', '--only', 'portals'], { encoding: 'utf8', env });
-    assert.equal(again.status, 0, again.stderr);
+    assert.equal(again.status, 0, describeSpawn(again));
     assert.deepEqual(JSON.parse(again.stdout), { written: ['portals.yml'], kept: ['config/profile.yml'] });
     assert.match(readFileSync(join(dir, 'config', 'profile.yml'), 'utf8'), /Edited By Hand/);
     const bad = spawnSync(process.execPath, [SCRIPT, '--answers', join(dir, 'answers.json'), '--target', dir, '--only', 'cv'], { encoding: 'utf8', env });
-    assert.equal(bad.status, 1);
+    assert.equal(bad.status, 1, describeSpawn(bad));
     assert.match(bad.stderr, /--only takes profile or portals/);
   } finally { cleanup(dir); }
 });
@@ -278,11 +279,11 @@ test('a flag with no value, or with another flag as its value, exits 1 and write
 test('a forced rewrite replaces the file whole and leaves no temp files behind', () => {
   const { dir, res } = run(ANSWERS);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const env = { ...process.env };
     delete env.CAREER_OPS_ROOT;
     const again = spawnSync(process.execPath, [SCRIPT, '--answers', join(dir, 'answers.json'), '--target', dir, '--force'], { encoding: 'utf8', env });
-    assert.equal(again.status, 0, again.stderr);
+    assert.equal(again.status, 0, describeSpawn(again));
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
     assert.deepEqual(readdirSync(join(dir, 'config')).filter((f) => f.endsWith('.tmp')), []);
     assert.ok(yaml.load(readFileSync(join(dir, 'portals.yml'), 'utf8')).title_filter);
@@ -293,7 +294,7 @@ test('a salary range without its currency exits 1 instead of assuming USD', () =
   const answers = { ...ANSWERS, compensation: { target_range: '95-120K' } };
   const { dir, res } = run(answers);
   try {
-    assert.equal(res.status, 1);
+    assert.equal(res.status, 1, describeSpawn(res));
     assert.match(res.stderr, /compensation\.currency/);
   } finally { cleanup(dir); }
 });
@@ -302,7 +303,7 @@ test('a missing required answer exits 1, names the field, and writes nothing', (
   const answers = { ...ANSWERS, candidate: { ...ANSWERS.candidate, full_name: '' } };
   const { dir, res } = run(answers);
   try {
-    assert.equal(res.status, 1);
+    assert.equal(res.status, 1, describeSpawn(res));
     assert.match(res.stderr, /candidate\.full_name/);
     assert.equal(existsSync(join(dir, 'config', 'profile.yml')), false);
     assert.equal(existsSync(join(dir, 'portals.yml')), false);
@@ -317,7 +318,7 @@ test('archetypes and narrative replace the example person, and proof points neve
   };
   const { dir, res, read } = run(answers);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const p = yaml.load(read('config/profile.yml'));
     assert.deepEqual(p.target_roles.archetypes, answers.archetypes);
     assert.equal(p.narrative.headline, 'Analyst who ships dashboards people use');
@@ -333,7 +334,7 @@ test('Remote or Hybrid as a location exits 1, since an allow-list entry admits e
     const answers = { ...ANSWERS, portals: { ...ANSWERS.portals, countries: ['United States', word] } };
     const { dir, res } = run(answers);
     try {
-      assert.equal(res.status, 1);
+      assert.equal(res.status, 1, describeSpawn(res));
       assert.match(res.stderr, new RegExp(word, 'i'));
       assert.equal(existsSync(join(dir, 'portals.yml')), false);
     } finally { cleanup(dir); }
@@ -361,9 +362,54 @@ test('the Step 3 yaml example is what the writer writes for a US-only answer', (
   const answers = { ...ANSWERS, portals: { ...ANSWERS.portals, countries: ['United States', 'USA'] } };
   const { dir, res, read } = run(answers);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     const c = yaml.load(read('portals.yml'));
     assert.deepEqual(c.location_filter, example.location_filter);
     assert.equal(c.max_posting_age_days, example.max_posting_age_days);
+  } finally { cleanup(dir); }
+});
+
+test('years of experience is optional and leaves experience_filter off', () => {
+  const { dir, res, read } = run(ANSWERS);
+  try {
+    assert.equal(res.status, 0, describeSpawn(res));
+    assert.equal(yaml.load(read('config/profile.yml')).candidate.years_of_experience, undefined);
+    assert.equal(yaml.load(read('portals.yml')).experience_filter, undefined);
+  } finally { cleanup(dir); }
+});
+
+test('years of experience and experience_filter are written when given', () => {
+  const answers = {
+    ...ANSWERS,
+    candidate: { ...ANSWERS.candidate, years_of_experience: 4 },
+    portals: { ...ANSWERS.portals, experience_filter: { stretch_years: 0, action: 'drop' } },
+  };
+  const { dir, res, read } = run(answers);
+  try {
+    assert.equal(res.status, 0, describeSpawn(res));
+    assert.equal(yaml.load(read('config/profile.yml')).candidate.years_of_experience, 4);
+    assert.deepEqual(yaml.load(read('portals.yml')).experience_filter, { enabled: true, stretch_years: 0, action: 'drop' });
+  } finally { cleanup(dir); }
+});
+
+test('experience_filter with no action is written as label', () => {
+  const answers = {
+    ...ANSWERS,
+    candidate: { ...ANSWERS.candidate, years_of_experience: 4 },
+    portals: { ...ANSWERS.portals, experience_filter: {} },
+  };
+  const { dir, res, read } = run(answers);
+  try {
+    assert.equal(res.status, 0, describeSpawn(res));
+    assert.deepEqual(yaml.load(read('portals.yml')).experience_filter, { enabled: true, stretch_years: 1, action: 'label' });
+  } finally { cleanup(dir); }
+});
+
+test('experience_filter without years of experience exits 1 and writes nothing', () => {
+  const { dir, res } = run({ ...ANSWERS, portals: { ...ANSWERS.portals, experience_filter: {} } });
+  try {
+    assert.equal(res.status, 1, describeSpawn(res));
+    assert.match(res.stderr, /years_of_experience/);
+    assert.equal(existsSync(join(dir, 'portals.yml')), false);
   } finally { cleanup(dir); }
 });

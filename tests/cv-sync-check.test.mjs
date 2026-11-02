@@ -70,7 +70,7 @@ test('a missing cv.md is reported as an error, not a crash', () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-sync-check-'));
   try {
     const r = runAgainst(dir);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stdout, /cv\.md not found/);
     assert.ok(!looksLikeCrash(r.all));
   } finally {
@@ -176,7 +176,7 @@ test('a commented-out template example is not mistaken for an unedited field', (
   ].join('\n'));
   assert.doesNotMatch(r.all, /may still have example data/,
     `a comment tripped the check:\n${r.all.slice(0, 400)}`);
-  assert.equal(r.status, 0);
+  assert.equal(r.status, 0, describeSpawn(r));
 });
 
 test('a profile still carrying the template values does warn, naming the field', () => {

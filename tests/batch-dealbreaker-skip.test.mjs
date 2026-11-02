@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { ROOT, pass, fail, rmSync, getBash } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 console.log('\nBatch dealbreaker skip');
 const read = (path) => readFileSync(join(ROOT, path), 'utf8').replace(/\r\n/g, '\n');
@@ -241,7 +242,7 @@ print_summary
       const env = { ...process.env, CAREER_OPS_ROOT: dir };
       for (const k of ['CAREER_OPS_DATA_DIR', 'CAREER_OPS_PROFILE', 'CAREER_OPS_TRACKER']) delete env[k];
       const res = spawnSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], { cwd: dir, encoding: 'utf8', env });
-      assert.equal(res.status, 0, res.stderr);
+      assert.equal(res.status, 0, describeSpawn(res));
       const merged = readFileSync(join(dir, 'data', 'applications.md'), 'utf8').trim().split('\n').at(-1);
       assert.match(merged, /\| Fabrikam \| Product Designer \| N\/A \| SKIP \|/);
       assert.ok(merged.includes(`"${RULE}"`) && merged.includes(`"${JD_LINE}"`), merged);
@@ -263,7 +264,7 @@ print_summary
         + `3\t${other}\tskipped\ts\te\t044\t2.0\tbelow-min-score\t0\n`);
       const env = { ...process.env, CAREER_OPS_ROOT: dir };
       const res = spawnSync(process.execPath, [join(ROOT, 'reconcile-pipeline.mjs'), '--state', join(dir, 'batch-state.tsv')], { cwd: dir, encoding: 'utf8', env });
-      assert.equal(res.status, 0, res.stderr);
+      assert.equal(res.status, 0, describeSpawn(res));
       const text = readFileSync(join(dir, 'data', 'pipeline.md'), 'utf8');
       const [pending, processed] = text.split('## Processed');
       const pendingLines = pending.split('\n');

@@ -107,9 +107,12 @@ export default {
   `ctx.idCache` (`get` / `set` / `delete` on this provider's slice of
   `provider-id-cache.mjs`: a value resolved on one scan, such as a board id
   only a careers page shows, kept for the next ones; absent in
-  `verify-portals` and tests, so the provider must work without it;
-  reference `providers/join.mjs`). A provider never reads or writes files
-  itself. Returns a normalized `Job[]`.
+  `verify-portals` and tests, so the provider must work without it; go
+  through `cachedLookup` in `providers/_cached-lookup.mjs`, as
+  `providers/join.mjs` and `providers/getro.mjs` do; a value read from a page
+  the provider loads on every fetch anyway gains nothing from the cache, so
+  `providers/consider.mjs` does not use it). A provider never reads or writes
+  files itself. Returns a normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
   When the payload has a dedicated field for them, also set `requisitionId`

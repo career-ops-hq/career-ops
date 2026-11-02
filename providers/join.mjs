@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
+import { cachedLookup } from './_cached-lookup.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 
@@ -23,10 +24,10 @@ import { decodeEntities } from './_html-entities.mjs';
 // The company id is assumed not to change, so step 1 is skipped where the id
 // is already known: `entry.company_id` when a directory supplies it, else
 // `ctx.idCache` (see provider-id-cache.mjs) from an earlier scan. A cached id
-// is checked against the careers page again after COMPANY_RECHECK_MS, which
-// is also how a deleted company — one whose old id still answers with an
-// empty job list — surfaces as a dead board, and how a changed id would be
-// picked up.
+// is checked against the careers page again once it is older than
+// DEFAULT_RECHECK_MS (_cached-lookup.mjs), which is also how a deleted company
+// — one whose old id still answers with an empty job list — surfaces as a dead
+// board, and how a changed id would be picked up.
 //
 // `parseCompanySitemap` reads join.com's own company directory,
 // https://join.com/companies/sitemap.xml, for scan-ats-full.mjs.
@@ -121,9 +122,6 @@ function toEpochMs(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-// How long a cached company id is trusted before the careers page is read again.
-const COMPANY_RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
-
 /** Resolve the page cap: a positive integer `max_pages` on the entry, capped. */
 function resolveMaxPages(entry) {
   const v = entry?.max_pages;
@@ -201,32 +199,20 @@ export function parseCompanySitemap(xml) {
 async function resolveCompanyId(entry, slug, ctx) {
   if (Number.isInteger(entry?.company_id) && entry.company_id > 0) return entry.company_id;
 
-  const cache = ctx?.idCache;
-  const cached = cache?.get(slug);
-  const cachedId = Number.isInteger(cached?.id) ? cached.id : null;
-  const checkedAt = Date.parse(cached?.checkedAt ?? '');
-  if (cachedId && Number.isFinite(checkedAt) && Date.now() - checkedAt < COMPANY_RECHECK_MS) return cachedId;
-
-  try {
+  return cachedLookup(ctx?.idCache, slug, async () => {
     // redirect:'error' prevents SSRF via server-side redirects; the URL is a
     // fixed https://join.com/... string, so the host is pinned regardless of
     // the original careers_url.
     const html = await fetchTextWithRetry(ctx, `https://join.com/companies/${slug}`, { redirect: 'error' });
     const company = extractCompany(extractNextData(html));
     if (!company) throw new Error('join: __NEXT_DATA__ not found or has no company id');
-    cache?.set(slug, { id: company.id, checkedAt: new Date().toISOString() });
     return company.id;
-  } catch (err) {
-    // A company that is gone takes its cache entry with it. Any other failure
-    // of a recheck, a page in an unexpected shape included, keeps using the id
-    // already known.
-    if (err?.status === 404 || err?.status === 410) {
-      cache?.delete(slug);
-      throw err;
-    }
-    if (cachedId) return cachedId;
-    throw err;
-  }
+  }, {
+    isValid: (v) => Number.isInteger(v) && v > 0,
+    // The job list answers a deleted company's old id with an empty list, so
+    // the careers page answering 404 / 410 is the only sign it is gone.
+    isGone: (err) => err?.status === 404 || err?.status === 410,
+  });
 }
 
 /**

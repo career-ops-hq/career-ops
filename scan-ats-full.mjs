@@ -1350,7 +1350,16 @@ async function main() {
   // Same defensive default as completedSources/counters below: a version-1
   // checkpoint that lost its offers array would otherwise set this to undefined
   // and throw on the next line, instead of degrading to an empty resume.
-  const newOffers = checkpoint?.offers || [];
+  //
+  // Minus the matches this data root already holds. A sweep the resolver
+  // breaker stopped saves its matches AND keeps its checkpoint (so --resume can
+  // finish the source), so by the time --resume reads them they are already in
+  // pipeline.md and scan-history: seeding them again appended every one a
+  // second time at this run's persist step. A match from a run that died
+  // before persisting is in neither file, so it is not in seenUrls and stays.
+  // Same token as the reseed below and the sweep's own dedup check.
+  const newOffers = (checkpoint?.offers || [])
+    .filter(o => !seenUrls.has(dedupTokenFor(o, providerForSource(o.source))));
   // Checkpointed matches were already deduped once — without re-seeding, a
   // resumed run re-scanning the in-flight overlap would duplicate them.
   // Reseed with the SAME token a fresh dedup check would produce (provider

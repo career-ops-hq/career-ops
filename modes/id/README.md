@@ -42,7 +42,7 @@ Iterasi pertama ini mencakup empat mode berdampak tertinggi:
 | File | Diterjemahkan dari | Peran |
 |------|--------------------|-------|
 | `_shared.md` | `modes/_shared.md` (EN) | Konteks bersama, arketipe, aturan global, kekhususan pasar Indonesia |
-| `lowongan.md` | `modes/oferta.md` (ES) | Evaluasi lengkap sebuah lowongan (Blok A-F) |
+| `lowongan.md` | `modes/oferta.md` (ES) | Evaluasi lengkap sebuah lowongan (Blok A-H) |
 | `melamar.md` | `modes/apply.md` (EN) | Asisten live untuk mengisi formulir lamaran |
 | `pipeline.md` | `modes/pipeline.md` (ES) | Inbox URL / Second Brain untuk lowongan yang dikumpulkan |
 
@@ -101,5 +101,5 @@ Untuk memperbaiki terjemahan atau menambahkan mode:
 1. Buka Issue dengan usulanmu (lihat `CONTRIBUTING.md`)
 2. Patuhi leksikon di atas agar nada tetap konsisten
 3. Terjemahkan secara idiomatik -- bukan kata per kata
-4. Pertahankan elemen struktural (Blok A-F, tabel, blok kode, instruksi perkakas) persis sama
+4. Pertahankan elemen struktural (Blok A-H, tabel, blok kode, instruksi perkakas) persis sama
 5. Uji dengan lowongan Indonesia yang nyata (Glints, Jobstreet, Kalibrr) sebelum mengirim PR

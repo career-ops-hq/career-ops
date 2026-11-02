@@ -25,16 +25,27 @@ Because the work is close to what I already do.
 None.
 `;
 
-// The five shipped market modes that translate the Block H title, plus the
-// three that keep it in English. Each pair is (mode file, heading title) and
-// is read from the mode file itself below, so this list cannot drift from the
-// modes without the drift test failing.
+// The shipped market modes that translate the Block H title. Each pair is
+// (mode file, heading title) and is checked against the mode file itself
+// below, so this list cannot drift from the modes without the drift test
+// failing. The last eleven wrote these titles under `G)` until #5843.
 const LOCALIZED = [
   ['modes/es/oferta.md', 'Borradores de respuestas para la candidatura'],
   ['modes/ru/oferta.md', 'Черновики ответов на форму'],
   ['modes/tr/is-ilani.md', 'Başvuru Formu Taslak Yanıtları'],
   ['modes/zh/oferta.md', '开放性问题拟答草稿'],
   ['modes/zh-TW/oferta.md', '開放式問題擬答草稿'],
+  ['modes/da/oferta.md', 'Udkast til svar til ansøgningen'],
+  ['modes/de/angebot.md', 'Draft-Antworten für die Bewerbung'],
+  ['modes/fr/offre.md', 'Brouillons de reponses pour la candidature'],
+  ['modes/hi/naukri.md', 'Application के लिए Draft Responses'],
+  ['modes/id/lowongan.md', 'Draft jawaban untuk lamaran'],
+  ['modes/it/annuncio.md', 'Bozze di risposta per la candidatura'],
+  ['modes/ko/gonggo.md', '지원서 답변 초안'],
+  ['modes/nl/vacature.md', 'Conceptantwoorden voor de sollicitatie'],
+  ['modes/pl/oferta.md', 'Szkice odpowiedzi do aplikacji'],
+  ['modes/pt/oferta.md', 'Rascunhos de Respostas para Candidatura'],
+  ['modes/ua/oferta.md', 'Чернетки відповідей на форму'],
 ];
 
 for (const [mode, title] of LOCALIZED) {

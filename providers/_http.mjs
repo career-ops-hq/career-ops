@@ -73,7 +73,9 @@ async function proxyFor(url) {
   for (const configuredProxy of [httpProxy, httpsProxy]) {
     if (!configuredProxy) continue;
     const parsed = new URL(configuredProxy);
-    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:') {
+    const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const isLoopback = host === 'localhost' || host === '::1' || (isIP(host) === 4 && host.startsWith('127.'));
+    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:' && !isLoopback) {
       throw new Error('Proxy URLs containing credentials must use HTTPS to protect proxy authentication.');
     }
   }
@@ -89,7 +91,11 @@ async function proxyFor(url) {
     throw new Error('Trusted proxy egress requires undici; run npm install in the career-ops directory, then retry.', { cause });
   });
   if (signature !== proxySignature) {
-    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy });
+    // proxyTunnel: true keeps every request, http:// included, on a CONNECT
+    // tunnel through the proxy. That is the default in undici 6 and 7. From
+    // undici 8 an http:// target is forwarded as an absolute-form request
+    // instead, which is what turned tests/providers/proxy-egress.test.mjs red.
+    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy, proxyTunnel: true });
     proxySignature = signature;
   }
   return { dispatcher: proxyAgent, proxyHost, fetchImpl: undiciFetch };

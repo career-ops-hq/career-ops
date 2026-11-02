@@ -387,7 +387,7 @@ try {
       ? gqlPage([job(1)], 2)
       : gqlPage([job(2)], 1)))));
 
-  // ctx.idCache — the company id is read from the cache instead of the careers page.
+  // ctx.idCache — the company id is kept per slug between scans.
   const memCache = (initial = {}) => {
     const values = new Map(Object.entries(initial));
     return { values, get: (k) => values.get(k), set: (k, v) => values.set(k, v), delete: (k) => values.delete(k) };
@@ -414,27 +414,6 @@ try {
     fail(`join.fetch() cache miss wrong: textCalls=${missCtx.textCalls.length}, stored=${JSON.stringify(stored)}`);
   }
 
-  const staleCache = memCache({ 'acme-corp': { id: 777, domain: 'acme-corp', checkedAt: old } });
-  const staleCtx = makeCtx(() => gqlPage([job(1)]), { idCache: staleCache });
-  await joinProvider.fetch(entry, staleCtx);
-  if (staleCtx.textCalls.length === 1 && staleCtx.jsonCalls[0].body.variables.input.companyId === 4242 && staleCache.values.get('acme-corp').id === 4242) {
-    pass('join.fetch() checks a cached id older than 30 days against the careers page and stores the result');
-  } else {
-    fail(`join.fetch() stale cache wrong: textCalls=${staleCtx.textCalls.length}, cached=${JSON.stringify(staleCache.values.get('acme-corp'))}`);
-  }
-
-  const flakyCache = memCache({ 'acme-corp': { id: 777, domain: 'acme-corp', checkedAt: old } });
-  const flakyCtx = makeCtx(() => gqlPage([job(1)]), {
-    idCache: flakyCache,
-    fetchText: async () => { throw Object.assign(new Error('HTTP 503'), { status: 503 }); },
-  });
-  const flakyJobs = await joinProvider.fetch(entry, flakyCtx);
-  if (flakyJobs.length === 1 && flakyCtx.jsonCalls[0].body.variables.input.companyId === 777) {
-    pass('join.fetch() keeps using the cached id when the 30-day recheck fails with a transient error');
-  } else {
-    fail(`join.fetch() failed recheck wrong: jobs=${flakyJobs.length}, companyId=${flakyCtx.jsonCalls[0]?.body.variables.input.companyId}`);
-  }
-
   const reshapedCache = memCache({ 'acme-corp': { id: 777, domain: 'acme-corp', checkedAt: old } });
   const reshapedCtx = makeCtx(() => gqlPage([job(1)]), {
     idCache: reshapedCache,
@@ -442,7 +421,7 @@ try {
   });
   const reshapedJobs = await joinProvider.fetch(entry, reshapedCtx);
   if (reshapedJobs.length === 1 && reshapedCtx.jsonCalls[0].body.variables.input.companyId === 777 && reshapedCache.values.get('acme-corp').checkedAt === old) {
-    pass('join.fetch() keeps using the cached id when the 30-day recheck returns a page without a company id');
+    pass('join.fetch() keeps using the cached id when the recheck returns a page without a company id');
   } else {
     fail(`join.fetch() reshaped recheck wrong: jobs=${reshapedJobs.length}, companyId=${reshapedCtx.jsonCalls[0]?.body.variables.input.companyId}, cached=${JSON.stringify(reshapedCache.values.get('acme-corp'))}`);
   }

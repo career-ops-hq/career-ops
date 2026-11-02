@@ -234,3 +234,36 @@ export function parseApplications(md, rootDir, systemRootDir) {
   }
   return rows;
 }
+
+/**
+ * Why a tracker read produced the rows it did.
+ *
+ * `missing` is no file (the caller passes null). A new install is an empty
+ * list, and the file must not be created here. `empty` is a blank file or a
+ * real tracker table with no data rows. `malformed` is bytes that are not a
+ * tracker table; callers must leave the file alone. `rows` is at least one
+ * application.
+ *
+ * @param {string | null | undefined} md
+ * @param {string} [rootDir]
+ * @param {string} [systemRootDir]
+ * @returns {"missing" | "empty" | "malformed" | "rows"}
+ */
+export function classifyTracker(md, rootDir, systemRootDir) {
+  if (md == null) return "missing";
+  const text = String(md).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (parseApplications(text, rootDir, systemRootDir).length > 0) return "rows";
+  if (!text.trim()) return "empty";
+  const lines = text.split("\n");
+  if (detectHeader(lines, loadHeaderAliases(rootDir, systemRootDir))) return "empty";
+  // Alias table missing: a header whose first cell is the number column is
+  // still an empty tracker, not a damaged file.
+  const legacyHeader = lines.some((raw) => {
+    const line = raw.trim();
+    if (!line.startsWith("|")) return false;
+    const cells = trackerCells(line);
+    return cells.length >= 8 && /^(#|num)$/i.test(cells[0] ?? "");
+  });
+  if (legacyHeader) return "empty";
+  return "malformed";
+}

@@ -62,6 +62,7 @@ import readline from 'node:readline';
 import { resolveTrackerPath, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseFileInput, collectInteractive } from './paste-reply.mjs';
@@ -349,7 +350,9 @@ async function main() {
   const contactType = typeOverride || inferContactType(`${candidate.subject} ${candidate.body_snippet}`);
 
   const replyType = classifyReply(candidate).type;
-  const today = new Date().toISOString().slice(0, 10);
+  // The local day: this lands in the user's contacts.tsv, and the UTC day is
+  // tomorrow all evening west of Greenwich (#3070).
+  const today = localToday();
   const contact = {
     name,
     company,

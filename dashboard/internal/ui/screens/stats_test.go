@@ -113,3 +113,32 @@ func TestStatsQualityBadgeOnlyInFitQualityChart(t *testing.T) {
 		t.Errorf("quality bar badge must not appear in Seniority Mix chart but it was present")
 	}
 }
+
+// A tier's slice colour follows its label, not its position: ScoreTiers omits
+// empty tiers, so with Viable and Below Bar alone the positional palette drew
+// Viable in Elite's green and Below Bar in Strong's blue.
+func TestScoreTierColorsFollowTheLabel(t *testing.T) {
+	th := theme.NewTheme("catppuccin-mocha")
+	got := scoreTierColors(th, []model.LabelCountStat{
+		{Label: "Viable (3.5-3.9)", Count: 2},
+		{Label: "Below Bar (<3.0)", Count: 1},
+	})
+	if len(got) != 2 || got[0] != th.Yellow || got[1] != th.Red {
+		t.Errorf("Viable/Below Bar colours = %v, want [Yellow %v, Red %v]", got, th.Yellow, th.Red)
+	}
+
+	all := scoreTierColors(th, []model.LabelCountStat{
+		{Label: "Elite (≥4.5)"}, {Label: "Strong (4.0-4.4)"}, {Label: "Viable (3.5-3.9)"},
+		{Label: "Moderate (3.0-3.4)"}, {Label: "Below Bar (<3.0)"},
+	})
+	want := []lipgloss.Color{th.Green, th.Sky, th.Yellow, th.Peach, th.Red}
+	for i := range want {
+		if all[i] != want[i] {
+			t.Errorf("tier %d colour = %v, want %v", i, all[i], want[i])
+		}
+	}
+
+	if other := scoreTierColors(th, []model.LabelCountStat{{Label: "Unscored"}}); other[0] != th.Mauve {
+		t.Errorf("unknown tier colour = %v, want neutral Mauve %v", other[0], th.Mauve)
+	}
+}

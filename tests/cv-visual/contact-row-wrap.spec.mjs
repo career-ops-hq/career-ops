@@ -26,7 +26,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { listTemplates } from '../../cv-templates.mjs';
+import { listTemplates, DEFAULT_TEMPLATES_DIR } from '../../cv-templates.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -78,7 +78,7 @@ function payload(lang, portfolioDisplay = 'candidate.example.com') {
 
 /** Every HTML template that renders a contact row (see the source-side suite). */
 function contactRowTemplates() {
-  const paths = listTemplates('cv').filter((t) => t.format === 'html').map((t) => t.path);
+  const paths = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html').map((t) => t.path);
   paths.push(join(ROOT, 'templates', 'resume-template.html'));
   return paths
     .filter((p) => readFileSync(p, 'utf-8').includes('class="contact-row"'))

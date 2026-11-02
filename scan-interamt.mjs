@@ -29,6 +29,7 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ function parseDE(str) {
 function loadLastScanDate() {
   if (!existsSync(SCAN_HISTORY)) return null;
   let latest = null;
-  readFileSync(SCAN_HISTORY, 'utf-8').split('\n').slice(1).forEach(line => {
+  scanHistoryDataLines(readFileSync(SCAN_HISTORY, 'utf-8')).forEach(line => {
     const parts = line.split('\t');
     if (parts[2] !== 'interamt') return;
     const d = new Date((parts[1] || '') + 'T00:00:00Z');

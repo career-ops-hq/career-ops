@@ -42,7 +42,7 @@ Cette premiere iteration couvre les quatre modes a plus fort impact :
 | Fichier | Traduit depuis | Role |
 |---------|----------------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | Contexte partage, archetypes, regles globales, specificites marche francophone |
-| `offre.md` | `modes/oferta.md` (ES) | Evaluation complete d'une offre (Blocs A-F) |
+| `offre.md` | `modes/oferta.md` (ES) | Evaluation complete d'une offre (Blocs A-H) |
 | `postuler.md` | `modes/apply.md` (EN) | Assistant live pour remplir les formulaires de candidature |
 | `pipeline.md` | `modes/pipeline.md` (ES) | Inbox d'URLs / Second Brain pour les offres collectees |
 
@@ -102,5 +102,5 @@ Pour ameliorer une traduction ou ajouter un mode :
 1. Ouvre une Issue avec ta proposition (voir `CONTRIBUTING.md`)
 2. Respecte le lexique ci-dessus pour garder le ton coherent
 3. Traduis de maniere idiomatique -- pas de traduction mot a mot
-4. Conserve les elements structurels (Blocs A-F, tableaux, blocs de code, instructions outils) a l'identique
+4. Conserve les elements structurels (Blocs A-H, tableaux, blocs de code, instructions outils) a l'identique
 5. Teste avec une vraie offre francophone (Welcome to the Jungle, APEC, Indeed FR) avant de soumettre la PR

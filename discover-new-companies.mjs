@@ -38,30 +38,14 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { buildCompanyCanonicalizer, findBlacklistEntry, loadBlacklist } from './scan.mjs';
 import { parseScanHistoryLine, scanHistoryLineHasColumn } from './lib/scan-history-columns.mjs';
 import { atsFromUrl } from './coverage-check.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
 const HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || join(DATA_ROOT, 'data', 'scan-history.tsv');
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(DATA_ROOT, 'portals.yml');
 const BLACKLIST_PATH = process.env.CAREER_OPS_BLACKLIST || join(DATA_ROOT, 'data', 'blacklist.md');
 
-const args = process.argv.slice(2);
-const has = (f) => args.includes(f);
-const val = (f, d = null) => {
-  const i = args.indexOf(f);
-  if (i === -1) return d;
-  if (args.indexOf(f, i + 1) !== -1) {
-    console.error(`ERROR: ${f} may only be specified once`);
-    process.exit(1);
-  }
-  if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
-    console.error(`ERROR: ${f} requires a value`);
-    process.exit(1);
-  }
-  return args[i + 1];
-};
-
-if (has('--help')) {
-  console.log(`Usage: node discover-new-companies.mjs [options]
+const USAGE = `Usage: node discover-new-companies.mjs [options]
 
 Reads data/scan-history.tsv, subtracts every company already tracked in
 portals.yml or on data/blacklist.md, and emits the remainder as a
@@ -81,7 +65,32 @@ Typical loop:
   node discover-new-companies.mjs --out /tmp/new.yml
   node discover-ats.mjs --in /tmp/new.yml --summary     # preview, writes nothing
   node discover-ats.mjs --in /tmp/new.yml --write       # only after you review
-`);
+`;
+
+const args = process.argv.slice(2);
+const KNOWN_FLAGS = ['--since','--min-rows','--limit','--added-only','--out','--summary','--json','--help','-h'];
+const VALUE_FLAGS = ['--since','--min-rows','--limit','--out'];
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
+// A flag given twice (in either --flag value or --flag=value form) is an error;
+// compare the part before '=' so --since 7 and --since=7 count as the same flag.
+const seenFlags = new Set();
+for (const arg of args) {
+  if (typeof arg !== 'string' || !arg.startsWith('-')) continue;
+  const flag = arg.split('=')[0];
+  if (!KNOWN_FLAGS.includes(flag)) continue;
+  if (seenFlags.has(flag)) {
+    console.error(`ERROR: ${flag} may only be specified once`);
+    process.exit(1);
+  }
+  seenFlags.add(flag);
+}
+
+const has = (f) => hasFlag(args, f);
+const val = (f, d = null) => flagValue(args, f) ?? d;
+
+if (has('--help')) {
+  console.log(USAGE);
   process.exit(0);
 }
 

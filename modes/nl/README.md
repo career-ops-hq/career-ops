@@ -42,7 +42,7 @@ Deze eerste iteratie omvat de vier modi met de hoogste impact:
 | Bestand | Vertaald uit | Rol |
 |--------|----------------|------|
 | `_shared.md` | `modes/fr/_shared.md` (FR) | Gedeelde context, archetypen, algemene regels, Nederlandstalige marktspecifieke kenmerken |
-| `vacature.md` | `modes/fr/offre.md` (FR) | Volledige evaluatie van een vacature (blokken A-F) |
+| `vacature.md` | `modes/fr/offre.md` (FR) | Volledige evaluatie van een vacature (blokken A-H) |
 | `solliciteren.md` | `modes/fr/postuler.md` (FR) | Live assistent bij het invullen van sollicitatieformulieren |
 | `pipeline.md` | `modes/fr/pipeline.md` (FR) | URL inbox / Second Brain voor verzamelde vacatures |
 
@@ -101,5 +101,5 @@ Om een ​​vertaling te verbeteren of een modus toe te voegen:
 1. Open een probleem met uw voorstel (zie `CONTRIBUTING.md`)
 2. Respecteer de bovenstaande woordenlijst om de toon consistent te houden
 3. Vertaal idiomatisch - geen woord-voor-woordvertaling
-4. Houd structurele elementen (blokken A-F, tabellen, codeblokken, gereedschapsinstructies) identiek
+4. Houd structurele elementen (blokken A-H, tabellen, codeblokken, gereedschapsinstructies) identiek
 5. Test met een echte Nederlandstalige vacature (LinkedIn, Indeed NL, Nationale Vacaturebank) voordat je de PR indient

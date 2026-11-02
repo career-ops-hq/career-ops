@@ -50,7 +50,7 @@ Esta primeira iteração cobre os quatro modos com maior impacto:
 | Arquivo | Traduzido de | Finalidade |
 |---------|-------------|------------|
 | `_shared.md` | `modes/_shared.md` (EN) | Contexto compartilhado, arquétipos, regras globais, especificidades do mercado BR |
-| `oferta.md` | `modes/oferta.md` (ES) | Avaliação completa de uma vaga (Blocos A-F) |
+| `oferta.md` | `modes/oferta.md` (ES) | Avaliação completa de uma vaga (Blocos A-H) |
 | `aplicar.md` | `modes/apply.md` (EN) | Assistente ao vivo para formulários de candidatura |
 | `pipeline.md` | `modes/pipeline.md` (ES) | Inbox de URLs / Second Brain para vagas acumuladas |
 
@@ -107,5 +107,5 @@ Se quiser melhorar uma tradução ou traduzir um modo adicional:
 1. Abra uma issue com a proposta (conforme `CONTRIBUTING.md`)
 2. Siga o vocabulário acima para manter o tom consistente
 3. Traduza de forma natural e idiomática — nada de tradução literal palavra por palavra
-4. Mantenha os elementos estruturais (Bloco A-F, tabelas, blocos de código, instruções de tools) exatamente iguais
+4. Mantenha os elementos estruturais (Bloco A-H, tabelas, blocos de código, instruções de tools) exatamente iguais
 5. Teste com uma vaga real brasileira (ex: do Gupy ou LinkedIn BR) antes de abrir o PR

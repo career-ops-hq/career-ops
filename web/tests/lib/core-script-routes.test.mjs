@@ -1,7 +1,11 @@
-// The four routes that execFile a core script directly — doctor, followups,
-// followups/cadence and portals/verify — bypass spawnHeadlessCli, so its
-// windowsHide does not reach them (#3809). Each has to spell the Windows-safe
-// launch itself, and two of them have to report a failed child as a failure.
+// The routes that execFile a core script directly bypass spawnHeadlessCli, so
+// its windowsHide does not reach them (#3809). Each has to spell the
+// Windows-safe launch itself, and two of them (doctor, portals/verify) have to
+// report a failed child as a failure. #4253 fixed four of these routes and
+// missed six (stats, patterns, upskill, quiet-companies, company-history,
+// keyword-match), which kept launching bare "node" with an inherited console,
+// so a census below keeps the routes driven here equal to every route that
+// calls execFile.
 //
 // The Windows half of #3809: a long-lived dev server whose console has gone
 // stale kills every child at DLL init with 0xC0000142 — no stdout, no stderr.
@@ -22,9 +26,11 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { listTree } from "../../../lib/walk-tree.mjs";
 import "../helpers/web-ts-alias-loader.mjs";
 
 const codeRoot = mkdtempSync(join(tmpdir(), "co-core-routes-code-"));
@@ -106,6 +112,68 @@ test("all four core-script routes launch with process.execPath and windowsHide",
     assert.equal(made[0].file, process.execPath, `${script}: launched with process.execPath`);
     assert.equal(made[0].options?.windowsHide, true, `${script}: launched with windowsHide`);
   }
+});
+
+test("the six analytics routes launch with process.execPath and windowsHide", async () => {
+  // Given each core script answers with a JSON payload, and keyword-match has
+  // a report to resolve (it never launches without one)
+  for (const name of ["stats", "analyze-patterns", "upskill", "rejection-latency", "company-history", "keyword-match"]) {
+    standIn(name, "console.log(JSON.stringify({}));");
+  }
+  mkdirSync(join(dataRoot, "reports"), { recursive: true });
+  writeFileSync(join(dataRoot, "reports", "001-acme-2026-10-01.md"), "# Acme\n");
+
+  const { GET: stats } = await route("stats");
+  const { GET: patterns } = await route("patterns");
+  const { GET: upskill } = await route("upskill");
+  const { GET: quiet } = await route("quiet-companies");
+  const { GET: history } = await route("company-history");
+  const { GET: keywords } = await route("keyword-match");
+
+  // When each route runs
+  const runs = [
+    ["stats", await call(stats)],
+    ["analyze-patterns", await call(patterns)],
+    ["upskill", await call(upskill)],
+    ["rejection-latency", await call(quiet)],
+    ["company-history", await call(history, new Request("http://localhost/api/company-history?company=Acme"))],
+    ["keyword-match", await call(keywords, new Request("http://localhost/api/keyword-match?report=1"))],
+  ];
+
+  // Then each launched its script once, with this process's Node binary and
+  // no console to inherit
+  for (const [script, { launches: made }] of runs) {
+    assert.equal(made.length, 1, `${script}: one launch`);
+    assert.equal(made[0].script, join(codeRoot, `${script}.mjs`));
+    assert.equal(made[0].file, process.execPath, `${script}: launched with process.execPath`);
+    assert.equal(made[0].options?.windowsHide, true, `${script}: launched with windowsHide`);
+  }
+});
+
+// Every route that calls execFile, found by reading the route tree. The two
+// tests above drive exactly these; a route added later that execFiles a core
+// script fails here until it is driven there too.
+const DRIVEN_ROUTES = [
+  "company-history",
+  "doctor",
+  "followups",
+  "followups/cadence",
+  "keyword-match",
+  "patterns",
+  "portals/verify",
+  "quiet-companies",
+  "stats",
+  "upskill",
+];
+
+test("census: the routes driven above are every route that calls execFile", () => {
+  const apiRoot = fileURLToPath(new URL("../../src/app/api", import.meta.url));
+  const found = listTree(apiRoot, { match: /route\.ts$/ })
+    .filter((f) => /\bexecFile\(/.test(readFileSync(f, "utf8")))
+    .map((f) => relative(apiRoot, dirname(f)).split(sep).join("/"));
+  // Premise: the walk sees the route tree at all
+  assert.ok(found.includes("doctor"), `the census walk found no doctor route under ${apiRoot}`);
+  assert.deepEqual(found.sort(), DRIVEN_ROUTES);
 });
 
 // ---------------------------------------------------------------------------

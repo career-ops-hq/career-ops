@@ -34,7 +34,7 @@ export function ScoreMethodology() {
       <div className="space-y-5 border-t border-border px-5 py-4 text-sm">
         <p className="text-muted">
           Every role is scored <strong className="text-foreground">1.0–5.0</strong> across six dimensions.{" "}
-          <strong className="text-brand">4.0</strong> is the apply / don&apos;t-apply line — below it, career-ops
+          <strong className="text-brand-text">4.0</strong> is the apply / don&apos;t-apply line — below it, career-ops
           recommends against applying.
         </p>
         <div>
@@ -52,7 +52,7 @@ export function ScoreMethodology() {
           <ul className="space-y-2">
             {BLOCKS.map(([k, v]) => (
               <li key={k} className="flex items-start gap-2.5">
-                <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded bg-brand-soft text-xs font-semibold text-brand">
+                <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded bg-brand-soft text-xs font-semibold text-brand-text">
                   {k}
                 </span>
                 <span className="text-muted">{v}</span>
@@ -65,7 +65,7 @@ export function ScoreMethodology() {
           target="_blank"
           rel="noreferrer"
           aria-label="Full methodology (opens in a new tab)"
-          className="inline-flex min-h-[24px] items-center gap-1 text-xs text-brand transition-colors hover:underline max-sm:min-h-[44px]"
+          className="inline-flex min-h-[24px] items-center gap-1 text-xs text-brand-text transition-colors hover:underline max-sm:min-h-[44px]"
         >
           Full methodology <ExternalLink className="size-3" aria-hidden="true" />
         </a>

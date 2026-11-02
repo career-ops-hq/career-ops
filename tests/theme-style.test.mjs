@@ -200,7 +200,7 @@ try {
   // declaration) must not drift between two tokens making the same promise about
   // different entries.
   {
-    const { listTemplates } = await import(pathToFileURL(join(ROOT, 'cv-templates.mjs')).href);
+    const { listTemplates, DEFAULT_TEMPLATES_DIR } = await import(pathToFileURL(join(ROOT, 'cv-templates.mjs')).href);
 
     // Innermost `selector { body }` rules of every <style> block, with
     // comments stripped (they hold braces and token names) and {{PLACEHOLDER}}s
@@ -266,7 +266,7 @@ try {
 
       // A new template must declare its default here, or the opt-in would ship
       // dead in it (template-page-breaks.test.mjs discovers templates the same way).
-      const discovered = listTemplates('cv').filter((t) => t.format === 'html')
+      const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html')
         .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
       const unlisted = discovered.filter((t) => !(t in tok.expected));
       if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared ${tok.key} default`);

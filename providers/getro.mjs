@@ -1,8 +1,9 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-// Getro provider — VC "talent network" portfolio job boards (jobs at a fund's
-// portfolio companies). Powers b2venture, Earlybird, Point Nine, Speedinvest,
+// Getro provider — multi-employer board adapter for `job_boards:`.
+// VC "talent network" portfolio job boards (jobs at a fund's portfolio
+// companies). Powers b2venture, Earlybird, Point Nine, Speedinvest,
 // Cherry, HV Capital, Atomico, and many other VC boards, all on independently
 // hosted vanity domains — no common host suffix to auto-detect against, so
 // this is opt-in only via `provider: getro`.
@@ -13,17 +14,19 @@
 //   -> { results: { jobs: [ {title,url,organization:{name},locations[],created_at,...} ], count } }
 //
 // A board's numeric collection_id is the `network.id` embedded in the board
-// page's __NEXT_DATA__. Set it explicitly with `getro_collection` in
-// portals.yml, or leave it out and it auto-resolves from `careers_url` (a GET
-// of the board's own jobs page, parsed for __NEXT_DATA__) — no manual lookup
-// required. `careers_url` is required either way: it also supplies the
-// `referer` header the search API needs (a bare request without one has been
-// observed returning 406).
+// page's __NEXT_DATA__. It resolves from `careers_url` (a GET of the board's
+// own jobs page, parsed for __NEXT_DATA__) and is kept in `ctx.idCache`
+// (provider-id-cache.mjs), so the page is read again only once the id is older
+// than DEFAULT_RECHECK_MS (_cached-lookup.mjs).
+// `getro_collection: N` in portals.yml sets it by hand; it is needed only when
+// the page stops carrying the id, and a set id is never checked again.
+// `careers_url` is required either way: it also supplies the `referer` header
+// the search API needs (a bare request without one has been observed
+// returning 406).
 //
 //   - name: b2venture (portfolio)
 //     provider: getro
 //     careers_url: https://jobs.b2venture.vc/jobs
-//     # getro_collection: 4283   # optional — skips the auto-resolve fetch
 //     enabled: true
 //
 // These boards are large (1000-2000+ jobs) but the API returns them
@@ -45,6 +48,7 @@
 // pages, so one blip mid-sweep shouldn't truncate the whole run (#2506).
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
+import { cachedLookup } from './_cached-lookup.mjs';
 
 // Getro returns `created_at` as Unix seconds, but older boards have been seen
 // emitting ISO strings, so both shapes are handled. Non-positive values return
@@ -134,27 +138,41 @@ export function extractCollectionId(html) {
   return null;
 }
 
-/** Override wins; otherwise fetch careers_url and parse __NEXT_DATA__. */
+/** ctx.idCache key for a board: its host, which is one Getro network. */
+function cacheKey(careersUrl) {
+  return careersUrl.host.toLowerCase();
+}
+
+/**
+ * Override wins; otherwise the id kept in ctx.idCache from an earlier scan
+ * (checked against the board page again once it is older than
+ * DEFAULT_RECHECK_MS, see _cached-lookup.mjs); otherwise fetch careers_url and
+ * parse __NEXT_DATA__.
+ * A failed board page never drops a cached id: the search API answers an
+ * unknown collection with its own 404, which fetch() handles below.
+ */
 async function resolveCollectionId(entry, ctx, careersUrl) {
   const override = resolveCollectionOverride(entry);
   if (override) return override;
 
   const label = entry?.name || careersUrl.href;
-  // Retried like every page fetch below — this single request runs BEFORE
-  // pagination even starts, so without a retry a transient blip here (DNS/TLS/
-  // connection reset) fails the whole board before a single page is fetched.
-  const html = await fetchTextWithRetry(ctx, careersUrl.href, {
-    redirect: 'error',
-    headers: { accept: 'text/html', 'user-agent': BROWSER_LIKE_USER_AGENT },
-  });
-  const id = extractCollectionId(html);
-  if (!id) {
-    throw new Error(
-      `getro: ${label} — could not resolve collection_id from ${careersUrl.href} (no network.id found in ` +
-      `__NEXT_DATA__; page structure may have changed — set getro_collection: N on this entry as a fallback)`,
-    );
-  }
-  return id;
+  return cachedLookup(ctx?.idCache, cacheKey(careersUrl), async () => {
+    // Retried like every page fetch below — this single request runs BEFORE
+    // pagination even starts, so without a retry a transient blip here (DNS/TLS/
+    // connection reset) fails the whole board before a single page is fetched.
+    const html = await fetchTextWithRetry(ctx, careersUrl.href, {
+      redirect: 'error',
+      headers: { accept: 'text/html', 'user-agent': BROWSER_LIKE_USER_AGENT },
+    });
+    const id = extractCollectionId(html);
+    if (!id) {
+      throw new Error(
+        `getro: ${label} — could not resolve collection_id from ${careersUrl.href} (no network.id found in ` +
+        `__NEXT_DATA__; page structure may have changed — set getro_collection: N on this entry as a fallback)`,
+      );
+    }
+    return id;
+  }, { isValid: (v) => typeof v === 'string' && /^\d+$/.test(v) && /[1-9]/.test(v) });
 }
 
 /**
@@ -244,6 +262,10 @@ export default {
         // catch, defeating the graceful-truncate guarantee here.
         const cause = err instanceof Error ? err.message : String(err);
         if (page === 0) {
+          // An unknown collection answers 404. Drop a cached id for this board
+          // so the next scan reads the board page again, in case the network
+          // moved to a new collection.
+          if (err?.status === 404 && !resolveCollectionOverride(entry)) ctx?.idCache?.delete(cacheKey(careersUrl));
           // The FIRST page failing after retries means the board itself is
           // unreachable, not that it has zero listings — returning [] here
           // would misreport "dead board" as "0 open roles". Every other

@@ -299,6 +299,12 @@ export function scanCompanyNames(content) {
  * `name` and the scanner's company string; that undercounts when names differ
  * ("Acme" vs "Acme, Inc."). Documented v1 contract — no silent fuzzy-matching.
  *
+ * configuredCompanies counts every tracked_companies entry, disabled ones
+ * included; enabledCompanies is the distinct enabled names producingPct
+ * divides by. They differ whenever an entry is disabled, as many are in the
+ * shipped template, so a reader handed only the first would see a percentage
+ * that does not divide out from the counts beside it.
+ *
  * @param {string} portalsYmlContent - Raw portals.yml text.
  * @param {object|null} scanStats - Result of computeScanStats (for activePortals).
  * @param {string[]} [producingCompanyNames] - From scanCompanyNames().
@@ -377,6 +383,7 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
 
   return {
     configuredCompanies: companies.length,
+    enabledCompanies: configuredNames.size,
     configuredBoards: boards.length,
     activePortals: Object.keys(scanStats?.byPortal || {}).length,
     producingCompanies,
@@ -703,8 +710,11 @@ function printSummary(stats, { followupsEnabled = true } = {}) {
       : '';
     // Only break out live/cold when there's a cold row to report — with no
     // follow-up data (or genuinely zero cold rows) the plain count is exactly
-    // as accurate and the parenthetical would be noise.
-    const liveInfo = t.activeAppsCold > 0 ? ` (${t.activeAppsLive} live, ${t.activeAppsCold} cold)` : '';
+    // as accurate and the parenthetical would be noise. 'Cold' is a follow-up
+    // cadence verdict, so it goes too when follow-ups are off: the Follow-ups
+    // line below says they are, and followup-cadence.mjs reports no cold rows
+    // then. JSON is unchanged, as for the follow-up line (#5710).
+    const liveInfo = followupsEnabled && t.activeAppsCold > 0 ? ` (${t.activeAppsLive} live, ${t.activeAppsCold} cold)` : '';
     console.log(`Tracker:    ${t.total} total | ${t.activeApps} active${liveInfo}${fit}`);
     const statusLine = Object.entries(t.byStatus).filter(([, c]) => c > 0).map(([s, c]) => `${s} ${c}`).join(' · ');
     if (statusLine) console.log(`Status:     ${statusLine}`);
@@ -727,7 +737,7 @@ function printSummary(stats, { followupsEnabled = true } = {}) {
   const p = stats.portals;
   if (p) {
     const deadPart = p.persistentlyDead > 0 ? ` | 🚨 ${p.persistentlyDead} persistently dead (run verify-portals.mjs)` : '';
-    console.log(`Portals:    ${p.configuredCompanies} companies + ${p.configuredBoards} boards configured | ${p.producingCompanies} have produced a match (${p.producingPct}%)${deadPart} — low ≠ broken, may just be no openings`);
+    console.log(`Portals:    ${p.configuredCompanies} companies + ${p.configuredBoards} boards configured | ${p.producingCompanies} of ${p.enabledCompanies} enabled have produced a match (${p.producingPct}%)${deadPart} — low ≠ broken, may just be no openings`);
   } else {
     console.log('Portals:    — no data (portals.yml missing)');
   }

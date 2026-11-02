@@ -27,6 +27,22 @@ docker run --rm --init --ipc=host --platform linux/amd64 \
 ```
 
 CI uses these same commands and [`tests/cv-visual/Dockerfile`](../tests/cv-visual/Dockerfile).
+
+A separate CI job, `tool-suites`, runs in the same image the discovered suites
+that need a real Chromium or a TeX engine, with the tool required so that a
+missing one fails instead of skipping (#5756, #5758):
+
+```bash
+docker run --rm --init --ipc=host --platform linux/amd64 \
+  --volume "$PWD:/work" --volume /work/node_modules \
+  career-ops-cv-visual \
+  sh -c 'npm install --ignore-scripts --package-lock=false && node install-latex-engine.mjs && node test-all.mjs --needs browser,latex'
+```
+
+`node install-latex-engine.mjs` writes `tectonic` into the checkout (it is
+gitignored), and its first compile downloads the TeX bundle, so this step needs
+network access.
+
 The Playwright image pins Chromium and its operating system by digest; the dated
 Ubuntu archive fixes Liberation Sans/Serif, Noto CJK, and Poppler versions. The
 explicit `linux/amd64` platform also applies on Apple Silicon. An anonymous

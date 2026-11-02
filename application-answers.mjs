@@ -350,10 +350,11 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
  * NEITHER the letter NOR the name identifies this block. Both move with the
  * locale: of the 19 evaluation modes, 3 write the English name under `H)`
  * (canonical, `ar`, `ja`), 5 write a translated name under `H)`
- * (`es ru tr zh zh-TW`), and 11 write a translated name under `G)`
- * (`da de fr hi id it ko nl pl pt ua`). Matching one exact heading found the
- * block in 3 of 19, so in sixteen languages `modes/apply.md` silently
- * regenerated every answer the evaluation had already drafted and paid for.
+ * (`es ru tr zh zh-TW`), and 11 wrote a translated name under `G)`
+ * (`da de fr hi id it ko nl pl pt ua`) until #5843 moved it to `H)`. Matching
+ * one exact heading found the block in 3 of 19, so in sixteen languages
+ * `modes/apply.md` silently regenerated every answer the evaluation had
+ * already drafted and paid for.
  *
  * A trailing parenthetical marker is the signal instead, which is the
  * convention `web/src/lib/report-sections.mjs` already established for the
@@ -403,9 +404,10 @@ function findDraftAnswersHeading(report) {
   // Last resort, and the only path that reads a TRANSLATED heading (#4400).
   // Neither rule above fires on one today: no mode emits the `(draft)` marker
   // (`git grep '(draft)' -- 'modes/*'` is empty), and the name rule is the
-  // English words, which five shipped modes translate — modes/es, modes/ru,
-  // modes/tr, modes/zh and modes/zh-TW. For those the block silently returned
-  // null, which is indistinguishable from a report that has no Block H.
+  // English words, which sixteen shipped modes translate (modes/es, modes/ru,
+  // modes/tr, modes/zh, modes/zh-TW, and since #5843 the eleven that used to
+  // write it under `G)`). For those the block silently returned null, which is
+  // indistinguishable from a report that has no Block H.
   //
   // The letter is the structural part every mode keeps: `modes/oferta.md`
   // defines `H)` as the draft-answers block and each translation renders the
