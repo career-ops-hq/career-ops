@@ -77,6 +77,13 @@ ok('text after the date is kept in Notes, not dropped with the date', () => {
   assert.deepStrictEqual(normalizeStatus('Applied 2026-01-02'), { status: 'Applied' }, 'a bare date moves nothing');
 });
 
+ok('text after a date joined some other way is kept in Notes too', () => {
+  for (const cell of ['Applied (2026-01-02) via referral', 'Applied - 2026-01-02 via referral', 'Applied on 2026-01-02 via referral']) {
+    assert.deepStrictEqual(normalizeStatus(cell), { status: 'Applied', moveToNotes: cell });
+  }
+  assert.deepStrictEqual(normalizeStatus('Applied (2026-01-02)'), { status: 'Applied' }, 'the closing bracket is no text');
+});
+
 ok('a dated word that is no state is still reported as unknown', () => {
   assert.deepStrictEqual(normalizeStatus('Pending 2026-01-02'), { status: null, unknown: true });
 });

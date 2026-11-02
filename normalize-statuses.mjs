@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   openTrackerTransaction, rebuildRow,
-  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId,
+  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId, statusTextAfterDate,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -127,8 +127,7 @@ function normalizeStatus(raw) {
   const datedId = resolveCanonicalStateId(raw, canonicalStates());
   if (datedId) {
     const status = canonicalStates().find(st => st.id.toLowerCase() === datedId).label;
-    const tail = (s.match(/\s+\d{4}-\d{2}-\d{2}(.*)$/)?.[1] ?? '').trim();
-    return tail ? { status, moveToNotes: raw.trim() } : { status };
+    return statusTextAfterDate(raw) ? { status, moveToNotes: raw.trim() } : { status };
   }
 
   // Unknown — flag it
