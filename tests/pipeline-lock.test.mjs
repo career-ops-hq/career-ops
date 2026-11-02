@@ -116,6 +116,13 @@ async function churnLockInWorker(lockDir, everyMs) {
   };
 }
 
+// The per-holder window for the tests of the extension rule. A window that sees
+// no handoff reads as wedged, so it has to outlast the longest gap a stalled
+// runner can leave between two handoffs, not just the handoff period. On
+// windows-latest gaps over 100ms failed these tests at windows of 100ms and
+// 150ms, from a worker thread as well.
+const EXTENSION_WINDOW_MS = 500;
+
 function fixtureRoot() {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-pipeline-lock-'));
   mkdirSync(join(root, 'data'), { recursive: true });
@@ -498,11 +505,11 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
     const freeItLater = sleep(600).then(() => churn.stop());
 
     const startedAt = Date.now();
-    // The old absolute deadline killed this caller at 150ms with
+    // The old absolute deadline killed this caller at its timeoutMs with
     // LockTimeoutError even though the lock was healthy and briskly shared —
     // which for agent-inbox.mjs meant its request was silently dropped. The
     // timeout is for a WEDGED holder, not for losing the retry lottery.
-    const lock = await acquirePipelineLock(p, { timeoutMs: 150, retryMs: 15 });
+    const lock = await acquirePipelineLock(p, { timeoutMs: EXTENSION_WINDOW_MS, retryMs: 15 });
     const elapsed = Date.now() - startedAt;
     lock.release();
     await freeItLater;
