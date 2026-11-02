@@ -94,12 +94,17 @@ function credentialMaterial(headers) {
 }
 
 function cacheKey(method, url, opts, body) {
-  return createHash('sha256').update(`${method}\n${url}\n${credentialMaterial(opts.headers)}\n${body}`).digest('hex');
+  // The cap is part of the request. A smaller maxBytes must not be answered
+  // with a body saved under a larger one.
+  const maxBytes = opts.maxBytes == null ? '' : String(opts.maxBytes);
+  return createHash('sha256').update(`${method}\n${url}\n${credentialMaterial(opts.headers)}\n${maxBytes}\n${body}`).digest('hex');
 }
 
 function isFresh(entry, store) {
   if (!entry || !(store.ttlMs > 0)) return false;
-  return store.now() - entry.storedAt < store.ttlMs;
+  const age = store.now() - entry.storedAt;
+  // A storedAt ahead of the clock is not a fresh board. Recheck it.
+  return age >= 0 && age < store.ttlMs;
 }
 
 function parseEntry(raw) {

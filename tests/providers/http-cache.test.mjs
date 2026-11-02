@@ -23,6 +23,11 @@ const server = createServer((req, res) => {
       res.end('nope');
       return;
     }
+    if (req.url === '/wide') {
+      res.writeHead(200, { 'content-type': 'text/plain', etag: '"v1"' });
+      res.end('x'.repeat(50));
+      return;
+    }
     if (req.headers['if-none-match'] === '"v1"') {
       res.writeHead(304, { etag: '"v1"' });
       res.end();
@@ -126,6 +131,54 @@ const board = `${origin}/v1/boards/northwind/jobs`;
   const got = hits.slice(before).filter((hit) => hit.url === '/postings/keyed');
   if (got.length === 2) pass('two API keys for one URL are two saved responses');
   else fail(`API keys shared a cache entry (${got.length} requests)`);
+}
+
+{
+  const url = `${origin}/wide`;
+  const full = await via(() => cache(() => fetchText(url)));
+  let tooBig = false;
+  try {
+    await via(() => cache(() => fetchText(url, { maxBytes: 10 })));
+  } catch (err) {
+    tooBig = err?.code === 'response_too_large';
+  }
+  const wideHits = hits.filter((hit) => hit.url === '/wide').length;
+  if (full.length === 50 && tooBig && wideHits === 2) pass('a smaller maxBytes does not reuse a larger saved body');
+  else fail(`maxBytes shared a body (len=${full.length}, tooBig=${tooBig}, hits=${wideHits})`);
+}
+
+{
+  const url = `${origin}/clock`;
+  await via(() => cache(() => fetchJson(url)));
+  now -= 5_000;
+  const before = hits.length;
+  const again = await via(() => cache(() => fetchJson(url)));
+  now += 5_000;
+  const got = hits.slice(before).filter((hit) => hit.url === '/clock');
+  if (got.length === 1 && got[0].inm === '"v1"' && again.n === 1) pass('a saved time in the future is rechecked');
+  else fail(`future storedAt was ${JSON.stringify(got)} and returned ${JSON.stringify(again)}`);
+}
+
+{
+  const readonly = `${origin}/readonly`;
+  const notSaved = `${origin}/not-saved`;
+  await via(() => cache(() => fetchJson(readonly)));
+  const before = hits.length;
+  const reused = await via(() => withHttpCache({
+    dir, ttlMs: 1_000, now: () => now, write: false,
+  }, () => fetchJson(readonly)));
+  await via(() => withHttpCache({
+    dir, ttlMs: 1_000, now: () => now, write: false,
+  }, () => fetchJson(notSaved)));
+  await via(() => cache(() => fetchJson(notSaved)));
+  const got = hits.slice(before);
+  const readonlyHits = got.filter((hit) => hit.url === '/readonly').length;
+  const notSavedHits = got.filter((hit) => hit.url === '/not-saved').length;
+  if (reused.n === 1 && readonlyHits === 0 && notSavedHits === 2) {
+    pass('a dry run reuses a saved response and does not keep a new one');
+  } else {
+    fail(`dry run was ${JSON.stringify({ reused, readonlyHits, notSavedHits })}`);
+  }
 }
 
 server.close();
