@@ -58,7 +58,9 @@ function restoreEnv() {
 
 const emptyRoot = mkdtempSync(join(tmpdir(), 'co-browser-empty-'));
 const envRoot = mkdtempSync(join(tmpdir(), 'co-browser-env-'));
+const relativeEnvRoot = mkdtempSync(join(tmpdir(), 'co-browser-relative-env-'));
 writeFileSync(join(envRoot, '.env'), `${EXE}=/opt/fromdotenv/browser # browser override\n`);
+writeFileSync(join(relativeEnvRoot, '.env'), `${EXE}=browsers/brave\n`);
 
 try {
   // Negative control: nothing configured -> bundled Chromium, options untouched.
@@ -110,6 +112,20 @@ try {
     pass('an explicit project root supplies the browser setting for targeted checks');
   } else {
     fail(`explicit project root ignored: ${JSON.stringify(fromTarget)} / ${JSON.stringify(targetOpts)}`);
+  }
+
+  // A relative path in .env belongs to the data root, not to whichever cwd
+  // launched the command. A shell export keeps the historical cwd-relative
+  // behavior because it is already explicit process configuration.
+  setEnv({ root: relativeEnvRoot });
+  const relativeFromFile = resolveBrowserExecutable();
+  setEnv({ exe: 'browsers/brave', root: relativeEnvRoot });
+  const relativeFromShell = resolveBrowserExecutable();
+  if (relativeFromFile?.path === join(relativeEnvRoot, 'browsers', 'brave')
+      && relativeFromShell?.path === 'browsers/brave') {
+    pass('relative .env paths resolve from the data root while shell paths stay unchanged');
+  } else {
+    fail(`relative executable path resolution is wrong: ${JSON.stringify(relativeFromFile)} / ${JSON.stringify(relativeFromShell)}`);
   }
 
   // A shell variable that is present but empty switches off what .env sets.
@@ -168,4 +184,5 @@ try {
   restoreEnv();
   rmSync(emptyRoot, { recursive: true, force: true });
   rmSync(envRoot, { recursive: true, force: true });
+  rmSync(relativeEnvRoot, { recursive: true, force: true });
 }
