@@ -290,7 +290,7 @@ npm i -g @santifer/career-ops
 
 `/career-ops` без продовження показує меню команд у CLI, які його використовують. Звичайна мова працює в будь-якому підтримуваному CLI. Якщо career-ops встановлено як плагін Claude Code, команда має вигляд `/career-ops:career-ops`.
 
-Усі вони мають один спільний роутер, `.agents/skills/career-ops/SKILL.md`, і ті самі файли `modes/*.md`, тому режим працює однаково в будь-якому CLI. Slash-команди в Codex не гарантовані: просіть звичайною мовою або запустіть один промпт у headless-режимі через `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Як запускати career-ops у кожному підтримуваному CLI, headless-команди там, де вони є, і нотатки щодо налаштування окремих CLI — у [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Усі вони мають один спільний роутер, `.agents/skills/career-ops/SKILL.md`, і ті самі файли `modes/*.md`, тому будь-який CLI спрямовує запит однаково (режимам, що активно використовують браузер, також потрібні інструменти Playwright). Slash-команди в Codex не гарантовані: просіть звичайною мовою або запустіть один промпт у headless-режимі через `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Як запускати career-ops у кожному підтримуваному CLI, headless-команди там, де вони є, і нотатки щодо налаштування окремих CLI — у [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Щоденні команди
 
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *вставте URL або опис вакансії* | Повний пайплайн: перевірка, що вакансія ще відкрита (лише для URL), оцінка A-G плюс H за високої оцінки, звіт, адаптоване резюме (за замовчуванням PDF), рядок у трекері |
 | `scan` | Сканує ваші портали в пошуку нових вакансій і додає їх до вхідних (`data/pipeline.md`) |
-| `pipeline` | Обробляє URL, що чекають у вхідних, пропускаючи явні невідповідності |
+| `pipeline` | Обробляє URL, що чекають у вхідних (рівні standard і premium можуть пропускати явні невідповідності) |
 | `apply` | Заповнює форму заявки разом із вами, поле за полем. Зупиняється перед надсиланням |
 | `tracker` | На якому етапі кожна заявка |
 | `followup` | За якими заявками час нагадати про себе, з готовими чернетками |
