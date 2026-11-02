@@ -42,6 +42,7 @@ if (process.platform === 'win32') {
  * `modelName` below and the `--model` examples accordingly.
  */
 
+import { createHash } from 'crypto';
 import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
@@ -382,6 +383,18 @@ const sharedLabel = join(modesDir, '_shared.md').replace(/\\/g, '/');
 const ofertaLabel = join(modesDir, evalFilename).replace(/\\/g, '/');
 let sharedContext    = readFile(PATHS.shared,      sharedLabel);
 const ofertaLogic    = readFile(PATHS.oferta,      ofertaLabel);
+// Market evaluation files are a layer over the canonical procedure: they cite
+// its gates, provenance rule and scoring bands, then add local vocabulary.
+// The web focused-evaluation path keeps those canonical rules and appends
+// market text as context that does not replace them (evaluation-options.mjs,
+// "MARKET CONTEXT (canonical scoring rules still apply)"). Gemini inlines
+// both, in that order. modes/oferta.md itself is not included twice.
+const CANONICAL_OFERTA_REL = 'modes/oferta.md';
+const MARKET_CONTEXT_MARK = '\n\n--- MARKET CONTEXT (canonical scoring rules still apply) ---\n';
+const resolvedOfertaRel = relative(CODE_ROOT, PATHS.oferta).replaceAll('\\', '/');
+const ofertaPrompt = resolvedOfertaRel === CANONICAL_OFERTA_REL
+  ? ofertaLogic
+  : `${readFile(join(CODE_ROOT, CANONICAL_OFERTA_REL), CANONICAL_OFERTA_REL)}${MARKET_CONTEXT_MARK}${ofertaLogic}`;
 
 // Multi-market (#3793): fold in every OTHER declared market's _shared.md so the
 // agent has all declared candidates' vocabulary/legal-concept context, not just
@@ -408,7 +421,7 @@ const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profil
 // ---------------------------------------------------------------------------
 const { contextBody, budgetReport } = buildBudgetedPrompt({
   sharedContent: sharedContext,
-  ofertaContent: ofertaLogic,
+  ofertaContent: ofertaPrompt,
   cvContent,
   profileYml,
   profileContent,
@@ -421,6 +434,18 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
 if (contextOnly) {
   const resolvedEvalMode = relative(CODE_ROOT, PATHS.oferta).replaceAll('\\', '/');
   console.log(`🧭  Evaluation mode: ${resolvedEvalMode}`);
+  // Fingerprints of the strings actually concatenated into the prompt, so a
+  // test can check order without printing the mode files (they name _custom.md,
+  // and an absent _custom.md must stay silent on stdout).
+  const evaluationFingerprint = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+  if (resolvedEvalMode === CANONICAL_OFERTA_REL) {
+    console.log(`🧭  Evaluation stack: ${CANONICAL_OFERTA_REL} ${evaluationFingerprint(ofertaPrompt)}`);
+  } else {
+    const splitAt = ofertaPrompt.indexOf(MARKET_CONTEXT_MARK);
+    const prefix = splitAt === -1 ? '' : ofertaPrompt.slice(0, splitAt);
+    const suffix = splitAt === -1 ? '' : ofertaPrompt.slice(splitAt + MARKET_CONTEXT_MARK.length);
+    console.log(`🧭  Evaluation stack: ${CANONICAL_OFERTA_REL} ${evaluationFingerprint(prefix)} -> ${resolvedEvalMode} ${evaluationFingerprint(suffix)}`);
+  }
 }
 
 // Log token budget info
