@@ -14,7 +14,7 @@
 // state added later is covered without editing this file.
 import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import assert from 'node:assert';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -111,6 +111,39 @@ ok('the CLI rewrites dated cells and reports no unknown statuses', () => {
       .map(l => l.split('|').map(c => c.trim()));
     assert.deepStrictEqual(rows.map(c => c[6]), ['Applied', 'Interview', 'Applied']);
     assert.deepStrictEqual(rows.map(c => c[9]), ['', 'panel booked', 'Applied 2026-01-04 via referral']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// verify-pipeline tells the user to run this script for a dated cell, so the
+// two have to agree on every cell, not only on the shape one of them expected.
+ok('every cell verify-pipeline flags as dated comes out clean after normalizing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'normalize-verify-test-'));
+  const cells = ['Applied 2026-01-02', 'Applied (2026-01-02)', 'Applied - 2026-01-02', 'Applied, 2026-01-02', 'Applied: 2026-01-02',
+    'Applied on 2026-01-02', '2026-01-02 Applied', '**Interview** (2026-02-10)', 'Rejected - 2026-05-06 by mail'];
+  const env = { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '', CAREER_OPS_PIPELINE: '',
+    CAREER_OPS_SCAN_HISTORY: '', CAREER_OPS_PORTALS: '', CAREER_OPS_PROFILE: '', CAREER_OPS_FOLLOWUPS: '', CAREER_OPS_REPORTS: '',
+    CAREER_OPS_CV: '', CAREER_OPS_JDS: '', CAREER_OPS_ADDITIONS: '', CAREER_OPS_ACTIVITY_DIR: '' };
+  const run = (script) => spawnSync(process.execPath, [join(ROOT, script)], { encoding: 'utf-8', env, cwd: dir });
+  const dated = (out) => (out.match(/Status contains date/g) ?? []).length;
+  try {
+    mkdirSync(join(dir, 'data'));
+    const tracker = join(dir, 'data', 'applications.md');
+    writeFileSync(tracker, ['# Applications Tracker', '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      ...cells.map((cell, i) => `| ${i + 1} | 2026-01-02 | Co${i} | Role${i} | 4.0/5 | ${cell} | ❌ | — |  |`),
+      ''].join('\n'));
+    const before = run('verify-pipeline.mjs');
+    assert.strictEqual(dated(before.stdout), cells.length, `the premise: ${before.stdout}`);
+    assert.doesNotMatch(before.stdout, /Non-canonical status/, 'a known state under a date is not an unknown status');
+    assert.strictEqual(run('normalize-statuses.mjs').status, 0);
+    const after = run('verify-pipeline.mjs');
+    assert.strictEqual(dated(after.stdout), 0, after.stdout);
+    const rows = readFileSync(tracker, 'utf-8').split('\n').filter(l => /^\|\s*\d+\s*\|/.test(l)).map(l => l.split('|').map(c => c.trim()));
+    assert.deepStrictEqual(rows.map(c => c[6]), [...Array(6).fill('Applied'), 'Applied', 'Interview', 'Rejected']);
+    assert.strictEqual(rows[8][9], 'Rejected - 2026-05-06 by mail', 'the words after the date move to Notes');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
