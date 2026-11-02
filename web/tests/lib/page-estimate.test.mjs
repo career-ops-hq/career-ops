@@ -263,6 +263,65 @@ test("a page border counts in the one-page estimate", () => {
   assert.equal(previewPageCount(contentHeightPx(one)), 2);
 });
 
+test("a visibility:hidden box does not add a preview page", () => {
+  const view = { getComputedStyle: (el) => ({ visibility: el.visibility || "visible" }) };
+  const box = (top, height, visibility, children) => ({
+    visibility,
+    children,
+    ownerDocument: { defaultView: view },
+    getBoundingClientRect: () => ({ top, height, width: 800 }),
+  });
+  const page = { ...box(200, 900, "visible"), scrollHeight: 900 };
+  const hiddenAbove = {
+    body: {
+      children: [box(0, 200, "hidden"), page],
+      scrollHeight: 1100,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(hiddenAbove), 900);
+  assert.equal(previewPageCount(contentHeightPx(hiddenAbove)), 1);
+
+  const shownInside = box(0, 80, "visible");
+  const hiddenParent = box(0, 200, "hidden", [shownInside]);
+  const visibleChild = {
+    body: {
+      children: [hiddenParent, page],
+      scrollHeight: 1100,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(visibleChild), 1100);
+  assert.equal(previewPageCount(contentHeightPx(visibleChild)), 2);
+
+  const pageAtTop = { ...box(0, 900, "visible"), scrollHeight: 900 };
+  const hiddenFooter = {
+    body: {
+      children: [pageAtTop, box(900, 200, "hidden")],
+      scrollHeight: 1100,
+      querySelector: () => pageAtTop,
+      querySelectorAll: () => [pageAtTop],
+    },
+  };
+  assert.equal(contentHeightPx(hiddenFooter), 900);
+  assert.equal(previewPageCount(contentHeightPx(hiddenFooter)), 1);
+
+  const shownFooter = box(900, 200, "visible");
+  const hiddenWrap = box(900, 200, "hidden", [shownFooter]);
+  const visibleFooter = {
+    body: {
+      children: [pageAtTop, hiddenWrap],
+      scrollHeight: 1100,
+      querySelector: () => pageAtTop,
+      querySelectorAll: () => [pageAtTop],
+    },
+  };
+  assert.equal(contentHeightPx(visibleFooter), 1100);
+  assert.equal(previewPageCount(contentHeightPx(visibleFooter)), 2);
+});
+
 test("an unmeasured preview estimates one page", () => {
   assert.equal(contentHeightPx(null), 0);
   assert.equal(previewPageCount(0), 1);

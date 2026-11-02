@@ -13,6 +13,18 @@ function placed(el) {
   return { top, bottom: top + height };
 }
 
+// visibility:hidden keeps a box, but that box is not content. A child can set
+// visibility back to visible, so callers still walk into this element.
+function isInvisible(el) {
+  const getComputedStyle = el.ownerDocument?.defaultView?.getComputedStyle;
+  if (typeof getComputedStyle !== "function") return false;
+  try {
+    return getComputedStyle(el)?.visibility === "hidden";
+  } catch {
+    return false;
+  }
+}
+
 // display:none reports a zero box at the origin. Treating that as the start
 // of the CV turns the body margin into extra height. display:contents has no
 // box either, but its children can, so those still count.
@@ -21,7 +33,8 @@ function hasBox(el) {
   const rect = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
   const width = Math.max(rect && Number.isFinite(rect.width) ? rect.width : 0, el.offsetWidth || 0);
   const height = Math.max(rect && Number.isFinite(rect.height) ? rect.height : 0, el.offsetHeight || 0, el.scrollHeight || 0);
-  return width > 0 || height > 0;
+  if (!(width > 0 || height > 0)) return false;
+  return !isInvisible(el);
 }
 
 // The highest box can come later in the DOM than .page. The first box in
