@@ -102,6 +102,15 @@ test('an advisory phrase only the pass spells out is reported, and a drafted one
   assert.equal(run.stderr.match(/advisory phrase: maybe/g)?.length, 1, run.stderr);
 });
 
+test('a letter says what the pass rewrote, and says nothing when it rewrote nothing', () => {
+  const rewritten = letter({ opening: 'I saved €50k — in a year.' }, { cv: 'I saved €50k in a year.\n' });
+  assert.equal(rewritten.run.status, 0, describeSpawn(rewritten.run));
+  assert.match(rewritten.run.stderr, /ATS normalization: \d+ replacements \(.*em-dash=\d+.*euro=1.*\)/);
+  const clean = letter({ opening: 'I build systems.' });
+  assert.equal(clean.run.status, 0, describeSpawn(clean.run));
+  assert.doesNotMatch(clean.run.stderr, /ATS normalization/);
+});
+
 test('a figure the pass rewrites still prints when a source backs it', () => {
   const body = printed(
     { opening: 'I saved €50k a year.', profile_intro: 'I took p99 from 900ms → 200ms.' },
