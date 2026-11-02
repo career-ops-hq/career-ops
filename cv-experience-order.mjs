@@ -29,7 +29,7 @@ const DISPLAY_PERIOD_MAX = 60;
  * guessed at — the same "don't penalize missing data" discipline the location
  * and country filters use.
  *
- * @param {string} period - e.g. "Jan 2021 - Apr 2022", "2005 - 2008".
+ * @param {string} period - e.g. "Jan 2021 - Apr 2022", "09/2021 - 04/2022", "2005 - 2008".
  * @returns {{ year: number, month: number|null }|null} null when no year is found.
  */
 export function parseExperienceStart(period) {
@@ -51,7 +51,25 @@ export function parseExperienceStart(period) {
   const last = range ? (MONTHS.get(range[2].slice(0, 3).toLowerCase()) ?? null) : null;
   // "Nov - Feb 2023" ran past New Year, so the year it names is the end's.
   const crossed = first !== null && last !== null && first > last;
-  return { year: Number(year[0]) - (crossed ? 1 : 0), month: first };
+  return {
+    year: Number(year[0]) - (crossed ? 1 : 0),
+    month: first ?? numericMonth(before, text.slice(year.index + year[0].length)),
+  };
+}
+
+/**
+ * The month of "09/2024", "09.2024" or "2024-09", from the text either side of
+ * the year. A full date written day or month first ("03/04/2024") stays unread,
+ * because which number is the month depends on the country.
+ *
+ * @param {string} before - The period's text ahead of the year.
+ * @param {string} after - The period's text after the year.
+ * @returns {number|null}
+ */
+function numericMonth(before, after) {
+  const found = before.match(/(?<![\d/.-])(0?[1-9]|1[0-2])[/.-]$/)
+    ?? after.match(/^[/.-](0[1-9]|1[0-2])(?!\d)/);
+  return found ? Number(found[1]) : null;
 }
 
 /**
