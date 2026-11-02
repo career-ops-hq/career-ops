@@ -249,8 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# 求人の URL または説明文を貼り付けると auto-pipeline が起動します。
+# それ以外のモードと、お使いの CLI での呼び出し方は、下の「使い方」を参照してください。
 ```
 
 </details>
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *URL または求人票を貼り付ける* | フルパイプライン：掲載確認（URL のみ）、A-G 評価（高スコア時は H も）、レポート、調整済み CV（既定では PDF）、トラッカー行 |
 | `scan` | ポータルをスキャンして新しい求人を見つけ、受信箱（`data/pipeline.md`）に追加する |
-| `pipeline` | 受信箱で待っているすべての URL を評価する |
+| `pipeline` | 受信箱で待っている URL を順に処理し、明らかに合わないものは飛ばす |
 | `apply` | 応募フォームをあなたと一緒に項目ごとに入力する。送信の手前で止まる |
 | `tracker` | 各応募の状況 |
 | `followup` | フォローアップの時期が来ている応募と、その下書き |
@@ -313,10 +313,10 @@ npm i -g @santifer/career-ops
 | コマンド | できること |
 | --- | --- |
 | [`scan`](modes/scan.md) | ポータルをスキャンして新しい求人を発見 |
-| [`discover`](modes/discover.md) | 企業名のリストをスキャン可能な ATS ボードに解決し、`portals.yml` に追加（トークン不要） |
+| [`discover`](modes/discover.md) | 企業名のリストをスキャン可能な ATS ボードに解決します。既定ではプレビューのみで、`--write` を付けたときだけ `portals.yml` に追加します（トークン不要） |
 | [`pipeline`](modes/pipeline.md) | 受信箱（`data/pipeline.md`）の未処理 URL を処理 |
 | [`triage`](modes/triage.md) | フル評価の前に、`modes/_brief.md` に基づいて応募する・しないを素早くふるい分ける（ファイルは書き込まない） |
-| [`batch`](modes/batch.md) | 並列のヘッドレスワーカーで多数の求人を評価 |
+| [`batch`](modes/batch.md) | ヘッドレスワーカーで多数の求人を評価（Claude では並列、他の CLI では 1 件ずつ） |
 | [`titles`](modes/titles.md) | CV から近い職種名を提案して、探す範囲を広げる |
 
 **求人を評価する**
