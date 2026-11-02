@@ -18,10 +18,7 @@ export function trackerEmptyMessage({ shape, query, min, tab }) {
       detail: "data/applications.md is not a tracker table. The file was not changed.",
     };
   }
-  const filtering = Boolean(String(query ?? "").trim())
-    || (min != null && min !== "")
-    || (tab && tab !== "ALL" && tab !== "INBOX");
-  if (shape === "rows" || filtering) {
+  if (shape === "rows") {
     return {
       kind: "filtered",
       title: "No matches",

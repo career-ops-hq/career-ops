@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveTrackerPath as coreResolve } from "../../../path-resolver.mjs";
-import { resolveTrackerPath, readTrackerFile } from "../../src/lib/core/tracker-files.mjs";
+import { trackerLinkDirsFor as coreLinkDirs } from "../../../tracker-utils.mjs";
+import { resolveTrackerPath, readTrackerFile, trackerLinkDirs } from "../../src/lib/core/tracker-files.mjs";
 
 test("web tracker and ledger follow the core resolver across supported layouts", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "tracker-files-"));
@@ -18,6 +19,7 @@ test("web tracker and ledger follow the core resolver across supported layouts",
     }
     const check = (directory) => {
       assert.equal(resolveTrackerPath(root), coreResolve(root));
+      assert.deepEqual(trackerLinkDirs(root), coreLinkDirs(root));
       assert.equal(readTrackerFile(root), directory);
       assert.equal(readTrackerFile(root, "status-log.tsv"), "ledger:" + directory);
     };
@@ -42,6 +44,8 @@ test("web tracker and ledger follow the core resolver across supported layouts",
     if (linked) {
       process.env.CAREER_OPS_TRACKER = path.join(root, "linked.md");
       check(path.join(root, "custom"));
+      // Links resolve from the target's folder first, then the link's (#5374).
+      assert.deepEqual(trackerLinkDirs(root), [fs.realpathSync(path.join(root, "custom")), path.resolve(root)]);
     }
     fs.unlinkSync(path.join(root, "custom/status-log.tsv"));
     assert.equal(readTrackerFile(root, "status-log.tsv"), null);

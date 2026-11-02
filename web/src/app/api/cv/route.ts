@@ -14,8 +14,9 @@ const MAX_CV_BYTES = 200_000;
 export async function GET() {
   try {
     return NextResponse.json({ content: fs.readFileSync(cvPath(), "utf8"), exists: true });
-  } catch {
-    return NextResponse.json({ content: "", exists: false });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return NextResponse.json({ content: "", exists: false });
+    return NextResponse.json({ error: "Couldn't read cv.md." }, { status: 500 });
   }
 }
 

@@ -1,7 +1,7 @@
 // tests/openrouter-runner-model-timeout.test.mjs — a single model call is
 // given 120 s before it is aborted.
 //
-// MODEL_TIMEOUT_MS was 15 s. The system prompt has grown since then and
+// The model timeout was 15 s. The system prompt has grown since then and
 // max_tokens is 8192, so slow free models were cut off mid-answer. In free
 // rotation a timeout is not a skip: the model is written to
 // data/model-blacklist.json, so one slow answer banned a working model for every
@@ -48,7 +48,15 @@ test('a single model call is aborted after 120 s, not 15 s', async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), 'career-ops-timeout-'));
   try {
     const runner = await loadRunner(dataRoot);
-    assert.equal(runner.MODEL_TIMEOUT_MS, 120_000);
+    const saved = { ops: process.env.CAREER_OPS_TIMEOUT_MS, or: process.env.OPENROUTER_TIMEOUT_MS };
+    delete process.env.CAREER_OPS_TIMEOUT_MS;
+    delete process.env.OPENROUTER_TIMEOUT_MS;
+    try {
+      assert.equal(runner.getModelTimeoutMs(), 120_000);
+    } finally {
+      if (saved.ops !== undefined) process.env.CAREER_OPS_TIMEOUT_MS = saved.ops;
+      if (saved.or !== undefined) process.env.OPENROUTER_TIMEOUT_MS = saved.or;
+    }
   } finally {
     rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
