@@ -536,7 +536,8 @@ test('acquirePipelineLock: extended waiting is still bounded by maxWaitMs, so en
     );
     const elapsed = Date.now() - startedAt;
     assert.ok(elapsed >= maxWaitMs, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
-    assert.ok(elapsed < 3000, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
+    // Under the default ceiling of ten windows, so an ignored maxWaitMs fails here.
+    assert.ok(elapsed < EXTENSION_WINDOW_MS * 8, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
   } finally {
     await churn.stop();
     rmSync(root, { recursive: true, force: true });
