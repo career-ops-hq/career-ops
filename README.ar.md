@@ -249,8 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# الصق رابط وظيفة أو نص وصفها لتشغيل auto-pipeline.
+# بقية الأوضاع وكيفية طلبها في واجهتك: انظر «الاستخدام» أدناه.
 ```
 
 </details>
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *الصق رابطًا أو وصفًا وظيفيًا* | خط المعالجة الكامل: التحقق من أن الوظيفة ما زالت متاحة (للروابط فقط)، تقييم A-G مع H عند الدرجات المرتفعة، تقرير، سيرة ذاتية مُكيَّفة (PDF افتراضيًا)، صف في المتتبّع |
 | `scan` | يفحص بواباتك بحثًا عن وظائف جديدة ويضيفها إلى صندوق الوارد (`data/pipeline.md`) |
-| `pipeline` | يقيّم كل رابط ينتظر في صندوق الوارد |
+| `pipeline` | يعالج الروابط المنتظرة في صندوق الوارد ويتخطى غير المطابقة بوضوح |
 | `apply` | يملأ نموذج التقديم معك حقلًا بحقل. ويتوقف قبل الإرسال |
 | `tracker` | أين وصل كل طلب |
 | `followup` | أي الطلبات حان موعد متابعتها، مع مسودات |
@@ -313,10 +313,10 @@ npm i -g @santifer/career-ops
 | الأمر | ماذا يفعل |
 | --- | --- |
 | [`scan`](modes/scan.md) | فحص البوابات واكتشاف عروض جديدة |
-| [`discover`](modes/discover.md) | تحويل قائمة أسماء شركات إلى لوحات ATS قابلة للفحص وإضافتها إلى `portals.yml` (بدون رموز) |
+| [`discover`](modes/discover.md) | تحويل قائمة أسماء شركات إلى لوحات ATS قابلة للفحص. يعرض معاينة افتراضيًا ولا يضيفها إلى `portals.yml` إلا مع `--write` (بدون رموز) |
 | [`pipeline`](modes/pipeline.md) | معالجة الروابط المعلّقة من صندوق الوارد (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | فرز أولي سريع (يستحق/لا يستحق) استنادًا إلى `modes/_brief.md`، قبل التقييم الكامل (لا يكتب أي ملفات) |
-| [`batch`](modes/batch.md) | تقييم وظائف كثيرة بعمّال متوازين دون واجهة |
+| [`batch`](modes/batch.md) | تقييم وظائف كثيرة بعمّال دون واجهة (بالتوازي مع Claude، وواحدة تلو الأخرى مع بقية الواجهات) |
 | [`titles`](modes/titles.md) | اقتراح مسميات وظيفية قريبة من سيرتك الذاتية لتوسيع البحث |
 
 **تقييم وظيفة**
