@@ -547,8 +547,11 @@ export function PipelineView({
           <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground">
             Clear
           </button>
-          {bulkError && <span role="alert" className="text-xs text-red-500">{bulkError}</span>}
         </div>
+      )}
+
+      {visibleTab !== "INBOX" && bulkError && (
+        <p role="alert" className="mt-2 text-xs text-red-500">{bulkError}</p>
       )}
 
       {visibleTab !== "INBOX" && (
