@@ -502,7 +502,7 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
     const churn = churnLock(`${p}.lock`, 40);
     // Let the lock change hands for several times the caller's timeout, then
     // free it. The caller must still be waiting, not dead.
-    const freeItLater = sleep(600).then(() => churn.stop());
+    const freeItLater = sleep(EXTENSION_WINDOW_MS * 2.6).then(() => churn.stop());
 
     const startedAt = Date.now();
     // The old absolute deadline killed this caller at its timeoutMs with
