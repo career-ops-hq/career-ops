@@ -125,6 +125,35 @@ ok('the CLI rewrites dated cells and reports no unknown statuses', () => {
   }
 });
 
+ok('without a Notes column, a cell with words after its date is left as it is', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'normalize-no-notes-test-'));
+  const tracker = join(dir, 'applications.md');
+  try {
+    writeFileSync(tracker, [
+      '# Applications Tracker', '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report |',
+      '|---|---|---|---|---|---|---|---|',
+      '| 1 | 2026-01-02 | Acme | Platform Engineer | 4.5/5 | Applied 2026-01-02 via referral | ❌ | — |',
+      '| 2 | 2026-01-03 | Globex | Data Engineer | 4.0/5 | Applied 2026-01-03 | ❌ | — |',
+      '| 3 | 2026-01-04 | Initech | Analyst | 3.5/5 | Aplicado 2026-01-04 via referral | ❌ | — |',
+      '',
+    ].join('\n'));
+    const r = spawnSync(process.execPath, [join(ROOT, 'normalize-statuses.mjs')], {
+      encoding: 'utf-8',
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker },
+    });
+    assert.strictEqual(r.status, 0, `normalize-statuses exited ${r.status}: ${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /unknown status/, 'the state is known; only the words have nowhere to go');
+    assert.match(r.stdout, /2 dated statuses left as they are: the tracker has no Notes column.*\n {2}#1 \(line 5\): "Applied 2026-01-02 via referral"\n {2}#3 /);
+    const rows = readFileSync(tracker, 'utf-8').split('\n').filter(l => /^\|\s*\d+\s*\|/.test(l))
+      .map(l => l.split('|').map(c => c.trim()));
+    assert.deepStrictEqual(rows.map(c => c[6]), ['Applied 2026-01-02 via referral', 'Applied', 'Aplicado 2026-01-04 via referral'],
+      'a bare date still goes');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // verify-pipeline tells the user to run this script for a dated cell, so the
 // two have to agree on every cell, not only on the shape one of them expected.
 ok('every cell verify-pipeline flags as dated comes out clean after normalizing', () => {

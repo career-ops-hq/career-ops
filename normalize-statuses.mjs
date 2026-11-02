@@ -184,6 +184,7 @@ const lines = content.split('\n');
 
 let changes = 0;
 let unknowns = [];
+let noNotes = [];
 
 // Map columns by header name (tracker-parse.mjs, #954/#1596). Fixed indices
 // assumed the original 9-column layout, so a customized tracker — an inserted
@@ -213,6 +214,14 @@ for (let i = 0; i < lines.length; i++) {
   }
 
   if (result.status === rawStatus) continue; // Already canonical
+
+  // Words after a date (`Applied 2026-01-02 via referral`) move to Notes. A
+  // layout without a Notes column has nowhere to put them, and the bare state
+  // would drop them, so the row stays as it is.
+  if (COLS.notes == null && statusTextAfterDate(rawStatus)) {
+    noNotes.push({ num, rawStatus, line: i + 1 });
+    continue;
+  }
 
   // Apply change
   const oldStatus = rawStatus;
@@ -248,6 +257,13 @@ for (let i = 0; i < lines.length; i++) {
 if (unknowns.length > 0) {
   console.log(`\n⚠️  ${unknowns.length} unknown statuses:`);
   for (const u of unknowns) {
+    console.log(`  #${u.num} (line ${u.line}): "${u.rawStatus}"`);
+  }
+}
+
+if (noNotes.length > 0) {
+  console.log(`\n⚠️  ${noNotes.length} dated statuses left as they are: the tracker has no Notes column for the words after the date:`);
+  for (const u of noNotes) {
     console.log(`  #${u.num} (line ${u.line}): "${u.rawStatus}"`);
   }
 }
