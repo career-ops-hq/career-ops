@@ -528,13 +528,14 @@ test('acquirePipelineLock: extended waiting is still bounded by maxWaitMs, so en
     const p = join(root, 'data', 'pipeline.md');
     // Progress must buy patience, never immortality: a lock handed round for
     // ever still has to fail the caller rather than block it indefinitely.
+    const maxWaitMs = EXTENSION_WINDOW_MS * 2.4;
     const startedAt = Date.now();
     await assert.rejects(
-      () => acquirePipelineLock(p, { timeoutMs: 100, retryMs: 10, maxWaitMs: 400 }),
+      () => acquirePipelineLock(p, { timeoutMs: EXTENSION_WINDOW_MS, retryMs: 10, maxWaitMs }),
       (err) => err instanceof LockTimeoutError,
     );
     const elapsed = Date.now() - startedAt;
-    assert.ok(elapsed >= 400, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
+    assert.ok(elapsed >= maxWaitMs, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
     assert.ok(elapsed < 3000, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
   } finally {
     await churn.stop();
