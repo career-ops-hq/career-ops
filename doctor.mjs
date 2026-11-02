@@ -20,7 +20,6 @@ import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
-import { browserLaunchOptions, resolveBrowserExecutable } from './lib/browser-launch.mjs';
 import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -57,7 +56,8 @@ try {
 // copy made without `npm install`) died with a raw ERR_MODULE_NOT_FOUND stack
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
-let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH, resolveExtractorMode, auditUserTemplates;
+let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
+let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable;
 try {
   [
     { hasYamlContent, loadYaml },
@@ -66,6 +66,7 @@ try {
     { validateProfile, EXAMPLE_PATH },
     { resolveExtractorMode },
     { auditUserTemplates },
+    { browserLaunchOptions, resolveBrowserExecutable },
   ] = await Promise.all([
     import('./lib/yaml-document.mjs'),
     import('dotenv'),
@@ -73,6 +74,7 @@ try {
     import('./validate-profile.mjs'),
     import('./browser-extract.mjs'),
     import('./cv-templates.mjs'),
+    import('./lib/browser-launch.mjs'),
   ]);
 } catch (err) {
   let missing = [];
