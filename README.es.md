@@ -251,8 +251,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# Pega la URL o el texto de una oferta para activar el auto-pipeline.
+# El resto de los modos, y cómo pedirlos en tu CLI: consulta Uso más abajo.
 ```
 
 </details>
@@ -292,7 +292,7 @@ Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueb
 
 `/career-ops` sin nada detrás muestra el menú de comandos en los CLIs que lo usan. El lenguaje natural funciona en todos los CLIs compatibles. Como plugin de Claude Code, el comando es `/career-ops:career-ops`.
 
-Todos comparten un único enrutador, `.agents/skills/career-ops/SKILL.md`, y los mismos archivos `modes/*.md`, así que un modo se comporta igual sea cual sea el CLI que lo ejecute. Los comandos de barra no están garantizados en Codex: pide en lenguaje natural, o lanza un prompt en modo headless con `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cómo ejecutarlo en cada CLI compatible, los comandos headless cuando un CLI los tiene y las notas de configuración de cada CLI están en [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Todos comparten un único enrutador, `.agents/skills/career-ops/SKILL.md`, y los mismos archivos `modes/*.md`, así que todos los CLIs enrutan una petición de la misma forma (los modos que usan mucho el navegador también necesitan herramientas de Playwright). Los comandos de barra no están garantizados en Codex: pide en lenguaje natural, o lanza un prompt en modo headless con `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cómo ejecutarlo en cada CLI compatible, los comandos headless cuando un CLI los tiene y las notas de configuración de cada CLI están en [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Los comandos de cada día
 
@@ -300,7 +300,7 @@ Todos comparten un único enrutador, `.agents/skills/career-ops/SKILL.md`, y los
 | --- | --- |
 | *pega una URL o una descripción de oferta* | Pipeline completo: comprobación de que la oferta sigue abierta (solo URLs), evaluación A-G más H con puntuaciones altas, informe, CV adaptado (PDF por defecto), fila en el tracker |
 | `scan` | Escanea tus portales en busca de ofertas nuevas y las añade a la bandeja (`data/pipeline.md`) |
-| `pipeline` | Evalúa cada URL que espera en la bandeja |
+| `pipeline` | Recorre las URL que esperan en la bandeja (los niveles standard y premium pueden descartar las que claramente no encajan) |
 | `apply` | Rellena un formulario de candidatura contigo, campo por campo. Se detiene antes de Enviar |
 | `tracker` | En qué punto está cada candidatura |
 | `followup` | Qué candidaturas toca seguir, con borradores |
@@ -315,10 +315,10 @@ Todos comparten un único enrutador, `.agents/skills/career-ops/SKILL.md`, y los
 | Comando | Qué hace |
 | --- | --- |
 | [`scan`](modes/scan.md) | Escanea portales y descubre ofertas nuevas |
-| [`discover`](modes/discover.md) | Convierte una lista de nombres de empresas en tableros ATS escaneables y los añade a `portals.yml` (sin tokens) |
+| [`discover`](modes/discover.md) | Convierte una lista de nombres de empresas en tableros ATS escaneables. Por defecto solo muestra una vista previa y únicamente con `--write` los añade a `portals.yml` (sin tokens) |
 | [`pipeline`](modes/pipeline.md) | Procesa las URLs pendientes de la bandeja (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Primer filtro rápido de sí/no a partir de `modes/_brief.md`, antes de una evaluación completa (no escribe archivos) |
-| [`batch`](modes/batch.md) | Evalúa muchas ofertas con workers headless en paralelo |
+| [`batch`](modes/batch.md) | Evalúa muchas ofertas con workers headless (en paralelo con Claude, de una en una con otros CLIs) |
 | [`titles`](modes/titles.md) | Sugiere títulos de puesto afines a partir de tu CV para ampliar la búsqueda |
 
 **Evaluar un puesto**
