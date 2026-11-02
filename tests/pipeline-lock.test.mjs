@@ -502,7 +502,7 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
   const root = fixtureRoot();
   try {
     const p = join(root, 'data', 'pipeline.md');
-    const churn = churnLock(`${p}.lock`, 40);
+    const churn = await churnLockInWorker(`${p}.lock`, 40);
     // Let the lock change hands for several times the caller's timeout, then
     // free it. The caller must still be waiting, not dead.
     const freeItLater = sleep(EXTENSION_WINDOW_MS * 2.6).then(() => churn.stop());
@@ -515,10 +515,10 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
     const lock = await acquirePipelineLock(p, { timeoutMs: EXTENSION_WINDOW_MS, retryMs: 15 });
     const elapsed = Date.now() - startedAt;
     lock.release();
-    await freeItLater;
+    const handoffs = await freeItLater;
 
     assert.ok(elapsed > EXTENSION_WINDOW_MS * 2, `acquired after only ${elapsed}ms — the lock was not actually contended`);
-    assert.ok(churn.handoffs() > 5, `only ${churn.handoffs()} handoffs — the deadline was never crossed mid-contention`);
+    assert.ok(handoffs > 5, `only ${handoffs} handoffs — the deadline was never crossed mid-contention`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
