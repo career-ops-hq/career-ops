@@ -18,7 +18,7 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
-import { assertFacts, printFactWarnings } from "./verify-cv-facts.mjs";
+import { assertFacts, newFactWarnings, printFactWarnings } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { PAGE_FORMATS, normalizePageFormat, pageFormatForCountry } from "./lib/page-format.mjs";
@@ -514,13 +514,12 @@ Usage:
     reportAtsReplacements(replacements, console.error);
     // As for a CV, the gate also reads the document that prints: the pass can
     // spell out a phrase the draft hid, as `self–starter` prints as
-    // `self-starter`. A forbidden one stops here. An advisory one is reported,
+    // `self-starter`. A forbidden one stops here. Anything advisory is reported,
     // unless the check above already named it.
-    const printedCheck = assertFacts(printed, factOptions);
-    const spelledOut = printedCheck.warnings.filter((phrase) => !factCheck.warnings.includes(phrase));
-    if (spelledOut.length > 0) {
+    const printedWarnings = newFactWarnings(factCheck, assertFacts(printed, factOptions));
+    if (printedWarnings) {
       console.error(`CV fact check warning: cover letter`);
-      printFactWarnings({ warnings: spelledOut }, console.error);
+      printFactWarnings(printedWarnings, console.error);
     }
     await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's

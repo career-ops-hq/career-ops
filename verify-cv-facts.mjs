@@ -3061,6 +3061,25 @@ export function printFactWarnings(result, print = console.warn) {
   }
 }
 
+/**
+ * What a second check of a document found that the first did not, ready for
+ * printFactWarnings(): a caller that checks twice has already reported the rest.
+ *
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} first
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} second
+ * @returns {{warnings: string[], advisoryFacts: object[], coverage: object|null}|null}
+ *   null when there is nothing new.
+ */
+export function newFactWarnings(first, second) {
+  const factKey = ({ kind, value }) => `${kind}\u0000${value}`;
+  const seenFacts = new Set((first.advisoryFacts ?? []).map(factKey));
+  const seenPhrases = new Set(first.warnings ?? []);
+  const warnings = (second.warnings ?? []).filter((phrase) => !seenPhrases.has(phrase));
+  const advisoryFacts = (second.advisoryFacts ?? []).filter((fact) => !seenFacts.has(factKey(fact)));
+  const coverage = first.coverage ? null : (second.coverage ?? null);
+  return warnings.length || advisoryFacts.length || coverage ? { warnings, advisoryFacts, coverage } : null;
+}
+
 /** Run the fact validator CLI and return its process exit code. */
 export function runCli(args = process.argv.slice(2)) {
   if (args.length === 1 && args[0] === '--self-test') return runSelfTest();

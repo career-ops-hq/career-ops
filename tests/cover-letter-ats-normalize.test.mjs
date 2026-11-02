@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { newFactWarnings } from '../verify-cv-facts.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CAPTURE = pathToFileURL(join(ROOT, 'tests', 'fixtures', 'cover-pdf-capture-register.mjs')).href;
@@ -109,6 +110,18 @@ test('a letter says what the pass rewrote, and says nothing when it rewrote noth
   const clean = letter({ opening: 'I build systems.' });
   assert.equal(clean.run.status, 0, describeSpawn(clean.run));
   assert.doesNotMatch(clean.run.stderr, /ATS normalization/);
+});
+
+test('a second check reports only what the first did not', () => {
+  const fact = { kind: 'title', value: 'Staff', line: 'Staff Engineer' };
+  const other = { kind: 'title', value: 'Principal', line: 'Principal Engineer' };
+  const coverage = { message: 'one span unread', spans: ['x'] };
+  assert.equal(newFactWarnings({}, {}), null);
+  assert.equal(newFactWarnings({ warnings: ['maybe'], advisoryFacts: [fact], coverage },
+    { warnings: ['maybe'], advisoryFacts: [fact], coverage }), null);
+  assert.deepEqual(newFactWarnings({ warnings: ['maybe'], advisoryFacts: [fact] },
+    { warnings: ['maybe', 'perhaps'], advisoryFacts: [fact, other], coverage }),
+  { warnings: ['perhaps'], advisoryFacts: [other], coverage });
 });
 
 test('a figure the pass rewrites still prints when a source backs it', () => {
