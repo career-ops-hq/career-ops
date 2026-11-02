@@ -20,6 +20,38 @@ export function createInboxSkipActions(persistSkip, onSkipFailure) {
   };
 }
 
+/** Tell the caller as soon as one skip fails. The returned promise waits for the whole batch.
+ * @param {Promise<unknown>[]} tasks
+ * @param {(index: number) => void} onReject
+ * @returns {Promise<void>}
+ */
+export function reportSkipRejections(tasks, onReject) {
+  return Promise.allSettled(tasks.map((task, index) => Promise.resolve(task).catch(() => {
+    onReject(index);
+  }))).then(() => {});
+}
+
+/** Unhide each restored URL as soon as that request succeeds.
+ * A later failure still rejects, after the successes have been reported.
+ * @param {string[]} urls
+ * @param {(url: string) => Promise<void>} persist
+ * @param {(url: string) => void} onRestored
+ * @returns {Promise<void>}
+ */
+export function restoreSkippedUrls(urls, persist, onRestored) {
+  const failures = [];
+  return Promise.all(urls.map((url) => Promise.resolve()
+    .then(() => persist(url))
+    .then(() => { onRestored(url); })
+    .catch((error) => { failures.push(error); }),
+  )).then(() => {
+    if (failures.length === 0) return;
+    const error = failures[0];
+    if (error instanceof Error) throw error;
+    throw new Error("Could not undo every skip. Please try again.");
+  });
+}
+
 /** Serialize writes for one posting while still reporting failures to the UI.
  * A failed request must not poison the chain: the next Undo/retry still runs.
  * @param {Map<string, Promise<void>>} chains
