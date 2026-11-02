@@ -4,7 +4,7 @@
 // a summer role "Jun - Aug 2022" looked older than it, because August > July.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseExperienceStart } from '../cv-experience-order.mjs';
+import { parseExperienceStart, validateCvExperienceOrder } from '../cv-experience-order.mjs';
 
 test('a month range inside one year starts in its first month', () => {
   for (const period of ['Jun - Aug 2022', 'Jun – Aug 2022', 'Jun — Aug 2022', 'June to August 2022', 'Jun-Aug 2022']) {
@@ -38,6 +38,26 @@ test('a range stays in its year when it ends later in it, or its end is not a mo
   assert.deepEqual(parseExperienceStart('Mar - Mar 2023'), { year: 2023, month: 3 });
   assert.deepEqual(parseExperienceStart('Nov - Present 2023'), { year: 2023, month: 11 });
   assert.deepEqual(parseExperienceStart('Ago - Feb 2023'), { year: 2023, month: null });
+});
+
+test('a numeric month reads the way a named one does', () => {
+  for (const period of ['09/2024 – 12/2024', '9/2024 - 12/2024', '09.2024 - Present', '2024-09 – 2024-12', '2024/09 - Present', '2024-09-15 - Present']) {
+    assert.deepEqual(parseExperienceStart(period), { year: 2024, month: 9 }, period);
+  }
+});
+
+test('a number that is not clearly a month stays unread', () => {
+  // Day first or month first depends on the country, so neither is guessed at.
+  assert.deepEqual(parseExperienceStart('03/04/2024'), { year: 2024, month: null });
+  assert.deepEqual(parseExperienceStart('13/2024'), { year: 2024, month: null });
+  assert.deepEqual(parseExperienceStart('2022-2024'), { year: 2022, month: null });
+  assert.deepEqual(parseExperienceStart('2023-24'), { year: 2023, month: null });
+});
+
+test('two roles in one year written with numeric months are ordered by them', () => {
+  const cv = (first, second) => `<span class="job-period">${first}</span><span class="job-period">${second}</span>`;
+  assert.doesNotThrow(() => validateCvExperienceOrder(cv('09/2024 - Present', '01/2024 - 08/2024')));
+  assert.throws(() => validateCvExperienceOrder(cv('01/2024 - 08/2024', '09/2024 - Present')), /reverse-chronological/);
 });
 
 test('a comma before the year does not hide the month', () => {
