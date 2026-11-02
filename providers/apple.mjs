@@ -133,6 +133,12 @@ function urlOf(r) {
   return `${BASE}/en-us/details/${id}/${slug}${team ? `?team=${team}` : ''}`;
 }
 
+// Each search row carries a `type`, "REQ" or "PIPE". It is only in the
+// hydration data, not in the visible job text, and the posting does not say
+// what PIPE means, so the note claims no more than the label. It is a hint on
+// the pipeline entry; nothing is filtered on it.
+const PIPE_NOTE = 'Apple labels this posting PIPE: it may be a talent pipeline, not a specific opening';
+
 /** @param {any} r @param {string} company @returns {Job|null} */
 function toJob(r, company) {
   const url = urlOf(r);
@@ -148,6 +154,7 @@ function toJob(r, company) {
     // survives a title edit, which the URL does not (#4076's Job.externalId).
     ...(externalId ? { externalId } : {}),
     ...(Number.isNaN(posted) ? {} : { postedAt: posted }),
+    ...(r.type === 'PIPE' ? { note: PIPE_NOTE } : {}),
   };
 }
 

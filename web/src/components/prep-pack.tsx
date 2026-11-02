@@ -2,9 +2,9 @@ import { ChevronDown } from "lucide-react";
 import { prepQuestions, readMachineSummary } from "@/lib/machine-summary.mjs";
 
 const MATCH_LABEL: Record<string, { text: string; className: string }> = {
-  strong: { text: "prove it", className: "text-emerald-600 dark:text-emerald-400" },
-  partial: { text: "show depth", className: "text-amber-600 dark:text-amber-400" },
-  missing: { text: "gap plan", className: "text-red-600 dark:text-red-400" },
+  strong: { text: "prove it", className: "text-emerald-800 dark:text-emerald-400" },
+  partial: { text: "show depth", className: "text-amber-800 dark:text-amber-400" },
+  missing: { text: "gap plan", className: "text-red-700 dark:text-red-400" },
 };
 
 export function PrepPack({ report, company }: { report: string; company: string }) {

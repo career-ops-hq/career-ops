@@ -88,15 +88,59 @@ function splitEnv(extra = {}) {
 
 // ── openrouter-runner.mjs ───────────────────────────────────────────────────
 
+const VALID_EVALUATION = `
+**URL:** https://example.com/job/123
+**Score:** 4.2/5
+**Decision:** Apply
+**Legitimacy:** High Confidence
+
+---
+
+## Machine Summary
+\`\`\`yaml
+company: "Acme"
+role: "Senior Backend Engineer"
+score: 4.2
+final_decision: "Apply"
+\`\`\`
+
+## A) Role Summary
+Backend platform role focusing on distributed systems in Go and Node.js.
+- Domain: Platform / Cloud
+- Seniority: Senior
+- Remote: Full
+
+## B) Match with CV
+| Requirement | Importance | Match | JD signal | Evidence / gap |
+|---|---|---|---|---|
+| Node.js | critical (stated) | ✅ Strong | "Expert Node.js" | cv.md: 5 years experience |
+
+## C) Level and Strategy
+Targeted at senior level with solid engineering ownership.
+
+## D) Comp and Demand
+Salary benchmark 120-140k EUR in line with market expectation.
+
+## E) Customization Plan
+Emphasize backend scale, microservices, and high-throughput queue architectures.
+
+## F) Interview Plan
+Prepare STAR stories for distributed systems troubleshooting and latency reduction.
+
+## G) Posting Legitimacy
+Verified direct company board with transparent company information. High Confidence.
+`;
+
 // Preloaded with --import. Records the request the runner would have sent to
 // OpenRouter and answers it; any other request fails, so the test cannot reach
 // the network.
 const FETCH_STUB = `
 import { writeFileSync } from 'node:fs';
+const EVAL_REPLY = ${JSON.stringify(VALID_EVALUATION)};
 globalThis.fetch = async (url, init = {}) => {
   if (!String(url).endsWith('/chat/completions')) throw new Error('split-root fixture: unexpected fetch ' + url);
   writeFileSync(process.env.SPLIT_ROOT_CAPTURE, String(init.body));
-  const body = { choices: [{ message: { content: '**Legitimacy:** High\\n\\nScore: 4.2/5\\n\\nFixture evaluation.' } }], usage: {} };
+  const body = { choices: [{ message: { content: EVAL_REPLY } }], usage: {} };
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 };
 `;
