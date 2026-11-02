@@ -3,6 +3,7 @@ import { profilePatchError } from "@/lib/profile-patch.mjs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
@@ -81,7 +82,7 @@ export async function POST(req: Request) {
   // malformed" (NEVER overwrite — that would silently destroy the user's data).
   if (!fs.existsSync(file)) {
     try {
-      source = fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8");
+      source = fs.readFileSync(path.join(resolveCodeRoot(process.cwd(), process.env), "config", "profile.example.yml"), "utf8");
       base = (yaml.load(source) as Record<string, unknown>) || {};
       seeded = Object.keys(base).length > 0;
     } catch {
