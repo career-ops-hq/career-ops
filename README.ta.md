@@ -249,8 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# auto-pipeline-ஐத் தொடங்க ஒரு வேலை URL-ஐயோ JD உரையையோ ஒட்டுங்கள்.
+# மற்ற எல்லா mode-களும், அவற்றை உங்கள் CLI-இல் எப்படிக் கேட்பது என்பதும்: கீழே Usage பகுதியைப் பாருங்கள்.
 ```
 
 </details>
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *URL அல்லது JD-ஐ ஒட்டு* | முழு pipeline: வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா எனச் சரிபார்த்தல் (URL-களுக்கு மட்டும்), A-G மதிப்பீடு மற்றும் உயர் மதிப்பெண்ணில் H, report, ஏற்றவாறு தயாரித்த CV (இயல்பாக PDF), tracker வரி |
 | `scan` | உங்கள் portal-களில் புதிய அறிவிப்புகளைத் தேடி inbox-இல் (`data/pipeline.md`) சேர் |
-| `pipeline` | inbox-இல் காத்திருக்கும் ஒவ்வொரு URL-ஐயும் மதிப்பிடு |
+| `pipeline` | inbox-இல் காத்திருக்கும் URL-களைச் செயலாக்கு; தெளிவாகப் பொருந்தாதவற்றைத் தவிர் |
 | `apply` | ஒரு விண்ணப்பப் படிவத்தை உங்களுடன் சேர்ந்து, புலம் புலமாக நிரப்பு. Submit-க்கு முன் நின்றுவிடும் |
 | `tracker` | ஒவ்வொரு விண்ணப்பமும் எந்த நிலையில் உள்ளது |
 | `followup` | எந்த விண்ணப்பங்களுக்கு follow-up செய்ய வேண்டும், வரைவுகளுடன் |
@@ -313,10 +313,10 @@ npm i -g @santifer/career-ops
 | கட்டளை | என்ன செய்கிறது |
 | --- | --- |
 | [`scan`](modes/scan.md) | தளங்களை ஸ்கேன் செய்து புதிய வாய்ப்புகளைக் கண்டறி |
-| [`discover`](modes/discover.md) | நிறுவனப் பெயர்களின் பட்டியலை ஸ்கேன் செய்யக்கூடிய ATS board-களாக மாற்றி `portals.yml`-இல் சேர் (token செலவு இல்லை) |
+| [`discover`](modes/discover.md) | நிறுவனப் பெயர்களின் பட்டியலை ஸ்கேன் செய்யக்கூடிய ATS board-களாக மாற்று. இயல்பாக முன்னோட்டம் மட்டும்; `--write` கொடுத்தால் மட்டுமே `portals.yml`-இல் சேர் (token செலவு இல்லை) |
 | [`pipeline`](modes/pipeline.md) | inbox-இல் (`data/pipeline.md`) நிலுவையிலுள்ள URL-களைச் செயலாக்கு |
 | [`triage`](modes/triage.md) | முழு மதிப்பீட்டுக்கு முன், `modes/_brief.md`-ஐ அடிப்படையாகக் கொண்ட விரைவான முதல் வடிகட்டல் (தொடரலாம்/வேண்டாம்) (கோப்புகளை எழுதாது) |
-| [`batch`](modes/batch.md) | இணையான headless worker-களுடன் பல அறிவிப்புகளை மதிப்பிடு |
+| [`batch`](modes/batch.md) | headless worker-களுடன் பல அறிவிப்புகளை மதிப்பிடு (Claude-இல் இணையாக, பிற CLI-களில் ஒன்றன்பின் ஒன்றாக) |
 | [`titles`](modes/titles.md) | தேடலை விரிவாக்க, உங்கள் CV அடிப்படையில் தொடர்புடைய பணிப் பெயர்களைப் பரிந்துரை |
 
 **ஒரு பணியை மதிப்பிடு**
