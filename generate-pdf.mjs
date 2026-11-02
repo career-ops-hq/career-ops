@@ -2328,6 +2328,10 @@ async function launchChromium(options) {
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
+  // Checked before the shared painter as well as in renderInPage(): the request
+  // reaches the painter as JSON, which turns NaN into null, and the painter
+  // would read that as no budget, paint with the default 2 and replace the PDF.
+  assertValidMaxPages(opts.maxPages ?? 2);
   // A passed launchBrowser is a test double and always paints in this process.
   // The shared painter is only for the batch, which opts in with the env var,
   // and the painter process itself must not dial its own socket.

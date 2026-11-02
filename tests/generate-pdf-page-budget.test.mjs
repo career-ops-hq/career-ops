@@ -584,6 +584,59 @@ try {
       fail(`renderHtmlToPdf let maxPages ${JSON.stringify(String(maxPages))} reach the output path: ${rejection?.message ?? 'no error'}; rendered=${rendered}; drafts=${drafts.join(', ')}`);
     }
   }
+
+  // The shared painter receives its options as JSON, which turns NaN into null,
+  // so the painter's own check would see no budget and paint with the default.
+  // renderHtmlToPdf() must reject the value before sending the request.
+  mkdirSync(join(sandbox, 'lib'), { recursive: true });
+  copyFileSync(join(ROOT, 'lib', 'pdf-server.mjs'), join(sandbox, 'lib', 'pdf-server.mjs'));
+  const { startPdfServer } = await import(pathToFileURL(join(sandbox, 'lib', 'pdf-server.mjs')).href);
+  const socketDir = mkdtempSync(join(tmpdir(), 'co-pb-'));
+  const socketPath = process.platform === 'win32'
+    ? `\\\\.\\pipe\\career-ops-page-budget-${process.pid}`
+    : join(socketDir, 'pdf.sock');
+  let painted = false;
+  const server = await startPdfServer({
+    socketPath,
+    launchBrowser: async () => ({ async close() {} }),
+    render: async (_browser, _html, outputPath) => {
+      painted = true;
+      writeFileSync(outputPath, 'PAINTED BY THE SHARED BROWSER', 'latin1');
+      return { outputPath, pageCount: 1, size: 29 };
+    },
+  });
+  const savedShared = process.env.CAREER_OPS_PDF_SHARED;
+  const savedSocket = process.env.CAREER_OPS_PDF_SOCKET;
+  const sharedPdf = join(sandbox, 'shared-invalid-budget.pdf');
+  writeFileSync(sharedPdf, 'PREVIOUS GOOD PDF', 'latin1');
+  let sharedRejection = null;
+  try {
+    process.env.CAREER_OPS_PDF_SHARED = '1';
+    process.env.CAREER_OPS_PDF_SOCKET = socketPath;
+    await renderHtmlToPdf('<!doctype html><html><body>shared</body></html>', sharedPdf, {
+      workspaceRoot: sandbox,
+      maxPages: Number.NaN,
+      strictPages: true,
+    });
+  } catch (err) {
+    sharedRejection = err;
+  } finally {
+    if (savedShared === undefined) delete process.env.CAREER_OPS_PDF_SHARED;
+    else process.env.CAREER_OPS_PDF_SHARED = savedShared;
+    if (savedSocket === undefined) delete process.env.CAREER_OPS_PDF_SOCKET;
+    else process.env.CAREER_OPS_PDF_SOCKET = savedSocket;
+    await server.close();
+    rmSync(socketDir, { recursive: true, force: true });
+  }
+  if (
+    sharedRejection?.message === 'Invalid page budget "NaN". Use a positive integer.' &&
+    !painted &&
+    readFileSync(sharedPdf, 'latin1') === 'PREVIOUS GOOD PDF'
+  ) {
+    pass('renderHtmlToPdf rejects maxPages NaN before asking the shared painter, leaving the existing PDF in place');
+  } else {
+    fail(`renderHtmlToPdf sent maxPages NaN to the shared painter: ${sharedRejection?.message ?? 'no error'}; painted=${painted}`);
+  }
   // --- Optional sections that arrived as a bare header (#3986) -------------
   // The builders strip these from the payload before filling a template, but
   // neither builder runs on the web pdf path: the agent emits finished HTML,
