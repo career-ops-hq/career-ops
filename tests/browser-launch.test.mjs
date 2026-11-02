@@ -127,14 +127,28 @@ try {
     fail(`auto-detect must be opt-in: ${JSON.stringify(resolveBrowserExecutable())}`);
   }
 
-  // When on, it either finds a real installed browser or nothing — it never
-  // invents a path, and never reports itself as the explicit override.
+  // Auto-detection's success path is deterministic: simulate a machine where
+  // only Brave exists instead of depending on the CI host's installed apps.
   setEnv({ auto: 'true', root: emptyRoot });
-  const auto = resolveBrowserExecutable();
-  if (auto === null || auto.source === 'auto') {
-    pass('auto-detect yields source=auto or null, never a fabricated path');
+  const bravePath = '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser';
+  const auto = resolveBrowserExecutable({
+    platform: 'darwin',
+    pathExists: candidate => candidate === bravePath,
+  });
+  if (auto?.path === bravePath && auto.source === 'auto') {
+    pass('enabled auto-detect finds a synthetic Brave install with source=auto');
   } else {
-    fail(`unexpected auto-detect result: ${JSON.stringify(auto)}`);
+    fail(`auto-detect should find synthetic Brave: ${JSON.stringify(auto)}`);
+  }
+
+  const absent = resolveBrowserExecutable({
+    platform: 'darwin',
+    pathExists: () => false,
+  });
+  if (absent === null) {
+    pass('enabled auto-detect returns null when no candidate exists');
+  } else {
+    fail(`auto-detect should return null without candidates: ${JSON.stringify(absent)}`);
   }
 } finally {
   restoreEnv();
