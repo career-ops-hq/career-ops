@@ -292,7 +292,7 @@ Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie 
 
 `/career-ops` seul affiche le menu des commandes dans les CLI qui l'utilisent. Le langage naturel fonctionne dans toutes les CLI prises en charge. En tant que plugin Claude Code, la commande est `/career-ops:career-ops`.
 
-Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les mêmes fichiers `modes/*.md` : un mode se comporte donc de la même façon quelle que soit la CLI qui l'exécute. Les commandes slash ne sont pas garanties dans Codex : demande en langage naturel, ou lance un prompt en mode headless avec `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). La façon de lancer career-ops dans chaque CLI prise en charge, les commandes headless quand une CLI en a une, et les notes de configuration propres à chaque CLI sont dans [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les mêmes fichiers `modes/*.md` : toutes les CLI aiguillent donc une demande de la même façon (les modes qui sollicitent beaucoup le navigateur ont aussi besoin des outils Playwright). Les commandes slash ne sont pas garanties dans Codex : demande en langage naturel, ou lance un prompt en mode headless avec `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). La façon de lancer career-ops dans chaque CLI prise en charge, les commandes headless quand une CLI en a une, et les notes de configuration propres à chaque CLI sont dans [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Les commandes du quotidien
 
@@ -300,7 +300,7 @@ Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les 
 | --- | --- |
 | *colle une URL ou une description d'offre* | Pipeline complet : vérification que l'offre est ouverte (URL uniquement), évaluation A-G plus H si le score est élevé, rapport, CV adapté (PDF par défaut), ligne dans le tracker |
 | `scan` | Scanner tes portails pour trouver de nouvelles offres et les ajouter à la boîte d'entrée (`data/pipeline.md`) |
-| `pipeline` | Parcourir les URL en attente dans la boîte d'entrée en écartant les offres manifestement hors sujet |
+| `pipeline` | Parcourir les URL en attente dans la boîte d'entrée (les niveaux standard et premium peuvent écarter les offres manifestement hors sujet) |
 | `apply` | Remplir un formulaire de candidature avec toi, champ par champ. Elle s'arrête avant l'envoi |
 | `tracker` | Où en est chaque candidature |
 | `followup` | Quelles candidatures sont à relancer, avec des brouillons |
