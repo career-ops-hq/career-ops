@@ -89,6 +89,7 @@ import { htmlToText } from './providers/_html-to-text.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { BOT_CHALLENGE_PATTERNS } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -592,7 +593,7 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
  */
 export async function scanBoardWithRetry(boardCfg, filters, {
   debug = false,
-  launch = () => chromium.launch({ headless: true }),
+  launch = () => chromium.launch(browserLaunchOptions({ headless: true })),
   retryDelayMs = RETRY_DELAY_MS,
 } = {}) {
   let lastError = null;

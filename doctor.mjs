@@ -20,6 +20,7 @@ import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
+import { browserLaunchOptions, resolveBrowserExecutable } from './lib/browser-launch.mjs';
 import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -507,19 +508,36 @@ async function checkPlaywright() {
   // tests the exact binary the runtime uses and catches stub-installs (directory
   // present but no binary — just ABOUT + LICENSE files).
   let browser;
+  // The configured browser, so the check tests what the rest of the repo will
+  // actually launch rather than always probing the bundled Chromium.
+  const override = resolveBrowserExecutable();
   try {
-    browser = await chromium.launch({ headless: true });
-    return { pass: true, label: 'Playwright chromium installed' };
+    browser = await chromium.launch(browserLaunchOptions({ headless: true }));
+    return {
+      pass: true,
+      label: override
+        ? `Playwright chromium installed (using the ${override.source === 'env' ? 'configured' : 'auto-detected'} browser at ${override.path})`
+        : 'Playwright chromium installed',
+    };
   } catch (err) {
     // Only a missing binary is fixed by installing it. Everything else means
     // the binary is present and failed to start, so the advice follows the
     // error Playwright reported instead of repeating a no-op install.
     const cause = classifyChromiumLaunchError(err);
+    // Either cause can be sidestepped by pointing career-ops at a
+    // Chromium-family browser the machine already has.
+    const overrideHint = override
+      ? ` The browser it tried is the one configured for career-ops (${override.path}); clear that setting to fall back to the bundled Chromium.`
+      : ' Or, to use a browser this machine already has instead of the bundled'
+        + ' Chromium (e.g. on an OS too old for it), set'
+        + ' PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/path/to/browser, or'
+        + ' CAREER_OPS_BROWSER_AUTODETECT=true to detect an installed'
+        + ' Brave/Chrome/Edge, in your shell or the data-root .env.';
     if (cause.kind === 'missing-executable') {
       return {
         pass: false,
         label: 'Playwright chromium not installed',
-        fix: playwrightInstallFix(),
+        fix: playwrightInstallFix() + overrideHint,
       };
     }
     if (cause.kind === 'missing-libraries') {
@@ -533,7 +551,7 @@ async function checkPlaywright() {
     return {
       pass: false,
       label: `Playwright chromium is installed but failed to launch: ${cause.detail}`,
-      fix: 'Reinstalling will not fix this, because the browser is already installed. If doctor runs inside a sandbox or container, check that it allows a browser process to start.',
+      fix: 'Reinstalling will not fix this, because the browser is already installed. If doctor runs inside a sandbox or container, check that it allows a browser process to start.' + overrideHint,
     };
   } finally {
     try { await browser?.close(); } catch { /* ignore */ }

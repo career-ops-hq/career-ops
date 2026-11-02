@@ -44,6 +44,7 @@ import { locateApplyReport } from './apply-scope.mjs';
 import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // Ambient privacy guard over global fetch. Installed explicitly here (rather
 // than relying on NODE_OPTIONS) so the OpenRouter path is guarded in a plain
@@ -738,7 +739,7 @@ async function fetchJobPage(url) {
     let browser;
     let unreadable = null;
     try {
-      browser = await chromium.launch({ headless: true });
+      browser = await chromium.launch(browserLaunchOptions({ headless: true }));
       const page = await browser.newPage();
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.waitForTimeout(2000); // wait for SPA render

@@ -30,6 +30,7 @@ import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -298,7 +299,7 @@ async function main() {
   // blacklist, location or date skip that is meant to be revisited later.
   const handledThisRun = new Set();
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
   const context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
   const page = await context.newPage();
 

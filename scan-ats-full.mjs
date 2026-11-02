@@ -83,6 +83,7 @@ import { KNOWN_ATS_VENDORS } from './ats-vendor.mjs';
 import { loadHistoryAtsSeeds } from './history-ats-seeds.mjs';
 import { classifyUnknownHostSeeds, makeHeadProbe } from './branded-successfactors.mjs';
 import { loadProviders } from './providers/_registry.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -1175,7 +1176,7 @@ async function filterLive(offers) {
     );
   }
   console.error(`\nVerifying liveness of ${offers.length} match(es) with Playwright (sequential)...`);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
   const live = [];
   try {
     const page = await newLivenessPage(browser);

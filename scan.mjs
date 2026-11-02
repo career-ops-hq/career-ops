@@ -102,6 +102,7 @@ const parseYaml = loadYaml;
 
 // ── Config ──────────────────────────────────────────────────────────
 import { resolveTrackerPath } from './path-resolver.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 // An explicit override wins; otherwise the root fixed above, since the .env just
@@ -3909,7 +3910,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
         );
       }
       try {
-        browser = await chromium.launch({ headless: true });
+        browser = await chromium.launch(browserLaunchOptions({ headless: true }));
       } catch (err) {
         throw new Error(
           `--verify could not launch Chromium (run "npx playwright install chromium" or re-run without --verify): ${err.message}`,

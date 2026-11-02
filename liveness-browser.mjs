@@ -8,6 +8,7 @@
 import { classifyLiveness, jobIdToken, JOB_ID_PATTERN } from './liveness-core.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 import { SINKHOLE_ADDRESSES } from './providers/_ip-guard.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
 // Single-page-app ATS render the posting after domcontentloaded, so the page
@@ -840,7 +841,7 @@ export function createHeadedPageProvider(chromium) {
       if (page) return page;
       if (launchFailed) return null;
       try {
-        browser = await chromium.launch({ headless: false });
+        browser = await chromium.launch(browserLaunchOptions({ headless: false }));
         const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
         page = await context.newPage();
         return page;

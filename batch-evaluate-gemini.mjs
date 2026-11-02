@@ -40,6 +40,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { assertGoogleRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // The Google SDK issues its own global fetch; this ambient install covers it.
 // The explicit gate at evaluateWithRetry() is the primary layer.
@@ -564,7 +565,7 @@ async function main() {
     return;
   }
   console.log(`Found ${pendingIndices.length} pending offers.`);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
   
   const results = await processPipelineBatch(pendingIndices, CONCURRENCY, (lineIdx, runIdx) => {
     return processOffer(browser, pipelineLines[lineIdx], runIdx);
