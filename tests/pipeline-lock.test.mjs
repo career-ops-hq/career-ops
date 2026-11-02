@@ -74,7 +74,8 @@ function churnLock(lockDir, everyMs) {
 // so the waiter never sees a free lock.
 // A remove-then-create swap would leave a gap another thread can slip through.
 // Resolves once the first owner is on disk; stop() is async because it ends the
-// worker.
+// worker, and resolves to the handoff count, read once nothing is renaming the
+// file.
 async function churnLockInWorker(lockDir, everyMs) {
   const worker = new Worker(`
     const { mkdirSync, writeFileSync } = require('node:fs');
@@ -111,7 +112,9 @@ async function churnLockInWorker(lockDir, everyMs) {
   return {
     async stop() {
       await worker.terminate();
+      const { token } = JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
       rmSync(lockDir, { recursive: true, force: true });
+      return Number(token.replace('handoff-', ''));
     },
   };
 }
