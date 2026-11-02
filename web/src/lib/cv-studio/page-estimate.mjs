@@ -35,17 +35,24 @@ function firstRendered(nodes) {
   return null;
 }
 
-// A footer can sit after .page. The body's own scroll height cannot be used
-// for this: it repeats the iframe viewport, which is the bug the page count
-// was changed to avoid.
+// A footer can sit after .page, including inside a display:contents wrapper.
+// That wrapper has no box, and it may also wrap the page, so the scan walks
+// into it and still skips the page itself. The body's own scroll height
+// cannot be used here: it repeats the iframe viewport.
 function heightAfterPages(body, pages) {
   const kids = body.children;
   if (!kids || typeof kids[Symbol.iterator] !== "function") return 0;
   const pageBottom = pages.length > 0 ? Math.max(...pages.map((page) => placed(page).bottom)) : 0;
   let extra = 0;
-  for (const el of kids) {
+  const pending = [...kids];
+  for (let i = 0; i < pending.length; i++) {
+    const el = pending[i];
     if (!el || pages.includes(el)) continue;
-    if (typeof el.contains === "function" && pages.some((page) => el.contains(page))) continue;
+    const holdsPage = typeof el.contains === "function" && pages.some((page) => el.contains(page));
+    if (holdsPage || !hasBox(el)) {
+      if (el.children && typeof el.children[Symbol.iterator] === "function") pending.push(...el.children);
+      if (!(holdsPage && hasBox(el))) continue;
+    }
     // Margin sits above the border box, so the height alone stops short of the footer.
     const below = placed(el).bottom - pageBottom;
     if (below > extra) extra = below;
@@ -92,7 +99,8 @@ export function contentHeightPx(doc) {
   }
   const page = pages[0] || (typeof body.querySelector === "function" ? body.querySelector(".page") : null);
   if (!page) {
-    const height = body.scrollHeight || body.offsetHeight || 0;
+    const childBottom = heightAfterPages(body, []);
+    const height = childBottom > 0 ? childBottom : body.scrollHeight || body.offsetHeight || 0;
     return height > 0 ? height : 0;
   }
   // scrollHeight stops at the padding edge. The border is part of the page,
@@ -122,7 +130,8 @@ export function frameHeightPx(doc) {
     const bottom = Math.max(...pages.map((page) => placed(page).bottom)) + heightAfterPages(body, pages);
     return bottom > 0 ? bottom : 0;
   }
-  const height = body.scrollHeight || body.offsetHeight || 0;
+  const childBottom = heightAfterPages(body, []);
+  const height = childBottom > 0 ? childBottom : body.scrollHeight || body.offsetHeight || 0;
   return height > 0 ? height : 0;
 }
 

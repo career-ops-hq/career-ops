@@ -129,6 +129,65 @@ test("a footer margin is part of the preview height", () => {
   assert.equal(previewPageCount(contentHeightPx(withGap)), 2);
 });
 
+test("a footer inside a boxless wrapper counts toward the preview height", () => {
+  const page = { scrollHeight: 900, getBoundingClientRect: () => ({ top: 0, height: 900, width: 800 }) };
+  const footer = { offsetHeight: 100, getBoundingClientRect: () => ({ top: 1100, height: 100, width: 800 }) };
+  const beside = { getBoundingClientRect: () => ({ top: 0, height: 0, width: 0 }), children: [footer] };
+  const siblingWrap = {
+    body: {
+      children: [page, beside],
+      scrollHeight: 2000,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(siblingWrap), 1200);
+  assert.equal(frameHeightPx(siblingWrap), 1200);
+
+  const around = {
+    getBoundingClientRect: () => ({ top: 0, height: 0, width: 0 }),
+    children: [page, footer],
+    contains(node) { return node === page; },
+  };
+  const sharedWrap = {
+    body: {
+      children: [around],
+      scrollHeight: 2000,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(sharedWrap), 1200);
+  assert.equal(frameHeightPx(sharedWrap), 1200);
+  assert.equal(previewPageCount(contentHeightPx(sharedWrap)), 2);
+});
+
+test("a document without .page uses the bottom of the rendered content", () => {
+  const block = { offsetHeight: 1000, getBoundingClientRect: () => ({ top: 20, height: 1000, width: 800 }) };
+  const wrap = { getBoundingClientRect: () => ({ top: 0, height: 0, width: 0 }), children: [block] };
+  const one = {
+    body: {
+      children: [wrap],
+      scrollHeight: 1000,
+      offsetHeight: 1000,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+  };
+  assert.equal(contentHeightPx(one), 1020);
+  assert.equal(frameHeightPx(one), 1020);
+
+  const bare = {
+    body: {
+      scrollHeight: 400,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+  };
+  assert.equal(contentHeightPx(bare), 400);
+  assert.equal(frameHeightPx(bare), 400);
+});
+
 test("a header inside a boxless wrapper counts toward the preview height", () => {
   const header = { getBoundingClientRect: () => ({ top: 0, height: 200, width: 800 }) };
   const wrap = { getBoundingClientRect: () => ({ top: 0, height: 0, width: 0 }), children: [header] };
