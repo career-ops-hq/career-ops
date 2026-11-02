@@ -500,13 +500,12 @@ async function settleOrGiveUp(promise, ms) {
 
 test('acquirePipelineLock: a lock that keeps changing hands does not time out a waiting caller', async () => {
   const root = fixtureRoot();
+  const p = join(root, 'data', 'pipeline.md');
+  const churn = await churnLockInWorker(`${p}.lock`, 40);
+  // Let the lock change hands for several times the caller's timeout, then
+  // free it. The caller must still be waiting, not dead.
+  const freeItLater = sleep(EXTENSION_WINDOW_MS * 2.6).then(() => churn.stop());
   try {
-    const p = join(root, 'data', 'pipeline.md');
-    const churn = await churnLockInWorker(`${p}.lock`, 40);
-    // Let the lock change hands for several times the caller's timeout, then
-    // free it. The caller must still be waiting, not dead.
-    const freeItLater = sleep(EXTENSION_WINDOW_MS * 2.6).then(() => churn.stop());
-
     const startedAt = Date.now();
     // The old absolute deadline killed this caller at its timeoutMs with
     // LockTimeoutError even though the lock was healthy and briskly shared —
@@ -520,6 +519,7 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
     assert.ok(elapsed > EXTENSION_WINDOW_MS * 2, `acquired after only ${elapsed}ms — the lock was not actually contended`);
     assert.ok(handoffs > 5, `only ${handoffs} handoffs — the deadline was never crossed mid-contention`);
   } finally {
+    await freeItLater;
     rmSync(root, { recursive: true, force: true });
   }
 });
