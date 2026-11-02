@@ -10,7 +10,7 @@
 // the launch options come back unchanged, so the bundled Chromium is launched
 // exactly as before and no existing user sees a behavior change.
 import { pass, fail } from './helpers.mjs';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -20,6 +20,17 @@ import {
 } from '../lib/browser-launch.mjs';
 
 console.log('\nlib/browser-launch.mjs — browser executable resolution');
+
+// A re-export does not create a local ESM binding. generate-pdf.mjs calls this
+// name inside renderHtmlToPdf(), so it must import it locally before exporting
+// it as part of the module's existing public API.
+const generatePdfSource = readFileSync(new URL('../generate-pdf.mjs', import.meta.url), 'utf8');
+if (/import\s*\{[^}]*\blaunchChromium\b[^}]*\}\s*from\s*['"]\.\/lib\/browser-launch\.mjs['"]/.test(generatePdfSource)
+    && /export\s*\{[^}]*\blaunchChromium\b[^}]*\}/.test(generatePdfSource)) {
+  pass('generate-pdf imports launchChromium locally before re-exporting it');
+} else {
+  fail('generate-pdf re-exports launchChromium without creating the local binding its renderer calls');
+}
 
 const EXE = 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH';
 const AUTO = 'CAREER_OPS_BROWSER_AUTODETECT';

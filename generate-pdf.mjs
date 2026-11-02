@@ -60,6 +60,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, pageFormatForCountry, resolvePageFormat } from './lib/page-format.mjs';
+import { launchChromium } from './lib/browser-launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
@@ -2259,7 +2260,7 @@ export async function inlineLocalFonts(html) {
 // PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH override and additionally reads the
 // data-root .env and can auto-detect an installed browser, so every launch
 // site in the repo resolves the browser identically.
-export { launchChromium } from './lib/browser-launch.mjs';
+export { launchChromium };
 
 /**
  * Render an HTML string to a PDF file via headless Chromium.
