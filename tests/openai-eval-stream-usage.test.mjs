@@ -74,6 +74,15 @@ test('the usage chunk reaches the token footer and the cost estimate', () => {
   assert.doesNotMatch(stdout, /total:.*\(\$0\.0000\)/);
 });
 
+test('Groq usage reaches the token footer', () => {
+  const { stdout } = evaluate([
+    { choices: [], x_groq: { usage: { prompt_tokens: 12000, completion_tokens: 3000, total_tokens: 15000 } } },
+  ]);
+  assert.match(stdout, /evaluation:\s+12\.0k prompt \/ 3\.0k completion/);
+  assert.match(stdout, /total:\s+15\.0k tokens/);
+  assert.doesNotMatch(stdout, /total:.*\(\$0\.0000\)/);
+});
+
 test('usage repeated on every chunk counts once, from the last chunk', () => {
   // llama.cpp's server has sent a running total on each chunk (ggml-org/llama.cpp#12102).
   const { stdout } = evaluate([
