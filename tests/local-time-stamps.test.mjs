@@ -9,6 +9,8 @@
 //                          the UTC day, one day behind for the first hours of a
 //                          local morning east of Greenwich.
 //   generate-pdf.mjs       the date column of data/pdf-index.tsv.
+//   fix-slugs.mjs          the `(slug migrated … <date>, verify-portals)` note
+//                          it writes into portals.yml.
 //
 // Every other "today" in the repo already goes through lib/local-today.mjs
 // (#2765, #2932, #3070, #3301, #3990). These were missed because they stamp
@@ -147,6 +149,24 @@ await renderHtmlToPdf('<!doctype html><html><body>cv</body></html>', ${JSON.stri
     const row = readFileSync(manifest, 'utf-8').split('\n').find((l) => l.startsWith('7\t'));
     assert.ok(row, 'no manifest row was written');
     assert.equal(row.split('\t')[4], LOCAL_DAY, `the row was not dated with the local day: ${row}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fix-slugs dates the note it writes into portals.yml with the local day, not UTC', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fix-slugs-stamp-'));
+  try {
+    const r = runPinned(dir, {
+      source: `
+const { computeFixes } = await import(${href('fix-slugs.mjs')});
+const text = ['tracked_companies:', '  - name: Foo Bar', '    careers_url: https://job-boards.greenhouse.io/foobar', ''].join('\\n');
+const results = [{ name: 'Foo Bar', status: 'missing', ats: 'greenhouse', suggested: { ats: 'lever', slug: 'foobar' } }];
+process.stdout.write(computeFixes(text, results).text);
+`,
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes(`(slug migrated greenhouse->lever ${LOCAL_DAY}, verify-portals)`), r.stdout);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
