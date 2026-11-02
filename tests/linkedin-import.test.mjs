@@ -13,6 +13,7 @@ import {
   LINKEDIN_DOCTOR_LABEL,
   linkedInPluginFix,
 } from '../lib/linkedin-import.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLI = join(ROOT, 'linkedin-import.mjs');
@@ -262,7 +263,7 @@ test('an unreadable tracker stops the import before anything is written', () => 
     mkdirSync(applications);
     const before = readFileSync(join(root, 'data', 'pipeline.md'), 'utf8');
     const result = runCli(root, ['--json'], `https://www.linkedin.com/jobs/view/${A}\n`);
-    assert.notEqual(result.status, 0);
+    assert.ok(exitedNonZero(result), describeSpawn(result, 'unreadable tracker must fail'));
     assert.match(result.stderr, /Nothing was saved/);
     assert.equal(readFileSync(join(root, 'data', 'pipeline.md'), 'utf8'), before);
   } finally {
