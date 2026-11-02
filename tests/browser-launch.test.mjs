@@ -58,7 +58,7 @@ function restoreEnv() {
 
 const emptyRoot = mkdtempSync(join(tmpdir(), 'co-browser-empty-'));
 const envRoot = mkdtempSync(join(tmpdir(), 'co-browser-env-'));
-writeFileSync(join(envRoot, '.env'), `${EXE}=/opt/fromdotenv/browser\n`);
+writeFileSync(join(envRoot, '.env'), `${EXE}=/opt/fromdotenv/browser # browser override\n`);
 
 try {
   // Negative control: nothing configured -> bundled Chromium, options untouched.
@@ -89,11 +89,12 @@ try {
   else fail(`whitespace override should be unset: ${JSON.stringify(resolveBrowserExecutable())}`);
 
   // The data-root .env supplies it when the shell does not — the reason this
-  // resolver exists rather than a bare process.env read.
+  // resolver exists rather than a bare process.env read. Inline comments are
+  // stripped with the same dotenv parser the repository's other readers use.
   setEnv({ root: envRoot });
   const fromFile = resolveBrowserExecutable();
   if (fromFile?.path === '/opt/fromdotenv/browser' && fromFile.source === 'env') {
-    pass(`the data-root .env supplies ${EXE}`);
+    pass(`the data-root .env supplies ${EXE} and strips inline comments`);
   } else {
     fail(`.env override should be read: ${JSON.stringify(fromFile)}`);
   }
