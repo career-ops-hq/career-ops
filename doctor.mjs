@@ -677,16 +677,12 @@ function isOmpClaudeUserProviderEnabled(root) {
     ...ompUserConfigFiles(),
   ].map(readOmpConfigIfPresent).filter(Boolean);
 
-  for (const cfg of configs) {
-    const disabled = Array.isArray(cfg.disabledProviders)
-      ? cfg.disabledProviders.map((p) => String(p).toLowerCase())
-      : [];
-    if (disabled.includes('claude')) return false;
-    const enabled = Array.isArray(cfg.enabledProviders)
-      ? cfg.enabledProviders.map((p) => String(p).toLowerCase())
-      : [];
-    if (enabled.includes('claude')) return true;
-  }
+  const listFor = (key) => {
+    const cfg = configs.find((entry) => Array.isArray(entry[key]));
+    return cfg ? cfg[key].map((p) => String(p).toLowerCase()) : [];
+  };
+  if (listFor('disabledProviders').includes('claude')) return false;
+  if (listFor('enabledProviders').includes('claude')) return true;
 
   return Boolean(process.env.CLAUDE_CONFIG_DIR);
 }

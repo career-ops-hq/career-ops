@@ -523,6 +523,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     }
 
     // 4t. Claude project config overrides root fallback mcp.json
+    mkdirSync(join(dir, '.claude'), { recursive: true });
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({
       mcpServers: {
         playwright: { enabled: false, command: 'mcp-server-playwright' },
@@ -546,6 +547,35 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
       pass('doctor prioritizes Claude project MCP over root fallback mcp.json');
     } else {
       fail(`doctor failed when Claude project config overrides root fallback: ${JSON.stringify(resClaudeOverridesRootFallback)}`);
+    }
+
+    // 4u. disabledProviders takes precedence over enabledProviders across config layers
+    rmSync(join(dir, 'mcp.json'), { force: true });
+    rmSync(join(dir, '.claude'), { recursive: true, force: true });
+    mkdirSync(join(isolatedHome, '.claude'), { recursive: true });
+    writeFileSync(join(isolatedHome, '.claude', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+    mkdirSync(join(dir, '.omp'), { recursive: true });
+    writeFileSync(join(dir, '.omp', 'settings.json'), JSON.stringify({
+      enabledProviders: ['claude'],
+    }));
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\ndisabledProviders:\n  - claude\n');
+
+    const resDisabledProvidersWins = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resDisabledProvidersWins.playwright_mcp?.omp === false
+        && resDisabledProvidersWins.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
+      pass('doctor respects disabledProviders over enabledProviders across config layers');
+    } else {
+      fail(`doctor failed when disabledProviders should win: ${JSON.stringify(resDisabledProvidersWins)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
