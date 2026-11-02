@@ -19,7 +19,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CAPTURE = pathToFileURL(join(ROOT, 'tests', 'fixtures', 'cover-pdf-capture-register.mjs')).href;
 
 /** Runs the script on a letter. `html` is what reached the renderer, if anything did. */
-function letter(fields, { cv = 'Jane Doe builds systems.\n', facts } = {}) {
+function letter(fields, { cv = 'Jane Doe builds systems.\n', facts, inputs } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-cover-ats-'));
   try {
     mkdirSync(join(dir, 'output'));
@@ -32,6 +32,7 @@ function letter(fields, { cv = 'Jane Doe builds systems.\n', facts } = {}) {
       candidate: { name: 'Jane Doe' },
       letter: { role_title: 'Engineer', opening: 'Opening.', profile_intro: 'Profile.', ...fields },
       output_path: 'output/letter.pdf',
+      ...(inputs ? { user_inputs: inputs } : {}),
     };
     writeFileSync(join(dir, 'payload.json'), JSON.stringify(payload));
     const capture = join(dir, 'printed.html');
@@ -122,6 +123,22 @@ test('a second check reports only what the first did not', () => {
   assert.deepEqual(newFactWarnings({ warnings: ['maybe'], advisoryFacts: [fact] },
     { warnings: ['maybe', 'perhaps'], advisoryFacts: [fact, other], coverage }),
   { warnings: ['perhaps'], advisoryFacts: [other], coverage });
+});
+
+test('an amount with the currency after it prints when cv.md or a plan answer states it', () => {
+  // The pass prints `50 000 €` as `50 000 EUR`, which the gate reads as €50000.
+  // Before the sources were read that way too, these letters were refused.
+  const stated = 'I cut supplier costs by 50 000 € a year at Globex.';
+  const backed = letter({ opening: stated }, { cv: 'Cut supplier costs by 50 000 € a year at Globex.\n' });
+  assert.equal(backed.run.status, 0, describeSpawn(backed.run));
+  assert.match(backed.html, /50 000 EUR/);
+  const plan = 'In my first year, I will cut supplier costs by 50 000 €.';
+  const planned = letter({ opening: plan }, { inputs: [plan] });
+  assert.equal(planned.run.status, 0, describeSpawn(planned.run));
+  // Read now that it prints as a code, so an amount no source states is refused.
+  const madeUp = letter({ opening: stated });
+  assert.equal(madeUp.run.status, 1, describeSpawn(madeUp.run));
+  assert.match(madeUp.run.stderr, /metric-like claims absent from sources: €50000/);
 });
 
 test('a figure the pass rewrites still prints when a source backs it', () => {
