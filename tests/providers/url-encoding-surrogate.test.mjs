@@ -86,6 +86,17 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.keka.com/careers/jobdetails/5',
   );
 
+  // darwinbox.parseDarwinboxResponse — for…of over the data array.
+  const { parseDarwinboxResponse } = await load('darwinbox.mjs');
+  check(
+    'darwinbox.parseDarwinboxResponse',
+    () => parseDarwinboxResponse(
+      { status: 'success', data: [{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 'a5', title: 'Good Id' }] },
+      'X', { origin: 'https://x.darwinbox.in', companyId: 'main' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.darwinbox.in/ms/candidatev2/main/careers/jobDetails/a5',
+  );
+
   // jibeapply.parseJibeapplyResponse — .map().filter(Boolean) over one page.
   const { parseJibeapplyResponse } = await load('jibeapply.mjs');
   const jibeEntry = { name: 'Acme', careers_url: 'https://acme.jibeapply.com/jobs' };
@@ -341,7 +352,7 @@ try {
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
   const CONVERTED = [
-    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
+    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'darwinbox.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
     'kalibrr.mjs', 'keka.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
     'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
