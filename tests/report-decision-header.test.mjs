@@ -1,6 +1,6 @@
 // The apply-or-not call sits in the report header, so a reader sees it at the
-// top instead of after the archived JD and the Machine Summary YAML. The
-// `## Verdict (lead)` block stays where it is; the header only repeats it.
+// top instead of after the archived JD. The `## Verdict (lead)` block stays
+// where it is; the header only repeats it.
 import { pass, fail, ROOT } from './helpers.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { readFileSync } from 'node:fs';
