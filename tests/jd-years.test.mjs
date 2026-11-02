@@ -61,6 +61,16 @@ const PARSE_CASES = [
   ['Ideally 4+ years in a strategy role', 'preferred-only', null, false, 'pref 4+'],
   ['Preferred qualifications:\n- 8 years of experience in strategy', 'preferred-only', null, false, 'pref 8+'],
   ['Minimum qualifications:\n- 5 years of experience in finance\nPreferred qualifications:\n- 8 years of experience in strategy', 'stated', 5, true, '5+'],
+  // The same lists with each item's text on a new line (`<li>\n<p>`), as many
+  // Greenhouse and Lever descriptions write them: every bar stays under its heading
+  ['<p>Preferred qualifications</p><ul><li>\n<p>8 years of experience in strategy</p>\n</li></ul>', 'preferred-only', null, false, 'pref 8+'],
+  ['<p>Minimum qualifications</p><ul><li>\n<p>5 years of experience in finance</p>\n</li></ul><p>Preferred qualifications</p><ul><li>\n<p>8 years of experience in strategy</p>\n</li></ul>', 'stated', 5, true, '5+'],
+  // An empty item leaves the same bare marker, and the heading above it still holds
+  ['<p>Preferred qualifications</p><ul><li></li><li>8 years of experience in strategy</li></ul>', 'preferred-only', null, false, 'pref 8+'],
+  ['<p>Minimum qualifications</p><ul><li></li><li>5 years of experience in finance</li></ul>', 'stated', 5, true, '5+'],
+  ['Preferred qualifications:\n*\n8 years of experience in strategy', 'preferred-only', null, false, 'pref 8+'],
+  // A marker ends at a space or the end of the line, so this "1." is part of the figure
+  ['1.5 years of experience in finance', 'stated', 1.5, true, '1.5+'],
   ['Required: 3+ years in FP&A. Preferred: 5+ years in strategy.', 'stated', 3, true, '3+'],
   ['5+ years of experience is a plus', 'preferred-only', null, false, 'pref 5+'],
   ['Nice to have\n- 3 years of experience in fintech', 'preferred-only', null, false, 'pref 3+'],

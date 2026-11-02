@@ -24,6 +24,12 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
 import { readLockedSections } from './theme-style.mjs';
 import { redactIfEnabled, restoreIfEnabled } from './utils/privacy-filter.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+
+// Ambient guard over global fetch (idempotent); the explicit gate below is the
+// primary layer.
+installPiiInterceptor();
 
 try {
   const { config } = await import('dotenv');
@@ -272,18 +278,22 @@ if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
 let tailoredHtml;
 try {
+  // Privacy gate: the full serialized tailoring request is inspected before the
+  // network call. Nothing is sent when a protected value is present.
+  const requestBody = JSON.stringify({
+    model:    modelName,
+    messages: [
+      buildSystemMessage(systemPrompt, endpointHost),
+      { role: 'user',   content: `EVALUATION REPORT:\n\n${reportText}\n\nJOB DESCRIPTION:\n\n${jdText}\n\nNow, generate and output the fully filled HTML CV matching the rules above. Output ONLY raw HTML.` },
+    ],
+    stream:      false,
+    temperature: 0.2,
+  });
+  assertLlmRequestAllowed(endpoint, requestBody);
   const res = await fetch(endpoint, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model:    modelName,
-      messages: [
-        buildSystemMessage(systemPrompt, endpointHost),
-        { role: 'user',   content: `EVALUATION REPORT:\n\n${reportText}\n\nJOB DESCRIPTION:\n\n${jdText}\n\nNow, generate and output the fully filled HTML CV matching the rules above. Output ONLY raw HTML.` },
-      ],
-      stream:      false,
-      temperature: 0.2,
-    }),
+    body: requestBody,
     signal: AbortSignal.timeout(timeoutMs),
   });
 
