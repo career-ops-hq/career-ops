@@ -32,6 +32,8 @@ const cases = [
   ['a+_work_@example.com', 'a+_work_@example.com'],
   ['_work_.jane@example.com', '_work_.jane@example.com'],
   ['Mail x+_y_@example.com about _Orbit_', 'Mail x+_y_@example.com about <em>Orbit</em>'],
+  // Underscores around a whole address are italics, not part of it.
+  ['Write to _jane@example.com_.', 'Write to <em>jane@example.com</em>.'],
 ];
 for (const [input, want] of cases) {
   const got = body(input);
