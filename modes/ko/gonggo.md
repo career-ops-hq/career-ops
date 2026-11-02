@@ -207,9 +207,6 @@ report를 저장하고 tracker에 기록한 뒤, `modes/oferta.md` -> Cover Lett
 
 ---
 
-## Machine Summary
-(스크립트용 YAML 블록 -- 아래 요구 사항 참고)
-
 ## A) 역할 요약
 (블록 A 전체 내용)
 
@@ -253,11 +250,14 @@ report를 저장하고 tracker에 기록한 뒤, `modes/oferta.md` -> Cover Lett
 
 ## Job Description (archived verbatim)
 (공고 전문을 그대로 붙여넣음 -- 아래 요구 사항 참고)
+
+## Machine Summary
+(스크립트용 YAML 블록 -- 아래 요구 사항 참고)
 ```
 
 **결정 줄(필수):** `**결정:**`은 Machine Summary의 `final_decision`이고, 헤더 아래 줄은 `## 결론 (lead)`의 문장을 그대로 복사한 것입니다. 둘 다 마지막에 채웁니다. `Verdict:`를 필드 이름으로 쓰지 않습니다. 웹 앱은 처음 나오는 `VERDICT:`를 score 줄로 읽습니다.
 
-**Machine Summary(필수):** 헤더 바로 뒤에 YAML 블록을 두고, `batch/batch-prompt.md`의 스키마, 정확한 필드 이름, 규칙을 따릅니다(그 파일이 기준이며 여기서 중복하지 않습니다). `advertised_comp`(공고 금액 그대로, 없으면 `null`), `risk_summary`, `requirement_importance`(블록 B를 행 단위로; `inferred` 제한은 여기에도 적용)를 포함합니다.
+**Machine Summary(필수):** 리포트 맨 끝, `## Job Description (archived verbatim)` 뒤에 YAML 블록을 두고, `batch/batch-prompt.md`의 스키마, 정확한 필드 이름, 규칙을 따릅니다(그 파일이 기준이며 여기서 중복하지 않습니다). `advertised_comp`(공고 금액 그대로, 없으면 `null`), `risk_summary`, `requirement_importance`(블록 B를 행 단위로; `inferred` 제한은 여기에도 적용)를 포함합니다.
 
 **공고 보관(필수, #2789):** 모든 report에는 공고 전문을 담은 `## Job Description (archived verbatim)` 섹션이 반드시 있어야 하며, 요약하거나 바꿔 쓰지 않습니다. 제목은 영어 그대로 둡니다. `check-jd-archive.mjs`가 이름으로 찾습니다. 첫 줄은 화면에 보이는 게시일입니다(`Posted: {날짜 또는 상대 표현}`, 없으면 `Posted: not visible in source`). report 파일 날짜를 쓰지 않습니다. 공고가 너무 길거나 전부 인용할 수 없으면 `archive-posting.mjs` (아래 명령)로 저장하고, 섹션에는 **정확히** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`만 다른 텍스트 없이 씁니다. 자동 저장이 불가능하면(예: URL 없이 붙여넣은 긴 텍스트) 섹션 제목을 `## Job Description (not archived)`로 바꾸고 이유를 적습니다. 대신 요약문을 넣지 않습니다. 전체 규칙은 `modes/oferta.md` (**JD archival**)에 있습니다.
 

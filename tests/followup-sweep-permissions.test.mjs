@@ -59,6 +59,11 @@ if (zshProbe.error?.code === 'ENOENT') {
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
+        // zsh reads $ZDOTDIR/.zshenv even when it runs a script. Pointing it at the
+        // temp dir keeps the user's own ~/.zshenv out: one that prepends a folder
+        // holding the real claude (~/.local/bin) shadowed the stub, and the test
+        // ran a real headless session until the 30 s timeout killed it.
+        ZDOTDIR: dir,
         CAREER_OPS_ROOT: dir,
         CAREER_OPS_TRACKER: join(dir, 'data', 'applications.md'),
         CAREER_OPS_FOLLOWUPS: join(dir, 'data', 'follow-ups.md'),
