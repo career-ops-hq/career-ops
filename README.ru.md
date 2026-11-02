@@ -249,8 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# Вставьте URL вакансии или текст описания, чтобы запустить auto-pipeline.
+# Все остальные режимы и способ вызвать их в вашем CLI: см. раздел «Использование» ниже.
 ```
 
 </details>
@@ -290,7 +290,7 @@ npm i -g @santifer/career-ops
 
 `/career-ops` без продолжения показывает меню команд в CLI, которые его используют. Обычный язык работает в любом поддерживаемом CLI. Как плагин Claude Code команда выглядит так: `/career-ops:career-ops`.
 
-У всех них один общий роутер, `.agents/skills/career-ops/SKILL.md`, и одни и те же файлы `modes/*.md`, поэтому режим работает одинаково в любом CLI. Slash-команды в Codex не гарантированы: просите обычным языком или запустите один промпт в headless-режиме через `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Как запускать career-ops в каждом поддерживаемом CLI, headless-команды там, где они есть, и заметки по настройке отдельных CLI — в [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+У всех них один общий роутер, `.agents/skills/career-ops/SKILL.md`, и одни и те же файлы `modes/*.md`, поэтому любой CLI направляет запрос одинаково (режимам, активно использующим браузер, также нужны инструменты Playwright). Slash-команды в Codex не гарантированы: просите обычным языком или запустите один промпт в headless-режиме через `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Как запускать career-ops в каждом поддерживаемом CLI, headless-команды там, где они есть, и заметки по настройке отдельных CLI — в [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Повседневные команды
 
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *вставьте URL или описание вакансии* | Полный пайплайн: проверка, что вакансия ещё открыта (только для URL), оценка A-G плюс H при высокой оценке, отчёт, адаптированное резюме (по умолчанию PDF), строка в трекере |
 | `scan` | Сканирует ваши порталы в поисках новых вакансий и добавляет их во входящие (`data/pipeline.md`) |
-| `pipeline` | Оценивает каждый URL, ожидающий во входящих |
+| `pipeline` | Обрабатывает URL, ожидающие во входящих (уровни standard и premium могут пропускать явные несоответствия) |
 | `apply` | Заполняет форму отклика вместе с вами, поле за полем. Останавливается перед отправкой |
 | `tracker` | На каком этапе каждый отклик |
 | `followup` | Какие отклики пора напомнить о себе, с черновиками |
@@ -313,10 +313,10 @@ npm i -g @santifer/career-ops
 | Команда | Что делает |
 | --- | --- |
 | [`scan`](modes/scan.md) | Сканирует порталы и находит новые вакансии |
-| [`discover`](modes/discover.md) | Превращает список названий компаний в сканируемые ATS-доски и добавляет их в `portals.yml` (без токенов) |
+| [`discover`](modes/discover.md) | Превращает список названий компаний в сканируемые ATS-доски. По умолчанию показывает только предпросмотр и добавляет их в `portals.yml` лишь с `--write` (без токенов) |
 | [`pipeline`](modes/pipeline.md) | Обрабатывает отложенные URL из входящих (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Быстрая первичная оценка «стоит / не стоит» по `modes/_brief.md` перед полной оценкой (файлы не пишет) |
-| [`batch`](modes/batch.md) | Оценивает много вакансий параллельными headless-воркерами |
+| [`batch`](modes/batch.md) | Оценивает много вакансий headless-воркерами (параллельно с Claude, по одной с другими CLI) |
 | [`titles`](modes/titles.md) | Предлагает смежные названия должностей по вашему резюме, чтобы расширить поиск |
 
 **Оценить вакансию**
