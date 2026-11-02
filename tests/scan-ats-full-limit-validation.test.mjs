@@ -39,6 +39,18 @@ try {
       assert.match(r.stderr, /--limit expects a positive whole number of companies/, r.stderr);
     });
   }
+  // Two caps are refused, as two --since windows are: which one applied
+  // depended on how each was spelled, not on the order typed.
+  for (const args of [['--limit=10000', '--limit', '1'], ['--limit', '1', '--limit=10000'], ['--limit', '5', '--limit', '5']]) {
+    ok(`${args.join(' ')} is refused`, () => {
+      const r = spawnSync(NODE, [join(ROOT, 'scan-ats-full.mjs'), ...args], {
+        cwd: root, encoding: 'utf-8', timeout: 30000,
+        env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '' },
+      });
+      assert.strictEqual(r.status, 1, `exit ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /--limit given 2 times; pass it once/, r.stderr);
+    });
+  }
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

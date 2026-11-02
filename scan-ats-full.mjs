@@ -502,6 +502,13 @@ export function parseArgs(argv) {
   // the same sweep, so the value must also be a safe integer.
   let limit = Infinity;
   if (hasFlag(args, '--limit')) {
+    // Two caps are refused, as two --since windows are: which one applied
+    // depended on how each was spelled, not on the order typed.
+    const occurrences = args.filter((a) => a === '--limit' || a.startsWith('--limit='));
+    if (occurrences.length > 1) {
+      console.error(`Error: --limit given ${occurrences.length} times; pass it once`);
+      process.exit(1);
+    }
     const raw = String(flagValue(args, '--limit') ?? '').trim();
     if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
       console.error(`Error: --limit expects a positive whole number of companies, got ${raw ? `"${raw}"` : 'no value'}`);
