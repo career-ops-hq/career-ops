@@ -42,23 +42,23 @@ export const LOCALES = {
     input: 'You paste a job URL or description', pill: 360,
     s1: 'Archetype Detection', n1: 'Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation',
     s2: 'A-H Evaluation', sub2: 'reads cv.md', n2: 'Match, gaps, comp research, STAR stories, legitimacy',
-    outs: ['Report', 'PDF', 'Tracker'],
+    outs: ['Report', 'Tailored CV', 'Tracker'],
   },
   id: {
     input: 'Anda menempelkan URL atau deskripsi lowongan', pill: 440,
     s1: 'Deteksi Arketipe', n1: 'Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation',
     s2: 'Evaluasi A-H', sub2: 'membaca cv.md', n2: 'Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan',
-    outs: ['Laporan', 'PDF', 'Entri Tracker'],
+    outs: ['Laporan', 'CV yang disesuaikan', 'Entri Tracker'],
   },
   vi: {
     input: 'Bạn dán URL hoặc mô tả tin tuyển dụng', pill: 400,
     s1: 'Archetype Detection', n1: 'Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation',
     s2: 'A-H Evaluation', sub2: 'reads cv.md', n2: 'Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy',
-    outs: ['Report', 'PDF', 'Tracker'],
+    outs: ['Report', 'CV tùy chỉnh', 'Tracker'],
   },
 };
 
-const PATHS = ['reports/*.md', 'output/*.pdf', 'data/applications.md'];
+const PATHS = ['reports/*.md', 'PDF by default', 'data/applications.md'];
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -67,7 +67,7 @@ export function altText(lang) {
   if (!lang) {
     return 'How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. '
       + 'The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. '
-      + 'It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md).';
+      + 'It produces a report (reports/*.md), the tailored CV in the format set by cv.output_format — a PDF by default — and a tracker entry (data/applications.md).';
   }
   const L = LOCALES[lang];
   return `${L.input} → ${L.s1} (${L.n1}) → ${L.s2} (${L.sub2}; ${L.n2}) → ${L.outs.map((o, i) => `${o} (${PATHS[i]})`).join(', ')}`;
