@@ -45,10 +45,12 @@ export function moveCursor(index, count, delta) {
 /**
  * Selection after a status save. Keep a selected row only when that save failed.
  * A cursor row that was not selected stays unselected, including when its save fails.
+ * Tracker numbers are strings, the same as a row's n.
+ * @template {{ n: string }} T
  * @param {string[]} selectedKeys
- * @param {{ n: number }[]} attempted
- * @param {Set<number>} failedNums
- * @param {(row: { n: number }) => string} keyOf
+ * @param {T[]} attempted
+ * @param {Set<string>} failedNums
+ * @param {(row: T) => string} keyOf
  * @returns {string[]}
  */
 export function selectionAfterFailedSave(selectedKeys, attempted, failedNums, keyOf) {

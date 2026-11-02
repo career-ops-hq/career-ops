@@ -41,11 +41,11 @@ test("shift-click selects the inclusive range between two rows", () => {
 
 test("a failed save keeps only selected failures, not the cursor row", () => {
   const keyOf = (row) => `n:${row.n}`;
-  const cursorOnly = [{ n: 4 }];
-  assert.deepEqual(selectionAfterFailedSave([], cursorOnly, new Set([4]), keyOf), []);
+  const cursorOnly = [{ n: "4" }];
+  assert.deepEqual(selectionAfterFailedSave([], cursorOnly, new Set(["4"]), keyOf), []);
   const selected = ["n:2", "n:4", "n:9"];
-  const attempted = [{ n: 2 }, { n: 4 }];
-  assert.deepEqual(selectionAfterFailedSave(selected, attempted, new Set([4]), keyOf), ["n:4"]);
+  const attempted = [{ n: "2" }, { n: "4" }];
+  assert.deepEqual(selectionAfterFailedSave(selected, attempted, new Set(["4"]), keyOf), ["n:4"]);
 });
 
 test("the cursor stays on a real row", () => {

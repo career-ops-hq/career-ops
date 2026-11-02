@@ -627,7 +627,10 @@ export function PipelineView({
                         type="checkbox"
                         aria-label={`Select ${company.label}, ${r.role} (#${r.n})`}
                         checked={selected.has(key)}
-                        onChange={(event) => toggleRow(key, (event.nativeEvent as MouseEvent).shiftKey === true)}
+                        onChange={(event) => {
+                          const native = event.nativeEvent;
+                          toggleRow(key, "shiftKey" in native && native.shiftKey === true);
+                        }}
                       />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
