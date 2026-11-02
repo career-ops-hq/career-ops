@@ -82,7 +82,9 @@ function restoreEnv() {
 const emptyRoot = mkdtempSync(join(tmpdir(), 'co-browser-empty-'));
 const envRoot = mkdtempSync(join(tmpdir(), 'co-browser-env-'));
 const relativeEnvRoot = mkdtempSync(join(tmpdir(), 'co-browser-relative-env-'));
-writeFileSync(join(envRoot, '.env'), `${EXE}=/opt/fromdotenv/browser # browser override\n`);
+// No trailing newline: Node 22.13's parser needs the resolver to normalize one
+// or it retains the inline comment as part of the executable path.
+writeFileSync(join(envRoot, '.env'), `${EXE}=/opt/fromdotenv/browser # browser override`);
 writeFileSync(join(relativeEnvRoot, '.env'), `${EXE}=browsers/brave\n`);
 
 try {
