@@ -292,7 +292,7 @@ Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops 
 
 `/career-ops` ohne weiteren Zusatz zeigt das Befehlsmenü in den CLIs, die ihn verwenden. Normale Sprache funktioniert in jeder unterstützten CLI. Als Claude-Code-Plugin lautet der Befehl `/career-ops:career-ops`.
 
-Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselben `modes/*.md`-Dateien, ein Modus verhält sich also in jeder CLI gleich. Slash Commands sind in Codex nicht garantiert: Frag in normaler Sprache oder führe einen Prompt headless aus mit `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Wie du career-ops in jeder unterstützten CLI startest, die Headless-Befehle, wo eine CLI einen hat, und CLI-spezifische Hinweise stehen in [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselben `modes/*.md`-Dateien, jede CLI leitet eine Anfrage also gleich weiter (browserlastige Modi brauchen zusätzlich Playwright-Werkzeuge). Slash Commands sind in Codex nicht garantiert: Frag in normaler Sprache oder führe einen Prompt headless aus mit `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Wie du career-ops in jeder unterstützten CLI startest, die Headless-Befehle, wo eine CLI einen hat, und CLI-spezifische Hinweise stehen in [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Die täglichen Befehle
 
@@ -300,7 +300,7 @@ Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselb
 | --- | --- |
 | *URL oder Stellenbeschreibung einfügen* | Komplette Pipeline: Aktualitätsprüfung (nur bei URLs), A-G-Bewertung plus H bei hoher Punktzahl, Report, angepasster Lebenslauf (standardmäßig PDF), Tracker-Zeile |
 | `scan` | Deine Portale nach neuen Stellen scannen und sie in die Inbox legen (`data/pipeline.md`) |
-| `pipeline` | Die wartenden URLs in der Inbox abarbeiten und offensichtliche Fehlgriffe überspringen |
+| `pipeline` | Die wartenden URLs in der Inbox abarbeiten (die Stufen standard und premium können offensichtliche Fehlgriffe überspringen) |
 | `apply` | Ein Bewerbungsformular gemeinsam mit dir ausfüllen, Feld für Feld. Vor dem Absenden hält er an |
 | `tracker` | Wo jede Bewerbung steht |
 | `followup` | Welche Bewerbungen ein Follow-up brauchen, mit Entwürfen |
