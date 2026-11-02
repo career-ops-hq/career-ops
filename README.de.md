@@ -251,8 +251,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# Füge eine Stellen-URL oder den Text einer Stellenbeschreibung ein, um die Auto-Pipeline auszulösen.
+# Alle anderen Modi und wie du sie in deiner CLI anforderst: siehe unten unter „Nutzung“.
 ```
 
 </details>
@@ -300,7 +300,7 @@ Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselb
 | --- | --- |
 | *URL oder Stellenbeschreibung einfügen* | Komplette Pipeline: Aktualitätsprüfung (nur bei URLs), A-G-Bewertung plus H bei hoher Punktzahl, Report, angepasster Lebenslauf (standardmäßig PDF), Tracker-Zeile |
 | `scan` | Deine Portale nach neuen Stellen scannen und sie in die Inbox legen (`data/pipeline.md`) |
-| `pipeline` | Jede URL bewerten, die in der Inbox wartet |
+| `pipeline` | Die wartenden URLs in der Inbox abarbeiten und offensichtliche Fehlgriffe überspringen |
 | `apply` | Ein Bewerbungsformular gemeinsam mit dir ausfüllen, Feld für Feld. Vor dem Absenden hält er an |
 | `tracker` | Wo jede Bewerbung steht |
 | `followup` | Welche Bewerbungen ein Follow-up brauchen, mit Entwürfen |
@@ -315,10 +315,10 @@ Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselb
 | Befehl | Was er tut |
 | --- | --- |
 | [`scan`](modes/scan.md) | Portale scannen und neue Angebote entdecken |
-| [`discover`](modes/discover.md) | Eine Liste von Firmennamen in scannbare ATS-Boards auflösen und an `portals.yml` anhängen (ohne Tokens) |
+| [`discover`](modes/discover.md) | Eine Liste von Firmennamen in scannbare ATS-Boards auflösen. Zeigt standardmäßig nur eine Vorschau und ergänzt `portals.yml` nur mit `--write` (ohne Tokens) |
 | [`pipeline`](modes/pipeline.md) | Ausstehende URLs aus der Inbox verarbeiten (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Schnelle erste Go/No-go-Einschätzung anhand von `modes/_brief.md`, vor einer vollständigen Bewertung (schreibt keine Dateien) |
-| [`batch`](modes/batch.md) | Viele Stellen mit parallelen Headless-Workern bewerten |
+| [`batch`](modes/batch.md) | Viele Stellen mit Headless-Workern bewerten (parallel mit Claude, nacheinander mit anderen CLIs) |
 | [`titles`](modes/titles.md) | Verwandte Jobtitel aus deinem Lebenslauf vorschlagen, um die Suche zu erweitern |
 
 **Eine Stelle bewerten**
