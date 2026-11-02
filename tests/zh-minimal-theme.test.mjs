@@ -72,7 +72,9 @@ test('Chinese Minimal applies profile typography and colors without changing its
     assert.equal(defaults.colors['.edu-org'], 'rgb(23, 74, 126)');
     assert.equal(defaults.colors['.award-org'], 'rgb(115, 34, 195)');
     // One font run for mixed Chinese/Latin lines keeps PDF extraction order (#2202).
-    assert.match(defaults.fonts.body, /^"PingFang SC"/);
+    // Arial Unicode MS leads because headless Chromium embeds it for Han text;
+    // PingFang SC stays right behind it for machines without it.
+    assert.match(defaults.fonts.body, /^"Arial Unicode MS", "Arial Unicode MS", "PingFang SC"/);
 
     for (const [lang, fallback] of [
       ['en', 'PingFang SC'], ['zh', 'PingFang SC'], ['zh-CN', 'PingFang SC'],

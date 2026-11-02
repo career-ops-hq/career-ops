@@ -49,15 +49,15 @@ function linkDestination(raw) {
 }
 
 /**
- * Every markdown-link target in a tracker cell, in order.
- * The walk matches tracker-parse.mjs `parseMarkdownLinks`: the label ends at
- * an unescaped `]`, the destination ends at the matching `)`, and a `\` skips
- * the next character.
+ * Every markdown link in a tracker cell, in order, with its span in `value`
+ * (`end` exclusive). The walk matches tracker-parse.mjs `scanMarkdownLinks`:
+ * the label ends at an unescaped `]`, the destination ends at the matching
+ * `)`, and a `\` skips the next character.
  * @param {string} value
- * @returns {string[]}
+ * @returns {{target: string, start: number, end: number}[]}
  */
-function markdownLinkTargets(value) {
-  const targets = [];
+function markdownLinks(value) {
+  const links = [];
   let cursor = 0;
   while (cursor < value.length) {
     const labelStart = value.indexOf("[", cursor);
@@ -92,10 +92,19 @@ function markdownLinkTargets(value) {
     }
 
     const target = linkDestination(value.slice(labelEnd + 2, linkEnd));
-    if (target != null) targets.push(target);
+    if (target != null) links.push({ target, start: labelStart, end: linkEnd + 1 });
     cursor = linkEnd + 1;
   }
-  return targets;
+  return links;
+}
+
+/**
+ * Every markdown-link target in a tracker cell, in order.
+ * @param {string} value
+ * @returns {string[]}
+ */
+function markdownLinkTargets(value) {
+  return markdownLinks(value).map((link) => link.target);
 }
 
 /**
@@ -120,6 +129,20 @@ function firstHttpMarkdownTarget(value) {
  */
 export function firstMarkdownLinkTarget(cell) {
   return markdownLinkTargets(String(cell ?? ""))[0] ?? null;
+}
+
+/**
+ * The target of a tracker cell that is exactly one markdown link, trimmed, with
+ * nothing around it; null for no link, two links, or text beside the link.
+ * Same result as tracker-parse.mjs `soleMarkdownLink`.
+ * @param {string | null | undefined} cell
+ * @returns {string|null}
+ */
+export function soleMarkdownLinkTarget(cell) {
+  const value = String(cell ?? "").trim();
+  const links = markdownLinks(value);
+  if (links.length !== 1 || links[0].start !== 0 || links[0].end !== value.length) return null;
+  return links[0].target;
 }
 
 /**
