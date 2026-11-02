@@ -759,7 +759,7 @@ export async function resolveKeywords(input, root) {
   const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
   if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
     console.error(`Report not found: ${reportArg}`);
-    console.error('Example: node keyword-match.mjs reports/001-role.md');
+    console.error(`Example: node keyword-match.mjs ${join(getCareerOpsRoot(), 'reports', '001-role.md')}`);
     process.exit(1);
   }
 

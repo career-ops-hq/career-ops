@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,9 +31,23 @@ test('-h is help, not a report path', () => {
   assert.doesNotMatch(`${result.stderr}\n${result.stdout}`, /Report not found/);
 });
 
-test('a missing report names the file and the example to run', () => {
-  const result = run(['reports/no-such-role.md']);
-  assert.equal(result.status, 1);
+test('a missing report names the file and the example to run', (t) => {
+  // The report path is resolved from the working directory, so this case has
+  // to run somewhere that does not already contain that file.
+  const cwd = mkdtempSync(join(tmpdir(), 'co-keyword-missing-'));
+  const dataRoot = mkdtempSync(join(tmpdir(), 'co-keyword-data-'));
+  t.after(() => {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  });
+  const result = spawnSync(process.execPath, [CLI, 'reports/no-such-role.md'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 20000,
+    env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
+  });
+  const example = join(dataRoot, 'reports', '001-role.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /Report not found: reports\/no-such-role\.md/);
-  assert.match(result.stderr, /node keyword-match\.mjs reports\/001-role\.md/);
+  assert.match(result.stderr, new RegExp(`Example: node keyword-match\\.mjs ${example}`));
 });
