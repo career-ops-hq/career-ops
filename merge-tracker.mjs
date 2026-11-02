@@ -31,7 +31,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
-import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
@@ -202,15 +202,6 @@ function isLinkableDestination(href) {
   }
   return depth === 0;
 }
-
-// URL cells that say "no URL" in words: the tracker's em-dash and hyphen
-// empty-cell markers and N/A. --backfill-urls fills these from the report the
-// way it fills an empty cell.
-const URL_PLACEHOLDER_RE = /^(?:—|-|n\/a)$/i;
-const urlCellUnset = (cell) => {
-  const value = (cell || '').trim();
-  return value === '' || URL_PLACEHOLDER_RE.test(value);
-};
 
 /**
  * Render the tracker's URL cell (#3516).
@@ -538,7 +529,7 @@ export async function mergeTracker(options = {}) {
   // and another requisition with the same title folded into this row.
   const reportUrls = new Map();
   function postingUrl(app) {
-    if (!urlCellUnset(app.url)) return app.url;
+    if (!isUnsetUrlCell(app.url)) return app.url;
     if (!reportUrls.has(app.report)) reportUrls.set(app.report, resolveReportUrl(app.report).url);
     return reportUrls.get(app.report);
   }
@@ -1620,7 +1611,7 @@ export async function mergeTracker(options = {}) {
         // Anything else the cell holds (a URL, a local:jds/ pointer) is the
         // user's and stays.
         const urlCell = (app.url || '').trim();
-        if (!urlCellUnset(urlCell)) { already++; return buildRow({ ...app }); }
+        if (!isUnsetUrlCell(urlCell)) { already++; return buildRow({ ...app }); }
         // Shared derivation with the merge loop — one place that knows how to turn a
         // report link into the posting URL. Tracker links may be root-relative
         // (`reports/...`) or data-relative (`../reports/...`); both resolve.
