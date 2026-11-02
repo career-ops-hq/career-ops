@@ -43,6 +43,9 @@ test('the pipeline mode takes a named file first, then the path scan.mjs writes 
   const scanner = which.indexOf('import { PIPELINE_PATH } from "./scan.mjs"');
   assert.ok(named !== -1 && scanner !== -1, 'both sources are listed');
   assert.ok(named < scanner, 'named file, then the scanner path');
+  // `./scan.mjs` resolves against the working directory, which is not the
+  // checkout when a plugin session starts elsewhere.
+  assert.match(which, /Run it from `PROJECT_ROOT`/);
   assert.match(which, /Do not fall back to `data\/pipeline\.md`/);
 });
 

@@ -13,6 +13,8 @@ Resolve the inbox file once, before the liveness sweep, and use it for every sea
    node --input-type=module -e 'import { PIPELINE_PATH } from "./scan.mjs"; console.log(PIPELINE_PATH)'
    ```
 
+   Run it from `PROJECT_ROOT`, like every other script: `./scan.mjs` resolves against the working directory, and a session started outside the checkout (a plugin install) has a different one. If the command fails, say so and stop; do not guess the inbox.
+
    It prints `CAREER_OPS_PIPELINE` when that is set, in the shell or in the data root's `.env` (the parallel search lane, #2271), and the data root's `data/pipeline.md` otherwise. Do not read the variable from the shell alone: `scan.mjs` also loads the data root's `.env`, so a lane set only there would be missed and the lane's postings would stay `- [ ]`.
 
 Name the inbox in your first line of output (`Inbox: data/pipeline.bridge.md`) when it is not `data/pipeline.md`, so the user can see which lane is being processed. If that file does not exist, say so and stop. Do not fall back to `data/pipeline.md`: that is the other lane's inbox.
