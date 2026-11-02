@@ -7,6 +7,8 @@ import { CoMark } from "@/components/co-mark";
 import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useVisualTheme } from "@/components/visual-theme-provider";
+import { Waves, Square } from "lucide-react";
 import { BackToTop } from "@/components/back-to-top";
 import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
@@ -21,6 +23,7 @@ import { visibleNavItems, isActivePath } from "@/lib/nav-items";
 
 export function AppShell({ children, followupsEnabled }: { children: React.ReactNode; followupsEnabled: boolean }) {
   const pathname = usePathname();
+  const { visual, setVisual } = useVisualTheme();
   return (
     <JobsProvider>
       <PipelineProvider>
@@ -77,6 +80,10 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
                 <span className="font-mono text-[10px] text-faint">THEME</span>
               </div>
               <ThemeToggle showLabel />
+              <div className="grid grid-cols-2 gap-1 rounded-lg border border-border p-1">
+                <button type="button" onClick={() => setVisual("ocean")} aria-pressed={visual === "ocean"} className="flex min-h-9 items-center justify-center gap-1.5 rounded-md text-xs text-muted aria-pressed:bg-brand-soft aria-pressed:text-brand-text"><Waves className="size-3.5" />Ocean</button>
+                <button type="button" onClick={() => setVisual("classic")} aria-pressed={visual === "classic"} className="flex min-h-9 items-center justify-center gap-1.5 rounded-md text-xs text-muted aria-pressed:bg-brand-soft aria-pressed:text-brand-text"><Square className="size-3.5" />Classic</button>
+              </div>
               <div className="px-1">
                 <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
               </div>

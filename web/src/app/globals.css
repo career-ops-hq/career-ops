@@ -323,3 +323,55 @@ html.dark .co-cost[data-tone="free"]{color:hsl(158 64% 60%);background:hsl(158 6
 .co-cost[data-tone="spend"]{color:hsl(35 9% 34%);background:hsl(35 8% 46% / .12);border-color:hsl(35 8% 46% / .26)}
 html.dark .co-cost[data-tone="spend"]{color:hsl(35 8% 70%);background:hsl(35 6% 60% / .12);border-color:hsl(35 6% 60% / .24)}
 .co-cost svg{width:.85em;height:.85em}
+
+
+/* Ocean visual theme: scoped runtime overrides keep classic tokens byte-for-byte. */
+html[data-visual="ocean"] {
+  --bg: #e9f6f4; --surface: #f7fcfb; --surface-hover: #d9eeeb; --border: #b8d9d5;
+  --fg: #173c43; --muted: #3e666b; --faint: #52777b; --landing: #14545b;
+  --brand-text: #087a78; --dot: 183 38% 38% / 0.12; --pre-bg: #e0f0ed;
+  --ocean-brand: #087e80; --ocean-brand-hover: #05a6a1; --ocean-brand-soft: rgb(8 126 128 / .13);
+  --ocean-brand-foreground: #ffffff; --ocean-secondary: #167f9b;
+}
+html.dark[data-visual="ocean"] {
+  --bg: #06141c; --surface: #0c222b; --surface-hover: #15343e; --border: #244651;
+  --fg: #e4f4f2; --muted: #a2c5c5; --faint: #8cb1b2; --landing: #d5f3ed;
+  --brand-text: #64ded3; --dot: 183 42% 65% / 0.11; --pre-bg: #091d25;
+  --ocean-brand: #22b8ae; --ocean-brand-hover: #45d1c5; --ocean-brand-soft: rgb(34 184 174 / .17);
+  --ocean-brand-foreground: #062024; --ocean-secondary: #63c7e4;
+}
+html[data-visual="ocean"] { --color-brand: var(--ocean-brand); --color-brand-200: var(--ocean-brand-hover); --color-brand-soft: var(--ocean-brand-soft); --color-brand-secondary: var(--ocean-secondary); --color-brand-foreground: var(--ocean-brand-foreground); }
+.reef-scene { position:absolute; inset:0; z-index:0; overflow:hidden; pointer-events:none; color:var(--brand-text); opacity:.7; }
+.reef-scene::after { content:""; position:absolute; inset:0; background:linear-gradient(120deg, transparent 25%, rgb(91 206 196 / .13), transparent 75%); background-size:200% 100%; }
+.reef-fish { transform-box:fill-box; transform-origin:center;  }
+.reef-fish-two { animation-delay:-9s; opacity:.7; }
+.reef-fish-three { animation-delay:-17s; opacity:.55; }
+.reef-kelp { transform-box:fill-box; transform-origin:bottom;  }
+.reef-kelp-two { animation-delay:-2s; }
+.reef-kelp-three { animation-delay:-3s; }
+.reef-jelly { transform-box:fill-box;  opacity:.55; }
+.reef-bubble { position:absolute; bottom:-12px; width:7px; aspect-ratio:1; border:1px solid currentColor; border-radius:50%; left:20%; }
+.bubble-two { left:44%; width:4px; animation-delay:-3s; }.bubble-three { left:72%; width:9px; animation-delay:-6s; }.bubble-four { left:87%; width:5px; animation-delay:-9s; }
+@keyframes bubble-rise { to { transform:translateY(-320px); opacity:0; } }
+@keyframes fish-swim { 0% { transform:translate(-120px,0); } 48% { transform:translate(920px,-16px); } 50% { transform:translate(920px,-16px) scaleX(-1); } 98%,100% { transform:translate(-120px,10px) scaleX(-1); } }
+@keyframes kelp-sway { to { transform:rotate(8deg); } }
+@keyframes jelly-drift { to { transform:translate(90px,25px); } }
+@keyframes caustic-shimmer { to { background-position:-200% 0; } }
+@keyframes wave-fill { to { transform:translateX(100%); } }
+.current-track { position:relative; height:7px; overflow:hidden; border-radius:999px; background:color-mix(in srgb,var(--color-brand) 14%,var(--surface)); }
+.current-bar { position:relative; height:100%; border-radius:inherit; background:var(--color-brand); overflow:hidden; }
+.current-bar::after { content:""; position:absolute; inset:0; background:linear-gradient(100deg,transparent,rgba(255,255,255,.65),transparent); transform:translateX(-100%); }
+.current-bar-secondary { background:var(--color-brand-secondary); }
+html[data-visual="ocean"] nav a svg { transition:transform 180ms ease; }
+@media (prefers-reduced-motion:no-preference) {
+ .reef-scene::after { animation:caustic-shimmer 12s ease-in-out infinite alternate; }
+ .reef-fish { translate:140px 85px; animation:fish-swim 18s linear infinite; }
+ .reef-fish-two { translate:410px 145px; animation-duration:25s; } .reef-fish-three { translate:680px 55px; animation-duration:31s; }
+ .reef-kelp { animation:kelp-sway 5s ease-in-out infinite alternate; }
+ .reef-jelly { translate:330px 45px; animation:jelly-drift 13s ease-in-out infinite alternate; }
+ .reef-bubble { animation:bubble-rise 11s linear infinite; }
+ .current-bar::after { animation:wave-fill 2.6s ease-in-out infinite; }
+ html[data-visual="ocean"] nav a:hover svg { transform:translateX(2px); }
+}
+
+@media (prefers-reduced-motion:reduce) { .reef-fish,.reef-kelp,.reef-jelly,.reef-bubble,.reef-scene::after,.current-bar::after { animation:none !important; } }

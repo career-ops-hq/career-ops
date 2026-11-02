@@ -284,3 +284,6 @@ data/interview-prep/
 .next/
 web/.next/
 web/out/
+
+# Auto-apply criteria: personal targeting, copied from config/auto-apply.example.yml
+config/auto-apply.yml

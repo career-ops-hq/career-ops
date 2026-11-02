@@ -1,0 +1,46 @@
+# Copy to config/auto-apply.yml and set your own criteria. That file is gitignored.
+# enabled stays false until you turn the bot on.
+enabled: false
+daily_cap: 5
+min_score: 3.0
+
+titles:
+  allow:
+    - "Staff Services Analyst"
+    - "Program Manager"
+    - "Contract Manager"
+    - "Operations Manager"
+  deny:
+    - intern
+    - junior
+    - coordinator
+    - assistant
+
+comp:
+  currency: USD
+  floor: 100000
+  target: 130000
+  unstated_pay: confirm_queue
+
+location:
+  remote: true
+  hybrid_commutable_from: ["Springfield", "Shelbyville"]
+  reject_onsite: true
+  reject_relocation: true
+  reject_clearance: true
+  unstated_country: confirm_queue
+
+exclude_companies_file: data/blacklist.md
+
+never_say:
+  - invented_metrics
+  - authorship_claims
+  - sponsorship_or_work_authorization_answers
+
+submit:
+  enabled: true
+  unattended: true
+  allowed_ats: [greenhouse, ashby, lever, governmentjobs, workday, smartrecruiters, workable, bamboohr, rippling, recruitee, breezy, pinpoint, join, icims, paylocity, paycom, ultipro, taleo, successfactors, jobvite, dayforce, other]
+  block_linkedin_easy_apply: true
+  block_workday: false
+  stop_on: [captcha, login, account_creation, unanswerable_required_question]
