@@ -172,7 +172,7 @@ if (guardErr && /cannot derive the client name/.test(guardErr.message) && guardC
     return calls === 1 ? page(many(1, 100), 40) : page(many(201, 100), 40);
   })));
   if (
-    jobs.length === 100 && calls === 1 && jobs.trakstarTruncated === true &&
+    jobs.length === 100 && calls === 1 && jobs.trakstarTruncated === 'counted' &&
     errors.some((w) => /reported total was reached on a full page/.test(w)) &&
     !errors.some((w) => /Raise max_pages/.test(w))
   ) {
@@ -202,7 +202,7 @@ if (guardErr && /cannot derive the client name/.test(guardErr.message) && guardC
     return page(many(1, 100), 9000);
   })));
   if (
-    jobs.length === 100 && calls === 2 && jobs.trakstarTruncated === true &&
+    jobs.length === 100 && calls === 2 && jobs.trakstarTruncated === 'repeated' &&
     errors.some((w) => /same page came back twice/.test(w)) &&
     !errors.some((w) => /Raise max_pages/.test(w))
   ) {
@@ -229,7 +229,7 @@ if (guardErr && /cannot derive the client name/.test(guardErr.message) && guardC
   })));
   if (calls === 20 && jobs.length === 2000) pass('trakstar.fetch() caps pagination at DEFAULT_MAX_PAGES');
   else fail(`trakstar.fetch() cap: ${calls} requests, ${jobs.length} jobs`);
-  if (errors.some((w) => /truncated at max_pages=20/.test(w)) && errors.some((w) => /Raise max_pages/.test(w)) && jobs.trakstarTruncated === true) {
+  if (errors.some((w) => /truncated at max_pages=20/.test(w)) && errors.some((w) => /Raise max_pages/.test(w)) && jobs.trakstarTruncated === 'cap') {
     pass('trakstar.fetch() warns and tags the board when the cap truncates it');
   } else fail(`trakstar.fetch() cap warning: ${JSON.stringify(errors)}`);
 }
@@ -306,7 +306,7 @@ if (guardErr && /cannot derive the client name/.test(guardErr.message) && guardC
   })));
   if (jobs.length === 100 && calls === 4) pass('trakstar.fetch() keeps page 1 when page 2 exhausts retries (1 + 3 attempts)');
   else fail(`trakstar.fetch() partial: ${jobs.length} jobs, ${calls} calls`);
-  if (errors.some((w) => /truncated at page 2 \(100 of 250 jobs\): upstream 503/.test(w)) && !errors.some((w) => /Raise max_pages/.test(w)) && jobs.trakstarTruncated === true) {
+  if (errors.some((w) => /truncated at page 2 \(100 of 250 jobs\): upstream 503/.test(w)) && !errors.some((w) => /Raise max_pages/.test(w)) && jobs.trakstarTruncated === 'fetch-error') {
     pass('trakstar.fetch() warns on a fetch-error stop without the max_pages hint');
   } else fail(`trakstar.fetch() fetch-error warnings: ${JSON.stringify(errors)}`);
 }
@@ -316,7 +316,7 @@ if (guardErr && /cannot derive the client name/.test(guardErr.message) && guardC
   const { result: jobs, errors } = await captureConsoleErrors(() => trakstar.fetch({ name: 'Acme', careers_url: BOARD }, ctxOf(async () => (
     ++calls === 1 ? page(many(1, 100), 250) : { error: 'maintenance' }
   ))));
-  if (jobs.length === 100 && calls === 2 && jobs.trakstarTruncated === true && errors.some((w) => /objects\[\]/.test(w))) {
+  if (jobs.length === 100 && calls === 2 && jobs.trakstarTruncated === 'fetch-error' && errors.some((w) => /objects\[\]/.test(w))) {
     pass('trakstar.fetch() keeps page 1 when page 2 has a malformed envelope');
   } else fail(`trakstar.fetch() malformed later page: ${jobs.length} jobs, ${calls} calls, ${JSON.stringify(errors)}`);
   let threw = false;

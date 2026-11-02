@@ -228,7 +228,8 @@ export default {
         : 'the same page came back twice';
       console.error(`⚠️  trakstar: ${entry.name} may be incomplete (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs): ${why}`);
     }
-    if (!probing && stopReason !== 'complete') /** @type {any} */ (jobs).trakstarTruncated = true;
+    // The value is the stop reason, so a caller can tell a page cap from a broken page.
+    if (!probing && stopReason !== 'complete') /** @type {any} */ (jobs).trakstarTruncated = stopReason;
     return jobs;
   },
 };
