@@ -790,7 +790,7 @@ O TSV carrega:
 **A linha que o merge escreve** (para referência; você escreve o TSV, não esta linha):
 
 ```markdown
-| # | Data | Empresa | Vaga | Score | Status | PDF | Report |
+| # | Data | Empresa | Vaga | Score | Status | PDF | Report | Notes |
 ```
 
 Com as colunas opcionais, que só aparecem num tracker que já as tenha: Notes ao final e Via (canal intermediário, #1596) após Empresa.
