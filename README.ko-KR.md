@@ -249,8 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# 채용 공고 URL이나 설명 텍스트를 붙여 넣으면 auto-pipeline이 실행됩니다.
+# 그 밖의 모드와 CLI에서 요청하는 방법은 아래 '사용법'을 참고하세요.
 ```
 
 </details>
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *URL 또는 채용 공고 붙여넣기* | 전체 파이프라인: 공고 게시 여부 확인(URL만), A-G 평가 + 높은 점수에서 H, 리포트, 맞춤 이력서(기본은 PDF), 트래커 행 |
 | `scan` | 포털을 스캔해 새 공고를 찾고 인박스(`data/pipeline.md`)에 추가 |
-| `pipeline` | 인박스에서 대기 중인 모든 URL 평가 |
+| `pipeline` | 인박스에서 대기 중인 URL을 차례로 처리하며 명백히 맞지 않는 것은 건너뜀 |
 | `apply` | 지원서 양식을 사용자와 함께 항목별로 작성. 제출 직전에 멈춤 |
 | `tracker` | 각 지원의 현재 상태 |
 | `followup` | 팔로업이 필요한 지원과 초안 |
@@ -313,10 +313,10 @@ npm i -g @santifer/career-ops
 | 명령어 | 기능 |
 | --- | --- |
 | [`scan`](modes/scan.md) | 포털 스캔 및 새 공고 발견 |
-| [`discover`](modes/discover.md) | 기업 이름 목록을 스캔 가능한 ATS 보드로 변환해 `portals.yml`에 추가 (토큰 사용 없음) |
+| [`discover`](modes/discover.md) | 기업 이름 목록을 스캔 가능한 ATS 보드로 변환합니다. 기본은 미리보기이며 `--write`를 줄 때만 `portals.yml`에 추가합니다 (토큰 사용 없음) |
 | [`pipeline`](modes/pipeline.md) | 인박스(`data/pipeline.md`)의 대기 중인 URL 처리 |
 | [`triage`](modes/triage.md) | 전체 평가 전에 `modes/_brief.md` 기준으로 지원 여부를 빠르게 1차 판정 (파일을 쓰지 않음) |
-| [`batch`](modes/batch.md) | 병렬 헤드리스 워커로 많은 공고 평가 |
+| [`batch`](modes/batch.md) | 헤드리스 워커로 많은 공고 평가 (Claude에서는 병렬, 다른 CLI에서는 한 번에 하나씩) |
 | [`titles`](modes/titles.md) | 이력서를 바탕으로 비슷한 직무명을 제안해 탐색 범위 확장 |
 
 **공고 평가하기**
