@@ -251,8 +251,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# Cole a URL ou o texto de uma vaga para acionar o auto-pipeline.
+# Todos os outros modos, e como pedi-los na sua CLI: veja Uso abaixo.
 ```
 
 </details>
@@ -292,7 +292,7 @@ Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere s
 
 `/career-ops` sem nada depois mostra o menu de comandos nas CLIs que o usam. A linguagem natural funciona em todas as CLIs compatíveis. Como plugin do Claude Code, o comando é `/career-ops:career-ops`.
 
-Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e os mesmos arquivos `modes/*.md`, então um modo se comporta do mesmo jeito em qualquer CLI. Comandos com barra não são garantidos no Codex: peça em linguagem natural ou rode um prompt em modo headless com `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Como rodar em cada CLI compatível, os comandos headless quando a CLI tem um e as notas de configuração de cada CLI estão em [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e os mesmos arquivos `modes/*.md`, então todas as CLIs roteiam um pedido do mesmo jeito (modos que usam muito o navegador também precisam das ferramentas do Playwright). Comandos com barra não são garantidos no Codex: peça em linguagem natural ou rode um prompt em modo headless com `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Como rodar em cada CLI compatível, os comandos headless quando a CLI tem um e as notas de configuração de cada CLI estão em [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Os comandos do dia a dia
 
@@ -300,7 +300,7 @@ Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e o
 | --- | --- |
 | *cole uma URL ou uma descrição de vaga* | Pipeline completo: verificação de que a vaga está aberta (só URLs), avaliação A-G mais H com notas altas, relatório, currículo adaptado (PDF por padrão), linha no tracker |
 | `scan` | Escaneia seus portais em busca de vagas novas e as adiciona à caixa de entrada (`data/pipeline.md`) |
-| `pipeline` | Avalia cada URL que espera na caixa de entrada |
+| `pipeline` | Percorre as URLs que esperam na caixa de entrada (os níveis standard e premium podem pular as que claramente não servem) |
 | `apply` | Preenche um formulário de candidatura com você, campo a campo. Para antes de Enviar |
 | `tracker` | Em que pé está cada candidatura |
 | `followup` | Quais candidaturas precisam de follow-up, com rascunhos |
@@ -315,10 +315,10 @@ Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e o
 | Comando | O que faz |
 | --- | --- |
 | [`scan`](modes/scan.md) | Escaneia portais e descobre vagas novas |
-| [`discover`](modes/discover.md) | Converte uma lista de nomes de empresas em quadros ATS escaneáveis e os adiciona ao `portals.yml` (sem tokens) |
+| [`discover`](modes/discover.md) | Converte uma lista de nomes de empresas em quadros ATS escaneáveis. Por padrão só mostra uma prévia e apenas com `--write` os adiciona ao `portals.yml` (sem tokens) |
 | [`pipeline`](modes/pipeline.md) | Processa as URLs pendentes da caixa de entrada (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Triagem rápida de vale ou não a pena a partir de `modes/_brief.md`, antes de uma avaliação completa (não grava arquivos) |
-| [`batch`](modes/batch.md) | Avalia muitas vagas com workers headless em paralelo |
+| [`batch`](modes/batch.md) | Avalia muitas vagas com workers headless (em paralelo com o Claude, uma por vez com outras CLIs) |
 | [`titles`](modes/titles.md) | Sugere cargos afins a partir do seu currículo para ampliar a busca |
 
 **Avaliar uma vaga**
