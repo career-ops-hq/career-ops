@@ -24,15 +24,28 @@ function hasBox(el) {
   return width > 0 || height > 0;
 }
 
+// The highest box can come later in the DOM than .page. The first box in
+// source order would treat the page as the start and drop the header above it.
 function firstRendered(nodes) {
   if (!nodes || typeof nodes[Symbol.iterator] !== "function") return null;
+  let best = null;
+  let bestTop = Infinity;
   for (const el of nodes) {
     if (!el) continue;
-    if (hasBox(el)) return el;
+    if (hasBox(el)) {
+      const top = placed(el).top;
+      if (top < bestTop) {
+        best = el;
+        bestTop = top;
+      }
+    }
     const nested = firstRendered(el.children);
-    if (nested) return nested;
+    if (nested && placed(nested).top < bestTop) {
+      best = nested;
+      bestTop = placed(nested).top;
+    }
   }
-  return null;
+  return best;
 }
 
 // A footer can sit after .page, including inside a display:contents wrapper.
@@ -60,9 +73,9 @@ function heightAfterPages(body, pages) {
   return extra;
 }
 
-// Markup before the first .page is part of the CV. The body's own margin is
-// not: the span starts at the first child's border, so the iframe can still
-// keep that offset without it adding a page.
+// Markup above .page is part of the CV, even when that markup comes later in
+// the DOM. The body's own margin is not: the span starts at the highest box,
+// so the iframe can still keep that offset without it adding a page.
 function contentAbovePages(body, pages) {
   const kids = body.children;
   if (!kids || typeof kids[Symbol.iterator] !== "function" || pages.length === 0) return 0;

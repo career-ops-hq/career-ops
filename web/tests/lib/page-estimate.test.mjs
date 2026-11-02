@@ -97,6 +97,33 @@ test("a header before .page counts toward the preview height", () => {
   assert.equal(previewPageCount(contentHeightPx(one)), 2);
 });
 
+test("a header drawn above the page counts when the page comes first in the DOM", () => {
+  const header = { offsetHeight: 200, getBoundingClientRect: () => ({ top: 0, height: 200, width: 800 }) };
+  const page = { scrollHeight: 900, getBoundingClientRect: () => ({ top: 200, height: 900, width: 800 }) };
+  const one = {
+    body: {
+      children: [page, header],
+      scrollHeight: 3000,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(one), 1100);
+  assert.equal(frameHeightPx(one), 1100);
+  assert.equal(previewPageCount(contentHeightPx(one)), 2);
+
+  const wrap = { offsetHeight: 10, getBoundingClientRect: () => ({ top: 400, height: 10, width: 800 }), children: [header] };
+  const nested = {
+    body: {
+      children: [page, wrap],
+      scrollHeight: 3000,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(nested), 1100);
+});
+
 test("a footer after .page is in the height, and a stretched body scroll height is not", () => {
   const page = { scrollHeight: 1000, getBoundingClientRect: () => ({ top: 0, height: 1000 }) };
   const footer = { offsetHeight: 200, getBoundingClientRect: () => ({ top: 1000, height: 200 }) };
