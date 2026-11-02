@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../helpers/web-ts-alias-loader.mjs";
@@ -100,6 +100,36 @@ test("an unchanged tracker is not read again, and an edited row is", () => {
       if (!moved && Date.now() > deadline) throw new Error("mtime did not advance");
     }
     assert.equal(readApplications()[0].status, "Evaluated");
+  });
+});
+
+test("a same-size edit with its mtime put back is still read again", () => {
+  withRoot((root) => {
+    writeFileSync(join(root, "data", "applications.md"), [
+      "| # | Date | Company | Role | Score | Status | PDF | Report | Notes |",
+      "|---|---|---|---|---|---|---|---|---|",
+      "| 1 | 2026-01-01 | Lumenfold | Platform Engineer | 4.2/5 | Applied | | | synthetic |",
+    ].join("\n"));
+  }, () => {
+    const file = join(process.env.CAREER_OPS_ROOT, "data", "applications.md");
+    // A whole-second mtime can be put back exactly.
+    utimesSync(file, 1_700_000_000, 1_700_000_000);
+    assert.equal(readApplications()[0].status, "Applied");
+    const before = statSync(file, { bigint: true });
+    const current = origRead(file, "utf8");
+    const sameSize = current.replace("Applied", "Offered");
+    assert.equal(Buffer.byteLength(sameSize), Buffer.byteLength(current));
+    const deadline = Date.now() + 2000;
+    let after;
+    do {
+      writeFileSync(file, sameSize);
+      utimesSync(file, 1_700_000_000, 1_700_000_000);
+      after = statSync(file, { bigint: true });
+      if (after.ctimeNs === before.ctimeNs && Date.now() > deadline) throw new Error("ctime did not advance");
+    } while (after.ctimeNs === before.ctimeNs);
+    assert.equal(after.mtimeNs, before.mtimeNs);
+    assert.equal(after.size, before.size);
+    assert.equal(readApplications()[0].status, "Offered");
   });
 });
 

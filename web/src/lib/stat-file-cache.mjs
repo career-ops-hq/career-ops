@@ -3,7 +3,7 @@ import fs from "node:fs";
 const slots = new Map();
 
 function stamp(st) {
-  return `${st.mtimeNs}:${st.size}`;
+  return `${st.mtimeNs}:${st.size}:${st.ctimeNs}`;
 }
 
 // A dependency that is missing stays a stable stamp. Appearing later is a
@@ -24,7 +24,8 @@ function dependencyToken(deps) {
 }
 
 /**
- * Parsed contents of one file, reused until that file's mtime or size changes.
+ * Parsed contents of one file, reused until that file's mtime, size, or ctime
+ * changes. ctime catches a same-size edit whose mtime was put back with utimes.
  * `kind` separates two parsers of the same path. `deps` are other files the
  * parsed value depends on. A change to any of them drops the cached value.
  * A missing file is null and not cached. Any other stat or read error is
