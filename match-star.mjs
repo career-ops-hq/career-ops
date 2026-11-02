@@ -26,6 +26,7 @@ import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseStories, splitStoryBlocks, isValidStory } from './lib/story-bank.mjs';
 import { parseStoryBlocks, classifyEntries } from './story-provenance-check.mjs';
+import { flagValue, safeIntFlag } from './lib/cli-flags.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -38,18 +39,17 @@ const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 const UNCONFIRMED = '[unconfirmed figure]';
 
+const VALUE_FLAGS = ['--jd', '--top'];
+
+// flagValue() reads `--jd=jds/acme.md` as well as `--jd jds/acme.md`. The
+// indexOf() lookup this replaces saw only the second, so the first ran without
+// the JD, and `--top=2` printed one match.
 const args       = process.argv.slice(2);
 const LIST_MODE  = args.includes('--list');
-const jdFlag     = args.indexOf('--jd');
-const jdPath     = jdFlag !== -1 ? args[jdFlag + 1] : null;
-const topFlag    = args.indexOf('--top');
-const topRaw     = topFlag !== -1 ? parseInt(args[topFlag + 1], 10) : NaN;
-const TOP_N      = Number.isInteger(topRaw) && topRaw > 0 ? topRaw : 1;
+const jdPath     = flagValue(args, '--jd') ?? null;
+const TOP_N      = safeIntFlag(flagValue(args, '--top'), 1) || 1;
 // Exclude flag operands by index position, not by value, to preserve repeated text in the question
-const excludeIdx = new Set([
-  ...(jdFlag  !== -1 ? [jdFlag + 1]  : []),
-  ...(topFlag !== -1 ? [topFlag + 1] : []),
-]);
+const excludeIdx = new Set(args.flatMap((a, i) => (VALUE_FLAGS.includes(a) ? [i + 1] : [])));
 const question = args
   .filter((a, i) => !a.startsWith('--') && !excludeIdx.has(i))
   .join(' ').trim();
