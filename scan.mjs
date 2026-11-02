@@ -3910,7 +3910,9 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
         );
       }
       try {
-        browser = await chromium.launch(browserLaunchOptions({ headless: true }));
+        browser = await chromium.launch(
+          browserLaunchOptions({ headless: true }, { projectRoot: DATA_ROOT }),
+        );
       } catch (err) {
         throw new Error(
           `--verify could not launch Chromium (run "npx playwright install chromium" or re-run without --verify): ${err.message}`,

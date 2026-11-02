@@ -2259,7 +2259,8 @@ export async function inlineLocalFonts(html) {
 // choice to the same resolver every other browser-backed feature uses.
 export async function launchChromium(options = {}) {
   const { chromium } = await import('playwright');
-  return chromium.launch(browserLaunchOptions(options));
+  const { projectRoot, ...launchOptions } = options;
+  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot }));
 }
 
 /**
@@ -2314,7 +2315,10 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
       console.warn(`⚠️  Shared PDF browser unavailable, painting locally: ${err.message}`);
     }
   }
-  const launchBrowser = opts.launchBrowser || launchChromium;
+  const launchBrowser = opts.launchBrowser || ((options) => launchChromium({
+    ...options,
+    projectRoot: opts.workspaceRoot || workspaceRoot,
+  }));
   let browser = null;
   try {
     browser = await launchBrowser({ headless: true });

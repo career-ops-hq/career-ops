@@ -26,10 +26,19 @@ console.log('\nlib/browser-launch.mjs — browser executable resolution');
 const generatePdfSource = readFileSync(new URL('../generate-pdf.mjs', import.meta.url), 'utf8');
 if (/import\s*\{[^}]*\bbrowserLaunchOptions\b[^}]*\}\s*from\s*['"]\.\/lib\/browser-launch\.mjs['"]/.test(generatePdfSource)
     && /export\s+async\s+function\s+launchChromium\b/.test(generatePdfSource)
-    && /chromium\.launch\(browserLaunchOptions\(options\)\)/.test(generatePdfSource)) {
-  pass('generate-pdf keeps launchChromium local and delegates its options to the shared resolver');
+    && /const\s*\{\s*projectRoot\s*,\s*\.\.\.launchOptions\s*\}\s*=\s*options/.test(generatePdfSource)
+    && /chromium\.launch\(browserLaunchOptions\(launchOptions,\s*\{\s*projectRoot\s*\}\)\)/.test(generatePdfSource)
+    && /projectRoot:\s*opts\.workspaceRoot\s*\|\|\s*workspaceRoot/.test(generatePdfSource)) {
+  pass('generate-pdf delegates launch options and its effective workspace root to the shared resolver');
 } else {
-  fail('generate-pdf launchChromium is not backed by the shared browser resolver');
+  fail('generate-pdf launchChromium is not backed by the workspace-aware shared browser resolver');
+}
+
+const scanSource = readFileSync(new URL('../scan.mjs', import.meta.url), 'utf8');
+if (/browserLaunchOptions\(\{\s*headless:\s*true\s*\},\s*\{\s*projectRoot:\s*DATA_ROOT\s*\}\)/.test(scanSource)) {
+  pass('scan verification resolves its browser from the scan data root');
+} else {
+  fail('scan verification does not pass its data root to the shared browser resolver');
 }
 
 // Several suites run a copied generate-pdf.mjs in an isolated directory. A
