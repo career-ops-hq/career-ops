@@ -13,6 +13,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -51,7 +52,9 @@ function run(body, template) {
       maxBuffer: 10 * 1024 * 1024,
     });
     const html = res.status === 0 ? readFileSync(out, 'utf-8') : '';
-    return { status: res.status, stderr: res.stderr, html };
+    // Keep the spawn fields (error, signal, status, streams) so exitedNonZero
+    // can tell a chosen non-zero exit from a timeout kill.
+    return { ...res, html };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -65,7 +68,7 @@ test('a template token in any double-brace shape that does not resolve fails and
     <p>{{ COMPANY }}</p>
   </body></html>`;
   const res = run(payload(), tpl);
-  assert.notEqual(res.status, 0);
+  assert.ok(exitedNonZero(res), describeSpawn(res, 'an unresolved template token must fail the build'));
   assert.match(res.stderr, /Unresolved placeholders: \{\{role_title\}\}, \{\{ COMPANY \}\}/);
 });
 
@@ -75,7 +78,7 @@ test('a CV that quotes {{ .Values.x }} still builds', () => {
     summary: quote,
     experience: [{ company: 'Acme', role: 'Engineer', dates: '2024', bullets: [quote] }],
   }));
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res, 'a CV quoting {{ .Values.x }} must still build'));
   assert.match(res.html, /Tuned the chart with &#123;&#123; \.Values\.x &#125;&#125; overrides\./);
   assert.match(res.html, /Test Candidate/);
 });
