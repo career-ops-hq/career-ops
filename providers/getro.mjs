@@ -31,7 +31,8 @@
 //
 // These boards are large (1000-2000+ jobs) but the API returns them
 // created_at-DESCENDING (newest first), so we paginate newest-first and STOP
-// once postings fall older than `getro_max_age_days`. This is a PAGINATION
+// once postings fall older than `getro_max_age_days` (a pinned `featured`
+// posting sits above that order and does not count). This is a PAGINATION
 // BOUND for efficiency (don't page through thousands of stale jobs); each job
 // still carries `postedAt` (epoch ms) for any downstream freshness handling.
 // The bound default (90d) is deliberately wide. `getro_max_pages` (default
@@ -289,9 +290,14 @@ export default {
         if (!url) continue;
         // Jobs are newest-first; a dated posting older than the cutoff (and
         // everything after it) is stale. Keep undated jobs (missing = pass).
+        // A board can pin `featured` postings above that order: Earlybird's
+        // first page opened with pins 10, 91 and 152 days old over postings
+        // two days old (2026-11-02). An old pin is dropped like any old posting,
+        // but it says nothing about the pages after it, so it does not stop
+        // the walk.
         const createdMs = toEpochMs(j.created_at);
         if (cutoffMs > 0 && createdMs != null && createdMs < cutoffMs) {
-          reachedOld = true;
+          if (j.featured !== true) reachedOld = true;
           continue;
         }
         const row = {
