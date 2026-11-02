@@ -64,21 +64,27 @@ async function main() {
   const applicationsPath = resolveTrackerPath(root);
   const plan = planLinkedInImport(text, `${readIf(pipelinePath)}\n${readIf(applicationsPath)}`, { dryRun });
 
+  let historyError = null;
   if (!dryRun && !plan.error && plan.added.length > 0) {
     const { appendToPipeline, appendToScanHistory } = await import('./scan.mjs');
     const { localToday } = await import('./lib/local-today.mjs');
     const offers = linkedInOffers(plan.added, text);
     mkdirSync(dirname(pipelinePath), { recursive: true });
     await appendToPipeline(offers, { pipelinePath });
-    await appendToScanHistory(offers, localToday(), 'added');
+    try {
+      await appendToScanHistory(offers, localToday(), 'added');
+    } catch (err) {
+      historyError = err instanceof Error ? err.message : String(err);
+    }
   }
 
   const payload = {
     added: plan.added.length,
     already: plan.already.length,
     found: plan.found,
-    message: plan.message,
+    message: historyError ? `${plan.message} The scan history could not be updated.` : plan.message,
     ...(plan.error ? { error: plan.error } : {}),
+    ...(historyError ? { historyError } : {}),
   };
   if (json) console.log(JSON.stringify(payload));
   else console.log(plan.message);

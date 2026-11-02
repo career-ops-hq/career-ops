@@ -202,7 +202,7 @@ function sandbox() {
   return root;
 }
 
-function runCli(root, args, input) {
+function runCli(root, args, input, extraEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     cwd: root,
     input,
@@ -215,6 +215,7 @@ function runCli(root, args, input) {
       CAREER_OPS_TRACKER: '',
       CAREER_OPS_SCAN_HISTORY: '',
       NO_COLOR: '1',
+      ...extraEnv,
     },
   });
 }
@@ -250,6 +251,26 @@ test('a root with no data directory still receives the jobs', () => {
     assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
     const pipeline = readFileSync(join(root, 'data', 'pipeline.md'), 'utf8');
     assert.match(pipeline, new RegExp(`https://www.linkedin.com/jobs/view/${A}`));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a failed scan-history write still reports the jobs that were saved', () => {
+  const root = sandbox();
+  const history = join(root, 'data', 'scan-history.tsv');
+  mkdirSync(history);
+  try {
+    const result = runCli(root, ['--json'], `https://www.linkedin.com/jobs/view/${A}\n`, {
+      CAREER_OPS_SCAN_HISTORY: history,
+    });
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.added, 1);
+    assert.match(parsed.message, /1 LinkedIn job added/);
+    assert.match(parsed.message, /scan history could not be updated/);
+    assert.doesNotMatch(parsed.message, /Nothing was saved/);
+    assert.match(readFileSync(join(root, 'data', 'pipeline.md'), 'utf8'), new RegExp(A));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

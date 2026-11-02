@@ -9,6 +9,7 @@ type ImportResult = {
   found?: number;
   message?: string;
   error?: string;
+  uncertain?: boolean;
 };
 
 export function LinkedInPaste() {
@@ -31,15 +32,16 @@ export function LinkedInPaste() {
         body: JSON.stringify({ text: body }),
       });
       const data = (await response.json()) as ImportResult;
+      const saved = (data.added ?? 0) > 0;
+      if (saved || data.uncertain) {
+        if (saved) setText((current) => (current === body ? "" : current));
+        router.refresh();
+      }
       if (!response.ok || data.error) {
         setError(data.message || "Could not add those jobs. Nothing was saved.");
         return;
       }
       setMessage(data.message || "");
-      if ((data.added ?? 0) > 0) {
-        setText((current) => (current === body ? "" : current));
-        router.refresh();
-      }
     } catch {
       setError("Could not add those jobs. Nothing was saved.");
     } finally {

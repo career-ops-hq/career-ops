@@ -13,12 +13,21 @@ const FAILED = {
   message: "Could not add those jobs. Nothing was saved.",
 };
 
+const UNCERTAIN = {
+  added: 0,
+  already: 0,
+  found: 0,
+  uncertain: true,
+  message: "The import did not finish. Check Pipeline before pasting again.",
+};
+
 type ImportPayload = {
   added: number;
   already: number;
   found: number;
   message: string;
   error?: string;
+  uncertain?: boolean;
 };
 
 function runImport(text: string): Promise<ImportPayload> {
@@ -50,7 +59,11 @@ function runImport(text: string): Promise<ImportPayload> {
         if (code !== 0 && !parsed.message) resolve({ ...FAILED, error: err || `exit ${code}` });
         else resolve(parsed);
       } catch {
-        resolve({ ...FAILED, error: err || `exit ${code}` });
+        // A crash after the pipeline write has no JSON. "Nothing was saved" is
+        // only true when the script itself said so, before it wrote anything.
+        const detail = err.trim();
+        if (/Nothing was saved/i.test(detail)) resolve({ ...FAILED, error: detail || `exit ${code}` });
+        else resolve({ ...UNCERTAIN, error: detail || `exit ${code}` });
       }
     });
     child.stdin.write(text);

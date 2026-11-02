@@ -247,7 +247,6 @@ claude   # or codex / opencode / qwen / agy / grok
 
 # 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
-# LinkedIn job alerts: paste the email. No Google account. See docs/LINKEDIN_JOBS.md
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
 # "Run the career-ops scan mode"
@@ -255,6 +254,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Run the career-ops pdf mode for the latest evaluated role"
 # "Run the career-ops tracker mode and summarize the current statuses"
 ```
+
+LinkedIn job alerts: paste the email. No Google account. See [docs/LINKEDIN_JOBS.md](docs/LINKEDIN_JOBS.md).
 
 </details>
 
