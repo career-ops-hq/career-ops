@@ -20,6 +20,12 @@ test("j and k move the focused tracker row", () => {
   assert.equal(trackerCommand({ key: "ArrowUp" }), null);
 });
 
+test("a held status key does not repeat, and j and k still do", () => {
+  assert.equal(trackerCommand({ key: "6", repeat: true }), null);
+  assert.deepEqual(trackerCommand({ key: "j", repeat: true }), { name: "next" });
+  assert.deepEqual(trackerCommand({ key: "k", repeat: true }), { name: "prev" });
+});
+
 test("status keys do nothing while typing or with a modifier", () => {
   assert.equal(trackerCommand({ key: "1", pending: true }), null);
   assert.equal(trackerCommand({ key: "j", pending: true }), null);
@@ -39,13 +45,15 @@ test("shift-click selects the inclusive range between two rows", () => {
   assert.equal(rangeKeys(keys, "a", "missing"), null);
 });
 
-test("a failed save keeps only selected failures, not the cursor row", () => {
+test("a failed save keeps the failed row and a row checked while the save ran", () => {
   const keyOf = (row) => `n:${row.n}`;
   const cursorOnly = [{ n: "4" }];
   assert.deepEqual(selectionAfterFailedSave([], cursorOnly, new Set(["4"]), keyOf), []);
   const selected = ["n:2", "n:4", "n:9"];
   const attempted = [{ n: "2" }, { n: "4" }];
-  assert.deepEqual(selectionAfterFailedSave(selected, attempted, new Set(["4"]), keyOf), ["n:4"]);
+  assert.deepEqual(selectionAfterFailedSave(selected, attempted, new Set(["4"]), keyOf), ["n:4", "n:9"]);
+  assert.deepEqual(selectionAfterFailedSave(selected, attempted, new Set(), keyOf), ["n:9"]);
+  assert.deepEqual(selectionAfterFailedSave(["n:9"], attempted, new Set(["4"]), keyOf), ["n:9"]);
 });
 
 test("the cursor stays on a real row", () => {

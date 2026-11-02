@@ -68,7 +68,7 @@ const SUITES = {
   "pipeline-return": { url: "PIPELINE_RETURN_TEST_URL", root: "PIPELINE_RETURN_TEST_ROOT", fixture: "pipeline-status" },
   "pipeline-views": { url: "PIPELINE_VIEWS_TEST_URL", root: "PIPELINE_VIEWS_TEST_ROOT", fixture: "pipeline-status" },
   "skip-link": { url: "SKIP_LINK_TEST_URL", fixture: "blank" },
-  "tracker-keys": { url: "TRACKER_KEYS_TEST_URL", root: "TRACKER_KEYS_TEST_ROOT", fixture: "pipeline-status" },
+  "tracker-keys": { url: "TRACKER_KEYS_TEST_URL", root: "TRACKER_KEYS_TEST_ROOT", fixture: "tracker-keys" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },
 };
 

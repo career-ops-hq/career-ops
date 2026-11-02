@@ -294,7 +294,7 @@ export function PipelineView({
       const { saved, failed } = await saveStatuses(rows, status);
       const failedNums = new Set(failed.map((f) => f.n));
       const savedNums = new Set(saved);
-      setSelected(new Set(selectionAfterFailedSave([...selected], rows, failedNums, applicationKey)));
+      setSelected((current) => new Set(selectionAfterFailedSave([...current], rows, failedNums, applicationKey)));
       if (failed.length > 0) {
         setBulkError(`${failed.length} not saved: ${failed.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
       }
@@ -336,6 +336,7 @@ export function PipelineView({
         ctrlKey: event.ctrlKey,
         altKey: event.altKey,
         pending: state.isPending,
+        repeat: event.repeat,
       });
       if (!command) return;
       if (command.name === "next" || command.name === "prev") {

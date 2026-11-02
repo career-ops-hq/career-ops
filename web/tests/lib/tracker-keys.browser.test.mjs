@@ -1,5 +1,5 @@
 // Live-browser regression for the tracker status keys (disposable data only).
-// Generate a root with node tests/fixtures/pipeline-status.mjs, start the web
+// Generate a root with node tests/fixtures/tracker-keys.mjs, start the web
 // server with CAREER_OPS_ROOT set to it, then set TRACKER_KEYS_TEST_URL and
 // TRACKER_KEYS_TEST_ROOT. tests/browser-suites.mjs does all of that.
 import assert from "node:assert/strict";
@@ -48,13 +48,30 @@ test("shift-click two rows, then a number key sets their status", { skip: liveSe
   await page.keyboard.press("6");
   await until(() => [11, 12, 13].every((n) => statusOf(n) === "Rejected"));
   assert.equal(statusOf(10), outsideBefore, "#10 stays Applied");
+  await until(async () => {
+    for (const n of [11, 12, 13]) {
+      if (await row(n).getByRole("checkbox").isChecked()) return false;
+    }
+    return true;
+  });
 
   // Arrow keys keep scrolling the page; j and k move the row cursor.
   await page.locator("h1").first().click();
   await page.keyboard.press("ArrowDown");
   assert.equal(await page.locator('[data-tracker-cursor="true"]').count(), 0, "ArrowDown does not move the row cursor");
   await page.keyboard.press("j");
-  await until(async () => (await page.locator('[data-tracker-cursor="true"]').count()) === 1);
+  const cursor = page.locator('tr[data-tracker-cursor="true"]');
+  await until(async () => (await cursor.count()) === 1);
+  const cursorN = Number((await cursor.getByRole("link", { name: /^#\d+$/ }).innerText()).replace("#", ""));
+  assert.equal(await cursor.getByRole("checkbox").isChecked(), false, "the cursor row is not part of the cleared selection");
+  const beforeCursor = statusOf(cursorN);
+  await page.keyboard.press("5");
+  await until(() => statusOf(cursorN) === "Offer");
+  assert.notEqual(beforeCursor, "Offer");
+  for (const n of [10, 11, 12, 13]) {
+    if (n === cursorN) continue;
+    assert.equal(statusOf(n), n === 10 ? outsideBefore : "Rejected", `#${n} is not the cursor row`);
+  }
   assert.ok(scrollBefore >= 0);
   assert.deepEqual(errors, []);
 });

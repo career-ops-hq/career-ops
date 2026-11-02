@@ -9,13 +9,15 @@ const STATUS_KEY = {
   "8": "SKIP",
 };
 
-/** @param {{ key?: string, metaKey?: boolean, ctrlKey?: boolean, altKey?: boolean, typing?: boolean, composing?: boolean, pending?: boolean }} input */
+/** @param {{ key?: string, metaKey?: boolean, ctrlKey?: boolean, altKey?: boolean, typing?: boolean, composing?: boolean, pending?: boolean, repeat?: boolean }} input */
 export function trackerCommand(input) {
   // pending: the list is mid-navigation and the rows on screen are the previous tab.
   if (!input || input.typing || input.composing || input.metaKey || input.ctrlKey || input.altKey || input.pending) return null;
   // Arrow keys stay with the browser so the page still scrolls.
+  // Holding j or k may repeat. Holding a status key must not set the cursor row after the selection clears.
   if (input.key === "j") return { name: "next" };
   if (input.key === "k") return { name: "prev" };
+  if (input.repeat) return null;
   const status = STATUS_KEY[input.key];
   if (status) return { name: "status", status };
   return null;
@@ -43,8 +45,10 @@ export function moveCursor(index, count, delta) {
 }
 
 /**
- * Selection after a status save. Keep a selected row only when that save failed.
- * A cursor row that was not selected stays unselected, including when its save fails.
+ * Selection after a status save. A row that saved is cleared. A row checked
+ * while that save was running stays, because it was not part of the attempt.
+ * A failed row stays only when it is still selected. A cursor row that was
+ * not selected stays unselected, including when its save fails.
  * Tracker numbers are strings, the same as a row's n.
  * @template {{ n: string }} T
  * @param {string[]} selectedKeys
@@ -54,11 +58,11 @@ export function moveCursor(index, count, delta) {
  * @returns {string[]}
  */
 export function selectionAfterFailedSave(selectedKeys, attempted, failedNums, keyOf) {
-  const failed = new Set();
+  const saved = new Set();
   for (const row of attempted) {
-    if (failedNums.has(row.n)) failed.add(keyOf(row));
+    if (!failedNums.has(row.n)) saved.add(keyOf(row));
   }
-  return selectedKeys.filter((key) => failed.has(key));
+  return selectedKeys.filter((key) => !saved.has(key));
 }
 
 export function rangeKeys(keys, anchor, target) {

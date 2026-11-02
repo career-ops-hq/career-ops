@@ -12,7 +12,6 @@ fs.writeFileSync(path.join(root, "data/applications.md"), `# Fictional browser f
 
 | # | Date | Company | Role | Score | Status | PDF | Report | Notes |
 |---|------|---------|------|-------|--------|-----|--------|-------|
-| 10 | 2026-10-02 | Fixture Outside | Engineer | 4.0/5 | Applied | — | | Fictional fixture only |
 | 11 | 2026-10-02 | Fixture Alpha | Engineer | 4.2/5 | Evaluated | — | [11](../reports/011-fixture-alpha.md) | Fictional fixture only |
 | 12 | 2026-10-02 | Fixture Beta | Designer | 3.8/5 | Applied | — | | Fictional fixture only |
 | 13 | 2026-10-02 | Fixture Gamma | Analyst | 3.6/5 | Evaluated | — | | Fictional fixture only |
