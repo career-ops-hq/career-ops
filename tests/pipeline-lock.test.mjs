@@ -514,7 +514,7 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
     lock.release();
     await freeItLater;
 
-    assert.ok(elapsed > 400, `acquired after only ${elapsed}ms — the lock was not actually contended`);
+    assert.ok(elapsed > EXTENSION_WINDOW_MS * 2, `acquired after only ${elapsed}ms — the lock was not actually contended`);
     assert.ok(churn.handoffs() > 5, `only ${churn.handoffs()} handoffs — the deadline was never crossed mid-contention`);
   } finally {
     rmSync(root, { recursive: true, force: true });
