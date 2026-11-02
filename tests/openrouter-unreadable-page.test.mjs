@@ -29,6 +29,49 @@ const JD = [
   'The role is remote within Europe and reports to the Head of Infrastructure. Apply now.',
 ].join(' ');
 
+const VALID_EVALUATION = `
+**URL:** https://example.com/job/123
+**Score:** 4.2/5
+**Decision:** Apply
+**Legitimacy:** High Confidence
+
+---
+
+## Machine Summary
+\`\`\`yaml
+company: "Acme"
+role: "Senior Backend Engineer"
+score: 4.2
+final_decision: "Apply"
+\`\`\`
+
+## A) Role Summary
+Backend platform role focusing on distributed systems in Go and Node.js.
+- Domain: Platform / Cloud
+- Seniority: Senior
+- Remote: Full
+
+## B) Match with CV
+| Requirement | Importance | Match | JD signal | Evidence / gap |
+|---|---|---|---|---|
+| Node.js | critical (stated) | ✅ Strong | "Expert Node.js" | cv.md: 5 years experience |
+
+## C) Level and Strategy
+Targeted at senior level with solid engineering ownership.
+
+## D) Comp and Demand
+Salary benchmark 120-140k EUR in line with market expectation.
+
+## E) Customization Plan
+Emphasize backend scale, microservices, and high-throughput queue architectures.
+
+## F) Interview Plan
+Prepare STAR stories for distributed systems troubleshooting and latency reduction.
+
+## G) Posting Legitimacy
+Verified direct company board with transparent company information. High Confidence.
+`;
+
 test('a page with a job description is evaluated', () => {
   assert.equal(unreadableJobPage({ status: 200, requestedUrl: URL_, finalUrl: URL_, text: JD }), null);
 });
@@ -103,7 +146,7 @@ for (const [name, reply] of Object.entries({
 }
 
 test('a scored reply is still saved', (t) => {
-  const { saved, additions, log } = evaluate(t, '**Score:** 4.2/5\n\nA solid match.');
+  const { saved, additions, log } = evaluate(t, VALID_EVALUATION);
   assert.equal(saved.length, 1, log);
   assert.equal(additions.length, 1, log);
 });
