@@ -42,7 +42,7 @@ if (process.platform === 'win32') {
  * `modelName` below and the `--model` examples accordingly.
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
@@ -139,6 +139,32 @@ function resolveModesDirCandidate(customModesDir) {
   return customModesDir;
 }
 
+// Same recognition as resolveEvalModeFile in web/src/lib/career-ops.ts: the
+// evaluation mode is the markdown file whose title states the block range it
+// produces (A-F, A-G, or A-H; the dash may be ASCII or typographic). A
+// filename allow-list goes stale whenever a market ships under a new name
+// (#6398: annuncio, vacature, gonggo, lowongan, offer, tuyen-dung).
+const EVAL_MODE_TITLE_RE = /A[-\u2010-\u2015][F-H]/;
+
+function findEvaluationModeFile(dir) {
+  let names;
+  try {
+    names = readdirSync(join(CODE_ROOT, dir));
+  } catch {
+    return null;
+  }
+  for (const name of names.sort()) {
+    if (!name.endsWith('.md') || name.startsWith('_') || name === 'README.md') continue;
+    try {
+      const first = readFileSync(join(CODE_ROOT, dir, name), 'utf8').split('\n', 1)[0] ?? '';
+      if (EVAL_MODE_TITLE_RE.test(first)) return name;
+    } catch {
+      // Unreadable file — keep looking.
+    }
+  }
+  return null;
+}
+
 if (existsSync(PATHS.profileYml)) {
   try {
     const yamlContent = stripBom(readFileSync(PATHS.profileYml, 'utf-8'));
@@ -154,8 +180,7 @@ if (existsSync(PATHS.profileYml)) {
       // anyone asking for it).
       const primaryRaw = candidates[0];
       const primaryDir = resolveModesDirCandidate(primaryRaw);
-      const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'fursah.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
-      const primaryEvalFile = primaryDir && candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
+      const primaryEvalFile = primaryDir && findEvaluationModeFile(primaryDir);
       const extras = candidates.slice(1).map(resolveModesDirCandidate).filter(Boolean);
       if (primaryDir && primaryEvalFile) {
         // Primary resolved. Any further declared markets only need to exist —
@@ -346,16 +371,6 @@ function validateEvaluationShape(text) {
   if (issues.length > 0) {
     throw new Error(`Gemini returned an invalid career-ops report: ${issues.join('; ')}`);
   }
-}
-
-// Lazy import — only used when saving
-let readdirSync;
-try {
-  ({ readdirSync } = await import('fs'));
-} catch { /* already imported above via named exports */ }
-// Use named import fallback
-if (!readdirSync) {
-  readdirSync = (await import('fs')).readdirSync;
 }
 
 // ---------------------------------------------------------------------------

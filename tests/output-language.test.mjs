@@ -4,7 +4,7 @@
 // the shared pass/fail counters from helpers.mjs and must never terminate the
 // process themselves — a stray exit call here would kill the whole suite
 // mid-run and forge its exit code (see the guard in test-all's runDiscovered).
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
@@ -236,3 +236,52 @@ check(
     && Math.abs(missingPrimary.tokenBudget - oneMarketArray.tokenBudget) > 1000,
   'the second declared market (modes/de) is NOT silently promoted to primary when the first cannot be resolved',
 );
+
+// Each market directory ships its own evaluation file. gemini-eval used to
+// pick that file from a hardcoded name list and, for the six markets below
+// plus any later one, fell back to English modes/oferta.md (#6398). The
+// names here are the files on disk; the coverage check fails when a market
+// directory is added or removed without updating them.
+const MARKET_EVAL_FILES = {
+  ar: 'fursah.md',
+  da: 'oferta.md',
+  de: 'angebot.md',
+  es: 'oferta.md',
+  fr: 'offre.md',
+  hi: 'naukri.md',
+  id: 'lowongan.md',
+  it: 'annuncio.md',
+  ja: 'kyujin.md',
+  ko: 'gonggo.md',
+  nl: 'vacature.md',
+  pl: 'oferta.md',
+  pt: 'oferta.md',
+  ru: 'oferta.md',
+  sg: 'offer.md',
+  tr: 'is-ilani.md',
+  ua: 'oferta.md',
+  vi: 'tuyen-dung.md',
+  zh: 'oferta.md',
+  'zh-TW': 'oferta.md',
+};
+const marketDirs = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && existsSync(join(ROOT, 'modes', entry.name, '_shared.md')))
+  .map((entry) => entry.name)
+  .sort();
+const mappedMarkets = Object.keys(MARKET_EVAL_FILES).sort();
+const missingFromMap = marketDirs.filter((name) => !MARKET_EVAL_FILES[name]);
+const extraInMap = mappedMarkets.filter((name) => !marketDirs.includes(name));
+check(
+  missingFromMap.length === 0 && extraInMap.length === 0,
+  `evaluation-file map covers every market directory (${marketDirs.length})`
+    + `${missingFromMap.length ? `; missing ${missingFromMap.join(', ')}` : ''}`
+    + `${extraInMap.length ? `; extra ${extraInMap.join(', ')}` : ''}`,
+);
+for (const [market, file] of Object.entries(MARKET_EVAL_FILES)) {
+  const resolved = runGeminiEval(`  modes_dir: modes/${market}`);
+  check(
+    resolved.evalModeFile === `modes/${market}/${file}`
+      && !resolved.stderr.includes('No matching evaluation file found'),
+    `gemini-eval.mjs resolves modes/${market} to ${file}`,
+  );
+}
