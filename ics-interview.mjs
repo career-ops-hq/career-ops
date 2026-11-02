@@ -181,7 +181,13 @@ const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 function parseUtcOffset(value) {
   const m = /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(String(value ?? '').trim());
   if (!m) return null;
-  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
+  const sign = m[1] === '-' ? -1 : 1;
+  return sign * (Number(m[2]) * 60 + Number(m[3]) + Number(m[4] ?? 0) / 60);
+}
+
+// Seconds make the minute count fractional. Round so the instant lands on a whole millisecond.
+function offsetMinutesToMs(minutes) {
+  return Math.round(minutes * 60000);
 }
 
 /**
@@ -255,7 +261,7 @@ function onsetIn(obs, year) {
   if (onset < first) return null;
   if (rule.until) {
     const u = rule.until;
-    const untilMs = Date.UTC(u.y, u.mo - 1, u.d, u.h, u.mi, u.s) + (u.kind === 'utc' ? obs.from * 60000 : 0);
+    const untilMs = Date.UTC(u.y, u.mo - 1, u.d, u.h, u.mi, u.s) + (u.kind === 'utc' ? offsetMinutesToMs(obs.from) : 0);
     if (onset > untilMs) return null;
   }
   return onset;
@@ -277,8 +283,10 @@ export function vtimezoneToInstant(d, observances) {
   if (!best) return null;
   const { onset, obs } = best;
   // Inside a spring-forward gap the pre-gap offset applies (RFC 5545 3.3.5).
-  const offset = wallMs < onset + (obs.to - obs.from) * 60000 ? obs.from : obs.to;
-  return wallMs - offset * 60000;
+  const fromMs = offsetMinutesToMs(obs.from);
+  const toMs = offsetMinutesToMs(obs.to);
+  const appliedMs = wallMs < onset + (toMs - fromMs) ? fromMs : toMs;
+  return wallMs - appliedMs;
 }
 
 export function isValidZone(zone) {

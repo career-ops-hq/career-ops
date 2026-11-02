@@ -68,6 +68,16 @@ test('a Windows zone name with no VTIMEZONE stays unconverted', () => {
   assert.ok(warnings.some((w) => w.code === 'unknown-tzid'));
 });
 
+test('a VTIMEZONE offset keeps its seconds', () => {
+  const ahead = observance('STANDARD', '16010101T000000', '+053045', '+053045');
+  const plus = parseIcs(invite('Example Zone', ahead, '20260115T120000'), { displayZone: 'UTC' });
+  assert.equal(plus.event.start.utc, '2026-01-15T06:29:15Z');
+
+  const behind = observance('STANDARD', '16010101T000000', '-053045', '-053045');
+  const minus = parseIcs(invite('Example Zone', behind, '20260115T120000'), { displayZone: 'UTC' });
+  assert.equal(minus.event.start.utc, '2026-01-15T17:30:45Z');
+});
+
 test('a VTIMEZONE that lists transitions with RDATE stays unconverted', () => {
   const listed = [
     'BEGIN:DAYLIGHT', 'DTSTART:19700101T020000', 'TZOFFSETFROM:-0500', 'TZOFFSETTO:-0400',
