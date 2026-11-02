@@ -31,6 +31,24 @@ function heightAfterPages(body, pages) {
   return extra;
 }
 
+// Markup before the first .page is part of the CV. The body's own margin is
+// not: the span starts at the first child's border, so the iframe can still
+// keep that offset without it adding a page.
+function contentAbovePages(body, pages) {
+  const kids = body.children;
+  if (!kids || typeof kids[Symbol.iterator] !== "function" || pages.length === 0) return 0;
+  let first = null;
+  for (const el of kids) {
+    if (el) {
+      first = el;
+      break;
+    }
+  }
+  if (!first) return 0;
+  const above = Math.min(...pages.map((page) => placed(page).top)) - placed(first).top;
+  return above > 0 ? above : 0;
+}
+
 /**
  * Height of the CV content.
  *
@@ -45,19 +63,20 @@ export function contentHeightPx(doc) {
   const body = doc?.body;
   if (!body) return 0;
   // A user template can lay its CV out as several sibling .page boxes.
-  // The page count is the distance from the first box to the last, so a
-  // margin above the first page does not add a page.
+  // The page count runs from the first child through the last page, so a
+  // margin above that first child does not add a page.
   const pages = pageBoxes(body);
   const extra = heightAfterPages(body, pages);
+  const above = contentAbovePages(body, pages);
   if (pages.length > 1) {
     const boxes = pages.map(placed);
     const extent = Math.max(...boxes.map((b) => b.bottom)) - Math.min(...boxes.map((b) => b.top));
-    const height = extent + extra;
+    const height = extent + extra + above;
     return height > 0 ? height : 0;
   }
   const page = pages[0] || (typeof body.querySelector === "function" ? body.querySelector(".page") : null);
   const box = page || body;
-  const height = (box.scrollHeight || box.offsetHeight || 0) + (page ? extra : 0);
+  const height = (box.scrollHeight || box.offsetHeight || 0) + (page ? extra + above : 0);
   return height > 0 ? height : 0;
 }
 

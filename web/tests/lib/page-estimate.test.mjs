@@ -68,7 +68,33 @@ test("the iframe includes the margin above the page and the page count does not"
   assert.equal(contentHeightPx(one), 1048);
   assert.equal(frameHeightPx(one), 1056);
   assert.equal(previewPageCount(contentHeightPx(one)), 1);
+  const pageIsFirstChild = {
+    body: {
+      children: pages,
+      scrollHeight: 1048,
+      querySelector: () => pages[0],
+      querySelectorAll: () => pages,
+    },
+  };
+  assert.equal(contentHeightPx(pageIsFirstChild), 1048);
+  assert.equal(frameHeightPx(pageIsFirstChild), 1056);
   assert.equal(frameHeightPx(null), 0);
+});
+
+test("a header before .page counts toward the preview height", () => {
+  const header = { getBoundingClientRect: () => ({ top: 0, height: 200 }) };
+  const page = { scrollHeight: 900, getBoundingClientRect: () => ({ top: 200, height: 900 }) };
+  const one = {
+    body: {
+      children: [header, page],
+      scrollHeight: 3000,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(one), 1100);
+  assert.equal(frameHeightPx(one), 1100);
+  assert.equal(previewPageCount(contentHeightPx(one)), 2);
 });
 
 test("a footer after .page is in the height, and a stretched body scroll height is not", () => {
