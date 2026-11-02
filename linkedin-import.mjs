@@ -87,7 +87,7 @@ async function main() {
     ...(historyError ? { historyError } : {}),
   };
   if (json) console.log(JSON.stringify(payload));
-  else console.log(plan.message);
+  else console.log(payload.message);
   if (plan.error) process.exit(1);
 }
 

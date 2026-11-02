@@ -276,6 +276,24 @@ test('a failed scan-history write still reports the jobs that were saved', () =>
   }
 });
 
+test('a failed scan-history write says so in the normal output', () => {
+  const root = sandbox();
+  const history = join(root, 'data', 'scan-history.tsv');
+  mkdirSync(history);
+  try {
+    const result = runCli(root, [], `https://www.linkedin.com/jobs/view/${A}\n`, {
+      CAREER_OPS_SCAN_HISTORY: history,
+    });
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    assert.match(result.stdout, /1 LinkedIn job added/);
+    assert.match(result.stdout, /scan history could not be updated/);
+    assert.doesNotMatch(result.stdout, /Nothing was saved/);
+    assert.match(readFileSync(join(root, 'data', 'pipeline.md'), 'utf8'), new RegExp(A));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('an unreadable tracker stops the import before anything is written', () => {
   const root = sandbox();
   try {
