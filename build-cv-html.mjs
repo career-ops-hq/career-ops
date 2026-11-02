@@ -53,6 +53,11 @@ const trackerPath = resolveTrackerPath(DATA_ROOT);
 const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
+// Any double-brace token, not only UPPER_SNAKE. {{role_title}} and
+// {{ COMPANY }} are unfilled template tokens too (#6396). Matched against the
+// template before it is filled: the filled document also holds candidate text,
+// and a CV that quotes {{ .Values.x }} must still build.
+const TEMPLATE_TOKEN_RE = /\{\{[^{}]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
 const PROFILE_PATH = getProfilePath();
@@ -794,14 +799,35 @@ function renderReport(payload, partials) {
   return { substitutions, candidate };
 }
 
+// Tokens the filler clears as whole regions, before the {{KEY}} loop. The
+// contact row is rebuilt from the candidate, and PHOTO / TITLE_BLOCK are
+// replaced on their own. What remains in the template, and is not one of the
+// substitution keys, is an unfilled token.
+function unresolvedTemplateTokens(template, substitutions) {
+  let scan = template.replace(CONTACT_ROW_RE, '');
+  scan = scan.replace(/\{\{PHOTO\}\}/g, '');
+  scan = scan.replace(/\n([ \t]*)\{\{TITLE_BLOCK\}\}/g, '');
+  const resolved = new Set(Object.keys(substitutions).map((key) => `{{${key}}}`));
+  const found = scan.match(TEMPLATE_TOKEN_RE) || [];
+  return [...new Set(found.filter((token) => !resolved.has(token)))];
+}
+
 // Merge a payload into the template and return the final HTML (throws on any
-// unresolved {{PLACEHOLDER}} so a malformed payload fails loudly, not silently).
+// unresolved placeholder so a malformed template fails loudly, not silently).
+// The any-shape check runs on the template before it is filled, so candidate
+// text that quotes {{ .Values.x }} is not mistaken for a token. A later
+// UPPER_SNAKE scan of the result still catches a token a partial left behind.
 function renderHtml(template, payload, templatePath) {
   // Load section partials from the sections/ directory co-located with the
   // template. Falls back to built-in builders when no partials directory exists.
   const partials = templatePath ? loadSectionPartials(templatePath) : new Map();
 
   const { substitutions, candidate } = renderReport(payload, partials);
+
+  const unresolvedInTemplate = unresolvedTemplateTokens(template, substitutions);
+  if (unresolvedInTemplate.length) {
+    throw new Error(`Unresolved placeholders: ${unresolvedInTemplate.join(', ')}`);
+  }
 
   // The contact row and photo carry conditional markup (dropped separators /
   // no <img>), so they are rebuilt as whole blocks before placeholder fill.
