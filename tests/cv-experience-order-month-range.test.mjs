@@ -27,6 +27,19 @@ test('a single month still reads as before', () => {
   assert.deepEqual(parseExperienceStart('2019 - 2021'), { year: 2019, month: null });
 });
 
+test('a range that runs past New Year starts in the year before the one it names', () => {
+  for (const period of ['Nov - Feb 2023', 'November to February 2023', 'Nov – Feb, 2023', 'Nov&ndash;Feb 2023']) {
+    assert.deepEqual(parseExperienceStart(period), { year: 2022, month: 11 }, period);
+  }
+});
+
+test('a range stays in its year when it ends later in it, or its end is not a month', () => {
+  assert.deepEqual(parseExperienceStart('Feb - Nov 2023'), { year: 2023, month: 2 });
+  assert.deepEqual(parseExperienceStart('Mar - Mar 2023'), { year: 2023, month: 3 });
+  assert.deepEqual(parseExperienceStart('Nov - Present 2023'), { year: 2023, month: 11 });
+  assert.deepEqual(parseExperienceStart('Ago - Feb 2023'), { year: 2023, month: null });
+});
+
 test('a comma before the year does not hide the month', () => {
   for (const period of ['Jun - Aug, 2022', 'June to August, 2022', 'June, 2022', 'Jun., 2022 - Present']) {
     assert.deepEqual(parseExperienceStart(period), { year: 2022, month: 6 }, period);
