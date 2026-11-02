@@ -512,9 +512,9 @@ async function checkPlaywright() {
   let browser;
   // The configured browser, so the check tests what the rest of the repo will
   // actually launch rather than always probing the bundled Chromium.
-  const override = resolveBrowserExecutable();
+  const override = resolveBrowserExecutable({ projectRoot });
   try {
-    browser = await chromium.launch(browserLaunchOptions({ headless: true }));
+    browser = await chromium.launch(browserLaunchOptions({ headless: true }, { projectRoot }));
     return {
       pass: true,
       label: override

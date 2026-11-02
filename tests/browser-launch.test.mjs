@@ -99,6 +99,19 @@ try {
     fail(`.env override should be read: ${JSON.stringify(fromFile)}`);
   }
 
+  // Commands such as doctor --target diagnose a checkout other than the
+  // process-wide data root. Their explicit root must control both the resolver
+  // result and the launch options, without mutating CAREER_OPS_ROOT.
+  setEnv({ root: emptyRoot });
+  const fromTarget = resolveBrowserExecutable({ projectRoot: envRoot });
+  const targetOpts = browserLaunchOptions({ headless: true }, { projectRoot: envRoot });
+  if (fromTarget?.path === '/opt/fromdotenv/browser'
+      && targetOpts.executablePath === '/opt/fromdotenv/browser') {
+    pass('an explicit project root supplies the browser setting for targeted checks');
+  } else {
+    fail(`explicit project root ignored: ${JSON.stringify(fromTarget)} / ${JSON.stringify(targetOpts)}`);
+  }
+
   // A shell variable that is present but empty switches off what .env sets.
   process.env[EXE] = '';
   process.env.CAREER_OPS_ROOT = envRoot;
