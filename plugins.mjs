@@ -261,6 +261,7 @@ async function cmdRun(args) {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
     const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, hook);
     const failed = results.filter(r => !r.ok);
     if (failed.length) {
       for (const r of failed) console.error(`${r.id} ${hook} failed: ${r.error}`);
@@ -295,6 +296,7 @@ async function cmdRun(args) {
     const rowCount = snapshot.applications.length;
     const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
     const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dataRoot: DATA_ROOT, dryRun, timeoutMs, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, 'export');
     let failed = false;
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
@@ -310,6 +312,7 @@ async function cmdRun(args) {
   if (hook === 'notify') {
     const message = positional.slice(hookArgStart).join(' ') || '(career-ops notification)';
     const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, 'notify');
     let failed = false;
     for (const r of results) {
       if (r.ok) console.log(`${r.id} notify: sent.`);
@@ -321,6 +324,15 @@ async function cmdRun(args) {
     if (failed) process.exit(1);
     return;
   }
+}
+
+// An empty result list means the selected plugin never ran. The integrity
+// gate and a failed import already printed why. A hook that ran and returned
+// no jobs is a one-element ok result, not an empty list.
+function exitIfPluginDidNotRun(results, id, hook) {
+  if (results.length > 0) return;
+  console.error(`${id} ${hook} did not run.`);
+  process.exit(1);
 }
 
 function findManifest(id) {

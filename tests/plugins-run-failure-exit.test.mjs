@@ -97,17 +97,22 @@ function run(checkout, root) {
   });
 }
 
-test('a plugin run that rejects its settings exits 1 and does not claim zero jobs', (t) => {
+function guardRealCheckout(t) {
   const lockPath = join(ROOT, 'plugins.lock');
   const lockBefore = existsSync(lockPath) ? readFileSync(lockPath) : null;
   const fixtureInRepo = join(ROOT, 'plugins.local', 'fixture-run');
-  const checkout = disposableCheckout();
+  const fixtureExisted = existsSync(fixtureInRepo);
   t.after(() => {
-    rmSync(checkout, { recursive: true, force: true });
-    assert.equal(existsSync(fixtureInRepo), false, 'the fixture must not be written into the real checkout');
+    assert.equal(existsSync(fixtureInRepo), fixtureExisted, 'the fixture must not change in the real checkout');
     const lockAfter = existsSync(lockPath) ? readFileSync(lockPath) : null;
     assert.deepEqual(lockAfter, lockBefore, 'plugins.lock in the real checkout must be unchanged');
   });
+}
+
+test('a plugin run that rejects its settings exits 1 and does not claim zero jobs', (t) => {
+  guardRealCheckout(t);
+  const checkout = disposableCheckout();
+  t.after(() => rmSync(checkout, { recursive: true, force: true }));
 
   const bad = dataRoot();
   t.after(() => rmSync(bad, { recursive: true, force: true }));
@@ -124,4 +129,20 @@ test('a plugin run that rejects its settings exits 1 and does not claim zero job
   const ok = run(checkout, good);
   assert.equal(ok.status, 0, ok.stderr);
   assert.match(ok.stdout, /0 found, 0 new/);
+});
+
+test('an enabled plugin whose hook does not load exits 1 and does not claim zero jobs', (t) => {
+  guardRealCheckout(t);
+  const checkout = disposableCheckout();
+  t.after(() => rmSync(checkout, { recursive: true, force: true }));
+  writeFileSync(join(checkout, 'plugins.local', 'fixture-run', 'index.mjs'), 'export default { ingest: "not a function" };\n');
+
+  const root = dataRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'config', 'plugins.yml'), 'plugins:\n  fixture-run:\n    enabled: true\n    mode: list\n');
+  const failed = run(checkout, root);
+  assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+  assert.match(failed.stderr, /hook must be a function/);
+  assert.match(failed.stderr, /did not run/);
+  assert.doesNotMatch(failed.stdout, /0 found/);
 });
