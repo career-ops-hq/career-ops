@@ -80,12 +80,18 @@ async function withFixture(files, fn) {
     }
   }
   const prev = process.env.CAREER_OPS_ROOT;
+  const prevCode = process.env.CAREER_OPS_CODE_ROOT;
   process.env.CAREER_OPS_ROOT = root;
+  // The stub tracker-utils.mjs below stands in for the code checkout, where
+  // pdf-index.ts loads it from; the temp dir is both roots here.
+  process.env.CAREER_OPS_CODE_ROOT = root;
   try {
     return await fn(outputDir);
   } finally {
     if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = prev;
+    if (prevCode === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = prevCode;
     rmSync(root, { recursive: true, force: true });
   }
 }
