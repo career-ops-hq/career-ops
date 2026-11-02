@@ -224,7 +224,7 @@ export async function pdfReadyForReport(n: string): Promise<boolean> {
 }
 
 export type PdfPathForReportResult =
-  | { status: "found"; path: string }
+  | { status: "found"; path: string; html: string | null }
   | { status: "not-found" }
   | { status: "invalid" }
   | { status: "rejected" };
@@ -271,7 +271,12 @@ export async function pdfPathStatusForReport(n: string, kind: "cv" | "cover" = "
   // (e.g. reports/) and pass a root-scoped realpath check — serving a file
   // this route was never meant to expose.
   if (!isRegularContainedFile(abs, outputDir)) return { status: "rejected" };
-  return { status: "found", path: abs };
+  let html: string | null = null;
+  if (entry.html) {
+    const htmlAbs = path.resolve(root, entry.html);
+    if (htmlAbs.startsWith(outputDir + path.sep) && isRegularContainedFile(htmlAbs, outputDir)) html = htmlAbs;
+  }
+  return { status: "found", path: abs, html };
 }
 
 export async function pdfPathForReport(n: string): Promise<string | null> {

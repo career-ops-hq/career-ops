@@ -1,7 +1,3 @@
-// The report page opens the PDF named in data/pdf-index.tsv. The Studio has to
-// open the HTML that same row names, even when that name is not the PDF's name
-// and the report filename's slug is not a token in the HTML name.
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -127,6 +123,26 @@ test("an indexed ATS HTML is the studio source when it is the recorded CV", asyn
 
     assert.equal(load.ok, true);
     if (load.ok) assert.equal(load.file, "cv-northwind-traders-ats.html");
+  } finally {
+    cleanup();
+  }
+});
+
+test("an indexed HTML path outside output/ is not the studio source", async () => {
+  const { root, cleanup } = workspace();
+  try {
+    const pdf = "output/cv-northwind-traders-2026-03-01.pdf";
+    fs.writeFileSync(path.join(root, pdf), "%PDF");
+    fs.writeFileSync(path.join(root, "stolen.html"), HTML);
+    fs.writeFileSync(
+      path.join(root, "data", "pdf-index.tsv"),
+      HEADER + `42\t${pdf}\tstolen.html\tletter\t2026-03-01\tcv\n`,
+    );
+
+    const load = await loadStudio("42");
+
+    assert.equal(load.ok, false);
+    if (!load.ok) assert.equal(load.reason, "no-tailored-cv");
   } finally {
     cleanup();
   }

@@ -18,8 +18,8 @@ test("pdfIndexEntryForReport distinguishes missing rows from matched empty paths
     "011\toutput/cv-011-acme.pdf",
   ].join("\n");
 
-  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: null });
-  assert.deepEqual(pdfIndexEntryForReport(index, 12), { found: false, path: null });
+  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: null, html: null });
+  assert.deepEqual(pdfIndexEntryForReport(index, 12), { found: false, path: null, html: null });
   assert.equal(pdfPathForReport(index, 11), "output/cv-011-acme.pdf");
 });
 
@@ -29,7 +29,7 @@ test("pdfIndexEntryForReport requires a complete numeric report field", () => {
     "010\toutput/right.pdf",
   ].join("\n");
 
-  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/right.pdf" });
+  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/right.pdf", html: null });
 });
 
 test("pdfPathForReport selects the exact report from a real pdf-index.tsv row shape", () => {
@@ -55,7 +55,7 @@ test("pdfIndexEntryForReport returns the CV even when a cover row precedes it", 
     "010\toutput/cv-010-acme.pdf\t\thtml\t2026-08-01\tcv",
   ].join("\n");
 
-  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/cv-010-acme.pdf" });
+  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/cv-010-acme.pdf", html: null });
 });
 
 // A row written before the column existed carries no kind. It is a CV: the
@@ -64,7 +64,7 @@ test("pdfIndexEntryForReport returns the CV even when a cover row precedes it", 
 test("pdfIndexEntryForReport treats a legacy row with no kind as the CV", () => {
   const index = ["010\toutput/cv-010-acme.pdf\t\thtml\t2026-08-01"].join("\n");
 
-  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/cv-010-acme.pdf" });
+  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/cv-010-acme.pdf", html: null });
 });
 
 // A report with only a cover row has no CV. Reporting found:true with the cover
@@ -75,7 +75,7 @@ test("pdfIndexEntryForReport reports no CV when the report has only a cover row"
     "010\toutput/cover-010-acme.pdf\t\thtml\t2026-08-01\tcover",
   ].join("\n");
 
-  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: false, path: null });
+  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: false, path: null, html: null });
 });
 
 test("pdfIndexEntryForReport can be asked for the cover instead", () => {
@@ -85,7 +85,7 @@ test("pdfIndexEntryForReport can be asked for the cover instead", () => {
     "010\toutput/cover-010-acme.pdf\t\thtml\t2026-08-01\tcover",
   ].join("\n");
 
-  assert.deepEqual(pdfIndexEntryForReport(index, 10, "cover"), { found: true, path: "output/cover-010-acme.pdf" });
+  assert.deepEqual(pdfIndexEntryForReport(index, 10, "cover"), { found: true, path: "output/cover-010-acme.pdf", html: null });
 });
 
 test("parsePdfManifestRows extracts structured entries and defaults missing kind to cv", () => {
@@ -103,6 +103,7 @@ test("parsePdfManifestRows extracts structured entries and defaults missing kind
   assert.deepEqual(rows[0], {
     reportId: "010",
     pdf: "output/cv-010.pdf",
+    html: "output/cv-010.html",
     format: "letter",
     date: "2026-08-01",
     kind: "cv",
@@ -110,6 +111,7 @@ test("parsePdfManifestRows extracts structured entries and defaults missing kind
   assert.deepEqual(rows[1], {
     reportId: "011",
     pdf: "output/cover-011.pdf",
+    html: "",
     format: "a4",
     date: "2026-08-02",
     kind: "cover",

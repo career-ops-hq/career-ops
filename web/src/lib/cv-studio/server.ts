@@ -37,16 +37,15 @@ function originalOf(htmlPath: string) {
   return htmlPath.replace(new RegExp(`${EDITED_SUFFIX}\\.html$`), ".html");
 }
 
-/**
- * The tailored HTML for a report: the sibling of the PDF recorded in
- * data/pdf-index.tsv when there is one, else the newest output/ HTML for the
- * report's company. An edited copy is never a source, because edits are always
- * made against the original the tailor wrote.
- */
 async function findTailoredHtml(reportNum: string, slug: string): Promise<string | null> {
   const dir = path.join(careerOpsRoot(), "output");
   const indexed = await pdfPathStatusForReport(reportNum);
   if (indexed.status === "found") {
+    if (indexed.html) {
+      const candidate = originalOf(indexed.html);
+      const name = path.basename(candidate).toLowerCase();
+      if (name.endsWith(".html") && !name.endsWith(`${EDITED_SUFFIX}.html`) && isRegularContainedFile(candidate, dir)) return candidate;
+    }
     const sibling = originalOf(indexed.path.replace(/\.pdf$/i, ".html"));
     if (isRegularContainedFile(sibling, dir)) return sibling;
   }
