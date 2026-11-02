@@ -294,7 +294,7 @@ Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm
 
 `/career-ops` đứng một mình sẽ hiện menu lệnh trong các CLI dùng lệnh này. Ngôn ngữ thường dùng được trong mọi CLI được hỗ trợ. Khi dùng như plugin của Claude Code, lệnh là `/career-ops:career-ops`.
 
-Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`, và cùng các tệp `modes/*.md`, nên một mode hoạt động giống nhau dù CLI nào chạy nó. Slash command không được đảm bảo trong Codex: hãy yêu cầu bằng ngôn ngữ thường, hoặc chạy một prompt ở chế độ headless bằng `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cách chạy trong từng CLI được hỗ trợ, lệnh headless với những CLI có lệnh này, và các ghi chú thiết lập riêng cho từng CLI nằm trong [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`, và cùng các tệp `modes/*.md`, nên mọi CLI đều chuyển yêu cầu theo cùng một cách (các mode dùng nhiều trình duyệt cũng cần công cụ Playwright). Slash command không được đảm bảo trong Codex: hãy yêu cầu bằng ngôn ngữ thường, hoặc chạy một prompt ở chế độ headless bằng `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cách chạy trong từng CLI được hỗ trợ, lệnh headless với những CLI có lệnh này, và các ghi chú thiết lập riêng cho từng CLI nằm trong [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Các lệnh dùng hằng ngày
 
@@ -302,7 +302,7 @@ Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`
 | --- | --- |
 | *dán URL hoặc JD* | Pipeline đầy đủ: kiểm tra tin còn mở hay không (chỉ với URL), đánh giá A-G cộng H khi điểm cao, báo cáo, CV đã tùy chỉnh (mặc định là PDF), một dòng trong tracker |
 | `scan` | Quét các cổng của bạn để tìm tin mới và thêm vào hộp thư (`data/pipeline.md`) |
-| `pipeline` | Xử lý các URL đang chờ trong hộp thư, bỏ qua những URL rõ ràng không phù hợp |
+| `pipeline` | Xử lý các URL đang chờ trong hộp thư (mức standard và premium có thể bỏ qua những URL rõ ràng không phù hợp) |
 | `apply` | Cùng bạn điền form ứng tuyển, từng trường một. Dừng lại trước khi Gửi |
 | `tracker` | Mỗi hồ sơ ứng tuyển đang ở đâu |
 | `followup` | Hồ sơ nào đến lúc cần follow-up, kèm bản nháp |
