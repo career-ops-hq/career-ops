@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, pass, fail } from './helpers.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'career-ops-hired-ids-'));
 mkdirSync(join(root, 'data'), { recursive: true });
@@ -104,7 +105,7 @@ try {
   seed({});
   const bogus = run(['--report', '1x2', '--mark', 'never']);
   check('a non-numeric --report is refused and nothing is recorded', () => {
-    assert.notEqual(bogus.status, 0, 'the command should have failed');
+    assert.ok(exitedNonZero(bogus), describeSpawn(bogus, 'the command should have failed'));
     assert.match(bogus.stderr, /--report must be a report number/);
     assert.deepEqual(readState(), {}, 'no decision may be recorded for an invalid id');
   });

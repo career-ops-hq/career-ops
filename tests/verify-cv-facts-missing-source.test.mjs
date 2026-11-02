@@ -20,10 +20,12 @@ const dir = mkdtempSync(join(tmpdir(), 'vcf-missing-source-'));
 try {
   const target = join(dir, 'cv.html');
   const source = join(dir, 'cv.md');
+  const config = join(dir, 'cv-facts.json');
+  writeFileSync(config, JSON.stringify({ allow_metrics: [], allow_facts: [], forbidden_phrases: [], warn_phrases: [] }));
   writeFileSync(target, '<html><body><p>Led a team of 4 engineers and cut latency by 30%.</p></body></html>');
   writeFileSync(source, '# CV\n\n- Led a team of 4 engineers and cut latency by 30%.\n');
   const run = (...sources) => {
-    const r = spawnSync(NODE, [join(ROOT, 'verify-cv-facts.mjs'), ...sources.flatMap((s) => ['--source', s]), target], { encoding: 'utf-8', timeout: 30000 });
+    const r = spawnSync(NODE, [join(ROOT, 'verify-cv-facts.mjs'), '--config', config, ...sources.flatMap((s) => ['--source', s]), target], { encoding: 'utf-8', timeout: 30000 });
     return { status: r.status, out: `${r.stdout}${r.stderr}` };
   };
 

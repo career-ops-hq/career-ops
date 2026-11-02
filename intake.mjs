@@ -32,6 +32,7 @@
 //   node intake.mjs --commit --all  # record every source with new material —
 //                                   # only when the user merged all of them
 //   node intake.mjs --self-test     # pure-function self-test, no filesystem
+//   node intake.mjs --help          # usage, then exit 0. An unknown flag exits 1.
 
 import { createHash } from 'crypto';
 import { execFileSync } from 'child_process';
@@ -41,6 +42,7 @@ import {
 import { dirname, extname, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { writeFileAtomic, acquireTrackerLock } from './tracker-utils.mjs';
 import { isNestedCheckout } from './lib/mjs-files.mjs';
@@ -459,14 +461,30 @@ const isMain = isMainModule(import.meta.url);
 // instead of calling process.exit(0). `--text` writes a whole CV to stdout and
 // is meant to be piped; process.exit() is synchronous and can truncate a pipe
 // write that hasn't drained. Falling off the end leaves exitCode at 0.
+const INTAKE_USAGE = [
+  'Usage: node intake.mjs [--summary]',
+  '       node intake.mjs --text <path>',
+  '       node intake.mjs --commit <path> [<path> ...]',
+  '       node intake.mjs --commit --all',
+  '       node intake.mjs --self-test',
+].join('\n');
+
+const INTAKE_KNOWN_FLAGS = ['--summary', '--text', '--commit', '--all', '--self-test', '--help', '-h'];
+
 async function main() {
   const args = process.argv.slice(2);
+  // Unknown flags used to be ignored, so `intake --txt path` scanned the
+  // whole folder and exited 0. --commit is not a value flag: `--commit --all`
+  // and `--commit --summary` are real. --text=path has to be read below or
+  // declaring --text as a value flag would scan again.
+  validateFlags(args, INTAKE_KNOWN_FLAGS, INTAKE_USAGE, { valueFlags: ['--text'], requireOperand: true });
   if (args.includes('--self-test')) runSelfTest();
 
   ensureScaffold();
+  const textEq = args.find((arg) => typeof arg === 'string' && arg.startsWith('--text='));
   const textIdx = args.indexOf('--text');
-  if (textIdx !== -1) {
-    const target = args[textIdx + 1];
+  if (textEq !== undefined || textIdx !== -1) {
+    const target = textEq !== undefined ? textEq.slice('--text='.length) : args[textIdx + 1];
     if (!target) { console.error('Usage: node intake.mjs --text <path relative to documents/>'); process.exit(1); }
     const abs = resolve(DOCS_DIR, target);
     // Scan output only ever emits paths inside documents/ — refuse anything
