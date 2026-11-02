@@ -52,6 +52,17 @@ test('case variants and omitted keys stay valid', () => {
 const errorKeys = (text) => validateProfile(text, EXAMPLE, 'config/profile.yml')
   .findings.filter((f) => f.level === 'error').map((f) => f.key);
 
+test('latex and text must be exact, since the pipeline matches them as written', () => {
+  for (const ok of ['latex', 'text', '" html "']) {
+    assert.deepEqual(errorKeys(`cv:\n  output_format: ${ok}\n`), [], ok);
+  }
+  for (const bad of ['LaTeX', '" latex "', '" text "', 'Text', 'pdf']) {
+    assert.deepEqual(errorKeys(`cv:\n  output_format: ${bad}\n`), ['cv.output_format'], bad);
+  }
+  const spaced = validateProfile('cv:\n  output_format: " latex "\n', EXAMPLE, 'config/profile.yml');
+  assert.match(spaced.findings[0].message, /is " latex "/);
+});
+
 test('language.output allows 64 characters and one line only', () => {
   assert.deepEqual(errorKeys(`language:\n  output: ${'a'.repeat(64)}\n`), []);
   assert.deepEqual(errorKeys(`language:\n  output: ${'a'.repeat(65)}\n`), ['language.output']);

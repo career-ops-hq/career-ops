@@ -121,10 +121,12 @@ function editDistance(a, b) {
  * @returns {{findings: object[], parsed: object|null}}
  */
 const SPEND_TIERS = new Set(['economy', 'standard', 'premium']);
-const CV_FORMATS = new Set(['html', 'latex', 'text']);
+// The auto-pipeline routes on an exact "latex" or "text" and sends anything
+// else down the HTML/PDF path, so only html can differ in case or spacing.
+const CV_ROUTED_FORMATS = new Set(['latex', 'text']);
 
 function shownValue(value) {
-  return typeof value === 'string' ? JSON.stringify(value.trim()) : typeof value;
+  return typeof value === 'string' ? JSON.stringify(value) : typeof value;
 }
 
 /**
@@ -188,13 +190,14 @@ function checkKnownValues(parsed, findings, file) {
       });
     } else if ('output_format' in cv) {
       const format = cv.output_format;
-      const ok = typeof format === 'string' && CV_FORMATS.has(format.trim().toLowerCase());
+      const ok = typeof format === 'string'
+        && (CV_ROUTED_FORMATS.has(format) || format.trim().toLowerCase() === 'html');
       if (!ok) {
         findings.push({
           level: 'error',
           code: 'bad-value',
           key: 'cv.output_format',
-          message: `${file}: cv.output_format is ${shownValue(format)}. Use html, latex, or text. Example: output_format: html`,
+          message: `${file}: cv.output_format is ${shownValue(format)}. Use html, latex, or text, in lowercase with no spaces. Example: output_format: html`,
         });
       }
     }
