@@ -19,11 +19,14 @@ function placed(el) {
 function heightAfterPages(body, pages) {
   const kids = body.children;
   if (!kids || typeof kids[Symbol.iterator] !== "function") return 0;
+  const pageBottom = pages.length > 0 ? Math.max(...pages.map((page) => placed(page).bottom)) : 0;
   let extra = 0;
   for (const el of kids) {
     if (!el || pages.includes(el)) continue;
     if (typeof el.contains === "function" && pages.some((page) => el.contains(page))) continue;
-    extra += Math.max(el.offsetHeight || 0, el.scrollHeight || 0);
+    // Margin sits above the border box, so the height alone stops short of the footer.
+    const below = placed(el).bottom - pageBottom;
+    if (below > extra) extra = below;
   }
   return extra;
 }
