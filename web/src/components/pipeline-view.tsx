@@ -295,10 +295,20 @@ export function PipelineView({
         return { key: filterKey, span: next };
       });
     };
-    measure();
     window.addEventListener("scroll", measure, { passive: true });
     window.addEventListener("resize", measure);
+    // Back restores the list's scroll position after this commit, and that
+    // move does not always emit a scroll event. Keep measuring until it lands.
+    let frames = 0;
+    let raf = 0;
+    const followScrollRestore = () => {
+      measure();
+      frames += 1;
+      if (frames < 30) raf = requestAnimationFrame(followScrollRestore);
+    };
+    raf = requestAnimationFrame(followScrollRestore);
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
     };

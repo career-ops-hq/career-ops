@@ -79,7 +79,8 @@ test("an off-screen save failure moves the window, and the error row does not se
 
   await page.goto(`${origin.origin}/pipeline?tab=ALL&sort=tracker&dir=1`);
   // Keep the scroll position when the banner is inserted above the table.
-  await page.addStyleTag({ content: "html, body { overflow-anchor: none; }" });
+  // Anchoring on a row would hold the table still, so the window would not move.
+  await page.addStyleTag({ content: "* { overflow-anchor: none !important; }" });
   const row = (n) => page.locator("tr[data-application-key]").filter({ has: page.getByRole("link", { name: `#${n}`, exact: true }) });
   await row(1).getByRole("button", { name: /^Edit status/ }).click();
   await row(1).getByRole("combobox").selectOption("Applied");
@@ -88,13 +89,21 @@ test("an off-screen save failure moves the window, and the error row does not se
   // Leave the bottom edge. A banner there can grow the page without moving
   // the rows that are already pinned in view. Sit a few pixels past a row
   // boundary around the middle, so the one-line notice changes the window.
+  // The saving row is taller than the spacers, so measure a normal row.
   await page.evaluate(() => {
-    const rowHeight = document.querySelector("tr[data-application-key]").getBoundingClientRect().height;
-    window.scrollTo(0, rowHeight * 50);
-    const body = document.querySelector("tbody [data-application-key]").closest("tbody");
-    const startPx = Math.max(0, -body.getBoundingClientRect().top);
+    const row = [...document.querySelectorAll("tr[data-application-key]")]
+      .find((el) => !el.querySelector("[role='alert'], [aria-busy='true']"));
+    window.scrollTo(0, row.getBoundingClientRect().height * 50);
+  });
+  await page.waitForFunction(() => ![...document.querySelectorAll("a")].some((a) => a.textContent.trim() === "#1"));
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll("tr[data-application-key]")]
+      .find((el) => !el.querySelector("[role='alert'], [aria-busy='true']"));
+    const rowHeight = row.getBoundingClientRect().height;
+    const startPx = Math.max(0, -row.closest("tbody").getBoundingClientRect().top);
     const frac = startPx % rowHeight;
-    if (frac > 4) window.scrollBy(0, -(frac - 4));
+    const delta = frac > 4 ? -(frac - 4) : -(rowHeight - (4 - frac));
+    window.scrollBy(0, delta);
   });
   await page.waitForFunction(() => ![...document.querySelectorAll("a")].some((a) => a.textContent.trim() === "#1"));
   assert.equal(await page.getByRole("link", { name: "#1", exact: true }).count(), 0);
