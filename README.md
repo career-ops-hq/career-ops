@@ -298,7 +298,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | --- | --- |
 | *paste a URL or JD* | Full pipeline: liveness check (URLs only), A-G evaluation plus H at high scores, report, tailored CV (PDF by default), tracker row |
 | `scan` | Scan your portals for new postings and add them to the inbox (`data/pipeline.md`) |
-| `pipeline` | Evaluate every URL waiting in the inbox |
+| `pipeline` | Work through the URLs waiting in the inbox, skipping obvious mismatches |
 | `apply` | Fill an application form with you, field by field. It stops before Submit |
 | `tracker` | Where every application stands |
 | `followup` | Which applications are due a follow-up, with drafts |
@@ -313,10 +313,10 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | Command | What it does |
 | --- | --- |
 | [`scan`](modes/scan.md) | Scan portals and discover new offers |
-| [`discover`](modes/discover.md) | Resolve a list of company names to scannable ATS boards and append them to `portals.yml` (zero-token) |
+| [`discover`](modes/discover.md) | Resolve a list of company names to scannable ATS boards. Previews by default; adds them to `portals.yml` only with `--write` (zero-token) |
 | [`pipeline`](modes/pipeline.md) | Process pending URLs from the inbox (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Fast first-pass go/no-go score from `modes/_brief.md`, before a full evaluation (writes no files) |
-| [`batch`](modes/batch.md) | Evaluate many postings with parallel headless workers |
+| [`batch`](modes/batch.md) | Evaluate many postings with headless workers (parallel with Claude, one at a time with other CLIs) |
 | [`titles`](modes/titles.md) | Suggest adjacent job titles from your CV to broaden the search |
 
 **Evaluate a role**
