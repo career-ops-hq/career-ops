@@ -2224,12 +2224,36 @@ function resolveInputPath(path, cwd = process.cwd()) {
 // blocks, instead of throwing.
 const MAX_SOURCE_LOOKUP_LENGTH = 500;
 
+// The glyphs normalizeTextForATS in generate-pdf.mjs rewrites. The gate reads the
+// rewritten document and cv.md keeps the original, so a title copied verbatim
+// with an arrow or a dash in it read as unsourced. A dash folded in the source
+// stays a marker and not a hyphen, so that "Acme\u2014Staff Engineer" still has a
+// token boundary before the title while "Staff Engineer - Platform" matches it.
+const FOLDED_DASH = '\uE000';
+function foldAtsGlyphs(text) {
+  return text
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/\s*\u2192\s*/g, ' to ')
+    .replace(/\s*\u2190\s*/g, ' from ')
+    .replace(/\s*[\u2191\u2193]\s*/g, ' ')
+    .replace(/(?<![lL])\s*\u00B7\s*|\s*\u00B7\s*(?![lL])|\s+\u00B7\s*|\s*\u00B7\s+/g, ' | ')
+    .replace(/\s*\u2022\s*/g, ' | ');
+}
+
 /** Check a normalized fact as a complete token or phrase, not a substring. */
 function sourceContainsFact(sourceText, value) {
+  if (sourceSpellsFact(sourceText, value)) return true;
+  const source = foldAtsGlyphs(sourceText).replace(/[\u2014\u2013]/g, FOLDED_DASH);
+  return sourceSpellsFact(source, foldAtsGlyphs(value).replace(/[\u2014\u2013]/g, '-'));
+}
+
+function sourceSpellsFact(sourceText, value) {
   if (value.length > MAX_SOURCE_LOOKUP_LENGTH) return false;
   const escaped = value
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\s+/g, '\\s+');
+    .replace(/\s+/g, '\\s+')
+    .replace(/-/g, `[-${FOLDED_DASH}]`);
   return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(sourceText);
 }
 
