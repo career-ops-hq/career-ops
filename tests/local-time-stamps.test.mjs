@@ -1,5 +1,5 @@
-// tests/local-time-stamps.test.mjs — the two remaining writers that stamp a
-// record with the UTC clock now use the local one.
+// tests/local-time-stamps.test.mjs — writers that stamp a record with the
+// UTC clock now use the local one.
 //
 //   agent-inbox.mjs        `- [ ] <stamp> — <request>`: the stamp was
 //                          toISOString().slice(0, 16), i.e. UTC date AND time
@@ -8,9 +8,10 @@
 //   plugins/apify          the `scraped:` date in a saved JD's frontmatter was
 //                          the UTC day, one day behind for the first hours of a
 //                          local morning east of Greenwich.
+//   generate-pdf.mjs       the date column of data/pdf-index.tsv.
 //
 // Every other "today" in the repo already goes through lib/local-today.mjs
-// (#2765, #2932, #3070, #3301, #3990). These two were missed because they stamp
+// (#2765, #2932, #3070, #3301, #3990). These were missed because they stamp
 // rather than gate.
 //
 // PINNED INSTANT in a zone far from UTC: Pacific/Kiritimati is UTC+14, so
@@ -19,7 +20,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -105,6 +106,48 @@ test('apify JD frontmatter dates the capture with the local day, not UTC', async
     globalThis.Date = RealDate;
     globalThis.fetch = realFetch;
     if (realTz === undefined) delete process.env.TZ; else process.env.TZ = realTz;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Runs a module in a child pinned to TZ and to `instant`; `source` is written next to it. */
+function runPinned(dir, { source, script, args = [], env = {}, instant = INSTANT }) {
+  const preload = join(dir, 'freeze.mjs');
+  writeFileSync(preload, FREEZE.replace(INSTANT, instant));
+  if (source) writeFileSync(script = join(dir, 'run.mjs'), source);
+  return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, script, ...args], {
+    cwd: dir, encoding: 'utf-8', timeout: 60000,
+    env: { ...process.env, TZ, ...env },
+  });
+}
+const href = (file) => JSON.stringify(pathToFileURL(join(ROOT, file)).href);
+
+test('generate-pdf dates its PDF index row with the local day, not UTC', () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'pdf-index-stamp-')));
+  try {
+    mkdirSync(join(dir, 'output'));
+    const manifest = join(dir, 'pdf-index.tsv');
+    // The browser is a test double, as in generate-pdf-manifest-concurrency.test.mjs.
+    const r = runPinned(dir, {
+      source: `
+const { renderHtmlToPdf } = await import(${href('generate-pdf.mjs')});
+const pdf = Buffer.from('%PDF-1.7\\n1 0 obj\\n<< /Type /Catalog /Pages 2 0 R >>\\nendobj\\n'
+  + '2 0 obj\\n<< /Type /Pages /Count 1 >>\\nendobj\\n%%EOF');
+const launchBrowser = async () => ({
+  async newPage() { return { async goto() {}, async evaluate() {}, async pdf() { return pdf; } }; },
+  async close() {},
+});
+await renderHtmlToPdf('<!doctype html><html><body>cv</body></html>', ${JSON.stringify(join(dir, 'output', 'cv.pdf'))}, {
+  reportNum: '7', workspaceRoot: ${JSON.stringify(dir)}, styleTokens: {}, launchBrowser, kind: 'cv',
+});
+`,
+      env: { CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '', CAREER_OPS_PDF_INDEX: manifest },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const row = readFileSync(manifest, 'utf-8').split('\n').find((l) => l.startsWith('7\t'));
+    assert.ok(row, 'no manifest row was written');
+    assert.equal(row.split('\t')[4], LOCAL_DAY, `the row was not dated with the local day: ${row}`);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
