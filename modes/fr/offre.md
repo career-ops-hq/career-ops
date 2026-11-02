@@ -313,7 +313,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 **Format du tracker :**
 
 ```markdown
-| # | Date | Entreprise | Role | Score | Statut | PDF | Report |
+| # | Date | Entreprise | Role | Score | Statut | PDF | Report | Notes |
 ```
 
 ### 3. Observations salariales (montant souhaite uniquement)
