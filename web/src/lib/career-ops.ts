@@ -191,8 +191,15 @@ export function readApplications(): Application[] {
   const root = careerOpsRoot();
   const file = resolveTrackerPath(root);
   const codeRoot = path.resolve(process.cwd(), "..");
+  // Parsed rows follow tracker-aliases.json as well as the tracker. A header
+  // rename in that file must not keep serving the old columns.
+  const aliasFiles = [...new Set([
+    path.resolve(root, "tracker-aliases.json"),
+    path.resolve(codeRoot, "tracker-aliases.json"),
+  ])];
   const rows = cachedFileValue(file, "applications", (md) =>
     parseApplications(md, root, codeRoot) as Application[],
+    aliasFiles,
   );
   return rows ?? [];
 }

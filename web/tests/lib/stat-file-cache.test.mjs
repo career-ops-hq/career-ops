@@ -103,6 +103,41 @@ test("an unchanged tracker is not read again, and an edited row is", () => {
   });
 });
 
+test("a changed header alias table reparses the tracker without the tracker file changing", () => {
+  const aliases = {
+    num: "num",
+    applied: "date",
+    employer: "company",
+    title: "role",
+    fit: "score",
+    stage: "status",
+    resume: "pdf",
+    writeup: "report",
+    notes: "notes",
+  };
+  withRoot((root) => {
+    writeFileSync(join(root, "tracker-aliases.json"), JSON.stringify(aliases));
+    writeFileSync(join(root, "data", "applications.md"), [
+      "| Num | Applied | Employer | Title | Fit | Stage | Resume | Writeup | Notes |",
+      "|---|---|---|---|---|---|---|---|---|",
+      "| 1 | 2026-01-01 | Lumenfold | Platform Engineer | 4.2/5 | Applied | | | synthetic |",
+    ].join("\n"));
+  }, () => {
+    assert.equal(readApplications()[0].company, "Lumenfold");
+    const afterFirst = counted("applications.md");
+    assert.ok(afterFirst >= 1);
+    assert.equal(readApplications()[0].role, "Platform Engineer");
+    assert.equal(counted("applications.md"), afterFirst);
+
+    const swapped = { ...aliases, employer: "role", title: "company" };
+    writeFileSync(join(process.env.CAREER_OPS_ROOT, "tracker-aliases.json"), JSON.stringify(swapped));
+    const again = readApplications()[0];
+    assert.equal(again.company, "Platform Engineer");
+    assert.equal(again.role, "Lumenfold");
+    assert.ok(counted("applications.md") > afterFirst);
+  });
+});
+
 test("an unchanged inbox is not read again", () => {
   withRoot((root) => {
     writeFileSync(join(root, "data", "applications.md"), [
