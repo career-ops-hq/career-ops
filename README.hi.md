@@ -290,7 +290,7 @@ npm i -g @santifer/career-ops
 
 सिर्फ़ `/career-ops` लिखने पर कमांड मेन्यू दिखता है उन CLI में जो इसे इस्तेमाल करते हैं। सामान्य भाषा हर समर्थित CLI में काम करती है। Claude Code plugin के रूप में कमांड `/career-ops:career-ops` है।
 
-ये सभी एक ही router, `.agents/skills/career-ops/SKILL.md`, और एक जैसी `modes/*.md` फ़ाइलें साझा करती हैं, इसलिए कोई भी CLI चलाए, mode एक जैसा ही व्यवहार करता है। Codex में स्लैश कमांड की गारंटी नहीं है: सामान्य भाषा में माँगें, या `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` से एक prompt headless चलाएँ ([docs/CODEX.md](docs/CODEX.md))। हर समर्थित CLI में इसे कैसे चलाएँ, जिस CLI में headless कमांड है उसका वह कमांड, और हर CLI के सेटअप नोट [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) में हैं।
+ये सभी एक ही router, `.agents/skills/career-ops/SKILL.md`, और एक जैसी `modes/*.md` फ़ाइलें साझा करती हैं, इसलिए हर CLI अनुरोध को एक ही तरह रूट करती है (ब्राउज़र पर निर्भर mode को Playwright टूल भी चाहिए)। Codex में स्लैश कमांड की गारंटी नहीं है: सामान्य भाषा में माँगें, या `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` से एक prompt headless चलाएँ ([docs/CODEX.md](docs/CODEX.md))। हर समर्थित CLI में इसे कैसे चलाएँ, जिस CLI में headless कमांड है उसका वह कमांड, और हर CLI के सेटअप नोट [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) में हैं।
 
 ### रोज़मर्रा के कमांड
 
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *URL या JD पेस्ट करें* | पूरी pipeline: पोस्टिंग खुली है या नहीं की जाँच (सिर्फ़ URL के लिए), A-G मूल्यांकन और ऊँचे स्कोर पर H, रिपोर्ट, तैयार किया गया CV (डिफ़ॉल्ट रूप से PDF), tracker की पंक्ति |
 | `scan` | आपके पोर्टल में नई पोस्टिंग खोजता है और उन्हें इनबॉक्स (`data/pipeline.md`) में जोड़ता है |
-| `pipeline` | इनबॉक्स में इंतज़ार कर रहे URL को क्रम से देखता है और साफ़ तौर पर बेमेल को छोड़ देता है |
+| `pipeline` | इनबॉक्स में इंतज़ार कर रहे URL को क्रम से देखता है (standard और premium टियर साफ़ तौर पर बेमेल को छोड़ सकते हैं) |
 | `apply` | आवेदन फ़ॉर्म को आपके साथ फ़ील्ड-दर-फ़ील्ड भरता है। Submit से पहले रुक जाता है |
 | `tracker` | हर आवेदन किस स्थिति में है |
 | `followup` | किन आवेदनों पर follow-up बनता है, ड्राफ़्ट के साथ |
