@@ -32,6 +32,14 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { extractSkills } from './skill-extract.mjs';
 
+// A normal path stays readable. A space or other shell syntax is quoted so the
+// example stays one argument.
+function shellExampleArg(value) {
+  const text = String(value);
+  if (!/[\s'"$`!*?;&|()<>#{}]/.test(text)) return text;
+  return `'${text.replace(/'/g, "'\\''")}'`;
+}
+
 /**
  * Small, deliberately conservative map of interchangeable ATS surface forms.
  * Each inner array is one equivalence group; matching is bidirectional.
@@ -759,7 +767,7 @@ export async function resolveKeywords(input, root) {
   const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
   if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
     console.error(`Report not found: ${reportArg}`);
-    console.error(`Example: node keyword-match.mjs ${join(getCareerOpsRoot(), 'reports', '001-role.md')}`);
+    console.error(`Example: node keyword-match.mjs ${shellExampleArg(join(getCareerOpsRoot(), 'reports', '001-role.md'))}`);
     process.exit(1);
   }
 

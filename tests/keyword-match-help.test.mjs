@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,4 +50,25 @@ test('a missing report names the file and the example to run', (t) => {
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /Report not found: reports\/no-such-role\.md/);
   assert.match(result.stderr, new RegExp(`Example: node keyword-match\\.mjs ${example}`));
+});
+
+test('a data root with a space is one quoted argument in the example', (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'co-keyword-missing-'));
+  const parent = mkdtempSync(join(tmpdir(), 'co-keyword-data-'));
+  const dataRoot = join(parent, 'My Data');
+  mkdirSync(dataRoot);
+  t.after(() => {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(parent, { recursive: true, force: true });
+  });
+  const result = spawnSync(process.execPath, [CLI, 'reports/no-such-role.md'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 20000,
+    env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
+  });
+  const quoted = `'${join(dataRoot, 'reports', '001-role.md').replace(/'/g, "'\\''")}'`;
+  const pattern = quoted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, new RegExp(`Example: node keyword-match\\.mjs ${pattern}`));
 });
