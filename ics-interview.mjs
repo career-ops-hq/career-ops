@@ -194,6 +194,9 @@ function parseObservance(props) {
   const from = parseUtcOffset(get('TZOFFSETFROM'));
   const to = parseUtcOffset(get('TZOFFSETTO'));
   if (!start || start.kind !== 'floating' || from === null || to === null) return null;
+  // RDATE lists transitions this parser does not read. Treating the block as
+  // one onset at DTSTART would apply the wrong offset and still look converted.
+  if (props.some((p) => p.name === 'RDATE')) return null;
   const rrule = get('RRULE');
   if (!rrule) return { start, from, to, rule: null };
   const parts = Object.fromEntries(rrule.split(';').map((kv) => kv.split('=').map((x) => x.trim().toUpperCase())));

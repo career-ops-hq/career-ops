@@ -68,6 +68,25 @@ test('a Windows zone name with no VTIMEZONE stays unconverted', () => {
   assert.ok(warnings.some((w) => w.code === 'unknown-tzid'));
 });
 
+test('a VTIMEZONE that lists transitions with RDATE stays unconverted', () => {
+  const listed = [
+    'BEGIN:DAYLIGHT', 'DTSTART:19700101T020000', 'TZOFFSETFROM:-0500', 'TZOFFSETTO:-0400',
+    'RDATE:20260308T020000', 'RDATE:20270314T020000', 'END:DAYLIGHT',
+  ];
+  const onlyRdate = parseIcs(invite('Custom Zone', listed, '20260701T140000'), { displayZone: 'UTC' });
+  assert.equal(onlyRdate.event.start.kind, 'unknown-tzid');
+  assert.equal(onlyRdate.event.start.utc, null);
+
+  const withRule = [
+    ...observance('STANDARD', '16010101T020000', '-0400', '-0500', 'FREQ=YEARLY;INTERVAL=1;BYDAY=1SU;BYMONTH=11'),
+    'BEGIN:DAYLIGHT', 'DTSTART:16010101T020000', 'TZOFFSETFROM:-0500', 'TZOFFSETTO:-0400',
+    'RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=2SU;BYMONTH=3', 'RDATE:20260308T020000', 'END:DAYLIGHT',
+  ];
+  const mixed = parseIcs(invite('Eastern Standard Time', withRule, '20260701T140000'), { displayZone: 'UTC' });
+  assert.equal(mixed.event.start.kind, 'unknown-tzid');
+  assert.equal(mixed.event.start.utc, null);
+});
+
 test('a VTIMEZONE rule this parser cannot read stays unconverted', () => {
   const vtz = [
     ...observance('STANDARD', '16010101T020000', '-0400', '-0500', 'FREQ=YEARLY;BYMONTHDAY=1;BYMONTH=11'),
