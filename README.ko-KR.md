@@ -60,6 +60,7 @@
 </p>
 
 <p align="center"><a href="#이제-당신-차례">공&#8288;고&nbsp;하&#8288;나&#8288;로&nbsp;써&nbsp;보&#8288;기&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">전&#8288;체&nbsp;이&#8288;야&#8288;기&nbsp;읽&#8288;기&nbsp;→</a></p>
+<p align="center"><sub>터미널을 쓰고 싶지 않으신가요? <a href="https://career-ops.org/waitlist?ref=readme-ko-kr">웹 버전 대기자 명단에 등록하기&nbsp;→</a></sub></p>
 
 <br>
 
@@ -202,7 +203,7 @@ career-ops는 구직자에게 영원히 무료입니다. 다음 기업들이 이
 
 ## 작동 원리
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), the tailored CV in the format set by cv.output_format — a PDF by default — and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## 빠른 시작
 
