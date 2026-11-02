@@ -249,8 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# auto-pipeline चलाने के लिए नौकरी का URL या JD का टेक्स्ट पेस्ट करें।
+# बाकी सभी mode, और उन्हें अपनी CLI में कैसे माँगें: नीचे Usage देखें।
 ```
 
 </details>
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *URL या JD पेस्ट करें* | पूरी pipeline: पोस्टिंग खुली है या नहीं की जाँच (सिर्फ़ URL के लिए), A-G मूल्यांकन और ऊँचे स्कोर पर H, रिपोर्ट, तैयार किया गया CV (डिफ़ॉल्ट रूप से PDF), tracker की पंक्ति |
 | `scan` | आपके पोर्टल में नई पोस्टिंग खोजता है और उन्हें इनबॉक्स (`data/pipeline.md`) में जोड़ता है |
-| `pipeline` | इनबॉक्स में इंतज़ार कर रहे हर URL का मूल्यांकन करता है |
+| `pipeline` | इनबॉक्स में इंतज़ार कर रहे URL को क्रम से देखता है और साफ़ तौर पर बेमेल को छोड़ देता है |
 | `apply` | आवेदन फ़ॉर्म को आपके साथ फ़ील्ड-दर-फ़ील्ड भरता है। Submit से पहले रुक जाता है |
 | `tracker` | हर आवेदन किस स्थिति में है |
 | `followup` | किन आवेदनों पर follow-up बनता है, ड्राफ़्ट के साथ |
@@ -313,10 +313,10 @@ npm i -g @santifer/career-ops
 | कमांड | यह क्या करता है |
 | --- | --- |
 | [`scan`](modes/scan.md) | पोर्टल स्कैन करता है और नए ऑफ़र खोजता है |
-| [`discover`](modes/discover.md) | कंपनियों के नामों की सूची को स्कैन होने लायक ATS बोर्ड में बदलता है और `portals.yml` में जोड़ता है (बिना token) |
+| [`discover`](modes/discover.md) | कंपनियों के नामों की सूची को स्कैन होने लायक ATS बोर्ड में बदलता है। डिफ़ॉल्ट रूप से सिर्फ़ प्रीव्यू दिखाता है; `portals.yml` में तभी जोड़ता है जब `--write` दिया जाए (बिना token) |
 | [`pipeline`](modes/pipeline.md) | इनबॉक्स (`data/pipeline.md`) के लंबित URL प्रोसेस करता है |
 | [`triage`](modes/triage.md) | पूरे मूल्यांकन से पहले `modes/_brief.md` के आधार पर तेज़ शुरुआती छँटाई (आगे बढ़ें या नहीं) (कोई फ़ाइल नहीं लिखता) |
-| [`batch`](modes/batch.md) | समानांतर headless वर्कर से कई पोस्टिंग का मूल्यांकन करता है |
+| [`batch`](modes/batch.md) | headless वर्कर से कई पोस्टिंग का मूल्यांकन करता है (Claude के साथ समानांतर, अन्य CLI के साथ एक-एक करके) |
 | [`titles`](modes/titles.md) | खोज का दायरा बढ़ाने के लिए आपके CV के आधार पर मिलते-जुलते जॉब टाइटल सुझाता है |
 
 **किसी रोल का मूल्यांकन करें**
