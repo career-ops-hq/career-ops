@@ -65,6 +65,7 @@ import {
 } from './tracker-parse.mjs';
 import {
   canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic, loadCanonicalStates,
+  companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
 import { parseStatusLog, foldObservations } from './funnel-velocity.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -885,8 +886,12 @@ async function query(args, ctx) {
     if (!canonical) { ctx.error(`Error: unknown status "${status}". Canonical: ${states.labels.join(', ')}`); throw new TrackerExit(1); }
     where.push('status = ?'); params.push(canonical);
   }
+  // Applied in JS after the other predicates. SQL LIKE misses a row when the
+  // query only adds a legal suffix ("Acme Labs, Inc." vs "Acme Labs"). The
+  // suffix rule is the same one set-status uses. A word that is not a
+  // corporate form still has to be a substring, so "Acme Robotics" does not
+  // match "Acme Labs".
   const company = flagValue(args, '--company');
-  if (company) { where.push('company LIKE ?'); params.push(`%${company}%`); }
   const role = flagValue(args, '--role');
   if (role) { where.push('role LIKE ?'); params.push(`%${role}%`); }
   const since = flagValue(args, '--since');
@@ -911,9 +916,21 @@ async function query(args, ctx) {
   let sql = 'SELECT id, date, company, role, score, status, pdf, report, notes FROM applications'
     + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
   const limit = parseInt(flagValue(args, '--limit') || '0', 10);
-  if (limit > 0) { sql += ' LIMIT ?'; params.push(limit); }
+  // Limit after the company filter. A SQL LIMIT taken first can hide the
+  // suffix match behind a page of unrelated substring hits, or drop it when
+  // the LIKE matches nothing.
+  if (!company && limit > 0) { sql += ' LIMIT ?'; params.push(limit); }
 
-  const rows = db.prepare(sql).all(...params);
+  let rows = db.prepare(sql).all(...params);
+  if (company) {
+    const needle = company.toLowerCase();
+    rows = rows.filter((r) => {
+      const cell = String(r.company ?? '');
+      if (cell.toLowerCase().includes(needle)) return true;
+      return companiesMatchIgnoringCorporateForm(cell, company);
+    });
+    if (limit > 0) rows = rows.slice(0, limit);
+  }
   if (args.includes('--json')) {
     ctx.log(JSON.stringify(rows, null, 2));
   } else if (args.includes('--csv')) {
