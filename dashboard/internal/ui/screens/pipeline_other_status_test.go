@@ -20,11 +20,22 @@ func otherStatusApps() []model.CareerApplication {
 
 func TestUnknownStatusGetsItsOwnTabAndMetric(t *testing.T) {
 	apps := otherStatusApps()
-	m := NewPipelineModel(theme.NewTheme(""), apps, data.ComputeMetrics(apps), t.TempDir(), 140, 40)
+	m := NewPipelineModel(theme.NewTheme(""), apps, data.ComputeMetrics(apps), t.TempDir(), 200, 40)
 
 	tabs := ansi.Strip(m.renderTabs())
 	if !strings.Contains(tabs, "OTHER (1)") {
 		t.Fatalf("tabs = %q, want OTHER (1) for the status the canonical list does not name", tabs)
+	}
+	if strings.Contains(tabs, "›") || strings.Contains(tabs, "‹") {
+		t.Fatalf("wide terminal clipped the tabs: %q", tabs)
+	}
+
+	narrow := m
+	narrow.width = 48
+	narrow.activeTab = tabIndexForFilter(t, filterOther)
+	narrowTabs := ansi.Strip(narrow.renderTabs())
+	if !strings.Contains(narrowTabs, "OTHER (1)") {
+		t.Fatalf("selected other tab = %q, want OTHER (1)", narrowTabs)
 	}
 	metricsLine := ansi.Strip(m.renderMetrics())
 	if !strings.Contains(metricsLine, "Other:1") {
