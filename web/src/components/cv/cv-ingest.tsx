@@ -373,7 +373,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
         <style>{STYLE}</style>
         {waitingForBase && baseFailed ? (
           <div className="space-y-3">
-            <p className="flex items-center gap-1.5 text-[13px] text-amber-600 dark:text-amber-400">
+            <p className="flex items-center gap-1.5 text-[13px] text-amber-800 dark:text-amber-400">
               <AlertTriangle className="size-3.5 shrink-0" /> The current CV could not be read. Load it again before review.
             </p>
             <button
