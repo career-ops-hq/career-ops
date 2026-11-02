@@ -322,6 +322,28 @@ test("a visibility:hidden box does not add a preview page", () => {
   assert.equal(previewPageCount(contentHeightPx(visibleFooter)), 2);
 });
 
+test("a display:none page does not stretch the visible page", () => {
+  const hidden = {
+    getBoundingClientRect: () => ({ top: 0, height: 0, width: 0 }),
+    scrollHeight: 0,
+    offsetHeight: 0,
+  };
+  const visible = {
+    getBoundingClientRect: () => ({ top: 200, height: 900, width: 800 }),
+    scrollHeight: 900,
+  };
+  const doc = {
+    body: {
+      children: [hidden, visible],
+      scrollHeight: 1100,
+      querySelector: () => visible,
+      querySelectorAll: () => [hidden, visible],
+    },
+  };
+  assert.equal(contentHeightPx(doc), 900);
+  assert.equal(previewPageCount(contentHeightPx(doc)), 1);
+});
+
 test("an unmeasured preview estimates one page", () => {
   assert.equal(contentHeightPx(null), 0);
   assert.equal(previewPageCount(0), 1);

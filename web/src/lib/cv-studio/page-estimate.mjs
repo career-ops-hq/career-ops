@@ -3,7 +3,9 @@ export const PREVIEW_PAGE_PX = 1056;
 
 function pageBoxes(body) {
   if (!body || typeof body.querySelectorAll !== "function") return [];
-  return [...body.querySelectorAll(".page")];
+  // A display:none page has a zero box at the origin. With another page,
+  // that origin becomes the top of the extent and adds a page.
+  return [...body.querySelectorAll(".page")].filter(hasBox);
 }
 
 function placed(el) {
