@@ -972,10 +972,23 @@ export function resolveCanonicalState(input, states) {
   return null;
 }
 
+// A date in a Status cell and whatever joins it to the state: `Applied 2026-01-02`,
+// `Applied - 2026-01-02`, `Applied: 2026-01-02`, `Applied (2026-01-02)`,
+// `Applied on 2026-01-02`. Group 1 is the text after it.
+const STATUS_DATE_RE = /\s*(?:[-–—,:/(]\s*)?(?:\bon\s+)?\d{4}-\d{2}-\d{2}\)?(.*)$/i;
+// The same date written ahead of the state: `2026-01-02 Applied`.
+const LEADING_STATUS_DATE_RE = /^\d{4}-\d{2}-\d{2}\b[\s,:–—-]*/;
+
+/** A Status cell without its bold or a leading date. */
+function withoutBoldOrLeadingDate(input) {
+  return String(input ?? '').replace(/\*\*/g, '').trim().replace(LEADING_STATUS_DATE_RE, '');
+}
+
 /**
  * A raw Status cell without the decoration legacy trackers carry: markdown
- * bold and a trailing date (`**Applied**`, `Applied 2026-01-02`). What is left
- * is the spelling states.yml resolves, a label or an alias, unchanged.
+ * bold and a date (`**Applied**`, `Applied 2026-01-02`, `Applied (2026-01-02)`).
+ * What is left is the spelling states.yml resolves, a label or an alias,
+ * unchanged.
  *
  * The read side resolves a cell through this (resolveCanonicalStateId()), so a
  * writer that copies a cell must strip it the same way. Otherwise it writes a
@@ -986,7 +999,19 @@ export function resolveCanonicalState(input, states) {
  * @returns {string}
  */
 export function stripStatusDecoration(input) {
-  return String(input ?? '').replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
+  return withoutBoldOrLeadingDate(input).replace(STATUS_DATE_RE, '').trim();
+}
+
+/**
+ * What a Status cell says after its date (`Applied 2026-01-02 via referral`).
+ * It is no part of any state, so a writer that strips the date has to put it
+ * somewhere else. Empty when the cell has no date, or nothing after one.
+ *
+ * @param {*} input - Raw status cell from applications.md.
+ * @returns {string}
+ */
+export function statusTextAfterDate(input) {
+  return withoutBoldOrLeadingDate(input).match(STATUS_DATE_RE)?.[1].trim() ?? '';
 }
 
 /**
