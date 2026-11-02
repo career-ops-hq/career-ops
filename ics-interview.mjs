@@ -275,9 +275,15 @@ export function vtimezoneToInstant(d, observances) {
   const wallMs = Date.UTC(d.y, d.mo - 1, d.d, d.h, d.mi, d.s);
   let best = null;
   for (const obs of observances) {
-    for (const year of [d.y - 1, d.y]) {
+    // A yearly rule can fire its last onset many years before the event.
+    // Walk back to the year it started. The first onset that already applies
+    // is the latest one, so an earlier year cannot replace it.
+    const firstYear = obs.rule ? obs.start.y : d.y;
+    for (let year = d.y; year >= firstYear; year -= 1) {
       const onset = onsetIn(obs, year);
-      if (onset !== null && onset <= wallMs && (!best || onset > best.onset)) best = { onset, obs };
+      if (onset === null || onset > wallMs) continue;
+      if (!best || onset > best.onset) best = { onset, obs };
+      break;
     }
   }
   if (!best) return null;

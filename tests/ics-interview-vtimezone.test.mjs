@@ -68,6 +68,22 @@ test('a Windows zone name with no VTIMEZONE stays unconverted', () => {
   assert.ok(warnings.some((w) => w.code === 'unknown-tzid'));
 });
 
+test('a daylight rule that ended years ago still covers a later interview', () => {
+  const ended = [
+    ...observance('STANDARD', '20000101T020000', '-0400', '-0500'),
+    ...observance('DAYLIGHT', '20000101T020000', '-0500', '-0400', 'FREQ=YEARLY;INTERVAL=1;BYDAY=2SU;BYMONTH=3;UNTIL=20200308T020000'),
+  ];
+  const summer = parseIcs(invite('Example Zone', ended, '20260615T120000'), { displayZone: 'UTC' });
+  assert.equal(summer.event.start.utc, '2026-06-15T16:00:00Z');
+
+  const recurringStandard = [
+    ...observance('STANDARD', '20000101T020000', '-0400', '-0500', 'FREQ=YEARLY;INTERVAL=1;BYDAY=1SU;BYMONTH=11'),
+    ...observance('DAYLIGHT', '20000101T020000', '-0500', '-0400', 'FREQ=YEARLY;INTERVAL=1;BYDAY=2SU;BYMONTH=3;UNTIL=20200308T020000'),
+  ];
+  const afterStandard = parseIcs(invite('Example Zone', recurringStandard, '20260615T120000'), { displayZone: 'UTC' });
+  assert.equal(afterStandard.event.start.utc, '2026-06-15T17:00:00Z');
+});
+
 test('a VTIMEZONE offset keeps its seconds', () => {
   const ahead = observance('STANDARD', '16010101T000000', '+053045', '+053045');
   const plus = parseIcs(invite('Example Zone', ahead, '20260115T120000'), { displayZone: 'UTC' });
