@@ -84,6 +84,23 @@ test('a daylight rule that ended years ago still covers a later interview', () =
   assert.equal(afterStandard.event.start.utc, '2026-06-15T17:00:00Z');
 });
 
+test('an offset minute, hour, or second past the limit stays unconverted', () => {
+  for (const offset of ['+126000', '+240000', '-005961']) {
+    const zone = observance('STANDARD', '16010101T000000', offset, offset);
+    const { event } = parseIcs(invite('Example Zone', zone, '20260115T120000'), { displayZone: 'UTC' });
+    assert.equal(event.start.kind, 'unknown-tzid', offset);
+    assert.equal(event.start.utc, null, offset);
+  }
+
+  const mixed = [
+    ...observance('STANDARD', '16010101T020000', '-0400', '-0500'),
+    ...observance('DAYLIGHT', '16010101T020000', '-0500', '+126000'),
+  ];
+  const broken = parseIcs(invite('Example Zone', mixed, '20260701T140000'), { displayZone: 'UTC' });
+  assert.equal(broken.event.start.kind, 'unknown-tzid');
+  assert.equal(broken.event.start.utc, null);
+});
+
 test('a VTIMEZONE offset keeps its seconds', () => {
   const ahead = observance('STANDARD', '16010101T000000', '+053045', '+053045');
   const plus = parseIcs(invite('Example Zone', ahead, '20260115T120000'), { displayZone: 'UTC' });
