@@ -194,6 +194,7 @@ check('a skipped_dup row spelling the URL differently finds its original', [row(
 check('a fresh added row plus a skipped_dup row stays seen', [row(RECENT), dup('2026-08-06')], PINNED);
 check('a fresh added row outlives an aged skipped_dup row', [dup(AGED), row(RECENT)], PINNED);
 check('a URL re-added after release is seen again through its new added row', [row(AGED), dup('2026-03-01'), row(RECENT)], PINNED);
+check('any row still pinning keeps it seen, not only the first', [row(AGED), row(RECENT, 'skipped_expired'), dup('2026-08-06')], PINNED);
 check('and that new row is on a clock of its own', [row(AGED), dup('2026-03-01'), row(RECENT), dup('2026-09-30')], RELEASED,
   { policy: { ...POLICY, today: '2026-10-01' } });
 
