@@ -251,8 +251,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# Colle l'URL ou le texte d'une offre pour déclencher l'auto-pipeline.
+# Tous les autres modes, et comment les demander dans ta CLI : voir Utilisation ci-dessous.
 ```
 
 </details>
@@ -280,7 +280,7 @@ Voir [docs/SETUP.md](docs/SETUP.md) pour le guide d'installation complet, [docs/
 
 ## Utilisation
 
-Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela couvre la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte.
+Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela suffit pour la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte.
 
 ### Demander un mode
 
@@ -300,7 +300,7 @@ Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les 
 | --- | --- |
 | *colle une URL ou une description d'offre* | Pipeline complet : vérification que l'offre est ouverte (URL uniquement), évaluation A-G plus H si le score est élevé, rapport, CV adapté (PDF par défaut), ligne dans le tracker |
 | `scan` | Scanner tes portails pour trouver de nouvelles offres et les ajouter à la boîte d'entrée (`data/pipeline.md`) |
-| `pipeline` | Évaluer chaque URL qui attend dans la boîte d'entrée |
+| `pipeline` | Parcourir les URL en attente dans la boîte d'entrée en écartant les offres manifestement hors sujet |
 | `apply` | Remplir un formulaire de candidature avec toi, champ par champ. Elle s'arrête avant l'envoi |
 | `tracker` | Où en est chaque candidature |
 | `followup` | Quelles candidatures sont à relancer, avec des brouillons |
@@ -315,10 +315,10 @@ Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les 
 | Commande | Ce qu'elle fait |
 | --- | --- |
 | [`scan`](modes/scan.md) | Scanner les portails et découvrir de nouvelles offres |
-| [`discover`](modes/discover.md) | Convertir une liste de noms d'entreprises en tableaux ATS scannables et les ajouter à `portals.yml` (sans token) |
+| [`discover`](modes/discover.md) | Convertir une liste de noms d'entreprises en tableaux ATS scannables. Par défaut, simple aperçu : l'ajout à `portals.yml` n'a lieu qu'avec `--write` (sans token) |
 | [`pipeline`](modes/pipeline.md) | Traiter les URL en attente de la boîte d'entrée (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Premier tri rapide go/no-go d'après `modes/_brief.md`, avant une évaluation complète (n'écrit aucun fichier) |
-| [`batch`](modes/batch.md) | Évaluer de nombreuses offres avec des workers headless en parallèle |
+| [`batch`](modes/batch.md) | Évaluer de nombreuses offres avec des workers headless (en parallèle avec Claude, une par une avec les autres CLI) |
 | [`titles`](modes/titles.md) | Suggérer des intitulés de poste proches à partir de ton CV pour élargir la recherche |
 
 **Évaluer un poste**
