@@ -200,6 +200,12 @@ test("a changed header alias table reparses the tracker without the tracker file
 
 test("an unchanged inbox is not read again", () => {
   withRoot((root) => {
+    // The URL column only parses through an alias table. Keep one in the
+    // scratch root so the result does not depend on the working directory.
+    writeFileSync(join(root, "tracker-aliases.json"), JSON.stringify({
+      "#": "num", date: "date", company: "company", role: "role", score: "score",
+      status: "status", pdf: "pdf", report: "report", notes: "notes", url: "url",
+    }));
     writeFileSync(join(root, "data", "applications.md"), [
       "| # | Date | Company | Role | Score | Status | PDF | Report | Notes |",
       "|---|---|---|---|---|---|---|---|---|",
