@@ -7,8 +7,13 @@ Process job URLs stored in the inbox, `data/pipeline.md` by default. The user ad
 Resolve the inbox file once, before the liveness sweep, and use it for every search and edit in this mode. Throughout this file, `{INBOX}` means that file.
 
 1. A file the user names in the request (`/career-ops pipeline data/pipeline.bridge.md`, "run pipeline mode for data/pipeline.bridge.md") is the inbox.
-2. Otherwise, if `CAREER_OPS_PIPELINE` is set, that file is the inbox. A relative path resolves against the working directory. This is the parallel search lane (#2271): `scan.mjs` writes its new postings to that file, not to `data/pipeline.md`. Read the variable with `node -p "process.env.CAREER_OPS_PIPELINE || ''"`, which works in every shell.
-3. Otherwise the inbox is `data/pipeline.md`.
+2. Otherwise, the inbox is the file `scan.mjs` writes to. Ask it, so the mode and the scanner resolve the path the same way:
+
+   ```bash
+   node --input-type=module -e 'import { PIPELINE_PATH } from "./scan.mjs"; console.log(PIPELINE_PATH)'
+   ```
+
+   It prints `CAREER_OPS_PIPELINE` when that is set, in the shell or in the data root's `.env` (the parallel search lane, #2271), and the data root's `data/pipeline.md` otherwise. Do not read the variable from the shell alone: `scan.mjs` also loads the data root's `.env`, so a lane set only there would be missed and the lane's postings would stay `- [ ]`.
 
 Name the inbox in your first line of output (`Inbox: data/pipeline.bridge.md`) when it is not `data/pipeline.md`, so the user can see which lane is being processed. If that file does not exist, say so and stop. Do not fall back to `data/pipeline.md`: that is the other lane's inbox.
 
