@@ -546,6 +546,44 @@ try {
   } else {
     fail(`renderHtmlToPdf placed its temporary file outside the workspace: ${observedTempPath}`);
   }
+
+  // A direct caller has no CLI or profile check in front of it. An unusable
+  // budget is rejected before the page renders, so a strict render carrying one
+  // neither replaces the PDF at the output path nor leaves a draft beside it.
+  const guardedPdf = join(sandbox, 'direct-invalid-budget.pdf');
+  writeFileSync(guardedPdf, 'PREVIOUS GOOD PDF', 'latin1');
+  const onePagePdf = Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 1 >>\nendobj\n%%EOF');
+  for (const maxPages of [Number.NaN, 0, '1']) {
+    let rendered = false;
+    let rejection = null;
+    try {
+      await renderHtmlToPdf('<!doctype html><html><body>direct</body></html>', guardedPdf, {
+        workspaceRoot: sandbox,
+        maxPages,
+        strictPages: true,
+        launchBrowser: async () => ({
+          async newPage() {
+            rendered = true;
+            return { async goto() {}, async evaluate() {}, async pdf() { return onePagePdf; } };
+          },
+          async close() {},
+        }),
+      });
+    } catch (err) {
+      rejection = err;
+    }
+    const drafts = readdirSync(sandbox).filter((name) => name.startsWith('direct-invalid-budget.overflow'));
+    if (
+      rejection?.message === `Invalid page budget "${maxPages}". Use a positive integer.` &&
+      !rendered &&
+      readFileSync(guardedPdf, 'latin1') === 'PREVIOUS GOOD PDF' &&
+      drafts.length === 0
+    ) {
+      pass(`renderHtmlToPdf rejects maxPages ${JSON.stringify(String(maxPages))} before rendering, leaving the existing PDF in place`);
+    } else {
+      fail(`renderHtmlToPdf let maxPages ${JSON.stringify(String(maxPages))} reach the output path: ${rejection?.message ?? 'no error'}; rendered=${rendered}; drafts=${drafts.join(', ')}`);
+    }
+  }
   // --- Optional sections that arrived as a bare header (#3986) -------------
   // The builders strip these from the payload before filling a template, but
   // neither builder runs on the web pdf path: the agent emits finished HTML,

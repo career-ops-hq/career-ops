@@ -1312,9 +1312,7 @@ export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false
   if (!Number.isInteger(pageCount) || pageCount < 1) {
     throw new Error(`Could not determine the rendered PDF page count (received ${pageCount}).`);
   }
-  if (!Number.isInteger(maxPages) || maxPages < 1) {
-    throw new Error(`Invalid page budget "${maxPages}". Use a positive integer.`);
-  }
+  assertValidMaxPages(maxPages);
   if (pageCount <= maxPages) return;
 
   const actualLabel = 'pages';
@@ -1328,6 +1326,20 @@ export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false
   }
 
   console.warn(`⚠️  ${message} Continuing because overflow is warning-only by default; use --strict-pages to reject it.`);
+}
+
+/**
+ * Throw unless a page budget is a positive integer. enforcePageBudget() checks
+ * it after a render; renderInPage() checks it before one, so a bad value never
+ * reaches the output path.
+ *
+ * @param {unknown} maxPages
+ * @returns {void}
+ */
+function assertValidMaxPages(maxPages) {
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    throw new Error(`Invalid page budget "${maxPages}". Use a positive integer.`);
+  }
 }
 
 /**
@@ -2409,6 +2421,12 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   if (!artifactKind) {
     throw new Error(`Invalid artifact kind "${opts.kind}". Use: ${ARTIFACT_KINDS.join(', ')}`);
   }
+  // The page budget is checked here for the same reason. The CLI, the batch
+  // loop and the profile reader validate it, but a direct caller does not, and
+  // an unusable value would skip the strict-overflow branch below, replace the
+  // PDF at outputPath, and only then be rejected by enforcePageBudget().
+  const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false };
+  assertValidMaxPages(budget.maxPages);
 
   // Reject an escaping destination before creating directories, launching
   // Chromium, or writing any renderer temporary files (#2844).
@@ -2484,7 +2502,6 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
 
     // Read the root page-tree count so page-like text in streams is ignored.
     const pageCount = countRenderedPdfPages(pdfBuffer);
-    const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false };
 
     // A strict overflow must not replace the PDF already at outputPath. A
     // caller that restores its own inputs on failure (CV Studio restores the
