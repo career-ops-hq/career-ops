@@ -298,7 +298,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | --- | --- |
 | *paste a URL or JD* | Full pipeline: liveness check (URLs only), A-G evaluation plus H at high scores, report, tailored CV (PDF by default), tracker row |
 | `scan` | Scan your portals for new postings and add them to the inbox (`data/pipeline.md`) |
-| `pipeline` | Work through the URLs waiting in the inbox, skipping obvious mismatches |
+| `pipeline` | Work through the URLs waiting in the inbox (the standard and premium tiers may skip obvious mismatches) |
 | `apply` | Fill an application form with you, field by field. It stops before Submit |
 | `tracker` | Where every application stands |
 | `followup` | Which applications are due a follow-up, with drafts |
