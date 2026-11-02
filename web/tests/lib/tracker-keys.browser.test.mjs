@@ -67,6 +67,9 @@ test("shift-click two rows, then a number key sets their status", { skip: liveSe
   const beforeCursor = statusOf(cursorN);
   await page.keyboard.press("5");
   await until(() => statusOf(cursorN) === "Offer");
+  // The file can change before the browser finishes the POST. Until the
+  // announcement is up, busyRef can ignore the next status key.
+  await until(async () => (await page.locator('p[role="status"]').innerText()).includes("set to Offer"));
   assert.notEqual(beforeCursor, "Offer");
   for (const n of [10, 11, 12, 13]) {
     if (n === cursorN) continue;
