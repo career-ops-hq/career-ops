@@ -8,6 +8,7 @@ import "../helpers/web-ts-alias-loader.mjs";
 
 const { readApplications, readScanDates, readInbox } = await import("../../src/lib/career-ops.ts");
 const { assembleDedupContext } = await import("../../src/lib/core/discover.ts");
+const { cachedFileValue } = await import("../../src/lib/stat-file-cache.mjs");
 
 const origRead = fs.readFileSync;
 const reads = [];
@@ -103,7 +104,30 @@ test("an unchanged tracker is not read again, and an edited row is", () => {
   });
 });
 
-test("a same-size edit with its mtime put back is still read again", () => {
+test("a ctime change alone drops the cached value", () => {
+  const origStat = fs.statSync;
+  let ctimeNs = 1n;
+  fs.statSync = (path, opts) => (String(path).endsWith("fixed.md")
+    ? { mtimeNs: 1_700_000_000_000_000_000n, size: 10n, ctimeNs }
+    : origStat.call(fs, path, opts));
+  const origReadFile = fs.readFileSync;
+  let text = "Applied";
+  fs.readFileSync = (path, ...args) => (String(path).endsWith("fixed.md") ? text : origReadFile.call(fs, path, ...args));
+  try {
+    const file = join(tmpdir(), "stat-cache-controlled", "fixed.md");
+    const parse = (t) => ({ status: t });
+    assert.equal(cachedFileValue(file, "test", parse).status, "Applied");
+    text = "Offered";
+    assert.equal(cachedFileValue(file, "test", parse).status, "Applied");
+    ctimeNs = 2n;
+    assert.equal(cachedFileValue(file, "test", parse).status, "Offered");
+  } finally {
+    fs.statSync = origStat;
+    fs.readFileSync = origReadFile;
+  }
+});
+
+test("a same-size edit with its mtime put back is still read again", (t) => {
   withRoot((root) => {
     writeFileSync(join(root, "data", "applications.md"), [
       "| # | Date | Company | Role | Score | Status | PDF | Report | Notes |",
@@ -125,8 +149,14 @@ test("a same-size edit with its mtime put back is still read again", () => {
       writeFileSync(file, sameSize);
       utimesSync(file, 1_700_000_000, 1_700_000_000);
       after = statSync(file, { bigint: true });
-      if (after.ctimeNs === before.ctimeNs && Date.now() > deadline) throw new Error("ctime did not advance");
+      if (after.ctimeNs === before.ctimeNs && Date.now() > deadline) break;
     } while (after.ctimeNs === before.ctimeNs);
+    // Some filesystems (FAT, for one) put ctime back along with mtime. The
+    // controlled-stat test above covers the cache there.
+    if (after.ctimeNs === before.ctimeNs) {
+      t.skip("this filesystem does not advance ctime after utimes");
+      return;
+    }
     assert.equal(after.mtimeNs, before.mtimeNs);
     assert.equal(after.size, before.size);
     assert.equal(readApplications()[0].status, "Offered");
