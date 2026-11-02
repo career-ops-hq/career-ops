@@ -44,7 +44,12 @@ function letter(fields, { cv = 'Jane Doe builds systems.\n', facts, inputs } = {
       cwd: dir,
       encoding: 'utf-8',
       timeout: 60_000,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: '', COVER_HTML_CAPTURE: capture },
+      // A tracker or PDF-index override set in the developer's shell would place
+      // the run's output/ in that workspace instead of this fixture.
+      env: {
+        ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: '', CAREER_OPS_TRACKER: '',
+        CAREER_OPS_PDF_INDEX: '', CAREER_OPS_PDF_SHARED: '', COVER_HTML_CAPTURE: capture,
+      },
     });
     return { run, html: existsSync(capture) ? readFileSync(capture, 'utf-8') : null };
   } finally {
