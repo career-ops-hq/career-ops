@@ -119,7 +119,7 @@ import { extractTrackerReportNumbers, parseMarkdownLinks, soleMarkdownLink, reso
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
-  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration,
+  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
   appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
@@ -804,6 +804,14 @@ try {
 
   statusChanged = parts[colmap.status].trim() !== newStatus;
   if (statusChanged) replaceCellValue(colmap.status, newStatus);
+
+  // Text after a date in the old cell is no part of any state, and replacing the
+  // cell would lose it. It moves to Notes, as normalize-statuses.mjs moves it.
+  if (statusChanged && colmap.notes != null && statusTextAfterDate(oldStatus)) {
+    const kept = (parts[colmap.notes] ?? '').trim();
+    const moved = oldStatus.trim();
+    if (!kept.includes(moved)) replaceCellValue(colmap.notes, kept ? `${moved}. ${kept}` : moved);
+  }
 
   if (note) {
     if (colmap.notes == null) {

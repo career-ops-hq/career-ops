@@ -29,8 +29,10 @@ function withRow(status, fn) {
   for (const name of OVERRIDES) env[name] = '';
   const run = (script, ...args) => spawnSync(NODE, [join(ROOT, script), ...args], { encoding: 'utf8', env, cwd: root });
   const ledger = () => readFileSync(join(root, 'data', 'status-log.tsv'), 'utf8').trim().split('\n').map((line) => line.split('\t'));
-  const cell = () => readFileSync(tracker, 'utf8').split('\n').find((line) => line.startsWith('| 1 |')).split('|')[6].trim();
-  try { fn({ run, ledger, cell }); } finally { rmSync(root, { recursive: true, force: true }); }
+  const cells = () => readFileSync(tracker, 'utf8').split('\n').find((line) => line.startsWith('| 1 |')).split('|');
+  const cell = () => cells()[6].trim();
+  const notes = () => cells()[9].trim();
+  try { fn({ run, ledger, cell, notes }); } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
 for (const [status, from] of [
@@ -65,3 +67,27 @@ test('a cell outside states.yml logs "-", so the row survives its readers', () =
     assert.deepEqual(JSON.parse(run('funnel-velocity.mjs').stdout).dataQuality.unparseable, []);
   });
 });
+
+test('text after a date moves to Notes instead of going with the old cell', () => {
+  withRow('Applied 2026-10-02 via referral', ({ run, ledger, cell, notes }) => {
+    const set = run('set-status.mjs', '1', 'Interview');
+    assert.equal(set.status, 0, set.stderr || set.stdout);
+    assert.equal(cell(), 'Interview');
+    assert.equal(notes(), 'Applied 2026-10-02 via referral');
+    assert.deepEqual(ledger()[0].slice(2, 4), ['Applied', 'Interview']);
+  });
+});
+
+test('a --note goes in beside the moved text, and a bare date moves nothing', () => {
+  withRow('Applied 2026-10-02 via referral', ({ run, notes }) => {
+    const set = run('set-status.mjs', '1', 'Interview', '--note', 'call booked');
+    assert.equal(set.status, 0, set.stderr || set.stdout);
+    assert.match(notes(), /Applied 2026-10-02 via referral/);
+    assert.match(notes(), /call booked/);
+  });
+  withRow('Applied 2026-10-02', ({ run, notes }) => {
+    assert.equal(run('set-status.mjs', '1', 'Interview').status, 0);
+    assert.equal(notes(), '');
+  });
+});
+
