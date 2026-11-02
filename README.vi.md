@@ -302,7 +302,7 @@ Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`
 | --- | --- |
 | *dán URL hoặc JD* | Pipeline đầy đủ: kiểm tra tin còn mở hay không (chỉ với URL), đánh giá A-G cộng H khi điểm cao, báo cáo, CV đã tùy chỉnh (mặc định là PDF), một dòng trong tracker |
 | `scan` | Quét các cổng của bạn để tìm tin mới và thêm vào hộp thư (`data/pipeline.md`) |
-| `pipeline` | Đánh giá mọi URL đang chờ trong hộp thư |
+| `pipeline` | Xử lý các URL đang chờ trong hộp thư, bỏ qua những URL rõ ràng không phù hợp |
 | `apply` | Cùng bạn điền form ứng tuyển, từng trường một. Dừng lại trước khi Gửi |
 | `tracker` | Mỗi hồ sơ ứng tuyển đang ở đâu |
 | `followup` | Hồ sơ nào đến lúc cần follow-up, kèm bản nháp |
@@ -317,10 +317,10 @@ Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`
 | Lệnh | Chức năng |
 | --- | --- |
 | [`scan`](modes/scan.md) | Quét các cổng và tìm tin mới |
-| [`discover`](modes/discover.md) | Chuyển danh sách tên công ty thành các bảng ATS có thể quét và thêm vào `portals.yml` (không tốn token) |
+| [`discover`](modes/discover.md) | Chuyển danh sách tên công ty thành các bảng ATS có thể quét. Mặc định chỉ xem trước; chỉ thêm vào `portals.yml` khi dùng `--write` (không tốn token) |
 | [`pipeline`](modes/pipeline.md) | Xử lý các URL đang chờ trong hộp thư (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Lọc nhanh lần đầu theo kiểu nên hay không nên ứng tuyển dựa trên `modes/_brief.md`, trước khi đánh giá đầy đủ (không ghi tệp nào) |
-| [`batch`](modes/batch.md) | Đánh giá nhiều tin bằng các worker headless chạy song song |
+| [`batch`](modes/batch.md) | Đánh giá nhiều tin bằng các worker headless (song song với Claude, lần lượt từng tin với các CLI khác) |
 | [`titles`](modes/titles.md) | Gợi ý các chức danh liên quan từ CV của bạn để mở rộng tìm kiếm |
 
 **Đánh giá một vị trí**
