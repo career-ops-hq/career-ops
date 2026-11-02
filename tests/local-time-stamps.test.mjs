@@ -11,6 +11,11 @@
 //   generate-pdf.mjs       the date column of data/pdf-index.tsv.
 //   fix-slugs.mjs          the `(slug migrated … <date>, verify-portals)` note
 //                          it writes into portals.yml.
+//   company-funded.mjs     generated_at, which also names the report files, and
+//                          the date of an item with none of its own. It read
+//                          the current year from the UTC clock as well, so an
+//                          item naming the local year was dated in the future
+//                          and dropped for the first hours of a new year.
 //
 // Every other "today" in the repo already goes through lib/local-today.mjs
 // (#2765, #2932, #3070, #3301, #3990). These were missed because they stamp
@@ -167,6 +172,38 @@ process.stdout.write(computeFixes(text, results).text);
     });
     assert.equal(r.status, 0, r.stderr);
     assert.ok(r.stdout.includes(`(slug migrated greenhouse->lever ${LOCAL_DAY}, verify-portals)`), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const FUNDED = (title) => `
+const { discoverFundedCompanies } = await import(${href('company-funded.mjs')});
+const item = { source: 'hacker_news', title: ${JSON.stringify(title)}, url: 'https://news.ycombinator.com/item?id=77',
+  observedDate: null, text: 'Acme raises funding.', categories: [] };
+const result = await discoverFundedCompanies({ discoveryItems: [item], months: 3 });
+process.stdout.write(JSON.stringify({ generated_at: result.generated_at, company: result.companies[0]?.company ?? null,
+  observed: result.companies[0]?.funding.sources[0]?.observed_date ?? null }));
+`;
+
+test('company-funded dates its run, and an item with no date, with the local day', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'funded-stamp-'));
+  try {
+    const r = runPinned(dir, { source: FUNDED('Acme raises $25M Series A') });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { generated_at: LOCAL_DAY, company: 'Acme', observed: LOCAL_DAY });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('company-funded keeps an item naming the local year once the UTC year is behind it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'funded-year-'));
+  try {
+    // 20:30Z on 31 December is 10:30 on 1 January in Kiritimati.
+    const r = runPinned(dir, { source: FUNDED('Acme raises $25M Series A in 2027'), instant: '2026-12-31T20:30:00Z' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { generated_at: '2027-01-01', company: 'Acme', observed: '2027' });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

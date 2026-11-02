@@ -1,6 +1,7 @@
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { localToday } from '../lib/local-today.mjs';
 
 console.log('\nUtility - company-funded');
 
@@ -352,16 +353,18 @@ try {
     return res;
   };
   try {
+    const now = new Date('2026-07-20T00:00:00Z');
     const result = await mod.discoverFundedCompanies({
       dryRun: true,
       sources: ['techcrunch'],
       months: 3,
       limit: 5,
-      now: new Date('2026-07-20T00:00:00Z'),
+      now,
     });
     if (
       result.companies[0]?.company === 'Acme' &&
-      result.generated_at === '2026-07-20' &&
+      // Dated with the day where the user is; local-time-stamps.test.mjs pins it.
+      result.generated_at === localToday(now) &&
       seenFetchOptions.every((call) => call.options?.redirect === 'manual') &&
       String(seenFetchOptions[0]?.url) === 'https://techcrunch.com/feed/' &&
       seenFetchOptions.some((call) => String(call.url) === 'https://techcrunch.com/final-feed/')
