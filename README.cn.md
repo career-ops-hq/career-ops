@@ -292,7 +292,7 @@ npm i -g @santifer/career-ops
 
 单独输入 `/career-ops` 会显示命令菜单（在使用它的 CLI 中）。自然语言在所有受支持的 CLI 中都能用。作为 Claude Code 插件使用时，命令是 `/career-ops:career-ops`。
 
-它们共用同一个路由器 `.agents/skills/career-ops/SKILL.md` 和同一批 `modes/*.md` 文件，所以无论由哪个 CLI 运行，模式的行为都一样。Codex 不保证支持斜杠命令：请用自然语言提出请求，或用 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` 以无头方式运行一条提示词（[docs/CODEX.md](docs/CODEX.md)）。如何在每个受支持的 CLI 中运行、带有无头命令的 CLI 的对应命令，以及 各 CLI 的设置说明，都在 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) 中。
+它们共用同一个路由器 `.agents/skills/career-ops/SKILL.md` 和同一批 `modes/*.md` 文件，所以每个 CLI 都以相同方式路由请求（依赖浏览器的模式还需要 Playwright 工具）。Codex 不保证支持斜杠命令：请用自然语言提出请求，或用 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` 以无头方式运行一条提示词（[docs/CODEX.md](docs/CODEX.md)）。如何在每个受支持的 CLI 中运行、带有无头命令的 CLI 的对应命令，以及 各 CLI 的设置说明，都在 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) 中。
 
 ### 日常命令
 
@@ -300,7 +300,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *粘贴链接或职位描述* | 完整流水线：职位是否仍在招的检查（仅限链接）、A-G 评估（高分时另加 H）、报告、定制简历（默认 PDF）、追踪表新增一行 |
 | `scan` | 扫描你的招聘平台以发现新职位，并加入收件箱（`data/pipeline.md`） |
-| `pipeline` | 处理收件箱中等待的链接，跳过明显不匹配的 |
+| `pipeline` | 处理收件箱中等待的链接（standard 和 premium 档位可能跳过明显不匹配的） |
 | `apply` | 与你一起逐个字段填写申请表。提交前会停下 |
 | `tracker` | 每份申请当前的进展 |
 | `followup` | 哪些申请该跟进了，并附草稿 |
