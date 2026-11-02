@@ -21,10 +21,11 @@ const SECTION = '## Runtime: GitHub evidence freshness';
 
 /**
  * Run the runner over three offers. `status` is what the stub check prints;
- * null leaves evidence-freshness.mjs out of the checkout.
+ * null leaves evidence-freshness.mjs out of the checkout. `mode` is passed as
+ * --mode, so 'match' runs the workers on batch-prompt-match.md.
  * Returns the captured prompts and how many times the check ran.
  */
-function runBatch(status) {
+function runBatch(status, { mode = 'full' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'batch-evidence-freshness-'));
   try {
     const batchDir = join(dir, 'batch');
@@ -35,6 +36,7 @@ function runBatch(status) {
     writeFileSync(join(batchDir, 'batch-runner.sh'), SRC);
     chmodSync(join(batchDir, 'batch-runner.sh'), 0o755);
     writeFileSync(join(batchDir, 'batch-prompt.md'), '# Fixture batch worker prompt\n\nURL: {{URL}}\nBatch ID: {{ID}}\n');
+    writeFileSync(join(batchDir, 'batch-prompt-match.md'), '# Fixture match worker prompt\n\nURL: {{URL}}\nBatch ID: {{ID}}\n');
     writeFileSync(join(batchDir, 'batch-input.tsv'), [
       'id\turl\tsource\tnotes',
       '1\thttps://example.com/one\tfixture\t-',
@@ -83,7 +85,7 @@ function runBatch(status) {
     chmodSync(join(binDir, 'claude'), 0o755);
     chmodSync(join(binDir, 'curl'), 0o755);
 
-    execFileSync(getBash(), [join(batchDir, 'batch-runner.sh'), '--parallel', '1', '--max-retries', '0', '--rate-limit-sleep', '0'], {
+    execFileSync(getBash(), [join(batchDir, 'batch-runner.sh'), '--parallel', '1', '--max-retries', '0', '--rate-limit-sleep', '0', '--mode', mode], {
       cwd: dir,
       env: { ...process.env, PATH: `${binDir}${delimiter}${process.env.PATH}`, CAPTURE_DIR: captureDir },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -122,4 +124,30 @@ test('an install without evidence-freshness.mjs runs the batch unchanged', () =>
   assert.equal(calls, 0);
   assert.equal(prompts.length, 3);
   assert.ok(prompts.every((p) => !p.includes(SECTION)));
+});
+
+test('match mode gets the same run-wide result on its own prompt', () => {
+  const { prompts, calls } = runBatch('ok', { mode: 'match' });
+  assert.equal(prompts.length, 3, 'expected one captured prompt per offer');
+  assert.equal(calls, 1, `evidence-freshness.mjs should run once per batch run in match mode too, ran ${calls} times`);
+  for (const p of prompts) {
+    assert.ok(p.includes('# Fixture match worker prompt'), 'match mode runs on batch-prompt-match.md');
+    assert.ok(p.includes(SECTION), 'every match worker prompt carries the run-wide freshness result');
+    assert.ok(p.includes('    "notice": "Fixture notice. Scores may understate fit."'));
+  }
+  assert.ok(prompts.every((p) => p === prompts[0]), 'the result keeps the resolved prompt byte-identical across offers');
+});
+
+test('both worker prompts tell the worker how to report the runtime result', () => {
+  for (const file of ['batch-prompt.md', 'batch-prompt-match.md']) {
+    const prompt = readFileSync(new URL(`../batch/${file}`, import.meta.url), 'utf8');
+    assert.ok(prompt.includes('Runtime: GitHub evidence freshness'), `${file} names the runtime section the runner appends`);
+    assert.ok(prompt.includes('evidence_freshness'), `${file} has a machine-readable evidence_freshness value`);
+    assert.ok(prompt.includes('"{fresh | stale | not_evaluated}"'), `${file} gives the three evidence_freshness values`);
+    assert.ok(prompt.includes('**GitHub evidence:**'), `${file} has the stale header line`);
+    assert.ok(/never changes? the score/.test(prompt), `${file} keeps the result out of scoring`);
+  }
+  const match = readFileSync(new URL('../batch/batch-prompt-match.md', import.meta.url), 'utf8');
+  const finalJson = match.slice(match.indexOf('### Step 5'));
+  assert.ok(finalJson.includes('"evidence_freshness": "{fresh | stale | not_evaluated}"'), 'match mode records the value in its final JSON, since its report has no Machine Summary');
 });

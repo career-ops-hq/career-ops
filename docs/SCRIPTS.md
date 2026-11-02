@@ -1704,7 +1704,10 @@ It writes nothing and never runs `expand` or `github-evidence.mjs`. The modes
 show the notice and continue, never change a score because of it, and record it
 in the report as Machine Summary `evidence_freshness` (`fresh` / `stale` /
 `not_evaluated`, schema in `batch/batch-prompt.md`) plus a
-`**GitHub evidence:**` header line when stale. Unattended runs ask nothing.
+`**GitHub evidence:**` header line when stale. A `--mode match` batch gets the
+same run-wide result: its report has no Machine Summary, so the worker puts the
+value in the final JSON (`evidence_freshness`, see `batch/batch-prompt-match.md`)
+and adds the same header line when stale. Unattended runs ask nothing.
 
 ---
 

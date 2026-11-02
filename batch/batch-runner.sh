@@ -1946,7 +1946,6 @@ process_offer() {
   fi
 }
 
-# Merge tracker additions into applications.md
 # GitHub evidence freshness (#5674): one check for the whole run, not one per
 # worker. The check makes a `gh search prs` call and its answer is the same for
 # every offer, so the runner makes it once and every worker reads the result
@@ -1967,6 +1966,7 @@ check_evidence_freshness() {
   echo ""
 }
 
+# Merge tracker additions into applications.md
 merge_tracker() {
   echo ""
   echo "=== Merging tracker additions ==="
