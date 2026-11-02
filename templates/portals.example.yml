@@ -2360,11 +2360,10 @@ tracked_companies:
   # -- Contact Center AI & CX --
 
   - name: Ada
-    careers_url: https://job-boards.greenhouse.io/ada
-    scan_method: websearch
-    scan_query: '"ada.cx" OR "ada" "AI" "Solutions" OR "Engineer" site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io'
-    notes: "Toronto + remote. AI customer service."
-    enabled: false
+    careers_url: https://job-boards.greenhouse.io/ada18
+    api: https://boards-api.greenhouse.io/v1/boards/ada18/jobs
+    notes: "Toronto + remote. AI customer service. The Greenhouse board is ada18 (its postings point to ada.cx); greenhouse.io/ada is gone."
+    enabled: true
 
   - name: LivePerson
     careers_url: https://liveperson.com/company/careers
@@ -2509,8 +2508,8 @@ tracked_companies:
   # -- Lever-based (Playwright direct) --
 
   - name: Mistral AI
-    careers_url: https://jobs.lever.co/mistral
-    notes: "Paris. European AI lab."
+    careers_url: https://jobs.ashbyhq.com/mistral.ai
+    notes: "Paris. European AI lab. Moved from Lever to Ashby (mistral.ai/careers links here)."
     enabled: true
 
   - name: Palantir
@@ -2696,8 +2695,8 @@ tracked_companies:
     enabled: true
 
   - name: Qonto
-    careers_url: https://jobs.lever.co/qonto
-    notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles."
+    careers_url: https://jobs.ashbyhq.com/qonto
+    notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles. Moved from Lever to Ashby (qonto.com/en/careers links here)."
     enabled: true
 
   # -- DACH logistics / mobility --
@@ -2849,8 +2848,10 @@ tracked_companies:
     enabled: true
 
   - name: Bolt
-    careers_url: https://jobs.ashbyhq.com/bolt
-    notes: "Tallinn. Ride-hailing/mobility."
+    careers_url: https://bolt.eu/en/careers/positions/
+    scan_method: websearch
+    scan_query: 'site:bolt.eu/en/careers/positions'
+    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which no provider reads; the Ashby board named Bolt has no postings."
     enabled: true
 
   - name: Bosch
@@ -2920,13 +2921,15 @@ tracked_companies:
     enabled: true
 
   - name: Toggl
-    careers_url: https://apply.workable.com/toggl
-    notes: "Remote EU. Time tracking. Workable board."
+    careers_url: https://jobs.ashbyhq.com/toggl
+    ashby:
+      embed: true        # the board is live but its public posting API answers 404
+    notes: "Remote EU. Time tracking. Moved from Workable to Ashby (toggl.com/jobs embeds this board)."
     enabled: true
 
   - name: Doist
-    careers_url: https://apply.workable.com/doist
-    notes: "Remote global. Productivity (Todoist). Workable board."
+    careers_url: https://jobs.ashbyhq.com/todoist-inc
+    notes: "Remote global. Productivity (Todoist). Moved from Workable to Ashby (todoist.com/careers links here)."
     enabled: true
 
   # -- Denmark AI / tech --
@@ -2946,10 +2949,9 @@ tracked_companies:
     enabled: true
 
   - name: Templafy
-    careers_url: https://job-boards.greenhouse.io/templafy
-    api: https://boards-api.greenhouse.io/v1/boards/templafy/jobs
-    notes: "Copenhagen DK. Document-generation / content-enablement platform."
-    enabled: false
+    careers_url: https://templafy.teamtailor.com
+    notes: "Copenhagen DK. Document-generation / content-enablement platform. Moved from Greenhouse to Teamtailor (templafy.com careers links here)."
+    enabled: true
 
   # -- Iberia AI --
 
