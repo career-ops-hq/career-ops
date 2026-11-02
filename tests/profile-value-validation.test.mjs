@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,4 +98,31 @@ test('the cli exits 2 for a bad spend tier', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+function doctorProfileWarning(t, profile) {
+  const dir = mkdtempSync(join(tmpdir(), 'co-profile-doctor-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, 'config'));
+  writeFileSync(join(dir, 'config', 'profile.yml'), profile);
+  // The scratch root has no CV or portals, so doctor exits 1. Only the
+  // profile line matters here, and --json does not carry it.
+  const r = spawnSync(process.execPath, [join(ROOT, 'doctor.mjs'), '--target', dir], {
+    cwd: dir,
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: '' },
+  });
+  const line = r.stdout.split('\n').find((l) => l.includes('config/profile.yml: '));
+  assert.ok(line, r.stdout + r.stderr);
+  return line;
+}
+
+test('doctor calls a bad value a bad value, not an unrecognized key', (t) => {
+  const bad = doctorProfileWarning(t, 'spend_tier: gold\n');
+  assert.match(bad, /1 issue — known settings hold values the readers ignore/);
+  const unknown = doctorProfileWarning(t, 'spend_teir: standard\n');
+  assert.match(unknown, /settings under an unrecognized key have no effect/);
+  const both = doctorProfileWarning(t, 'spend_tier: gold\nspend_teir: standard\n');
+  assert.match(both, /2 issues — unrecognized keys and invalid values have no effect/);
 });

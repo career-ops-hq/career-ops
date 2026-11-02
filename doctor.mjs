@@ -1297,9 +1297,18 @@ function checkProfileShape(root) {
   }
   const actionable = findings.filter((f) => f.level !== 'info');
   if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  // A bad value sits under a key the readers know. Calling it an unrecognized
+  // key would send the user to delete a setting they only need to correct.
+  const badValues = actionable.some((f) => f.code === 'bad-value');
+  const otherIssues = actionable.some((f) => f.code !== 'bad-value');
+  const why = badValues && otherIssues
+    ? 'unrecognized keys and invalid values have no effect'
+    : badValues
+      ? 'known settings hold values the readers ignore'
+      : 'settings under an unrecognized key have no effect';
   return {
     warn: true,
-    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — settings under an unrecognized key have no effect`,
+    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — ${why}`,
     fix: actionable.map((f) => f.message),
   };
 }
