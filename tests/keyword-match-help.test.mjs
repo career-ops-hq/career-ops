@@ -49,7 +49,7 @@ test('a missing report names the file and the example to run', (t) => {
   const example = join(dataRoot, 'reports', '001-role.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /Report not found: reports\/no-such-role\.md/);
-  assert.match(result.stderr, new RegExp(`Example: node keyword-match\\.mjs ${example}`));
+  assert.match(result.stderr, new RegExp(`Example: node keyword-match\\.mjs '?${example}'?`));
 });
 
 test('a data root with a space is one quoted argument in the example', (t) => {
