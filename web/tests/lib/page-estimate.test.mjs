@@ -129,6 +129,37 @@ test("a footer margin is part of the preview height", () => {
   assert.equal(previewPageCount(contentHeightPx(withGap)), 2);
 });
 
+test("a hidden element before the page does not add a page", () => {
+  const hidden = { getBoundingClientRect: () => ({ top: 0, height: 0, width: 0 }) };
+  const page = { scrollHeight: 1050, getBoundingClientRect: () => ({ top: 8, height: 1050, width: 800 }) };
+  const one = {
+    body: {
+      children: [hidden, page],
+      scrollHeight: 1050,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(one), 1050);
+  assert.equal(frameHeightPx(one), 1058);
+  assert.equal(previewPageCount(contentHeightPx(one)), 1);
+});
+
+test("a page border counts in the one-page estimate", () => {
+  const page = { scrollHeight: 1050, getBoundingClientRect: () => ({ top: 0, height: 1058, width: 800 }) };
+  const one = {
+    body: {
+      children: [page],
+      scrollHeight: 1050,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(one), 1058);
+  assert.equal(frameHeightPx(one), 1058);
+  assert.equal(previewPageCount(contentHeightPx(one)), 2);
+});
+
 test("an unmeasured preview estimates one page", () => {
   assert.equal(contentHeightPx(null), 0);
   assert.equal(previewPageCount(0), 1);

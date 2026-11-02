@@ -13,6 +13,16 @@ function placed(el) {
   return { top, bottom: top + height };
 }
 
+// display:none reports a zero box at the origin. Treating that as the start
+// of the CV turns the body margin into extra height.
+function hasBox(el) {
+  if (!el) return false;
+  const rect = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
+  const width = Math.max(rect && Number.isFinite(rect.width) ? rect.width : 0, el.offsetWidth || 0);
+  const height = Math.max(rect && Number.isFinite(rect.height) ? rect.height : 0, el.offsetHeight || 0, el.scrollHeight || 0);
+  return width > 0 || height > 0;
+}
+
 // A footer can sit after .page. The body's own scroll height cannot be used
 // for this: it repeats the iframe viewport, which is the bug the page count
 // was changed to avoid.
@@ -39,7 +49,7 @@ function contentAbovePages(body, pages) {
   if (!kids || typeof kids[Symbol.iterator] !== "function" || pages.length === 0) return 0;
   let first = null;
   for (const el of kids) {
-    if (el) {
+    if (hasBox(el)) {
       first = el;
       break;
     }
@@ -75,8 +85,14 @@ export function contentHeightPx(doc) {
     return height > 0 ? height : 0;
   }
   const page = pages[0] || (typeof body.querySelector === "function" ? body.querySelector(".page") : null);
-  const box = page || body;
-  const height = (box.scrollHeight || box.offsetHeight || 0) + (page ? extra + above : 0);
+  if (!page) {
+    const height = body.scrollHeight || body.offsetHeight || 0;
+    return height > 0 ? height : 0;
+  }
+  // scrollHeight stops at the padding edge. The border is part of the page,
+  // and the iframe already measures that same box.
+  const measured = placed(page);
+  const height = measured.bottom - measured.top + extra + above;
   return height > 0 ? height : 0;
 }
 
