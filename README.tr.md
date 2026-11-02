@@ -249,8 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# auto-pipeline'ı başlatmak için bir ilan URL'si veya ilan metni yapıştır.
+# Diğer tüm modlar ve CLI'ında nasıl istenecekleri: aşağıdaki Kullanım bölümüne bak.
 ```
 
 </details>
@@ -290,7 +290,7 @@ Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. caree
 
 Arkasında hiçbir şey olmayan `/career-ops` komut menüsünü gösterir onu kullanan CLI'larda. Düz dil her desteklenen CLI'da çalışır. Claude Code eklentisi olarak komut `/career-ops:career-ops` biçimindedir.
 
-Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `modes/*.md` dosyalarını paylaşır; bu yüzden bir mod hangi CLI çalıştırırsa çalıştırsın aynı davranır. Codex'te eğik çizgi komutları garanti değildir: düz dille iste ya da `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ile tek bir prompt'u headless çalıştır ([docs/CODEX.md](docs/CODEX.md)). Desteklenen her CLI'da nasıl çalıştırılacağı, headless komutu olan CLI'lar için bu komutlar ve CLI'ya özel kurulum notları [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) içindedir.
+Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `modes/*.md` dosyalarını paylaşır; bu yüzden her CLI bir isteği aynı şekilde yönlendirir (tarayıcıyı yoğun kullanan modlar ayrıca Playwright araçlarına ihtiyaç duyar). Codex'te eğik çizgi komutları garanti değildir: düz dille iste ya da `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ile tek bir prompt'u headless çalıştır ([docs/CODEX.md](docs/CODEX.md)). Desteklenen her CLI'da nasıl çalıştırılacağı, headless komutu olan CLI'lar için bu komutlar ve CLI'ya özel kurulum notları [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) içindedir.
 
 ### Günlük komutlar
 
@@ -298,7 +298,7 @@ Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `m
 | --- | --- |
 | *bir URL veya iş tanımı yapıştır* | Tam pipeline: ilanın hâlâ yayında olup olmadığının denetimi (yalnızca URL'ler), A-G değerlendirmesi artı yüksek puanda H, rapor, uyarlanmış CV (varsayılan olarak PDF), tracker satırı |
 | `scan` | Portallarını yeni ilanlar için tarar ve bunları gelen kutusuna ekler (`data/pipeline.md`) |
-| `pipeline` | Gelen kutusunda bekleyen her URL'yi değerlendirir |
+| `pipeline` | Gelen kutusunda bekleyen URL'leri işler (standard ve premium katmanları açıkça uymayanları atlayabilir) |
 | `apply` | Bir başvuru formunu seninle birlikte alan alan doldurur. Gönder'den önce durur |
 | `tracker` | Her başvurunun durumu |
 | `followup` | Hangi başvurular takip bekliyor, taslaklarıyla birlikte |
@@ -313,10 +313,10 @@ Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `m
 | Komut | Ne yapar |
 | --- | --- |
 | [`scan`](modes/scan.md) | Portalları tarar ve yeni ilanları keşfeder |
-| [`discover`](modes/discover.md) | Bir şirket adı listesini taranabilir ATS panolarına çevirir ve `portals.yml` dosyasına ekler (token harcamaz) |
+| [`discover`](modes/discover.md) | Bir şirket adı listesini taranabilir ATS panolarına çevirir. Varsayılan olarak yalnızca önizleme gösterir; `portals.yml` dosyasına ancak `--write` ile ekler (token harcamaz) |
 | [`pipeline`](modes/pipeline.md) | Gelen kutusundaki bekleyen URL'leri işler (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Tam değerlendirmeden önce `modes/_brief.md` temelinde hızlı bir ilk eleme (başvur/başvurma) puanı (dosya yazmaz) |
-| [`batch`](modes/batch.md) | Paralel headless worker'larla çok sayıda ilanı değerlendirir |
+| [`batch`](modes/batch.md) | Headless worker'larla çok sayıda ilanı değerlendirir (Claude ile paralel, diğer CLI'larla tek tek) |
 | [`titles`](modes/titles.md) | Aramayı genişletmek için CV'ne dayanarak yakın iş unvanları önerir |
 
 **Bir pozisyonu değerlendir**
