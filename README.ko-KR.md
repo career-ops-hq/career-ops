@@ -290,7 +290,7 @@ npm i -g @santifer/career-ops
 
 `/career-ops`만 입력하면 명령어 메뉴가 표시됩니다 (이를 사용하는 CLI에서). 일상 언어는 지원하는 모든 CLI에서 동작합니다. Claude Code 플러그인으로 사용할 때 명령어는 `/career-ops:career-ops`입니다.
 
-모든 CLI가 하나의 라우터 `.agents/skills/career-ops/SKILL.md`와 같은 `modes/*.md` 파일을 공유하므로, 어떤 CLI에서 실행해도 모드는 똑같이 동작합니다. Codex에서는 슬래시 명령이 보장되지 않습니다. 일상 언어로 요청하거나 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`로 프롬프트 하나를 헤드리스로 실행하세요([docs/CODEX.md](docs/CODEX.md)). 지원하는 각 CLI에서 실행하는 방법, 헤드리스 명령이 있는 CLI의 해당 명령, CLI별 설정 참고 사항은 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)에 있습니다.
+모든 CLI가 하나의 라우터 `.agents/skills/career-ops/SKILL.md`와 같은 `modes/*.md` 파일을 공유하므로, 어떤 CLI든 요청을 같은 방식으로 라우팅합니다(브라우저를 많이 쓰는 모드는 Playwright 도구도 필요합니다). Codex에서는 슬래시 명령이 보장되지 않습니다. 일상 언어로 요청하거나 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`로 프롬프트 하나를 헤드리스로 실행하세요([docs/CODEX.md](docs/CODEX.md)). 지원하는 각 CLI에서 실행하는 방법, 헤드리스 명령이 있는 CLI의 해당 명령, CLI별 설정 참고 사항은 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)에 있습니다.
 
 ### 자주 쓰는 명령어
 
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *URL 또는 채용 공고 붙여넣기* | 전체 파이프라인: 공고 게시 여부 확인(URL만), A-G 평가 + 높은 점수에서 H, 리포트, 맞춤 이력서(기본은 PDF), 트래커 행 |
 | `scan` | 포털을 스캔해 새 공고를 찾고 인박스(`data/pipeline.md`)에 추가 |
-| `pipeline` | 인박스에서 대기 중인 URL을 차례로 처리하며 명백히 맞지 않는 것은 건너뜀 |
+| `pipeline` | 인박스에서 대기 중인 URL을 차례로 처리 (standard와 premium 등급은 명백히 맞지 않는 것을 건너뛸 수 있음) |
 | `apply` | 지원서 양식을 사용자와 함께 항목별로 작성. 제출 직전에 멈춤 |
 | `tracker` | 각 지원의 현재 상태 |
 | `followup` | 팔로업이 필요한 지원과 초안 |
