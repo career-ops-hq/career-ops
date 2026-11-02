@@ -26,3 +26,9 @@ test('a single month still reads as before', () => {
   assert.deepEqual(parseExperienceStart('Jan 2020 - Jun 2021'), { year: 2020, month: 1 });
   assert.deepEqual(parseExperienceStart('2019 - 2021'), { year: 2019, month: null });
 });
+
+test('a comma before the year does not hide the month', () => {
+  for (const period of ['Jun - Aug, 2022', 'June to August, 2022', 'June, 2022', 'Jun., 2022 - Present']) {
+    assert.deepEqual(parseExperienceStart(period), { year: 2022, month: 6 }, period);
+  }
+});
