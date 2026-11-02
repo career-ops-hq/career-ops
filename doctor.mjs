@@ -665,47 +665,72 @@ function isOmpProjectMcpEnabled(root) {
   return true;
 }
 
+// OMP gates user-level Claude Code MCP discovery behind enabledProviders ('claude'),
+// but setting CLAUDE_CONFIG_DIR implicitly enables it unless disabledProviders lists it.
+function isOmpClaudeUserProviderEnabled(root) {
+  const configs = [
+    ...(root ? [
+      join(root, '.omp', 'config.yml'),
+      join(root, '.omp', 'config.yaml'),
+      join(root, '.omp', 'settings.json'),
+    ] : []),
+    ...ompUserConfigFiles(),
+  ].map(readOmpConfigIfPresent).filter(Boolean);
+
+  for (const cfg of configs) {
+    const disabled = Array.isArray(cfg.disabledProviders)
+      ? cfg.disabledProviders.map((p) => String(p).toLowerCase())
+      : [];
+    if (disabled.includes('claude')) return false;
+    const enabled = Array.isArray(cfg.enabledProviders)
+      ? cfg.enabledProviders.map((p) => String(p).toLowerCase())
+      : [];
+    if (enabled.includes('claude')) return true;
+  }
+
+  return Boolean(process.env.CLAUDE_CONFIG_DIR);
+}
+
 // OMP merges MCP definitions across user agent directory and project files.
 // Project definitions override/shadow user definitions with the same name.
 // User-level disabledServers acts as an explicit denylist across all sources (docs/mcp-config.md).
 // User-level enabledServers force-enables a server definition unless disabledServers also lists it.
 function getOmpEffectivePlaywright(root) {
   const projectEnabled = isOmpProjectMcpEnabled(root);
+  const claudeUserEnabled = isOmpClaudeUserProviderEnabled(root);
 
-  // Read Claude user config if present (~/.claude.json)
-  const claudeDir = process.env.CLAUDE_CONFIG_DIR || homedir();
-  const claudeJson = readConfigIfPresent(join(claudeDir, '.claude.json'));
-  let claudeProjectCfg = null;
-  if (projectEnabled && root && claudeJson?.projects && typeof claudeJson.projects === 'object') {
-    const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-    const target = norm(root);
-    for (const [key, proj] of Object.entries(claudeJson.projects)) {
-      if (norm(key) === target && proj && typeof proj === 'object') {
-        claudeProjectCfg = proj;
-        break;
-      }
-    }
-  }
+  const claudeHome = process.env.CLAUDE_CONFIG_DIR ? process.env.CLAUDE_CONFIG_DIR : homedir();
 
   const sources = [
-    // Imported Claude user config (.claude.json user scope)
-    ...(claudeJson ? [{ cfg: claudeJson, source: 'the Claude user .claude.json' }] : []),
-    // Imported Claude project configs (.claude.json local project scope, .claude/mcp.json)
-    ...(projectEnabled && claudeProjectCfg ? [{ cfg: claudeProjectCfg, source: 'the Claude project .claude.json' }] : []),
-    ...(projectEnabled && root ? [{ file: join(root, '.claude', 'mcp.json'), source: '.claude/mcp.json' }] : []),
-    // Root fallback files (ascending precedence: .mcp.json, then mcp.json)
-    ...(projectEnabled ? [
-      { file: root ? join(root, '.mcp.json') : '.mcp.json', source: '.mcp.json' },
-      { file: root ? join(root, 'mcp.json') : 'mcp.json', source: 'mcp.json' },
+    // 1. Imported Claude user configs (gated on effective Claude user provider)
+    ...(claudeUserEnabled ? [
+      { file: join(claudeConfigDir(), 'mcp.json'), source: 'the Claude user mcp.json' },
+      { file: join(claudeHome, '.claude.json'), source: 'the Claude user .claude.json' },
     ] : []),
-    // User files (ascending precedence: .mcp.json, then mcp.json)
+    // 2. Project root fallback files (ascending precedence: .mcp.json, then mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.mcp.json'), source: '.mcp.json' },
+      { file: join(root, 'mcp.json'), source: 'mcp.json' },
+    ] : (projectEnabled ? [
+      { file: '.mcp.json', source: '.mcp.json' },
+      { file: 'mcp.json', source: 'mcp.json' },
+    ] : [])),
+    // 3. Imported Claude project configs (.claude/.mcp.json, then .claude/mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.claude', '.mcp.json'), source: '.claude/.mcp.json' },
+      { file: join(root, '.claude', 'mcp.json'), source: '.claude/mcp.json' },
+    ] : []),
+    // 4. Native OMP user files (ascending precedence: .mcp.json, then mcp.json)
     { file: join(ompAgentDir(), '.mcp.json'), source: 'the OMP user mcp.json' },
     { file: join(ompAgentDir(), 'mcp.json'), source: 'the OMP user mcp.json', userOverrides: true },
-    // OMP project files (ascending precedence: .omp/.mcp.json, then .omp/mcp.json)
-    ...(projectEnabled ? [
-      { file: root ? join(root, '.omp', '.mcp.json') : join('.omp', '.mcp.json'), source: '.omp/.mcp.json' },
-      { file: root ? join(root, '.omp', 'mcp.json') : join('.omp', 'mcp.json'), source: '.omp/mcp.json' },
-    ] : []),
+    // 5. Native OMP project files (ascending precedence: .omp/.mcp.json, then .omp/mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.omp', '.mcp.json'), source: '.omp/.mcp.json' },
+      { file: join(root, '.omp', 'mcp.json'), source: '.omp/mcp.json' },
+    ] : (projectEnabled ? [
+      { file: join('.omp', '.mcp.json'), source: '.omp/.mcp.json' },
+      { file: join('.omp', 'mcp.json'), source: '.omp/mcp.json' },
+    ] : [])),
   ];
 
   const disabledServers = new Set();

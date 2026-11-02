@@ -66,6 +66,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     PI_CODING_AGENT_DIR: isolatedAgentDir,
     OMP_PROFILE: '',
     PI_PROFILE: '',
+    CLAUDE_CONFIG_DIR: join(isolatedHome, '.claude'),
   };
 
   try {
@@ -499,6 +500,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     // 4s. OMP discovers Playwright MCP from Claude project config (.claude/mcp.json)
     rmSync(join(dir, '.omp', 'mcp.json'), { force: true });
     rmSync(join(dir, '.omp', 'settings.json'), { force: true });
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
     mkdirSync(join(dir, '.claude'), { recursive: true });
     writeFileSync(join(dir, '.claude', 'mcp.json'), JSON.stringify({
       mcpServers: {
@@ -518,6 +520,32 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
       pass('doctor discovers Playwright MCP for OMP from imported Claude project config');
     } else {
       fail(`doctor failed to discover Playwright MCP from Claude config: ${JSON.stringify(resClaudeImported)}`);
+    }
+
+    // 4t. Claude project config overrides root fallback mcp.json
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { enabled: false, command: 'mcp-server-playwright' },
+      },
+    }));
+    writeFileSync(join(dir, '.claude', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+
+    const resClaudeOverridesRootFallback = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resClaudeOverridesRootFallback.playwright_mcp?.omp === true
+        && !resClaudeOverridesRootFallback.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor prioritizes Claude project MCP over root fallback mcp.json');
+    } else {
+      fail(`doctor failed when Claude project config overrides root fallback: ${JSON.stringify(resClaudeOverridesRootFallback)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
