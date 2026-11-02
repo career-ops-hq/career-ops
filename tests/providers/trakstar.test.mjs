@@ -271,6 +271,21 @@ if (guardErr && /cannot derive the client name/.test(guardErr.message) && guardC
 }
 
 {
+  let calls = 0;
+  const { result: jobs, errors } = await captureConsoleErrors(() => trakstar.fetch({ name: 'Acme', careers_url: BOARD }, {
+    maxPages: 1,
+    sleep: async () => {},
+    fetchJson: async () => {
+      calls++;
+      return page(many(1, 100), 100);
+    },
+  }));
+  if (calls === 1 && jobs.length === 100 && errors.length === 0 && !jobs.trakstarTruncated) {
+    pass('trakstar.fetch() stays quiet when a probe page matches the reported total');
+  } else fail(`trakstar.fetch() probe at total: ${calls} calls, ${jobs.length} jobs, truncated=${jobs.trakstarTruncated}, ${JSON.stringify(errors)}`);
+}
+
+{
   class FakeSentinel extends Error {}
   let caught = null;
   try {

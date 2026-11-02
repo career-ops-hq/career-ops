@@ -220,13 +220,15 @@ export default {
     if (stopReason === 'cap') {
       console.error(`⚠️  trakstar: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs). Raise max_pages on this entry for more`);
     }
-    if (stopReason === 'counted' || stopReason === 'repeated') {
+    // A probe only checks that the board answers. A full page that matches the
+    // reported total is still a counted stop on a scan, and stays quiet here.
+    if (!probing && (stopReason === 'counted' || stopReason === 'repeated')) {
       const why = stopReason === 'counted'
         ? 'the reported total was reached on a full page'
         : 'the same page came back twice';
       console.error(`⚠️  trakstar: ${entry.name} may be incomplete (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs): ${why}`);
     }
-    if (stopReason !== 'complete') /** @type {any} */ (jobs).trakstarTruncated = true;
+    if (!probing && stopReason !== 'complete') /** @type {any} */ (jobs).trakstarTruncated = true;
     return jobs;
   },
 };
