@@ -25,7 +25,7 @@ const BROKEN = [
 ].join('\n');
 
 test('a bad known value names the file, the key, and an example', () => {
-  const { findings } = validateProfile(BROKEN, EXAMPLE);
+  const { findings } = validateProfile(BROKEN, EXAMPLE, 'config/profile.yml');
   const errors = findings.filter((f) => f.level === 'error');
   assert.equal(errors.length, 3, JSON.stringify(findings));
   const spend = errors.find((f) => f.key === 'spend_tier');
@@ -43,10 +43,30 @@ test('a bad known value names the file, the key, and an example', () => {
 });
 
 test('case variants and omitted keys stay valid', () => {
-  const mixed = validateProfile('spend_tier: Standard\nlanguage:\n  output: EN\ncv:\n  output_format: HTML\n', EXAMPLE);
+  const mixed = validateProfile('spend_tier: Standard\nlanguage:\n  output: EN\ncv:\n  output_format: HTML\n', EXAMPLE, 'config/profile.yml');
   assert.deepEqual(mixed.findings, []);
-  const empty = validateProfile('candidate:\n  full_name: A\n', EXAMPLE);
+  const empty = validateProfile('candidate:\n  full_name: A\n', EXAMPLE, 'config/profile.yml');
   assert.deepEqual(empty.findings, []);
+});
+
+const errorKeys = (text) => validateProfile(text, EXAMPLE, 'config/profile.yml')
+  .findings.filter((f) => f.level === 'error').map((f) => f.key);
+
+test('language.output allows 64 characters and one line only', () => {
+  assert.deepEqual(errorKeys(`language:\n  output: ${'a'.repeat(64)}\n`), []);
+  assert.deepEqual(errorKeys(`language:\n  output: ${'a'.repeat(65)}\n`), ['language.output']);
+  assert.deepEqual(errorKeys('language:\n  output: "en\\nfr"\n'), ['language.output']);
+});
+
+test('language and cv must be mappings', () => {
+  assert.deepEqual(errorKeys('language: en\n'), ['language']);
+  assert.deepEqual(errorKeys('cv:\n  - html\n'), ['cv']);
+});
+
+test('a present but blank value is an error', () => {
+  assert.deepEqual(errorKeys('spend_tier: ""\n'), ['spend_tier']);
+  assert.deepEqual(errorKeys('language:\n  output: "  "\n'), ['language.output']);
+  assert.deepEqual(errorKeys('cv:\n  output_format: ""\n'), ['cv.output_format']);
 });
 
 test('the cli exits 2 for a bad spend tier', () => {
