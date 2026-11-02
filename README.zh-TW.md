@@ -251,8 +251,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# 貼上職缺連結或職缺描述文字，即可觸發 auto-pipeline。
+# 其他所有模式，以及如何在你的 CLI 中呼叫它們：見下方「使用方式」。
 ```
 
 </details>
@@ -300,7 +300,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *貼上連結或職缺描述* | 完整流程：職缺是否仍在徵才的檢查（僅限連結）、A-G 評估（高分時另加 H）、報告、客製化履歷（預設 PDF）、追蹤表新增一列 |
 | `scan` | 掃描你的求職平台以發現新職缺，並加入收件匣（`data/pipeline.md`） |
-| `pipeline` | 評估收件匣中等待處理的每個連結 |
+| `pipeline` | 處理收件匣中等待的連結，略過明顯不合的 |
 | `apply` | 與你一起逐欄填寫申請表。送出前會停下 |
 | `tracker` | 每份申請目前的進度 |
 | `followup` | 哪些申請該跟進了，並附草稿 |
@@ -315,10 +315,10 @@ npm i -g @santifer/career-ops
 | 命令 | 作用 |
 | --- | --- |
 | [`scan`](modes/scan.md) | 掃描求職平台並發現新職缺 |
-| [`discover`](modes/discover.md) | 把公司名稱清單解析為可掃描的 ATS 招募頁，並附加到 `portals.yml`（零 token） |
+| [`discover`](modes/discover.md) | 把公司名稱清單解析為可掃描的 ATS 招募頁。預設只預覽，僅在加上 `--write` 時才附加到 `portals.yml`（零 token） |
 | [`pipeline`](modes/pipeline.md) | 處理收件匣（`data/pipeline.md`）裡待處理的連結 |
 | [`triage`](modes/triage.md) | 在完整評估之前，依據 `modes/_brief.md` 快速做一輪是否值得投的初篩（不寫入任何檔案） |
-| [`batch`](modes/batch.md) | 用並行的無頭 worker 評估大量職缺 |
+| [`batch`](modes/batch.md) | 用無頭 worker 評估大量職缺（Claude 下並行，其他 CLI 下逐一處理） |
 | [`titles`](modes/titles.md) | 根據你的履歷推薦相近的職稱，以擴大搜尋範圍 |
 
 **評估職缺**
