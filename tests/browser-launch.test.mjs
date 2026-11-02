@@ -10,7 +10,7 @@
 // the launch options come back unchanged, so the bundled Chromium is launched
 // exactly as before and no existing user sees a behavior change.
 import { pass, fail } from './helpers.mjs';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -21,15 +21,38 @@ import {
 
 console.log('\nlib/browser-launch.mjs — browser executable resolution');
 
-// A re-export does not create a local ESM binding. generate-pdf.mjs calls this
-// name inside renderHtmlToPdf(), so it must import it locally before exporting
-// it as part of the module's existing public API.
+// generate-pdf keeps its existing launchChromium export, but its executable
+// choice must come from the shared resolver rather than a second env-only path.
 const generatePdfSource = readFileSync(new URL('../generate-pdf.mjs', import.meta.url), 'utf8');
-if (/import\s*\{[^}]*\blaunchChromium\b[^}]*\}\s*from\s*['"]\.\/lib\/browser-launch\.mjs['"]/.test(generatePdfSource)
-    && /export\s*\{[^}]*\blaunchChromium\b[^}]*\}/.test(generatePdfSource)) {
-  pass('generate-pdf imports launchChromium locally before re-exporting it');
+if (/import\s*\{[^}]*\bbrowserLaunchOptions\b[^}]*\}\s*from\s*['"]\.\/lib\/browser-launch\.mjs['"]/.test(generatePdfSource)
+    && /export\s+async\s+function\s+launchChromium\b/.test(generatePdfSource)
+    && /chromium\.launch\(browserLaunchOptions\(options\)\)/.test(generatePdfSource)) {
+  pass('generate-pdf keeps launchChromium local and delegates its options to the shared resolver');
 } else {
-  fail('generate-pdf re-exports launchChromium without creating the local binding its renderer calls');
+  fail('generate-pdf launchChromium is not backed by the shared browser resolver');
+}
+
+// Several suites run a copied generate-pdf.mjs in an isolated directory. A
+// new static import must travel with every one of those fixtures; otherwise the
+// whole cross-platform CI matrix fails at module load time. Discover the
+// fixtures from their copy operations so a newly added sandbox joins this
+// contract automatically instead of relying on another hand-maintained list.
+const fixtureWithoutBrowserHelper = [];
+for (const entry of readdirSync(new URL('.', import.meta.url), { withFileTypes: true })) {
+  if (!entry.isFile() || !entry.name.endsWith('.mjs')) continue;
+  const source = readFileSync(new URL(entry.name, import.meta.url), 'utf8');
+  const copiesGeneratePdfDirectly = /copyFileSync\s*\(\s*join\(ROOT,\s*['"]generate-pdf\.mjs['"]/.test(source);
+  const copiesGeneratePdfFromLiteralList = /for\s*\(\s*const\s+(?:f|file)\s+of\s+\[[\s\S]{0,1200}['"]generate-pdf\.mjs['"][\s\S]{0,1200}\]\s*\)\s*\{?[\s\S]{0,200}copyFileSync\(join\(ROOT,\s*(?:f|file)\)/.test(source);
+  const copiesGeneratePdfFromClosure = /['"]generate-pdf\.mjs['"]\s*:\s*\[[\s\S]{0,3000}copyFileSync\(join\(ROOT,\s*file\)/.test(source);
+  if ((copiesGeneratePdfDirectly || copiesGeneratePdfFromLiteralList || copiesGeneratePdfFromClosure)
+      && !source.includes('browser-launch.mjs')) {
+    fixtureWithoutBrowserHelper.push(entry.name);
+  }
+}
+if (fixtureWithoutBrowserHelper.length === 0) {
+  pass('every isolated generate-pdf fixture carries lib/browser-launch.mjs');
+} else {
+  fail(`isolated generate-pdf fixtures missing lib/browser-launch.mjs: ${fixtureWithoutBrowserHelper.join(', ')}`);
 }
 
 const EXE = 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH';
@@ -92,7 +115,7 @@ try {
 
   // The data-root .env supplies it when the shell does not — the reason this
   // resolver exists rather than a bare process.env read. Inline comments are
-  // stripped with the same dotenv parser the repository's other readers use.
+  // stripped by Node's built-in .env parser.
   setEnv({ root: envRoot });
   const fromFile = resolveBrowserExecutable();
   if (fromFile?.path === '/opt/fromdotenv/browser' && fromFile.source === 'env') {

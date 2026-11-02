@@ -60,7 +60,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, pageFormatForCountry, resolvePageFormat } from './lib/page-format.mjs';
-import { launchChromium } from './lib/browser-launch.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
@@ -2255,12 +2255,12 @@ export async function inlineLocalFonts(html) {
   return html.replace(FONT_REF, (match, _quote, name) => dataUrls.get(name) || match);
 }
 
-// The PDF path's launch entry point, kept exported here, now backed by
-// lib/browser-launch.mjs. That module resolves the same
-// PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH override and additionally reads the
-// data-root .env and can auto-detect an installed browser, so every launch
-// site in the repo resolves the browser identically.
-export { launchChromium };
+// Keep the PDF module's existing launch API while delegating the executable
+// choice to the same resolver every other browser-backed feature uses.
+export async function launchChromium(options = {}) {
+  const { chromium } = await import('playwright');
+  return chromium.launch(browserLaunchOptions(options));
+}
 
 /**
  * Render an HTML string to a PDF file via headless Chromium.
