@@ -3,7 +3,7 @@
 // browser, which the CI test job does not install.
 import { writeFileSync } from 'node:fs';
 
-export { normalizeTextForATS } from '../../generate-pdf.mjs';
+export { normalizeTextForATS, reportAtsReplacements } from '../../generate-pdf.mjs';
 
 export async function renderHtmlToPdf(html) {
   writeFileSync(process.env.COVER_HTML_CAPTURE, html);

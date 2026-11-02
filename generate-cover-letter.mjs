@@ -506,11 +506,12 @@ Usage:
     }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.
-    const { normalizeTextForATS, renderHtmlToPdf } = await import("./generate-pdf.mjs");
+    const { normalizeTextForATS, reportAtsReplacements, renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
     // The pass a CV gets before it prints. Without it a letter kept its em
     // dashes and curly quotes, and printed a draft's **bold** with the asterisks.
-    const printed = normalizeTextForATS(html).html;
+    const { html: printed, replacements } = normalizeTextForATS(html);
+    reportAtsReplacements(replacements, console.error);
     // As for a CV, the gate also reads the document that prints: the pass can
     // spell out a phrase the draft hid, as `self–starter` prints as
     // `self-starter`. A forbidden one stops here. An advisory one is reported,
