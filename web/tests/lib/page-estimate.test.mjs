@@ -344,6 +344,27 @@ test("a display:none page does not stretch the visible page", () => {
   assert.equal(previewPageCount(contentHeightPx(doc)), 1);
 });
 
+test("a hidden page is not added again below the visible content", () => {
+  const view = { getComputedStyle: (el) => ({ visibility: el.visibility || "visible" }) };
+  const box = (top, height, visibility) => ({
+    visibility,
+    ownerDocument: { defaultView: view },
+    getBoundingClientRect: () => ({ top, height, width: 800 }),
+    scrollHeight: height,
+  });
+  const page = box(0, 900, "hidden");
+  const footer = box(900, 100, "visible");
+  const doc = {
+    body: {
+      children: [page, footer],
+      scrollHeight: 1000,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(doc), 1000);
+});
+
 test("an unmeasured preview estimates one page", () => {
   assert.equal(contentHeightPx(null), 0);
   assert.equal(previewPageCount(0), 1);

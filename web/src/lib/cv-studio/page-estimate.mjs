@@ -125,7 +125,10 @@ export function contentHeightPx(doc) {
     const height = extent + extra + above;
     return height > 0 ? height : 0;
   }
-  const page = pages[0] || (typeof body.querySelector === "function" ? body.querySelector(".page") : null);
+  // pageBoxes already dropped hidden pages. querySelector would pick one
+  // back up and add its height on top of the content below it.
+  const found = pages[0] || (typeof body.querySelector === "function" ? body.querySelector(".page") : null);
+  const page = hasBox(found) ? found : null;
   if (!page) {
     const childBottom = heightAfterPages(body, []);
     const height = childBottom > 0 ? childBottom : body.scrollHeight || body.offsetHeight || 0;
