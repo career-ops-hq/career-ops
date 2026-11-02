@@ -1018,6 +1018,9 @@ ${sections.join('\n')}</div>
     // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at
     // module scope, so the copy needs it for the same reason.
     copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+    // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+    copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+    copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
@@ -1162,6 +1165,9 @@ export const chromium = {
     // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at
     // module scope, so the copy needs it for the same reason.
     copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+    // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+    copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+    copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from

@@ -860,6 +860,8 @@ const scripts = [
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
+  { name: 'linkedin-join.mjs --self-test', expectExit: 0 },
+  { name: 'validate-profile.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
@@ -1026,6 +1028,14 @@ try {
       fail(`${name} declares an unusable timeoutMs (${String(timeoutMs)}) — must be a positive integer number of milliseconds`);
       continue;
     }
+    // Same rule for the declared exit status. Every entry wrote `expectExit`
+    // and nothing read it: a pass meant exit 0 whatever the entry said, so
+    // cv-sync-check.mjs's `expectExit: 1` was a claim no check stood behind.
+    const expectExit = Object.hasOwn(script, 'expectExit') ? script.expectExit : 0;
+    if (!Number.isInteger(expectExit) || expectExit < 0) {
+      fail(`${name} declares an unusable expectExit (${String(expectExit)}) — must be a non-negative integer exit status`);
+      continue;
+    }
     const budgetMs = declared ? timeoutMs : DEFAULT_SCRIPT_TIMEOUT_MS;
     const startedAt = Date.now();
     // Spread rather than defaulted: `{ timeout: undefined }` reads to
@@ -1053,11 +1063,17 @@ try {
       warn(`${name} used ${(elapsedMs / 1000).toFixed(1)}s of its ${(budgetMs / 1000).toFixed(0)}s budget `
         + `(${Math.round((elapsedMs / budgetMs) * 100)}%) — it is passing, but it is close to being killed for time`);
     }
-    if (result !== null) {
-      pass(`${name} runs OK`);
-    } else if (allowFail && !crashedBeforeRunning(lastRunFailure())) {
-      warn(`${name} exited with error (expected without user data)`);
-    } else if (allowFail) {
+    // A signal kill (a timeout) has no exit status, so it can never match.
+    const failure = result === null ? lastRunFailure() : null;
+    const status = result !== null ? 0 : (failure?.status ?? null);
+    const crashed = result === null && crashedBeforeRunning(failure);
+    if (status === expectExit && !crashed) {
+      pass(expectExit === 0 ? `${name} runs OK` : `${name} exits ${expectExit} as declared`);
+    } else if (allowFail && status !== null && !crashed) {
+      // Allowed, not confirmed: the exit depends on user data a developer's
+      // copy may carry, so say what happened rather than why it might have.
+      warn(`${name} exited ${status}, not the declared ${expectExit} (allowFail: its exit depends on user data)`);
+    } else if (allowFail && crashed) {
       // allowFail says "a non-zero exit is expected here", never "any outcome
       // is fine". A script that dies with an uncaught exception did not run at
       // all, and reporting that as the expected failure is how #3440 sat in
@@ -1069,7 +1085,7 @@ try {
       // Include the child's exit status and streams. Without them a CI-only
       // failure arrives as a bare `<name> crashed`: no stack, no assertion
       // text, no exit code, and nothing a reader can act on.
-      fail(`${name} crashed${formatRunFailure()}`);
+      fail(`${name} ${crashed || status === null ? 'crashed' : `exited ${status}, not the declared ${expectExit}`}${formatRunFailure()}`);
     }
   }
 
@@ -2369,6 +2385,9 @@ for (const f of skillEntrypoints) {
   try {
     copyFileSync(join(ROOT, 'validate-system-paths-coverage.mjs'), join(probeDir, 'validate-system-paths-coverage.mjs'));
     copyFileSync(join(ROOT, 'update-system.mjs'), join(probeDir, 'update-system.mjs'));
+    // The manifest too, so the only thing the guard lacks is a git tree.
+    mkdirSync(join(probeDir, 'lib'));
+    copyFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), join(probeDir, 'lib', 'update-manifest.mjs'));
     const probe = spawnSync(process.execPath, [join(probeDir, 'validate-system-paths-coverage.mjs')], {
       cwd: probeDir,
       encoding: 'utf-8',
@@ -2589,6 +2608,8 @@ const allowedFiles = [
 // the ones this PR actually intends to allow, so they get the tighter
 // check instead of loosening the shared one.
 const exactAllowedFiles = new Set([
+  // Exempt only the root Indonesian README, not similarly named files.
+  'README.id.md',
   // GitHub Sponsors funding target + Codex plugin manifest (#4131) — same
   // maintainer-credit shape as the .claude-plugin/.github/plugin ones above.
   'funding.json', '.codex-plugin/plugin.json',
@@ -2668,18 +2689,26 @@ console.log('\n7. Absolute path check');
 
 // Same git grep approach: only scans tracked files. Untracked AI tool
 // outputs, local debate artifacts, etc. can't false-positive here.
+// stderr is piped (captured, not printed) so a failure below can report it.
 const absPathRaw = run(
   'git',
   ['grep', '-n', '/Users/', '--', '*.mjs', '*.sh', '*.md', '*.go', '*.yml'],
-  { stdio: ['pipe', 'pipe', 'ignore'] }
+  { stdio: ['pipe', 'pipe', 'pipe'] }
 );
+// run() returns null for every failure, but only exit 1 means "no matches".
+// Any other failure (git missing, not a repository, the timeout) means the
+// scan never ran, and reading that null as "no absolute paths" would pass
+// this check without checking anything.
+const absPathScanFailed = absPathRaw === null && lastRunFailure()?.status !== 1;
 // The old shell pipeline's `grep -v` exclusions, now as a JS filter.
 const ABS_PATH_EXCLUDE = ['README.md', 'LICENSE', 'CLAUDE.md', 'test-all.mjs'];
 const absPathLines = (absPathRaw || '')
   .split('\n')
   .filter(Boolean)
   .filter(line => !ABS_PATH_EXCLUDE.some(x => line.includes(x)));
-if (absPathLines.length === 0) {
+if (absPathScanFailed) {
+  fail(`Absolute path check could not run: git grep failed${formatRunFailure()}`);
+} else if (absPathLines.length === 0) {
   pass('No absolute paths in code files');
 } else {
   for (const line of absPathLines) {
@@ -2863,7 +2892,7 @@ try {
   if (
     generatePdfScript.includes('preferCSSPageSize: true') &&
     generatePdfScript.includes("right: '0'") &&
-    generatePdfScript.includes('injectPrintPageCss(html, format)') &&
+    generatePdfScript.includes('injectPrintPageCss(html, format, opts.country)') &&
     !/page\.pdf\(\{\s*format:/s.test(generatePdfScript)
   ) {
     pass('PDF renderer uses CSS @page margins instead of Playwright margins');
@@ -2939,17 +2968,18 @@ console.log('\n7c. Updater dashboard rebuild');
 const updateSystemScript = readFile('update-system.mjs');
 if (
   /git\('diff',\s*'--name-only',\s*'HEAD',\s*'--',\s*'dashboard'\)/.test(updateSystemScript) &&
-  /path\.startsWith\(['"]dashboard\/['"]\)\s*&&\s*path\.endsWith\(['"]\.go['"]\)/.test(updateSystemScript) &&
-  /go build -o career-dashboard \./.test(updateSystemScript) &&
+  /return dashboardBuildInputsChanged\(changed\.split\('\\n'\)\)/.test(updateSystemScript) &&
+  /execFileSync\('go',\s*\['build',\s*'-o',\s*binary,\s*'\.'\]/.test(updateSystemScript) &&
+  /const binary = dashboardBinaryName\(\);/.test(updateSystemScript) &&
   /cwd:\s*join\(ROOT,\s*['"]dashboard['"]\)/.test(updateSystemScript) &&
   /dashboard binary rebuild skipped/.test(updateSystemScript)
 ) {
-  pass('update-system rebuilds dashboard binary when dashboard Go sources change');
+  pass('update-system rebuilds dashboard binary when dashboard Go sources or go.mod/go.sum change');
 } else {
-  fail('update-system does not rebuild dashboard binary after dashboard Go source updates');
+  fail('update-system does not rebuild dashboard binary after dashboard Go source or dependency updates');
 }
 
-if (updateSystemScript.includes("'CODEX.md'")) {
+if (readFile('lib/update-manifest.mjs').includes("'CODEX.md'")) {
   pass('update-system preserves CODEX.md as a system-layer wrapper');
 } else {
   fail('update-system does not preserve CODEX.md');
@@ -4638,13 +4668,13 @@ for (const mode of ['discover', 'text']) {
 
 const dataContractDoc = readFile('DATA_CONTRACT.md');
 const gitignoreDoc = readFile('.gitignore');
-const updaterSrc = readFile('update-system.mjs');
+const updateManifestSrc = readFile('lib/update-manifest.mjs');
 if (
   dataContractDoc.includes('data/offers/') &&
   dataContractDoc.includes('modes/offer-prep.md') &&
   gitignoreDoc.includes('data/offers/*') &&
   gitignoreDoc.includes('!data/offers/.gitkeep') &&
-  updaterSrc.includes("'modes/offer-prep.md'")
+  updateManifestSrc.includes("'modes/offer-prep.md'")
 ) {
   pass('offer-prep registered in data contract, gitignore, and updater manifest');
 } else {
@@ -5992,7 +6022,6 @@ try {
   const nodeTrackerWriters = [
     ['dedup-tracker.mjs', 1],
     ['normalize-statuses.mjs', 1],
-    ['reply-watch.mjs', 1],
     ['tracker.mjs', 2],
   ];
   const unsafeWriters = nodeTrackerWriters.filter(([name, minTransactions]) => {
@@ -9760,6 +9789,10 @@ try {
       // via lib/local-today.mjs (#3070), so the fixture carries that too.
       mkdirSync(join(e2eTmp, 'lib'), { recursive: true });
       copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(e2eTmp, 'lib', 'local-today.mjs'));
+      // ...and pipeline-lock.mjs runs the shared lock protocol from
+      // lib/dir-lock.mjs (#5358), so the fixture carries that too.
+      copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(e2eTmp, 'lib', 'dir-lock.mjs'));
+      copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(e2eTmp, 'lib', 'yaml-document.mjs'));
       // ...and followup-cadence now delegates flag validation to the shared
       // lib/cli-flags.mjs helper, so the fixture carries that too.
       copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
@@ -9767,6 +9800,11 @@ try {
       // which is what lets the copy answer "am I main?" correctly from a
       // symlinked tmpdir in the first place.
       copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(e2eTmp, 'lib', 'is-main-module.mjs'));
+      // ...and it reads the apply date from status-log.tsv with funnel-velocity.mjs's
+      // ledger parser, so the fixture carries that module and its imports too.
+      for (const rel of ['funnel-velocity.mjs', 'stats.mjs', 'funnel-stages.mjs', 'lib/scan-history-columns.mjs', 'lib/tsv-formula-escape.mjs']) {
+        copyFileSync(join(ROOT, rel), join(e2eTmp, rel));
+      }
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
       // The sandbox resolves js-yaml (and the rest of followup-cadence's
@@ -14428,8 +14466,8 @@ try {
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
   const out = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
   const argv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
-  if (argv.includes('--model') && argv.includes('claude-haiku-4-5') && out.includes('spend_tier=economy')) {
-    pass('economy spend_tier resolves to claude-haiku-4-5');
+  if (argv.includes('--model') && argv.includes('claude-haiku-5-5') && out.includes('spend_tier=economy')) {
+    pass('economy spend_tier resolves to claude-haiku-5-5');
   } else {
     fail(`economy spend_tier did not route to haiku: argv=${JSON.stringify(argv)}, out=${JSON.stringify(out.slice(-240))}`);
   }
@@ -15338,7 +15376,7 @@ try {
   }
 
   // The template MUST be in SYSTEM_PATHS so updates deliver/refresh it.
-  const sysBlock = (updater.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  const sysBlock = (readFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), 'utf-8').match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
   if (sysBlock.includes("'modes/_custom.template.md'")) {
     pass('modes/_custom.template.md is in SYSTEM_PATHS (shipped + updatable)');
   } else {
@@ -16361,8 +16399,9 @@ try {
 
   // Updater registration (SYSTEM vs USER split).
   const upd = readFileSync(join(ROOT, 'update-system.mjs'), 'utf8');
-  if (["'plugins/'", "'plugins.mjs'", "'config/plugins.example.yml'"].every(s => upd.includes(s))) pass('plugins/, plugins.mjs, config/plugins.example.yml registered as SYSTEM paths');
-  else fail('plugin SYSTEM paths not fully registered in update-system.mjs');
+  const manifest = readFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), 'utf8');
+  if (["'plugins/'", "'plugins.mjs'", "'config/plugins.example.yml'"].every(s => manifest.includes(s))) pass('plugins/, plugins.mjs, config/plugins.example.yml registered as SYSTEM paths');
+  else fail('plugin SYSTEM paths not fully registered in lib/update-manifest.mjs');
   if (["'config/plugins.yml'", "'plugins.local/'"].every(s => upd.includes(s))) pass('config/plugins.yml + plugins.local/ registered as USER paths (never auto-updated)');
   else fail('plugin USER paths not registered in update-system.mjs');
 
@@ -16411,8 +16450,8 @@ for (const f of ['interview-prep/sessions/.gitkeep', 'interview-prep/sessions/RE
 
 // The scaffold must be in SYSTEM_PATHS (the updater delivers/refreshes it).
 {
-  const updater = readFile('update-system.mjs');
-  const sysBlock = (updater.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  const manifest = readFile('lib/update-manifest.mjs');
+  const sysBlock = (manifest.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
   for (const p of ['interview-prep/sessions/.gitkeep', 'interview-prep/sessions/README.md']) {
     if (sysBlock.includes(`'${p}'`)) {
       pass(`Session scaffold in SYSTEM_PATHS: ${p}`);
@@ -16871,7 +16910,7 @@ try {
     { file: 'web/src/lib/format.ts', re: /CANONICAL_STATES\s*=\s*\[([\s\S]*?)\]/, upper: false, exclude: [] },
     { file: 'web/src/app/actions/registry.ts', re: /CANON_STATUS\s*=\s*\[([\s\S]*?)\]/, upper: false, exclude: [] },
     { file: 'web/src/app/actions/registry.ts', re: /TAB_VALUES\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
-    { file: 'web/src/components/pipeline-view.tsx', re: /TABS\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
+    { file: 'web/src/lib/pipeline-navigation.mjs', re: /PIPELINE_TABS\s*=[^[]*\[([\s\S]*?)\]/, upper: true, exclude: [] },
     // Analytics now derives its funnel from canonStatus in analytics-metrics;
     // it no longer owns a hardcoded status-list copy to keep in sync.
     // The states ACL used to be checked here too. It moved to its own block
@@ -16939,7 +16978,7 @@ try {
     // The assistant preamble also enumerates the states in PROSE (the setStatus
     // list + the filterPipeline tab enum). Those drift the same way — the AI
     // couldn't offer to set/filter by Hired — so check them too (#2249).
-    const assistantPath = join(ROOT, 'web', 'src', 'app', 'api', 'assistant', 'route.ts');
+    const assistantPath = join(ROOT, 'web', 'src', 'lib', 'assistant-preamble.mjs');
     if (existsSync(assistantPath)) {
       const src = readFileSync(assistantPath, 'utf-8');
       const proseChecks = [
@@ -18222,10 +18261,10 @@ try {
     fail('AGENTS.md missing the titles Skill Modes row');
   }
 
-  const updaterSrc = readFile('update-system.mjs');
-  const titlesSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  const manifestSrc = readFile('lib/update-manifest.mjs');
+  const titlesSysBlock = (manifestSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
   if (titlesSysBlock.includes("'modes/titles.md'")) {
-    pass('modes/titles.md is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+    pass('modes/titles.md is in SYSTEM_PATHS (shipped + updatable)');
   } else {
     fail('modes/titles.md is NOT in SYSTEM_PATHS — updates would never deliver it');
   }
@@ -19247,10 +19286,10 @@ console.log('\n70. Table-freshness validator wiring + read-only boundary (#2036)
 try {
   const freshnessSrc = readFile('check-table-freshness.mjs');
 
-  const updaterSrc = readFile('update-system.mjs');
-  const freshSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  const manifestSrc = readFile('lib/update-manifest.mjs');
+  const freshSysBlock = (manifestSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
   if (freshSysBlock.includes("'check-table-freshness.mjs'")) {
-    pass('check-table-freshness.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+    pass('check-table-freshness.mjs is in SYSTEM_PATHS (shipped + updatable)');
   } else {
     fail('check-table-freshness.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
   }

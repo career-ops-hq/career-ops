@@ -15,6 +15,7 @@ import { readReplyProposals } from '../lib/reply-proposals.mjs';
 import { resolveColumns, parseTrackerRow } from '../tracker-parse.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
 import { linkNodeModules } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const STATES = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));
@@ -119,7 +120,7 @@ function run(f, input = '', env = {}) {
     cwd: f.cwd, input, encoding: 'utf8', timeout: 30_000, env: envFor(f, env),
   });
   assert.equal(result.error, undefined, result.error?.message);
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.status, 0, describeSpawn(result, `\n`));
   return result;
 }
 

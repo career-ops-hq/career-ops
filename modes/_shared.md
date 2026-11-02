@@ -28,13 +28,14 @@ See "Untrusted External Content" in `AGENTS.md` / `CLAUDE.md` / `CODEX.md` for t
 **RULE: NEVER hardcode metrics from proof points.** Read them from cv.md + article-digest.md at evaluation time.
 **RULE: For article/project metrics, article-digest.md takes precedence over cv.md.**
 **RULE: Read _profile.md AFTER this file. User customizations in _profile.md override defaults here.**
-**RULE: Read _custom.md (if it exists) AFTER _profile.md and honor its house rules in every mode.** It is where the user's persistent instructions live ("use this date format", "never reorder section X", "always include Y in summaries") — an instruction recorded there is NOT optional and does not expire between sessions or between items in a batch. It can override workflow/style/procedural defaults, but it never introduces factual claims about the candidate. When the user states a lasting preference in conversation, write it to `modes/_custom.md` so it survives the session.
+**RULE: Read _custom.md (if it exists) AFTER _profile.md and honor its house rules in every mode.** It is where the user's persistent instructions live ("use this date format", "never reorder section X", "always include Y in summaries") — an instruction recorded there is NOT optional and does not expire between sessions or between items in a batch. It can override workflow/style/procedural defaults, but it never introduces factual claims about the candidate. In an interactive session, a lasting preference or correction the user states in conversation goes through the `retro` mode (`modes/retro.md`), which writes to `modes/_custom.md` only the rules the user accepts. A delegated or headless worker (`CAREER_OPS_HEADLESS=1`, `-p`, `exec`, or a subagent) never writes `modes/_custom.md`, `modes/_profile.md`, or `config/profile.yml`. It reports the preference to its parent instead.
 **RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
 **RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+**RULE: Before an interactive session ends, if the user corrected or rejected your work, offer `/career-ops retro` once.** The `retro` mode (`modes/retro.md`) turns those corrections into proposed rules and writes only the ones the user accepts. A delegated or headless worker never offers or runs it.
 
 ## Data Root & Path Resolution (CRITICAL)
 
-All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`, `data/applications.md` or `applications.md`, `reports/`, `output/`, `interview-prep/`, `portals.yml`, etc.) must be resolved relative to the dynamically resolved **Data Root** (`{DATA_ROOT}`).
+All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`, `data/applications.md` or `applications.md`, `reports/`, `output/`, `interview-prep/`, `portals.yml`, `batch/tracker-additions/`, etc.) must be resolved relative to the dynamically resolved **Data Root** (`{DATA_ROOT}`).
 
 ### Data Root Resolution Order:
 1. **Environment Variables**: Check if `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` is set. If set, use its value (resolved relative to the repository root if it is a relative path).
@@ -58,7 +59,7 @@ All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`
 
 | CLI | economy | standard | premium | Extended thinking |
 |-----|---------|----------|---------|--------------------|
-| Claude Code | Haiku 4.5 | Sonnet 5.5 | Opus 5.5 | off / off / adaptive |
+| Claude Code | Haiku 5.5 | Sonnet 5.5 | Opus 5.5 | off / off / adaptive |
 | OpenCode | your CLI's cheapest/fastest available model | balanced model | most capable model | off / off / adaptive |
 | Gemini CLI | your CLI's cheapest/fastest available model | balanced model | most capable model | off / off / adaptive |
 | Copilot CLI | your CLI's cheapest/fastest available model | balanced model | most capable model | off / off / adaptive |
@@ -85,7 +86,7 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 | Red flags | Blockers, warnings (negative adjustments) |
 | **Global** | Holistic judgment integrating the five dimensions above (no arithmetic formula) |
 
-Decide the Global Score once from these dimensions, applying any user-specific Scoring Rules in `modes/_custom.md`. The report header, Machine Summary `score`, and application tracker must record that same value. A–H are report sections, not numeric inputs to average; Block B requirement importance and Block G posting legitimacy remain separate from the 1–5 score.
+Decide the Global Score once from these dimensions, applying the user's own scoring rules from `modes/_profile.md` and `modes/_custom.md`. The report header, Machine Summary `score`, and application tracker must record that same value. A–H are report sections, not numeric inputs to average; Block B requirement importance and Block G posting legitimacy remain separate from the 1–5 score.
 
 **Score interpretation:**
 - 4.5+ → Strong match, recommend applying immediately
@@ -115,7 +116,7 @@ Name up to three concrete checks that could change the decision; use an empty li
 
 **How to score the "Cultural signals" dimension:**
 1. Read `culture_screen.require` from `config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension qualitatively based on company size, remote policy, and stability.
-2. Actively look for evidence in the JD + Block G company research corresponding to those requirements (e.g., team size mentions, org-chart depth/manager layers, meeting-culture language, company stage).
+2. Actively look for evidence in the JD + Block G company research corresponding to those requirements (e.g., team size mentions, org-chart depth/manager layers, meeting-culture language, company stage, named interview stages).
 3. **If most `require` criteria have positive evidence** → score 4-5.
 4. **If some criteria have positive evidence, and none are contradicted** → score 3.
 5. **If evidence contradicts the `require` criteria** → **cap this dimension at 2/5**, and add an explicit line to Block A's Culture Screen field (see `oferta.md`) naming what's missing or contradicted. Do not let a strong CV-match score silently compensate for this — surface it, don't bury it.
@@ -255,11 +256,11 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 3. Cite exact lines from CV when matching
 4. Use WebSearch for comp and company data
 5. Register in tracker after evaluating
-6. Generate content in the language of the JD (EN default)
+6. Write human-facing content in `{language.output}` from `config/profile.yml` (EN when unset), whatever the language of the JD. Keep this market's terms and explain them in that language when needed
 7. Be direct and actionable -- no fluff
 8. Native tech English for generated text. Short sentences, action verbs, no passive voice.
 8b. Case study URLs in PDF Professional Summary (recruiter may only read this).
-9. **Tracker additions as TSV** -- NEVER edit applications.md directly. Write TSV in `batch/tracker-additions/`: a header row of column labels, then one data row (see AGENTS.md, "TSV Format for Tracker Additions"). The header is what lets `merge-tracker.mjs` resolve fields by name instead of guessing which column is score and which is status.
+9. **Tracker additions as TSV** -- NEVER edit applications.md directly. Write TSV in `{DATA_ROOT}/batch/tracker-additions/`: a header row of column labels, then one data row (see AGENTS.md, "TSV Format for Tracker Additions"). The header is what lets `merge-tracker.mjs` resolve fields by name instead of guessing which column is score and which is status.
 10. **Include `**URL:**` in every report header.**
 
 ### Tools
@@ -270,7 +271,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 | WebFetch | Fallback for extracting JDs from static pages |
 | Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER let 2+ agents drive the same Playwright/MCP browser session concurrently.** This is a per-session rule, not a per-agent-count one: agents each holding their own isolated browser session are fine in parallel; agents sharing one interactive MCP browser session are not — they race for control and can silently read or act on each other's page state. |
 | Read | cv.md, _profile.md, article-digest.md, cv-template.html |
-| Write | Temporary HTML for PDF, reports .md, tracker-addition TSVs in `batch/tracker-additions/` (never `applications.md` directly) |
+| Write | Temporary HTML for PDF, reports .md, tracker-addition TSVs in `{DATA_ROOT}/batch/tracker-additions/` (never `applications.md` directly) |
 | Edit | Fixes to reports and other generated content. Never the tracker table: new rows go in as a TSV merged by `node merge-tracker.mjs`, status and notes changes go through `node set-status.mjs` |
 | Canva MCP | Optional visual CV generation. Duplicate base design, edit text, export PDF. Requires `cv.canva_resume_design_id` in profile.yml. |
 | Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |
@@ -293,6 +294,22 @@ A mode may tell you to run work in a background subagent (e.g. `scan`, or parall
 - **Delegated/headless worker:** return `status: needs_confirmation`, `reason: agency_confirmation`, the posting `url`, observed `agency` (string or null, evidence only), and the `question` for the parent. Stop immediately: no tracker row or TSV, no report, no CV in any format, no application drafts, and no pipeline completion. Return through the worker hand-back/stdout, never a placeholder report. Do not wait for a human inside the worker, spawn another agent, or write first and flag an override afterward.
 - **Parent/orchestrator:** surface the question with the URL and evidence; keep this item pending and show it separately from completed/failed evaluations. Other URLs may continue. Release any unused report-number reservation. Resume only after the user's explicit answer, passing that answer and its exact posting identity to a fresh single-pass worker or handling the posting interactively. Re-check liveness and other gates; reserve a fresh report number if the old reservation was released. A new URL needs its own answer. Only actual completed artifacts may enter the tracker merge and completion summary.
 - After confirmation, use the confirmed agency as Via; use `?` for an undisclosed end employer plus a distinguishing Notes descriptor. Never substitute the agency for the end employer. This gate also applies to localized modes and overrides unconditional "always write/register" instructions. It is not a new tracker lifecycle status.
+
+### Unattended runs
+
+A run is unattended when nobody can answer before it ends. Treat it as unattended when the request says headless, unattended or non-interactive, when a parent agent or script dispatched you with one prompt (`grok -p`, `claude -p`, `codex exec`), or when an orchestrating mode has no user turn to wait for. Otherwise treat it as interactive. A batch worker follows `batch/batch-prompt.md` and its JSON hand-back instead.
+
+In an unattended run, at every gate that would ask, confirm, approve or wait:
+
+1. Do not ask and do not wait. Apply the default the mode names in its **Unattended runs** paragraph. A prompt that already carries the decision a closing line asked for (`approve`, `evaluate anyway`, the missing answers) resolves that gate. An approval covers only the same item the earlier line named, so an `approve` with no entry, rows or items named resolves nothing.
+2. Write nothing the gate protects, unless that default names the one write it makes.
+3. End with exactly one line and nothing after it, for the first gate that stopped the run:
+
+   ```
+   needs_confirmation: {gate} {detail} - {resume}
+   ```
+
+   `{gate}` is one lowercase word, `{detail}` names what stopped the run, and `{resume}` says what to send or rerun with. Never end on a question, an approval request or the update prompt.
 
 ### Time-to-offer priority
 - Working demo + metrics > perfection

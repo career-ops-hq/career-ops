@@ -12,8 +12,8 @@ const dir = join(ROOT, 'modes', 'oferta-signals');
 const files = existsSync(dir) ? readdirSync(dir).sort() : [];
 const indexed = [...oferta.matchAll(/^\*\*(\d+)\. .+?\*\*\. Read `modes\/oferta-signals\/([^`]+)` when .+\.$/gm)];
 
-check('oferta indexes conditional signals 8 to 17 in order',
-  JSON.stringify(indexed.map((m) => Number(m[1]))) === JSON.stringify([8, 9, 10, 11, 12, 13, 14, 15, 16, 17]),
+check('oferta indexes conditional signals 8 to 17, 19, 20, 21 and 22 in order',
+  JSON.stringify(indexed.map((m) => Number(m[1]))) === JSON.stringify([8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22]),
   `got ${JSON.stringify(indexed.map((m) => m[1]))}`);
 check('every indexed signal file exists and every signal file is indexed',
   files.length > 0 && JSON.stringify(indexed.map((m) => m[2]).sort()) === JSON.stringify(files),

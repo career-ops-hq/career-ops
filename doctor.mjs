@@ -10,25 +10,52 @@ import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
-import dotenv from 'dotenv';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
+import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
-import { validateProfile, EXAMPLE_PATH } from './validate-profile.mjs';
-import { resolveExtractorMode } from './browser-extract.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
-import { validateFlags } from './lib/cli-flags.mjs';
+import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
+import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
 import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 
+// Modules that import an npm package (directly or through their own imports)
+// load here, after the fact, instead of as static imports. A static import of
+// a missing package fails while Node links the module graph, before a single
+// line of this file runs, so a copy with no node_modules (a ZIP download, a
+// copy made without `npm install`) died with a raw ERR_MODULE_NOT_FOUND stack
+// from the very check that exists to report missing dependencies. Loading them
+// dynamically lets that failure be caught and reported with the fix.
+let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH, resolveExtractorMode;
+try {
+  [
+    { hasYamlContent, loadYaml },
+    { default: dotenv },
+    { AGENT_CLIS },
+    { validateProfile, EXAMPLE_PATH },
+    { resolveExtractorMode },
+  ] = await Promise.all([
+    import('./lib/yaml-document.mjs'),
+    import('dotenv'),
+    import('./lib/agent-cli.mjs'),
+    import('./validate-profile.mjs'),
+    import('./browser-extract.mjs'),
+  ]);
+} catch (err) {
+  let missing = [];
+  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: rethrow below */ }
+  if (err?.code !== 'ERR_MODULE_NOT_FOUND' || missing.length === 0) throw err;
+  console.error(`career-ops dependencies are not installed in ${__dirname} (missing: ${missing.join(', ')}), so doctor cannot run its checks.\nFix: run \`npm install\` in ${__dirname}, then run doctor again.`);
+  process.exit(1);
+}
+
 // CLIs the doctor recognises.
-const VALID_CLIS = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini', 'hermes'];
 
 // --help ran the full diagnostic and printed the report at exit 0 (#2856), so
 // a mistyped flag was indistinguishable from a clean run — and --targe
@@ -37,7 +64,9 @@ const VALID_CLIS = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'grok', 
 // flags before --help so `--help --bogus` still errors.
 const KNOWN_FLAGS = ['--target', '--json', '--init-templates', '--strict', '--cli', '--help', '-h'];
 
-// Both take their value as the next argv token.
+// Both take a value, as the next argv token or as `--flag=value`. validateFlags
+// accepts either form, so both are read with flagValue(): an indexOf() lookup
+// cannot see `--target=<path>` and would diagnose this checkout instead.
 const VALUE_FLAGS = ['--target', '--cli'];
 
 const USAGE = `Usage:
@@ -49,19 +78,36 @@ const USAGE = `Usage:
   node doctor.mjs --cli <name>       # check a specific CLI's integration
   node doctor.mjs --help             # show this message
 
-CLIs: ${VALID_CLIS.join(', ')}`;
+CLIs: ${AGENT_CLIS.join(', ')}`;
 
 // requireOperand: without it, `--target --json` reads --json as the target
-// path (argv[targetIdx + 1] below has no adjacency check of its own), and the
+// path (flagValue() below takes the next token as-is), and the
 // doctor silently diagnoses a directory literally named "--json" at exit 0
 // (#3087) — this is the onboarding entrypoint, so that's a user told to
 // create files that already exist. Nothing more specific to say than the
 // shared message.
 validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-const targetIdx = argv.indexOf('--target');
-const explicitTarget = targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : null;
+const explicitTarget = flagValue(argv, '--target') || null;
 const projectRoot = explicitTarget || getCareerOpsRoot();
+// --target diagnoses a whole other checkout, so that checkout's profile is the
+// one that counts; otherwise CAREER_OPS_PROFILE applies as it does everywhere.
+// With no override the path is the root the doctor started from: the human run
+// loads the root's whole .env later, and a CAREER_OPS_ROOT in it must not move
+// this one check to another root.
+const profilePathFor = (root) => (explicitTarget || !hasProfileOverride() ? getProfilePath(root) : getProfilePath());
+// Only scan.mjs, the evaluators, openai-tailor.mjs and openrouter-runner load a .env; most readers
+// of the profile see the process environment alone. Doctor reports what they see,
+// so an override set only in the root's .env is looked up for the advice below
+// but never counted as a found profile.
+const profileFromEnvFile = (root) => {
+  try {
+    const value = dotenv.parse(readFileSync(join(root, '.env'))).CAREER_OPS_PROFILE;
+    return value?.trim() ? value.trim() : null;
+  } catch {
+    return null; // no .env, or unreadable
+  }
+};
 // node_modules and .git belong to the CODE checkout, not the resolved data
 // root — under a split checkout (CAREER_OPS_ROOT/CAREER_OPS_DATA_DIR or the
 // .career-ops-data marker) those are two different directories, and neither
@@ -80,8 +126,7 @@ if (INIT_TEMPLATES && !JSON_OUT) {
 // Opt-in so the default `npm run doctor` stays fast and fully offline.
 const STRICT = argv.includes('--strict');
 
-const cliIdx = argv.indexOf('--cli');
-const cliFlag = cliIdx !== -1 ? argv[cliIdx + 1] : null;
+const cliFlag = flagValue(argv, '--cli') ?? null;
 
 // ANSI colors (only on TTY)
 const isTTY = process.stdout.isTTY;
@@ -183,6 +228,25 @@ function checkDependencies() {
     pass: false,
     label: `Dependencies missing: ${missing.join(', ')}`,
     fix: 'Run: npm install',
+  };
+}
+
+// The web UI is optional, so missing web/ dependencies are a warning: only
+// `npm run ui` needs them, and a CLI-only install never does.
+function checkWebDependencies() {
+  const webDir = join(codeRoot, 'web');
+  if (!existsSync(join(webDir, 'package.json'))) return null;
+  let missing;
+  try {
+    missing = findMissingDependencies(webDir);
+  } catch (err) {
+    return { warn: true, label: `Web UI dependencies could not be checked: web/package.json unreadable (${err.message})` };
+  }
+  if (missing.length === 0) return { pass: true, label: 'Web UI dependencies installed' };
+  return {
+    warn: true,
+    label: `Web UI dependencies are not installed (${missing.length} missing, including ${missing[0]}), so npm run ui cannot start`,
+    fix: 'Run: npm --prefix web ci',
   };
 }
 
@@ -343,15 +407,55 @@ function playwrightInstallFix() {
   return 'Run: npx playwright install chromium';
 }
 
+// Missing shared libraries are a host problem, not a download problem: the
+// browser is there and `npx playwright install` skips it. Playwright's own
+// remedy is install-deps, which installs system packages and so needs root.
+// It only knows apt (#4223), so on any other Linux it would fail with
+// "apt-get: command not found"; there the distro's own package manager is the
+// fix.
+function isDebianLike() {
+  try {
+    const osRelease = readFileSync('/etc/os-release', 'utf-8');
+    return /^(?:ID|ID_LIKE)=.*\b(?:debian|ubuntu)\b/m.test(osRelease);
+  } catch {
+    return false;
+  }
+}
+
+function playwrightDepsFix() {
+  if (existsSync('/etc/NIXOS')) return playwrightInstallFix();
+  // On Windows the missing pieces are Media Foundation DLLs. install-deps
+  // installs them through Playwright's install_media_pack.ps1, which enables a
+  // Windows Server feature and so needs an administrator shell; Windows N
+  // editions lack them by design and need Microsoft's Media Feature Pack.
+  if (process.platform === 'win32') {
+    return [
+      'Run in an administrator terminal: npx playwright install-deps chromium',
+      'On a Windows N edition, install the Media Feature Pack from Microsoft instead (Settings → Apps → Optional features).',
+    ];
+  }
+  if (process.platform === 'linux' && !isDebianLike()) {
+    return 'Install the packages that provide these libraries with your distribution\'s package manager. `npx playwright install-deps` uses apt-get, so it only works on Debian and Ubuntu.';
+  }
+  const sudo = process.platform !== 'win32' && process.getuid?.() ? 'sudo ' : '';
+  return `Run: ${sudo}npx playwright install-deps chromium`;
+}
+
 async function checkPlaywright() {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch {
+  } catch (err) {
+    // The package itself is missing or broken, so there is no browser to
+    // install yet: `npx playwright install` would fetch a CLI whose version
+    // need not match the one package.json pins.
+    const notFound = err?.code === 'ERR_MODULE_NOT_FOUND';
     return {
       pass: false,
-      label: 'Playwright chromium not installed',
-      fix: playwrightInstallFix(),
+      label: notFound
+        ? 'Playwright chromium could not be checked: the playwright package is not installed'
+        : `Playwright chromium could not be checked: the playwright package failed to load (${String(err?.message ?? err).split('\n')[0]})`,
+      fix: 'Run: npm install',
     };
   }
   // Validate by launching — chromium.executablePath() points at Chrome for Testing
@@ -363,11 +467,30 @@ async function checkPlaywright() {
   try {
     browser = await chromium.launch({ headless: true });
     return { pass: true, label: 'Playwright chromium installed' };
-  } catch {
+  } catch (err) {
+    // Only a missing binary is fixed by installing it. Everything else means
+    // the binary is present and failed to start, so the advice follows the
+    // error Playwright reported instead of repeating a no-op install.
+    const cause = classifyChromiumLaunchError(err);
+    if (cause.kind === 'missing-executable') {
+      return {
+        pass: false,
+        label: 'Playwright chromium not installed',
+        fix: playwrightInstallFix(),
+      };
+    }
+    if (cause.kind === 'missing-libraries') {
+      const which = cause.libraries.length ? ` (${cause.libraries.join(', ')})` : '';
+      return {
+        pass: false,
+        label: `Playwright chromium is installed but cannot start: the system libraries it needs are missing${which}`,
+        fix: playwrightDepsFix(),
+      };
+    }
     return {
       pass: false,
-      label: 'Playwright chromium not installed',
-      fix: playwrightInstallFix(),
+      label: `Playwright chromium is installed but failed to launch: ${cause.detail}`,
+      fix: 'Reinstalling will not fix this, because the browser is already installed. If doctor runs inside a sandbox or container, check that it allows a browser process to start.',
     };
   } finally {
     try { await browser?.close(); } catch { /* ignore */ }
@@ -581,23 +704,26 @@ function isPlaywrightMcpConfigured(root, activeCli) {
 // missing file is normal, malformed values are caught per call below.
 function resolveActiveCli() {
   if (cliFlag !== undefined && cliFlag !== null) {
-    if (!VALID_CLIS.includes(cliFlag)) {
-      return { cli: 'unknown', source: 'flag', warning: `Unknown --cli "${cliFlag}". Valid: ${VALID_CLIS.join(', ')}.` };
+    if (!AGENT_CLIS.includes(cliFlag)) {
+      return { cli: 'unknown', source: 'flag', warning: `Unknown --cli "${cliFlag}". Valid: ${AGENT_CLIS.join(', ')}.` };
     }
     return { cli: cliFlag, source: 'flag' };
   }
   if (process.env.CAREER_OPS_CLI) {
-    if (!VALID_CLIS.includes(process.env.CAREER_OPS_CLI)) {
-      return { cli: 'unknown', source: 'env', warning: `CAREER_OPS_CLI="${process.env.CAREER_OPS_CLI}" is not a recognized CLI. Valid: ${VALID_CLIS.join(', ')}.` };
+    if (!AGENT_CLIS.includes(process.env.CAREER_OPS_CLI)) {
+      return { cli: 'unknown', source: 'env', warning: `CAREER_OPS_CLI="${process.env.CAREER_OPS_CLI}" is not a recognized CLI. Valid: ${AGENT_CLIS.join(', ')}.` };
     }
     return { cli: process.env.CAREER_OPS_CLI, source: 'env' };
   }
   // .env is best-effort: missing file → fall through to default. dotenv does
   // not throw on a missing path when `quiet: true`, so no try/catch is needed.
+  // The load must not make a .env-only CAREER_OPS_PROFILE look like a shell one.
+  const hadProfileOverride = hasProfileOverride();
   dotenv.config({ path: join(projectRoot, '.env'), quiet: true });
+  if (!hadProfileOverride) delete process.env.CAREER_OPS_PROFILE;
   if (process.env.CAREER_OPS_CLI) {
-    if (!VALID_CLIS.includes(process.env.CAREER_OPS_CLI)) {
-      return { cli: 'unknown', source: '.env', warning: `CAREER_OPS_CLI in .env is not a recognized CLI. Valid: ${VALID_CLIS.join(', ')}.` };
+    if (!AGENT_CLIS.includes(process.env.CAREER_OPS_CLI)) {
+      return { cli: 'unknown', source: '.env', warning: `CAREER_OPS_CLI in .env is not a recognized CLI. Valid: ${AGENT_CLIS.join(', ')}.` };
     }
     return { cli: process.env.CAREER_OPS_CLI, source: '.env' };
   }
@@ -625,7 +751,7 @@ function resolveActiveCli() {
 }
 
 function checkPlaywrightMcp(root, activeCli) {
-  // Unknown CLI (typo / not in VALID_CLIS).
+  // Unknown CLI (typo / not in AGENT_CLIS).
   if (activeCli === 'unknown') return null;
 
   // Known CLI without an MCP file mapping.
@@ -663,7 +789,7 @@ function checkPlaywrightMcp(root, activeCli) {
 // is selected but the helper is missing, the modes fall back to MCP — surface
 // that as a warning, never a failure.
 function checkScanExtractor(root) {
-  const mode = resolveExtractorMode(join(root, 'config', 'profile.yml'));
+  const mode = resolveExtractorMode(profilePathFor(root));
   if (mode === 'cli') {
     if (existsSync(join(__dirname, 'browser-extract.mjs'))) {
       return { pass: true, label: 'Scan extractor: cli (browser-extract.mjs)' };
@@ -691,6 +817,7 @@ const USER_LAYER_PREREQS = [
   },
   {
     path: 'config/profile.yml',
+    emptyImpact: 'evaluations and scans have none of your targeting',
     fix: [
       'Run: cp config/profile.example.yml config/profile.yml',
       'Then edit it with your details',
@@ -706,6 +833,7 @@ const USER_LAYER_PREREQS = [
   {
     path: 'portals.yml',
     env: 'CAREER_OPS_PORTALS',
+    emptyImpact: 'scans have no companies or filters',
     fix: [
       'Run: cp templates/portals.example.yml portals.yml',
       'Then customize with your target companies',
@@ -721,6 +849,7 @@ const CLI_NAMES = 'claude, codex, gemini, opencode, qwen, agy or grok';
 const PORTALS_PREREQ = USER_LAYER_PREREQS.find(({ path }) => path === 'portals.yml');
 
 function prereqFile(root, { path, env }) {
+  if (path === 'config/profile.yml') return profilePathFor(root);
   return (env && process.env[env]) || join(root, ...path.split('/'));
 }
 
@@ -728,10 +857,58 @@ function prereqPresent(root, prereq) {
   return existsSync(prereqFile(root, prereq));
 }
 
+const EMPTY_YAML_REASON = 'has no settings (empty or only comments)';
+
+function emptyYamlPrereqs(root) {
+  return USER_LAYER_PREREQS.filter((prereq) => {
+    if (!prereq.emptyImpact || !prereqPresent(root, prereq)) return false;
+    try {
+      return !hasYamlContent(readFileSync(prereqFile(root, prereq), 'utf-8'));
+    } catch {
+      return false;
+    }
+  });
+}
+
+// The root's .env names a profile. scan.mjs, the evaluators, openai-tailor.mjs and
+// openrouter-runner.mjs load a .env, and all four follow CAREER_OPS_PROFILE once
+// it is loaded (scan.mjs from the data root, the evaluators and openai-tailor.mjs
+// from a working-directory config(), openrouter-runner.mjs from the code root).
+// The other readers load none. That is a split whether or not a data-root profile exists, so it is
+// reported either way. A shell value shadows the .env, so it is not a split then.
+function checkEnvFileProfile(root) {
+  const fromEnvFile = explicitTarget || hasProfileOverride() ? null : profileFromEnvFile(root);
+  if (!fromEnvFile) return null;
+  return {
+    warn: true,
+    label: `.env sets CAREER_OPS_PROFILE=${fromEnvFile}, but of the profile readers, only scan.mjs, the evaluators, openai-tailor.mjs and openrouter-runner.mjs load .env; cv-sync-check, generate-pdf, upskill and the other readers use ${profilePathFor(root)}`,
+    fix: [`Export CAREER_OPS_PROFILE=${fromEnvFile} in your shell so every command reads the same file, or remove it from .env`],
+  };
+}
+
 function checkPrereq(prereq) {
   const { path, fix } = prereq;
+  if (emptyYamlPrereqs(projectRoot).includes(prereq)) {
+    return { warn: true, label: `${path} ${EMPTY_YAML_REASON}; ${prereq.emptyImpact}`, fix };
+  }
   if (prereqPresent(projectRoot, prereq)) {
     return { pass: true, label: `${path} found` };
+  }
+  if (path === 'config/profile.yml' && !explicitTarget && hasProfileOverride()) {
+    const named = profilePathFor(projectRoot);
+    return {
+      warn: true,
+      label: `${path} not found (CAREER_OPS_PROFILE names ${named})`,
+      fix: [`Create ${named}, or unset CAREER_OPS_PROFILE to use the profile in the data root`],
+    };
+  }
+  const fromEnvFile = path === 'config/profile.yml' && !explicitTarget ? profileFromEnvFile(projectRoot) : null;
+  if (fromEnvFile) {
+    return {
+      warn: true,
+      label: `${path} not found (.env sets CAREER_OPS_PROFILE=${fromEnvFile}, but most commands never load .env)`,
+      fix: [`Export CAREER_OPS_PROFILE=${fromEnvFile} in your shell so every command sees it, or remove it from .env and put the profile at ${profilePathFor(projectRoot)}`],
+    };
   }
   return { warn: true, label: `${path} not found (user setup required)`, fix };
 }
@@ -794,12 +971,17 @@ async function checkPortalSlugs(root) {
   try {
     const { verifyPortalsFile } = await import('./verify-portals.mjs');
     const { loadProviders } = await import('./providers/_registry.mjs');
+    const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
     const { makeHttpCtx } = await import('./providers/_http.mjs');
     // Load the same provider plugins the scanner uses so tier 2 runs: without
     // them every non-ATS entry (all job_boards, plus any Workday/Avature/…
     // tracked_companies) resolves to an un-actionable "skipped" and a broken
     // one would never reach "missing" — a false pass.
     const providers = await loadProviders(join(__dirname, 'providers'));
+    // verify-portals.mjs's own CLI folds in enabled provider plugins (#4026);
+    // this caller builds the map itself, so it must too, or a plugin-provider
+    // entry is probed as unclaimed. No-op when config/plugins.yml is absent.
+    await mergeProviderPlugins(providers, { root: __dirname, dataRoot: root });
     const { results } = await verifyPortalsFile(portalsPath, {
       providers,
       httpCtx: makeHttpCtx(),
@@ -873,7 +1055,7 @@ function readPluginConfigSync(root) {
   const cfgPath = join(root, 'config', 'plugins.yml');
   if (!existsSync(cfgPath)) return { cfg: {}, error: null };
   try {
-    return { cfg: yaml.load(readFileSync(cfgPath, 'utf8')) || {}, error: null };
+    return { cfg: loadYaml(readFileSync(cfgPath, 'utf8')) || {}, error: null };
   } catch (err) {
     return { cfg: {}, error: String(err.message).split('\n')[0] };
   }
@@ -945,14 +1127,14 @@ function checkCvShape(root) {
       ? 'cv.md: no Experience section the CV checks recognize — title and structure checks will not run'
       : 'cv.md: Experience section has no "### Company — Location" entries — title and structure checks will not run',
     fix: [
-      `Name the section ${EXPERIENCE_HEADING_NAMES.map((n) => `"## ${n}"`).join(', ')}`,
+      ...(sections.length === 0 ? [`Name the section ${EXPERIENCE_HEADING_NAMES.map((n) => `"## ${n}"`).join(', ')}`] : []),
       'Start each job with "### Company — Location", then a bold **Title** line, then a dates line (see examples/cv-example.md)',
     ],
   };
 }
 
 function checkProfileShape(root) {
-  const profilePath = process.env.CAREER_OPS_PROFILE || join(root, 'config', 'profile.yml');
+  const profilePath = profilePathFor(root);
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
   let findings;
   try {
@@ -983,6 +1165,7 @@ async function main() {
     geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
+    checkWebDependencies(),
     checkTrackedBakFiles(codeRoot),
     checkSkillEntrypoints(codeRoot),
     await checkPlaywright(),
@@ -999,6 +1182,8 @@ async function main() {
     checkAutoDir('output'),
     checkAutoDir('reports'),
     checkPlugins(projectRoot),
+    // checkPrereq already explains the .env case when the profile is missing.
+    prereqPresent(projectRoot, { path: 'config/profile.yml' }) ? checkEnvFileProfile(projectRoot) : null,
   ].filter(Boolean);
 
   // Network-bound portals.yml reachability probe — only under --strict.
@@ -1097,8 +1282,12 @@ function unpersonalizedFiles(root) {
   const out = [];
   for (const { path, template, impact } of PERSONALIZATION_FILES) {
     const targetPath = join(root, ...path.split('/'));
-    const rootTemplatePath = join(root, ...template.split('/'));
-    const templatePath = existsSync(rootTemplatePath) ? rootTemplatePath : join(__dirname, ...template.split('/'));
+    // The checkout's template first, as the web reads it, so doctor and the web
+    // agree on which sections are still template text even when a separate data
+    // root holds an older copy. The data root's copy only covers a checkout
+    // that ships none (#5340).
+    const checkoutTemplatePath = join(__dirname, ...template.split('/'));
+    const templatePath = existsSync(checkoutTemplatePath) ? checkoutTemplatePath : join(root, ...template.split('/'));
     if (!existsSync(targetPath) || !existsSync(templatePath)) continue;
     let target, tpl;
     try {
@@ -1106,6 +1295,45 @@ function unpersonalizedFiles(root) {
       tpl = readFileSync(templatePath, 'utf-8');
     } catch {
       continue; // unreadable → let the existence checks speak
+    }
+    // An empty file is neither identical to the template nor carries a
+    // placeholder, so it would pass as personalized while the web asks for
+    // every section (#5340).
+    if (!target.trim()) {
+      out.push({ path, reason: 'is empty', impact });
+      continue;
+    }
+    if (path === 'modes/_profile.md') {
+      // A _profile.md written in the user's own structure, without any of the
+      // eight ## Your … headings, is quiet here rather than reported as missing
+      // every section (#5126). Missing prerequisites speak for absent files.
+      const userHeadings = new Set(scanHeadings(target).heads.filter((h) => h.level === 2).map((h) => h.heading));
+      const hasAnyTemplateHeading = SECTIONS.some((s) => userHeadings.has(s.heading));
+      if (!hasAnyTemplateHeading) {
+        const left = [...templatePlaceholders(tpl)].filter((p) => target.includes(p));
+        if (left.length > 0) {
+          out.push({
+            path,
+            reason: `still has ${left.length} unfilled placeholder${left.length === 1 ? '' : 's'} (e.g. ${left[0]})`,
+            impact,
+          });
+        }
+        continue;
+      }
+      const states = sectionState(target, tpl);
+      const unfilled = states.filter((s) => s.state !== 'filled');
+      if (unfilled.length > 0) {
+        const n = unfilled.length;
+        const templateCount = unfilled.filter((s) => s.state === 'template').length;
+        const missingCount = unfilled.filter((s) => s.state === 'missing').length;
+        const ids = unfilled.map((s) => s.id).join(', ');
+        out.push({
+          path,
+          reason: `still has ${n} unfilled section${n === 1 ? '' : 's'}: ${templateCount} on template, ${missingCount} missing (${ids})`,
+          impact,
+        });
+      }
+      continue;
     }
     if (target === tpl) {
       out.push({ path, reason: 'still identical to the shipped template', impact });
@@ -1149,7 +1377,7 @@ function titleFilterConflicts(root) {
   if (!existsSync(portalsPath)) return null;
   let config;
   try {
-    config = yaml.load(readFileSync(portalsPath, 'utf-8'));
+    config = loadYaml(readFileSync(portalsPath, 'utf-8'));
   } catch {
     // A portals.yml that does not parse is a different check's problem; this
     // one only has something to say about a file it could actually read.
@@ -1210,7 +1438,10 @@ function onboardingState(root) {
   // MCP project configuration belongs to the launch checkout. `root` is the
   // user-data layer and may point elsewhere under split-checkout installs.
   const mcpCheck = checkPlaywrightMcp(process.cwd(), activeCli);
-  const unpersonalized = unpersonalizedFiles(root);
+  const unpersonalized = [
+    ...unpersonalizedFiles(root),
+    ...emptyYamlPrereqs(root).map(({ path, emptyImpact }) => ({ path, reason: EMPTY_YAML_REASON, impact: emptyImpact })),
+  ];
   const titleFilterIssues = titleFilterConflicts(root);
   // Every other check in this function is data-layer and correctly uses this
   // function's own `root` parameter. The tracked-.bak check is the one
@@ -1220,12 +1451,14 @@ function onboardingState(root) {
   const bakCheck = checkTrackedBakFiles(codeRoot);
   const skillCheck = checkSkillEntrypoints(codeRoot);
   const cvShape = checkCvShape(root);
+  const envFileProfile = checkEnvFileProfile(root);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
     ...(bakCheck.warn ? [`${bakCheck.label}\n→ ${[].concat(bakCheck.fix || []).join('\n  ')}`] : []),
     ...(skillCheck.warn ? [`${skillCheck.label}\n→ ${[].concat(skillCheck.fix || []).join('\n  ')}`] : []),
     ...(cvShape?.warn ? [`${cvShape.label}\n→ ${[].concat(cvShape.fix || []).join('\n  ')}`] : []),
+    ...(envFileProfile ? [`${envFileProfile.label}\n→ ${envFileProfile.fix.join('\n  ')}`] : []),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 

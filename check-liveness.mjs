@@ -25,7 +25,8 @@ import {
   checkUrlLivenessWithFallback,
   createHeadedPageProvider,
   newLivenessPage,
-  jitteredDelayMs,
+  createHostSpacer,
+  takeSuppressedBlockCount,
   sleep,
 } from './liveness-browser.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
@@ -167,7 +168,8 @@ async function main() {
   // On a challenge we retry once in a headed browser (which clears it); pass
   // --no-fallback to stay fully headless (e.g. on a machine with no display).
   const noFallback = args.includes('--no-fallback');
-  // --throttle or --throttle=<ms>: wait base..2*base ms (jittered) between checks
+  // --throttle or --throttle=<ms>: wait base..2*base ms (jittered) between browser
+  // checks of the same host (createHostSpacer in liveness-browser.mjs)
   // to stay under rate-based WAF limits. pracuj.pl's Cloudflare flags the session
   // after ~2 rapid hits, so a bulk run needs spacing. Default base 5000ms.
   const throttleArg = args.find((a) => a === '--throttle' || a.startsWith('--throttle='));
@@ -245,14 +247,20 @@ async function main() {
 
   let active = 0, expired = 0, uncertain = 0, viaApi = 0;
   const verdicts = [];
+  // --throttle spaces repeat browser visits to the same host; the API rung is
+  // cheap and not WAF-rate-limited, so it never waits.
+  const spacer = createHostSpacer(throttleBaseMs);
+  // An Ashby board answers for every posting under its org: fetch each board
+  // once per run, not once per posting.
+  const boardCache = new Map();
 
   // Sequential — project rule: never Playwright in parallel
   for (let i = 0; i < urls.length; i++) {
     const url = urls[i];
-    let result, reason, code, usedBrowser = false;
+    let result, reason, code;
 
     // Rung 1: zero-token ATS API check. A conclusive active/expired wins; otherwise fall through.
-    const api = await checkLivenessViaApi(url);
+    const api = await checkLivenessViaApi(url, { boardCache });
     if (api) {
       ({ result, reason, code } = api);
       viaApi++;
@@ -266,9 +274,15 @@ async function main() {
       // were not confirmed.
       try {
         await ensureBrowser();
+        const wait = spacer.waitBefore(url);
+        if (wait) await sleep(wait);
         const getHeadedPage = headed ? () => headed.get() : undefined;
-        ({ result, reason, code } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage }));
-        usedBrowser = true;
+        try {
+          ({ result, reason, code } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage }));
+        } finally {
+          // A failed visit counts too: that is when a WAF is most likely involved.
+          spacer.visited(url);
+        }
       } catch (err) {
         result = 'uncertain';
         code = 'browser_unavailable';
@@ -283,16 +297,14 @@ async function main() {
     else if (result === 'expired') expired++;
     else uncertain++;
     verdicts.push({ url, result, code });
-
-    // Throttle only matters between browser checks (the API is cheap, not WAF-rate-limited).
-    const wait = usedBrowser && i < urls.length - 1 ? jitteredDelayMs(throttleBaseMs) : 0;
-    if (wait) await sleep(wait);
   }
 
   if (headed) await headed.close();
   if (browser) await browser.close();
 
   console.log(`\nResults: ${active} active  ${expired} expired  ${uncertain} uncertain  (${viaApi} via API, no browser)`);
+  const quietBlocks = takeSuppressedBlockCount();
+  if (quietBlocks) console.log(`(${quietBlocks} tracker/analytics requests skipped: their host had no usable address, e.g. a DNS ad-blocker; not counted against any posting)`);
 
   // Close the loop: the verdict is the expensive part of this run and it used
   // to die with the process. `--no-record` leaves no trace, so the write is

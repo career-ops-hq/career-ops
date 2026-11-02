@@ -296,3 +296,40 @@ data/interview-prep/
 /tectonic.exe
 /tectonic.part
 /tectonic.part.exe
+
+# Added by career-ops update-system.mjs.
+# System-owned ignore rules that were missing from this file. Your own rules
+# are never modified, reordered or removed: the updater only appends patterns
+# it cannot already find somewhere in this file. Reordering these lines, or
+# moving them elsewhere in the file, is safe and will not bring them back.
+# Deleting or commenting one out is not: they are system-owned, several of
+# them guard files holding personal data, and the next update re-adds any
+# that is no longer present as a live pattern.
+!batch/company-scope.mjs
+!batch/jd-rescue.mjs
+!batch/logs
+!batch/tracker-additions
+!batch/logs/.gitkeep
+!batch/tracker-additions/.gitkeep
+!/jds/
+!jds/.gitkeep
+!/interview-prep/
+!interview-prep/.gitkeep
+!interview-prep/sessions/
+!interview-prep/sessions/.gitkeep
+!interview-prep/sessions/README.md
+!writing-samples/README.md
+# Hermes Agent personal project rules. docs/HERMES.md offers it as a way to
+# supply rules that override AGENTS.md without sharing them with the repository.
+.hermes.md
+!web/package-lock.json
+!test-fixtures/**
+!/documents/
+!documents/.gitkeep
+!documents/README.md
+# Web UI local runtime and environment
+.career-ops.env
+**/.career-ops.env
+.next/
+web/.next/
+web/out/

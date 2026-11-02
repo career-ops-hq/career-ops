@@ -107,6 +107,8 @@ try {
   } else {
     fail(`phenom fetch-error stop should log a truncation warning: ${JSON.stringify(partialWarnings)}`);
   }
+  if (partialJobs.phenomTruncated === true) pass('phenom.fetch() tags a fetch-error-truncated board phenomTruncated');
+  else fail(`phenom fetch-error board should carry phenomTruncated, got ${partialJobs.phenomTruncated}`);
 
   // fetch — a page that fails once (transient) then succeeds is recovered by
   // fetchJsonWithRetry: no truncation, no warning, full board returned.

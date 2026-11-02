@@ -5,6 +5,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeF
 import { join, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ROOT, getBash, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'batch-limit-'));
@@ -52,7 +53,7 @@ test('omitting the limit retains all pending offers; positive limits cap the rea
     for (const [args, count] of [[[], 2], [['--limit', '1'], 1], [['--limit', '2'], 2], [['--limit', '008'], 2], [['--limit', '9223372036854775807'], 2]]) {
       const result = f.run(['--dry-run', '--model', 'test-model', ...args]);
       assert.ifError(result.error);
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, describeSpawn(result));
       assert.match(result.stdout, new RegExp(`Would process ${count} offers`));
       assert.match(result.stdout, /#1: https:\/\/example.com\/1/);
       if (count === 1) assert.doesNotMatch(result.stdout, /#2:/);

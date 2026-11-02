@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NO_TRACKER = join(tmpdir(), 'career-ops-no-such-tracker.md');
@@ -33,14 +34,14 @@ const STATES = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));
 
 test('--help exits 0 and prints the usage block', () => {
   const r = runSetStatus('--help');
-  assert.equal(r.status, 0, `--help should exit 0, got ${r.status}: ${r.all}`);
+  assert.equal(r.status, 0, describeSpawn(r, `--help should exit 0, got ${r.status}`));
   assert.match(r.all, /Usage: node set-status\.mjs/);
 });
 
 test('-h behaves identically to --help', () => {
   const long = runSetStatus('--help');
   const short = runSetStatus('-h');
-  assert.equal(short.status, 0, `-h should exit 0, got ${short.status}`);
+  assert.equal(short.status, 0, describeSpawn(short, `-h should exit 0, got ${short.status}`));
   assert.equal(short.stdout, long.stdout, '-h and --help should print the same text');
 });
 
@@ -84,7 +85,7 @@ test('--help never consults the tracker', () => {
 
 test('--help wins over otherwise-invalid arguments', () => {
   const r = runSetStatus('--report', 'not-a-number', 'Bogus', '--help');
-  assert.equal(r.status, 0, `--help should win over invalid args, got ${r.status}: ${r.all}`);
+  assert.equal(r.status, 0, describeSpawn(r, `--help should win over invalid args, got ${r.status}`));
   assert.match(r.all, /Usage: node set-status\.mjs/);
 });
 

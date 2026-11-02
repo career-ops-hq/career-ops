@@ -20,7 +20,8 @@
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
   <a href="README.tr.md">Türkçe</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
+  <a href="README.vi.md">Tiếng Việt</a> |
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
@@ -121,7 +122,11 @@ Stilheden, efter du trykker send, handler ikke om dig. Nok mennesker så det sam
 
 <br>
 
-Rekruttering reparerer ikke sig selv. Det kan de, der går igennem den, og de er allerede i rummet, hvor de sammenligner noter og fikser hinandens opsætninger. [Det er her, rettelsen bliver skrevet](CONTRIBUTING.md). Et rum, ikke en klub. **Lad os bygge sammen.**
+Rekruttering reparerer ikke sig selv. Det kan de, der går igennem den, og de er allerede i rummet, hvor de sammenligner noter og fikser hinandens opsætninger.
+
+<p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=da" alt="Animeret væg med bidragydernes GitHub-avatarer, der fyldes op i den rækkefølge, de kom til siden april 2026, med det næste felt holdt åbent." width="100%"></a></p>
+
+[Det er her, rettelsen bliver skrevet](CONTRIBUTING.md). Et rum, ikke en klub. **Lad os bygge sammen.**
 
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: antal medlemmer på career-ops-serveren, live"></a></p>
 
@@ -203,7 +208,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` følger med [Node.js](https://nodejs.org): det kører installationen én gang
 > uden at installere noget globalt. Ingen Node endnu? Installer den først.
-> (Bruger du allerede en Claude Code / Gemini / Codex CLI? Så har du den allerede.)
+> (Bruger du allerede en Claude Code / Codex CLI? Så har du den allerede.)
 
 Det kloner den seneste udgivelse ind i `./career-ops` og installerer afhængigheder. Derefter:
 
@@ -226,17 +231,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -245,7 +241,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -263,11 +259,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-Det installerer `career-ops`-binæren globalt, så du kan køre den direkte i stedet for via `npx`. I modsætning til `npx @santifer/career-ops init` (som opretter en projektmappe) giver den globale installation dig en permanent `career-ops`-kommando, der er tilgængelig overalt i din terminal.
+Det installerer `career-ops`-binæren globalt, så du kan køre `career-ops init [folder]` uden `npx`. `init` er dens eneste kommando: den opretter et arbejdsområde, og alt derefter foregår i din AI-kodnings-CLI (se Brug nedenfor), ikke gennem denne binær.
 
 **Hvilken skal du bruge?**
 - `npx @santifer/career-ops init`: bedst til første brug; opretter en dedikeret projektmappe.
-- `npm i -g @santifer/career-ops`: bedst, når du har en projektmappe og vil køre career-ops-kommandoer direkte.
+- `npm i -g @santifer/career-ops`: hvis du hellere vil skrive `career-ops init` end `npx`-formen. Den tilføjer ingen andre kommandoer.
 
 > **Systemet er designet til at blive tilpasset af din AI-kodnings-CLI selv.** Tilstande, arketyper, scorevægte, forhandlingsscripts: bed den bare om at ændre dem. Den læser de samme filer, som den bruger, så den ved præcis, hvad den skal redigere.
 
@@ -501,7 +497,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Funktioner: 6 filterfaner, 4 sorteringstilstande, grupperet/flad visning, forhåndsvisninger med lazy loading, statusændringer inline.
+Funktioner: 10 filterfaner, 8 sorteringstilstande, grupperet/flad visning, forhåndsvisninger med lazy loading, statusændringer inline.
 
 Der findes også en **eksperimentel web-UI** (alfa og tilvalg: intet kører, medmindre du starter den): se [`web/README.md`](web/README.md).
 
@@ -621,7 +617,7 @@ Go-dashboardets TUI, Node.js-scripts og AI-agenttilstande respekterer alle autom
 career-ops ([career-ops.org](https://career-ops.org), også kendt som **careerops**) er en open source AI-jobsøgning, der kører lokalt i din AI-kodnings-CLI (Claude Code, Codex, OpenCode og andre) og overlader hver beslutning til dig. Den vurderer jobopslag mod dit CV, genererer ATS-tilpassede PDF'er, finder den rette person at kontakte og holder styr på alt ét sted: du har altid det sidste ord. Den er den første referenceimplementering af [CareerOps-manifestet](https://career-ops.org/manifesto).
 
 **Kan det tilpassede CV finde på ting?**
-Det må det ikke, og prompterne siger det: omformuler, opdigt aldrig. `generate-pdf` blokerer et CV med tal eller fakta, der ikke står i dine kilder, medmindre du angiver `--skip-fact-check`. Kontrollen tjekker endnu ikke jobtitler og bedømmer heller ikke omformuleringer. To åbne issues følger det: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (jobtitler skal matche cv.md) og [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (troskabskontrol, der blokerer ved afvigelse). Indtil de er merget: læs hvert CV, før du sender det. [Den juridiske ansvarsfraskrivelse](LEGAL_DISCLAIMER.md) siger det samme med flere ord.
+Det må det ikke, og prompterne siger det: omformuler, opdigt aldrig. `generate-pdf` blokerer et CV med tal eller fakta, der ikke står i dine kilder, medmindre du angiver `--skip-fact-check`. `pdf`-tilstanden kører også `cv-title-check.mjs`, som sammenligner hver jobtitel i det tilpassede CV med den titel, cv.md giver samme job (matchet på virksomhed og datoer), og spørger dig, om en afvigende titel skal beholdes eller rettes tilbage. Den advarer i stedet for at blokere, fordi en omformuleret titel nogle gange er dit valg. Intet bedømmer omformuleringer endnu: [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (troskabskontrol, der blokerer ved afvigelse) følger det. Indtil da: læs hvert CV, før du sender det. [Den juridiske ansvarsfraskrivelse](LEGAL_DISCLAIMER.md) siger det samme med flere ord.
 
 **Kan jeg køre career-ops gratis eller på en billigere / lokal model?**
 Ja. career-ops er CLI-uafhængig og kører på gratis og lokale modeller (gratis OpenRouter-modeller, Ollama eller ethvert OpenAI-kompatibelt endpoint), så du er ikke bundet til et betalt abonnement. Se [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for den fulde opsætning.

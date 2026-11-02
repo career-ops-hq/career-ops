@@ -16,7 +16,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { resolve, dirname } from 'path';
-import { applyPatches } from './lib/latex-content.mjs';
+import { applyPatches, buildManifest } from './lib/latex-content.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 async function main() {
@@ -59,9 +59,28 @@ async function main() {
     process.exit(1);
   }
 
+  if (new Set(slots.map(s => s.id)).size !== slots.length) {
+    console.error('Duplicate slot ids in patches.json; rerun extract-latex-content.mjs.');
+    process.exit(1);
+  }
+
   const missing = patches.filter(p => !slots.some(s => s.id === p.id));
   if (missing.length > 0) {
     console.error(`Unknown patch ids: ${missing.map(p => p.id).join(', ')}`);
+    process.exit(1);
+  }
+
+  // Re-extract before comparing: unbraced items normalize trailing whitespace.
+  // An edit before or inside a slot must not splice into current LaTeX.
+  const currentSlots = buildManifest(absSource, tex).slots;
+  const stale = patches.filter(p => {
+    const slot = slots.find(s => s.id === p.id);
+    const current = currentSlots.find(s => s.id === p.id);
+    return !current || current.text !== slot.text || current.kind !== slot.kind
+      || current.span.start !== slot.span.start || current.span.end !== slot.span.end;
+  });
+  if (stale.length > 0) {
+    console.error(`Stale patch slots: ${stale.map(p => p.id).join(', ')}. Source changed; rerun extract-latex-content.mjs.`);
     process.exit(1);
   }
 

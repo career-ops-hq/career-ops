@@ -287,7 +287,8 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
   g('config', 'commit.gpgsign', 'false');
   g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
 
-  for (const f of ['validate-system-paths-coverage.mjs', 'update-system.mjs']) {
+  mkdirSync(join(dir, 'lib'), { recursive: true });
+  for (const f of ['validate-system-paths-coverage.mjs', 'update-system.mjs', 'lib/update-manifest.mjs']) {
     copyFileSync(join(ROOT, f), join(dir, f));
   }
   // A fork-local file upstream has never heard of — the reported case.

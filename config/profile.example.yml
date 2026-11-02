@@ -154,6 +154,15 @@ language:
 # Set to off to keep your own titles.
 # session_title: auto
 
+# Optional. Private repos the `expand` mode's GitHub evidence step
+# (`node github-evidence.mjs`, needs a logged-in `gh`) may use as evidence.
+# Empty by default: a private repo appears only by name and PR and commit counts,
+# never with PR titles or commit dates, until you add it here yourself as
+# "owner/repo". Only PR and commit metadata is read, never source code or commit
+# messages, and nothing reaches cv.md without your confirmation.
+# github_evidence:
+#   private_allowlist: []            # e.g. ["acme-corp/billing-service"]
+
 # Controls which model tier evaluates your offers. Valid values:
 #   economy  -- cheapest/fastest model, no extended thinking. Best for high-volume scanning.
 #   standard -- balanced model, no extended thinking. Default if this key is absent.
@@ -161,10 +170,13 @@ language:
 # See the tier -> model mapping table in modes/_shared.md.
 spend_tier: standard
 
-# (Optional) Paper size for every generated PDF: "letter" or "a4".
+# (Optional) Paper size for every generated PDF: "letter", "a4" or "auto".
 # One setting for the CV, the cover letter and the HTML body width, so they
 # cannot disagree. Absent means letter. An explicit --format flag or a payload
 # page_format still wins for a single render.
+# "auto" picks the sheet from the employer's country (payload `country`, or
+# --country on the renderers): Letter where Unicode CLDR lists it as the
+# primary size, A4 everywhere else, letter when the country is unknown.
 # page_format: letter
 
 # (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
@@ -223,16 +235,23 @@ cv:
   # rendered CV against it, and still fails if they disagree.
   # sections: [skills, education, certifications, awards]
 
+  # Sections that the AI must never remove, shorten, or paraphrase during CV generation or tailoring.
+  # (Enforced programmatically in HTML/PDF pipeline via build-cv-html and generate-pdf; LaTeX pipeline is not covered yet.)
+  # locked_sections:
+  #   - "Open Source Contributions"
+  #   - "GitHub Projects"
+
 # ── Culture Screen ───────────────────────────────────────────────────────────
 #
 # Enforces structural capping on the "Cultural signals" dimension during evaluation.
 #
 # culture_screen:
-#   # What you actively look for in a team culture (e.g. org size, meeting frequency, async-first).
+#   # What you actively look for in a team culture (e.g. org size, meeting frequency, async-first, hiring process).
 #   # If absent/commented, the dimension is scored qualitatively without a hard cap.
 #   require:
 #     - "Small, flat teams (under 15 engineers)"
 #     - "Async-first communication, low meeting overhead"
+#     - "Practical interview processes (pair programming, system design); avoid multiple LeetCode rounds or unpaid take-home assignments over ~6 hours"
 #   # If true, the dimension is capped at 2/5 if the JD lacks any evidence for the required criteria.
 #   # If false (or absent), lack of evidence defaults to a neutral 3/5.
 #   deprioritize_if_absent: true

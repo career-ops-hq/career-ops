@@ -297,8 +297,11 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 **URL:**
 **Archetype:** {detected}
 **Score:** {X/5}
+**決定:** {応募する | 検討する | 先に調べる | 見送る}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **PDF:** {path or pending}
+
+{`## 判定 (lead)` の一文をそのまま写す}
 
 ---
 
@@ -336,7 +339,12 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 
 ## Keywords extracted
 (list of 15-20 keywords from the JD for ATS optimization)
+
+## Job Description (archived verbatim)
+(posting の全文を verbatim で貼る — 下の要件を参照)
 ```
+
+**JD archival（必須、#2789）：** すべての report に `## Job Description (archived verbatim)` section を入れ、posting の全文をそのまま貼る。要約・言い換えはしない。見出しは英語のまま：`check-jd-archive.mjs` が名前で探す。`**URL:**` は archive ではない：posting が閉じると link は切れ、元の要件はもう取り戻せない。Section の 1 行目は source に表示されている掲載日（`Posted: {日付または表示どおりの相対表記}`、本当に無いときは `Posted: not visible in source`）で、report file 自体の日時で代用しない。JD が長すぎる、または全文を引用できないときは `archive-posting.mjs <url> --company={company-slug} --report={num}` で capture し、section には `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` の一文**だけ**を書く。言い換えで代用しない。Rule 全体は `modes/oferta.md` の **JD archival** を参照。
 
 ### 2. Record in tracker
 

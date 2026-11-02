@@ -115,8 +115,11 @@ Simpan evaluasi lengkap ke `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 **Tanggal:** {YYYY-MM-DD}
 **Arketipe:** {terdeteksi}
 **Score:** {X/5}
+**Keputusan:** {Lamar | Pertimbangkan | Teliti dulu | Lewati}
 **URL:** {URL lowongan}
 **PDF:** {path atau menunggu}
+
+{kalimat lamar atau tidak, disalin apa adanya}
 
 ---
 

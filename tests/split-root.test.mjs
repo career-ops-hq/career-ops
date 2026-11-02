@@ -38,6 +38,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { getBash, rmSync, ROOT, toBashPath } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const TRACKER_HEADER = [
   '# Applications Tracker',
@@ -80,6 +81,7 @@ function splitEnv(extra = {}) {
     CAREER_OPS_REPORTS_DIR: '',
     CAREER_OPS_ADDITIONS: '',
     CAREER_OPS_BATCH_STATE: '',
+    CAREER_OPS_PROFILE: '',
     ...extra,
   };
 }
@@ -117,7 +119,7 @@ function sentSystemPrompt(base, dataRoot, args) {
     }),
   });
   assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
-  assert.equal(r.status, 0, `openrouter-runner ${args[0]} exited ${r.status}: ${r.stderr}`);
+  assert.equal(r.status, 0, describeSpawn(r, `openrouter-runner ${args[0]} exited ${r.status}`));
   assert.ok(existsSync(capture), `openrouter-runner ${args[0]} sent no model request:\n${r.stdout}\n${r.stderr}`);
   const request = JSON.parse(readFileSync(capture, 'utf8'));
   return request.messages[0].content[0].text;
@@ -268,7 +270,7 @@ test('batch-runner: personalization, spend_tier, reports and tracker additions f
     const r = runBatch(checkout, { CAREER_OPS_ROOT: dataRoot });
     const output = `${r.stdout}\n${r.stderr}`;
     assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
-    assert.equal(r.status, 0, `batch-runner exited ${r.status}:\n${output}`);
+    assert.equal(r.status, 0, describeSpawn(r, `batch-runner exited ${r.status}:\n${output}`));
 
     // 1. The worker was briefed with the data root's personalization.
     const promptPath = join(checkout.captureDir, 'system-prompt.md');

@@ -39,7 +39,7 @@ export function reportPrefix(num) {
  * Both grammars written here put the company first, after the report prefix and
  * an optional capture date:
  *
- *   {NNN}-{YYYY-MM-DD}_{company}_{role}.pdf   archive-posting.mjs
+ *   {NNN}-{YYYY-MM-DD}_{company}_{role}_{sha256(url)[0:16]}[-2, -3, ...].pdf   archive-posting.mjs
  *   {NNN}-{company}-{role}.{ext}              hand-named and plugin captures
  *
  * So the slug is anchored to that position and must end on a field boundary.

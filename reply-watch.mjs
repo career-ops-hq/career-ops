@@ -18,14 +18,11 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import {
-  openTrackerTransaction, rebuildRow, resolveTrackerPath, loadCanonicalStates,
-} from './tracker-utils.mjs';
+import { resolveColumns, parseTrackerRow, trackerRowIdentity } from './tracker-parse.mjs';
+import { resolveTrackerPath, loadCanonicalStates } from './tracker-utils.mjs';
 import { readReplyProposals, hasProposalReceipt } from './lib/reply-proposals.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
-import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseFollowups } from './followup-cadence.mjs';
 
@@ -163,6 +160,52 @@ function groupStatusRecommendations(recommendations) {
   return { updates, conflicts };
 }
 
+// Every accepted update is written by set-status.mjs, the canonical writer, so
+// it runs the same status hooks as any other status change: the status-log
+// row, the JD archive on a move into Interview, follow-up seeding on Applied
+// (#5536). A cell edit here skipped all but the first, and the next hook added
+// to set-status would have been skipped too.
+//
+// Returns the parsed JSON result, or the writer's structured error (`code`,
+// plus `exitCode`, and `currentStatus` for a status-changed refusal).
+function runSetStatus(args) {
+  try {
+    const output = execFileSync(process.execPath, [path.join(CODE_ROOT, 'set-status.mjs'), ...args, '--json'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT, CAREER_OPS_TRACKER: APPS_FILE },
+      // stdout is the JSON result. stderr is passed through: it carries what
+      // the hooks have to tell the user directly, such as another session
+      // already working this row, or a failed JD archive.
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    return { result: JSON.parse(output) };
+  } catch (err) {
+    let failure = {};
+    try { failure = JSON.parse(err.stdout); } catch { /* no structured result */ }
+    return { error: { ...failure, exitCode: err.status ?? null } };
+  }
+}
+
+// What the hooks did, from set-status's JSON. Under --json it prints only
+// failures (to the stderr passed through above), so successes are reported
+// here; the ledger warning is restated per row in reply-watch's own words.
+function reportHooks(result, ledgerWarning) {
+  if (result.statusLogged === false) console.warn(ledgerWarning);
+  if (result.followupSeeded?.seeded) {
+    console.log(`   Follow-up seeded for #${result.num}: next ${result.followupSeeded.nextDate}`);
+  }
+  const archive = result.jdArchiveTriggered;
+  if (archive?.attempted && !archive.error) {
+    console.log(`   Archived the JD for #${result.num} before the posting can close`);
+  }
+}
+
+// A busy or unusable lock is not about one row: stop applying, as the
+// in-process writer did when it could not open the tracker.
+function isLockFailure(error) {
+  return error.code === 'lock-timeout' || error.code === 'lock-error';
+}
+
 // Re-read after the prompt, then compare the entire tracker under the canonical
 // writer's lock. This protects both the reviewed row and receipt absence across
 // ALL rows, including two concurrent reviews of one message targeting different
@@ -175,92 +218,56 @@ function applyProposalUpdate(update) {
   const matches = apps.filter(app => app.num === update.num);
   if (matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(update.snapshot)) {
     console.warn(`Skipped #${update.num}: tracker row changed during review; review again`);
-    return;
+    return true;
   }
   if (update.proposals.some(p => hasProposalReceipt(apps, p.receipt))) {
     console.warn(`Skipped #${update.num}: proposal was already accepted during review`);
-    return;
+    return true;
   }
   const digest = createHash('sha256').update(content).digest('hex');
-  try {
-    const output = execFileSync(process.execPath, [path.join(CODE_ROOT, 'set-status.mjs'),
-      '--row', String(update.num), update.newStatus, '--source', 'reply-watch',
-      '--expect-tracker', digest, '--note', update.proposals.map(p => p.receipt).join('; '), '--json'], {
-      encoding: 'utf8',
-      env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT, CAREER_OPS_TRACKER: APPS_FILE },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const result = JSON.parse(output);
+  const { result, error } = runSetStatus(['--row', String(update.num), update.newStatus, '--source', 'reply-watch',
+    '--expect-tracker', digest, '--note', update.proposals.map(p => p.receipt).join('; ')]);
+  if (result) {
     console.log(`Updated #${result.num} to ${result.newStatus}`);
-    if (result.statusLogged === false) console.warn(`Warning: status-log append failed for #${result.num}; status and receipt were saved`);
-  } catch (err) {
-    let reason = 'canonical writer failed; review again before retrying';
-    try { reason = JSON.parse(err.stdout).code ?? reason; } catch { /* no structured result */ }
-    console.warn(`Skipped #${update.num}: ${reason}`);
+    reportHooks(result, `Warning: status-log append failed for #${result.num}; status and receipt were saved`);
+    return true;
   }
+  console.warn(`Skipped #${update.num}: ${error.code ?? 'canonical writer failed; review again before retrying'}`);
+  return !isLockFailure(error);
 }
 
-async function updateTrackerStatuses(updates, onApplied = null) {
-  if (updates.length === 0) {
-    return { applied: new Set(), alreadyCurrent: new Set(), conflicts: new Map(), reviewConflicts: new Set(), missing: new Set(), recommendationConflicts: [] };
-  }
-  const trackerTransaction = await openTrackerTransaction(APPS_FILE);
-
-  try {
-    const content = trackerTransaction.read();
-    const lines = content.split('\n');
-    const colmap = resolveColumns(lines);
-    const grouped = groupStatusRecommendations(updates);
-    const updatesByNum = new Map(grouped.updates.map(update => [update.num, update]));
-    const applied = new Set();
-    const alreadyCurrent = new Set();
-    const conflicts = new Map();
-    const reviewConflicts = new Set();
-    const missing = new Set(updatesByNum.keys());
-    const currentRows = lines.map(line => parseTrackerRow(line, colmap)).filter(Boolean);
-    const counts = new Map();
-    for (const row of currentRows) counts.set(row.num, (counts.get(row.num) || 0) + 1);
-
-    for (let i = 0; i < lines.length; i++) {
-      const row = parseTrackerRow(lines[i], colmap);
-      if (!row) continue;
-      const update = updatesByNum.get(row.num);
-      if (!update) continue;
-      missing.delete(update.num);
-      // Consent belongs to the displayed application, not a reusable row number.
-      // Check under the writer lock so a replacement or duplicate cannot absorb it.
-      if (counts.get(row.num) !== 1) {
-        reviewConflicts.add(update.num);
-        continue;
-      }
-      // Compare identity before either status fast path. Status is checked
-      // separately below; raw includes that status cell's formatting.
-      if (JSON.stringify(row) !== JSON.stringify({ ...update.snapshot, status: row.status, raw: row.raw })) {
-        reviewConflicts.add(update.num);
-        continue;
-      }
-      if (row.status === update.newStatus) {
-        alreadyCurrent.add(update.num);
-        continue;
-      }
-      if (row.status !== update.oldStatus) {
-        conflicts.set(update.num, row.status);
-        continue;
-      }
-      const parts = lines[i].split('|').map(s => s.trim());
-      parts[colmap.status] = update.newStatus;
-      lines[i] = rebuildRow(parts);
-      applied.add(update.num);
+// The candidates path hands the writer the snapshot that was on screen, and the
+// writer checks it under its lock: the row must still be the application shown
+// (--expect-row, every cell but Status) and still hold the status shown
+// (--expect-status). Consent belongs to the displayed application, not a
+// reusable row number, so a replaced or duplicated row is refused (#5034). A
+// write to some other row meanwhile is not a reason to refuse, which is why
+// this does not use --expect-tracker the way the proposal path must.
+//
+// Returns false when the tracker lock could not be taken.
+function applyReviewedUpdate(update) {
+  const count = update.count > 1 ? ` (${update.count} replies)` : '';
+  const { result, error } = runSetStatus(['--row', String(update.num), update.newStatus, '--source', 'reply-watch',
+    '--expect-row', trackerRowIdentity(update.snapshot), '--expect-status', update.oldStatus]);
+  if (result) {
+    if (!result.changed) {
+      console.log(`No change for #${update.num}: already ${update.newStatus}${count}`);
+    } else {
+      console.log(`Updated #${update.num} to ${update.newStatus}${count}`);
+      reportHooks(result, `Warning: failed to append to status-log.tsv for #${update.num}; the status was saved`);
     }
-
-    if (applied.size > 0) {
-      trackerTransaction.replace(lines.join('\n'));
-      if (onApplied) onApplied(applied, updatesByNum);
-    }
-    return { applied, alreadyCurrent, conflicts, reviewConflicts, missing, recommendationConflicts: grouped.conflicts };
-  } finally {
-    trackerTransaction.close();
+    return true;
   }
+  if (error.code === 'status-changed') {
+    console.warn(`Skipped #${update.num}: status changed from ${update.oldStatus} to ${error.currentStatus} during review`);
+  } else if (error.code === 'row-changed' || error.code === 'ambiguous') {
+    console.warn(`Skipped #${update.num}: tracker row changed or became ambiguous during review; review again`);
+  } else if (error.code === 'not-found') {
+    console.warn(`Skipped #${update.num}: row no longer exists in the tracker`);
+  } else {
+    console.warn(`Skipped #${update.num}: ${error.error ?? error.code ?? 'canonical writer failed'}; review again before retrying`);
+  }
+  return !isLockFailure(error);
 }
 
 const KNOWN_FLAGS = ['--help', '-h'];
@@ -391,38 +398,18 @@ async function main() {
     const selected = acceptAll ? updates : rowIds.length > 0 && rowIds.every(num => updates.some(u => u.num === num))
       ? updates.filter(u => rowIds.includes(u.num)) : [];
     if (selected.length > 0) {
-      const statusLogFile = path.join(path.dirname(APPS_FILE), 'status-log.tsv');
-      const todayStr = localToday();
-
-      const legacyUpdates = selected.filter(update => update.proposals.length === 0);
-      const result = await updateTrackerStatuses(legacyUpdates, (applied, updatesByNum) => {
-        for (const num of applied) {
-          const u = updatesByNum.get(num);
-          if (u) {
-            const line = `${num}\t${todayStr}\t${u.oldStatus}\t${u.newStatus}\treply-watch\t\n`;
-            try {
-              fs.appendFileSync(statusLogFile, line, 'utf-8');
-            } catch (err) {
-              console.warn(`Warning: failed to append to status-log.tsv for #${num}: ${err.message}`);
-            }
-          }
-        }
-      });
-      for (const r of legacyUpdates) {
-        const count = r.count > 1 ? ` (${r.count} replies)` : '';
-        if (result.applied.has(r.num)) {
-          console.log(`Updated #${r.num} to ${r.newStatus}${count}`);
-        } else if (result.alreadyCurrent.has(r.num)) {
-          console.log(`No change for #${r.num}: already ${r.newStatus}${count}`);
-        } else if (result.conflicts.has(r.num)) {
-          console.warn(`Skipped #${r.num}: status changed from ${r.oldStatus} to ${result.conflicts.get(r.num)} during review`);
-        } else if (result.reviewConflicts.has(r.num)) {
-          console.warn(`Skipped #${r.num}: tracker row changed or became ambiguous during review; review again`);
-        } else if (result.missing.has(r.num)) {
-          console.warn(`Skipped #${r.num}: row no longer exists in the tracker`);
-        }
+      // One row at a time, so each is checked against the tracker as it is
+      // when its own write takes the lock.
+      let lockAvailable = true;
+      for (const update of selected) {
+        lockAvailable = update.proposals.length === 0 ? applyReviewedUpdate(update) : applyProposalUpdate(update);
+        if (!lockAvailable) break;
       }
-      for (const update of selected.filter(u => u.proposals.length > 0)) applyProposalUpdate(update);
+      if (!lockAvailable) {
+        console.error('\nCould not take the tracker lock; the remaining updates were not applied. Run reply-watch again.');
+        process.exitCode = 1;
+        return;
+      }
       console.log('\n✅ Tracker review complete');
 
       // Sync tracker DB if tracker.mjs exists

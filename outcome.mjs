@@ -4,7 +4,7 @@
  * outcome.mjs — Record application outcomes, archive artifacts, and sync tracker (#1722).
  *
  * Usage:
- *   node outcome.mjs <report#|company> <outcome_type> [--stage "..."] [--feedback "..."] [--note "..."] [--role "..."] [--cv "..."] [--cover "..."] [--dry-run] [--json]
+ *   node outcome.mjs <tracker#|company> <outcome_type> [--stage "..."] [--feedback "..."] [--note "..."] [--role "..."] [--cv "..."] [--cover "..."] [--dry-run] [--json]
  *
  * Outcomes:
  *   interview_progress | offer_received | hired | offer_declined | rejected | no_response | interview_only
@@ -18,7 +18,7 @@
  * Synchronizes tracker status using set-status.mjs under shared tracker lock.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'fs';
+import { constants, statSync, openSync, fstatSync, closeSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, linkSync, copyFileSync, rmSync } from 'fs';
 import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -39,6 +39,7 @@ import {
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { resolveOutcomeDir } from './lib/outcome-dir.mjs';
+import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { findCaptureForReport } from './jd-capture.mjs';
 
@@ -82,15 +83,15 @@ function today() {
 }
 
 
-const USAGE = `Usage: node outcome.mjs <report#|company> <outcome_type> [options]
+const USAGE = `Usage: node outcome.mjs <tracker#|company> <outcome_type> [options]
 
-  <report#|company>  Tracker selector (# or company name)
+  <tracker#|company> Tracker selector (# or company name)
   <outcome_type>     interview_progress | offer_received | hired | offer_declined | rejected | no_response | interview_only
   --stage "..."      Stage reached (e.g. "Tech Screen", "Final Round")
   --feedback "..."   Verbatim candidate/recruiter feedback
   --note "..."       Custom note to append to tracker
   --role "..."       Disambiguate company match
-  --cv "..."         Path to submitted CV (defaults to cv.md)
+  --cv "..."         Path to submitted CV (relative to the tracker workspace; defaults to cv.md)
   --cover "..."      Path to submitted cover letter
   --url "..."        Job posting URL (overrides auto-detection from tracker notes)
   --clean-output     Remove the tailored PDF/HTML from output/ once archived to data/outcomes/
@@ -245,11 +246,27 @@ const noteToAppend = flags.note || (flags.stage ? `${outcomeConfig.defaultNote}:
 // and, if --clean-output is set, what would be removed from output/ afterward.
 let cvResolvedPath = null;
 let isPdf = false;
+let explicitCvBytes = null;
 
 // Case A: A custom CV path is explicitly passed via CLI options.
-if (flags.cv) {
-  cvResolvedPath = flags.cv;
-  isPdf = flags.cv.toLowerCase().endsWith('.pdf');
+if (flags.cv !== null) {
+  const selectedCv = resolve(repoRoot, flags.cv);
+  try {
+    if (!statSync(selectedCv).isFile()) throw new Error('not a file');
+    // A regular file may become a FIFO after stat; do not block before fstat.
+    const fd = openSync(selectedCv, process.platform === 'win32' ? 'r' : constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      if (!fstatSync(fd).isFile()) throw new Error('not a file');
+      explicitCvBytes = readFileSync(fd);
+      if (explicitCvBytes.length === 0) throw new Error('empty file');
+    } finally {
+      closeSync(fd);
+    }
+  } catch (err) {
+    failExit(`Selected CV is not a readable file: ${flags.cv} (${err.message})`, 'invalid-cv', 1);
+  }
+  cvResolvedPath = selectedCv;
+  isPdf = selectedCv.toLowerCase().endsWith('.pdf');
 } else {
   // Case B: Read tracker's PDF column cell and resolve its path.
   if (matchedRow.pdf && matchedRow.pdf !== '—' && matchedRow.pdf !== '-') {
@@ -370,24 +387,66 @@ mkdirSync(outcomeDir, { recursive: true });
 // Write or copy resolved CV artifact to outcomeDir, preserving existing files instead of overwriting.
 let archivedCvPdfPath = null;
 let archivedCvHtmlPath = null;
-if (cvResolvedPath && existsSync(cvResolvedPath)) {
-  const destName = isPdf ? 'submitted_cv.pdf' : 'submitted_cv.md';
-  const cvDestPath = join(outcomeDir, destName);
-  if (!existsSync(cvDestPath)) {
-    copyFileSync(cvResolvedPath, cvDestPath);
-  }
-  if (isPdf) archivedCvPdfPath = cvDestPath;
-} else {
-  // Case D: Fallback to the master root cv.md.
-  const masterCv = resolve(repoRoot, 'cv.md');
-  const cvDestPath = join(outcomeDir, 'submitted_cv.md');
-  if (!existsSync(cvDestPath)) {
-    if (existsSync(masterCv)) {
-      copyFileSync(masterCv, cvDestPath);
+// All CV writers wait before checking existence: an exclusive copy can expose
+// a partial destination, and remove it again on failure, on linkless volumes.
+let cvLock;
+try {
+  cvLock = await acquireDirLock(join(outcomeDir, '.submitted-cv.lock'), {
+    timeoutMs: 60_000, retryMs: 75, staleMs: 10 * 60_000, maxWaitMs: 60_000,
+  });
+} catch (err) {
+  failExit(`CV archive lock unavailable in ${outcomeDir} (${err.message})`, 'cv-archive-locked', 1);
+}
+try {
+  try {
+    if (cvResolvedPath && (flags.cv !== null || existsSync(cvResolvedPath))) {
+      const destName = isPdf ? 'submitted_cv.pdf' : 'submitted_cv.md';
+      const cvDestPath = join(outcomeDir, destName);
+      if (!existsSync(cvDestPath)) {
+        if (flags.cv !== null) {
+          const stagingDir = mkdtempSync(join(outcomeDir, '.submitted-cv-'));
+          try {
+            const stagedCv = join(stagingDir, destName);
+            writeFileSync(stagedCv, explicitCvBytes);
+            // Publish complete bytes without replacing a concurrently archived CV.
+            try {
+              linkSync(stagedCv, cvDestPath);
+            } catch (err) {
+              if (['EPERM', 'ENOTSUP', 'ENOSYS', 'EXDEV'].includes(err.code)) {
+                // Volumes without hard links can still archive without overwriting.
+                try {
+                  copyFileSync(stagedCv, cvDestPath, constants.COPYFILE_EXCL);
+                } catch (copyErr) {
+                  if (copyErr.code !== 'EEXIST') throw copyErr;
+                }
+              } else if (err.code !== 'EEXIST') throw err;
+            }
+          } finally {
+            rmSync(stagingDir, { recursive: true, force: true });
+          }
+        } else {
+          copyFileSync(cvResolvedPath, cvDestPath);
+        }
+      }
+      if (isPdf) archivedCvPdfPath = cvDestPath;
     } else {
-      writeFileSync(cvDestPath, `# Submitted CV — #${matchedRow.num} ${matchedRow.company}\n\nNo CV source file found at ${masterCv} on ${today()}.\n`);
+      // Case D: Fallback to the master root cv.md.
+      const masterCv = resolve(repoRoot, 'cv.md');
+      const cvDestPath = join(outcomeDir, 'submitted_cv.md');
+      if (!existsSync(cvDestPath)) {
+        if (existsSync(masterCv)) {
+          copyFileSync(masterCv, cvDestPath);
+        } else {
+          writeFileSync(cvDestPath, `# Submitted CV — #${matchedRow.num} ${matchedRow.company}\n\nNo CV source file found at ${masterCv} on ${today()}.\n`);
+        }
+      }
     }
+  } finally {
+    releaseOrWarn(cvLock);
   }
+} catch (err) {
+  if (flags.cv !== null) failExit(`Selected CV could not be archived: ${flags.cv} (${err.message})`, 'invalid-cv', 1);
+  throw err;
 }
 
 // 1b. Snapshot the companion HTML CV — only archived (and thus only eligible for
@@ -481,7 +540,7 @@ if (postingArchived && resolvedPostingPath) {
   }
 }
 
-// 4. Append entry to outcome.md
+// 4. Prepare the journal entry (no write until the tracker confirms it)
 const outcomeLogPath = join(outcomeDir, 'outcome.md');
 const entryHeader = `## Entry: ${today()}`;
 const newEntry = `${entryHeader}
@@ -492,18 +551,6 @@ const newEntry = `${entryHeader}
 > ${flags.feedback ? flags.feedback.replace(/\r?\n/g, '\n> ') : 'None recorded'}
 - **Notes**: ${noteToAppend}
 `;
-
-if (existsSync(outcomeLogPath)) {
-  const existingLog = readFileSync(outcomeLogPath, 'utf-8');
-  if (!existingLog.includes(newEntry.trim())) {
-    writeFileSync(outcomeLogPath, existingLog.endsWith('\n') ? existingLog + '\n' + newEntry : existingLog + '\n\n' + newEntry);
-  }
-} else {
-  const initialLog = `# Application Outcome Log — ${matchedRow.company} — ${matchedRow.role} (#${matchedRow.num})
-
-${newEntry}`;
-  writeFileSync(outcomeLogPath, initialLog);
-}
 
 // 5. Update tracker via set-status.mjs
 const setStatusArgs = [
@@ -525,6 +572,23 @@ try {
   setStatusResult = JSON.parse(statusOutput);
 } catch (err) {
   failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
+}
+
+// Publish the committed journal only after set-status confirms the transition.
+try {
+  if (existsSync(outcomeLogPath)) {
+    const existingLog = readFileSync(outcomeLogPath, 'utf-8');
+    if (!existingLog.includes(newEntry.trim())) {
+      writeFileSync(outcomeLogPath, existingLog.endsWith('\n') ? existingLog + '\n' + newEntry : existingLog + '\n\n' + newEntry);
+    }
+  } else {
+    const initialLog = `# Application Outcome Log — ${matchedRow.company} — ${matchedRow.role} (#${matchedRow.num})
+
+${newEntry}`;
+    writeFileSync(outcomeLogPath, initialLog);
+  }
+} catch (err) {
+  failExit(`Tracker updated, but outcome journal could not be saved: ${err.message}`, 'journal-write-failed', 1);
 }
 
 // 6. Clean up output/ — only ever removes a file whose archived copy in

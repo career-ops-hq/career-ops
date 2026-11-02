@@ -1,24 +1,26 @@
 ---
 name: career-ops
 description: >-
-  AI job search command center -- evaluate offers, generate CVs, scan portals,
+  Open-source AI job search agent -- evaluate offers, generate CVs, scan portals,
   track applications. Use when the user pastes a job URL or JD, asks to scan
   portals, generate a CV/PDF, track applications, prepare for interviews, draft
   outreach/emails, or run any career-ops mode.
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | master-profile | intake | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
+argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
 license: MIT
 ---
 
 # career-ops -- Router
 
-career-ops is a multi-CLI job-search command center. The routing below is shared across supported agent CLIs even when the invocation surface differs.
+career-ops is a multi-CLI AI job search agent. The routing below is shared across supported agent CLIs even when the invocation surface differs.
 
 ## Project Root Resolution
 
-Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `SKILL.md`: start at the skill file's directory and walk upward until the nearest directory containing both `AGENTS.md` and `modes/`. Resolve every path in this router (`modes/`, `config/`, `data/`, scripts, templates, and output paths) against `PROJECT_ROOT`, never against the process's current working directory. This is required even when the checkout itself is nested (for example `Development\\career-ops`) or the command starts from a subdirectory. If those two sentinels cannot be found, stop and locate the career-ops checkout before reading or writing files.
+Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `SKILL.md`: start at the skill file's directory and walk upward until the nearest directory containing both `AGENTS.md` and `modes/`. This is required even when the checkout itself is nested (for example `Development\\career-ops`) or the command starts from a subdirectory. If those two sentinels cannot be found, stop and locate the career-ops checkout before reading or writing files. Then derive `DATA_ROOT`, where the user's own files live, with the precedence `path-resolver.mjs` uses: `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` if either is set; otherwise the path written in `PROJECT_ROOT/.career-ops-data` if that file exists and is not empty; otherwise `PROJECT_ROOT` itself. A relative value in either place resolves against `PROJECT_ROOT`. Run from `PROJECT_ROOT`, `node -e "import('./path-resolver.mjs').then(m => console.log(m.getCareerOpsRoot()))"` prints the same directory. With no override the two roots are one directory.
+
+Resolve every path in this router against one of these two roots, never against the process's current working directory. User Layer paths resolve against `DATA_ROOT`. They include `cv.md`, `article-digest.md`, `portals.yml`, `config/` (except the shipped `*.example.*` files), `data/`, `reports/`, `output/`, `interview-prep/`, `modes/_profile.md`, `modes/_custom.md`, `modes/_brief.md`, `batch/tracker-additions/`, and every other User Layer path in `DATA_CONTRACT.md`. Everything else (the other `modes/` files, scripts, templates, the `config/*.example.*` files) resolves against `PROJECT_ROOT`.
 
 ## Invocation Notes
 
@@ -55,6 +57,7 @@ Determine the mode from `$mode`:
 | `interview` | `interview` |
 | `master-profile` | `master-profile` |
 | `intake` | `intake` |
+| `retro` | `retro` |
 | `eu-swe` | `regional/eu-swe` |
 | `interview/plan` | `interview/plan` |
 | `interview/practice` | `interview/practice` |
@@ -143,7 +146,7 @@ Concrete equivalents for Codex prompt-driven sessions:
 Show this menu:
 
 ```
-career-ops -- Command Center
+career-ops -- AI Job Search Agent
 
 Available commands:
   /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
@@ -156,6 +159,7 @@ Available commands:
   /career-ops interview    → Interactive profile/CV onboarding interview
   /career-ops master-profile → Import, review, and validate your Master Career Profile
   /career-ops intake    → Build or enrich your profile from documents/ (master CV, LinkedIn export; nothing written without confirm)
+  /career-ops retro     → Review this session and keep what you taught it as rules (writes only the ids you accept)
   /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
@@ -173,7 +177,7 @@ Available commands:
   /career-ops project   → Evaluate portfolio project idea
   /career-ops tracker   → Application status overview
   /career-ops agent-inbox → Queue/drain requests for the next session (data/agent-inbox.md)
-  /career-ops apply     → Live application assistant (reads form + generates answers)
+  /career-ops apply     → Live application assistant (Playwright from this checkout, does not submit)
   /career-ops scan      → Scan portals and discover new offers
   /career-ops discover  → Resolve a company list to scannable ATS boards + append to portals.yml (zero-token)
   /career-ops triage    → Fast first-pass go/no-go score from modes/_brief.md (writes no files)
@@ -199,7 +203,7 @@ After determining the mode, load the necessary files before executing:
 
 If `modes/_custom.md` exists, read it after `modes/_profile.md` and before the selected mode file. It contains user house rules and procedural preferences. It may override workflow/style defaults, but it never adds factual claims about the candidate.
 
-Resolve `language.modes_dir` before applying the path shorthand below. With no setting, use `modes`. With a scalar directory, preserve the existing behavior: use that directory's `_shared.md` and localized mode file when it provides one. With a list, load every declared directory's `_shared.md` exactly once (including the baseline `modes/_shared.md` when `modes` appears), but use only the FIRST entry's evaluation-mode file for Blocks A-F; later entries contribute context, never a competing evaluation file. User-layer `_profile.md` and `_custom.md` remain under `modes/`.
+Resolve `language.modes_dir` before applying the path shorthand below. With no setting, use `modes`. With a scalar directory, preserve the existing behavior: use that directory's `_shared.md` and localized mode file when it provides one. With a list, load every declared directory's `_shared.md` exactly once (including the baseline `modes/_shared.md` when `modes` appears), but use only the FIRST entry's evaluation-mode file for Blocks A-F; later entries contribute context, never a competing evaluation file. User-layer `_profile.md` and `_custom.md` remain under `modes/` in `DATA_ROOT`.
 
 ### Modes that require `_shared.md` + their mode file
 
@@ -211,7 +215,7 @@ Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `ap
 
 Read `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + `modes/{mode}.md`
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `master-profile`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`, `intake`, `ats`, `calibrate`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `master-profile`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`, `intake`, `ats`, `calibrate`, `retro`, `expand`, `interview-redflag`, `update`
 
 ### Modes that load only their mode file
 

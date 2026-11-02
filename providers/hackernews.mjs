@@ -60,7 +60,7 @@ import { decodeEntities } from './_html-entities.mjs';
  * Exported for unit testing.
  *
  * @param {string} text  Raw comment text (may contain HTML; tags are stripped).
- * @param {string} threadUrl  Fallback url (the HN thread) if no URL in comment.
+ * @param {string} threadUrl  Fallback url if no URL in comment (fetch() passes the comment's own permalink).
  * @returns {{ title: string, url: string, company: string, location: string } | null}
  *   null when the comment is empty, deleted, or carries no usable title.
  */
@@ -165,7 +165,16 @@ export default {
       const text = typeof child.text === 'string' ? child.text : '';
       if (!text.trim()) continue;
 
-      const parsed = parseHnComment(text, threadHnUrl);
+      // A post with no link of its own falls back to its own permalink, not the
+      // thread's. With the thread URL every such post shared one dedup key, so
+      // only the first was ever considered, and its pipeline row opened the
+      // whole thread (#5478). The thread URL stays the last resort for a
+      // comment that carries no id.
+      const commentId = child.id ?? child.objectID;
+      const fallbackUrl = commentId != null && String(commentId) !== ''
+        ? `https://news.ycombinator.com/item?id=${encodeURIComponent(String(commentId))}`
+        : threadHnUrl;
+      const parsed = parseHnComment(text, fallbackUrl);
       if (!parsed) continue;
 
       jobs.push({

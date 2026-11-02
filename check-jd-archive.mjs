@@ -74,7 +74,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
-import { join, dirname, basename } from 'path';
+import { join, dirname, basename, relative, isAbsolute } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { flagValue } from './lib/cli-flags.mjs';
@@ -83,6 +83,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { loadCanonicalStates, resolveCanonicalState, resolveTrackerPath } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { JD_HEADING_RE, NEXT_REPORT_SECTION_RE } from './lib/jd-archive-section.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -139,20 +140,13 @@ export function parseReportFilename(filename) {
 }
 
 // --- Archive-section detection ---
-// Matches "## Job Description", with or without a parenthetical/suffix (the
-// canonical heading is "## Job Description (archived verbatim)"). Content is
-// read up to the next KNOWN report-section heading or end of file — not any
-// "## " line, because a JD pasted verbatim can itself contain markdown-style
-// sub-headings (e.g. "## Responsibilities"), which would otherwise truncate
-// the section and falsely report a real archive as missing (CodeRabbit,
-// PR #2791). The allowlist below is every section name modes/oferta.md's
-// report template actually uses; a real JD's own text is vanishingly
-// unlikely to collide with one verbatim. HTML comments are stripped before
-// the length check so a commented-out template stub doesn't count as
-// archived text.
-const JD_HEADING_RE = /^##\s+Job Description\b.*$/im;
-const NEXT_REPORT_SECTION_RE =
-  /^##\s+(?:Machine Summary|Keywords extracted|[A-Z]\)|Block\s[A-Z]\b|Risk Summary|Cover Letter Draft|Post-evaluation|Liveness gate|Blacklist gate|Bounded Research Budget|Step 0\b)/im;
+// JD_HEADING_RE and NEXT_REPORT_SECTION_RE are shared with the evaluators that
+// write the section (lib/jd-archive-section.mjs), so writer and reader agree on
+// where it starts and ends. Content runs to the next KNOWN report-section
+// heading or end of file, not to any "## " line, because a verbatim JD can
+// carry its own sub-headings (CodeRabbit, PR #2791). HTML comments are
+// stripped before the length check so a commented-out template stub doesn't
+// count as archived text.
 
 // The unfilled modes/oferta.md template placeholder ("(the posting's full
 // text, pasted verbatim — see requirement below)") is 66 characters — longer
@@ -181,11 +175,11 @@ const UNFILLED_TEMPLATE_PLACEHOLDER =
 // reference anywhere in the section as pointer-only, which wrongly rejected
 // real archived text alongside an incidental path mention.
 // Tracker links also name PDF captures from archive-posting and plain text
-// captures; the embedded pointer convention below remains Markdown-only.
+// captures. The embedded pointer sentence below accepts .md and .pdf.
 const JDS_PATH_RE = /jds\/[^\s()<>]+?\.(?:pdf|txt|md)(?=$|[\s)\]`>]|[.,;:!?](?=\s|$))/i;
 const POSTED_LINE_RE = /^Posted:.*$/im;
 const POINTER_SENTENCE_RE =
-  /^See\s+jds\/[^\s()]+\.md\s+for the full archive(?:\s*\(archive-posting\.mjs\s+--report=\d+\))?\.?$/i;
+  /^See\s+jds\/[^\s()]+\.(?:md|pdf)\s+for the full archive(?:\s*\(archive-posting\.mjs\s+--report=\d+\))?\.?$/i;
 
 function isPathOnlyPointer(strippedSection) {
   const withoutPostedLine = strippedSection.replace(POSTED_LINE_RE, '').trim();
@@ -232,6 +226,18 @@ const NON_CONTENT_MARKERS = [
     category: 'js-required',
     reason: 'looks like a "please enable JavaScript" shell, not a posting',
     re: /(please enable javascript|this site requires javascript|<noscript)/i,
+  },
+  {
+    category: 'paraphrase',
+    // An evaluator that cannot quote the posting (fetch-tool copyright guard,
+    // quote-length limit) writes a restatement and usually SAYS so in the
+    // section. A restatement is not an archive: it carries the evaluator's
+    // reading of the posting, not the posting (#5179). Matched on the
+    // evaluator's own disclosure phrasing, deliberately not the bare words
+    // "paraphrase" or "restate", which a real JD can use as a duty ("you will
+    // paraphrase source material") or in finance prose ("restated financials").
+    reason: 'says it is a paraphrase or restatement, not the verbatim posting',
+    re: /(\(paraphras(?:e|ed)\b[^)\n]*\)\s*(?::|$)|\b(?:what follows|the following|(?:the )?(?:text|passages?|content) below|this(?: (?:description|section|posting|text|summary|document))?) (?:is|are) (?:a |an )?(?:(?:close|detailed|faithful|complete|non-fabricated|full|accurate)[ ,]+)*(?:paraphrase|paraphrased|restatement|restated)\b|\bthis section restates\b|\bthis (?:description|section|posting|text|summary|document) (?:was|has been|is) (?:paraphrased|restated)\b|^[\s*_>#-]*(?:paraphrased|restated) (?:from|version)\b|[—–-]\s*paraphras(?:e|ed)\s*$|\b(?:what follows|the following|(?:the )?(?:text|passages?|content) below|this (?:is|description|section|posting|text|summary|document))[^.\n]{0,60}?\bnot (?:a |the )?(?:literal|verbatim) (?:copy|quote|text|reproduction|archive|posting)\b|\bparaphrase,? not (?:a |the )?(?:literal|verbatim)\b|\b(?:tool|fetcher|evaluator|scraper)\b[^.\n]{0,30}?\b(?:could|would|did|can) ?not (?:be )?(?:reproduc|quot|return|captur|copi)\w*[^.\n]{0,40}\b(?:literal|verbatim)\b)/im,
   },
   {
     category: 'bot-challenge',
@@ -288,12 +294,27 @@ export function extractStrippedJdSection(content) {
   return stripped.trim();
 }
 
+// Marker lookup over the whole section, heading line included. The heading is
+// outside extractStrippedJdSection()'s text, and an honest evaluator may retitle
+// it ("## Job Description (paraphrase, not verbatim)") without touching the body.
+export function detectJdSectionMarker(content) {
+  const stripped = extractStrippedJdSection(content);
+  if (stripped === null) return null;
+  const heading = JD_HEADING_RE.exec(String(content ?? ''))[0];
+  // The heading is evaluator-written, never JD text, so a plain "not verbatim"
+  // there is a disclosure ("(not verbatim)", ", not verbatim").
+  const headingDisclosure = /\bnot (?:a |the )?(?:literal|verbatim)\b/i.test(heading)
+    ? NON_CONTENT_MARKERS.find((m) => m.category === 'paraphrase')
+    : null;
+  return detectNonContentMarker(stripped) ?? detectNonContentMarker(heading) ?? headingDisclosure;
+}
+
 export function hasEmbeddedJdArchive(content) {
   const stripped = extractStrippedJdSection(content);
   if (stripped === null) return false;
   if (stripped === UNFILLED_TEMPLATE_PLACEHOLDER) return false;
   if (isPathOnlyPointer(stripped)) return false;
-  if (detectNonContentMarker(stripped)) return false;
+  if (detectJdSectionMarker(content)) return false;
   return stripped.length >= MIN_ARCHIVE_CHARS;
 }
 
@@ -411,6 +432,15 @@ export function mapTrackerCaptureLinks(trackerPath, jdsDir) {
     // directory is overridable with --jds-dir, so the literal `jds/` segment is
     // not guaranteed to be where they live. Try the root-relative path first,
     // then the same basename inside the directory actually in use.
+    // A link such as `jds/../../x.pdf` must not reach a file outside the data
+    // root, or the capture directory in use.
+    const within = (base, candidate) => {
+      const rel = relative(base, candidate);
+      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+    };
+    // Reject an escaping link outright, so the basename fallback cannot credit
+    // an unrelated in-root file that happens to share its name.
+    if (!within(dataRoot, join(dataRoot, match[0]))) continue;
     const abs = [join(dataRoot, match[0]), join(jdsDir, basename(match[0]))]
       .find((candidate) => existsSync(candidate));
     if (!abs) continue; // dangling link is not an archive
@@ -490,8 +520,7 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
     // non-content marker, #3829) rather than just being absent or too
     // short — surface it so a user reads "looks like a sign-in wall, not a
     // posting" instead of a generic miss.
-    const strippedSection = extractStrippedJdSection(content);
-    const marker = strippedSection !== null ? detectNonContentMarker(strippedSection) : null;
+    const marker = detectJdSectionMarker(content);
 
     const detail = marker
       ? `"## Job Description" section ${marker.reason} — not credited as an archive, and no jds/ capture found${meta ? ` for report ${meta.reportNum} (company slug "${meta.companySlug}")` : ''}`
@@ -743,6 +772,88 @@ function runSelfTest() {
   check(hasEmbeddedJdArchive(
     '## Job Description (archived verbatim)\n\nOnce hired, you will sign in to our internal LMS daily to manage learner rosters and publish course updates across three regional campuses.\n\n## Machine Summary'),
     'hasEmbeddedJdArchive does not false-positive on real JD prose that merely mentions signing in to an internal system, since it does not match the anchored login-wall phrasing (#3829)');
+
+  // --- Self-declared paraphrase (#5179) ---
+  // An evaluator that cannot quote the posting writes a restatement and says so
+  // in the section. The prose clears MIN_ARCHIVE_CHARS, so without a marker it
+  // is credited as an archive under a heading that promises "verbatim".
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nNote: the fetch tool would not return the literal text. What follows is a detailed, close paraphrase of the posting, not a literal copy.\n\nTitle: Director of Marketing. Owns demand generation and reports to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a section that calls itself a paraphrase while the heading says archived verbatim (#5179)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\n**Mandate (paraphrased):** Own pipeline generation across all online channels and report to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a section whose body labels its content "(paraphrased)" (#5179)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (paraphrase, not verbatim)\n\nTitle: Director of Marketing. Owns demand generation, reports to the CMO, manages a team of eight.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not credit a section whose own heading says it is not verbatim (#5179)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThe tool could not reproduce the verbatim text, so this section restates it. Title: Director of Marketing, reports to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a section that says verbatim reproduction was not possible (#5179)');
+  check(detectNonContentMarker('This is a close paraphrase, not a literal copy of the posting.')?.category === 'paraphrase',
+    'detectNonContentMarker classifies a self-declared paraphrase with the paraphrase category (#5179)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nYou will paraphrase dense source material into plain language for our course catalog and edit copy written by three regional teams.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on real JD prose that merely uses the word paraphrase as a duty (#5179)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nWe are hiring a part-time Instructional Design Assistant to support course updates in our LMS, 10 hours/week, remote, $28/hr. Candidates must be able to restate technical content for lay readers.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on real JD prose that mentions restating content (#5179)');
+
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nParaphrased from the original posting: Director of Marketing, owns demand generation and reports to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects an unparenthesized "Paraphrased from the original posting" body disclosure (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description - paraphrased\n\nDirector of Marketing. Owns demand generation, reports to the CMO, manages a team of eight.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a heading that ends in "- paraphrased" (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description \u2014 paraphrased\n\nDirector of Marketing. Owns demand generation, reports to the CMO, manages a team of eight.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a heading that ends in an em dash and "paraphrased" (#5179 review)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nIn this role you will produce a paraphrased version of source material for our course catalog, working from drafts supplied by three regional teams.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on a JD duty that asks for a paraphrased version of source material (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\n**Restated from the original posting:** Director of Marketing, owns demand generation and reports to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a line-start "Restated from the original posting" disclosure (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThis description was paraphrased from the original posting. Director of Marketing, owns demand generation and reports to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a "was paraphrased" disclosure (#5179 review)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nOur earlier course catalog was paraphrased from legacy vendor manuals, and you will rewrite those entries from the original sources with three regional teams.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on JD prose where something other than the section was paraphrased (#5179 review)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nCreate training notes (a close paraphrase of the technical specifications) for new hires across three regional teams, and review them monthly.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on a JD duty with a parenthetical that mentions a paraphrase (#5179 review)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nYour deliverable is a faithful paraphrase of customer interviews, written for our product team and reviewed by three regional leads.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on a JD duty where a deliverable is a paraphrase (#5179 review)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nCreate a summary that is not a literal copy of source notes, and review it with three regional leads each month before it ships.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on a JD duty asking for a summary that is not a literal copy (#5179 review)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nYou cannot quote customer data verbatim in external reports, so you will summarize findings for the regional leads each month.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on a JD duty that forbids quoting customer data verbatim (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThe fetch tool would not return the literal text, so the director of marketing role below is written from memory of the page.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive still rejects an evaluator disclosure that the fetch tool would not return the literal text (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThis is a paraphrase of the original posting. Director of Marketing, owns demand generation and reports to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a bare "This is a paraphrase" disclosure (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nWhat follows is paraphrased from the original posting. Director of Marketing, owns demand generation and reports to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects "What follows is paraphrased" (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThis section is restated from the original posting. Director of Marketing, owns demand generation and reports to the CMO.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects "This section is restated" (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (not verbatim)\n\nDirector of Marketing. Owns demand generation, reports to the CMO, manages a team of eight.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a heading with a parenthetical "not verbatim" (#5179 review)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description, not verbatim\n\nDirector of Marketing. Owns demand generation, reports to the CMO, manages a team of eight.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a comma-separated "not verbatim" heading (#5179 review)');
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nCandidates need not verbatim-copy source text. Survey answers are not literal quotes, and you will review them for tone across three regional teams.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on real JD prose that says "not literal" or "verbatim" as a duty (#5179 review)');
+  check(isPathOnlyPointer('See jds/042-2026-01-15_acme_director.pdf for the full archive (archive-posting.mjs --report=42).'),
+    'a PDF pointer sentence is read as a pointer, so its capture must resolve (#5179 review)');
 
   // --- Fixture directory tree (mkdtempSync, mirrors the repo's own test convention) ---
   const tmpDir = mkdtempSync(join(tmpdir(), 'check-jd-archive-test-'));

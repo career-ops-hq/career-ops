@@ -89,6 +89,20 @@ node scan.mjs --company "<Company>" --dry-run --json
 A dry run resolves the company, fetches (or parses) its board, and prints what it
 found without writing to `data/pipeline.md`.
 
+When the edit touched `title_filter`, check the keywords against what you have
+already scanned:
+
+```bash
+node filter-audit.mjs --summary
+```
+
+It replays `title_filter.positive` over `data/scan-history.tsv` and shows, per
+keyword, how many offers only that keyword catches (`unique`). A keyword that
+matches nothing, or catches nothing another keyword does not also catch, can go.
+One that brings many offers that score low once evaluated is a hint to add
+negatives. It reads only the positive list, so offers that a negative keyword
+or `location_filter` already drop still count.
+
 ---
 
 ## 3. Run the checks through your agent CLI
@@ -129,6 +143,15 @@ both "is it well-formed" and "is it returning real postings".
   parent company, a regional subsidiary, or a same-named unrelated tenant. No
   heuristic catches this; it is why the audit *shows* you sample titles and
   locations instead of pretending to a verdict. A human has to eyeball it.
+
+The other way round: you found a posting by hand that the scanner never showed
+you. `coverage-check.mjs` says why: a filter dropped it, the entry is disabled or
+has no provider, the company is not in `portals.yml`, and so on. It proposes the
+one `portals.yml` change that would have caught it, without editing anything:
+
+```bash
+node coverage-check.mjs <url> --company "<Company>" --title "<Title>" [--location "<Location>"]
+```
 
 Which provider covers which board — and what each one needs in `portals.yml` — is
 in [Supported job boards](SUPPORTED_JOB_BOARDS.md).

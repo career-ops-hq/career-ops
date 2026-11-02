@@ -1,6 +1,6 @@
 {
   "name": "@santifer/career-ops",
-  "version": "1.37.0",
+  "version": "1.38.0",
   "description": "One-command installer for career-ops — the AI-powered job search pipeline built on Claude Code.",
   "bin": {
     "career-ops": "bin/cli.mjs"
@@ -9,6 +9,7 @@
   "files": [
     "bin/cli.mjs",
     "bin/npm-command.mjs",
+    "bin/release-tag.mjs",
     "bin/skill-entrypoints.mjs",
     "README.md"
   ],

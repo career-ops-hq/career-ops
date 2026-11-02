@@ -81,7 +81,7 @@ Project-level `.claude/settings.json` and `~/.claude/settings.local.json` can se
 
 ### The batch mode is the exception worth knowing
 
-`batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+`batch/batch-runner.sh` drives `claude -p` workers by default, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
 
 ```bash
 claude setup-token          # requires an active Claude subscription

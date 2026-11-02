@@ -289,6 +289,11 @@ export default {
     if (stopReason === 'cap' && !probing) {
       console.error(`⚠️  pageup: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length} jobs) — raise max_pages on this entry for more`);
     }
+    // Every non-complete stop leaves the board partial (a probe's own cap does not count); tag it
+    // (the workdayTruncated convention) so a caller can tell without reading stderr.
+    if ((stopReason === 'cap' && !probing) || stopReason === 'fetch-error' || stopReason === 'unrecognised-page') {
+      /** @type {any} */ (jobs).pageupTruncated = true;
+    }
     return jobs;
   },
 };

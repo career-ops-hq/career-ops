@@ -5,9 +5,9 @@
 // This is the half underneath: a snapshot that missed a class of path would
 // leave the wiring reporting a clean run over a changed tracker.
 import { pass, fail, rmSync } from './helpers.mjs';
-import { GUARDED_PATHS, MARKER_FILE, UNGUARDED_USER_PATHS, describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
+import { CHECKOUT_GUARDED_PATHS, CHECKOUT_KEY_PREFIX, GUARDED_PATHS, MARKER_FILE, UNGUARDED_USER_PATHS, describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
 import { USER_PATHS } from '../update-system.mjs';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -127,6 +127,100 @@ try {
     longReport,
   );
 
+  // The user files resolved from the checkout rather than the data root
+  // (#5207). The pinned scratch root does not move them, so the snapshot has
+  // to read them where they are.
+  {
+    const checkout = join(dir, 'checkout');
+    mkdirSync(join(checkout, 'plugins.local', 'acme', '.git'), { recursive: true });
+    mkdirSync(join(checkout, '.claude', 'hooks'), { recursive: true });
+    writeFileSync(join(checkout, 'plugins.local', 'acme', 'index.mjs'), 'export default {};\n');
+    writeFileSync(join(checkout, 'plugins.local', 'acme', '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    writeFileSync(join(checkout, 'plugins.lock'), '{}\n');
+    writeFileSync(join(checkout, 'opencode.json'), '{}\n');
+    writeFileSync(join(checkout, '.claude', 'settings.json'), '{}\n');
+    writeFileSync(join(checkout, '.claude', 'hooks', 'pre.sh'), '#!/bin/sh\n');
+    // Beside them, not user layer: no business of the guard's.
+    writeFileSync(join(checkout, '.claude', 'settings.local.json'), '{}\n');
+    writeFileSync(join(checkout, 'scan.mjs'), '// code\n');
+
+    // The common layout: the checkout is its own data root.
+    const same = () => snapshotDataRoot(checkout, checkout);
+    const sameBefore = same();
+    const expected = ['plugins.local/acme/index.mjs', 'plugins.local/acme/.git/HEAD', 'plugins.lock',
+      'opencode.json', '.claude/settings.json', '.claude/hooks/pre.sh'];
+    check(
+      expected.every((p) => sameBefore.has(p))
+        && !sameBefore.has('.claude/settings.local.json') && !sameBefore.has('scan.mjs'),
+      'a snapshot covers the user files resolved from the checkout, and nothing beside them',
+      [...sameBefore.keys()],
+    );
+
+    writeFileSync(join(checkout, 'plugins.lock'), '{"probe":true}\n');
+    rmSync(join(checkout, 'opencode.json'));
+    writeFileSync(join(checkout, 'plugins.local', 'acme', 'index.mjs'), 'export default { evil: true };\n');
+    writeFileSync(join(checkout, '.claude', 'settings.json'), '{"hooks":{}}\n');
+    writeFileSync(join(checkout, '.claude', 'hooks', 'post.sh'), '#!/bin/sh\n');
+    writeFileSync(join(checkout, '.claude', 'settings.local.json'), '{"x":1}\n');
+    const sameDrift = diffSnapshots(sameBefore, same());
+    check(
+      JSON.stringify(sameDrift) === JSON.stringify([
+        { path: '.claude/hooks/post.sh', change: 'added' },
+        { path: '.claude/settings.json', change: 'modified' },
+        { path: 'opencode.json', change: 'removed' },
+        { path: 'plugins.local/acme/index.mjs', change: 'modified' },
+        { path: 'plugins.lock', change: 'modified' },
+      ]),
+      'a write to each checkout-resolved user file is named',
+      sameDrift,
+    );
+
+    // A data root elsewhere: the same files are still read from the checkout,
+    // under keys that cannot be taken for a path under the data root.
+    const elsewhere = join(dir, 'elsewhere');
+    mkdirSync(elsewhere);
+    const apart = () => snapshotDataRoot(elsewhere, checkout);
+    const apartBefore = apart();
+    check(
+      apartBefore.has(`${CHECKOUT_KEY_PREFIX}plugins.lock`) && !apartBefore.has('plugins.lock'),
+      'with a separate data root, checkout files are keyed apart from data-root paths',
+      [...apartBefore.keys()],
+    );
+    writeFileSync(join(checkout, 'plugins.lock'), '{"probe":2}\n');
+    // The same name under the data root is not a user file there.
+    writeFileSync(join(elsewhere, 'plugins.lock'), '{}\n');
+    const apartDrift = diffSnapshots(apartBefore, apart());
+    check(
+      JSON.stringify(apartDrift) === JSON.stringify([{ path: `${CHECKOUT_KEY_PREFIX}plugins.lock`, change: 'modified' }]),
+      'with a separate data root, a write in the checkout is named and one in the data root is not',
+      apartDrift,
+    );
+    const apartReport = describeDrift(elsewhere, apartDrift, checkout);
+    check(
+      apartReport.some((l) => l.includes(`${CHECKOUT_KEY_PREFIX}plugins.lock`))
+        && apartReport.some((l) => l.includes(CHECKOUT_KEY_PREFIX.replace(/\/$/, '')) && l.includes(checkout)),
+      'the report says which directory the checkout key stands for',
+      apartReport,
+    );
+    check(
+      !describeDrift(elsewhere, drift, checkout).some((l) => l.includes(checkout)),
+      'a report with no checkout paths does not mention the checkout',
+      describeDrift(elsewhere, drift, checkout),
+    );
+
+    // The same directory reached by two spellings is one root, not two.
+    let aliased = true;
+    const alias = join(dir, 'checkout-alias');
+    try { symlinkSync(checkout, alias, 'dir'); } catch { aliased = false; }
+    if (aliased) {
+      const keys = [...snapshotDataRoot(alias, realpathSync(checkout)).keys()];
+      check(keys.includes('plugins.lock') && !keys.some((k) => k.startsWith(CHECKOUT_KEY_PREFIX)),
+        'a data root that is a link to the checkout counts as the checkout', keys);
+    } else {
+      pass('aliased-checkout check skipped: this platform refused the symlink');
+    }
+  }
+
   check(
     ['data', 'reports', 'interview-prep'].every((p) => GUARDED_PATHS.includes(p)),
     'the tracker, report and interview-prep directories are guarded',
@@ -139,20 +233,24 @@ try {
   // would be a place to write unseen, in the module whose job is to see.
   const userPaths = USER_PATHS.map((p) => p.replace(/\/$/, ''));
   const unguarded = Object.keys(UNGUARDED_USER_PATHS);
-  const unclassified = userPaths.filter((p) => !GUARDED_PATHS.includes(p) && !unguarded.includes(p));
+  const lists = [GUARDED_PATHS, CHECKOUT_GUARDED_PATHS, unguarded];
+  const unclassified = userPaths.filter((p) => !lists.some((list) => list.includes(p)));
   check(
     unclassified.length === 0,
-    'every USER_PATHS entry is either guarded or listed as unguarded with a reason',
+    'every USER_PATHS entry is guarded (from the data root or the checkout) or listed as unguarded with a reason',
     unclassified,
   );
-  const notUserLayer = [...GUARDED_PATHS, ...unguarded].filter((p) => !userPaths.includes(p));
+  const notUserLayer = lists.flat().filter((p) => !userPaths.includes(p));
   check(
     notUserLayer.length === 0,
-    'neither list names a path that is not in USER_PATHS',
+    'no list names a path that is not in USER_PATHS',
     notUserLayer,
   );
-  const inBoth = GUARDED_PATHS.filter((p) => unguarded.includes(p));
-  check(inBoth.length === 0, 'no path is both guarded and listed as unguarded', inBoth);
+  const inTwo = userPaths.filter((p) => lists.filter((list) => list.includes(p)).length > 1);
+  check(inTwo.length === 0, 'no path is in more than one list', inTwo);
+  const checkoutOnly = ['plugins.local', 'plugins.lock', 'opencode.json', '.claude/settings.json', '.claude/hooks']
+    .filter((p) => !CHECKOUT_GUARDED_PATHS.includes(p));
+  check(checkoutOnly.length === 0, 'the five user files resolved from the checkout are guarded there (#5207)', checkoutOnly);
   const noReason = unguarded.filter((p) => String(UNGUARDED_USER_PATHS[p] ?? '').trim().length < 20);
   check(noReason.length === 0, 'every unguarded path says why', noReason);
 } catch (err) {

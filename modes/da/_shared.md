@@ -200,7 +200,7 @@ I danske opslag og forhandlinger optræder visse termer, som ikke findes på EN/
 3. Citér eksakte linjer fra CV'et ved matching
 4. Brug WebSearch til løn- og virksomhedsdata
 5. Registrér i trackeren efter hver evaluering
-6. Generér indhold på opslagets sprog (dansk hvis opslaget er på dansk, ellers engelsk)
+6. Generér indhold til brugeren på `{language.output}` fra `config/profile.yml` (engelsk hvis det ikke er sat), uanset opslagets sprog. Behold dette markeds begreber og forklar dem på det sprog, når det er nødvendigt
 7. Vær direkte og konkret -- ingen smøren
 8. Naturligt tech-dansk til genererede tekster. Korte sætninger, aktive verber, undgå passiv. Oversæt ikke tekniske termer med tvang (stack, pipeline, deployment, embedding)
 8b. **Case-study-URL'er i PDF'ens Professional Summary:** Hvis PDF'en nævner case studies eller demoer, SKAL URL'erne optræde i det første afsnit (Professional Summary). Rekrutterere læser ofte kun summary. Alle URL'er i HTML med `white-space: nowrap`

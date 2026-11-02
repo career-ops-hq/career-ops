@@ -21,6 +21,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -59,7 +60,7 @@ test('a transition into Applied seeds the first follow-up', () => {
   const dir = sandbox();
   try {
     const r = setStatus(dir, ['--row', '7', 'Applied']);
-    assert.equal(r.status, 0, r.all);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.equal(pinsFor(dir, 7), 1, `nothing was scheduled:\n${r.all}`);
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
@@ -102,7 +103,7 @@ test('--dry-run previews the seed and writes nothing', () => {
   const dir = sandbox();
   try {
     const r = setStatus(dir, ['--row', '7', 'Applied', '--dry-run']);
-    assert.equal(r.status, 0, r.all);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.match(r.all, /Follow-up would be seeded/, `dry run did not preview the seed:\n${r.all}`);
     assert.doesNotMatch(r.all, /follow-up seeding failed/, 'dry run reported a failure');
     assert.ok(!existsSync(followups(dir)), 'dry run wrote a follow-ups file');
@@ -145,7 +146,7 @@ test('a seeding failure never fails the status change', () => {
   try {
     mkdirSync(followups(dir), { recursive: true });   // a DIRECTORY where the file goes
     const r = setStatus(dir, ['--row', '7', 'Applied']);
-    assert.equal(r.status, 0, `the status change was failed by a seeding problem:\n${r.all}`);
+    assert.equal(r.status, 0, describeSpawn(r, `the status change was failed by a seeding problem:\n`));
     assert.match(readFileSync(join(dir, 'data', 'applications.md'), 'utf-8'), /Applied/, 'the status was not written');
     assert.match(r.all, /follow-up seeding failed/, 'the seeding failure was not reported');
   } finally {

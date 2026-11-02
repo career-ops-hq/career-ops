@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'reconcile-pipeline.mjs');
@@ -29,14 +30,14 @@ function runReconcile(...args) {
 
 test('--help prints usage and exits 0', () => {
   const result = runReconcile('--help');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
   assert.match(result.stdout, /node reconcile-pipeline\.mjs/);
 });
 
 test('-h prints usage and exits 0', () => {
   const result = runReconcile('-h');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
 });
 

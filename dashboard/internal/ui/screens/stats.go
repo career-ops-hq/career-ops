@@ -185,7 +185,12 @@ func (m StatsModel) renderBody() string {
 		m.theme.Yellow,
 		m.theme.Red,
 	}, false)
-	workModes := m.renderLabelCountTable(i18n.Current.WorkModeTitle, m.metrics.WorkModes)
+	modeStats := make([]model.LabelCountStat, len(m.metrics.WorkModes))
+	for i, s := range m.metrics.WorkModes {
+		s.Label = i18n.Current.WorkModeLabel(s.Label)
+		modeStats[i] = s
+	}
+	workModes := m.renderLabelCountTable(i18n.Current.WorkModeTitle, modeStats)
 	locations := m.renderLabelCountTable(i18n.Current.LocationTitle, m.metrics.Locations)
 	pay := m.renderPay()
 

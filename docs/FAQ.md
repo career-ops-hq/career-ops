@@ -67,7 +67,15 @@ The checker classifies each numeric claim as `existing`, `supportedByResume`, `d
 
 ## How do I stop a company from showing up in scans?
 
-Copy `templates/blacklist.example.md` to `data/blacklist.md`, then list one company per line.
+Copy `templates/blacklist.example.md` to `data/blacklist.md`, delete its example rows, and add one table row per company:
+
+```markdown
+| Company | Since | Scope | Reason |
+|---------|-------|-------|--------|
+| Acme Corp | 2026-01-15 | company | what happened |
+```
+
+The scanner reads only table rows, so a plain list of names, one per line, filters nothing. `Scope` is `company` (match the company name, ignoring case and punctuation) or `domain` (put a hostname such as `ibm.com` in the Company column to match postings on `jobs.ibm.com`).
 
 If a listed company is encountered, the scan reports that it was skipped (never silently). You can bypass the filter with `--include-blacklisted` if you want to audit matching postings.
 

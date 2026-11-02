@@ -68,11 +68,12 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, extractTrackerReportLinks, extractTrackerReportNumbers } from './tracker-parse.mjs';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { parseAmount, compensationPeriod } from './providers/_salary-text.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
@@ -144,105 +145,6 @@ const TRUST = {
   desired: { user: 1, profile: 0 },
   advertised: { user: 2, 'recruiter-verbal': 1, jd: 0 },
 };
-
-/**
- * Rewrite a number's separators into a form parseFloat reads correctly.
- *
- * #3174 taught this file that a period can be thousands grouping ("35.000" is
- * 35000, not 35), which is how Spain, Germany, Italy, the Netherlands and
- * Brazil write a salary. It did that with `.replace(/,/g, '')` first, though,
- * which silently assumes the comma is ALWAYS grouping — and in every one of
- * those same markets the comma is the DECIMAL point. So the half of the
- * convention that carries cents was left folding by 1000:
- *
- *   "45.000,00"  -> strip commas -> "45.00000" -> 45      (want 45000)
- *   "120.000,00" -> strip commas -> "120.00000" -> 120    (want 120000)
- *
- * The period rule could not rescue those, because after the comma is deleted
- * the period is followed by five digits and its "exactly three" lookahead
- * fails. Which separator means what has to be decided BEFORE either is
- * touched.
- *
- * @param {string} numStr - The numeric run, currency already stripped.
- * @returns {string} The same number with `.` as its only separator.
- */
-function canonicalizeSeparators(numStr) {
-  const lastComma = numStr.lastIndexOf(',');
-  const lastDot = numStr.lastIndexOf('.');
-
-  // Both present: the LAST one is the decimal separator and the other is
-  // grouping. True in both conventions, which is what makes it decidable —
-  // "45.000,00" and "123,684.50" are the same shape written two ways, and
-  // nothing else has to be guessed.
-  if (lastComma !== -1 && lastDot !== -1) {
-    const decimal = lastComma > lastDot ? ',' : '.';
-    const grouping = decimal === ',' ? '.' : ',';
-    return numStr.split(grouping).join('').replace(decimal, '.');
-  }
-
-  // Only one separator, so its role is genuinely ambiguous and is inferred
-  // from what follows it: exactly three digits and not a fourth reads as
-  // grouping ("35.000", "123,684"), anything else as a decimal point ("82.5",
-  // "45000,50"). This is #3174's rule, now applied to whichever separator is
-  // present instead of to the period alone — the comma had no rule at all and
-  // was unconditionally deleted, so "45000,50" read as 4500050.
-  //
-  // A three-place decimal ("1.250") stays ambiguous without knowing the
-  // document's locale; reading it as grouped remains the safer default for a
-  // salary field (#3174), and is now the same default in both directions.
-  const sep = lastComma !== -1 ? ',' : lastDot !== -1 ? '.' : null;
-  if (sep === null) return numStr;
-  const grouped = new RegExp(`(\\d)\\${sep}(?=\\d{3}(?!\\d))`, 'g');
-  return numStr.replace(grouped, '$1').replace(sep, '.');
-}
-
-// --- Amount parsing ---
-export function parseAmount(raw) {
-  let s = String(raw ?? '').trim();
-  if (!s || s === '?' || s === '-' || /^(n\/?a|null)$/i.test(s)) return null;
-  // Keep period recognition separate from amount parsing, but allow an explicit
-  // annual suffix to coexist with the numeric value in Machine Summary data.
-  // It may appear on either side of a trailing currency token ("60k CAD per
-  // year" or "60k per year CAD"), so strip annual/currency/annual in that
-  // order. Other periods remain unparseable because callers must annualize them
-  // from the JD's own inputs before treating them as annual gross.
-  const stripAnnual = (value) => value.replace(/\s*(?:\/\s*(?:year|yr)|per\s+(?:year|annum)|annual(?:ly)?|yearly)\s*$/i, '').trim();
-  s = stripAnnual(s);
-  // Strip currency symbols anywhere (US pay-transparency ranges often repeat the
-  // symbol on both bounds: "$123,684—$254,644 USD") and a trailing 3-letter
-  // ISO-4217-style alpha token (any case — "450k SEK", "80-90k eur"). Exactly
-  // three letters, so the lone "k" magnitude suffix ("80k") is never eaten, and
-  // prose ("competitive") still fails the numeric match below even after losing
-  // its last three letters.
-  s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
-  s = stripAnnual(s);
-  const toNum = (numStr, kFlag) => {
-    const n = parseFloat(canonicalizeSeparators(numStr));
-    return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
-  };
-  const range = s.match(/^([\d.,]+)\s*(k)?\s*[-–—]\s*([\d.,]+)\s*(k)?$/i);
-  if (range) {
-    const lo = toNum(range[1], range[2] || range[4]); // "80-90k": k applies to both
-    const hi = toNum(range[3], range[4] || range[2]);
-    if (lo === null || hi === null) return null;
-    const min = Math.min(lo, hi), max = Math.max(lo, hi);
-    return { min, max, mid: (min + max) / 2 };
-  }
-  const single = s.match(/^([\d.,]+)\s*(k)?$/i);
-  if (single) {
-    const v = toNum(single[1], single[2]);
-    return v === null ? null : { min: v, max: v, mid: v };
-  }
-  return null;
-}
-
-export function compensationPeriod(raw) {
-  const value = String(raw ?? '');
-  if (/(?:\/\s*(?:year|yr)\b|\bper\s+(?:year|annum)\b|\bannual(?:ly)?\b|\byearly\b)/i.test(value)) return 'annual';
-  if (/(?:\/\s*(?:month|mo)\b|\bper\s+month\b|\bmonthly\b)/i.test(value)) return 'monthly';
-  if (/(?:\/\s*(?:hour|hr)\b|\bper\s+hour\b|\bhourly\b)/i.test(value)) return 'hourly';
-  return null;
-}
 
 const VALID_TYPES = new Set(['desired', 'advertised', 'actual', 'stated']);
 
@@ -348,7 +250,7 @@ export function reportToObservation(content, num, date) {
 export function loadRelocationTable(tablePath = RELOCATION_TABLE_PATH) {
   if (!existsSync(tablePath)) return null;
   try {
-    const doc = yaml.load(readFileSync(tablePath, 'utf-8').replace(/\r\n/g, '\n'));
+    const doc = loadYaml(readFileSync(tablePath, 'utf-8').replace(/\r\n/g, '\n'));
     return doc?.jurisdictions && typeof doc.jurisdictions === 'object' ? doc.jurisdictions : null;
   } catch {
     return null;
@@ -1592,10 +1494,10 @@ function collectSources() {
 }
 
 function loadProfileDesired() {
-  const profilePath = join(CAREER_OPS, 'config/profile.yml');
+  const profilePath = getProfilePath();
   if (!existsSync(profilePath)) return null;
   try {
-    const profile = yaml.load(readFileSync(profilePath, 'utf-8'));
+    const profile = loadYaml(readFileSync(profilePath, 'utf-8'));
     const comp = profile?.compensation;
     if (!comp?.target_range) return null;
     return { amount: String(comp.target_range), currency: comp.currency ? String(comp.currency) : null };
@@ -1610,10 +1512,10 @@ function loadProfileDesired() {
 // throughout config/profile.example.yml; `location.city` is the fallback for
 // a profile that only fills in the structured `location:` block.
 function loadProfileLocation() {
-  const profilePath = join(CAREER_OPS, 'config/profile.yml');
+  const profilePath = getProfilePath();
   if (!existsSync(profilePath)) return null;
   try {
-    const profile = yaml.load(readFileSync(profilePath, 'utf-8'));
+    const profile = loadYaml(readFileSync(profilePath, 'utf-8'));
     const candidateLoc = profile?.candidate?.location;
     if (typeof candidateLoc === 'string' && candidateLoc.trim()) return candidateLoc.trim();
     const city = profile?.location?.city;

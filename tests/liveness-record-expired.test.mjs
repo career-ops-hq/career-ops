@@ -182,6 +182,21 @@ test('a planned row carries the known row’s portal, title, company and locatio
   assert.equal(row.location, 'Remote');
 });
 
+test('a title, company or location the writer escaped is not escaped a second time', async () => {
+  // The writer prefixes a cell that starts with = + - or @ with an apostrophe,
+  // and the planned row goes back through that writer. Reading the stored cell
+  // raw handed it the already-escaped text, which gained one more apostrophe on
+  // every record: "+1 Platform Engineer" came back as "'+1 Platform Engineer".
+  const { formatScanHistoryRow } = await import('../scan.mjs');
+  const { parseScanHistoryLine } = await import('../lib/scan-history-columns.mjs');
+  const offer = { url: DEAD, source: 'greenhouse', title: '+1 Platform Engineer', company: '@Home Health', location: '-Remote' };
+  const [row] = plan([HEADER, formatScanHistoryRow(offer, '2026-09-01')], [{ url: DEAD, result: 'expired' }]);
+  const rewritten = parseScanHistoryLine(formatScanHistoryRow(row, '2026-09-04', 'skipped_expired'));
+  assert.equal(rewritten.title, '+1 Platform Engineer');
+  assert.equal(rewritten.company, '@Home Health');
+  assert.equal(rewritten.location, '-Remote');
+});
+
 test('a URL already recorded dead is not recorded twice', () => {
   const rows = [
     HEADER,

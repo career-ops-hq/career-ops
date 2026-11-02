@@ -22,7 +22,7 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
@@ -306,7 +306,7 @@ export function scanCompanyNames(content) {
 export function computePortalStats(portalsYmlContent, scanStats, producingCompanyNames = [], portalHealthContent = null) {
   let cfg;
   try {
-    cfg = yaml.load(String(portalsYmlContent ?? '')) || {};
+    cfg = loadYaml(String(portalsYmlContent ?? '')) || {};
   } catch {
     return null; // malformed YAML → no portal section rather than a crash
   }
@@ -388,7 +388,7 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
  */
 export function computePortalRecommendations(portalsContent, scanContent, healthContent, now = Date.now()) {
   let cfg;
-  try { cfg = yaml.load(String(portalsContent ?? '')) || {}; } catch { return null; }
+  try { cfg = loadYaml(String(portalsContent ?? '')) || {}; } catch { return null; }
   const positive = (n, fallback) => Number.isInteger(n) && n > 0 ? n : fallback;
   const days = positive(cfg.portal_prune_quiet_days, 30);
   const threshold = positive(cfg.portal_health_threshold, 3);

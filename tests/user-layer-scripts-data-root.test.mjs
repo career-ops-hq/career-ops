@@ -126,14 +126,14 @@ for (const mode of MODES) {
     write(join(f.code, 'reports', '007-decoy-2026-01-01.md'), '# decoy\n');
 
     // An empty PATH keeps the worker spawn from reaching a real `claude`: it
-    // fails with ENOENT, which the script logs and survives. Windows keys the
+    // fails with ENOENT, so the batch returns failure after logging it. Windows keys the
     // variable as `Path`, so every casing is replaced.
     const env = envFor(mode, f);
     for (const key of Object.keys(env)) if (key.toUpperCase() === 'PATH') delete env[key];
     env.PATH = join(f.dir, 'empty-bin');
 
     const result = run(f, 'batch-tailor.mjs', ['--min-score', '4.0'], env);
-    assert.equal(result.status, 0, result.output);
+    assert.equal(result.status, 1, result.output);
     assert.ok(result.output.includes(`Report: ${report}`),
       `expected the data-root report to be handed to the worker:\n${result.output}`);
     assert.doesNotMatch(result.output, /decoy/, `batch-tailor read reports/ from the code root:\n${result.output}`);

@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SCRATCH_PREFIX } from '../lib/scratch-dirs.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |';
@@ -61,12 +62,14 @@ function fakeArchiveCodeRoot() {
     'set-status.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs',
     'tracker-parse.mjs', 'lib/local-today.mjs', 'role-matcher.mjs',
     'session-activity.mjs', 'lib/is-main-module.mjs', 'check-jd-archive.mjs',
-    'jd-capture.mjs', 'lib/cli-flags.mjs', 'templates/states.yml',
-    'tracker-aliases.json',
+    'jd-capture.mjs', 'lib/cli-flags.mjs', 'lib/jd-archive-section.mjs', 'templates/states.yml',
+    'tracker-aliases.json', 'lib/dir-lock.mjs', 'lib/run-bounded.mjs', 'lib/status-hooks.mjs',
+    'lib/yaml-document.mjs',
   ]) copyFileSync(join(ROOT, file), join(codeRoot, file));
   writeFileSync(join(codeRoot, 'archive-posting.mjs'), [
     "import { writeFileSync } from 'node:fs';",
     "import { join } from 'node:path';",
+    "if (process.env.FAKE_ARCHIVE_PID_FILE) writeFileSync(process.env.FAKE_ARCHIVE_PID_FILE, String(process.pid));",
     "if (process.env.FAKE_ARCHIVE_HANG === '1') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60_000);",
     "console.log('child stdout must not contaminate JSON');",
     "writeFileSync(join(process.env.CAREER_OPS_ROOT, 'archive-invocation.json'), JSON.stringify({ args: process.argv.slice(2), root: process.env.CAREER_OPS_ROOT }));",
@@ -160,7 +163,7 @@ test('a hung archive child times out and remains warn-only', () => {
         CAREER_OPS_JD_ARCHIVE_TIMEOUT_MS: '100',
       },
     });
-    assert.equal(raw.status, 0, raw.all);
+    assert.equal(raw.status, 0, describeSpawn(raw));
     const result = JSON.parse(raw.stdout);
     assert.equal(result.changed, true, 'the status transition must survive an archive timeout');
     assert.equal(result.jdArchiveTriggered?.attempted, true);
@@ -169,6 +172,84 @@ test('a hung archive child times out and remains warn-only', () => {
     cleanup(dir);
     rmSync(codeRoot, { recursive: true, force: true, maxRetries: 10 });
   }
+});
+
+// --detach-jd-archive is what the web UI and the dashboard pass. Both kill
+// set-status after 30s, and a waited-for archive can take 120s, so a status
+// that was saved came back to them as a timeout.
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function waitFor(check, ms = 15_000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const v = check();
+    if (v) return v;
+    await sleep(50);
+  }
+  return check();
+}
+function readIfExists(path) {
+  try { return readFileSync(path, 'utf-8'); } catch { return null; }
+}
+function isAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+test('--detach-jd-archive returns before a hung archive finishes', async () => {
+  const dir = sandbox();
+  const codeRoot = fakeArchiveCodeRoot();
+  const pidFile = join(dir, 'archive.pid');
+  writeFileSync(join(dir, 'reports', '007-acme-2026-02-01.md'), '# Eval\n\n## Job Description\n\nTBD\n');
+  try {
+    const t0 = Date.now();
+    const raw = setStatus(dir, ['--row', '7', 'Interview', '--detach-jd-archive', '--json'], {
+      codeRoot,
+      // The fake hangs 60s; the default 120s bound would outlast the test.
+      env: { FAKE_ARCHIVE_HANG: '1', FAKE_ARCHIVE_PID_FILE: pidFile, CAREER_OPS_JD_ARCHIVE_TIMEOUT_MS: '3000' },
+    });
+    const elapsed = Date.now() - t0;
+    assert.equal(raw.status, 0, describeSpawn(raw));
+    assert.ok(elapsed < 10_000, `set-status waited ${elapsed}ms for a detached archive`);
+    const result = JSON.parse(raw.stdout);
+    assert.equal(result.changed, true);
+    assert.deepEqual(result.jdArchiveTriggered, { attempted: true, detached: true });
+    assert.match(readFileSync(join(dir, 'data', 'applications.md'), 'utf-8'), /\| Interview \|/);
+
+    // The archive did start, and the timeout still applies without a parent.
+    const pid = Number(await waitFor(() => readIfExists(pidFile)));
+    assert.ok(pid > 0, 'the detached archive never started');
+    assert.equal(await waitFor(() => !isAlive(pid)), true, 'the detached archive outlived CAREER_OPS_JD_ARCHIVE_TIMEOUT_MS');
+  } finally {
+    cleanup(dir);
+    rmSync(codeRoot, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('--detach-jd-archive runs the same archive command in the tracker workspace', async () => {
+  const dir = sandbox({ reportCell: '[999](../reports/008-acme-2026-02-01.md)' });
+  const codeRoot = fakeArchiveCodeRoot();
+  writeFileSync(join(dir, 'reports', '008-acme-2026-02-01.md'), '# Eval\n\n## Job Description\n\nTBD\n');
+  try {
+    const raw = setStatus(dir, ['--row', '7', 'Interview', '--detach-jd-archive', '--json'], { codeRoot });
+    assert.equal(raw.status, 0, describeSpawn(raw));
+    assert.doesNotMatch(raw.stdout, /child stdout/, 'child output leaked into JSON stdout');
+    const written = await waitFor(() => readIfExists(join(dir, 'archive-invocation.json')));
+    assert.ok(written, 'the detached archive never ran');
+    const invocation = JSON.parse(written);
+    assert.deepEqual(invocation.args, ['--report=8', '--company=Acme', 'https://boards.greenhouse.io/acme/jobs/1']);
+    assert.equal(realpathSync(invocation.root), realpathSync(dir));
+  } finally {
+    cleanup(dir);
+    rmSync(codeRoot, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('--detach-jd-archive changes nothing when no archive is needed', () => {
+  const dir = sandbox({ url: '' });
+  try {
+    const r = jsonOf(setStatus(dir, ['--row', '7', 'Interview', '--detach-jd-archive', '--json']));
+    assert.deepEqual(r.jdArchiveTriggered, { attempted: false, reason: 'no-url' });
+  } finally { cleanup(dir); }
 });
 
 test('a row with no URL is not attempted', () => {

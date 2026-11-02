@@ -57,10 +57,11 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
+import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -316,7 +317,7 @@ export function findUnclaimedEntries(entries, providers) {
 /** Read tracked_companies out of a portals file. Throws on a missing file. */
 export function loadCompanies(filePath = DEFAULT_PORTALS_PATH) {
   if (!existsSync(filePath)) throw new Error(`portals file not found: ${filePath}`);
-  const cfg = yaml.load(readFileSync(filePath, 'utf-8')) || {};
+  const cfg = loadYaml(readFileSync(filePath, 'utf-8')) || {};
   return Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : [];
 }
 
@@ -415,7 +416,7 @@ async function main() {
   }
 
   if (hasFlag(args, '--queries')) {
-    const cfg = yaml.load(readFileSync(filePath, 'utf-8')) || {};
+    const cfg = loadYaml(readFileSync(filePath, 'utf-8')) || {};
     const warnings = findStaleScanQueries(companies, cfg.title_filter?.positive);
     if (asJson) console.log(JSON.stringify({ warnings }, null, 2));
     else {
@@ -429,6 +430,10 @@ async function main() {
   }
 
   const providers = await loadProviders(PROVIDERS_DIR);
+  // Fold in enabled provider plugins as scan.mjs does (#4026). Without them
+  // every `provider: <plugin-id>` entry audits as `no-provider` while the
+  // scanner scans it. No-op when config/plugins.yml is absent.
+  await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: ROOT });
   const rows = await auditCompanies(companies, { providers, smallThreshold });
 
   let drops = [];

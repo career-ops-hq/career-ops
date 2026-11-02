@@ -40,16 +40,14 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
+import { getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = getCareerOpsRoot();
 
 export const EXAMPLE_PATH = join(CODE_ROOT, 'config', 'profile.example.yml');
-export const DEFAULT_PROFILE_PATH = process.env.CAREER_OPS_PROFILE
-  || join(DATA_ROOT, 'config', 'profile.yml');
+export const DEFAULT_PROFILE_PATH = getProfilePath();
 
 /**
  * Top-level keys the code reads that config/profile.example.yml does not show.
@@ -77,7 +75,7 @@ export const UNDOCUMENTED_KEYS = {
  */
 export function knownKeysFromExample(exampleText) {
   const text = String(exampleText ?? '');
-  const doc = yaml.load(text) || {};
+  const doc = loadYaml(text) || {};
   if (typeof doc !== 'object' || Array.isArray(doc)) return [];
   const commented = [...text.matchAll(/^# ([a-z][a-z0-9_]*):(?=\s|$)/gm)].map((m) => m[1]);
   return [...new Set([...Object.keys(doc), ...commented])];
@@ -120,22 +118,11 @@ function editDistance(a, b) {
  */
 export function validateProfile(profileText, exampleText) {
   const findings = [];
-  // Emptiness is decided from the TEXT, before parsing, because the parsers
-  // disagree about it: js-yaml 4 returns undefined for an empty or comment-only
-  // document, js-yaml 5 throws "expected a document, but the input is empty".
-  // package.json asks for ^5.3.0 and there is no root lockfile, so which major a
-  // given checkout has is not fixed — inferring "empty" from what the parser
-  // does would report a blank profile as malformed on one and not the other.
-  // The identical hazard bit #3593 in plugins.mjs; same answer here.
-  const hasContent = String(profileText ?? '').split('\n').some((line) => {
-    const t = line.trim();
-    return t !== '' && !t.startsWith('#');
-  });
-  if (!hasContent) return { parsed: null, findings };
+  if (!hasYamlContent(profileText)) return { parsed: null, findings };
 
   let parsed;
   try {
-    parsed = yaml.load(String(profileText ?? ''));
+    parsed = loadYaml(String(profileText ?? ''));
   } catch (err) {
     return {
       parsed: null,

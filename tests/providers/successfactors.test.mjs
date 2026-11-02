@@ -393,6 +393,36 @@ try {
     if (got.size === 25 && jobs.length === 25) pass('successfactors CSB returns every posting when the server reshuffles page order');
     else fail(`successfactors CSB lost postings under unstable paging: ${got.size} of 25`);
   }
+  {
+    let inFlight = 0;
+    let peak = 0;
+    const pagesAsked = [];
+    const jobs = await sf.fetch(
+      { name: 'ParallelCo', careers_url: 'https://careers.parallelco.example', sfVariant: 'csb' },
+      {
+        sleep: async () => {},
+        fetchText: async () => '<a href="/search/?q=&startrow=0&locale=de_DE">de</a>',
+        fetchJson: async (_url, opts) => {
+          const { pageNumber } = JSON.parse(opts.body);
+          pagesAsked.push(pageNumber);
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight--;
+          const count = Math.max(0, Math.min(10, 125 - pageNumber * 10));
+          return {
+            totalJobs: 125,
+            jobSearchResult: Array.from({ length: count }, (_, i) => ({ response: { id: String(pageNumber * 10 + i), unifiedStandardTitle: `Role ${pageNumber * 10 + i}`, unifiedUrlTitle: 'Role' } })),
+          };
+        },
+      },
+    );
+    if (jobs.length === 125 && pagesAsked.length === 13 && peak === 6 && jobs[0].title === 'Role 0' && jobs[124].title === 'Role 124') {
+      pass('successfactors CSB fetch() asks for the pages after page 0 six at a time and keeps board order');
+    } else {
+      fail(`successfactors CSB parallel pages: ${jobs.length} jobs, ${pagesAsked.length} requests, peak ${peak} in flight, first=${jobs[0]?.title} last=${jobs.at(-1)?.title}`);
+    }
+  }
 } catch (err) {
   fail(`successfactors provider test threw: ${err.message}`);
 }

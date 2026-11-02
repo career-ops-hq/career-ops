@@ -18,9 +18,10 @@
  * expected "fall back to the browser path" case, not an error condition, and
  * a visible miss is the whole point: never a fabricated JD.
  *
- * Coverage is JD_TEXT_API_ATS (liveness-api.mjs): Greenhouse (including
- * company careers pages that carry only `?gh_jid=`), Lever, Ashby, Workday,
- * SmartRecruiters. Every fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
+ * Coverage is JD_TEXT_API_ATS (liveness-api.mjs), including company careers
+ * pages that carry only a Greenhouse `?gh_jid=`, and canonical/share-link
+ * Workable postings (description, requirements and benefits).
+ * Every fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
  * — the same dispatch its own `jd` mode uses — so this script and the
  * interactive extractor cannot drift on which ATS is API-fetchable.
  */

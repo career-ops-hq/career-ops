@@ -85,16 +85,20 @@ export default {
       if (!Array.isArray(pageItems)) throw new Error('join: __NEXT_DATA__ not found or unexpected structure');
       allItems.push(...pageItems);
     }
-    if (pageCount === maxPages && reportedPageCount > maxPages && ctxCap === Infinity) {
+    const truncated = pageCount === maxPages && reportedPageCount > maxPages && ctxCap === Infinity;
+    if (truncated) {
       console.error(`⚠️  join: ${entry.name} truncated at max_pages=${maxPages} of ${reportedPageCount} reported pages — raise max_pages on this entry for more`);
     }
 
     const companySlug = state.company?.domain || slug;
-    return allItems.map(j => ({
+    const jobs = allItems.map(j => ({
       title: j.title || '',
       url: `https://join.com/companies/${companySlug}/jobs/${j.idParam}`,
       company: entry.name,
       location: j.city?.cityName || '',
     }));
+    // Tag a cap-truncated board (the workdayTruncated convention) so a caller can tell without reading stderr.
+    if (truncated) /** @type {any} */ (jobs).joinTruncated = true;
+    return jobs;
   },
 };

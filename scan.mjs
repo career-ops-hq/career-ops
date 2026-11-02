@@ -38,7 +38,6 @@
  */
 
 import {
-  appendFileSync,
   closeSync,
   existsSync,
   fchmodSync,
@@ -56,7 +55,7 @@ import {
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
@@ -67,7 +66,7 @@ import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
 import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
-import { normalizeCompany } from './tracker-utils.mjs';
+import { normalizeCompany, appendLedgerRows } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldTitle } from './title-keywords.mjs';
@@ -78,8 +77,9 @@ import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
+import { sectionKind } from './lib/pipeline-sections.mjs';
 import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -96,13 +96,15 @@ try {
   // dotenv is optional — fall back to process.env if not installed
 }
 
-const parseYaml = yaml.load;
+const parseYaml = loadYaml;
 
 // ── Config ──────────────────────────────────────────────────────────
 import { resolveTrackerPath } from './path-resolver.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
+// An explicit override wins; otherwise the root fixed above, since the .env just
+// loaded may name another CAREER_OPS_ROOT that getProfilePath() would follow.
+const PROFILE_PATH = hasProfileOverride() ? getProfilePath() : getProfilePath(DATA_ROOT);
 // Overridable for the same reason the two inputs above are (#2271). A second
 // search lane - a bridge/income track, a career-change track, a partner sharing
 // the checkout - already gets its own portals.yml and profile, but without these
@@ -129,6 +131,7 @@ const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 // to leave a stray data/ in whatever cwd it ran from.
 
 const CONCURRENCY = 10;
+const PROGRESS_EVERY = 25;
 
 export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
   return ['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(err?.code)
@@ -373,7 +376,8 @@ export function matchedTitleKeywords(title, titleFilter) {
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
 //   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
-//     an explicit remote marker (see titleSignalsRemote below)
+//     an explicit remote marker (see titleSignalsRemote below), unless
+//     `remote_title_fallback: false` disables that final rescue.
 
 // Normalize a keyword list from portals.yml: tolerates a bare string
 // (wrapped to a 1-item array), null/undefined (→ []), and non-string
@@ -647,7 +651,7 @@ export function buildLocationFilter(locationFilter) {
     // Last resort only. Deliberately placed AFTER `block` so a remote title can
     // never rescue a blocked location — "Program Manager - Remote" in Bengaluru
     // stays rejected. This widens `allow`, never `block`.
-    return titleSignalsRemote(title);
+    return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
 }
 
@@ -1271,7 +1275,7 @@ export function addDays(dateStr, days) {
 export function loadCandidateCountry(profilePath = PROFILE_PATH) {
   if (!existsSync(profilePath)) return '';
   try {
-    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
     const country = raw?.location?.country;
     return typeof country === 'string' ? country.trim() : '';
   } catch {
@@ -1282,7 +1286,7 @@ export function loadCandidateCountry(profilePath = PROFILE_PATH) {
 export function loadReApplyWindows(profilePath = PROFILE_PATH) {
   if (!existsSync(profilePath)) return {};
   try {
-    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
     const windows = raw.re_apply_windows || {};
     const validWindows = {};
     for (const [company, win] of Object.entries(windows)) {
@@ -1479,28 +1483,41 @@ const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
  * Every other skipped status describes the posting: a dead URL stays dead
  * until the configured recheck window releases it (see
  * RECHECKABLE_SCAN_HISTORY_STATUSES), a blocked host stays blocked, so pinning
- * saves a later scan the work. These
- * two describe the user's CONFIG instead — `location_filter` and
- * `max_posting_age_days` are thresholds they edit. Pinning would mean a role
- * dropped under the old threshold never resurfaces under the new one, which is
- * the opposite of what recording the drop is for.
+ * saves a later scan the work. These four describe something else.
  *
- * Pinning would also buy nothing: both cuts run on data the provider already
- * returned, before any liveness verification, so a re-scan of one of these URLs
- * costs no extra request.
+ * `skipped_title`, `skipped_location` and `skipped_age` describe the user's
+ * CONFIG — `title_filter`, `location_filter` and `max_posting_age_days` are
+ * settings they edit. Pinning would mean a role dropped under the old setting
+ * never resurfaces under the new one, which is the opposite of what recording
+ * the drop is for: a keyword added to `title_filter.positive` has to hand back
+ * the titles it now matches. For those three, not pinning is also free: each
+ * cut runs on data the provider already returned, before any liveness
+ * verification, so a re-scan of one of these URLs costs no extra request.
+ *
+ * `skipped_no_apply_control` describes the CHECK: the browser classifier did
+ * not see an Apply control, which is not proof the posting is closed. On
+ * boards whose button it does not recognise, pinning would drop a live posting
+ * once and never offer it again (#4832). Unlike the other two, this verdict
+ * comes from a browser load, so every `--verify` scan re-opens the posting for
+ * as long as the provider lists it. That is the accepted price: a slower
+ * `--verify` beats a posting lost for good, and it shrinks as the classifier
+ * learns each board, since a posting that reads `active` gets an `added` row
+ * and stops coming back.
  *
  * `collectSeenCompanyRoles` needs no companion change — it already seeds from
  * `added` rows alone.
  */
 const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
+  'skipped_title',
   'skipped_location',
   'skipped_age',
+  'skipped_no_apply_control',
 ]);
 
 /**
  * The offers not yet recorded under `status`, one per URL.
  *
- * The location and posting-age cuts run before dedup, and their rows never
+ * The title, location and posting-age cuts run before dedup, and their rows never
  * pin a URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so without this every scan
  * appended the same rows again. A URL already carrying a row with the same
  * status is skipped, and so is a second listing of one URL within this scan.
@@ -1541,6 +1558,7 @@ function daysBetweenIsoDates(start, end) {
 // explicitly; only the default moves.
 export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = localToday() } = {}) {
   if (PERMANENT_SCAN_HISTORY_STATUSES.has(status)) return true;
+  if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) return false;
   if (status.startsWith('cooldown:')) {
     const parts = status.split(':');
     const cooldownUntil = parts[parts.length - 1];
@@ -2033,10 +2051,10 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     const { url, first_seen: firstSeen, portal, status: rawStatus, title, language, listing_key: listingKey } = parseScanHistoryLine(line);
     const status = rawStatus || 'added';
     if (!url) continue;
-    // Not pinned and not a recheck candidate either: the row records a config
-    // rejection, and the URL was never queued, so counting it as "eligible
-    // again" would overstate what the TTL released. See
-    // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
+    // Not pinned, no listing identity, and not a recheck candidate either: the
+    // row records a config rejection or an inconclusive Apply-control check,
+    // and the URL was never queued, so counting it as "eligible again" would
+    // overstate what the TTL released. See OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       const urlToken = normalizeUrlForDedup(url);
@@ -2044,9 +2062,10 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       const recorded = languageFormsForDedup(language);
       recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
       // Only accepted or intentionally deferred posting rows can teach this
-      // scan a strong identity. Verification rejections such as expired or
-      // missing-apply-control URLs may pin that URL, but must not suppress a
-      // different live alias with the same provider identity.
+      // scan a strong identity. A verification rejection such as an expired
+      // URL may pin that URL, but must not suppress a different live alias
+      // with the same provider identity. (A missing Apply control never gets
+      // here: its row is observational and pins nothing, see above.)
       const identityMayPromote = status === 'added' || status.startsWith('cooldown:');
       if (identityMayPromote) addIdentityPromotableUrl(urlToken, listingKey);
       if (extraTokensFor && identityMayPromote) {
@@ -3332,11 +3351,6 @@ Paste job URLs below as \`- [ ] {url}\` then run \`/career-ops pipeline\`.
 ## Processed
 `;
 
-// Current section names (English). Legacy Spanish names are checked as fallback
-// so existing pipeline.md files created before this change keep working.
-const PENDING_MARKERS = ['## Pending', '## Pendientes'];
-const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
-
 // Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, and plugins.mjs
 // (pipeline mode) — the three current callers — can never interleave their
 // read-modify-write and silently drop each other's offers.
@@ -3351,21 +3365,18 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
       ? readFileSync(pipelinePath, 'utf-8')
       : PIPELINE_SKELETON;
 
-    const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
-    const idx = marker !== null ? text.indexOf(marker) : -1;
+    const headings = [...text.matchAll(/^##[ \t].*$/gm)];
+    const pending = headings.find(h => sectionKind(h[0]) === 'pending');
 
-    if (idx === -1) {
+    if (!pending) {
       // No Pending section found — insert one before Processed (or at end)
-      const procIdx = PROCESSED_MARKERS.reduce((found, m) => {
-        const i = text.indexOf(m);
-        return (found === -1 || (i !== -1 && i < found)) ? i : found;
-      }, -1);
-      const insertAt = procIdx === -1 ? text.length : procIdx;
+      const processed = headings.find(h => sectionKind(h[0]) === 'processed');
+      const insertAt = processed ? processed.index : text.length;
       const block = `\n## Pending\n\n` + offers.map(formatPipelineOffer).join('\n') + '\n\n';
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     } else {
       // Find the end of existing Pending content (next ## or end)
-      const afterMarker = idx + marker.length;
+      const afterMarker = pending.index + pending[0].length;
       const nextSection = text.indexOf('\n## ', afterMarker);
       const insertAt = nextSection === -1 ? text.length : nextSection;
 
@@ -3406,7 +3417,7 @@ export async function appendToScanHistory(offers, date, status = 'added', { alre
 
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-    appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+    appendLedgerRows(SCAN_HISTORY_PATH, lines);
   };
 
   if (alreadyLocked) write();
@@ -3662,7 +3673,7 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     // filtered_country_eligibility (#2093) appended at the END for the same reason.
     c.filteredCountryEligibility ?? 0,
   ].join('\t') + '\n';
-  appendFileSync(filePath, row, 'utf-8');
+  appendLedgerRows(filePath, row);
 }
 
 // ── Portal health persistence (#1744) ───────────────────────────────
@@ -3692,7 +3703,7 @@ export async function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH
     for (const r of healthRecords) {
       lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
     }
-    if (lines) appendFileSync(filePath, lines, 'utf-8');
+    if (lines) appendLedgerRows(filePath, lines);
   });
 }
 
@@ -3736,7 +3747,7 @@ export function emptyTargetStatus(observation) {
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
-async function parallelFetch(tasks, limit) {
+async function parallelFetch(tasks, limit, onDone = () => {}) {
   const results = [];
   let i = 0;
 
@@ -3744,12 +3755,24 @@ async function parallelFetch(tasks, limit) {
     while (i < tasks.length) {
       const task = tasks[i++];
       results.push(await task());
+      onDone();
     }
   }
 
   const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
   await Promise.all(workers);
   return results;
+}
+
+// stderr, so it shows under --quiet and never mixes into the --json receipt.
+export function progressTicker(total, { every = PROGRESS_EVERY, write = (line) => process.stderr.write(line), now = () => new Date() } = {}) {
+  let done = 0;
+  return () => {
+    done++;
+    if (done % every === 0 || done === total) {
+      write(`[${now().toTimeString().slice(0, 8)}] scan: ${done}/${total} sources done\n`);
+    }
+  };
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -3763,6 +3786,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
   const {
     rejectPrivateOrInvalid, checkUrlLiveness, checkUrlLivenessWithFallback,
     createHeadedPageProvider, newLivenessPage, installLivenessRouteGuard, jitteredDelayMs, sleep,
+    takeSuppressedBlockCount,
   } = await import('./liveness-browser.mjs');
 
   // The HTTP rung can run concurrently; each provider retains its own rate
@@ -3819,12 +3843,14 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
     ? checkUrlLivenessWithFallback(page, url, { getHeadedPage: () => headed.get() })
     : checkUrlLiveness(page, url);
 
-  // Three permanent buckets + one transient passthrough:
+  // Two permanent buckets, one observational, one transient passthrough:
   //   verified  → active pages and transient nav errors (retry next scan)
   //   expired   → classifier-confirmed dead postings (HTTP 4xx, redirect markers,
   //               body patterns, listing pages, insufficient content)
   //   dropped   → page loaded but classifier saw no Apply control. --verify is an
-  //               opt-in stricter filter; keeping these defeats the purpose.
+  //               opt-in stricter filter; keeping these defeats the purpose. Not
+  //               proof the posting is closed, so the row never pins the URL and
+  //               the next --verify scan loads the page again (#4832).
   //   invalid   → up-front URL guard rejections (malformed / non-http / private)
   const verified = [];
   const verificationStatusByOffer = new Map();
@@ -3881,9 +3907,11 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
         invalid.push({ ...offer, code, reason });
         console.log(`  ⛔ invalid   ${offer.company} | ${offer.title} (${reason})`);
       } else if (result === 'uncertain' && code === 'no_apply_control') {
-        // Page loaded but classifier could not find an Apply control. Treat like
-        // expired for routing — drop from pipeline AND record in scan-history so
-        // we don't burn a verify cycle on the same URL next scan.
+        // Page loaded but classifier could not find an Apply control. Drop from
+        // pipeline and record in scan-history for visibility only: the row does
+        // not pin the URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so the next
+        // --verify scan checks it again rather than losing a live posting whose
+        // button the classifier does not recognise (#4832).
         dropped.push({ ...offer, reason });
         console.log(`  ⚠️ no-apply  ${offer.company} | ${offer.title} (${reason})`);
       } else {
@@ -3901,6 +3929,9 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       if (browser) await browser.close();
     }
   }
+  // The route guard counts, rather than logs, subresources a DNS filter blocks.
+  const quietBlocks = typeof takeSuppressedBlockCount === 'function' ? takeSuppressedBlockCount() : 0;
+  if (quietBlocks) console.warn(`--verify: ${quietBlocks} tracker/analytics requests skipped (no usable address, e.g. a DNS ad-blocker); not counted against any posting`);
 
   return { verified, expired, dropped, invalid, migrated, verificationStatusByOffer };
 }
@@ -4251,8 +4282,9 @@ async function main() {
   let totalFilteredCooldown = 0;
   const cooldownOffers = [];
   // Config-rejected offers, kept so the scan-history row can say what the
-  // summary counter only counts. Both lists stay empty under --dry-run, the
-  // same as every other history write below.
+  // summary counter only counts. All three lists stay empty under --dry-run,
+  // the same as every other history write below.
+  const titleFilteredOffers = [];
   const locationFilteredOffers = [];
   const ageFilteredOffers = [];
   let totalFound = 0;
@@ -4342,6 +4374,11 @@ async function main() {
       // Present only when portals.yml sets preferred_languages: a provider that
       // returns language versions selectively also returns the preferred ones.
       ...(preferredLanguageRank ? { preferredLanguageRank } : {}),
+      // This scan's own title decision, for a provider that pays extra per
+      // posting (Workday's multi-location detail GETs) and can skip postings
+      // the title filter below will drop. Absent when this company's filter_on
+      // leaves the title out, since then no title is dropped.
+      ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => titleFilter(title) } : {}),
     };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
@@ -4444,6 +4481,7 @@ async function main() {
         }
         if (failedField === 'title') {
           totalFilteredTitle++;
+          if (!dryRun) titleFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (failedField !== null) {
@@ -4578,7 +4616,7 @@ async function main() {
     }
   });
 
-  await parallelFetch(tasks, CONCURRENCY);
+  await parallelFetch(tasks, CONCURRENCY, progressTicker(tasks.length));
 
   // 5.5. Optional liveness verification — drop expired and guard-rejected postings
   let verifiedOffers = newOffers;
@@ -4684,23 +4722,30 @@ async function main() {
   if (!dryRun && expiredForHistory.length > 0) {
     await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
   }
-  // Offers the location and posting-age cuts removed: recorded for visibility,
-  // never added to pipeline.md. Both are OBSERVATIONAL_SCAN_HISTORY_STATUSES,
-  // so the rows carry no dedup weight — the threshold that rejected them is one
-  // the user edits, and a row written under the old threshold must not suppress
-  // the same posting once it moves.
-  // Each posting is recorded once per status, not once per scan.
-  if (!dryRun && (locationFilteredOffers.length > 0 || ageFilteredOffers.length > 0)) {
+  // Offers the title, location and posting-age cuts removed: recorded for
+  // visibility, never added to pipeline.md. All three are
+  // OBSERVATIONAL_SCAN_HISTORY_STATUSES, so the rows carry no dedup weight —
+  // the setting that rejected them is one the user edits, and a row written
+  // under the old setting must not suppress the same posting once it moves.
+  // Each posting is recorded once per status, not once per scan, so the file
+  // grows with new postings rather than with scans (#2695).
+  if (!dryRun && (titleFilteredOffers.length > 0 || locationFilteredOffers.length > 0 || ageFilteredOffers.length > 0)) {
     const historyText = readIfExists(SCAN_HISTORY_PATH);
+    const newTitleRows = unrecordedOffers(titleFilteredOffers, 'skipped_title', historyText);
     const newLocationRows = unrecordedOffers(locationFilteredOffers, 'skipped_location', historyText);
     const newAgeRows = unrecordedOffers(ageFilteredOffers, 'skipped_age', historyText);
+    if (newTitleRows.length > 0) await appendToScanHistory(newTitleRows, date, 'skipped_title');
     if (newLocationRows.length > 0) await appendToScanHistory(newLocationRows, date, 'skipped_location');
     if (newAgeRows.length > 0) await appendToScanHistory(newAgeRows, date, 'skipped_age');
   }
-  // Pages that loaded but had no Apply control: record so we don't re-verify
-  // them next scan, but never let them reach pipeline.md.
+  // Pages that loaded but had no Apply control: recorded for visibility and
+  // never added to pipeline.md. The row carries no dedup weight
+  // (OBSERVATIONAL_SCAN_HISTORY_STATUSES), because "no visible Apply control"
+  // is not proof the posting is closed; the next scan verifies it again.
+  // Each posting is recorded once, not once per scan.
   if (!dryRun && droppedOffers.length > 0) {
-    await appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
+    const newDroppedRows = unrecordedOffers(droppedOffers, 'skipped_no_apply_control', readIfExists(SCAN_HISTORY_PATH));
+    if (newDroppedRows.length > 0) await appendToScanHistory(newDroppedRows, date, 'skipped_no_apply_control');
   }
   // Guard-rejected URLs (invalid / unsupported protocol / blocked host) are
   // recorded with a precise status so subsequent scans dedup-skip them via

@@ -1,6 +1,6 @@
 # Tryb: aplikuj -- Asystent na żywo do formularzy aplikacyjnych
 
-Tryb interaktywny na moment, gdy kandydat wypełnia formularz aplikacyjny w Chrome. Czyta to, co jest na ekranie, ładuje kontekst poprzedniej oceny oferty i generuje spersonalizowane odpowiedzi na każde pytanie formularza.
+Tryb interaktywny na moment, gdy kandydat wypełnia formularz aplikacyjny w przeglądarce Playwright uruchomionej przez ten projekt. Czyta to, co jest na ekranie, ładuje kontekst poprzedniej oceny oferty i generuje spersonalizowane odpowiedzi na każde pytanie formularza.
 
 ## Wymagania wstępne
 
@@ -10,7 +10,7 @@ Tryb interaktywny na moment, gdy kandydat wypełnia formularz aplikacyjny w Chro
 ## Workflow
 
 ```
-1. WYKRYJ       -> Przeczytaj aktywną kartę Chrome (zrzut/URL/tytuł)
+1. WYKRYJ       -> Otwórz ogłoszenie w przeglądarce Playwright tego projektu
 2. ZIDENTYFIKUJ -> Wyciągnij firmę + rolę ze strony
 3. WYSZUKAJ     -> Dopasuj do istniejących reportów w reports/
 4. ZAŁADUJ      -> Przeczytaj pełny report + Blok G (jeśli istnieje)
@@ -20,9 +20,14 @@ Tryb interaktywny na moment, gdy kandydat wypełnia formularz aplikacyjny w Chro
 8. ZAPREZENTUJ  -> Wyświetl odpowiedzi sformatowane do skopiowania
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Krok 1 -- Wykryj ofertę
 
-**Z Playwright:** Snapshot aktywnej strony. Przeczytaj tytuł, URL i widoczną treść.
+**Z Playwright:** Uruchom `node apply-scope.mjs launch-options`, otwórz ogłoszenie w tym oknie i odczytaj tytuł, URL i widoczną treść.
 
 **Bez Playwright:** Poproś kandydata, aby:
 - Udostępnił zrzut ekranu formularza (narzędzie Read czyta obrazy)

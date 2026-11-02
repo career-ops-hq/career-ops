@@ -17,6 +17,7 @@ import {
   TECTONIC_VERSION, TECTONIC_ASSETS, tectonicAsset, verifySha256, installTectonic,
 } from '../install-latex-engine.mjs';
 import { localTectonicPath } from '../generate-latex.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'install-latex-engine.mjs');
@@ -259,7 +260,7 @@ for (const [name, probeResult] of [['a binary that does not run', null], ['a bin
 test('install-latex-engine --help prints usage and exits 0', () => {
   for (const flag of ['--help', '-h']) {
     const result = run(SCRIPT, [flag]);
-    assert.equal(result.status, 0, `${flag} exited ${result.status}`);
+    assert.equal(result.status, 0, describeSpawn(result, `${flag} exited ${result.status}`));
     assert.match(result.stdout, /Usage:/);
     assert.match(result.stdout, /node install-latex-engine\.mjs/);
     assert.doesNotMatch(result.all, /Downloading/, `${flag} started a download`);

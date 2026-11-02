@@ -267,6 +267,10 @@ export default {
       console.error(`⚠️  phenom: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);
     }
 
+    // A page cap or a failed page leaves the board partial; tag it (the workdayTruncated convention)
+    // so a caller can tell without reading stderr.
+    if (stopReason === 'cap' || stopReason === 'fetch-error') /** @type {any} */ (jobs).phenomTruncated = true;
+
     return jobs;
   },
 };

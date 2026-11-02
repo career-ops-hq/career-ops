@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { atsLint, loadAtsRules, ATS_DETECTORS } from '../cv-templates.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { rules, cannotCatch, sourceDoc } = loadAtsRules();
@@ -475,7 +476,7 @@ test('the CLI refuses a non-HTML template rather than reporting it clean', () =>
   // Every detector is an HTML pattern, so a .tex template lints to zero
   // findings — a pass that checked nothing. That must be an error, not JSON.
   const tex = cli(['lint', 'cv', '--format=tex']);
-  assert.notEqual(tex.status, 0, 'a .tex lint must fail rather than print findings');
+  assert.ok(exitedNonZero(tex), describeSpawn(tex, 'a .tex lint must fail rather than print findings'));
   assert.match(tex.stderr, /HTML templates only/);
   assert.equal(tex.stdout.trim(), '', 'nothing that looks like a clean result may be printed');
 

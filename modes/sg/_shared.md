@@ -204,7 +204,7 @@ Work passes, benefits, and hiring norms differ materially from the US/EU. Apply 
 3. Cite exact CV lines during matching
 4. Use WebSearch for comp data and company intel
 5. Record in the tracker after every evaluation
-6. Generate content in the posting's language (English for Singapore postings)
+6. Write human-facing content in `{language.output}` from `config/profile.yml` (EN when unset), whatever the language of the posting. Keep Singapore market terms and explain them in that language when needed
 7. Be direct and concrete — no beating around the bush
 8. Natural tech English for generated text. Short sentences, action verbs, avoid the passive. Do not force-translate technical terms.
 8b. **Case-study URLs in the PDF Professional Summary:** If the PDF mentions demos or case studies, their URLs MUST appear in the first paragraph (Professional Summary) — recruiters often read only that. All URLs in HTML with `white-space: nowrap`

@@ -1,6 +1,6 @@
 # Mode: apply -- Live-assistent til ansøgningsformularer
 
-Interaktiv mode til det øjeblik, hvor kandidaten udfylder en ansøgningsformular i Chrome. Den læser, hvad der er på skærmen, indlæser konteksten fra opslagets tidligere evaluering og genererer personaliserede svar til hvert spørgsmål i formularen.
+Interaktiv mode til det øjeblik, hvor kandidaten udfylder en ansøgningsformular i den Playwright-browser, dette projekt starter. Den læser, hvad der er på skærmen, indlæser konteksten fra opslagets tidligere evaluering og genererer personaliserede svar til hvert spørgsmål i formularen.
 
 ## Forudsætninger
 
@@ -10,7 +10,7 @@ Interaktiv mode til det øjeblik, hvor kandidaten udfylder en ansøgningsformula
 ## Workflow
 
 ```
-1. DETEKTÉR     -> Læs den aktive Chrome-fane (skærmbillede/URL/titel)
+1. DETEKTÉR     -> Åbn opslaget i dette projekts Playwright-browser
 2. IDENTIFICÉR  -> Udtræk virksomhed + rolle fra siden
 3. SØG          -> Match mod eksisterende reports i reports/
 4. INDLÆS       -> Læs den fulde report + Blok G (hvis den findes)
@@ -20,9 +20,14 @@ Interaktiv mode til det øjeblik, hvor kandidaten udfylder en ansøgningsformula
 8. PRÆSENTÉR    -> Vis de formaterede svar til copy-paste
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Trin 1 -- Detektér opslaget
 
-**Med Playwright:** Snapshot af den aktive side. Læs titel, URL og synligt indhold.
+**Med Playwright:** Kør `node apply-scope.mjs launch-options`, åbn opslaget i det vindue, og læs titel, URL og synligt indhold.
 
 **Uden Playwright:** Bed kandidaten om at:
 - Dele et skærmbillede af formularen (Read-værktøjet læser billeder)

@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detectColumns, parseTrackerRow, resolveColumns } from '../tracker-parse.mjs';
 import { analyzeFromContent } from '../followup-cadence.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n';
@@ -58,7 +59,7 @@ for (const format of ['pipe', 'tabs', 'tabs-status-last', 'pipe-no-closing-delim
     const f = fixture(t, header + row);
     const args = ['--report-link', '7', 'Applied', '--note', 'follow-up'];
     const result = run(f, args);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.equal(result.json.num, 42, 'report ID must not be treated as tracker row ID');
     assert.equal(result.json.statusLogged, true);
     assert.equal(result.json.followupSeeded.seeded, true, result.stderr);
@@ -71,7 +72,7 @@ for (const format of ['pipe', 'tabs', 'tabs-status-last', 'pipe-no-closing-delim
     const cadence = analyzeFromContent(expected, followups);
     assert.ok(cadence.entries.some(entry => entry.num === 42), 'follow-up cadence must still see the updated application');
     const retry = run(f, args);
-    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(retry.status, 0, describeSpawn(retry));
     assert.equal(retry.json.changed, false);
     assert.equal(readFileSync(f.tracker, 'utf8'), expected);
     assert.equal(readFileSync(join(f.data, 'status-log.tsv'), 'utf8'), ledger);
@@ -83,7 +84,7 @@ test('strict report identity ignores references in Notes', t => {
   const decoy = ROW.replace('42', '99').replace('[7](reports/007.md)', '—').replace('original', 'see [7](reports/007-example.md)');
   const f = fixture(t, HEADER + decoy + ROW);
   const result = run(f);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(result.json.num, 42);
   assert.ok(readFileSync(f.tracker, 'utf8').includes(decoy));
 });
@@ -116,7 +117,7 @@ for (const [name, row] of [
     const before = HEADER + row;
     const f = fixture(t, before);
     const result = run(f, ['--report-link', '7', 'Applied', '--note', 'follow-up']);
-    assert.notEqual(result.status, 0);
+    assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
     unchanged(f, before);
   });
 }
@@ -125,7 +126,7 @@ test('strict selector reads legacy bold status and fills a compact empty Notes c
   const before = HEADER + ROW.replace('Evaluated', '**Evaluated**').replace('| original |', '||');
   const f = fixture(t, before);
   const result = run(f, ['--report-link', '7', 'Interview', '--note', 'scheduled']);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(readFileSync(f.tracker, 'utf8'), before.replace('**Evaluated**', 'Interview').replace('||', '| scheduled |'));
 });
 
@@ -133,7 +134,7 @@ test('tab whitespace inside a pipe cell does not become a column separator', t =
   const before = HEADER + ROW.replace('original', 'original\tnote');
   const f = fixture(t, before);
   const result = run(f, ['--report-link', '7', 'Interview']);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(readFileSync(f.tracker, 'utf8'), before.replace('Evaluated', 'Interview'));
 });
 
@@ -147,7 +148,7 @@ for (const format of ['tabs', 'pipe']) {
     const storedNote = format === 'tabs' ? 'first second  third' : note;
     const args = ['--row', '42', 'Applied', '--note', note];
     const result = run(f, args);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.equal(result.json.note, storedNote);
     assert.equal(result.json.statusLogged, true);
     assert.equal(result.json.followupSeeded.seeded, true, result.stderr);
@@ -157,7 +158,7 @@ for (const format of ['tabs', 'pipe']) {
     assert.equal(followups.split('\n').filter(line => line.includes('next #42 ')).length, 1);
     assert.ok(analyzeFromContent(expected, followups).entries.some(entry => entry.num === 42));
     const retry = run(f, args);
-    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(retry.status, 0, describeSpawn(retry));
     assert.equal(retry.json.changed, false);
     assert.equal(readFileSync(f.tracker, 'utf8'), expected);
     assert.equal(readFileSync(join(f.data, 'follow-ups.md'), 'utf8'), followups);
@@ -197,7 +198,7 @@ for (const note of ['--dry-run', '--help']) {
   test(`equals-form note treats ${note} as text, never a flag`, t => {
     const f = fixture(t);
     const result = run(f, ['--report-link', '7', 'Applied', `--note=${note}`]);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.equal(result.json.note, note);
     assert.equal(result.json.statusLogged, true);
     assert.equal(result.json.followupSeeded.seeded, true);

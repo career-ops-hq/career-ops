@@ -4,7 +4,7 @@
 import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nbrowser-extract.mjs (config + normalizers)');
@@ -16,7 +16,7 @@ try {
     resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
     workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
-    fetchJdViaKnownApi, JD_FETCHERS,
+    normalizeZohoJob, fetchJdViaKnownApi, JD_FETCHERS,
   } = mod;
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
@@ -395,6 +395,37 @@ try {
   if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
   else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
 
+  // normalizeZohoJob — Zoho Recruit has no JSON API; the posting page embeds
+  // the record as a JS string literal, and its Job_Description is HTML.
+  const zohoFixture = (name) => readFileSync(join(ROOT, 'tests', 'fixtures', name), 'utf8');
+  const ZOHO_URL = 'https://exampleco.zohorecruit.com/jobs/Careers/100000000001853029';
+  const zoho = normalizeZohoJob(zohoFixture('zoho-recruit-detail.html'), '100000000001853029', ZOHO_URL);
+  if (zoho
+      && zoho.url === ZOHO_URL
+      && zoho.title === 'Senior DevOps Engineer / Ruby'
+      && zoho.text.startsWith('Work model: Remote\nJob type: Full time\nSalary: 65.000 EUR-75.000 EUR\nPosted: 2026-05-14\n\n')
+      && zoho.text.includes('Senior DevOps Engineer / Ruby & Rails')
+      && zoho.text.includes("What you'll do")
+      && !zoho.text.includes('<')) {
+    pass('normalizeZohoJob reads the embedded record: HTML description to text, plus work model, salary and date');
+  } else {
+    fail(`normalizeZohoJob => ${JSON.stringify(zoho)}`);
+  }
+  const zohoLocked = normalizeZohoJob(zohoFixture('zoho-recruit-detail-locked.html'), '100000000009803001', ZOHO_URL);
+  if (zohoLocked?.text.includes('Location: New Britain, United States')
+      && zohoLocked.text.includes('Applications closed (the career site shows the posting as filled)')) {
+    pass('normalizeZohoJob surfaces a filled posting as closed');
+  } else {
+    fail(`normalizeZohoJob locked => ${JSON.stringify(zohoLocked)}`);
+  }
+  const zohoNulls = [
+    normalizeZohoJob(zohoFixture('zoho-recruit-detail.html'), '999', ZOHO_URL),
+    normalizeZohoJob(zohoFixture('zoho-recruit-detail-gone.html'), '100000000001853029', ZOHO_URL),
+    normalizeZohoJob(null, '1', ZOHO_URL),
+  ];
+  if (zohoNulls.every((v) => v === null)) pass('normalizeZohoJob returns null for another id, a removed posting, or no body');
+  else fail(`normalizeZohoJob nulls => ${JSON.stringify(zohoNulls)}`);
+
   // normalizeLeverJob — `lists` carries the labeled sections (Requirements,
   // etc.) as separate HTML blocks; dropping them loses half the JD.
   const lever = normalizeLeverJob(
@@ -544,6 +575,7 @@ try {
     ['workday', 'https://acme.wd5.myworkdayjobs.com/External/job/Seattle-WA/Engineer_R1234'],
     ['greenhouse-embedded', 'https://www.acme.com/careers/job?gh_jid=12345'],
     ['smartrecruiters', 'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer'],
+    ['zoho-recruit', 'https://acme.zohorecruit.com/jobs/Careers/100000000001853029/Senior-Engineer'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);

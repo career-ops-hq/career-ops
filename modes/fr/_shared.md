@@ -202,7 +202,7 @@ Dans les offres et negociations francophones, certains termes n'existent pas sur
 3. Citer des lignes exactes du CV lors du matching
 4. Utiliser WebSearch pour les donnees de remuneration et d'entreprise
 5. Enregistrer dans le tracker apres chaque evaluation
-6. Generer le contenu dans la langue de l'offre (francais si l'offre est en francais, anglais sinon)
+6. Generer le contenu destine a l'utilisateur en `{language.output}` de `config/profile.yml` (anglais si non defini), quelle que soit la langue de l'offre. Garder les termes de ce marche et les expliquer dans cette langue si besoin
 7. Etre direct et concret -- pas de blabla
 8. Francais tech naturel pour les textes generes. Phrases courtes, verbes d'action, eviter le passif. Ne pas traduire de force les termes techniques (stack, pipeline, deployment, embedding)
 8b. **URLs de case studies dans le Professional Summary du PDF :** Si le PDF mentionne des case studies ou demos, les URLs DOIVENT apparaitre dans le premier paragraphe (Professional Summary). Les recruteurs ne lisent souvent que le summary. Toutes les URLs en HTML avec `white-space: nowrap`

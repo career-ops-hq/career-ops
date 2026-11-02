@@ -145,6 +145,9 @@ const METRIC_NOUNS = [
   'staff', 'personnel', 'people', 'technicians', 'operators', 'contractors',
   'vendors', 'scientists', 'researchers', 'volunteers', 'students', 'patients',
   'crew',
+  // People a candidate mentored or hired: "Mentored 12 interns" against a
+  // source saying 3 passed, because none of these nouns was listed (#5348).
+  'interns', 'mentees', 'apprentices', 'hires',
   // Physical assets and scale, for the same reason.
   'facilities', 'sites', 'buildings', 'rooms', 'labs', 'laboratories', 'plants',
   'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
@@ -301,11 +304,98 @@ const NOUN_SYNONYMS = new Map([
   ['werkzeuge', 'tools'],
   ['werkzeugen', 'tools'],
 ]);
+// One claim, however it is spelled (#5348). Each pattern below is a spelling of
+// a percentage, an amount of money or a multiplier, and canonicalMetric() folds
+// every match onto one key: `45 percent` / `45 per cent` / `45%` -> `45%`,
+// `USD 3M` / `3 million dollars` / `$3M` -> `$3m`, `10-fold` / `10x` -> `10x`.
+// With only the symbol spellings recognized, the same inflated figure blocked
+// as `45%` and passed as `45 percent`, so whether the gate caught a number
+// depended on wording an LLM rewriter picks freely.
+//
+// Currency codes are matched case-sensitively: lowercase "eur" or "gbp" in prose
+// is not a currency. A bare "pound(s)" is left out because it is also a weight.
+const MAGNITUDE_ALT = String.raw`(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB](?![\p{L}]))`;
 const SIMPLE_CLAIM_PATTERNS = [
-  /\b\d+(?:\.\d+)?\s?%/g,
-  /(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?[kKmMbB])?/g,
+  /\b\d+(?:\.\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
+  new RegExp(String.raw`(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB])?`, 'gu'),
+  new RegExp(String.raw`(?:\b(?:USD|EUR|GBP)|\bUS\$)\s?\d[\d,.]*${MAGNITUDE_ALT}?`, 'gu'),
+  new RegExp(String.raw`\b\d[\d,.]*${MAGNITUDE_ALT}?\s?-?\s?(?:(?:USD|EUR|GBP)\b|(?:[Dd]ollars?|[Ee]uros?)\b)`, 'gu'),
   /\b\d+(?:\.\d+)?\s?x\b/gi,
+  /\b\d+(?:\.\d+)?\s?-?\s?fold\b/gi,
 ];
+
+const CURRENCY_SYMBOLS = new Map([
+  ['$', '$'], ['us$', '$'], ['usd', '$'], ['dollar', '$'], ['dollars', '$'],
+  ['€', '€'], ['eur', '€'], ['euro', '€'], ['euros', '€'],
+  ['£', '£'], ['gbp', '£'],
+]);
+
+/**
+ * Fold one SIMPLE_CLAIM_PATTERNS match onto the key its other spellings share.
+ *
+ * Anything this does not recognize falls back to normalizeClaim, so an entry
+ * in allow_metrics written in an unusual spelling still compares the way it
+ * always did.
+ *
+ * @param {string} raw - the matched text
+ * @returns {string}
+ */
+function canonicalMetric(raw) {
+  const claim = normalizeClaim(raw);
+  const percent = /^(\d+(?:\.\d+)?) ?(?:%|percent|per ?cent|pct)$/.exec(claim);
+  if (percent) return `${percent[1]}%`;
+  const multiplier = /^(\d+(?:\.\d+)?) ?(?:x|-? ?fold)$/.exec(claim);
+  if (multiplier) return `${multiplier[1]}x`;
+  const amount = String.raw`(\d[\d.]*)(?: ?(thousand|million|billion|[kmb]))?`;
+  const lead = new RegExp(String.raw`^(\$|€|£|us\$|usd|eur|gbp) ?${amount}$`).exec(claim);
+  const trail = lead ? null : new RegExp(String.raw`^${amount} ?-? ?(usd|eur|gbp|dollars?|euros?)$`).exec(claim);
+  if (!lead && !trail) return claim;
+  const [symbol, number, magnitude] = lead ? [lead[1], lead[2], lead[3]] : [trail[3], trail[1], trail[2]];
+  const suffix = magnitude ? (SPELLED_MAGNITUDES.get(magnitude) ?? magnitude) : '';
+  return `${CURRENCY_SYMBOLS.get(symbol)}${number}${suffix}`;
+}
+
+// Spelled-out numbers, rewritten as digits before the claim patterns run, so
+// "Led forty engineers" and "Led 40 engineers" make the same claim (#5348).
+// Before, only the digit form was read, and a rewriter that spelled the
+// number out got an inflated headcount past the gate.
+//
+// "one" on its own is left alone: "one of the engineers" is not a count of
+// one engineer, and every count noun here is plural anyway. It is read only as
+// the start of "one hundred". The `-fold` multiplier is read for four and up,
+// because "a twofold approach" and "a threefold mission" are prose far more
+// often than they are metrics.
+const NUMBER_WORD_VALUES = new Map([
+  ['one', 1], ['two', 2], ['three', 3], ['four', 4], ['five', 5], ['six', 6], ['seven', 7], ['eight', 8], ['nine', 9],
+  ['ten', 10], ['eleven', 11], ['twelve', 12], ['thirteen', 13], ['fourteen', 14], ['fifteen', 15],
+  ['sixteen', 16], ['seventeen', 17], ['eighteen', 18], ['nineteen', 19],
+  ['twenty', 20], ['thirty', 30], ['forty', 40], ['fifty', 50], ['sixty', 60], ['seventy', 70],
+  ['eighty', 80], ['ninety', 90],
+]);
+const UNIT_WORDS = 'one|two|three|four|five|six|seven|eight|nine';
+const TENS_WORDS = 'twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety';
+const TEEN_WORDS = 'ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen';
+const SPELLED_NUMBER_RE = new RegExp(
+  String.raw`\b(?:(?<tens>${TENS_WORDS})(?:[-\s](?<tensUnit>${UNIT_WORDS}))?|(?<teen>${TEEN_WORDS})|(?<unit>two|three|four|five|six|seven|eight|nine)|(?<one>one)(?=\s+hundred\b))(?<hundred>\s+hundred)?\b`,
+  'gi',
+);
+const SPELLED_FOLD_RE = /\b(four|five|six|seven|eight|nine|ten|twenty|fifty|hundred|thousand)-?fold\b/gi;
+
+/** Rewrite spelled-out English numbers as digits, for metric extraction only. */
+function spellNumbers(text) {
+  return text
+    .replace(SPELLED_FOLD_RE, (_, word) => {
+      const lower = word.toLowerCase();
+      const value = lower === 'hundred' ? 100 : lower === 'thousand' ? 1000 : NUMBER_WORD_VALUES.get(lower);
+      return `${value}-fold`;
+    })
+    .replace(SPELLED_NUMBER_RE, (...args) => {
+      const groups = args.at(-1);
+      const word = (name) => NUMBER_WORD_VALUES.get(groups[name]?.toLowerCase()) ?? 0;
+      const value = word('tens') + word('tensUnit') + word('teen') + word('unit') + word('one');
+      return String(groups.hundred ? value * 100 : value);
+    });
+}
 
 /** Read a UTF-8 file when it exists, otherwise return an empty string. */
 function readIfExists(path) {
@@ -403,8 +493,28 @@ function decodeHtmlEntity(entity, decimal, hex, name, markup) {
   return char;
 }
 
+// Only the body of a LaTeX document is CV content. The preamble is package
+// names, lengths and macro definitions, and read as text it made claims of its
+// own: `\pdfgentounicode=1` above a `%%%%` banner was the metric "1%", and
+// the `0em` lengths outvoted a short CV's English in the language check
+// ("em" is Portuguese). Comments go too, since a comment runs from an
+// unescaped `%` to the end of the line. Only a LaTeX document is treated this
+// way: everywhere else `%` is a percent sign.
+const LATEX_DOCUMENT_RE = /\\documentclass\b|\\begin\{document\}/;
+const LATEX_COMMENT_RE = /(?<!\\)%.*$/gm;
+const LATEX_BODY_RE = /\\begin\{document\}([\s\S]*?)(?:\\end\{document\}|$)/;
+
+/** The body of a LaTeX document without its comments; any other text unchanged. */
+function latexBody(text) {
+  const raw = String(text);
+  if (!LATEX_DOCUMENT_RE.test(raw)) return raw;
+  const uncommented = raw.replace(LATEX_COMMENT_RE, '');
+  return LATEX_BODY_RE.exec(uncommented)?.[1] ?? uncommented;
+}
+
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
 export function stripMarkup(text, { keepLineBreaks = false } = {}) {
+  text = latexBody(text);
   // An entity is the character it encodes, and a default-ignorable character
   // (zero-width space, joiner, soft hyphen, directional mark, variation
   // selector) renders as nothing. Both are resolved before anything else reads
@@ -436,6 +546,12 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     .replace(/<\/?(?:li|p|div|tr|h[1-6]|section|article|ul|ol|table|br)\b[^>\n]*>/gi, '. ')
     .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
     .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
+    // An escaped special character is the character. LaTeX writes a percent
+    // sign as `\%` (and markdown allows the same escape), and the backslash
+    // broke the digit-percent adjacency the claim pattern needs, so every
+    // percentage in a .tex CV was invisible to the gate (#5348). `\&`, `\#`
+    // and `\_` matter to names: "R\&D", "C\#".
+    .replace(/\\([%$&#_])/g, '$1')
     // Markdown emphasis (`**bold**`, `__bold__`, `*italic*`) — the house style
     // used to bold nearly every metric in cv.md/article-digest.md. A closing
     // marker sitting directly against the number severed the number-noun
@@ -902,6 +1018,67 @@ export function factClaims(text, sourceNormalized = null) {
   return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
 }
 
+// The fields the CV builders emit as structure rather than prose (#5348).
+// factClaims() reads an employer only after a prose trigger ("worked at",
+// "joined", "Company:"), and a built CV never phrases its employer that way: it
+// is a `job-company` span. So a payload that swapped the employer, the degree
+// or a certification rendered and passed the gate, which is the fabrication
+// AGENTS.md treats as most serious.
+//
+// Employer, education and certification fields BLOCK when no source contains
+// them. The job title only WARNS: cv-title-check.mjs is deliberately warn-only
+// about titles, because reframing one is sometimes the candidate's call, and a
+// second check that blocked on the same field would overrule that choice.
+// Skills lists are not read here. Rewording a skill into the posting's
+// vocabulary is the reformulation the tailoring is allowed to do.
+//
+// Templates with section partials (#2183) may use other class names, and a
+// markdown CV has no markup to read, so neither is covered.
+const STRUCTURED_HTML_FIELDS = [
+  ['job-company', 'employer', true],
+  ['edu-title', 'education', true],
+  ['edu-org', 'education', true],
+  ['cert-title', 'certification', true],
+  ['job-role', 'title', false],
+];
+// One level of nested braces, enough for `\textbf{...}` inside an argument.
+const LATEX_ARG = String.raw`\s*\{((?:[^{}]|\{[^{}]*\})*)\}`;
+// build-cv-latex.mjs writes `\resumeSubheading{organization}{…}{title or degree}{…}`
+// for both experience and education, so the first argument is an employer or
+// an institution and the third a role or a degree. The first blocks; the third
+// is read as a title and warns, for the reason given above.
+const LATEX_SUBHEADING_RE = new RegExp(String.raw`\\resumeSubheading${LATEX_ARG}${LATEX_ARG}${LATEX_ARG}${LATEX_ARG}`, 'g');
+
+/**
+ * Employer, education, certification and title claims a CV builder emitted as
+ * structured fields.
+ *
+ * @param {string} text - generated HTML or LaTeX
+ * @returns {{kind: string, value: string, line: string, blocking: boolean}[]}
+ */
+export function structuredFieldClaims(text) {
+  const raw = latexBody(text ?? '');
+  const claims = [];
+  const add = (kind, inner, blocking) => {
+    const line = stripMarkup(inner);
+    const value = normalizeFact(line);
+    if (value) claims.push({ kind, value, line, blocking });
+  };
+  for (const [cls, kind, blocking] of STRUCTURED_HTML_FIELDS) {
+    const re = new RegExp(String.raw`<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])${cls}(?![\w-])[^"]*"[^>]*>([\s\S]*?)</\1>`, 'gi');
+    for (const match of raw.matchAll(re)) {
+      // edu-title encloses its edu-org span, which is read on its own.
+      add(kind, match[2].replace(/<span\b[^>]*>[\s\S]*?<\/span>/gi, ' '), blocking);
+    }
+  }
+  for (const match of raw.matchAll(LATEX_SUBHEADING_RE)) {
+    add('organization', match[1], true);
+    add('title', match[3], false);
+  }
+  const seen = new Set();
+  return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
+}
+
 /** Split generated/source documents into bounded statements for attribution checks. */
 function factStatements(text) {
   const withLineBoundaries = String(text ?? '').replace(/\r?\n+/g, '. ');
@@ -1169,11 +1346,12 @@ function isDisclosedRequirement(clean, match, allMatches) {
  * @param {string} clean
  * @returns {RegExpMatchArray[]}
  */
-function countMatches(clean) {
+function countMatches(clean, { keepPlanHorizons = false } = {}) {
   COUNT_CLAIM_RE.lastIndex = 0;
   const allMatches = [...clean.matchAll(COUNT_CLAIM_RE)];
   return allMatches.filter((match) => {
     if (isDisclosedRequirement(clean, match, allMatches)) return false;
+    if (keepPlanHorizons) return true;
     if (!TIME_NOUNS.has(match[2].toLowerCase())) return true;
     const lead = clean.slice(Math.max(0, match.index - 40), match.index);
     if (!HORIZON_LEAD_RE.test(lead)) return true;
@@ -1562,13 +1740,13 @@ function compactMagnitude(raw) {
 }
 
 /** Extract metric-like claims that require source evidence. */
-export function metricClaims(text) {
-  const clean = stripMarkup(text, { keepLineBreaks: true });
+export function metricClaims(text, { keepPlanHorizons = false } = {}) {
+  const clean = spellNumbers(stripMarkup(text, { keepLineBreaks: true }));
   const claims = new Set();
   for (const pattern of SIMPLE_CLAIM_PATTERNS) {
-    for (const match of clean.matchAll(pattern)) claims.add(normalizeClaim(match[0]));
+    for (const match of clean.matchAll(pattern)) claims.add(canonicalMetric(match[0]));
   }
-  for (const match of countMatches(clean)) {
+  for (const match of countMatches(clean, { keepPlanHorizons })) {
     const noun = match[2].toLowerCase();
     claims.add(normalizeClaim(`${compactMagnitude(match[1])} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
   }
@@ -1797,7 +1975,11 @@ function looksEnglish(text) {
   if (letters.length && nonLatin.length / letters.length > 0.3) return false;
   let english = 0;
   let other = 0;
-  for (const [word] of text.matchAll(/[\p{L}]+/gu)) {
+  // Addresses are not prose. "com" is Portuguese for "with", so the contact
+  // line of a short CV (jane@example.com, github.com/jane) counted as two or
+  // three Portuguese words and outvoted its English (#5348).
+  const prose = text.replace(/\S+@\S+|\S+:\/\/\S+|[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+\S*/gu, ' ');
+  for (const [word] of prose.matchAll(/[\p{L}]+/gu)) {
     if (word.length > 1 && word === word.toUpperCase()) continue;
     const lower = word.toLowerCase();
     if (ENGLISH_FUNCTION_WORDS.has(lower)) english++;
@@ -1849,24 +2031,38 @@ function sourceContainsFact(sourceText, value) {
 
 /**
  * @param {string} targetText generated candidate-facing HTML/Markdown/text
- * @param {{ sourcePaths?: string[], configPath?: string, cwd?: string }} options
+ * @param {{ sourcePaths?: string[], planTexts?: string[], configPath?: string, cwd?: string }} options
+ *   planTexts: what the candidate wrote for one document, such as the answers
+ *   for a cover letter. They support only a number the document states as a
+ *   plan, never an employer, title, tool, or past experience. The rendered
+ *   letter is not passed here, or every claim in it would support itself.
  * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], advisoryFacts: object[], forbidden: string[], warnings: string[] }}
  * @throws when the config is invalid
  */
 export function verifyFacts(targetText, {
   sourcePaths = DEFAULT_SOURCES,
+  planTexts = [],
   configPath = DEFAULT_CONFIG,
   cwd = process.cwd(),
 } = {}) {
-  const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
+  // Per file, before the join: stripMarkup keeps only the body of a LaTeX
+  // document, and run on the joined text it would discard every source read
+  // ahead of a .tex one as if it were that document's preamble.
+  const sourceText = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd)))).join('\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
-  const invented = [...targetClaims].filter(claim => !allowed.has(claim));
+  const planned = plannedClaims(targetText, planTexts);
+  const invented = [...targetClaims].filter(claim => !allowed.has(claim) && !planned.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const namedFacts = [...factClaims(targetText, sourceNormalized), ...delegatedAuthorshipClaims(targetText, sourceText)]
-    .filter(({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value));
+  const unsourced = ({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value);
+  const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
+  const namedFacts = [
+    ...factClaims(targetText, sourceNormalized),
+    ...delegatedAuthorshipClaims(targetText, sourceText),
+    ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
+  ].filter(unsourced);
   // Scope and adoption claims resolve their own source evidence — a verb-tier
   // comparison and a phrase lookup — so they must not be re-filtered by
   // sourceContainsFact. That test asks whether the claim's own wording appears
@@ -1879,8 +2075,10 @@ export function verifyFacts(targetText, {
   // Adoption claims warn instead of block. The phrase list cannot see every
   // way a source states reach, and a block makes the PDF step tell the agent to
   // stop and fix, so a missed paraphrase would get a true bullet rewritten.
-  const advisoryFacts = (languageGap ? [] : adoptionClaims(targetText, sourceText))
-    .filter(({ value }) => !allowedFacts.has(value));
+  const advisoryFacts = [
+    ...(languageGap ? [] : adoptionClaims(targetText, sourceText)),
+    ...fieldClaims.filter(claim => !claim.blocking).map(({ kind, value, line }) => ({ kind, value, line })),
+  ].filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases
@@ -1915,6 +2113,107 @@ export function verifyFacts(targetText, {
 }
 
 /**
+ * A past-experience framing of a time metric inside an assertion span, e.g.
+ * "I have 6 months of experience". When a forward marker appears later in the
+ * same clause ("…and will review incidents"), that marker must not pull the
+ * past metric into the plan set.
+ */
+const PAST_TIME_CLAIM_RE = /\b(?:have|has|had|spent|worked)\s+(?:[\p{L}\p{M}-]+\s+){0,4}\d[\d,.]*\s*\+?\s*(?:months|years|weeks|days)\b/giu;
+const PAST_PERCENT_CLAIM_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b[^.!?;\n]{0,80}?\d[\d,.]*\s*(?:%|(?:percent|per\s?cent|pct)\b)/giu;
+const DURATION_INTRO_RE = /^\s*(?:over|in|within|for|during|across)\b[^,;:]*?\d[\d,.]*\s*\+?\s*(?:days|weeks|months|years)\s*$/i;
+
+/**
+ * Sentence bounds at `.`, `!`, `?`, or newline — used so a duration intro
+ * ("Over 6 months, …") can inherit a forward marker from the next clause.
+ */
+function sentenceBounds(text, index) {
+  const isSentenceEnd = (i) => {
+    const c = text[i];
+    if (c === '\n') return true;
+    if (c !== '.' && c !== '!' && c !== '?') return false;
+    return !(/\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? ''));
+  };
+  let start = 0;
+  for (let i = index - 1; i >= 0; i--) if (isSentenceEnd(i)) { start = i + 1; break; }
+  let end = text.length;
+  for (let i = index; i < text.length; i++) if (isSentenceEnd(i)) { end = i; break; }
+  return { start, end };
+}
+
+function pastClaimMetrics(span) {
+  const claims = new Set();
+  const add = (text) => {
+    for (const claim of metricClaims(text, { keepPlanHorizons: true })) claims.add(claim);
+  };
+  for (const match of span.matchAll(PAST_TIME_CLAIM_RE)) add(match[0]);
+  for (const match of span.matchAll(PAST_PERCENT_CLAIM_RE)) {
+    const markerAfterVerb = match[0].search(FORWARD_MARKER_RE) > 0;
+    if (markerAfterVerb) continue;
+    add(match[0]);
+  }
+  return claims;
+}
+
+/** A span states a plan when it has a forward marker, or it is a duration introduction in a sentence that has one. */
+function isPlanAssertion(span, sentence) {
+  if (FORWARD_MARKER_RE.test(span)) return true;
+  return DURATION_INTRO_RE.test(span) && FORWARD_MARKER_RE.test(sentence);
+}
+
+/**
+ * Metric claims in `targetText` that `planTexts` support: the plan texts hold
+ * the claim, and the target states that claim as a plan. "I will read the last
+ * 6 months of incident reviews" qualifies. "I have 6 months of
+ * incident-response experience" does not, even when a forward marker appears
+ * later in the same clause. Plan answers keep forward-looking horizon numbers
+ * so a letter can restate them ("Over 6 months, I will…").
+ *
+ * @param {string} targetText
+ * @param {string[]} planTexts
+ * @returns {Set<string>}
+ */
+function plannedClaims(targetText, planTexts) {
+  const planText = planTexts.filter(text => typeof text === 'string').join('\n');
+  if (!planText.trim()) return new Set();
+  // keepPlanHorizons: answers often say "In my first 6 months I will…"; the
+  // target-side horizon rule still drops those from invented claims, but the
+  // plan evidence must retain the number so the letter can restate it.
+  const inPlans = metricClaims(planText, { keepPlanHorizons: true });
+  const clean = spellNumbers(stripMarkup(targetText, { keepLineBreaks: true }));
+  const forward = new Set();
+  const past = new Set();
+  for (let i = 0; i < clean.length;) {
+    const { start, end } = clauseBounds(clean, i);
+    const span = clean.slice(start, end);
+    const { start: s0, end: s1 } = sentenceBounds(clean, i);
+    const sentence = clean.slice(s0, s1);
+    const planAssertion = isPlanAssertion(span, sentence);
+    const pastInSpan = pastClaimMetrics(span);
+    for (const claim of metricClaims(clean.slice(i, end))) {
+      if (pastInSpan.has(claim)) past.add(claim);
+      else if (planAssertion) forward.add(claim);
+      else past.add(claim);
+    }
+    i = end + 1;
+  }
+  return new Set([...forward].filter(claim => inPlans.has(claim) && !past.has(claim)));
+}
+
+/** Say which sources the gate read, so nobody looks for evidence it never checked. */
+export function factSourceAdvice({ letterAnswers = false } = {}) {
+  if (!letterAnswers) {
+    return 'cv.md and article-digest.md do not contain these claims. Add career evidence to one of them. A verified exception belongs in config/cv-facts.json.';
+  }
+  return [
+    'These claims are not in cv.md, article-digest.md, or the answers and inputs supplied for this letter.',
+    'Those answers support only a number the letter states as a plan, never an employer, title, tool, or past experience.',
+    'Add career evidence to cv.md or article-digest.md.',
+    'A plan stays in those answers. Do not copy that plan into cv.md.',
+    'A verified exception belongs in config/cv-facts.json.',
+  ].join(' ');
+}
+
+/**
  * Tell the user why a scope claim blocked and how to allow it once verified.
  *
  * The value is the exact string `allow_facts` matches, so the user can copy it.
@@ -1935,7 +2234,7 @@ export function assertFacts(targetText, options = {}) {
       return sourceLine ? `${kind}=${value} (source says: ${sourceLine})` : `${kind}=${value}`;
     }).join(', ')}`);
     if (result.forbidden.length) details.push(`forbidden phrases found: ${result.forbidden.join(', ')}`);
-    throw new Error(`Fact check failed${options.label ? ` for ${options.label}` : ''}: ${details.join('; ')}`);
+    throw new Error(`Fact check failed${options.label ? ` for ${options.label}` : ''}: ${details.join('; ')}. ${factSourceAdvice({ letterAnswers: Array.isArray(options.planTexts) })}`);
   }
   return result;
 }
@@ -1975,7 +2274,9 @@ function usage() {
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
 non-metric facts (employers, titles, tools, delegated-work authorship, scope-verb
 inflation, and unsourced adoption claims) absent from source files.
-Default sources: cv.md, article-digest.md
+Default sources: cv.md and article-digest.md.
+A cover letter also reads the answers supplied for that letter, which support
+only a number the letter states as a plan. The rendered letter is not a source.
 Default config:  config/cv-facts.json (optional)`;
 }
 
@@ -2535,6 +2836,27 @@ export function printAdvisoryFacts(facts = [], print = console.warn) {
   }
 }
 
+/**
+ * Print everything that made a verdict 'warn': advisory phrases, advisory
+ * facts, and what the gate could not read.
+ *
+ * One function for the CLI and every renderer that calls assertFacts. The
+ * renderers used to print the phrases and facts themselves and leave out the
+ * coverage note, so a document the gate could not read showed a warning header
+ * with no reason under it (#5348).
+ *
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: {message: string, spans: string[]}|null}} result
+ * @param {(line: string) => void} [print]
+ */
+export function printFactWarnings(result, print = console.warn) {
+  for (const phrase of result.warnings ?? []) print(`  - advisory phrase: ${phrase}`);
+  printAdvisoryFacts(result.advisoryFacts, print);
+  if (result.coverage) {
+    print(`  - not checked: ${result.coverage.message}`);
+    for (const span of result.coverage.spans.slice(0, 8)) print(`      ${span}`);
+  }
+}
+
 /** Run the fact validator CLI and return its process exit code. */
 export function runCli(args = process.argv.slice(2)) {
   if (args.length === 1 && args[0] === '--self-test') return runSelfTest();
@@ -2575,12 +2897,7 @@ export function runCli(args = process.argv.slice(2)) {
     }
     if (result.verdict === 'warn') {
       console.error(`CV fact check warning: ${basename(targetPath)}`);
-      for (const phrase of result.warnings) console.error(`  - advisory phrase: ${phrase}`);
-      printAdvisoryFacts(result.advisoryFacts, console.error);
-      if (result.coverage) {
-        console.error(`  - not checked: ${result.coverage.message}`);
-        for (const span of result.coverage.spans.slice(0, 8)) console.error(`      ${span}`);
-      }
+      printFactWarnings(result, console.error);
       return 0;
     }
     console.error(`CV fact check failed: ${basename(targetPath)}`);
@@ -2605,7 +2922,7 @@ export function runCli(args = process.argv.slice(2)) {
       console.error('\nForbidden phrases found:');
       for (const phrase of result.forbidden) console.error(`  - ${phrase}`);
     }
-    console.error('\nAdd real evidence to cv.md/article-digest.md, or allow a verified exception in config/cv-facts.json.');
+    console.error(`\n${factSourceAdvice()}`);
     return 1;
   } catch (err) {
     if (parsed.json) {

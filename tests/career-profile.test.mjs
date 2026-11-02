@@ -7,6 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import * as yaml from 'js-yaml';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { acquirePipelineLock } from '../pipeline-lock.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLI = join(ROOT, 'career-profile.mjs');
@@ -31,24 +32,24 @@ test('reviewed import consumes piped answers one line at a time and writes appro
   withProfileRoot((root) => {
     const result = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\ny\ny\n');
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     const profile = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     assert.equal(profile.experiences[0].facts[0].text, 'Built dashboards with SQL.');
     assert.equal(profile.skills.length, 2);
     assert.equal(profile.skills[0].review_status, 'verified');
     assert.equal(profile.skills[0].evidence.quote, '- SQL, Excel');
     const validation = runCli(root, ['validate']);
-    assert.equal(validation.status, 0, validation.stderr);
+    assert.equal(validation.status, 0, describeSpawn(validation));
   });
 });
 
 test('re-import after line shifts updates evidence without duplicating approved facts', () => {
   withProfileRoot((root) => {
     const first = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\ny\ny\n');
-    assert.equal(first.status, 0, first.stderr);
+    assert.equal(first.status, 0, describeSpawn(first));
     writeFileSync(join(root, 'cv.md'), `<!-- moved -->\n<!-- moved again -->\n${CV}`);
     const second = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\ny\ny\n');
-    assert.equal(second.status, 0, second.stderr);
+    assert.equal(second.status, 0, describeSpawn(second));
     const profile = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     assert.equal(profile.experiences.length, 1);
     assert.equal(profile.experiences[0].facts.length, 1);
@@ -60,7 +61,7 @@ test('re-import after line shifts updates evidence without duplicating approved 
 test('preview does not create a profile, and validation rejects missing evidence', () => {
   withProfileRoot((root) => {
     const preview = runCli(root, ['import', 'cv.md']);
-    assert.equal(preview.status, 0, preview.stderr);
+    assert.equal(preview.status, 0, describeSpawn(preview));
     assert.match(preview.stdout, /Preview only/);
     assert.throws(() => readFileSync(join(root, 'data', 'career-profile.yml')),
       { code: 'ENOENT' });
@@ -81,7 +82,7 @@ test('source paths outside the data root retain their complete absolute path', (
     writeFileSync(sourcePath, CV);
     try {
       const result = runCli(root, ['import', sourcePath]);
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, describeSpawn(result));
       assert.ok(result.stdout.includes(sourcePath), result.stdout);
     } finally {
       rmSync(sibling, { recursive: true, force: true });
@@ -94,7 +95,7 @@ test('identical statements under different experience entries retain distinct ID
     const cv = `# Candidate\n## Experience\n### North Co — Analyst\n- Shipped reports.\n### South Co — Analyst\n- Shipped reports.\n`;
     writeFileSync(join(root, 'cv.md'), cv);
     const result = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\ny\ny\n');
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     const profile = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     const ids = profile.experiences.map((entry) => entry.facts[0].id);
     assert.equal(profile.experiences.length, 2);
@@ -107,7 +108,7 @@ test('repeated facts are deduplicated and same-title entries with different fact
     const cv = `# Candidate\n## Experience\n### Acme — Analyst\n- Built reports.\n- Built reports.\n### Acme — Analyst\n- Built dashboards.\n## Skills\n- SQL, SQL\n`;
     writeFileSync(join(root, 'cv.md'), cv);
     const first = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\ny\ny\ny\n');
-    assert.equal(first.status, 0, first.stderr);
+    assert.equal(first.status, 0, describeSpawn(first));
     const before = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     assert.equal(before.experiences.length, 2);
     assert.notEqual(before.experiences[0].id, before.experiences[1].id);
@@ -116,7 +117,7 @@ test('repeated facts are deduplicated and same-title entries with different fact
 
     writeFileSync(join(root, 'cv.md'), `<!-- moved -->\n${cv}`);
     const second = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\ny\ny\ny\n');
-    assert.equal(second.status, 0, second.stderr);
+    assert.equal(second.status, 0, describeSpawn(second));
     const after = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     assert.equal(after.experiences.length, 2);
     assert.deepEqual(after.experiences.map((entry) => entry.facts[0].text).sort(), ['Built dashboards.', 'Built reports.']);
@@ -129,7 +130,7 @@ test('reordering same-title entries keeps each identity attached to its facts on
     const firstOrder = `# Candidate\n## Experience\n### Acme — Analyst\n- Built reports.\n### Acme — Analyst\n- Built dashboards.\n`;
     writeFileSync(join(root, 'cv.md'), firstOrder);
     const first = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\ny\ny\n');
-    assert.equal(first.status, 0, first.stderr);
+    assert.equal(first.status, 0, describeSpawn(first));
     const profilePath = join(root, 'data', 'career-profile.yml');
     const initial = yaml.load(readFileSync(profilePath, 'utf8'));
     const idsByFact = new Map(initial.experiences.map((entry) => [entry.facts[0].text, entry.id]));
@@ -141,7 +142,7 @@ test('reordering same-title entries keeps each identity attached to its facts on
 
     writeFileSync(join(root, 'cv.md'), `# Candidate\n## Experience\n### Acme — Analyst\n- Built dashboards.\n### Acme — Analyst\n- Built reports.\n`);
     const second = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\ny\ny\n');
-    assert.equal(second.status, 0, second.stderr);
+    assert.equal(second.status, 0, describeSpawn(second));
     const reordered = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     assert.equal(reordered.experiences.length, 2);
     assert.deepEqual(reordered.experiences.map((entry) => entry.facts.map((fact) => fact.text)).sort(), [
@@ -155,7 +156,7 @@ test('reordering same-title entries keeps each identity attached to its facts on
 test('skipping an experience heading also skips its facts', () => {
   withProfileRoot((root) => {
     const result = runCli(root, ['import', 'cv.md', '--review'], 'n\ny\ny\n');
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     const profile = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     assert.equal(profile.experiences.length, 0);
     assert.equal(profile.skills.length, 2);
@@ -165,16 +166,16 @@ test('skipping an experience heading also skips its facts', () => {
 test('re-import applies explicit wording edits but plain approval preserves prior edits', () => {
   withProfileRoot((root) => {
     const initial = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\nn\nn\n');
-    assert.equal(initial.status, 0, initial.stderr);
+    assert.equal(initial.status, 0, describeSpawn(initial));
 
     const edited = runCli(root, ['import', 'cv.md', '--review'], 'e\nAcme — Lead Analyst\ne\nDesigned verified dashboards.\nn\nn\n');
-    assert.equal(edited.status, 0, edited.stderr);
+    assert.equal(edited.status, 0, describeSpawn(edited));
     let profile = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     assert.equal(profile.experiences[0].label, 'Acme — Lead Analyst');
     assert.equal(profile.experiences[0].facts[0].text, 'Designed verified dashboards.');
 
     const approvedAgain = runCli(root, ['import', 'cv.md', '--review'], 'y\ny\nn\nn\n');
-    assert.equal(approvedAgain.status, 0, approvedAgain.stderr);
+    assert.equal(approvedAgain.status, 0, describeSpawn(approvedAgain));
     profile = yaml.load(readFileSync(join(root, 'data', 'career-profile.yml'), 'utf8'));
     assert.equal(profile.experiences[0].label, 'Acme — Lead Analyst');
     assert.equal(profile.experiences[0].facts[0].text, 'Designed verified dashboards.');
@@ -187,7 +188,7 @@ test('an import with nothing approved does not read the existing profile', () =>
     const invalid = 'schema_version: 2\ncandidate: {}\n';
     writeFileSync(profilePath, invalid);
     const result = runCli(root, ['import', 'cv.md', '--review'], 'n\nn\nn\n');
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.match(result.stdout, /No approved items; profile was not changed\./);
     assert.equal(readFileSync(profilePath, 'utf8'), invalid);
   });

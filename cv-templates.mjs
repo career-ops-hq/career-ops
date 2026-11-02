@@ -7,10 +7,10 @@
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getProfilePath } from './path-resolver.mjs';
 import {
   parseMeta, PARTIAL_SECTIONS, declaredSections, checkDeclaredSections,
 } from './lib/template-manifest.mjs';
@@ -25,8 +25,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // templates/ is System Layer (code root); config/profile.yml is User Layer and
 // follows the data root. CAREER_OPS_PROFILE still wins over both.
 const DEFAULT_TEMPLATES_DIR = resolve(__dirname, 'templates');
-const DEFAULT_PROFILE_PATH =
-  process.env.CAREER_OPS_PROFILE || resolve(getCareerOpsRoot(), 'config', 'profile.yml');
+const DEFAULT_PROFILE_PATH = getProfilePath();
 
 export const KINDS = {
   cv: {
@@ -232,7 +231,7 @@ export function validateTemplate(path, kind) {
 const DEFAULT_ATS_RULES_PATH = resolve(__dirname, 'templates', 'ats-rules.yml');
 
 export function loadAtsRules(path = DEFAULT_ATS_RULES_PATH) {
-  const doc = yaml.load(readFileSync(path, 'utf-8')) || {};
+  const doc = loadYaml(readFileSync(path, 'utf-8')) || {};
   // A missing `rules:` key, a wrongly-typed one and an empty list used to
   // coerce to [], and atsLint then walked zero rules and reported ok. Every
   // other way of breaking this file already fails loudly, so a config that
@@ -591,7 +590,7 @@ export function loadProfileDefault(kind, { profilePath = DEFAULT_PROFILE_PATH, s
   if (!existsSync(profilePath)) return null;
   let doc;
   try {
-    doc = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    doc = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
   } catch (err) {
     if (strict) {
       throw new Error(

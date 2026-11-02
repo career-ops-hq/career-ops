@@ -15,6 +15,7 @@ import { linkNodeModules } from './helpers.mjs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -58,7 +59,7 @@ test('merge-tracker merges with the status as written when templates/states.yml 
     });
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
 
-    assert.equal(r.status, 0, `merge-tracker died without states.yml:\n${out}`);
+    assert.equal(r.status, 0, describeSpawn(r, `merge-tracker died without states.yml:\n${out}`));
     assert.match(out, /Cannot read canonical states/, 'the broken install must be reported');
     const row = readFileSync(tracker, 'utf-8').split('\n').find(l => l.includes('Globex'));
     assert.ok(row, `the addition was not merged:\n${out}`);

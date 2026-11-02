@@ -96,6 +96,7 @@ if (dispatchBlock) {
       // extracted block runs in the same shape it has inside process_offer().
       // The block opens the retry loop (`while true; do`) and ends at the
       // dispatch `esac`; close the loop here after a single attempt.
+      'run_worker() { "$@"; }',
       'local_wrapper() {',
       '  local -a claude_args=(-p)',
       dispatchBlock,

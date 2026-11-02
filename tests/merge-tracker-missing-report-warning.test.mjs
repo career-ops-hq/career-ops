@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, renameSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -105,4 +105,24 @@ test('--dry-run reports the warning and writes nothing', withRoot((root) => {
   assert.match(r.out, WARN);
   assert.equal(tracker(root), before, 'tracker untouched');
   assert.ok(existsSync(join(root, 'batch', 'tracker-additions', '001-acme-widgets.tsv')), 'TSV not archived');
+}));
+
+test('a symlinked tracker FILE: a link that resolves from the link\'s own folder does not warn (#5374)', withRoot((root) => {
+  // data/applications.md links into another repo; reports/ sits next to the
+  // link, not next to the target, and ../reports/ resolves from data/.
+  const privateData = join(root, 'private', 'data');
+  mkdirSync(privateData, { recursive: true });
+  const real = join(privateData, 'applications.md');
+  renameSync(join(root, 'data', 'applications.md'), real);
+  try { symlinkSync(real, join(root, 'data', 'applications.md')); } catch (e) {
+    if (e.code === 'EPERM' || e.code === 'EACCES') return; // symlinks need privileges on some Windows setups
+    throw e;
+  }
+  writeFileSync(join(root, 'reports', '001-acme-widgets-2026-07-15.md'), '# Eval\n**URL:** N/A\n');
+  addTsv(root, '[1](../reports/001-acme-widgets-2026-07-15.md)');
+  const r = run(root);
+  assert.equal(r.status, 0, r.out);
+  assert.doesNotMatch(r.out, WARN);
+  assert.doesNotMatch(r.out, /not on disk/);
+  assert.match(readFileSync(real, 'utf-8'), /Acme Widgets/, 'the row was merged into the real file');
 }));

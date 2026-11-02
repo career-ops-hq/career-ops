@@ -121,10 +121,12 @@ export default {
   `_types.js` for the full list of optional fields.
   Populate `description` **only** when the list payload carries it for free
   (no extra per-job request — the scanner is zero-token). The one exception
-  is opt-in enrichment: an entry with `fetchDetails: true` (plus an optional
-  `detailLimit` cap) makes the provider fetch per-posting detail to fill
-  `description`, bounded by `detailLimit` and skipped entirely while a health
-  probe runs (reference: `eploy.mjs`; find the rest with
+  is opt-in enrichment: `fetchDetails: true` (plus an optional `detailLimit`
+  cap) under the provider's own config key on the entry —
+  `eploy: { fetchDetails: true, detailLimit: 25 }`, not top-level keys —
+  makes the provider fetch per-posting detail to fill `description`, bounded
+  by `detailLimit` and skipped entirely while a health probe runs
+  (reference: `eploy.mjs`; find the rest with
   `grep -l fetchDetails providers/*.mjs`). That enrichment is
   opt-in *only*: gate the whole detail loop on the entry config asking for
   it **and** on not being in a probe — `eploy.mjs`
@@ -167,15 +169,26 @@ the reverse-ATS sweep, and only for a job that passed the title/location
 filters but came back undated — so the undated-drop policy has a date to
 judge.
 
-`scan-ats-full.mjs` imports a **fixed** set of modules (`greenhouse`,
-`lever`, `ashby`, `workday`, `icims`) with no registry lookup — a provider
-it does not import can define `enrichDate` and nothing will ever call it.
-The hook also overlaps the `fetchDetails` opt-in above, which already
-fetches the detail page on the normal `scan.mjs` path. Pick one:
+`scan-ats-full.mjs` reaches a provider in one of two ways, and both call
+`enrichDate`:
+
+- **The dataset sweep.** A **fixed** `SOURCES` table of six directly
+  imported modules (`greenhouse`, `lever`, `ashby`, `workday`, `icims`,
+  `bamboohr`), each paired with a public company dataset. No registry
+  lookup; joining it means adding an import and a `SOURCES` entry.
+- **The `--history-seeds` pass.** Boards derived from the user's tracker and
+  scan history (`history-ats-seeds.mjs`). This one does load the registry,
+  but it only reaches a provider whose `id` equals a vendor label from
+  `ATS_HOST_PATTERNS` in `ats-vendor.mjs` and whose `detect()` accepts the
+  derived board URL.
+
+A provider reached by neither can define `enrichDate` and nothing will ever
+call it. The hook also overlaps the `fetchDetails` opt-in above, which
+already fetches the detail page on the normal `scan.mjs` path. Pick one:
 `fetchDetails` for a provider reached through `portals.yml`; `enrichDate`
-only when the provider is (or is being) wired into `scan-ats-full.mjs`.
-Don't ship both. If you add it, test it and say in the header comment that
-it is inert until the provider is added there.
+only when `scan-ats-full.mjs` reaches the provider (or is being changed to).
+Don't ship both. If you add it, test it, and if the provider is not reached
+yet, say in the header comment that the hook is inert until it is.
 
 ## 2. Mandatory guards
 
@@ -798,8 +811,9 @@ provider whose tuning needs differ from the shared default
       or fail loud) that doesn't misfire the "raise `max_pages`" warning.
 - [ ] A `fetchDetails` detail-fetch loop is paced and retry-wrapped the
       same way, even when the provider does not paginate.
-- [ ] No `enrichDate` unless the provider is (being) wired into
-      `scan-ats-full.mjs`; not shipped alongside the `fetchDetails` opt-in.
+- [ ] No `enrichDate` unless `scan-ats-full.mjs` reaches the provider
+      (or is being changed to); not shipped alongside the `fetchDetails`
+      opt-in.
 - [ ] `tests/providers/{name}.test.mjs` covers everything in section 3.
 - [ ] `node test-all.mjs` — the full suite is green (not just `--only`).
 - [ ] A row is added to

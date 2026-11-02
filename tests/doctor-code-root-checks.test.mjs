@@ -19,11 +19,14 @@
 // already pins that it keeps checking the targeted directory. Here the split
 // is the ambient one a real installation hits — CAREER_OPS_ROOT set, no
 // --target — so codeRoot must fall back to doctor.mjs's own directory.
-import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync, sealProcessGitEnv } from './helpers.mjs';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\ndoctor.mjs — code-root checks stay on the code checkout under a split root (#3867)');
 
@@ -59,6 +62,7 @@ try {
   git(dataRoot, 'init', '-q');
   git(dataRoot, 'config', 'user.email', 'test@example.com');
   git(dataRoot, 'config', 'user.name', 'Test');
+  git(dataRoot, 'config', 'core.hooksPath', join(dataRoot, 'no-such-hooks'));
   writeFileSync(join(dataRoot, 'stray.md.bak'), 'a data-root backup that is not the code checkout\n', 'utf-8');
   git(dataRoot, 'add', 'stray.md.bak');
   git(dataRoot, 'commit', '-q', '-m', 'tracked backup living in the data root only');

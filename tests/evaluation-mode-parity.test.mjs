@@ -60,6 +60,14 @@ test('frozen locales still require report-format resync', () => {
   }
 });
 
+// A frozen file may still miss blocks, but not the posting URL: verify-pipeline,
+// merge-tracker --backfill-urls and the dashboard all match `**URL:**` exactly.
+test('every evaluation mode, frozen ones included, writes the exact **URL:** label', () => {
+  for (const file of ['oferta.md', ...discoverEvaluationModes(ROOT)]) {
+    assert.ok(!structuralGaps(readModeText(ROOT, `modes/${file}`)).includes('**URL:** in report header'), file);
+  }
+});
+
 test('a missing H answers section is reported', () => {
   assert.ok(structuralGaps(mode(REPORT.replace('## H) Answers\n{answers}\n', ''))).includes('## H)'));
 });

@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'funnel-velocity.mjs');
@@ -31,7 +32,7 @@ function runFunnel(...args) {
 
 test('--help prints usage and exits 0', () => {
   const result = runFunnel('--help');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
   assert.match(result.stdout, /node funnel-velocity\.mjs/);
   assert.match(result.stdout, /--summary/);
@@ -40,13 +41,13 @@ test('--help prints usage and exits 0', () => {
 
 test('-h prints usage and exits 0', () => {
   const result = runFunnel('-h');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
 });
 
 test('help exits before reading report inputs', () => {
   const result = runFunnel('--benchmarks', NO_BENCHMARKS, '--help');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
   assert.doesNotMatch(result.all, /benchmark file not found/i);
 });
@@ -90,7 +91,7 @@ test('a normal run preserves the existing no-tracker JSON bytes', () => {
     },
   }, null, 2)}\n`;
 
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.equal(result.stderr, '');
   assert.equal(result.stdout, expected);
 });

@@ -24,6 +24,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import { spawn } from 'node:child_process';
+import { tryAcquireDirLockSync } from '../lib/dir-lock.mjs';
 import {
   acquirePipelineLock, LockTimeoutError, OWNERLESS_GRACE_MS,
   lockRecoveryVerdict, RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE,
@@ -356,18 +358,43 @@ test('lockRecoveryVerdict: an absent directory is VANISHED, never STALE — "gon
 
 test('lockRecoveryVerdict: STALE, LIVE and the grace floor keep their existing meanings', () => {
   const root = fixtureRoot();
+  const liveChild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
   try {
     const dead = join(root, 'data', 'dead.lock');
     writeCrashedHolder(dead);
     assert.equal(lockRecoveryVerdict(dead, 1), RECOVER_STALE, 'a crashed holder is still reclaimable');
 
+    // A live owner is ANOTHER live process. This process's own pid no longer
+    // stands in for one: without a handle behind it, it is a leftover (#5390).
     const live = join(root, 'data', 'live.lock');
     mkdirSync(live, { recursive: true });
     writeFileSync(join(live, 'owner.json'), JSON.stringify({
-      pid: process.pid, token: 'live', started_at: new Date().toISOString(),
+      pid: liveChild.pid, token: 'live', started_at: new Date().toISOString(),
     }), 'utf-8');
     backdate(live, OWNERLESS_GRACE_MS * 50);
     assert.equal(lockRecoveryVerdict(live, 1), RECOVER_LIVE, 'a live owner is never stale, however old');
+
+    // Our own pid with a token no handle of ours holds: a release whose rm was
+    // swallowed, or a stamp we could not confirm. Judged by age, so a long-lived
+    // process (the web server) does not keep it LIVE until it restarts.
+    const leftover = join(root, 'data', 'leftover.lock');
+    mkdirSync(leftover, { recursive: true });
+    writeFileSync(join(leftover, 'owner.json'), JSON.stringify({
+      pid: process.pid, token: 'no-handle', started_at: new Date().toISOString(),
+    }), 'utf-8');
+    assert.equal(lockRecoveryVerdict(leftover, 1), RECOVER_LIVE, 'our own leftover is respected while young');
+    backdate(leftover, OWNERLESS_GRACE_MS * 50);
+    assert.equal(lockRecoveryVerdict(leftover, 1), RECOVER_STALE, 'our own leftover ages out once old');
+
+    // Our own pid with a handle we really hold: live, however old.
+    const held = join(root, 'data', 'held.lock');
+    const handle = tryAcquireDirLockSync(held, { staleMs: 1 });
+    try {
+      backdate(held, OWNERLESS_GRACE_MS * 50);
+      assert.equal(lockRecoveryVerdict(held, 1), RECOVER_LIVE, 'a lock this process holds is never stale');
+    } finally {
+      handle.release();
+    }
 
     const fresh = join(root, 'data', 'fresh.lock');
     mkdirSync(fresh, { recursive: true });
@@ -386,6 +413,7 @@ test('lockRecoveryVerdict: STALE, LIVE and the grace floor keep their existing m
     backdate(opaque, OWNERLESS_GRACE_MS * 5);
     assert.equal(lockRecoveryVerdict(opaque, 1), RECOVER_LIVE, 'a stamp we could not read protects the lock');
   } finally {
+    liveChild.kill();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -767,8 +795,14 @@ test('createLockWaitPolicy: a hardDeadline that is not a number is refused, not 
 });
 
 test('no lock module re-derives the wait ceiling — the policy holds the only copy (#3895)', () => {
-  const policyModule = join(REPO_ROOT, 'pipeline-lock.mjs');
-  const sources = collectMjsFiles(REPO_ROOT).filter((f) => f !== SELF && f !== policyModule);
+  const policyModule = join(REPO_ROOT, 'lib', 'dir-lock.mjs');
+  // The web's copy of the policy module is the policy, not a re-derivation of
+  // it, for exactly as long as it is byte-identical (#5358). A drifted copy is
+  // scanned like any other file.
+  const webMirror = join(REPO_ROOT, 'web', 'src', 'lib', 'core', 'dir-lock.mjs');
+  const mirrorIsPolicy = existsSync(webMirror) && readFileSync(webMirror).equals(readFileSync(policyModule));
+  const sources = collectMjsFiles(REPO_ROOT)
+    .filter((f) => f !== SELF && f !== policyModule && !(mirrorIsPolicy && f === webMirror));
 
   // A guard that cannot look must never pass: an empty or tiny scan means the
   // walk failed, not that the repository is clean.
@@ -1002,7 +1036,7 @@ for (const [label, value] of [
     const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
     process.env.CAREER_OPS_OWNERLESS_GRACE_MS = value;
     try {
-      const lock = await import(`../pipeline-lock.mjs?grace-bad-${label.replace(/\s/g, '-')}`);
+      const lock = await import(`../lib/dir-lock.mjs?grace-bad-${label.replace(/\s/g, '-')}`);
       assert.equal(
         lock.OWNERLESS_GRACE_MS, 1_000,
         `${label} is not a floor, so the 1000ms default must stand`,
@@ -1028,7 +1062,7 @@ test('a valid CAREER_OPS_OWNERLESS_GRACE_MS is still honored (control)', async (
   const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
   process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '2500';
   try {
-    const lock = await import('../pipeline-lock.mjs?grace-good');
+    const lock = await import('../lib/dir-lock.mjs?grace-good');
     assert.equal(lock.OWNERLESS_GRACE_MS, 2_500, 'a finite positive override must reach the floor');
   } finally {
     if (prior === undefined) delete process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
@@ -1041,7 +1075,7 @@ test('the ownerless grace floor honors CAREER_OPS_OWNERLESS_GRACE_MS', async () 
   const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
   process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '30000';
   try {
-    const lock = await import('../pipeline-lock.mjs?grace-env');
+    const lock = await import('../lib/dir-lock.mjs?grace-env');
     const dir = join(root, 'x.lock');
     mkdirSync(dir, { recursive: true });
     backdate(dir, 5_000); // ownerless and 5s old: past the 1s default floor

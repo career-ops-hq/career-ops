@@ -22,6 +22,9 @@ const copyIntoFixture = (relativePath) => {
 
 for (const relativePath of [
   'ollama-eval.mjs',
+  // ollama-eval resolves its endpoint (server->local failover) through this
+  // shared helper (#4520), so the fixture has to carry it too.
+  'ollama-client.mjs',
   'profile-language.mjs',
   'reserve-report-num.mjs',
   'tracker-aliases.json',
@@ -30,6 +33,9 @@ for (const relativePath of [
   // tracker-utils imports the shared lock-contention helpers (#2777 fix):
   // a fixture that carries tracker-utils has to carry its import too.
   'pipeline-lock.mjs',
+  // ...which runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+  'lib/dir-lock.mjs',
+  'lib/yaml-document.mjs',
   // ollama-eval/reserve-report-num resolve user-layer paths via
   // path-resolver.mjs (CAREER_OPS_ROOT), so the fixture carries that too.
   'path-resolver.mjs',

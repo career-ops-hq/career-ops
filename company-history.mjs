@@ -51,7 +51,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { tmpdir } from 'os';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { parseScanHistory, detectReposts, loadAggregatorCompanies, isKeyLookup } from './detect-reposts.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
@@ -68,11 +68,11 @@ import {
   normalizeStatus,
 } from './followup-cadence.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
+const PROFILE_FILE = getProfilePath();
 const PACKAGE_JSON = join(CAREER_OPS, 'package.json');
 
 const DEFAULT_STALE_AFTER_DAYS = 365;
@@ -196,7 +196,7 @@ export function resolveDefaultSilenceWindow(rootDir = CAREER_OPS) {
   try {
     const path = join(rootDir, 'templates/benchmarks.yml');
     if (!existsSync(path)) return DEFAULT_SILENCE_WINDOW_DAYS;
-    const doc = yaml.load(readFileSync(path, 'utf-8'));
+    const doc = loadYaml(readFileSync(path, 'utf-8'));
     const range = doc?.days_first_response?.range_days;
     const upper = Array.isArray(range) ? range[1] : undefined;
     if (typeof upper === 'number' && Number.isFinite(upper) && upper > 0) return upper * 2;
@@ -735,7 +735,7 @@ export function resolveRegion(profilePath = PROFILE_FILE) {
   if (!profilePath || !existsSync(profilePath)) return null;
   let raw;
   try {
-    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
   } catch {
     return null;
   }

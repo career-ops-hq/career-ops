@@ -241,6 +241,23 @@ func (c *Catalog) StatusLabel(norm string) string {
 	}
 }
 
+// WorkModeLabel returns the localized display label for a derived work mode
+// ("Remote", "RemoteFlex", "Hybrid", "Full").
+func (c *Catalog) WorkModeLabel(mode string) string {
+	switch mode {
+	case "Remote":
+		return c.ModeRemote
+	case "RemoteFlex":
+		return c.ModeRemoteFlex
+	case "Hybrid":
+		return c.ModeHybrid
+	case "Full":
+		return c.ModeFull
+	default:
+		return mode
+	}
+}
+
 // NowFunc allows injecting a mock clock for testing.
 var NowFunc = time.Now
 
@@ -330,9 +347,9 @@ var En = Catalog{
 
 	// Work modes
 	ModeRemote:     "Remote",
-	ModeRemoteFlex: "RemoteFlex",
+	ModeRemoteFlex: "Remote (flex)",
 	ModeHybrid:     "Hybrid",
-	ModeFull:       "Full",
+	ModeFull:       "On-site",
 
 	// Progress screen
 	ProgressTitle:   "SEARCH PROGRESS",

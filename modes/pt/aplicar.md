@@ -1,6 +1,6 @@
 # Modo: aplicar -- Assistente de Candidatura ao Vivo
 
-Modo interativo para quando o candidato está preenchendo um formulário de candidatura no Chrome. Lê o que está na tela, carrega o contexto da avaliação prévia da vaga e gera respostas personalizadas para cada pergunta do formulário.
+Modo interativo para quando o candidato está preenchendo um formulário de candidatura no navegador Playwright que este projeto abre. Lê o que está na tela, carrega o contexto da avaliação prévia da vaga e gera respostas personalizadas para cada pergunta do formulário.
 
 ## Requisitos
 
@@ -10,7 +10,7 @@ Modo interativo para quando o candidato está preenchendo um formulário de cand
 ## Workflow
 
 ```
-1. DETECTAR    → Ler aba ativa do Chrome (screenshot/URL/título)
+1. DETECTAR    → Abrir a vaga no navegador Playwright deste projeto
 2. IDENTIFICAR → Extrair empresa + vaga da página
 3. BUSCAR      → Match contra reports existentes em reports/
 4. CARREGAR    → Ler report completo + Bloco G (se existir)
@@ -20,9 +20,14 @@ Modo interativo para quando o candidato está preenchendo um formulário de cand
 8. APRESENTAR  → Mostrar respostas formatadas para copy-paste
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Passo 1 -- Detectar a vaga
 
-**Com Playwright:** Tirar snapshot da página ativa. Ler título, URL e conteúdo visível.
+**Com Playwright:** Rodar `node apply-scope.mjs launch-options`, abrir a vaga nessa janela e ler título, URL e conteúdo visível.
 
 **Sem Playwright:** Pedir ao candidato que:
 - Compartilhe um screenshot do formulário (o Read tool lê imagens)

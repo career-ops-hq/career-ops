@@ -58,11 +58,20 @@ const CALL_SITES = [
     probe: 'run',
   },
   {
-    source: 'web/src/app/api/status/route.ts',
+    // Before the set-status probe, which moves row 1 off Applied.
+    source: 'web/src/lib/core-cli.ts',
+    argvSource: 'web/src/app/api/followups/seed/route.ts',
+    script: 'followup-seed.mjs',
+    args: ['1', '--json'],
+    probe: 'run',
+  },
+  {
+    source: 'web/src/lib/core-cli.ts',
+    argvSource: 'web/src/app/api/status/route.ts',
     script: 'set-status.mjs',
-    // The route builds ['--row', row, canon, '--source', 'web', '--json'];
+    // The route builds ['--row', row, canon, '--source', 'web', '--detach-jd-archive', '--json'];
     // row 1 and Responded are the fixture tracker's row and a canonical state.
-    args: ['--row', '1', 'Responded', '--source', 'web', '--json'],
+    args: ['--row', '1', 'Responded', '--source', 'web', '--detach-jd-archive', '--json'],
     probe: 'run',
   },
   {
@@ -184,14 +193,16 @@ export function verifyWebStaticSources({ root = ROOT, reportPass = pass, reportF
 
   // Every `"--flag"` literal in a listed source must appear in its argv here.
   // This covers the argv literals the routes write inline; it does NOT cover a
-  // flag assembled at runtime from a variable or a template string.
+  // flag assembled at runtime from a variable or a template string. A route
+  // that spawns through a shared runner names its own file as `argvSource`.
   const flagDrift = [];
   for (const site of CALL_SITES) {
-    const src = readFileSync(join(root, site.source), 'utf-8');
+    const argvSource = site.argvSource ?? site.source;
+    const src = readFileSync(join(root, argvSource), 'utf-8');
     const literals = [...new Set([...src.matchAll(/"(--[a-z][a-z0-9-]*)"/g)].map((m) => m[1]))];
     for (const flag of literals) {
       if (!site.args.includes(flag))
-        flagDrift.push(`${site.source} passes ${flag}, which no probe above covers`);
+        flagDrift.push(`${argvSource} passes ${flag}, which no probe above covers`);
     }
   }
   if (flagDrift.length === 0)

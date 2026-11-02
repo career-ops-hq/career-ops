@@ -540,6 +540,50 @@ try {
       : fail(`truncation tag: partial=${jobs.eightfoldTruncated} complete=${complete.eightfoldTruncated}`);
   }
 
+  // The page cap cuts a board short exactly like a 429 does, so it is tagged the
+  // same way. A board that fits under the cap, or one the caller deliberately
+  // probes with ctx.maxPages beyond its end, must stay untagged.
+  {
+    const page = (start) => Array.from({ length: 10 }, (_, i) => position(String(start + i), `R${start + i}`));
+    const walk = (c) => {
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      return { positions: page(start), count: 45 };
+    };
+    const capped = await ef.fetch({ ...TENANT, max_pages: 2 }, recording(walk).ctx);
+    const roomy = await ef.fetch({ ...TENANT, max_pages: 10 }, recording((c) => {
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      return { positions: start < 40 ? page(start) : page(start).slice(0, 5), count: 45 };
+    }).ctx);
+    capped.length === 20 && capped.eightfoldTruncated === true && roomy.length === 45 && roomy.eightfoldTruncated === undefined
+      ? pass('eightfold tags a max_pages-truncated board eightfoldTruncated, and not a complete one')
+      : fail(`max_pages tag: capped=${capped.length}/${capped.eightfoldTruncated} roomy=${roomy.length}/${roomy.eightfoldTruncated}`);
+
+    // Under a probe, the stop is classified by whichever cap limited the walk:
+    // a ctx.maxPages below max_pages is the probe's own budget (no warning, no
+    // tag); one equal to or above it leaves max_pages as the limit.
+    const errors = [];
+    const origError = console.error;
+    console.error = (...args) => { errors.push(args.join(' ')); };
+    const probeAt = async (maxPages) => {
+      const jobs = await ef.fetch({ ...TENANT, max_pages: 2 }, { ...recording(walk).ctx, maxPages });
+      return { jobs, warned: errors.splice(0).filter((e) => /raise max_pages/.test(e)).length };
+    };
+    let below, equal, above;
+    try {
+      below = await probeAt(1);
+      equal = await probeAt(2);
+      above = await probeAt(3);
+    } finally {
+      console.error = origError;
+    }
+    below.jobs.length === 10 && below.jobs.eightfoldTruncated === undefined && below.warned === 0
+      ? pass('eightfold neither tags nor warns when a probe below max_pages stops the walk')
+      : fail(`probe below max_pages: ${below.jobs.length} jobs, tag=${below.jobs.eightfoldTruncated}, warnings=${below.warned}`);
+    [equal, above].every((r) => r.jobs.length === 20 && r.jobs.eightfoldTruncated === true && r.warned === 1)
+      ? pass('eightfold tags and warns when max_pages, not the probe, stops the walk')
+      : fail(`probe at/above max_pages: equal=${equal.jobs.eightfoldTruncated}/${equal.warned} above=${above.jobs.eightfoldTruncated}/${above.warned}`);
+  }
+
   // PCSX pages are paced for PCSX: Microsoft's edge 429s a walk at the v2
   // spacing, so PCSX pages wait longer between requests than v2 pages do.
   {

@@ -248,15 +248,16 @@ ok('the lookalike-host and root-label guards hold for the id too', () => {
 console.log('\npostingLanguageKey() / postingUrlRelation()');
 ok('the language param leaves the key and comes back as its language subtag', () => {
   const bare = postingLanguageKey('https://acme.recruitee.com/o/qa-lead');
-  assert.deepEqual(bare, { key: normalizeUrl('https://acme.recruitee.com/o/qa-lead'), language: '' });
-  assert.deepEqual(postingLanguageKey('https://acme.recruitee.com/o/qa-lead?lang=de'), { key: bare.key, language: 'de' });
+  assert.deepEqual(bare, { key: normalizeUrl('https://acme.recruitee.com/o/qa-lead'), language: '', script: '' });
+  assert.deepEqual(postingLanguageKey('https://acme.recruitee.com/o/qa-lead?lang=de'), { key: bare.key, language: 'de', script: '' });
+  // en-GB states a region, so the script it implies IS established: Latn.
   assert.deepEqual(postingLanguageKey('https://acme.jobs.personio.de/job/1?language=en-GB&utm_source=x'),
-    { key: normalizeUrl('https://acme.jobs.personio.de/job/1'), language: 'en' });
+    { key: normalizeUrl('https://acme.jobs.personio.de/job/1'), language: 'en', script: 'Latn' });
   assert.deepEqual(postingLanguageKey('https://jobs.example.com/j/1?Locale=fr_CA&id=7'),
-    { key: normalizeUrl('https://jobs.example.com/j/1?id=7'), language: 'fr' });
+    { key: normalizeUrl('https://jobs.example.com/j/1?id=7'), language: 'fr', script: 'Latn' });
 });
 ok('a non-URL keeps normalizeUrl\'s "no key" and has no language', () => {
-  for (const v of ['', 'N/A', null, 'local:jds/x.md']) assert.deepEqual(postingLanguageKey(v), { key: '', language: '' });
+  for (const v of ['', 'N/A', null, 'local:jds/x.md']) assert.deepEqual(postingLanguageKey(v), { key: '', language: '', script: '' });
 });
 ok('different pages are distinct; no key on either side is no evidence', () => {
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a', 'https://acme.recruitee.com/o/b'), 'distinct');
@@ -266,6 +267,36 @@ ok('different pages are distinct; no key on either side is no evidence', () => {
 ok('the same page with a language on one side only is its own relation, in either order', () => {
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a', 'https://acme.recruitee.com/o/a?lang=de'), 'one-sided-language');
   assert.equal(postingUrlRelation('https://acme.jobs.personio.de/job/1?language=en', 'https://acme.jobs.personio.de/job/1'), 'one-sided-language');
+});
+ok('two known, different SCRIPTS of one language are two versions, not one page', () => {
+  // A script is not a regional variant — it is different text. zh-Hant and
+  // zh-Hans are not the same page for any reader, which is why this project
+  // ships modes/zh/ and modes/zh-TW/ as two market mode sets. Before this,
+  // both reduced to `zh` and the pair came back 'same', so one tracker row
+  // overwrote the other — the exact fold `distinct` prevents for de vs en.
+  const U = (q) => `https://acme.recruitee.com/o/a?lang=${q}`;
+  assert.equal(postingUrlRelation(U('zh-Hant'), U('zh-Hans')), 'distinct');
+  assert.equal(postingUrlRelation(U('zh-Hant-TW'), U('zh-Hans-CN')), 'distinct');
+  // The script may be stated by the region rather than spelled out.
+  assert.equal(postingUrlRelation(U('zh-TW'), U('zh-CN')), 'distinct');
+  // Not Chinese-specific: Serbian in Latin and in Cyrillic is the same case.
+  assert.equal(postingUrlRelation(U('sr-Latn'), U('sr-Cyrl')), 'distinct');
+  // Order must not matter.
+  assert.equal(postingUrlRelation(U('zh-Hans'), U('zh-Hant')), 'distinct');
+});
+ok('a bare language code is never resolved to a script, so it asserts nothing', () => {
+  // THE OVER-CLAIM THIS AVOIDS. Intl.Locale('zh').maximize() answers
+  // zh-Hans-CN — a guess at the commonest case, not something the URL said. A
+  // posting served as ?lang=zh may be the Traditional one under a loose code,
+  // so calling the pair 'distinct' would split one posting into two rows on no
+  // evidence. Unknown stays unknown, as an absent language param does.
+  const U = (q) => `https://acme.recruitee.com/o/a?lang=${q}`;
+  assert.equal(postingUrlRelation(U('zh'), U('zh-Hant')), 'same');
+  assert.equal(postingUrlRelation(U('zh'), U('zh-Hans')), 'same');
+  assert.equal(postingUrlRelation(U('zh-Hant'), U('zh')), 'same');
+  // Same rule for a language whose script is never in doubt.
+  assert.equal(postingUrlRelation(U('de'), U('de-AT')), 'same');
+  assert.equal(postingUrlRelation(U('pt-BR'), U('pt-PT')), 'same');
 });
 ok('two known, different languages are distinct; the same language (any region) or none is the same', () => {
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a?lang=de', 'https://acme.recruitee.com/o/a?lang=en'), 'distinct');

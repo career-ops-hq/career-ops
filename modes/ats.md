@@ -112,7 +112,7 @@ The two stages chain in payload → HTML order, because the payload stage change
 
 1. Tailor the render payload as usual in `pdf` mode (through the fact gate).
 2. **Payload stage:** `node ats-payload.mjs payload.json --summary > payload-ats.json`. The fold is applied for you; the three lints are findings to relay, not edits to make.
-3. Build from the transformed payload: `node build-cv-html.mjs payload-ats.json output/cv-{candidate}-{company}.html [template]`.
+3. Build from the transformed payload: `node build-cv-html.mjs payload-ats.json output/cv-{candidate}-{company}.html [template]`, then gate it: `node verify-cv-facts.mjs output/cv-{candidate}-{company}.html`. The fold cannot add a claim, but this HTML is a CV the user may paste into an application form, and a fix made to the styled HTML in `pdf` mode never reaches the payload this one is built from. If the gate fails, fix the payload and rebuild.
 4. **HTML stage:** `node verify-ats.mjs output/cv-{candidate}-{company}.html`.
 5. Fix any `critical`/`warning` items (usually in the template), then re-run step 4.
 6. Optionally pass the JD's keywords with `--keywords` to confirm coverage before rendering the PDF.

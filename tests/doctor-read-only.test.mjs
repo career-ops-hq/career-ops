@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { walkTree } from '../lib/walk-tree.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TARGETS = ['modes/_profile.md', 'modes/_custom.md', 'modes/_brief.md', 'voice-dna.md'];
@@ -27,7 +28,7 @@ function doctor(dir, args = ['--json']) {
 
 function state(dir, args) {
   const result = doctor(dir, args);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(result.stderr, '');
   return JSON.parse(result.stdout);
 }
@@ -117,7 +118,7 @@ test('explicit initialization supports a separate empty data root and retains pe
 test('--init-templates requires --json and leaves the target untouched on misuse', (t) => {
   const dir = fixture(t);
   const result = doctor(dir, ['--init-templates']);
-  assert.notEqual(result.status, 0);
+  assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
   assert.match(result.stderr, /--init-templates requires --json/);
   assert.deepEqual(readdirSync(dir), []);
 });

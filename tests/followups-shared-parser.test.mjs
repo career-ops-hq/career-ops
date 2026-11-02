@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ROOT, NODE } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const REPLY_WATCH = join(ROOT, 'reply-watch.mjs');
 const CONTACT_EXTRACT = join(ROOT, 'contact-extract.mjs');
@@ -77,7 +78,7 @@ test('reply-watch: a legacy bullet attributes a reply to application 42', () => 
   const { tmp, trackerFile, candidatesFile } = setupWorkspace(`${LEGACY_BULLET}\n`);
   const res = runCli(REPLY_WATCH, tmp, trackerFile, writeCandidates(candidatesFile));
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     // Header is rendered from the MATCHED TRACKER ROW, so company/role here can
     // only have come from resolving the candidate to #42.
     assert.match(res.stdout, /^1\. Acme Corp — Backend Engineer$/m);
@@ -92,7 +93,7 @@ test('reply-watch: a table row attributes a reply to application 42 too', () => 
   const { tmp, trackerFile, candidatesFile } = setupWorkspace(`${TABLE_ROWS}\n`);
   const res = runCli(REPLY_WATCH, tmp, trackerFile, writeCandidates(candidatesFile));
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     assert.match(res.stdout, /^1\. Acme Corp — Backend Engineer$/m);
     assert.match(res.stdout, /^ {2}#42 Acme Corp \(Backend Engineer\): Applied → Interview$/m);
   } finally {
@@ -104,7 +105,7 @@ test('reply-watch: an unattributable bullet (no #num) does not match', () => {
   const { tmp, trackerFile, candidatesFile } = setupWorkspace('- 2026-07-02 · Acme Corp — careers@acme-partners.com\n');
   const res = runCli(REPLY_WATCH, tmp, trackerFile, writeCandidates(candidatesFile));
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     // No recommendation can be raised without an application_num, so #42 must
     // never appear...
     assert.doesNotMatch(res.stdout, /#42/);
@@ -127,7 +128,7 @@ test('contact-extract: a legacy bullet attributes the saved contact to 42', () =
 
   const res = runCli(CONTACT_EXTRACT, tmp, trackerFile, ['--file', message, '--yes']);
   try {
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
 
     // Assert on the persisted row, not stdout: stdout only echoes the inferred
     // values, so it cannot tell us whether tracker #42 actually drove them.

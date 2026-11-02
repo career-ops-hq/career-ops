@@ -2,17 +2,31 @@
 
 > Apply `voice-dna.md` (if present) to free-text answers and cover-letter fields — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_writing.md` → Voice DNA.
 
-Interactive mode for when the candidate is filling out an application form in Chrome. It reads what is on the screen, loads the previous context of the job, and generates personalized responses for each form question.
+Interactive mode for filling out an application form. Open the form in a Playwright browser this project launches, load the previous context of the job, and generate a response for each question.
+
+**Unattended runs** (`modes/_shared.md` → **Unattended runs**): never ask, never wait and never submit. A blacklist hit stops before drafting and ends with `needs_confirmation: blacklist "{company}" - rerun with "apply anyway" to draft`. A company or role mismatch, or an agency that needs acknowledgement, stops before drafting and ends with `needs_confirmation: apply_preflight {company} - confirm the company and role, then rerun`. A posting that appears closed ends with `needs_confirmation: posting_closed {company} - rerun with the reason to apply anyway`. When liveness cannot be verified, the run ends with `needs_confirmation: liveness_unverified {company} - confirm the company, role and active posting, then rerun`. Otherwise draft only answers backed by the tailored CV, `cv.md`, `config/profile.yml`, the report, or answers the prompt gives for this application, leave every other field blank, and end with `needs_confirmation: apply_input {n} questions - answer them, then rerun`.
+
+## Scope
+
+Work only inside this checkout. Run `node apply-scope.mjs root` and read or search only the directories it prints. That list is this checkout, plus the data root when `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` is set.
+
+Do not search the home directory. Do not grep or open another career-ops install.
+
+Open the form in a Playwright browser this project launches. Run `node apply-scope.mjs launch-options` and pass that object to `chromium.launch`. Do not call `chromium.connect` or `connectOverCDP`. Do not read `DevToolsActivePort`. Do not pass a remote-debugging port or a Chrome user-data directory.
+
+If Playwright is not available, ask the candidate to paste the questions or share a screenshot.
+
+Do not submit the form. Stop before Submit, Send, or Apply. Continue only after the candidate confirms they submitted it.
 
 ## Requirements
 
-- **Best with Playwright in visible mode**: In visible mode, the candidate sees the browser and the agent can interact with the page.
-- **Without Playwright**: the candidate shares a screenshot or pastes the questions manually.
+- **Best with Playwright in visible mode.** The candidate sees the browser this project launched. The agent uses that page.
+- **Without Playwright.** The candidate shares a screenshot or pastes the questions. Do not attach to a browser the candidate already has open.
 
 ## Workflow
 
 ```text
-1. DETECT      → Read active Chrome tab (screenshot/URL/title)
+1. DETECT      → Open the posting in this project's Playwright browser
 2. IDENTIFY    → Extract company + role from the page
 3. SEARCH      → Match against existing reports in reports/
 4. LOAD        → Read full report + Section H / Application Answers (if they exist)
@@ -35,6 +49,8 @@ Interactive mode for when the candidate is filling out an application form in Ch
 Before generating any application answers, verify that the form still points to the intended active job. This gate runs after the page has been detected, the company/role has been identified, and the matching report has been loaded.
 
 **Blacklist check (#1742):** before any form filling starts, if `data/blacklist.md` exists, check both the visible company and posting URL against it. For `Scope: company` (also the default for blank or unsupported scopes), match the company case- and punctuation-insensitively. For `Scope: domain`, treat the Company cell as a hostname suffix: compare it with the posting URL's hostname, ignoring case and a trailing dot, and match only the exact host or a subdomain (`ibm.com` matches `jobs.ibm.com`, never `notibm.com`). Keep dots and hyphens distinct. If the URL is missing or invalid, domain rules cannot match; still check company rules. The file is the candidate's own do-not-apply list — on a hit, STOP and surface their own recorded decision: "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want to apply?" Require an explicit yes before generating or filling anything — never silently refuse, never silently proceed; the candidate's call always wins. Absent file = skip this check.
+
+**Duplicate check:** once per new posting, before writing a CV, run `node precheck-duplicate.mjs --company "$COMPANY" --title "$TITLE" [--req "$REQ"] [--url "$URL"]` (read-only, advisory; set each variable from the posting with single quotes, or pass an argument array, and never paste posting text into the command string, since `$(...)` in a posting title would be expanded inside double quotes) and show any hit in one line, e.g. "Possible repost of #N (Applied, date)". A Rejected match is a warning, not a block; the candidate decides.
 
 **Cross-channel check (#1596):** before drafting — and ALWAYS before the user authorizes an agency to submit on their behalf — check `data/applications.md` for an existing row with the same company+role under a different Via (agency vs direct, or two agencies). A double submission burns the candidate with both the agency and the employer. If found, stop and ask the user which channel owns the candidacy. If the end employer is still unknown (Company `?`), the check still runs in degraded form — it is never silently skipped:
 
@@ -132,17 +148,17 @@ Before drafting answers, read the matched report's Block G fixed-term finding an
 
 ## Step 1 — Detect the job
 
-**With Playwright:** Take a snapshot of the active page. Read title, URL, and visible content.
+**With Playwright:** Run `node apply-scope.mjs launch-options` and launch Chromium with that object. Open the posting URL in that browser. Snapshot that page. Read the title, the URL, and the visible content. Do not attach to a browser the candidate already has open. Do not read `DevToolsActivePort`.
 
 **Without Playwright:** Ask the candidate to:
 - Share a screenshot of the form (Read tool can read images)
 - Or paste the form questions as text
-- Or say company + role so we can search for it
+- Or say the company and the role so we can search `reports/` under the roots from `node apply-scope.mjs root`
 
 ## Step 2 — Identify and search for context
 
 1. Extract company name and role title from the page
-2. Search in `reports/` by company name (case-insensitive grep)
+2. Search `reports/` under every root printed by `node apply-scope.mjs root` (this checkout, plus the configured data root when set) by company name (case-insensitive grep). Do not search only the checkout when the data root holds the reports.
 3. If there is a match → load the full report
 4. If there is a `## Application Answers` section → recover it through the strict reader, never by re-reading the rendered markdown as prose:
 
@@ -177,7 +193,7 @@ If the role on screen differs from the one evaluated:
 
 The document uploaded to the form is the tailored CV the `pdf` mode built for this
 report — the active bundle's `cv/tailored/vNNN/cv.pdf`, or a flat
-`output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`. It is deliberately not `cv.md`:
+`output/cv-{candidate}[-{report}]-{company}-{YYYY-MM-DD}.pdf`. It is deliberately not `cv.md`:
 bullets are reselected and reordered, role framing is rewritten toward the
 employer's domain, and engagements may be regrouped under an umbrella firm. A
 reviewer reads the structured fields and the attached document side by side, so a
@@ -196,7 +212,7 @@ tailoring that made the application relevant.
 2. Several tailoring versions? The bundle keys them `v001`, `v002`, and so on. Take
    the highest one that exists on disk, and pass it back as `--version N` when you
    want the other paths beside it.
-3. No bundle, so a flat `output/cv-{candidate}-{company}-{YYYY-MM-DD}.html`.
+3. No bundle, so a flat `output/cv-{candidate}[-{report}]-{company}-{YYYY-MM-DD}.html`.
    `data/pdf-index.tsv` can shorten the search here, but it is a hint and not an
    answer. Its columns are `report \t pdf \t html \t format \t date` and there is
    no document-kind column: `generate-pdf.mjs` drops every earlier row for a report
@@ -276,7 +292,7 @@ For every free-text field, inspect the **rendered form control** before drafting
 
 For each question, generate the response following:
 
-1. **Report context**: Use proof points from block B, STAR stories from block F
+1. **Report context**: Use proof points from block B, STAR stories from block F. Block F stories and story-bank entries supply narrative; a figure from one goes into an answer only if it appears in `cv.md` or `article-digest.md`, or `node story-provenance-check.mjs --summary` puts it in `existing`. Otherwise leave the number out, or ask the candidate with AGENTS.md's four outcomes (confirm as stated, give the correct figure, narrative only, "I don't know"). Never use a figure from a `user-cannot-confirm` story. An answer carrying an unconfirmed figure is not ready for copy-paste
 2. **Previous Section H / Application Answers**: If a draft or final response exists, use it as a base and refine
 3. **"I'm choosing you" tone**: Same auto-pipeline framework
 4. **Specificity**: Reference something specific from the JD visible on screen

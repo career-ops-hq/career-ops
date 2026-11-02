@@ -175,6 +175,18 @@
 # Turn strict on for those sweeps. It only bites when a restricting tier
 # (allow / block / block_hard) is set; `strict: true` alone restricts nothing.
 #
+# `remote_title_fallback` defaults to true (also when omitted). After a nonempty
+# allow list fails to match the structured location or a supported URL hint,
+# an explicit Remote title can still admit the posting. Set false to disable
+# only that last rescue in both scan.mjs and scan-ats-full.mjs. Unlike strict,
+# this does not change missing-location handling, tier precedence, URL hints,
+# or an explicitly allowed Remote location. It is not an eligibility check.
+# Opting out can miss remote roles listed under an unrelated hiring office.
+# For configured scan.mjs targets, field_filters.location.positive plus
+# filter_on: [title, location] is an existing alternative that gates the
+# structured location only. Reverse scans do not consume those field gates;
+# unlike the shared location filter, that alternative does not use URL hints.
+#
 # Example below targets US-based remote + a couple of US metros, blocking
 # common foreign hubs. Customize to your geography.
 
@@ -184,6 +196,7 @@
 #     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states
 #     - "New York"
 #   # strict: true       # reject postings with no location — see note above
+#   # remote_title_fallback: false  # require allow to match location evidence
 #   allow:
 #     - "Remote"
 #     - "United States"
@@ -1177,6 +1190,7 @@ search_queries:
 #   pinpoint        <slug>.pinpointhq.com
 #   prevueaps       <tenant>.prevueaps.ca  (or api: field; domainId resolved from the tenant's /jobs/ page)
 #   rippling        ats.rippling.com/<slug>/jobs
+#   dover           app.dover.com/<Company>/careers/<board-uuid>
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
 #   jobvite         jobs.jobvite.com/<slug>  (add company_eid: to skip the board lookup — see the stanza below)
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
@@ -1223,6 +1237,9 @@ search_queries:
 #                   recruiting.ultipro.(ca|com) / recruiting2/3.ultipro.com variants, matched by pattern —
 #                   whichever host the tenant's own board URL uses is preserved, not normalized)
 #   adp-workforcenow  workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...
+#   zoho-recruit    <tenant>.zohorecruit.com  (any path; the board is always read from /jobs/Careers)
+#   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
+#   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1289,6 +1306,12 @@ search_queries:
 #                          # is logged if the cap truncates real results)
 #   enabled: true
 #
+# - name: Example Dover Co
+#   careers_url: https://app.dover.com/ExampleCo/careers/00000000-0000-4000-8000-000000000000
+#                          # the careers-page link; the board uuid is the last segment
+#   max_pages: 5           # optional page cap (300 jobs/page, default 5, max 20)
+#   enabled: true
+#
 # - name: Example JibeApply Co
 #   careers_url: https://exampleco.jibeapply.com/jobs     # any *.jibeapply.com/jobs host
 #   max_pages: 50          # optional page cap (10 jobs/page, default 50, max 500) —
@@ -1352,6 +1375,13 @@ search_queries:
 #   adpWorkforcenow:
 #     fetchDetails: true    # optional: fetch each posting's detail JSON for a description (off by default — the list payload carries no JD text)
 #     detailLimit: 25       # optional: max detail calls per sweep when fetchDetails is true
+#   enabled: true
+#
+# - name: Example Zoho Recruit Co
+#   careers_url: https://exampleco.zohorecruit.com/jobs/Careers   # any <tenant>.zohorecruit.com URL
+#   zohoRecruit:
+#     fetchDetails: false   # optional: fetch each posting's page for its full description, date and salary (one extra request per posting)
+#     detailLimit: 25       # optional: max detail fetches per sweep when fetchDetails is true (max 100)
 #   enabled: true
 
 #
@@ -1628,6 +1658,18 @@ search_queries:
 #   states: ["nuevo-leon", "jalisco"]     # optional; omit to scan nationwide
 #   max_pages: 3                          # optional page cap (20 jobs/page, default 3, max 10)
 #   enabled: true                         # 750ms pacing between pages
+#
+# - name: Example Computrabajo Co         # LatAm general board, one host per country
+#   careers_url: https://co.computrabajo.com/trabajo-de-sistemas  # auto-detected; any search URL
+#   max_pages: 3                          # optional; default 3 is also the cap (crawl kept tight)
+#   max_jobs: 15                          # optional; default 15 is also the cap
+#   enabled: true                         # random 2-5s pause between pages
+#
+# - name: Example Magneto365 Co           # Colombia general board
+#   careers_url: https://www.magneto365.com/co/trabajos/buscar/tecnologia  # auto-detected; any search URL
+#   max_pages: 5                          # optional page cap (20 jobs/page, default 5, max 20)
+#   max_jobs: 100                         # optional (default 100, max 500)
+#   enabled: true                         # random 1-2s pause between pages
 #
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
@@ -2408,7 +2450,12 @@ tracked_companies:
 
   - name: Channable
     careers_url: https://channable.recruitee.com
-    notes: "Utrecht. Product feed management for e-commerce. Recruitee board."
+    notes: "Utrecht. Product feed management for e-commerce."
+    enabled: true
+
+  - name: Shiji Group
+    careers_url: https://shijigroup.zohorecruit.com/jobs/Careers
+    notes: "Katowice / Barcelona. International hubs of a Beijing-based hospitality technology group."
     enabled: true
 
   # -- DACH & European AI ecosystem --
@@ -3291,7 +3338,7 @@ job_boards:
     searchKeywords: "data scientist"
     searchLocation: "Jakarta"
     pageSize: 30
-    maxPages: 3
+    # max_pages: 100                   # optional (default 100, hard max 500); warns if truncated
     enabled: false
     notes: "Indonesia's largest job board (SEEK group). Uses SEEK v5 JobSearch API — zero tokens."
 
@@ -3458,3 +3505,19 @@ job_boards:
     careers_url: https://www.python.org/jobs/
     enabled: false
     notes: "Official Python Software Foundation job board (public RSS feed)"
+
+  # ── Latin America general boards (Computrabajo, Magneto365) ──
+  # Server-rendered search pages, zero-auth, auto-detected from careers_url.
+  # Point careers_url at the search you would run in a browser; the search
+  # path is the only filter these boards offer. Measured 2026-10-23 (one GET
+  # of each page below, 20 postings each). Left `enabled: false`.
+
+  - name: Computrabajo Colombia
+    careers_url: https://co.computrabajo.com/trabajo-de-sistemas
+    enabled: false
+    notes: "Colombia; other <country>.computrabajo.com hosts are detected but unmeasured. Crawl capped at 3 pages / 15 postings per entry; narrow the search URL."
+
+  - name: Magneto365 Tecnologia
+    careers_url: https://www.magneto365.com/co/trabajos/buscar/tecnologia
+    enabled: false
+    notes: "Colombia. 'tecnologia' search; swap the last path segment for another search."

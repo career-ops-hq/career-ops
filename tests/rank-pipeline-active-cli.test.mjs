@@ -18,7 +18,7 @@ test('CAREER_OPS_CLI picks the ranking CLI when several are installed', {
       const binary = join(root, 'bin', cli);
       writeFileSync(binary, `#!${process.execPath}\n`
         + `if (process.argv[2] !== '--version') require('node:fs').writeFileSync(process.env.RANK_CALL, ${JSON.stringify(cli)} + ' ' + process.argv[2]);\n`
-        + `console.log('[]');\n`);
+        + `console.log('[{"id":0,"score":3,"reason":"Fixture match"}]');\n`);
       chmodSync(binary, 0o755);
     }
     const env = {

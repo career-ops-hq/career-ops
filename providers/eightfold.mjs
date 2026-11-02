@@ -359,6 +359,9 @@ export default {
     if (!tenant) throw new Error(`eightfold: cannot derive API URL for ${entry.name}`);
 
     const maxPages = resolveMaxPages(entry, ctx);
+    // A probe's ctx.maxPages below the entry's own cap is the probe's budget,
+    // not a max_pages cut: such a stop is neither warned about nor tagged.
+    const probeLimited = maxPages < resolveMaxPages(entry);
     const all = [];
     /** @type {number|null} */
     let total = null;
@@ -471,8 +474,12 @@ export default {
       // adp-workforcenow.mjs (adpTruncated) do, so a caller can tell this
       // board from a complete one without reading stderr.
       /** @type {any} */ (all).eightfoldTruncated = true;
-    } else if (total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
+    } else if (!probeLimited && total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
       console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
+      // Same tag as the 429 branch above: the page cap cuts a board short just
+      // as a rate limit does (2,000 of 2,083 on a real tenant), and a caller
+      // that cannot see the stderr line must still be able to tell.
+      /** @type {any} */ (all).eightfoldTruncated = true;
     }
 
     return all;

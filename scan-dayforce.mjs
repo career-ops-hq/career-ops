@@ -65,7 +65,7 @@
 import { chromium } from 'playwright';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import {
   appendToPipeline,
   appendToScanHistory,
@@ -367,7 +367,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
 export function loadConfig(portalsPath = PORTALS_PATH, singleTenant = null) {
   let config = {};
   if (existsSync(portalsPath)) {
-    config = yaml.load(readFileSync(portalsPath, 'utf-8')) || {};
+    config = loadYaml(readFileSync(portalsPath, 'utf-8')) || {};
   }
 
   const rawBoards = Array.isArray(config.dayforce_boards) ? config.dayforce_boards : [];

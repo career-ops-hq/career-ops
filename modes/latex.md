@@ -4,20 +4,25 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 
 ## Pipeline
 
+**Locked Sections:** If `cv.locked_sections` is defined in `profile.yml`, NEVER remove, shorten, or paraphrase those sections during CV generation or tailoring. They must appear verbatim. (Note: Programmatic validation of locked sections is enforced in the HTML/PDF pipeline; it is not yet covered in the LaTeX pipeline.)
+
 1. Read `cv.md` as source of truth
 2. Read `config/profile.yml` for candidate identity and contact info
 3. Ask the user for the JD if not already in context (text or URL)
+   For a new posting (no tracker row yet), run `node precheck-duplicate.mjs` once first with the posting's company, title and any `--url` / `--req`, passed as quoted variables or an argument array exactly as in `modes/pdf.md` step 2 (read-only, advisory), and surface any hit before drafting.
 4. Extract 15-20 keywords from the JD
-5. Detect JD language → CV language (EN default)
+5. Use `language.output` for the CV language. The JD language and `language.modes_dir` supply market vocabulary and evaluation context, but never override the configured output language.
 6. Detect role archetype → adapt framing
 7. Rewrite Professional Summary injecting JD keywords (same rules as `pdf` mode — NEVER invent skills)
 8. Select top 3-4 most relevant projects for the offer, and populate `awards[]` from `cv.md`'s Awards / Honors section when it has entries that support the role (omit the key otherwise — the section is dropped, header included; never invent an award)
 9. Reorder experience bullets by JD relevance
 10. Inject keywords naturally into existing achievements
-11. Build a JSON payload (see schema below) and write to `/tmp/cv-{candidate}-{company}.json`
-12. Run: `node build-cv-latex.mjs /tmp/cv-{candidate}-{company}.json output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex`
-13. Run: `node generate-latex.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`
-    *(Replace `{candidate}`, `{company}`, `{YYYY-MM-DD}` with actual values.)*
+11. Build a JSON payload (see schema below) and write to `/tmp/cv-{candidate}-{company}.json` — if a report number is already assigned for this run (auto-pipeline, batch, or any parallel fan-out per AGENTS.md "Parallel fan-outs"), include it: `/tmp/cv-{candidate}-{report}-{company}.json`. Two parallel agents handling the same company on the same day otherwise write the *same* temp path and can silently read each other's JSON.
+12. Run: `node build-cv-latex.mjs /tmp/cv-{candidate}[-{report}]-{company}.json output/cv-{candidate}-{report}-{company}-{YYYY-MM-DD}.tex`
+13. Run: `node generate-latex.mjs output/cv-{candidate}-{report}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{report}-{company}-{YYYY-MM-DD}.pdf`
+    *(Replace `{candidate}`, `{company}`, `{report}`, `{YYYY-MM-DD}` with actual values. Omit the `-{report}` segment only for a standalone one-off run with no report number at all.)*
+    - This runs the CV fact gate (`verify-cv-facts.mjs`) on the `.tex` before compiling, the same hard gate `pdf` mode runs in step 19. A blocked document is not compiled, and the JSON report carries `factCheck.verdict: "block"` with the claims it could not find in `cv.md` / `article-digest.md`.
+    - If it blocks, stop and fix the step 11 payload (remove the invented claim, or add verified evidence to `cv.md`, `article-digest.md` or `config/cv-facts.json`), rebuild the `.tex`, and re-run. Never pass `--skip-fact-check` unless the user explicitly asks for it.
 14. Report: .tex path, .pdf path, file sizes, section count, keyword coverage %
 
 **Requires:** `tectonic` (preferred — auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live). `generate-latex.mjs` uses a repo-local tectonic first, then PATH.

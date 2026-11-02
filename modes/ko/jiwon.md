@@ -1,6 +1,6 @@
 # 모드: jiwon -- 지원서 작성 live assistant
 
-후보자가 Chrome에서 지원서 폼을 작성하는 순간 사용하는 interactive mode입니다. 화면에 보이는 내용을 읽고, 이전에 평가한 채용 공고의 context를 불러온 뒤, 폼의 각 질문에 맞는 개인화 답변을 생성합니다.
+후보자가 이 프로젝트가 띄운 Playwright 브라우저에서 지원서 폼을 작성하는 순간 사용하는 interactive mode입니다. 화면에 보이는 내용을 읽고, 이전에 평가한 채용 공고의 context를 불러온 뒤, 폼의 각 질문에 맞는 개인화 답변을 생성합니다.
 
 ## 사전 조건
 
@@ -10,7 +10,7 @@
 ## Workflow
 
 ```text
-1. DETECT      -> 활성 Chrome 탭 읽기 (스크린샷/URL/title)
+1. DETECT      -> 이 프로젝트의 Playwright 브라우저에서 공고 열기
 2. IDENTIFY    -> 페이지에서 회사 + 역할 추출
 3. SEARCH      -> reports/ 안의 기존 report와 매칭
 4. LOAD        -> 전체 report + 블록 G(있다면) 읽기
@@ -20,9 +20,14 @@
 8. PRESENT     -> 복사/붙여넣기 가능한 형식으로 답변 표시
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Step 1 -- 공고 감지
 
-**Playwright 사용 시:** 활성 페이지 snapshot을 뜹니다. title, URL, 보이는 내용을 읽습니다.
+**Playwright 사용 시:** `node apply-scope.mjs launch-options`로 연 창에서 공고를 열고 title, URL, 보이는 내용을 읽습니다.
 
 **Playwright 없이 진행 시:** 후보자에게 다음 중 하나를 요청합니다.
 - 지원서 폼 스크린샷 공유 (Read tool이 이미지를 읽을 수 있음)

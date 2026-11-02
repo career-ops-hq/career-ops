@@ -1,6 +1,6 @@
 # Mode: aavedan -- Application Form के लिए Live Assistant
 
-Interactive mode जब candidate Chrome में application form भर रहा हो। Screen पर जो है उसे पढ़ता है, पिछले offer evaluation का context load करता है, और form के हर question के लिए personalized responses generate करता है।
+Interactive mode जब candidate इस प्रोजेक्ट के Playwright ब्राउज़र में application form भर रहा हो। Screen पर जो है उसे पढ़ता है, पिछले offer evaluation का context load करता है, और form के हर question के लिए personalized responses generate करता है।
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ Interactive mode जब candidate Chrome में application form भर र�
 ## Workflow
 
 ```
-1. DETECT     -> Active Chrome tab पढ़ें (capture/URL/title)
+1. DETECT     -> Is project ke Playwright browser mein posting kholen
 2. IDENTIFY   -> Page से company + role extract करें
 3. SEARCH     -> reports/ में existing reports से match करें
 4. LOAD       -> पूरा report + Block G (यदि मौजूद हो) पढ़ें
@@ -20,9 +20,14 @@ Interactive mode जब candidate Chrome में application form भर र�
 8. PRESENT    -> Copy-paste के लिए formatted responses display करें
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Step 1 -- Offer Detect करें
 
-**Playwright के साथ:** Active page का snapshot। Title, URL और visible content पढ़ें।
+**Playwright के साथ:** `node apply-scope.mjs launch-options` se window kholen, posting wahan kholen, title, URL aur visible content padhen.
 
 **Playwright के बिना:** Candidate से कहें:
 - Form का screenshot share करें (Read tool images पढ़ता है)

@@ -40,6 +40,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { linkedInPathJobId } from './lib/linkedin-url.mjs';
 
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
@@ -195,17 +196,9 @@ function foldHostname(host) {
 // Extractors are keyed on the DOMAIN, never on the path: `/jobs/view/{id}` is
 // also Workable's employer-board shape, where it means something else.
 const AGGREGATOR_POSTING_ID = {
-  // linkedin.com/jobs/view/{id} · .../jobs/view/{title-slug}-{id} · any page
-  // that carries the posting in ?currentJobId= (search and collection views) ·
-  // /comm/jobs/view/{id}, the link in every LinkedIn email. Verified against
-  // linkedin.com itself: `/comm/jobs/view/{id}?trk=…` answers 307 with
-  // `session_redirect=/jobs/view/{id}?trk=…`, the same id with `/comm` dropped.
-  'linkedin.com': (u) => {
-    const path = u.pathname.match(/^\/(?:jobs\/view\/(?:.*-)?|comm\/jobs\/view\/)(\d+)\/?$/);
-    if (path) return path[1];
-    const current = u.searchParams.get('currentJobId');
-    return current && /^\d+$/.test(current) ? current : null;
-  },
+  // The shapes and the /comm/ email link are documented in lib/linkedin-url.mjs.
+  // parseAggregator has already matched the folded host, so only the path is read.
+  'linkedin.com': linkedInPathJobId,
   // indeed.com/viewjob?jk={id}; a results page carries the focused posting as
   // ?vjk={id}. The job key is the requisition, so region hosts (uk./www./de.)
   // and the two page shapes all reduce to it.
@@ -362,16 +355,59 @@ export const LANGUAGE_PARAMS = ['language', 'lang', 'locale'];
  * @returns {{key: string, language: string}} `key` is '' when there is no key.
  */
 export function postingLanguageKey(raw) {
-  if (typeof raw !== 'string') return { key: '', language: '' };
+  if (typeof raw !== 'string') return { key: '', language: '', script: '' };
   let u;
-  try { u = new URL(raw.trim()); } catch { return { key: normalizeUrl(raw), language: '' }; }
+  try { u = new URL(raw.trim()); } catch { return { key: normalizeUrl(raw), language: '', script: '' }; }
   let language = '';
+  let script = '';
   for (const name of [...u.searchParams.keys()]) {
     if (!LANGUAGE_PARAMS.includes(name.toLowerCase())) continue;
-    if (!language) language = languageSubtag(u.searchParams.get(name));
+    if (!language) {
+      const raw = u.searchParams.get(name);
+      language = languageSubtag(raw);
+      script = postingScript(raw);
+    }
     u.searchParams.delete(name);
   }
-  return { key: normalizeUrl(u.href), language };
+  return { key: normalizeUrl(u.href), language, script };
+}
+
+/**
+ * The script a posting language param names, or '' when the value does not say.
+ *
+ * Separate from languageSubtag() because the two answer different questions.
+ * languageSubtag() reduces to the language, which is what ranking a posting
+ * against `preferred_languages` wants: a user who writes `zh` means Chinese,
+ * and should match a Traditional posting as readily as a Simplified one.
+ * Posting IDENTITY is the opposite question, and there the script is not a
+ * regional variant at all — it changes the text. `zh-Hant` and `zh-Hans` are
+ * not the same page for any reader, which is why this project ships
+ * `modes/zh/` and `modes/zh-TW/` as two market mode sets rather than one.
+ *
+ * The script is reported only when the value actually establishes it:
+ *
+ * - an explicit script subtag (`zh-Hant`, `sr-Cyrl`) — stated outright;
+ * - otherwise the script implied by an explicit REGION (`zh-TW` → Hant,
+ *   `zh-CN` → Hans), which is reliable for the cases that matter;
+ * - otherwise ''. A bare `zh` is never resolved to a script, because
+ *   `Intl.Locale('zh').maximize()` answers `zh-Hans-CN` — a guess at the
+ *   commonest case, not something the URL said. A posting served as `?lang=zh`
+ *   may well be the Traditional one under a loose code, so treating it as
+ *   Simplified would assert two postings where there is no evidence of two.
+ *   Unknown stays unknown, the same way an absent language param does.
+ *
+ * @param {unknown} value - A language param value.
+ * @returns {string} A script subtag (`Hant`), or ''.
+ */
+export function postingScript(value) {
+  if (typeof value !== 'string') return '';
+  const v = value.trim();
+  if (!v) return '';
+  let loc;
+  try { loc = new Intl.Locale(v.replace(/_/g, '-')); } catch { return ''; }
+  if (loc.script) return loc.script;
+  if (!loc.region) return '';
+  try { return loc.maximize().script || ''; } catch { return ''; }
 }
 
 /**
@@ -411,7 +447,9 @@ export function languageSubtag(value) {
  * - `'same'`: the same page in the same language, or both without one.
  * - `'distinct'`: two different pages, or the same page in two known,
  *   different languages — two language versions of one posting are kept as
- *   two tracker rows.
+ *   two tracker rows. Two known, different SCRIPTS of one language count here
+ *   too (`zh-Hant` vs `zh-Hans`): a script is not a regional variant, it is
+ *   different text. See postingScript().
  * - `'one-sided-language'`: the same page with a language on one side only.
  *   The bare URL is the posting's default version, and the URL does not say
  *   which language that is, so this is not proof of two postings — a
@@ -428,7 +466,13 @@ export function postingUrlRelation(rawA, rawB) {
   const b = postingLanguageKey(rawB);
   if (!a.key || !b.key) return 'no-key';
   if (a.key !== b.key) return 'distinct';
-  if (a.language === b.language) return 'same';
+  if (a.language === b.language) {
+    // One language, two scripts: two versions, not one page. Only when BOTH
+    // sides actually state a script — `zh` vs `zh-Hant` stays 'same', because
+    // the bare code is not evidence of Simplified.
+    if (a.language && a.script && b.script && a.script !== b.script) return 'distinct';
+    return 'same';
+  }
   return a.language && b.language ? 'distinct' : 'one-sided-language';
 }
 

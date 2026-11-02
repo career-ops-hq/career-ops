@@ -107,16 +107,21 @@ Sauvegarder l'evaluation complete dans `reports/{###}-{company-slug}-{YYYY-MM-DD
 - `{company-slug}` = nom d'entreprise en minuscules, sans espaces (utiliser des tirets)
 - `{YYYY-MM-DD}` = date du jour
 
+Les libelles de l'en-tete (`**Date:**`, `**Archetype:**`, `**Score:**`, `**URL:**`, `**PDF:**`) s'ecrivent exactement comme ci-dessous, sans espace avant les deux-points : les scripts du depot les lisent sous cette forme exacte, et `**URL :**` n'est trouve par aucun d'eux.
+
 **Format du report :**
 
 ```markdown
 # Evaluation : {Entreprise} -- {Role}
 
-**Date :** {YYYY-MM-DD}
-**Archetype :** {detecte}
-**Score :** {X/5}
-**URL :** {URL de l'offre}
-**PDF :** {chemin ou en attente}
+**Date:** {YYYY-MM-DD}
+**Archetype:** {detecte}
+**Score:** {X/5}
+**Décision:** {Postuler | Envisager | Chercher d'abord | Passer}
+**URL:** {URL de l'offre}
+**PDF:** {chemin ou en attente}
+
+{la phrase postuler ou non, copiée telle quelle}
 
 ---
 

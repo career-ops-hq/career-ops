@@ -26,6 +26,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { trackedFiles } from '../lib/mjs-files.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -104,7 +105,7 @@ function help(script) {
 for (const script of FIXED) {
   test(`${script} --help prints usage and exits 0`, () => {
     const r = help(script);
-    assert.equal(r.status, 0, `exited ${r.status}: ${r.stderr.slice(0, 200)}`);
+    assert.equal(r.status, 0, describeSpawn(r, `exited ${r.status}: ${r.stderr.slice(0, 200)}`));
     assert.match(r.stdout, /^Usage:/m, `no usage block:\n${r.stdout.slice(0, 200)}`);
   });
 
@@ -152,7 +153,7 @@ test('-h is accepted wherever --help is, and suppresses the same work', () => {
   // own output so the two cannot drift into answering differently.
   for (const script of FIXED) {
     const short = runIn(EMPTY_ROOT, script, ['-h']);
-    assert.equal(short.status, 0, `${script} -h exited ${short.status}: ${short.stderr.slice(0, 200)}`);
+    assert.equal(short.status, 0, describeSpawn(short, `${script} -h exited ${short.status}: ${short.stderr.slice(0, 200)}`));
     assert.match(short.stdout, /^Usage:/m, `${script} -h did not print usage`);
 
     const shortFull = runIn(FULL_ROOT, script, ['-h']);

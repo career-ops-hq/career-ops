@@ -18,7 +18,7 @@
 // browser session (page referer for a real job matched this exact shape),
 // not just inferred from field naming.
 
-import { decodeEntities } from './_html-entities.mjs';
+import { htmlToText as sharedHtmlToText } from './_html-to-text.mjs';
 import { countryNameFromIso } from './_country.mjs';
 
 const GEM_API_URL = 'https://jobs.gem.com/api/public/graphql/batch';
@@ -88,15 +88,14 @@ function toEpochMs(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-// Same tag-strip + entity-decode convention as the other scraping providers
-// (deutschebahn.mjs, hecklerkoch.mjs, etc.) that get raw HTML back. Entities
-// are decoded BEFORE tags are stripped: a double-encoded tag like
-// "&lt;strong&gt;Role&lt;/strong&gt;" isn't a literal "<...>" yet, so
-// stripping first leaves it untouched and a later decode turns it back into
-// what looks like real markup in the plain-text output.
+// The shared providers/_html-to-text.mjs pipeline: strip real markup, then
+// decode, then strip whatever the decode revealed. Decoding first turned an
+// escaped "&lt;" in prose into a tag opener, and the strip then deleted
+// everything up to the next ">" — the rest of the paragraph, visa wording
+// included. Uncapped, unlike the other providers: these sections used to reach
+// scan.mjs whole, and the description filters read the end of a JD too.
 function htmlToText(html) {
-  if (typeof html !== 'string' || !html) return '';
-  return decodeEntities(html).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return sharedHtmlToText(html, { cap: Infinity });
 }
 
 // Concatenate intro + body + outro in page order, then append compensationHtml

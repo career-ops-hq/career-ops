@@ -1,6 +1,6 @@
 # Mode : postuler -- Assistant live pour les formulaires de candidature
 
-Mode interactif pour le moment ou le candidat remplit un formulaire de candidature dans Chrome. Lit ce qui est a l'ecran, charge le contexte de l'evaluation precedente de l'offre et genere des reponses personnalisees pour chaque question du formulaire.
+Mode interactif pour le moment ou le candidat remplit un formulaire de candidature dans le navigateur Playwright que lance ce projet. Lit ce qui est a l'ecran, charge le contexte de l'evaluation precedente de l'offre et genere des reponses personnalisees pour chaque question du formulaire.
 
 ## Prerequis
 
@@ -10,7 +10,7 @@ Mode interactif pour le moment ou le candidat remplit un formulaire de candidatu
 ## Workflow
 
 ```
-1. DETECTER     -> Lire l'onglet Chrome actif (capture/URL/titre)
+1. DETECTER     -> Ouvrir l'offre dans le navigateur Playwright de ce projet
 2. IDENTIFIER   -> Extraire entreprise + role depuis la page
 3. RECHERCHER   -> Matcher avec les reports existants dans reports/
 4. CHARGER      -> Lire le report complet + Bloc G (si existant)
@@ -20,9 +20,14 @@ Mode interactif pour le moment ou le candidat remplit un formulaire de candidatu
 8. PRESENTER    -> Afficher les reponses formatees pour copier-coller
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Etape 1 -- Detecter l'offre
 
-**Avec Playwright :** Snapshot de la page active. Lire titre, URL et contenu visible.
+**Avec Playwright :** Lancer avec `node apply-scope.mjs launch-options`, ouvrir l'offre dans cette fenêtre, puis lire le titre, l'URL et le contenu visible.
 
 **Sans Playwright :** Demander au candidat de :
 - Partager une capture d'ecran du formulaire (le Read tool lit les images)

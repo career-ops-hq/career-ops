@@ -66,6 +66,9 @@ const CSB_MAX_LOCALES = 16; // guard against a tenant advertising an absurd loca
 // second sweep picks up the few same-day ties it still shuffles across pages.
 const CSB_SORT = 'date';
 const CSB_SWEEPS = 2;
+// Pages per locale fetched in parallel once page 0 has reported totalJobs. Each
+// call returns only 10 postings, so a 500-job tenant was ~50 calls in a row.
+const CSB_PAGE_CONCURRENCY = 6;
 // Locales tried when /search/ discovery yields nothing (fetch failed / markup
 // changed). de_DE + en_US cover the DACH targets this provider is aimed at.
 const CSB_DEFAULT_LOCALES = ['de_DE', 'en_US'];
@@ -343,49 +346,61 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
 
   for (const locale of locales) {
     if (jobs.length >= MAX_JOBS) break;
+    const fetchPage = (page) => ctx.fetchJson(cfg.jobsApi, {
+      method: 'POST',
+      redirect: 'error',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: CSB_SORT }),
+    });
     let total = null;
     let failed = false;
     const localeIds = new Set();
     for (let sweep = 0; sweep < CSB_SWEEPS; sweep++) {
-      for (let page = 0; page < maxPages; page++) {
-        let json;
-        try {
-          json = await ctx.fetchJson(cfg.jobsApi, {
-            method: 'POST',
-            redirect: 'error',
-            headers: { 'content-type': 'application/json', accept: 'application/json' },
-            body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: CSB_SORT }),
-          });
-        } catch (err) {
-          firstErr ??= err;
-          failed = true;
-          break; // this locale failed (e.g. 307 legacy redirect) — try the next
-        }
-        succeededOnce = true;
-        if (total === null) {
-          total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
-        }
-        // Page-fullness checks below use the raw response count, not rows.length:
-        // parseCsbJobs drops id/title-less records, and a full API page with a
-        // few dropped records would otherwise look "short" and stop pagination
-        // before reaching later pages that still hold valid jobs.
-        const rawCount = Array.isArray(json?.jobSearchResult) ? json.jobSearchResult.length : 0;
-        if (rawCount === 0) break;
-        const rows = parseCsbJobs(json, cfg, locale);
+      const lastPageFor = (count) => Math.min(maxPages - 1, Math.ceil(count / CSB_PAGE_SIZE) - 1);
+      let lastPage = total === null ? maxPages - 1 : lastPageFor(total);
+      let page = 0;
+      // Page 0 carries totalJobs. With a total known, the remaining pages go out
+      // CSB_PAGE_CONCURRENCY at a time; without one we cannot tell where the
+      // board ends, so pages stay one at a time and a short page stops the loop.
+      pages: while (page <= lastPage) {
+        const width = total === null ? 1 : CSB_PAGE_CONCURRENCY;
+        const batch = Array.from({ length: Math.min(width, lastPage - page + 1) }, (_, i) => page + i);
+        const results = await Promise.allSettled(batch.map(fetchPage));
+        for (let i = 0; i < batch.length; i++) {
+          const result = results[i];
+          if (result.status === 'rejected') {
+            firstErr ??= result.reason;
+            failed = true;
+            break pages; // this locale failed (e.g. 307 legacy redirect) — try the next
+          }
+          succeededOnce = true;
+          const json = result.value;
+          if (total === null) {
+            total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
+            if (total !== null) lastPage = lastPageFor(total);
+          }
+          // Page-fullness checks below use the raw response count, not rows.length:
+          // parseCsbJobs drops id/title-less records, and a full API page with a
+          // few dropped records would otherwise look "short" and stop pagination
+          // before reaching later pages that still hold valid jobs.
+          const rawCount = Array.isArray(json?.jobSearchResult) ? json.jobSearchResult.length : 0;
+          if (rawCount === 0) break pages;
+          const rows = parseCsbJobs(json, cfg, locale);
 
-        for (const row of rows) {
-          localeIds.add(row.id);
-          if (seen.has(row.id)) continue;
-          seen.add(row.id);
-          const job = { title: row.title, url: row.url, company: entry.name, location: row.location };
-          if (typeof row.postedAt === 'number') job.postedAt = row.postedAt;
-          jobs.push(job);
-          if (jobs.length >= MAX_JOBS) break;
+          for (const row of rows) {
+            localeIds.add(row.id);
+            if (seen.has(row.id)) continue;
+            seen.add(row.id);
+            const job = { title: row.title, url: row.url, company: entry.name, location: row.location };
+            if (typeof row.postedAt === 'number') job.postedAt = row.postedAt;
+            jobs.push(job);
+            if (jobs.length >= MAX_JOBS) break pages;
+          }
+          // Stop once we've covered the reported total, or on a short page.
+          if (total !== null && (batch[i] + 1) * CSB_PAGE_SIZE >= total) break pages;
+          if (rawCount < CSB_PAGE_SIZE) break pages;
         }
-        if (jobs.length >= MAX_JOBS) break;
-        // Stop once we've covered the reported total, or on a short page.
-        if (total !== null && (page + 1) * CSB_PAGE_SIZE >= total) break;
-        if (rawCount < CSB_PAGE_SIZE) break;
+        page = batch[batch.length - 1] + 1;
       }
       if (failed || total === null || localeIds.size >= total || jobs.length >= MAX_JOBS) break;
     }

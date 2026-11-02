@@ -7,6 +7,12 @@
  * question text (and optionally a JD file), and returns the top match(es)
  * formatted to ATS paste length (250–500 words).
  *
+ * The answer is meant to be pasted as-is, so its figures are checked here
+ * rather than left to whoever reads it (AGENTS.md, Source-of-Truth Boundary):
+ * a story marked `**Provenance:** user-cannot-confirm` has every number
+ * replaced by a placeholder, and every other figure that does not trace to
+ * cv.md gets a ⚠️ line, using story-provenance-check.mjs's classifier.
+ *
  * Usage:
  *   node match-star.mjs "Tell me about a time you led a project under pressure"
  *   node match-star.mjs "Describe a conflict you resolved" --jd jds/acme.md
@@ -19,6 +25,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseStories, splitStoryBlocks, isValidStory } from './lib/story-bank.mjs';
+import { parseStoryBlocks, classifyEntries } from './story-provenance-check.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -27,6 +34,9 @@ import { parseStories, splitStoryBlocks, isValidStory } from './lib/story-bank.m
 // process was started — so this read the checkout's story bank (usually absent)
 // for anyone whose data lives elsewhere.
 const STORY_BANK_PATH = join(getCareerOpsRoot(), 'interview-prep', 'story-bank.md');
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
+
+const UNCONFIRMED = '[unconfirmed figure]';
 
 const args       = process.argv.slice(2);
 const LIST_MODE  = args.includes('--list');
@@ -121,13 +131,51 @@ function score(story, queryTokens, jdTokens) {
 
 // ── Formatter ────────────────────────────────────────────────────────
 
+// A number with what makes it a figure: a currency sign before it, and a
+// magnitude, `%`, `+`, `x`, `h` or `/unit` rate after it ("$60/hr", "$40K",
+// "3.5x", "1,200+", "8h"). Not inside a word, so "Q3" and "B2B" stay.
+const FIGURE_RE = /(?<![\p{L}\p{N}])[$€£¥]?\d[\d,.]*(?:\s?(?:%|[kmbh]\b|x\b))?\+?(?:\/\p{L}+)?/giu;
+
 /**
- * Format a STAR story as ATS-ready prose (250–500 words).
- * @param {object} story
- * @param {string} question
+ * Replace every number in `text` with a placeholder, so a story the user
+ * could not confirm can't carry its figures into a paste. Every number, not
+ * only the checker's claims: its patterns are not exhaustive (a rate like
+ * "$60/hr" is none of them), and a number the user could not confirm is not
+ * safe to paste whatever its shape.
+ * @param {string} text
  * @returns {string}
  */
-function formatAts(story, question) {
+function maskFigures(text) {
+  return String(text ?? '').replace(FIGURE_RE, UNCONFIRMED);
+}
+
+/**
+ * ⚠️ lines for the figures in `prose` that do not trace to cv.md.
+ * @param {object} story
+ * @param {string} prose - the exact text about to be printed
+ * @param {string} cvText
+ * @returns {string[]}
+ */
+function provenanceWarnings(story, prose, cvText) {
+  if (story.provenance === 'user-cannot-confirm') {
+    return [`   ⚠️  Provenance: user-cannot-confirm. Every number is replaced with ${UNCONFIRMED}: use this story as narrative only.`];
+  }
+  const buckets = classifyEntries([{ title: story.title, provenance: story.provenance ?? null, body: prose }], cvText);
+  return [
+    ...buckets.derivedUnverified.map((c) => `   ⚠️  "${c.claim}" is not in cv.md (derived-unverified): confirm it before pasting.`),
+    ...buckets.supportedByResume.map((c) => `   ⚠️  "${c.claim}": cv.md supports the fact but not this figure (supportedByResume): confirm it before pasting.`),
+  ];
+}
+
+/**
+ * Format a STAR story as ATS-ready prose (250–500 words).
+ * @param {object} story - a parseStories() story, plus `provenance` (its
+ *   Provenance marker, lowercased, or null)
+ * @param {string} question
+ * @param {{cvText?: string}} [opts] - cv.md, to check the figures against
+ * @returns {string}
+ */
+function formatAts(story, question, { cvText = '' } = {}) {
   const parts = [];
 
   if (story.situation) parts.push(story.situation);
@@ -136,7 +184,13 @@ function formatAts(story, question) {
   if (story.result)    parts.push(story.result);
   if (story.reflection) parts.push(story.reflection);
 
-  const wordArr = parts.filter(Boolean).join(' ').split(/\s+/).filter(Boolean);
+  // Every field this prints, not only the prose: a figure in a title or a tag
+  // is still a figure. Source is left as written: it says where the story
+  // came from ("Report #042"), which is what the user needs to check it.
+  const cannotConfirm = story.provenance === 'user-cannot-confirm';
+  const safe = (text) => (cannotConfirm ? maskFigures(text) : text);
+  const joined = safe(parts.filter(Boolean).join(' '));
+  const wordArr = joined.split(/\s+/).filter(Boolean);
   // Enforce 500-word ceiling; prose below 250 words gets a warning
   const prose   = wordArr.slice(0, 500).join(' ');
   const words   = Math.min(wordArr.length, 500);
@@ -145,9 +199,10 @@ function formatAts(story, question) {
     : '';
 
   return [
-    `— ${story.title}${story.theme ? ` [${story.theme}]` : ''}`,
+    `— ${safe(story.title)}${story.theme ? ` [${safe(story.theme)}]` : ''}`,
     story.source ? `   Source: ${story.source}` : '',
-    story.tags.length ? `   Tags: ${story.tags.join(', ')}` : '',
+    story.tags.length ? `   Tags: ${story.tags.map(safe).join(', ')}` : '',
+    ...provenanceWarnings(story, prose, cvText),
     '',
     prose,
     '',
@@ -156,7 +211,7 @@ function formatAts(story, question) {
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { parseStories, tokenize, score, STOPWORDS };
+export { parseStories, tokenize, score, formatAts, STOPWORDS };
 
 // ── Main ─────────────────────────────────────────────────────────────
 
@@ -168,7 +223,12 @@ if (!existsSync(STORY_BANK_PATH)) {
 }
 
 const content = readFileSync(STORY_BANK_PATH, 'utf-8');
-const stories = parseStories(content);
+// The checker's own reading of each story's marker, matched by heading line,
+// so a marker it honours is honoured here.
+const provenanceAt = new Map(parseStoryBlocks(content)
+  .filter(e => e.kind === 'story').map(e => [e.line, e.provenance]));
+const stories = parseStories(content).map(s => ({ ...s, provenance: provenanceAt.get(s.line) ?? null }));
+const cvText = existsSync(CV_PATH) ? readFileSync(CV_PATH, 'utf-8') : '';
 
 // Say what is in the file but cannot be read, so an empty or short bank is
 // never mistaken for the whole story (#4514). Never rewrites the file: it is
@@ -231,7 +291,7 @@ for (let i = 0; i < ranked.length; i++) {
   const { story, score: s } = ranked[i];
   console.log(`${'─'.repeat(40)}`);
   console.log(`Match ${i + 1} of ${ranked.length} (score: ${s})\n`);
-  console.log(formatAts(story, question));
+  console.log(formatAts(story, question, { cvText }));
   console.log('');
 }
 

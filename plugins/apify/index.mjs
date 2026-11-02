@@ -28,6 +28,7 @@
 import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { join } from 'path';
+import * as yaml from 'js-yaml';
 import { hasToken, runActor } from './_apify.mjs';
 
 const JDS_DIR = 'jds';
@@ -79,10 +80,6 @@ function slugify(text) {
   return `jd-${hash}`;
 }
 
-function yamlEscape(str) {
-  const s = String(str ?? '').replace(/\n/g, ' ').trim();
-  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-}
 
 // Lightweight HTML → text for actor description fields (enough for downstream
 // snippet extraction and full evaluation, not a full parser).
@@ -134,19 +131,15 @@ function saveJd(normalized, descriptionBody, sourceLabel, root) {
     relPath = `${JDS_DIR}/${filename}`;
     if (existsSync(filepath)) return relPath;
     const today = new Date().toISOString().slice(0, 10);
-    const content = `---
-title: ${yamlEscape(normalized.title)}
-company: ${yamlEscape(normalized.company)}
-url: ${yamlEscape(normalized.url)}
-location: ${yamlEscape(normalized.location)}
-scraped: "${today}"
-source: ${sourceLabel}
----
-
-# ${normalized.title} — ${normalized.company}
-
-${descriptionBody}
-`;
+    const frontmatter = yaml.dump({
+      title: normalized.title,
+      company: normalized.company,
+      url: normalized.url,
+      location: normalized.location,
+      scraped: today,
+      source: sourceLabel,
+    });
+    const content = `---\n${frontmatter}---\n\n# ${normalized.title} — ${normalized.company}\n\n${descriptionBody}\n`;
     writeFileSync(filepath, content, { encoding: 'utf-8', flag: 'wx' });
     return relPath;
   } catch (err) {

@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fixReportLinks } from '../fix-report-links.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const CODE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const HEADER = [
@@ -36,7 +37,11 @@ function run(root, args = [], envExtra = { CAREER_OPS_ROOT: root }) {
   Object.assign(env, envExtra);
   const r = spawnSync(process.execPath, [join(CODE_ROOT, 'fix-report-links.mjs'), ...args], { cwd: CODE_ROOT, env, encoding: 'utf-8', timeout: 30_000 });
   assert.equal(r.error, undefined);
-  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  // Spread the real result, so describeSpawn() can still reach stdout, stderr,
+  // signal and error. Returning only { status, out } made the failure message
+  // print "(empty)" for both streams even when the script had written its
+  // usage text (#5380).
+  return { ...r, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 const withRoot = (fn) => () => { const root = makeRoot(); try { fn(root); } finally { rmSync(root, { recursive: true, force: true }); } };
 
@@ -155,7 +160,11 @@ function runVerify(root) {
   env.CAREER_OPS_ROOT = root;
   const r = spawnSync(process.execPath, [join(CODE_ROOT, 'verify-pipeline.mjs')], { cwd: CODE_ROOT, env, encoding: 'utf-8', timeout: 30_000 });
   assert.equal(r.error, undefined);
-  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  // Spread the real result, so describeSpawn() can still reach stdout, stderr,
+  // signal and error. Returning only { status, out } made the failure message
+  // print "(empty)" for both streams even when the script had written its
+  // usage text (#5380).
+  return { ...r, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
 test('verify-pipeline warns about a report it cannot inspect instead of passing it', (t) => {
@@ -256,7 +265,7 @@ test('unknown flag is rejected; --help prints usage', withRoot((root) => {
   assert.match(bad.out, /--dryrun/);
   assert.equal(tracker(root), before, 'a mistyped flag must not fall through to a live run');
   const help = run(root, ['--help']);
-  assert.equal(help.status, 0);
+  assert.equal(help.status, 0, describeSpawn(help));
   assert.match(help.out, /Usage: node fix-report-links\.mjs/);
 }));
 
@@ -342,4 +351,32 @@ test('a symlinked CAREER_OPS_TRACKER: the backup sits beside the real file and h
   assert.match(readFileSync(real, 'utf-8'), /\| — \|/, 'the real file was rewritten');
   assert.equal(readFileSync(`${real}.bak`, 'utf-8'), original, 'backup beside the real file, original bytes');
   assert.equal(existsSync(`${link}.bak`), false, 'no backup beside the link');
+}));
+
+test('a symlinked tracker FILE: links resolve from the link\'s own folder, not only the target\'s (#5374)', withRoot((root) => {
+  // The tracker lives in another repo and data/applications.md links to it;
+  // reports/ sits next to the link, not next to the target. Editors resolve
+  // ../reports/ from data/, so both scripts must too.
+  const privateData = join(root, 'private', 'data');
+  mkdirSync(privateData, { recursive: true });
+  const real = join(privateData, 'applications.md');
+  report(root, '001-acme-widgets-2026-07-15.md');
+  const original = [...HEADER, row(1, 'Acme Widgets', DEAD), row(2, 'Bolt Gadgets', '[2](../reports/gone.md)'), ''].join('\n');
+  writeFileSync(real, original);
+  try { symlinkSync(real, trackerPath(root)); } catch (e) {
+    if (e.code === 'EPERM' || e.code === 'EACCES') return; // symlinks need privileges on some Windows setups
+    throw e;
+  }
+  assert.equal(existsSync(join(privateData, '..', 'reports')), false, 'no reports/ next to the target');
+
+  const r = run(root);
+  assert.equal(r.status, 0, r.out);
+  assert.doesNotMatch(r.out, /#1 Acme Widgets/, 'the live link is not rewritten');
+  assert.match(r.out, /#2 Bolt Gadgets/, 'a genuinely dead link still is');
+  assert.match(r.out, /1 dead report link\(s\) fixed/);
+  assert.match(readFileSync(real, 'utf-8'), /\[1\]\(\.\.\/reports\/001-acme-widgets-2026-07-15\.md\)/);
+
+  const v = runVerify(root);
+  assert.doesNotMatch(v.out, /Report not found/, v.out);
+  assert.match(v.out, /All report links valid/, v.out);
 }));

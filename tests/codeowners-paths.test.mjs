@@ -39,9 +39,19 @@ function matchesSomething(pattern) {
   return readdirSync(join(ROOT, dir)).some(name => re.test(name));
 }
 
+// web/ ships in the release tag but is not in update-system.mjs's manifest
+// (#3269), so an install updated with `apply` has no web/ directory. Its
+// CODEOWNERS entry is still correct for a full checkout; only the existence
+// check has to tolerate the documented absence, the way the web-dependent
+// suites do (#1675, #3563, #3608, #4165, #4706). When web/ is present the
+// check stays strict, so a pattern that stops matching is still caught.
+const webInstalled = existsSync(join(ROOT, 'web'));
+const absentOptionalPath = (p) => p === '/web/' && !webInstalled;
+
 ok('every CODEOWNERS pattern matches a path that exists', () => {
   assert.ok(patterns.length > 10, 'CODEOWNERS parsed');
-  assert.deepEqual(patterns.filter(p => !matchesSomething(p)), []);
+  assert.ok(patterns.includes('/web/'), 'web/ is still owned');
+  assert.deepEqual(patterns.filter(p => !absentOptionalPath(p) && !matchesSomething(p)), []);
 });
 
 ok('the plugin registry directory is owned, not the deleted single file', () => {
@@ -54,13 +64,20 @@ ok('the plugin registry directory is owned, not the deleted single file', () => 
 // The router is whatever the CLI skill entrypoints actually link to, read from
 // the links themselves so a moved router fails here rather than going unowned.
 // A checkout without symlink support (Windows, core.symlinks=false) holds each
-// link as a one-line file naming its target, so read that form too.
+// link as a one-line file naming its target, so read that form too. An install
+// updated with `update-system.mjs apply` on such a system holds each entrypoint
+// as a regular file with the router's full content instead (#2259, #2272), so
+// a file whose content equals the router's counts as linking to it.
+const ROUTER = join(ROOT, '.agents', 'skills', 'career-ops', 'SKILL.md');
+const routerText = existsSync(ROUTER) ? readFileSync(ROUTER, 'utf-8') : null;
 function linkTarget(p) {
   const abs = join(ROOT, p);
   if (!existsSync(abs)) return null;
   if (lstatSync(abs).isSymbolicLink()) return readlinkSync(abs);
   const text = readFileSync(abs, 'utf-8');
-  return text.length < 200 && /^[^\n]+SKILL\.md\s*$/.test(text) ? text.trim() : null;
+  if (text.length < 200 && /^[^\n]+SKILL\.md\s*$/.test(text)) return text.trim();
+  if (abs !== ROUTER && text === routerText) return relative(dirname(abs), ROUTER);
+  return null;
 }
 const skillLinks = readdirSync(ROOT)
   .map(d => join(d, 'skills', 'career-ops', 'SKILL.md'))

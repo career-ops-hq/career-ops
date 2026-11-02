@@ -31,6 +31,7 @@ import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { codeMask, isCodeRange } from './helpers.mjs';
 import { shouldDedupScanHistoryRow } from '../scan.mjs';
 import { parseScanHistory, detectReposts } from '../detect-reposts.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -78,7 +79,7 @@ function inFrozenTz(tz, expr, instant = INSTANT) {
     env: { ...process.env, TZ: tz },
   });
   assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
-  assert.equal(r.status, 0, `child exited ${r.status}: ${r.stderr}`);
+  assert.equal(r.status, 0, describeSpawn(r, `child exited ${r.status}`));
   return r.stdout.trim();
 }
 
@@ -411,8 +412,9 @@ test('the scanner resolves every call the four known writers contain', () => {
   // The shapes above are synthetic. This is the real files, and it is what
   // would catch masking that is correct in miniature and wrong at scale.
   // scan.mjs went 5 → 7 when the location and posting-age cuts started
-  // recording what they drop (`skipped_location`, `skipped_age`).
-  for (const [file, expected] of [['scan.mjs', 7], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
+  // recording what they drop (`skipped_location`, `skipped_age`), and 7 → 8
+  // when the title cut did (`skipped_title`, #2695).
+  for (const [file, expected] of [['scan.mjs', 8], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     const naive = [...src.matchAll(/(?<!function )\bappendToScanHistory\s*\(/g)].length;
     assert.equal(naive, expected, `${file}: expected ${expected} call sites, source has ${naive} — update this expectation deliberately`);

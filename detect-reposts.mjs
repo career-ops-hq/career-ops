@@ -62,7 +62,7 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 // Namespace import, not default: js-yaml 5.x drops the default export, and
 // #2656 migrated the rest of the repo for exactly that reason.
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -205,7 +205,7 @@ export function loadAggregatorCompanies(portalsPath = PORTALS_PATH) {
   const found = new Map();
   try {
     if (!existsSync(portalsPath)) return found;
-    const doc = yaml.load(readFileSync(portalsPath, 'utf-8'));
+    const doc = loadYaml(readFileSync(portalsPath, 'utf-8'));
     for (const entries of [doc?.tracked_companies, doc?.job_boards]) {
       if (!Array.isArray(entries)) continue;
       for (const entry of entries) {

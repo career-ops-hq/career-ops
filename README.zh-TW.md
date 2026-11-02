@@ -20,7 +20,8 @@
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
   <a href="README.tr.md">Türkçe</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
+  <a href="README.vi.md">Tiếng Việt</a> |
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <p align="center"><a href="https://career-ops.org/zh?utm_source=readme&utm_content=zh-tw">網站目前只有簡體中文版：career-ops.org/zh</a></p>
@@ -123,7 +124,11 @@ npx @santifer/career-ops init
 
 <br>
 
-招募不會自己修好。正在經歷它的人可以，而且他們已經在這個房間裡，交換筆記，互相修各自的設定。[修復就是在這裡寫出來的](CONTRIBUTING.md)。是房間，不是俱樂部。**一起來建。**
+招募不會自己修好。正在經歷它的人可以，而且他們已經在這個房間裡，交換筆記，互相修各自的設定。
+
+<p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=zh-TW" alt="貢獻者 GitHub 頭像組成的動態牆，自 2026年4月 起依加入順序逐一填滿，下一格留空。" width="100%"></a></p>
+
+[修復就是在這裡寫出來的](CONTRIBUTING.md)。是房間，不是俱樂部。**一起來建。**
 
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord：career-ops 伺服器的即時成員數"></a></p>
 
@@ -205,7 +210,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` 隨 [Node.js](https://nodejs.org) 一起提供：它只執行一次安裝程式，
 > 不會全域安裝任何東西。還沒有 Node？先安裝它。
-> （已經在用 Claude Code / Gemini / Codex CLI？那你已經有了。）
+> （已經在用 Claude Code / Codex CLI？那你已經有了。）
 
 這會把最新版本複製到 `./career-ops` 並安裝相依套件。然後：
 
@@ -228,17 +233,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -247,7 +243,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -265,11 +261,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-這會全域安裝 `career-ops` 執行檔，讓你可以直接執行它而不是透過 `npx`。與 `npx @santifer/career-ops init`（用來初始化一個專案目錄）不同，全域安裝會給你一個持久的 `career-ops` 指令，在終端機的任何地方都能用。
+這會全域安裝 `career-ops` 執行檔，讓你不用 `npx` 就能執行 `career-ops init [folder]`。`init` 是它唯一的指令：它只負責建立工作區，之後的一切都在你的 AI 程式碼 CLI 裡進行（見下方「使用方式」），而不是透過這個執行檔。
 
 **該用哪一個？**
 - `npx @santifer/career-ops init`：最適合首次使用；會建立一個專用的專案資料夾。
-- `npm i -g @santifer/career-ops`：最適合已有專案資料夾、想直接執行 career-ops 指令的情況。
+- `npm i -g @santifer/career-ops`：如果你比較想輸入 `career-ops init`，而不是 `npx` 的寫法。它不會增加其他指令。
 
 > **這個系統就是設計成由你的 AI 程式碼 CLI 自己來客製的。** 模式、原型、評分權重、談判話術：直接請它改就行。它讀取的正是它自己使用的檔案，所以它清楚該改哪裡。
 
@@ -503,7 +499,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-功能：6 個篩選分頁、4 種排序模式、分組／平鋪檢視、延遲載入預覽、行內狀態修改。
+功能：10 個篩選分頁、8 種排序模式、分組／平鋪檢視、延遲載入預覽、行內狀態修改。
 
 還有一個**實驗性的 Web UI**（alpha 版，選用：除非你主動啟動，否則不會執行任何東西）：見 [`web/README.md`](web/README.md)。
 
@@ -623,7 +619,7 @@ Go 版儀表板 TUI、Node.js 腳本和 AI 代理模式都會自動遵循這個�
 career-ops（[career-ops.org](https://career-ops.org)，也稱 **careerops**） 是一個開源的 AI 求職工具，在你的 AI 程式碼 CLI（Claude Code、Codex、OpenCode 等）裡於本機執行，把每一個決定都留給你。它依你的履歷評估職缺、產生適配 ATS 的 PDF、找出該聯絡的對象，並在一個地方追蹤所有進度：最終決定權永遠在你手上。它是 [CareerOps 宣言](https://career-ops.org/manifesto)的第一個參考實作。
 
 **客製化履歷會捏造內容嗎？**
-不應該，提示詞裡也這麼寫：只改寫，絕不捏造。`generate-pdf` 會擋下數字或事實在你的資料來源中找不到的履歷，除非你傳入 `--skip-fact-check`。它目前還不檢查職稱，也不評判改寫。兩個未關閉的 issue 在追蹤這些：[#2677](https://github.com/career-ops-hq/career-ops/issues/2677)（職稱必須與 cv.md 一致）和 [#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不通過即阻止的真實性檢查）。在它們合併之前，每份履歷送出前都請自己讀一遍。[法律聲明](LEGAL_DISCLAIMER.md) 用更長的篇幅說了同樣的話。
+不應該，提示詞裡也這麼寫：只改寫，絕不捏造。`generate-pdf` 會擋下數字或事實在你的資料來源中找不到的履歷，除非你傳入 `--skip-fact-check`。`pdf` 模式還會執行 `cv-title-check.mjs`：它依公司和日期，把客製化履歷中的每個職稱與 cv.md 中同一份工作的職稱比對，有不同就請你決定保留還是改回。它只提醒、不阻擋，因為調整職稱的寫法有時是你自己的選擇。目前還沒有任何檢查評判改寫：[#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不通過即阻止的真實性檢查）在追蹤這一點。在此之前，每份履歷送出前都請自己讀一遍。[法律聲明](LEGAL_DISCLAIMER.md) 用更長的篇幅說了同樣的話。
 
 **我可以免費執行 career-ops，或改用較便宜／本機的模型嗎？**
 可以。career-ops 不綁定特定 CLI，也能跑在免費與本機模型上（OpenRouter 的免費模型、Ollama，或任何相容 OpenAI 的端點），所以你不必被付費訂閱綁住。完整設定見 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)。

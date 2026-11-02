@@ -155,6 +155,8 @@ try {
   } else {
     fail(`join.fetch() truncation warning missing; captured = ${JSON.stringify(bigBoardWarnings)}`);
   }
+  if (bigBoardJobs.joinTruncated === true) pass('join.fetch() tags a cap-truncated board joinTruncated');
+  else fail(`join cap-truncated board should carry joinTruncated, got ${bigBoardJobs.joinTruncated}`);
 
   // fetch() — entry.max_pages overrides the default, clamped at MAX_PAGES_CAP.
   let overrideCalls = 0;

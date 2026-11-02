@@ -40,9 +40,17 @@ plugins/<id>/
   "hooks": ["provider"],             // any of: provider, ingest, search, notify, export
   "requiredEnv": ["WELLFOUND_TOKEN"],// env VAR NAMES only — values go in .env
   "allowedHosts": ["api.wellfound.com"], // required when requiredEnv is non-empty
-  "humanInTheLoop": true             // must be true
+  "humanInTheLoop": true,            // must be true
+  "jobPostings": true                // optional: ingest/search results are job postings
 }
 ```
+
+`jobPostings: true` tells the engine that what your `ingest` or `search` hook
+returns are job postings. They then pass the scanner's discovery filters
+(`data/blacklist.md`, `portals.yml` `title_filter` and `location_filter`) and
+are recorded in `data/scan-history.tsv`. Leave it out when your results are
+something else, such as interview events: those are only de-duplicated against
+the tracker, the pipeline and scan history.
 
 ### Hooks (`index.mjs` default export)
 
@@ -65,6 +73,15 @@ node plugins.mjs run gmail                       # ingest
 node plugins.mjs run notion search "platform"    # search
 node plugins.mjs run notion export [--dry-run]   # export
 ```
+
+The `export` snapshot is `{ applications, pipeline }`, frozen. `applications`
+holds one row per tracker row, read from the same tracker `set-status.mjs`
+writes (`CAREER_OPS_TRACKER`, else `data/applications.md`, else the legacy root
+copy). Columns are mapped through `tracker-aliases.json`, so the keys are the
+same whatever language the header is in: `num`, `date`, `company`, `role`,
+`score`, `status`, `pdf`, `report`, `notes`, `url`, and `location` / `via` when
+the tracker has those columns. Every value is a string, and `url` is the
+posting link's href. `pipeline` holds `{ url }` per `data/pipeline.md` entry.
 
 ### The `ctx` object
 

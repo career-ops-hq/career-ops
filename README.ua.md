@@ -20,7 +20,8 @@
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
   <a href="README.tr.md">Türkçe</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
+  <a href="README.vi.md">Tiếng Việt</a> |
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
@@ -121,7 +122,11 @@ npx @santifer/career-ops init
 
 <br>
 
-Найм сам себе не виправить. Люди, які через нього проходять, можуть, і вони вже в кімнаті: звіряють нотатки й лагодять одне одному налаштування. [Саме тут пишеться виправлення](CONTRIBUTING.md). Кімната, а не клуб. **Будуймо разом.**
+Найм сам себе не виправить. Люди, які через нього проходять, можуть, і вони вже в кімнаті: звіряють нотатки й лагодять одне одному налаштування.
+
+<p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ua" alt="Анімована стіна з GitHub-аватарів учасників, що заповнюється в порядку приходу з квітень 2026 р.; наступна клітинка лишається вільною." width="100%"></a></p>
+
+[Саме тут пишеться виправлення](CONTRIBUTING.md). Кімната, а не клуб. **Будуймо разом.**
 
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: кількість учасників сервера career-ops наживо"></a></p>
 
@@ -203,7 +208,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` іде разом із [Node.js](https://nodejs.org): він запускає інсталятор один раз,
 > нічого не встановлюючи глобально. Ще немає Node? Спершу встановіть його.
-> (Уже користуєтеся CLI Claude Code / Gemini / Codex? Тоді він у вас уже є.)
+> (Уже користуєтеся CLI Claude Code / Codex? Тоді він у вас уже є.)
 
 Це клонує останній реліз у `./career-ops` і встановлює залежності. Потім:
 
@@ -226,17 +231,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -245,7 +241,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -263,11 +259,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-Це встановлює бінарник `career-ops` глобально, тож ви можете запускати його напряму, а не через `npx`. На відміну від `npx @santifer/career-ops init` (який створює каталог проєкту), глобальне встановлення дає постійну команду `career-ops`, доступну будь-де у вашому терміналі.
+Це встановлює бінарник `career-ops` глобально, тож ви можете запускати `career-ops init [folder]` без `npx`. `init` — його єдина команда: вона створює робочий простір, а все подальше відбувається всередині вашого AI-кодинг CLI (див. «Використання» нижче), а не через цей бінарник.
 
 **Що обрати?**
 - `npx @santifer/career-ops init`: найкраще для першого запуску; створює окрему теку проєкту.
-- `npm i -g @santifer/career-ops`: найкраще, коли тека проєкту вже є і ви хочете запускати команди career-ops напряму.
+- `npm i -g @santifer/career-ops`: якщо вам зручніше набирати `career-ops init`, ніж форму з `npx`. Інших команд він не додає.
 
 > **Система спроєктована так, щоб її налаштовував сам ваш AI-кодинг CLI.** Режими, архетипи, ваги оцінювання, скрипти переговорів: просто попросіть його змінити їх. Він читає ті самі файли, якими користується, тож точно знає, що редагувати.
 
@@ -501,7 +497,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Функції: 6 вкладок фільтрів, 4 режими сортування, згрупований/плоский вигляд, ліниве завантаження попереднього перегляду, зміна статусів у рядку.
+Функції: 10 вкладок фільтрів, 8 режимів сортування, згрупований/плоский вигляд, ліниве завантаження попереднього перегляду, зміна статусів у рядку.
 
 Є також **експериментальний веб-інтерфейс** (альфа, опційно: нічого не запускається, поки ви його не запустите): дивіться [`web/README.md`](web/README.md).
 
@@ -621,7 +617,7 @@ career-ops/
 career-ops ([career-ops.org](https://career-ops.org), також відомий як **careerops**) є AI-пошуком роботи з відкритим кодом, який працює локально у вашому AI-кодинг CLI (Claude Code, Codex, OpenCode та інших) і залишає кожне рішення за вами. Він оцінює вакансії відносно вашого резюме, генерує ATS-адаптовані PDF, знаходить потрібну людину для контакту і відстежує все в одному місці: останнє слово завжди за вами. Це перша еталонна реалізація [Маніфесту CareerOps](https://career-ops.org/manifesto).
 
 **Чи може адаптоване резюме щось вигадати?**
-Не має права, і промпти це кажуть: переформульовувати, ніколи не вигадувати. `generate-pdf` блокує резюме, у якому є цифри чи факти, відсутні у ваших джерелах, якщо тільки ви не передасте `--skip-fact-check`. Назви посад він поки не перевіряє і переформулювання не оцінює. Це відстежують два відкриті issue: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (назви посад мають збігатися з cv.md) і [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (перевірка достовірності, що блокує в разі невідповідності). Поки їх не змерджено, читайте кожне резюме перед відправкою. [Юридичне застереження](LEGAL_DISCLAIMER.md) каже те саме довше.
+Не має права, і промпти це кажуть: переформульовувати, ніколи не вигадувати. `generate-pdf` блокує резюме, у якому є цифри чи факти, відсутні у ваших джерелах, якщо тільки ви не передасте `--skip-fact-check`. Режим `pdf` також запускає `cv-title-check.mjs`: він порівнює кожну назву посади в адаптованому резюме з назвою, яку cv.md дає тій самій роботі (зіставлення за компанією та датами), і питає, залишити чи повернути кожну, що відрізняється. Він лише попереджає, а не блокує, бо переформулювати назву посади іноді ваше рішення. Переформулювання поки ніщо не оцінює: це відстежує [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (перевірка достовірності, що блокує в разі невідповідності). До того часу читайте кожне резюме перед відправкою. [Юридичне застереження](LEGAL_DISCLAIMER.md) каже те саме довше.
 
 **Чи можу я запускати career-ops безкоштовно або на дешевшій / локальній моделі?**
 Так. career-ops не залежить від CLI і працює на безкоштовних та локальних моделях (безкоштовні моделі OpenRouter, Ollama або будь-який OpenAI-сумісний ендпоінт), тож ви не прив'язані до платної підписки. Повне налаштування: [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md).

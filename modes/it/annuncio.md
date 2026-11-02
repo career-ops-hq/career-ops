@@ -115,8 +115,11 @@ Salvare la valutazione completa in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 **Data:** {YYYY-MM-DD}
 **Archetipo:** {rilevato}
 **Punteggio:** {X/5}
+**Decisione:** {Candidarsi | Valutare | Approfondire prima | Scartare}
 **URL:** {URL dell'annuncio}
 **PDF:** {percorso del file o in attesa}
+
+{la frase candidarsi o no, copiata parola per parola}
 
 ---
 

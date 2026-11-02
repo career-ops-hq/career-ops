@@ -54,7 +54,13 @@ A plugin is a directory with a `manifest.json` (validated before any code is
 imported), an `index.mjs` (default-exports your hooks), and optionally a
 `skill.md` + `_helpers`. Hooks: **provider / ingest / search / notify / export**
 — there is no auto-submit hook. Producers **return** `Job[]`; the engine writes
-them. Reach the network **only** through `ctx.fetch` (your manifest
+them. Before it does, an `ingest` or `search` result already in the tracker,
+the pipeline or `data/scan-history.tsv` (compared by normalized URL) is dropped.
+A plugin whose manifest sets `"jobPostings": true` also gets the scanner's
+discovery filters: `data/blacklist.md` and `portals.yml`'s `title_filter` /
+`location_filter`, and what it admits is recorded in `data/scan-history.tsv`.
+Leave the flag out when your results are not job postings (interview events, for
+example). Reach the network **only** through `ctx.fetch` (your manifest
 `allowedHosts` is enforced, with SSRF protection). Keys arrive via `ctx.env`,
 non-secret settings via `ctx.settings`. To deduplicate the postings you return —
 or to compare a posting against one you have already seen — use
@@ -143,6 +149,12 @@ Every community plugin in the registry is reviewed and pinned to an exact commit
 | [career-ops-plugin-linkedin-alerts](https://github.com/Schlaflied/career-ops-plugin-linkedin-alerts) | LinkedIn job alert ingest — parse LinkedIn alert emails from your Gmail inbox, normalize tracking links to canonical job URLs, and surface them in the career-ops pipeline. | ingest | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | @Schlaflied |
 | [career-ops-plugin-outlook-interviews](https://github.com/Schlaflied/career-ops-plugin-outlook-interviews) | Outlook interview ingest — detect interview invitation emails via Microsoft Graph, extract company / role / meeting link, and surface them in the career-ops pipeline. | ingest | `MSGRAPH_CLIENT_ID`, `MSGRAPH_REFRESH_TOKEN` (optional: `MSGRAPH_CLIENT_SECRET`) | @Schlaflied |
 | [career-ops-plugin-obsidian](https://github.com/Schlaflied/career-ops-plugin-obsidian) | Obsidian export — mirror the tracker into your vault as frontmatter notes queryable by Dataview/Bases; frontmatter belongs to the machine, the note body belongs to you. | export | None | @Schlaflied |
+| [career-ops-plugin-startup-boards](https://github.com/giacomoguidotto/career-ops-plugin-startup-boards) | Opt-in scanner provider for YC, Getro, and Consider startup job boards. | provider | None | @giacomoguidotto |
+| [career-ops-plugin-docx](https://github.com/rubicon/career-ops-plugin-docx) | Export your cv.md to a clean, ATS-friendly Word .docx, honoring #### nested sub-roles for fractional, interim, and umbrella engagements. | export | None | @rubicon |
+| [career-ops-plugin-markdown](https://github.com/rubicon/career-ops-plugin-markdown) | Export your cv.md to a clean, markdownlint-compliant Markdown resume, honoring #### nested sub-roles for fractional, interim, and umbrella engagements. | export | None | @rubicon |
+| [career-ops-plugin-serper](https://github.com/d-ulker/career-ops-plugin-serper) | Google Search provider via Serper.dev — drop-in replacement for the discontinued serpapi provider, with isFallback detect so free ATS providers are never shadowed. | provider | `SERPER_API_KEY` | @d-ulker |
+| [career-ops-plugin-commute](https://github.com/bullitt186/career-ops-plugin-commute) | Drive time from home to each posting's workplace for evaluation and triage; home stays coordinates, routing runs on your own OSRM/Valhalla | ingest, search | None | @bullitt186 |
+| [career-ops-plugin-workspace-mcp](https://github.com/theridgerugby/career-ops-plugin-workspace-mcp) | Read-only MCP access to application rows with scores and the absolute paths and byte sizes of reports, CVs and cover letters. | export | None | @theridgerugby |
 
 To add your own plugin to the registry, follow the [Publishing + getting approved](#publishing--getting-approved) flow above.
 

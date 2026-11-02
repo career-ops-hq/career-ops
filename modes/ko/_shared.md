@@ -201,7 +201,7 @@
 3. matching 시 CV의 정확한 문장을 인용합니다.
 4. 보상/회사 데이터에는 WebSearch를 사용합니다.
 5. 매 평가 후 tracker에 기록합니다.
-6. 생성 콘텐츠는 공고 언어에 맞춥니다(한국어 공고면 한국어, 영어 공고면 영어).
+6. 사용자에게 보여 줄 콘텐츠는 공고 언어와 관계없이 `config/profile.yml`의 `{language.output}`로 생성합니다(설정이 없으면 영어). 이 시장의 용어는 유지하고 필요하면 그 언어로 설명합니다.
 7. 직접적이고 구체적으로 씁니다. 불필요한 말은 줄입니다.
 8. 한국 테크 채용 문맥에 맞는 자연스러운 한국어를 사용합니다. 짧은 문장, 동사 중심, 수동태 회피. stack, pipeline, deployment, embedding 같은 현장 용어는 억지로 번역하지 않습니다.
 8b. **PDF Professional Summary의 case study URL:** PDF가 case study나 demo를 언급하면 URL은 반드시 첫 문단(Professional Summary)에 들어갑니다. recruiter는 summary만 읽는 경우가 많습니다. HTML에서는 모든 URL에 `white-space: nowrap` 적용.

@@ -9,7 +9,7 @@ import {
   MACOS_BROWSER_LIKE_USER_AGENT,
 } from '../user-agent.mjs';
 import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
-import { currentConnectionScope } from './_connection-scope.mjs';
+import { currentConnectionScope, currentAbortSignal } from './_connection-scope.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 
 /** @typedef {import('./_types.js').Context} Context */
@@ -167,14 +167,23 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     // A trusted-proxy dispatcher, when configured, still takes precedence,
     // together with the fetchImpl proxyFor() paired it with.
     const scope = dispatcher ? undefined : currentConnectionScope();
+    // A sweep's per-company watchdog aborts the board's signal when it times
+    // out; fold it into this request's own timeout so an abandoned board stops
+    // mid-flight instead of running on in the background (#5570). Read straight
+    // from the store so it also applies on the trusted-proxy path, where the
+    // pool `scope` is left undefined.
+    const boardSignal = currentAbortSignal();
+    const requestSignal = boardSignal
+      ? AbortSignal.any([controller.signal, boardSignal])
+      : controller.signal;
     let res;
     try {
-      res = await (scope ? scope.fetch : fetchImpl)(url, {
+      res = await (scope?.fetch ?? fetchImpl)(url, {
         method,
         headers: requestHeaders,
         body,
         redirect,
-        signal: controller.signal,
+        signal: requestSignal,
         dispatcher: dispatcher ?? scope?.agent,
       });
     } catch (err) {
@@ -360,6 +369,32 @@ export function sleep(ms, ctx) {
 }
 
 /**
+ * sleep(), but resolves at once if `signal` aborts partway — a retry backoff
+ * must not keep a board the watchdog has already given up on pending for its
+ * full delay (#5570).
+ *
+ * @param {number} ms
+ * @param {{ sleep?: (ms: number) => Promise<void> }} [ctx]
+ * @param {AbortSignal | null} [signal]
+ * @returns {Promise<void>}
+ */
+export function abortableSleep(ms, ctx, signal) {
+  if (!signal) return sleep(ms, ctx);
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { cleanup(); resolve(); };
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    signal.addEventListener('abort', onAbort, { once: true });
+    // Settle with the sleep's own result so a rejecting clock propagates
+    // instead of hanging the promise and surfacing as an unhandled rejection.
+    Promise.resolve(sleep(ms, ctx)).then(
+      (value) => { cleanup(); resolve(value); },
+      (err) => { cleanup(); reject(err); },
+    );
+  });
+}
+
+/**
  * Milliseconds from a Retry-After header, in either permitted form (delta
  * seconds or an HTTP-date). Null when absent or unparseable.
  *
@@ -459,7 +494,10 @@ async function withRetry(request, ctx, policy = {}) {
       // which would replace the real rejection with an unrelated TypeError
       // right here in the catch, before any caller sees it.
       if (err !== null && (typeof err === 'object' || typeof err === 'function')) err.attempts = attempt + 1;
-      if (attempt === retries || !isRetryableError(err)) throw err;
+      // A board whose watchdog has already fired must not keep retrying: that is
+      // the 4-attempts-per-slice storm a timed-out Workday board left running in
+      // the background (#5570). The abort is terminal, not a transient failure.
+      if (attempt === retries || !isRetryableError(err) || currentAbortSignal()?.aborted) throw err;
       // Cap the backoff at maxDelayMs MINUS the jitter, so the jittered total
       // still honours the policy limit. Clamping the sum instead would erase
       // the jitter exactly at the cap — where every retry has converged on the
@@ -475,7 +513,11 @@ async function withRetry(request, ctx, policy = {}) {
       const delayMs = retryAfterMs !== null
         ? Math.min(retryAfterMs, maxDelayMs * 4)
         : backoff + Math.random() * jitterMs;
-      await sleep(delayMs, ctx);
+      // Interruptible: if the board's watchdog fires during the backoff, stop
+      // waiting and give up rather than sleeping out the delay and then issuing
+      // a doomed attempt (#5570).
+      await abortableSleep(delayMs, ctx, currentAbortSignal());
+      if (currentAbortSignal()?.aborted) throw lastErr;
     }
   }
   throw lastErr;

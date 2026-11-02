@@ -238,11 +238,89 @@ function isKeywordsHeading(line) {
     title.startsWith(key) && !/^[\p{L}\p{N}]/u.test(title.slice(key.length)));
 }
 
+// CommonMark 0.31.2 §4.1: three or more of the same character, spaces and tabs
+// permitted between them, nothing else on the line.
+const THEMATIC_BREAK_RE = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+// CommonMark 0.31.2 §4.5: a fence is three or more backticks or tildes,
+// indented no more than three spaces. Opened by one, closed by the same
+// character with nothing but whitespace after it.
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+// A list marker on a keyword line: the three ASCII bullets, or an ordered
+// marker's digits and its `.`/`)` (CommonMark §5.2 caps those at nine digits).
+// The digits must be followed by the punctuation AND a space, so `3D modeling`
+// and `Node.js tooling` keep the part a keyword rather than losing their head.
+const BULLET_RE = /^(?:[-*+]|\d{1,9}[.)])\s+/;
+
+// CJK ordered-list markers are written with NO space after them ("1、SQL"), so
+// they cannot be a bullet and are stripped separately. Peeled from the line
+// before splitting rather than dropped after, so the surviving `、` can still do
+// its job as a separator on the rest of the line.
+const CJK_MARKER_RE = /^(?:\d{1,9}|[〇一二三四五六七八九十百千万]+)\s*、\s*/;
+
+// What separates one keyword from the next.
+//
+// ASCII comma plus the three non-Latin list commas. U+00B7 MIDDLE DOT is in
+// the set ONLY when whitespace sits on both sides of it, because Unicode's
+// NamesList records it inside words — a vowel length mark across much of
+// Amerindian orthography, and Catalan writes `col·laboració` — so splitting on
+// the bare character would break real keywords in half. Requiring the spaces
+// keeps those one token and still splits the `SQL · Tableau` shape (#4842).
+const LIST_SEPARATOR_RE = /[,、，،]|\s·\s/;
+
+// Sentence-final punctuation a keyword may carry. The ASCII period was already
+// stripped; these are the marks the CJK and Devanagari lists close a phrase with.
+const TRAILING_PUNCT_RE = /[.。．।]+$/;
+
+// The line a fence opened at `start` closes on, or -1 when it never closes.
+// A closer carries the same character, is AT LEAST as long as the opener, and
+// has nothing but whitespace after it (CommonMark 0.31.2 §4.5). The length test
+// is what keeps a shorter run of the same character — common inside a block
+// that quotes code — from closing the fence early and letting the rest of the
+// report leak into the keyword list.
+//
+// `indented` decides how the closer is matched, and it is the whole subtlety
+// (found by CodeRabbit on #5362). A fence indented four or more spaces is an
+// INDENTED CODE BLOCK (§4.9), not a fence, so matching the closer on a trimmed
+// line made any indented run of the same character close a real fence early —
+// and a `## ` heading after it then dropped out of the keyword list silently.
+//
+// But the two cases cannot both be served by one rule, because an indented
+// code block's own closing delimiter is indented too:
+//
+//   ```            <- real fence (0-3 spaces): closer must be 0-3 spaces
+//   SQL
+//     ```          <- indented code block delimiter, NOT a closer
+//   ## not a heading
+//
+//   ```            <- real fence
+//     SQL          <- indented code block: its closer is indented as well
+//     ```
+//
+// So the closer is matched on the same basis as the opener was: untrimmed when
+// the opener sat in the fence's own indentation range, trimmed when the opener
+// only matched after trimming (the indented-code-block case, where reading the
+// delimiters as fences is what lets the contents through at all).
+function indexOfFenceClose(lines, start, open, indented) {
+  for (let i = start + 1; i < lines.length; i++) {
+    const m = FENCE_RE.exec(indented ? lines[i].trim() : lines[i]);
+    if (m && m[1][0] === open[0] && m[1].length >= open.length && !m[2].trim()) return i;
+  }
+  return -1;
+}
+
 /**
  * Pull keywords out of a report's keyword section, opened by any heading in
  * KEYWORDS_HEADINGS. Liberal: accepts bulleted, comma-separated, or
  * one-per-line entries; stops at the next level-2 heading; skips an
  * empty/placeholder parenthetical line. Returns [] if the block is absent.
+ *
+ * The list shape is whatever the agent that wrote the report chose, so this
+ * reads the shapes that actually turn up (#4842): the ASCII comma, the CJK and
+ * Arabic list commas, a spaced middle dot, ordered-list markers, a thematic
+ * break, and a fenced code block. A fenced block is content rather than
+ * structure — the delimiters are skipped and the lines between them are still
+ * read — so a `## ` line inside the fence cannot close the section early.
  *
  * @param {string} reportText - Full report markdown.
  * @returns {string[]} Extracted keywords in order.
@@ -251,18 +329,49 @@ export function extractKeywords(reportText) {
   const lines = String(reportText || '').split(/\r?\n/);
   const out = [];
   let inBlock = false;
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
+
+  const collect = (line) => {
+    if (!line || /^\(.*\)$/.test(line)) return;
+    // Tested before BULLET_RE, or `- - -` would lose its first `- ` and become
+    // the keyword "- -". Checked here rather than at the call site so a
+    // thematic break inside a fenced list is skipped on the same terms as one
+    // outside it — both are a keyword list an agent wrote, not a separator.
+    if (THEMATIC_BREAK_RE.test(line)) return;
+    const body = line.replace(BULLET_RE, '').replace(CJK_MARKER_RE, '');
+    for (const part of body.split(LIST_SEPARATOR_RE)) {
+      const kw = part.trim().replace(TRAILING_PUNCT_RE, '').trim();
+      if (kw) out.push(kw);
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
     if (isKeywordsHeading(line)) { inBlock = true; continue; }
     if (!inBlock) continue;
     if (/^##\s+/.test(line)) break;
-    if (!line) continue;
-    if (/^\(.*\)$/.test(line)) continue;
-    const body = line.replace(/^[-*]\s+/, '');
-    for (const part of body.split(',')) {
-      const kw = part.trim().replace(/\.+$/, '').trim();
-      if (kw) out.push(kw);
+
+    // Tested on the trimmed line so a `- - -` rule indented inside a fenced
+    // list is recognised the same as one at the margin.
+    if (THEMATIC_BREAK_RE.test(line)) continue;
+
+    // A delimiter that matches on the RAW line sits in the fence's own 0-3
+    // space range, so its closer must too. One that only matches after trimming
+    // is an indented code block, whose closer is indented as well.
+    const marker = FENCE_RE.exec(line);
+    if (marker) {
+      // The closer is looked up rather than tracked forward, so a fence the
+      // report never closes cannot swallow every section after it: with no
+      // closer the opener stays an ordinary line and the section still ends at
+      // the next heading, as it did before.
+      const close = indexOfFenceClose(lines, i, marker[1], !FENCE_RE.test(lines[i]));
+      if (close > i) {
+        for (let k = i + 1; k < close; k++) collect(lines[k].trim());
+        i = close;
+        continue;
+      }
     }
+
+    collect(line);
   }
   return out;
 }

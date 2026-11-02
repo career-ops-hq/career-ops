@@ -47,6 +47,9 @@
 
 # The self-updater (catastrophic if wrong — touches user installs)
 /update-system.mjs     @santifer
+# Its system-layer list (#5554). Kept here: the run-time checks refuse an entry
+# that names the user layer, not one that ships a file installs should not get.
+/lib/update-manifest.mjs  @santifer
 /updater-migration-tests.mjs  @santifer
 
 # Plugin governance chokepoint (a bad change here ships unreviewed code to

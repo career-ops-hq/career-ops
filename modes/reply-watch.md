@@ -86,8 +86,12 @@ accepts only those displayed rows. `N`, any invalid selection, or EOF accepts
 nothing and leaves proposals available for later review. Conflicting
 recommendations are excluded from the batch.
 
-Proposal acceptance delegates to `set-status.mjs`, with a locked snapshot
-check and an atomic receipt in Notes to prevent repeated delivery from
+Every accepted update is written by `set-status.mjs`, so it runs the same
+hooks as any other status change: the status-log row, the JD archive on a move
+into Interview, follow-up seeding on Applied. The writer checks the reviewed
+row under its lock and skips one that was edited, replaced or moved to another
+status while the prompt was open. Proposal acceptance also checks the whole
+tracker and writes an atomic receipt in Notes to prevent repeated delivery from
 reapplying the same email. If the row changed during review, review again;
 do not retry with `--force` or remove its receipt. The drop directory follows
 the configured Data Root, and proposals for another tracker are rejected.

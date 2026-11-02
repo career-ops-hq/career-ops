@@ -65,6 +65,15 @@ LEGITIMACY: High Confidence
       } else {
         fail('report missing the score');
       }
+      // The header (everything above the first `---`) is written by the
+      // evaluator, not the model, and must carry no leftover HTML comments. The
+      // model-written body below it is out of scope here.
+      const header = content.split(/^---$/m)[0];
+      if (/^\*\*Score:\*\* 4\.5$/m.test(header) && /^\*\*Legitimacy:\*\* High Confidence$/m.test(header) && !header.includes('<!--')) {
+        pass('report header Score/Legitimacy lines carry no HTML comments');
+      } else {
+        fail(`report header has leftover comments: ${JSON.stringify(header.split('\n').filter(l => l.includes('<!--')))}`);
+      }
     } else {
       fail(`processOffer report write failed: ${reports}`);
     }

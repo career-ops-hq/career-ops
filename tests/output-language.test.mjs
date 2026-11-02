@@ -5,10 +5,11 @@
 // process themselves — a stray exit call here would kill the whole suite
 // mid-run and forge its exit code (see the guard in test-all's runDiscovered).
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 import { SCRATCH_PREFIX } from '../lib/scratch-dirs.mjs';
+import { listTree } from '../lib/walk-tree.mjs';
 import {
   outputLanguageInstruction,
   parseOutputLanguage,
@@ -64,6 +65,28 @@ check(openrouterPrompt.includes(outputLanguageInstruction('ja')), 'OpenRouter sy
 
 const gemini = readFileSync(join(ROOT, 'gemini-eval.mjs'), 'utf-8');
 check(!gemini.includes('in English, unless the JD is in another language'), 'Gemini no longer lets JD language override profile output');
+
+// ── the modes follow language.output, not the JD's language ─────────────
+//
+// The directive above only reaches the headless engines. An agent reading the
+// modes directly got the opposite rule: every market's _shared.md, and a few
+// English modes, said to write in the language of the JD, so a user with
+// `output: en` evaluating a Spanish posting got a Spanish report (#4727).
+// Every _shared.md must name the configured output language, and no mode may
+// bring back one of the old JD-language rules.
+const modesDir = join(ROOT, 'modes');
+const rel = (path) => relative(ROOT, path).split(sep).join('/');
+const sharedFiles = listTree(modesDir, { match: /_shared\.md$/ })
+  .filter((path) => /^modes\/(?:[\w-]+\/)?_shared\.md$/.test(rel(path)));
+check(sharedFiles.length >= 20, `found every market's _shared.md (${sharedFiles.length})`);
+for (const path of sharedFiles) {
+  check(readFileSync(path, 'utf-8').includes('{language.output}'), `${rel(path)} writes human-facing content in {language.output}`);
+}
+const OLD_JD_LANGUAGE_RULE = /Generate (?:content )?in the language of the JD \(EN default\)|Detect JD language → CV language|Always in the language of the JD|Keep output in the JD language|Generate content in the posting's language/;
+const jdLanguageRules = listTree(modesDir, { match: /\.md$/ })
+  .filter((path) => OLD_JD_LANGUAGE_RULE.test(readFileSync(path, 'utf-8')))
+  .map(rel);
+check(jdLanguageRules.length === 0, `no mode tells the agent to write in the JD's language${jdLanguageRules.length ? `: ${jdLanguageRules.join(', ')}` : ''}`);
 
 // ── language.modes_dir as a list (#3793) ─────────────────────────────────
 //

@@ -9,10 +9,10 @@ personalized answers for each form question.
 
 ## Base workflow
 
-Follow `modes/apply.md` verbatim: DETECT → IDENTIFY → SEARCH → LOAD →
-PREFLIGHT (blacklist, cross-channel, repeat-application checks) → ANALYZE →
-GENERATE → PRESENT → PERSIST. The steps below are Singapore-specific field
-guidance for the GENERATE step.
+Follow `modes/apply.md` verbatim, including its Scope section. Run
+`node apply-scope.mjs root` and `node apply-scope.mjs launch-options`. Do not
+read `DevToolsActivePort` or attach to an existing browser. Do not submit the
+form. The steps below are Singapore-specific field guidance for the GENERATE step.
 
 ## Singapore-specific fields
 

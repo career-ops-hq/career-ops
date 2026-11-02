@@ -35,9 +35,12 @@ function stripMarkup(content) {
  * Exported for tests.
  *
  * @param {unknown} content
+ * @param {{cap?: number}} [options] - `cap`: maximum length of the result,
+ *   DESCRIPTION_CAP by default. A provider that has always passed a JD
+ *   through whole passes `Infinity`.
  * @returns {string}
  */
-export function htmlToText(content) {
+export function htmlToText(content, { cap = DESCRIPTION_CAP } = {}) {
   if (typeof content !== 'string' || !content) return '';
   // Strip literal markup before decoding: quote entities inside a quoted
   // attribute are data, and decoding them first would turn them into false
@@ -51,5 +54,5 @@ export function htmlToText(content) {
     .replace(/<(?=\/?[a-z!?])/gi, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, DESCRIPTION_CAP);
+    .slice(0, cap);
 }

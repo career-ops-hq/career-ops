@@ -12,7 +12,7 @@ const VALID_STATES = new Set(['filled', 'submitted']);
 // three leading spaces, and empty headings. Level-3 groups stay inside it.
 const ANSWERS_SECTION_END_RE = /^ {0,3}#{1,2}(?:[ \t]+|$)/;
 
-function nextAnswersSectionHeading(text) {
+function findUnfencedHeading(text, pattern) {
   let fence = null;
   for (const line of text.matchAll(/^.*$/gm)) {
     if (fence) {
@@ -25,7 +25,7 @@ function nextAnswersSectionHeading(text) {
       fence = open[1];
       continue;
     }
-    if (ANSWERS_SECTION_END_RE.test(line[0])) return line;
+    if (pattern.test(line[0])) return line;
   }
   return null;
 }
@@ -311,11 +311,11 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
   const skipped = [];
   const onSkip = strict ? (line) => skipped.push(line.trim()) : undefined;
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
-  const heading = /^## Application Answers\s*$/m.exec(report);
+  const heading = findUnfencedHeading(report, /^## Application Answers[ \t]*$/);
   if (!heading) return null;
 
   const afterHeading = heading.index + heading[0].length;
-  const nextHeading = nextAnswersSectionHeading(report.slice(afterHeading));
+  const nextHeading = findUnfencedHeading(report.slice(afterHeading), ANSWERS_SECTION_END_RE);
   const body = report.slice(
     afterHeading,
     nextHeading ? afterHeading + nextHeading.index : report.length,
@@ -482,7 +482,7 @@ export function parseDraftAnswersBlockH(reportText) {
 export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
   const section = formatApplicationAnswersSection(snapshot).trimEnd();
-  const heading = /^## Application Answers\s*$/m.exec(report);
+  const heading = findUnfencedHeading(report, /^## Application Answers[ \t]*$/);
 
   if (!heading) {
     return `${report.trimEnd()}\n\n${section}\n`;
@@ -490,7 +490,7 @@ export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
 
   const start = heading.index;
   const afterHeading = start + heading[0].length;
-  const nextHeading = nextAnswersSectionHeading(report.slice(afterHeading));
+  const nextHeading = findUnfencedHeading(report.slice(afterHeading), ANSWERS_SECTION_END_RE);
   const end = nextHeading ? afterHeading + nextHeading.index : report.length;
   const before = report.slice(0, start).trimEnd();
   const after = report.slice(end);

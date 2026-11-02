@@ -20,10 +20,11 @@
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
   <a href="README.tr.md">Türkçe</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
+  <a href="README.vi.md">Tiếng Việt</a> |
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
-<p align="center"><a href="https://career-ops.org/zh/docs?utm_source=readme&utm_content=zh">完整中文文档：career-ops.org/zh/docs</a></p>
+<p align="center"><a href="https://career-ops.org/zh/docs?utm_source=readme&utm_content=zh">开源 AI 求职智能体 · 完整中文文档</a></p>
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
@@ -123,7 +124,11 @@ npx @santifer/career-ops init
 
 <br>
 
-招聘不会自己修好。正在经历它的人可以，而且他们已经在这个房间里，交换笔记，互相修各自的配置。[修复就是在这里写出来的](CONTRIBUTING.md)。是房间，不是俱乐部。**一起来建。**
+招聘不会自己修好。正在经历它的人可以，而且他们已经在这个房间里，交换笔记，互相修各自的配置。
+
+<p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=cn" alt="贡献者 GitHub 头像组成的动态墙，自 2026年4月 起按加入顺序依次填满，下一个方格留空。" width="100%"></a></p>
+
+[修复就是在这里写出来的](CONTRIBUTING.md)。是房间，不是俱乐部。**一起来建。**
 
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord：career-ops 服务器的实时成员数"></a></p>
 
@@ -205,7 +210,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` 随 [Node.js](https://nodejs.org) 一起提供：它只运行一次安装程序，
 > 不会全局安装任何东西。还没有 Node？先安装它。
-> （已经在用 Claude Code / Gemini / Codex CLI？那你已经有了。）
+> （已经在用 Claude Code / Codex CLI？那你已经有了。）
 
 这会把最新版本克隆到 `./career-ops` 并安装依赖。然后：
 
@@ -228,17 +233,8 @@ npx playwright install chromium   # only needed for PDF generation
 # your distro's package manager if PDF generation fails to launch the browser
 # (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -247,7 +243,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
+# 3. Start using
 # Paste a job URL or JD text to trigger auto-pipeline
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
@@ -265,11 +261,11 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-这会全局安装 `career-ops` 二进制文件，让你可以直接运行它而不是通过 `npx`。与 `npx @santifer/career-ops init`（用来初始化一个项目目录）不同，全局安装会给你一个持久的 `career-ops` 命令，在终端的任何地方都能用。
+这会全局安装 `career-ops` 二进制文件，让你不用 `npx` 就能运行 `career-ops init [folder]`。`init` 是它唯一的命令：它只负责搭建工作区，之后的一切都在你的 AI 编码 CLI 里进行（见下方“用法”），而不是通过这个二进制文件。
 
 **该用哪个？**
 - `npx @santifer/career-ops init`：最适合首次使用；会创建一个专用的项目文件夹。
-- `npm i -g @santifer/career-ops`：最适合已有项目文件夹、想直接运行 career-ops 命令的情况。
+- `npm i -g @santifer/career-ops`：如果你更想输入 `career-ops init` 而不是 `npx` 的写法。它不会增加其他命令。
 
 > **这个系统就是设计成由你的 AI 编码 CLI 自己来定制的。** 模式、原型、评分权重、谈判话术：直接让它改就行。它读取的正是它自己使用的文件，所以它清楚该改哪里。
 
@@ -503,7 +499,7 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-功能：6 个筛选标签、4 种排序模式、分组/平铺视图、延迟加载预览、内联状态修改。
+功能：10 个筛选标签、8 种排序模式、分组/平铺视图、延迟加载预览、内联状态修改。
 
 还有一个**实验性的 Web UI**（alpha 版，可选：除非你主动启动，否则不会运行任何东西）：见 [`web/README.md`](web/README.md)。
 
@@ -623,7 +619,7 @@ Go 版仪表板 TUI、Node.js 脚本和 AI 代理模式都会自动遵循这一�
 career-ops（[career-ops.org](https://career-ops.org)，也称 **careerops**） 是一个开源的 AI 求职工具，在你的 AI 编码 CLI（Claude Code、Codex、OpenCode 等）里本地运行，把每一个决定都留给你。它根据你的简历评估职位，生成适配 ATS 的 PDF，找到合适的联系人，并在一个地方追踪所有进展：最终决定始终在你手中。它是 [CareerOps 宣言](https://career-ops.org/manifesto)的首个参考实现。
 
 **定制简历会编造内容吗？**
-不应该，提示词里也这么写：只改写，绝不编造。`generate-pdf` 会拦下数字或事实在你的资料来源中找不到的简历，除非你传入 `--skip-fact-check`。它目前还不检查职位名称，也不评判改写。两个未关闭的 issue 在跟进这些：[#2677](https://github.com/career-ops-hq/career-ops/issues/2677)（职位名称必须与 cv.md 一致）和 [#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不通过即阻止的真实性检查）。在它们合并之前，每份简历发出前都请自己读一遍。[法律声明](LEGAL_DISCLAIMER.md) 用更长的篇幅说了同样的话。
+不应该，提示词里也这么写：只改写，绝不编造。`generate-pdf` 会拦下数字或事实在你的资料来源中找不到的简历，除非你传入 `--skip-fact-check`。`pdf` 模式还会运行 `cv-title-check.mjs`：它按公司和日期，把定制简历中的每个职位名称与 cv.md 中同一份工作的职位名称对比，有不同就请你决定保留还是改回。它只提醒、不拦截，因为调整职位名称的写法有时是你自己的选择。目前还没有任何检查评判改写：[#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不通过即阻止的真实性检查）在跟进这一点。在此之前，每份简历发出前都请自己读一遍。[法律声明](LEGAL_DISCLAIMER.md) 用更长的篇幅说了同样的话。
 
 **我可以免费运行 career-ops，或使用更便宜的本地模型吗？**
 可以。career-ops 不受特定 CLI 限制，可以用免费和本地模型运行（OpenRouter 免费模型、Ollama 或任何兼容 OpenAI 的端点），因此你不必绑定付费订阅。完整设置见 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)。

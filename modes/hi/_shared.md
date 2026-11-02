@@ -205,7 +205,7 @@ Profile को **"Demonstrable practice वाले Technical Builder"** के
 3. Matching करते समय CV की exact lines quote करें
 4. Compensation और company data के लिए WebSearch उपयोग करें
 5. हर evaluation के बाद tracker में record करें
-6. Content offer की language में generate करें (Hindi offer के लिए Hindi, English के लिए English)
+6. User के लिए content `config/profile.yml` के `{language.output}` में generate करें (set न हो तो English), offer की language चाहे जो हो। इस market के terms रखें और ज़रूरत हो तो उसी language में समझाएँ
 7. Direct और concrete रहें — बकवास नहीं
 8. Natural Hindi tech language use करें। Short sentences, action verbs, passive avoid करें। Technical terms force-translate न करें (stack, pipeline, deployment, embedding)
 8b. **PDF में case study URLs:** यदि PDF में case studies या demos mention हों, URLs Professional Summary के पहले paragraph में होने चाहिए। Recruiters अक्सर सिर्फ summary पढ़ते हैं। सभी URLs HTML में `white-space: nowrap` के साथ

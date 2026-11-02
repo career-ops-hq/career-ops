@@ -32,7 +32,7 @@ import { execFileSync } from 'child_process';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseTrackerRow, resolveColumns, isSeparatorRow, isHeaderRow } from './tracker-parse.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, writeFileAtomic } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, writeFileAtomic, acquireTrackerLock } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const REPO_URL = 'https://github.com/career-ops-hq/career-ops';
@@ -116,6 +116,19 @@ function saveState(root, s) {
   const p = statePath(root);
   mkdirSync(dirname(p), { recursive: true });
   writeFileAtomic(p, JSON.stringify(s, null, 2) + '\n');
+}
+
+async function recordDecision(root, report, status) {
+  mkdirSync(join(root, 'data'), { recursive: true });
+  const lock = await acquireTrackerLock(`${statePath(root)}.lock`, { tracker: statePath(root) });
+  try {
+    const state = loadState(root);
+    if (status === 'drafted' && state.byReport[report]?.status === 'never') return;
+    state.byReport[report] = { status, askedAt: new Date().toISOString() };
+    saveState(root, state);
+  } finally {
+    lock.release();
+  }
 }
 
 /** All tracker rows whose canonical state is Hired, as {report, role, company, location, date}. */
@@ -227,8 +240,7 @@ async function main() {
   const mark = flagValue(args, '--mark');
   if (mark) {
     if (!['shared', 'later', 'never'].includes(mark)) { console.error(`--mark must be shared|later|never.\n\n${USAGE}`); process.exitCode = 1; return; }
-    state.byReport[hire.report] = { status: mark, askedAt: new Date().toISOString() };
-    saveState(root, state);
+    await recordDecision(root, hire.report, mark);
     console.log(`report #${hire.report} marked "${mark}"${mark === 'never' ? ' — this hire will never be brought up again' : ''}.`);
     return;
   }
@@ -261,8 +273,7 @@ async function main() {
 
   if (hasFlag(args, '--dry-run')) return;
 
-  state.byReport[hire.report] = { status: 'drafted', askedAt: new Date().toISOString() };
-  saveState(root, state);
+  await recordDecision(root, hire.report, 'drafted');
 
   if (hasFlag(args, '--open')) {
     if (!openInBrowser(url)) console.log('(could not open a browser here — copy the URL above)');

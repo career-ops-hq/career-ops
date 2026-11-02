@@ -27,7 +27,7 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, parseMarkdownLinks } from './tracker-parse.mjs';
 import { resolvePdfIndexPath, resolveWorkspaceRootFor, pathIsInside, pathIsInsideCanonical } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
@@ -63,7 +63,7 @@ export function parseTrackerRows(text) {
   for (const line of lines) {
     const row = parseTrackerRow(line, colmap);
     if (!row) continue;
-    const link = row.report.match(/\[(\d+)\]\(([^)]+)\)/);
+    const link = parseMarkdownLinks(row.report).find(l => /^\d+$/.test(l.label));
     rows.push({
       trackerNum: row.num,
       date: row.date,
@@ -71,8 +71,8 @@ export function parseTrackerRows(text) {
       role: row.role,
       score: row.score,
       status: cleanStatus(row.status),
-      reportNum: link ? normNum(link[1]) : null,
-      reportPath: link ? link[2].replace(/^(\.\.\/)+/, '') : null,
+      reportNum: link ? normNum(link.label) : null,
+      reportPath: link ? link.target.replace(/^(\.\.\/)+/, '') : null,
     });
   }
   return rows;

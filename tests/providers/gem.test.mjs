@@ -158,6 +158,34 @@ try {
     fail(`parseRestResponse() content fallback description = ${JSON.stringify(restContentFallbackRows[0]?.description)}`);
   }
 
+  // An escaped "<" in prose is text, not a tag opener. Decoding before the
+  // first strip turned it into one, and the strip then deleted the rest of the
+  // paragraph, including the visa wording the visa filter reads.
+  const escapedLtRows = parseRestResponse([{
+    title: 'Escaped Lt Role',
+    absolute_url: 'https://jobs.gem.com/example-company/998',
+    content: '<p>Base pay &lt;$180k, and we sponsor H-1B visas for this role.</p>',
+  }], 'Gem REST');
+  if (escapedLtRows[0]?.description === 'Base pay <$180k, and we sponsor H-1B visas for this role.') {
+    pass('parseRestResponse() keeps prose after an escaped "<" instead of stripping it as a tag');
+  } else {
+    fail(`parseRestResponse() escaped-< description = ${JSON.stringify(escapedLtRows[0]?.description)}`);
+  }
+
+  // The shared pipeline caps at DESCRIPTION_CAP by default; gem passes the
+  // whole JD through, as it did before, so wording near the end survives.
+  const longBody = `${'Build things. '.repeat(400)}We sponsor H-1B visas.`;
+  const longRows = parseRestResponse([{
+    title: 'Long Role',
+    absolute_url: 'https://jobs.gem.com/example-company/997',
+    content: `<p>${longBody}</p>`,
+  }], 'Gem REST');
+  if (longRows[0]?.description?.endsWith('We sponsor H-1B visas.')) {
+    pass('parseRestResponse() does not truncate a long JD to DESCRIPTION_CAP');
+  } else {
+    fail(`parseRestResponse() long JD ends with ${JSON.stringify(longRows[0]?.description?.slice(-40))}`);
+  }
+
   let restUrl = null;
   let restOptions = null;
   const fetchedRest = await gem.fetch(

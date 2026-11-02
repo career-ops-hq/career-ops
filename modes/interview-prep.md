@@ -279,6 +279,8 @@ Run this mapping **per audience pack** from Step 4 — same story can map differ
 - **partial**: story is adjacent, needs reframing
 - **none**: no existing story — flag for the user
 
+Before filling the table, run `node story-provenance-check.mjs --summary`. A story fits on its narrative; its figures are a separate question. For each mapped story whose figures are `supportedByResume` or `derived-unverified`, say so in the Gap? column ("figure unconfirmed: {figure}") so the candidate either confirms it with AGENTS.md's four outcomes or tells it without the number. A `user-cannot-confirm` story maps on narrative only, never with its figures. Never restate an unconfirmed figure in this prep doc as if it were settled: a figure written here is how a guess ends up back in the story bank as fact.
+
 For each gap, suggest: "You need a story about {topic}. Consider: {specific experience from cv.md that could become a STAR+R story}."
 
 If the user wants to draft missing stories, help them build STAR+R format and append to `interview-prep/story-bank.md` as a `### ` block in the exact format of `templates/story-bank.template.md` (create the file from that template if it is missing). Keep the labels in English, always include `**A (Action):**`, and add no `**Provenance:**` line.
@@ -353,5 +355,5 @@ After delivering the report:
 - **NEVER invent interview questions and attribute them to sources.** Inferred questions must be labeled `[inferred from JD]`.
 - **NEVER fabricate Glassdoor ratings or statistics.** If the data isn't there, say so.
 - **Cite everything.** Every question, every stat, every claim gets a source or an `[inferred]` tag.
-- Generate in the language of the JD (EN default).
+- Generate in `language.output` (EN when unset), whatever the language of the JD.
 - Be direct. This is a working prep document, not a pep talk.

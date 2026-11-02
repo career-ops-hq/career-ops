@@ -9,7 +9,7 @@
  * 4. Scores match format X.XX/5 or N/A or DUP
  * 5. All rows have proper pipe-delimited format
  * 6. No pending TSVs in tracker-additions/ (only in merged/ or archived/)
- * 7. states.yml canonical IDs for cross-system consistency
+ * 7. No markdown bold in scores
  * 8. Stale report-number reservation sentinels are garbage-collected
  * 9. No two report files cover the same company+role (warning — see #1425)
  * 10. Every report file has a tracker row referencing it (warning — see #1425)
@@ -30,9 +30,9 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
-  normalizeTextKey, normalizeVia,
+  normalizeTextKey, normalizeVia, unwrapReportUrlToken, parseMarkdownLinks,
 } from './tracker-parse.mjs';
-import { CONTROL_CHARS, findDeadReportLink } from './tracker-utils.mjs';
+import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
@@ -173,8 +173,10 @@ if (dupes === 0) ok('No exact duplicates found');
 // Markdown links resolve relative to the file that contains them, so report
 // links must resolve against the tracker's own directory (see #760). For the
 // transition we also accept legacy root-relative links: try the tracker dir
-// first, then fall back to the repo root before flagging a link broken.
-const TRACKER_DIR = dirname(APPS_FILE);
+// first, then fall back to the repo root before flagging a link broken. A
+// symlinked tracker file has two "own directories": its target's and the
+// link's, which is the one editors resolve from (#5374).
+const TRACKER_DIRS = trackerLinkDirsFor(CAREER_OPS);
 let brokenReports = 0;
 let uninspectableReports = 0;
 for (const e of entries) {
@@ -182,7 +184,7 @@ for (const e of entries) {
   // data root; a directory is not a report (#4748). Also used by merge-tracker
   // and fix-report-links so all three agree on which rows are broken.
   let inspectionFailure = null;
-  const link = findDeadReportLink(e.report, TRACKER_DIR, CAREER_OPS, {
+  const link = findDeadReportLink(e.report, TRACKER_DIRS, CAREER_OPS, {
     onInspectionError: (failure) => { inspectionFailure = failure; },
   });
   if (inspectionFailure) {
@@ -317,7 +319,7 @@ function extractRole(reportContent) {
 function extractReportUrlKey(reportContent) {
   const m = reportContent.match(/\*\*URL:\*\*[ \t]*(\S+)/);
   if (!m) return '';
-  return normalizeUrl(m[1].replace(/^<|>$/g, '').replace(/[),.;]+$/, ''));
+  return normalizeUrl(unwrapReportUrlToken(m[1]));
 }
 
 const reportFiles = existsSync(REPORTS_DIR)
@@ -378,14 +380,14 @@ if (dupReports === 0) ok('No duplicate reports for the same company+role');
 const referencedNums = new Set();
 for (const e of entries) {
   const linkTexts = [...e.report.matchAll(/\[(\d+)\]/g)];
-  const linkTargets = [...e.report.matchAll(/\]\(([^)]+)\)/g)];
+  const linkTargets = parseMarkdownLinks(e.report).map(link => link.target);
   if (linkTexts.length === 0 && linkTargets.length === 0) {
     referencedNums.add(e.num);
     continue;
   }
   for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
   for (const lt of linkTargets) {
-    const m = lt[1].split(/[\\/]/).pop().match(/^(\d+)-/);
+    const m = lt.split(/[\\/]/).pop().match(/^(\d+)-/);
     if (m) referencedNums.add(parseInt(m[1], 10));
   }
 }
@@ -588,9 +590,9 @@ if (!existsSync(PORTALS_FILE)) {
     const { findUnclaimedEntries } = await import('./audit-portals.mjs');
     const { loadProviders } = await import('./providers/_registry.mjs');
     const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
-    const yaml = await import('js-yaml');
+    const { loadYaml } = await import('./lib/yaml-document.mjs');
 
-    const cfg = yaml.load(readFileSync(PORTALS_FILE, 'utf-8')) || {};
+    const cfg = loadYaml(readFileSync(PORTALS_FILE, 'utf-8')) || {};
     // Both sections, because scan.mjs resolves both through the same registry:
     // an unclaimed aggregator board is exactly as dead as an unclaimed company.
     const entries = [

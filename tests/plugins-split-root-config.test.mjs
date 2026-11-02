@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { rmSync, ROOT } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const PLUGINS_CLI = join(ROOT, 'plugins.mjs');
 const NOTION_KEYS = ['NOTION_ACCESS_TOKEN', 'NOTION_PARENT_PAGE_ID'];
@@ -47,7 +48,7 @@ test('plugins list reads activation and .env from the configured data root', () 
     const result = runCli(dir, ['list']);
 
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
+    assert.equal(result.status, 0, describeSpawn(result, `stdout=\nstderr=`));
     assert.match(result.stdout, /notion\s+\[export, search\]\s+— ✅ enabled/);
     assert.doesNotMatch(result.stdout + result.stderr, /missing env/i);
   } finally {
@@ -91,7 +92,7 @@ test('scan preloads .env from the data root instead of the caller cwd', () => {
     );
 
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
+    assert.equal(result.status, 0, describeSpawn(result, `stdout=\nstderr=`));
     assert.equal(result.stdout, 'from-data-root');
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
@@ -210,7 +211,7 @@ test('split checkout: plugins.yml and .env left in the code root are named with 
     const result = mergeInChild(codeRoot, dataRoot);
 
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
+    assert.equal(result.status, 0, describeSpawn(result, `stdout=\nstderr=`));
     const lines = result.stderr.split('\n').filter(line => LEFT_IN_CODE.test(line));
     const yml = lines.find(line => line.startsWith('⚠️  config/plugins.yml '));
     const env = lines.find(line => line.startsWith('⚠️  .env '));
@@ -241,7 +242,7 @@ test('split checkout: plugins.yml in the data root raises no left-in-code warnin
     const result = mergeInChild(codeRoot, dataRoot);
 
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
+    assert.equal(result.status, 0, describeSpawn(result, `stdout=\nstderr=`));
     assert.doesNotMatch(result.stderr, LEFT_IN_CODE);
   } finally {
     rmSync(codeRoot, { recursive: true, force: true });
@@ -258,7 +259,7 @@ test('single root: plugins.yml and .env beside the code raise no warning', () =>
     const result = mergeInChild(root, root);
 
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
+    assert.equal(result.status, 0, describeSpawn(result, `stdout=\nstderr=`));
     assert.doesNotMatch(result.stderr, LEFT_IN_CODE);
   } finally {
     rmSync(root, { recursive: true, force: true });

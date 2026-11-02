@@ -56,7 +56,7 @@ import { readFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { findColumn } from './process-quality.mjs';
@@ -111,7 +111,7 @@ const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
  * @returns {{ order: string[], terminal: Set<string>, labels: Record<string,string> }}
  */
 export function loadLifecycle(statesPath) {
-  const doc = yaml.load(readFileSync(statesPath, 'utf-8'));
+  const doc = loadYaml(readFileSync(statesPath, 'utf-8'));
   if (!doc || !Array.isArray(doc.states)) {
     throw new Error(`Malformed states file at ${statesPath}: expected a top-level "states" list`);
   }

@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(dirname(dirname(fileURLToPath(import.meta.url))), 'reconcile-pipeline.mjs');
 const URL = 'https://jobs.example.test/4521';
@@ -30,7 +31,7 @@ function fixture(t, { report, stateScore = '-', stateStatus = 'completed', langu
       timeout: 15_000,
     });
     assert.ifError(result.error);
-    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(result.status, 0, describeSpawn(result, `\n`));
     return result;
   };
   return { pipeline, original, run };
@@ -112,7 +113,18 @@ test('an empty PDF field does not consume the next header', t => {
   assert.deepEqual(processedRow(f.pipeline), { score: '4.2/5', pdf: 'PDF ❌' });
 });
 
-for (const [pdf, expected] of [['Not generated', 'PDF ❌'], ['output/042-cv.pdf', 'PDF ✅']]) {
+for (const [pdf, expected] of [
+  ['Not generated', 'PDF ❌'],
+  ['output/042-cv.pdf', 'PDF ✅'],
+  ['no generado — ejecuta /career-ops pdf example para crearlo bajo demanda', 'PDF ❌'],
+  ['no se generó ningún archivo .pdf', 'PDF ❌'],
+  ['nicht erstellt — mit /career-ops pdf example bei Bedarf erzeugen', 'PDF ❌'],
+  ['não gerado — execute /career-ops pdf example para criar quando quiser', 'PDF ❌'],
+  ['未生成 — 运行 /career-ops pdf example 按需生成', 'PDF ❌'],
+  ['❌', 'PDF ❌'],
+  ['✅', 'PDF ✅'],
+  ['/home/candidate/career-ops/output/cv-candidate-042-example-2026-09-01.PDF', 'PDF ✅'],
+]) {
   test(`a skipped batch entry preserves PDF field: ${pdf}`, t => {
     const f = fixture(t, { report: `**Score:** 2.5/5\n**PDF:** ${pdf}`, stateStatus: 'skipped' });
     f.run();

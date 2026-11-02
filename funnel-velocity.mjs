@@ -39,7 +39,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { computeFunnel, computeFunnelWithHistory, parseStatusLogStages, trackerStatusByNum, computeTrackerStats } from './stats.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
@@ -79,9 +79,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // reconstructed afterwards. Only the door differs.
 // `reply-watch` is the same class: the user confirms the update interactively;
 // the transition is observed at that moment, not reconstructed later.
-const VALID_SOURCES = new Set(['set-status', 'web', 'correction', 'backfill', 'manual', 'reply-watch']);
-// Sources whose dates are trusted for day-math. backfill/manual are parsed and
-// counted but excluded: they are reconstructed after the fact, not observed.
+// `dedup-tracker` is the opposite class: the kept row of a duplicate pair takes
+// over the removed row's more advanced status, and that transition was found
+// at dedup time, not observed then (#5536).
+const VALID_SOURCES = new Set(['set-status', 'web', 'correction', 'backfill', 'manual', 'reply-watch', 'dedup-tracker']);
+// Sources whose dates are trusted for day-math. backfill/manual/dedup-tracker
+// are parsed and counted but excluded: they are reconstructed after the fact,
+// not observed.
 const DAY_MATH_SOURCES = new Set(['set-status', 'web', 'correction', 'reply-watch']);
 
 // The hops a candidate can measure from their own tracker. Applied→Rejected is
@@ -258,7 +262,7 @@ export function loadBenchmarks(explicitPath) {
     || (existsSync(join(DATA_ROOT, 'config/benchmarks.yml')) ? join(DATA_ROOT, 'config/benchmarks.yml') : join(CODE_ROOT, 'templates/benchmarks.yml'));
   let doc;
   try {
-    doc = yaml.load(readFileSync(path, 'utf-8'));
+    doc = loadYaml(readFileSync(path, 'utf-8'));
   } catch (err) {
     throw new Error(`Cannot read benchmarks at ${path}: ${err.message}`);
   }

@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -30,13 +31,13 @@ function run(...args) {
 
 test('plugin-install.mjs --help exits 0 and prints usage', () => {
   const r = run('--help');
-  assert.equal(r.status, 0, `--help exited ${r.status}, want 0`);
+  assert.equal(r.status, 0, describeSpawn(r, `--help exited ${r.status}, want 0`));
   assert.match(r.stdout, /Usage:/, '--help printed no usage block');
 });
 
 test('plugin-install.mjs -h exits 0 and prints usage', () => {
   const r = run('-h');
-  assert.equal(r.status, 0, `-h exited ${r.status}, want 0`);
+  assert.equal(r.status, 0, describeSpawn(r, `-h exited ${r.status}, want 0`));
   assert.match(r.stdout, /Usage:/, '-h printed no usage block');
 });
 

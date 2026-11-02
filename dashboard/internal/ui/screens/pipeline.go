@@ -2,6 +2,7 @@ package screens
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1374,15 +1375,8 @@ func (m PipelineModel) View() string {
 	metricsBar := m.renderMetrics()
 	sortBar := m.renderSortBar()
 	searchBar := m.renderSearchBar()
-	body := m.renderBody()
 	preview := m.renderPreview()
 	help := m.renderHelp()
-
-	// Apply scroll to body
-	bodyLines := strings.Split(body, "\n")
-	if m.scrollOffset > 0 && m.scrollOffset < len(bodyLines) {
-		bodyLines = bodyLines[m.scrollOffset:]
-	}
 
 	// Calculate available height for body
 	previewLines := strings.Count(preview, "\n") + 1
@@ -1390,10 +1384,14 @@ func (m PipelineModel) View() string {
 	if availHeight < 3 {
 		availHeight = 3
 	}
-	if len(bodyLines) > availHeight {
-		bodyLines = bodyLines[:availHeight]
+
+	// Render only the rows that will be shown. An offset past the end shows the
+	// body from the top, as slicing the fully rendered body used to.
+	bodyLines := m.renderBodyWindow(m.scrollOffset, availHeight)
+	if len(bodyLines) == 0 {
+		bodyLines = m.renderBodyWindow(0, availHeight)
 	}
-	body = strings.Join(bodyLines, "\n")
+	body := strings.Join(bodyLines, "\n")
 
 	// Column picker overlay
 	if m.colPicker {
@@ -1567,14 +1565,40 @@ func (m PipelineModel) renderSortBar() string {
 }
 
 func (m PipelineModel) renderBody() string {
+	return strings.Join(m.renderBodyWindow(0, math.MaxInt), "\n")
+}
+
+// renderBodyWindow returns the body's display lines from line `start`, at most
+// `height` of them: the same lines as rendering the whole body and slicing it,
+// without rendering the rows outside the window. View used to render every
+// filtered row on each keypress and then keep a screenful.
+//
+// A row or group header that is not rendered counts as one line. That holds for
+// both: every cell is truncated to its column and neither sets a width that
+// could wrap. The selected row is the exception, since it is padded to the
+// screen width and can wrap on a narrow terminal, so it is always rendered and
+// counted by its real line count.
+func (m PipelineModel) renderBodyWindow(start, height int) []string {
+	lines := make([]string, 0, min(height, len(m.filtered)+8))
+	line := 0 // index of the next display line
+	emit := func(s string) bool {
+		for _, l := range strings.Split(s, "\n") {
+			if line >= start && len(lines) < height {
+				lines = append(lines, l)
+			}
+			line++
+		}
+		return len(lines) < height
+	}
+
 	if len(m.filtered) == 0 {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(m.theme.Subtext).
 			Padding(1, 2)
-		return emptyStyle.Render(i18n.Current.NoOffersMatch)
+		emit(emptyStyle.Render(i18n.Current.NoOffersMatch))
+		return lines
 	}
 
-	var lines []string
 	prevStatus := ""
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
 
@@ -1583,24 +1607,35 @@ func (m PipelineModel) renderBody() string {
 
 		// Group header in grouped mode
 		if m.viewMode == "grouped" && norm != prevStatus {
-			count := m.countByNormStatus(norm)
-			headerStyle := lipgloss.NewStyle().
-				Bold(true).
-				Foreground(m.theme.Subtext)
-			lines = append(lines, padStyle.Render(
-				headerStyle.Render(fmt.Sprintf("── %s (%d) %s",
-					strings.ToUpper(statusLabel(norm)), count,
-					strings.Repeat("─", max(0, m.width-30-len(statusLabel(norm)))))),
-			))
 			prevStatus = norm
+			if line < start {
+				line++
+			} else {
+				count := m.countByNormStatus(norm)
+				headerStyle := lipgloss.NewStyle().
+					Bold(true).
+					Foreground(m.theme.Subtext)
+				if !emit(padStyle.Render(
+					headerStyle.Render(fmt.Sprintf("── %s (%d) %s",
+						strings.ToUpper(statusLabel(norm)), count,
+						strings.Repeat("─", max(0, m.width-30-len(statusLabel(norm)))))),
+				)) {
+					break
+				}
+			}
 		}
 
 		selected := i == m.cursor
-		line := m.renderAppLine(app, selected)
-		lines = append(lines, line)
+		if line < start && !selected {
+			line++
+			continue
+		}
+		if !emit(m.renderAppLine(app, selected)) {
+			break
+		}
 	}
 
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // colWidths holds per-column rune budgets for the table.
@@ -1701,7 +1736,7 @@ func (m PipelineModel) workModeColor(mode string) lipgloss.Color {
 }
 
 func (m PipelineModel) renderLocCell(app model.CareerApplication, width int) string {
-	text := app.WorkMode
+	text := i18n.Current.WorkModeLabel(app.WorkMode)
 	if app.Location != "" {
 		if text != "" {
 			text += " · " + app.Location
@@ -1947,7 +1982,7 @@ func (m PipelineModel) renderPreview() string {
 	// and the only place narrow terminals see location/pay/last-contact.
 	var facts []string
 	if app.WorkMode != "" || app.Location != "" {
-		loc := app.WorkMode
+		loc := i18n.Current.WorkModeLabel(app.WorkMode)
 		if app.Location != "" {
 			if loc != "" {
 				loc += " · " + app.Location

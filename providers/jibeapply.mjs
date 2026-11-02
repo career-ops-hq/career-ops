@@ -109,6 +109,9 @@ export default {
     // set `count` to the total rather than the per-page count.
     const pageSize = first.jobs?.length || first.count || DEFAULT_PAGE_SIZE;
     const allJobs = [...(first.jobs ?? [])];
+    // Set when the board is cut short (page cap or a failed page), so a caller can tell a
+    // partial board from a complete one without reading stderr (the workdayTruncated convention).
+    let truncated = false;
 
     if (total > pageSize && pageSize > 0) {
       const maxPages = resolveMaxPages(entry);
@@ -126,6 +129,7 @@ export default {
           json = await ctx.fetchJson(u2.toString(), { redirect: 'error' });
         } catch (err) {
           console.error(`⚠️  jibeapply: ${entry.name} page ${page} fetch failed — ${err.message} (returning ${allJobs.length} jobs fetched so far)`);
+          truncated = true;
           break;
         }
         allJobs.push(...(json.jobs ?? []));
@@ -136,6 +140,7 @@ export default {
       // otherwise the user has no way to notice postings are missing from
       // their scan.
       if (Math.ceil(total / pageSize) > maxPages) {
+        truncated = true;
         console.error(
           `⚠️  jibeapply: ${entry.name} has more postings than max_pages allows ` +
           `(fetched ${allJobs.length} of ${total}) — ` +
@@ -144,6 +149,8 @@ export default {
       }
     }
 
-    return parseJibeapplyResponse({ jobs: allJobs }, entry);
+    const result = parseJibeapplyResponse({ jobs: allJobs }, entry);
+    if (truncated) /** @type {any} */ (result).jibeapplyTruncated = true;
+    return result;
   },
 };

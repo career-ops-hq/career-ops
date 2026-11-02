@@ -23,7 +23,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -81,7 +82,7 @@ test('a complete setup passes', () => {
       'candidate:\n  full_name: "Jane Roe"\n  email: jane@example.com\n  location: Lisbon\n');
     const r = runAgainst(dir);
     assert.ok(!looksLikeCrash(r.all), r.all.slice(0, 400));
-    assert.equal(r.status, 0, `expected a clean pass, got ${r.status}:\n${r.all.slice(0, 400)}`);
+    assert.equal(r.status, 0, describeSpawn(r, `expected a clean pass, got ${r.status}:\n${r.all.slice(0, 400)}`));
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
   }
@@ -102,4 +103,37 @@ test('the prompt-file checks read the CODE root, not the data root', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
   }
+});
+
+test('the shipped prompt files raise no hardcoded-metric warning', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-sync-check-'));
+  try {
+    const r = runAgainst(dir);
+    assert.match(r.stdout, /career-ops sync check/);
+    assert.doesNotMatch(r.stdout, /Possible hardcoded metric/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('a candidate metric is flagged and a time window is not', async () => {
+  const { hardcodedMetrics } = await import('../cv-sync-check.mjs');
+  const found = (line) => hardcodedMetrics(line).map(m => m.match);
+  assert.deepEqual(found('Saved 170+ hours of manual review'), ['170+ hours']);
+  assert.deepEqual(found('Wrote 300+ tests for the billing service'), ['300+ tests']);
+  assert.deepEqual(found('A hit requires facts **less than 24 hours** old'), []);
+  assert.deepEqual(found('Re-check the posting within 48 hours'), []);
+  assert.deepEqual(found('Refresh the cache every 12 hours'), []);
+  assert.deepEqual(found('Facts captured 36 hours ago are stale'), []);
+  assert.deepEqual(found('Facts 72 hours old are stale'), []);
+});
+
+test('importing the module runs no checks', async () => {
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(pathToFileURL(join(ROOT, 'cv-sync-check.mjs')).href)}); console.log('imported');`], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    timeout: 30_000,
+  });
+  assert.equal(r.status, 0, describeSpawn(r, r.stderr));
+  assert.equal(r.stdout.trim(), 'imported');
 });

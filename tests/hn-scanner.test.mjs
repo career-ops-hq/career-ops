@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractWithAI } from '../scan-hn.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 test('Hacker News AI Extraction Logic', async (t) => {
   const mockModel = {
@@ -60,7 +61,7 @@ test('Hacker News AI Extraction Logic', async (t) => {
 // responses, Gemini fails the way an invalid key does, and any other request is
 // recorded in `unexpected` and refused. With `serveHn: false` every request is
 // refused, for runs that must not reach the network at all.
-function writeFetchFixture(dir, { serveHn = true, children = null } = {}) {
+function writeFetchFixture(dir, { serveHn = true, children = null, geminiAnswers = false } = {}) {
   const unexpected = join(dir, 'unexpected-requests');
   const preload = join(dir, 'fetch-fixture.cjs');
   writeFileSync(preload, `
@@ -69,7 +70,7 @@ function writeFetchFixture(dir, { serveHn = true, children = null } = {}) {
       status, headers: { 'content-type': 'application/json' },
     });
     const serveHn = ${serveHn};
-    globalThis.fetch = async (input) => {
+    globalThis.fetch = async function (input) {
       const url = String(input?.url ?? input);
       if (serveHn && url.includes('hn.algolia.com/api/v1/search_by_date')) {
         return json({ hits: [{ objectID: '424242', title: 'Ask HN: Who is hiring? (September 2026)' }] });
@@ -81,6 +82,17 @@ function writeFetchFixture(dir, { serveHn = true, children = null } = {}) {
         ] });
       }
       if (serveHn && url.includes('generativelanguage.googleapis.com')) {
+        if (${geminiAnswers}) {
+          // Answers like a working key: extract "Company | Role | Location" from
+          // the post's header line, whatever the post is. Each call is logged so
+          // a test can count how many posts were sent.
+          const body = JSON.parse(input?.body ?? arguments[1]?.body ?? '{}');
+          const text = body.contents?.[0]?.parts?.[0]?.text ?? '';
+          const header = (text.split('--- BEGIN UNTRUSTED DATA ---\\n')[1] || '').split('\\n')[0];
+          const [company = '', title = '', location = ''] = header.split('|').map(p => p.trim());
+          appendFileSync(${JSON.stringify(join(dir, 'gemini-calls'))}, company + '\\n');
+          return json({ candidates: [{ content: { role: 'model', parts: [{ text: 'company: ' + company + '\\ntitle: ' + title + '\\nlocation: ' + location }] }, finishReason: 'STOP', index: 0 }] });
+        }
         return json({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }, 400);
       }
       appendFileSync(${JSON.stringify(unexpected)}, url + '\\n');
@@ -137,7 +149,7 @@ test('scan-hn --help prints usage and an unknown flag is refused, neither runs t
 
     const help = runScanHn(dir, preload, ['--help']);
     assert.equal(help.error, undefined, `scan-hn failed to spawn: ${help.error?.message}`);
-    assert.equal(help.status, 0, `expected --help to exit 0, got ${help.status}\n${help.stderr}`);
+    assert.equal(help.status, 0, describeSpawn(help, `expected --help to exit 0, got ${help.status}\n`));
     assert.match(help.stdout, /Usage:\n\s+node scan-hn\.mjs/);
     assert.match(help.stdout, /data\/pipeline\.md/, 'usage should say what the scan writes');
 
@@ -168,7 +180,7 @@ test('scan-hn refuses a portals.yml that does not parse instead of scanning with
     writeFileSync(portals, keywords);
     const valid = runScanHn(dir, served.preload, [], { GEMINI_API_KEY: '' });
     assert.equal(valid.error, undefined, `scan-hn failed to spawn: ${valid.error?.message}`);
-    assert.equal(valid.status, 0, `expected a valid portals.yml to exit 0, got ${valid.status}\n${valid.stderr}`);
+    assert.equal(valid.status, 0, describeSpawn(valid, `expected a valid portals.yml to exit 0, got ${valid.status}\n`));
     assert.match(valid.stdout, /Postings fetched:\s+2/);
     assert.match(valid.stdout, /New offers:\s+0/, 'hn_hiring.keywords should replace the default');
 
@@ -200,17 +212,69 @@ test('scan-hn does not add a posting again when its URL is not already in normal
     ] });
 
     const first = runScanHn(dir, preload, [], { GEMINI_API_KEY: '' });
-    assert.equal(first.status, 0, `first run failed\n${first.stderr}`);
+    assert.equal(first.status, 0, describeSpawn(first, `first run failed\n`));
     assert.match(first.stdout, /New offers:\s+2/);
 
     const second = runScanHn(dir, preload, [], { GEMINI_API_KEY: '' });
-    assert.equal(second.status, 0, `second run failed\n${second.stderr}`);
+    assert.equal(second.status, 0, describeSpawn(second, `second run failed\n`));
     assert.match(second.stdout, /Postings fetched:\s+2/);
     assert.match(second.stdout, /New offers:\s+0/, `the second run re-added postings it had already recorded:\n${second.stdout}`);
 
     const pipeline = readFileSync(join(dir, 'data', 'pipeline.md'), 'utf8');
     assert.equal((pipeline.match(/^- \[ \] /gm) || []).length, 2, `pipeline.md should list each posting once:\n${pipeline}`);
     assert.equal(existsSync(unexpected), false, 'scan-hn made a request outside the fixture');
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// With GEMINI_API_KEY set, every post Gemini could extract used to be admitted:
+// hn_hiring.keywords appeared only in the prompt, and neither branch read the
+// blacklist, the title_filter negatives or location_filter (#5478). Gemini here
+// extracts whatever it is sent, so only the scanner's own gate can drop a post.
+test('scan-hn AI mode admits only keyword matches that pass the blacklist and filters', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-scanhn-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(join(dir, 'portals.yml'), [
+      'hn_hiring:',
+      '  keywords: [Software Engineer]',
+      'title_filter:',
+      '  negative: [word:Intern]',
+      'location_filter:',
+      '  allow: [Remote, Berlin]',
+      '',
+    ].join('\n'));
+    writeFileSync(join(dir, 'data', 'blacklist.md'), '| Company | Since | Scope | Reason |\n|---|---|---|---|\n| Initech | 2026-01-01 | | |\n');
+    const { preload, unexpected } = writeFetchFixture(dir, { geminiAnswers: true, children: [
+      { text: 'Stripe | Software Engineer | Remote | https://stripe.example/jobs/1' },
+      { text: 'Bakery | Pastry Chef | Remote | https://bakery.example/jobs/2' },
+      { text: 'Initech | Software Engineer | Remote | https://initech.example/jobs/3' },
+      { text: 'Acme | Software Engineer | Tokyo | https://acme.example/jobs/4' },
+      { text: 'Globex | Software Engineer Intern | Berlin | https://globex.example/jobs/5' },
+    ] });
+
+    const r = runScanHn(dir, preload, [], { GEMINI_API_KEY: 'test-key' });
+    assert.equal(r.status, 0, describeSpawn(r, `scan failed\n`));
+    assert.equal(existsSync(unexpected), false, 'scan-hn made a request outside the fixture');
+    assert.match(r.stdout, /New offers:\s+1\b/, r.stdout);
+    assert.match(r.stdout, /Skipped:\s+1 blacklisted, 2 title filter, 1 location filter/, r.stdout);
+
+    const pipeline = readFileSync(join(dir, 'data', 'pipeline.md'), 'utf8');
+    assert.deepEqual(pipeline.match(/^- \[ \] \S+/gm), ['- [ ] https://stripe.example/jobs/1']);
+    // The keywords are checked before Gemini is called, so the pastry chef and
+    // the intern are never sent; the blacklist and location need the extraction.
+    const calls = readFileSync(join(dir, 'gemini-calls'), 'utf8').trim().split('\n');
+    assert.deepEqual(calls.sort(), ['Acme', 'Initech', 'Stripe']);
+
+    // A second run counts the queued post as already seen, as the no-key
+    // branch does, and does not send it to Gemini again.
+    const again = runScanHn(dir, preload, [], { GEMINI_API_KEY: 'test-key' });
+    assert.equal(again.status, 0, describeSpawn(again, `second scan failed\n`));
+    assert.match(again.stdout, /New offers:\s+0\b/, again.stdout);
+    assert.match(again.stdout, /Skipped:\s+1 already seen, 1 blacklisted, 2 title filter, 1 location filter/, again.stdout);
+    const callsAgain = readFileSync(join(dir, 'gemini-calls'), 'utf8').trim().split('\n');
+    assert.equal(callsAgain.filter(c => c === 'Stripe').length, 1, 'the seen post was sent to Gemini again');
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

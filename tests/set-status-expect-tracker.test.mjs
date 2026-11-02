@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'set-status.mjs');
 const TRACKER = [
@@ -45,7 +46,7 @@ test('matching UTF-8 tracker digest atomically writes status and receipt note', 
   const f = fixture(t);
   const receipt = `[reply-proposal:${'a'.repeat(64)}]`;
   const r = run(f, '--row', '1', 'interview', '--expect-tracker', digest(TRACKER), '--note', receipt, '--source', 'reply-watch');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.equal(r.json.changed, true);
   assert.equal(r.json.newStatus, 'Interview');
   const content = readFileSync(f.tracker, 'utf8');
@@ -76,7 +77,7 @@ test('stale digest also refuses an otherwise idempotent or forced update', (t) =
 test('dry-run checks the same digest but never writes', (t) => {
   const f = fixture(t);
   const good = run(f, '--row', '1', 'interview', '--expect-tracker', digest(TRACKER), '--dry-run');
-  assert.equal(good.status, 0, good.stderr);
+  assert.equal(good.status, 0, describeSpawn(good));
   assert.equal(good.json.dryRun, true);
   const stale = run(f, '--row', '1', 'interview', '--expect-tracker', digest(`${TRACKER}\n`), '--dry-run');
   assert.equal(stale.status, 3, stale.stderr);

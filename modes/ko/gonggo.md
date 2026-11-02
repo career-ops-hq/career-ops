@@ -117,8 +117,11 @@ WebSearch를 사용합니다.
 **Date:** {YYYY-MM-DD}
 **Archetype:** {detected}
 **Score:** {X/5}
+**결정:** {지원 | 검토 | 먼저 조사 | 건너뛰기}
 **URL:** {job URL}
 **PDF:** {path or pending}
+
+{지원 여부를 한 문장으로, 그대로 복사}
 
 ---
 

@@ -1,0 +1,38 @@
+{
+  "profile": {
+    "schema_version": 1,
+    "candidate": {},
+    "summary": [],
+    "experiences": [
+      {
+        "id": "exp-acme-recent",
+        "label": "Acme — Software Engineer",
+        "evidence": {"source": "cv.md", "line": 6, "quote": "### Acme — Fixture City"},
+        "facts": [
+          {"id": "fact-team", "text": "Managed 20 people.", "review_status": "verified", "evidence": {"source": "cv.md", "line": 9, "quote": "Managed 20 people."}},
+          {"id": "fact-chinese", "text": "维护 A&B <组件> 的告警规则。", "review_status": "verified", "evidence": {"source": "cv.md", "line": 10, "quote": "维护 A&B <组件> 的告警规则。"}},
+          {"id": "fact-unreviewed", "text": "An unreviewed fixture claim.", "review_status": "needs_review", "evidence": {"source": "cv.md", "line": 11, "quote": "An unreviewed fixture claim."}}
+        ]
+      },
+      {
+        "id": "exp-acme-earlier",
+        "label": "Acme — Software Engineer",
+        "evidence": {"source": "cv.md", "line": 13, "quote": "### Acme — Fixture City"},
+        "facts": [
+          {"id": "fact-earlier", "text": "Maintained release notes.", "review_status": "verified", "evidence": {"source": "cv.md", "line": 16, "quote": "Maintained release notes."}}
+        ]
+      }
+    ],
+    "projects": [], "education": [], "certifications": [], "skills": []
+  },
+  "base_payload": {
+    "lang": "en", "page_format": "a4",
+    "candidate": {"name": "Fictional Candidate", "location": "Fixture City"},
+    "experience": [
+      {"company": "Acme", "role": "Software Engineer", "location": "Fixture City", "dates": "2022–2024", "bullets": ["Old selected-entry wording."]},
+      {"company": "Acme", "role": "Software Engineer", "location": "Fixture City", "dates": "2020–2021", "bullets": ["Maintained release notes."]}
+    ],
+    "skills": [{"category": "Fixture", "items": ["Documentation"]}]
+  },
+  "primary_cv": "# Fictional Candidate\n\nFixture City\n\n## Experience\n### Acme — Fixture City\n**Software Engineer**\n2022–2024\n- Managed 20 people.\n- 维护 A&B <组件> 的告警规则。\n- An unreviewed fixture claim.\n\n### Acme — Fixture City\n**Software Engineer**\n2020–2021\n- Maintained release notes.\n\n## Skills\n- Documentation\n"
+}

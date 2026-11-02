@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as yaml from 'js-yaml';
 import { rmSync } from './helpers.mjs';
 import apify from '../plugins/apify/index.mjs';
 
@@ -83,4 +84,44 @@ test('a ctx with no dataRoot keeps writing to the working directory, as before',
 
   assert.ok(existsSync(join(workDir, job.url.slice('local:'.length))));
   assert.equal(existsSync(join(dataRoot, 'jds')), false);
+});
+
+test('JD frontmatter round-trips through js-yaml with awkward values', async () => {
+  const awkwardItem = {
+    title: 'Lead "AI" Architect:\r\nDistributed Systems & ML',
+    company: 'Acme & Sons: Innovation Lab [UK]',
+    url: 'https://jobs.example.test/awkward?id=123&track=ml#overview',
+    location: "New York, NY\t[Remote / Hybrid]",
+    description: 'A'.repeat(60),
+  };
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.endsWith('/acts/owner~actor/runs')) return json({ data: { id: 'run-awkward' } });
+    if (u.endsWith('/actor-runs/run-awkward')) return json({ data: { status: 'SUCCEEDED' } });
+    if (u.endsWith('/actor-runs/run-awkward/dataset/items')) return json([awkwardItem]);
+    throw new Error(`unexpected request in test: ${u}`);
+  };
+
+  const entry = {
+    name: 'awkward-fixture',
+    actor: 'owner/actor',
+    field_map: { title: 'title', url: 'url', company: 'company', location: 'location', description: 'description' },
+  };
+
+  const [job] = await apify.provider.fetch(entry, ctxFor(dataRoot));
+  assert.ok(job.url.startsWith('local:jds/'));
+  const file = join(dataRoot, job.url.slice('local:'.length));
+  assert.ok(existsSync(file));
+
+  const content = readFileSync(file, 'utf-8');
+  const match = content.match(/^---\n([\s\S]*?)\n---\n/);
+  assert.ok(match, 'content must start with frontmatter bounded by ---');
+
+  const parsed = yaml.load(match[1]);
+  assert.equal(parsed.title, awkwardItem.title);
+  assert.equal(parsed.company, awkwardItem.company);
+  assert.equal(parsed.url, awkwardItem.url);
+  assert.equal(parsed.location, awkwardItem.location);
+  assert.equal(parsed.scraped, new Date().toISOString().slice(0, 10));
+  assert.equal(parsed.source, 'owner-actor');
 });

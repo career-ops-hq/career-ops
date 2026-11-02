@@ -1,6 +1,6 @@
 # Modus: solliciteren - Live assistent voor sollicitatieformulieren
 
-Interactieve modus voor wanneer de kandidaat een sollicitatieformulier in Chrome invult. Leest wat er op het scherm staat, laadt context uit de vorige vacature-evaluatie en genereert gepersonaliseerde antwoorden voor elke vraag op het formulier.
+Interactieve modus voor wanneer de kandidaat een sollicitatieformulier invult in de Playwright-browser die dit project start. Leest wat er op het scherm staat, laadt context uit de vorige vacature-evaluatie en genereert gepersonaliseerde antwoorden voor elke vraag op het formulier.
 
 ## Vereisten
 
@@ -10,7 +10,7 @@ Interactieve modus voor wanneer de kandidaat een sollicitatieformulier in Chrome
 ## Werkstroom
 
 ```text
-1. DETECTEREN     -> Lees het actieve Chrome-tabblad (screenshot/URL/titel)
+1. DETECTEREN     -> Open de vacature in de Playwright-browser van dit project
 2. IDENTIFICEREN  -> Haal bedrijf en functie uit de pagina
 3. ZOEKEN         -> Zoek een match in de bestaande rapporten in reports/
 4. LADEN          -> Lees het volledige rapport en blok G (indien aanwezig)
@@ -20,9 +20,14 @@ Interactieve modus voor wanneer de kandidaat een sollicitatieformulier in Chrome
 8. PRESENTEREN    -> Toon de antwoorden in een formaat dat direct kan worden gekopieerd
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Stap 1 -- Ontdek de vacature
 
-**Met Playwright:** Maak een snapshot van de actieve pagina. Lees titel, URL en zichtbare inhoud.
+**Met Playwright:** Start met `node apply-scope.mjs launch-options`, open de vacature in dat venster en lees titel, URL en zichtbare inhoud.
 
 **Zonder Playwright:** Vraag de kandidaat om:
 - Deel een screenshot van het formulier (de Read-tool leest de afbeeldingen)

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { ROOT, NODE, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'reply-watch.mjs');
 
@@ -43,7 +44,7 @@ test('status-log.tsv is created and appended on a confirmed tracker update', () 
   }]));
 
   const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
 
   const trackerContent = readFileSync(trackerFile, 'utf-8');
   assert.match(trackerContent, /\| 1 \|.+?\| Interview \|/);
@@ -75,7 +76,7 @@ test('No status-log entry is written on a no-op re-run', () => {
 
   // Run 2
   const res2 = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
-  assert.equal(res2.status, 0);
+  assert.equal(res2.status, 0, describeSpawn(res2));
 
   const logContent2 = readFileSync(logFile, 'utf-8').trim().split('\n');
   assert.equal(logContent2.length, 1, 'No duplicate entry for alreadyCurrent');
@@ -98,7 +99,7 @@ test('Status-log append failure does not abort the tracker update', () => {
   mkdirSync(logFile);
 
   const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
-  assert.equal(res.status, 0);
+  assert.equal(res.status, 0, describeSpawn(res));
   assert.match(res.stderr || res.stdout, /failed to append to status-log\.tsv/);
 
   // Tracker is still updated
@@ -114,7 +115,7 @@ test('reply-watch.mjs with no candidates prints the count line and exits 0', () 
   writeFileSync(candFile, JSON.stringify([]));
 
   const res = runReplyWatch(tmp, trackerFile, candFile);
-  assert.equal(res.status, 0);
+  assert.equal(res.status, 0, describeSpawn(res));
   assert.match(res.stdout, /0 application updates need review/);
 
   rmSync(tmp, { recursive: true, force: true });
@@ -131,7 +132,7 @@ test('reply-watch.mjs skips Noise candidates from status recommendations', () =>
   }]));
 
   const res = runReplyWatch(tmp, trackerFile, candFile);
-  assert.equal(res.status, 0);
+  assert.equal(res.status, 0, describeSpawn(res));
   assert.match(res.stdout, /Type: Noise/);
   assert.doesNotMatch(res.stdout, /Suggested status updates to apply:/);
 
@@ -163,7 +164,7 @@ test('reply-watch.mjs renders and applies one confirmed update per company-wide 
   }]));
 
   const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   assert.match(res.stdout, /company-wide rejection \(2 applications\)/);
   assert.match(res.stdout, /#1 Acme Air \(Backend Engineer\): Applied → Rejected/);
   assert.match(res.stdout, /#2 Acme Air \(Product Designer\): Evaluated → Rejected/);

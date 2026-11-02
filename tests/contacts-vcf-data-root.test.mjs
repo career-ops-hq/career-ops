@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'contacts.mjs');
 
@@ -58,7 +59,7 @@ test('--vcf writes its default output into the data root when the data root is n
   const f = fixture();
   try {
     const r = run(f, ['--vcf']);
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.match(r.stdout, /Wrote 1 contact/);
     const out = join(f.dataRoot, 'output', 'contacts.vcf');
     assert.ok(existsSync(out), 'vCard lands in <data root>/output/contacts.vcf');
@@ -74,7 +75,7 @@ test('--vcf accepts an explicit path inside the data root (CAREER_OPS_DATA_DIR s
   try {
     const target = join(f.dataRoot, 'output', 'custom.vcf');
     const r = run(f, ['--vcf', target], 'CAREER_OPS_DATA_DIR');
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.ok(existsSync(target), 'vCard lands at the explicit path');
   } finally {
     rmSync(f.base, { recursive: true, force: true });

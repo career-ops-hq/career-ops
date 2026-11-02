@@ -3,7 +3,7 @@
  * normalize-statuses.mjs — Clean non-canonical states in applications.md
  *
  * Maps all non-canonical statuses to canonical ones per states.yml:
- *   Evaluada, Aplicado, Respondido, Entrevista, Oferta, Rechazado, Descartado, NO APLICAR
+ *   Evaluated, Applied, Responded, Assessment, Interview, Offer, Hired, Rejected, Discarded, SKIP
  *
  * Also strips markdown bold (**) and dates from the status field,
  * moving DUPLICADO info to the notes column.
@@ -19,7 +19,7 @@ import {
   openTrackerTransaction, rebuildRow,
   loadCanonicalStates, resolveCanonicalState,
 } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
@@ -172,14 +172,19 @@ let unknowns = [];
 // Location or Via column — shifted every field one to the left: the Score cell
 // was normalized as if it were the status and overwritten, while the real
 // status was left alone and reported as unknown (#1955).
-const COLS = resolveColumns(lines);
+// Legacy tab-layout rows are readable here the same way set-status.mjs and
+// mark-pdf-ready.mjs already read them: opt in explicitly, keep the layout on
+// the way out (a pipe-only writer must not migrate the table as a side effect).
+const PARSE_OPTS = { allowTabs: true };
+const COLS = resolveColumns(lines, PARSE_OPTS);
 
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
-  const row = parseTrackerRow(line, COLS);
+  const row = parseTrackerRow(line, COLS, PARSE_OPTS);
   if (!row) continue; // header, separator, non-row, or a row missing cells
 
-  const parts = line.split('|').map(s => s.trim());
+  const separator = trackerRowSeparator(line);
+  const parts = splitTrackerCells(line).map(s => s.trim());
   const num = row.num;
   const rawStatus = row.status;
   const result = normalizeStatus(rawStatus);
@@ -210,8 +215,12 @@ for (let i = 0; i < lines.length; i++) {
     parts[COLS.score] = parts[COLS.score].replace(/\*\*/g, '');
   }
 
-  // Reconstruct line
-  const newLine = rebuildRow(parts);
+  // Reconstruct line, preserving the row's own layout: rebuildRow is the
+  // pipe writer; a tab row goes back out tab-delimited, same canonical shape
+  // set-status.mjs writes (`|a\tb\tc|`).
+  let cells = parts.slice(1);
+  if (cells.length > 0 && cells[cells.length - 1] === '') cells = cells.slice(0, -1);
+  const newLine = separator === '\t' ? '|' + cells.join('\t') + '|' : rebuildRow(parts);
   lines[i] = newLine;
   changes++;
 

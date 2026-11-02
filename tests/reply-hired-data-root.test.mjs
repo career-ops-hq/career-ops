@@ -29,6 +29,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPTS = ['hired-share.mjs', 'reply-watch.mjs', 'paste-reply.mjs'];
@@ -110,7 +111,7 @@ function run(f, script, args, env = {}, input = '') {
     },
   });
   assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
-  assert.equal(r.status, 0, `${script} ${args.join(' ')} exited ${r.status}:\n${r.stdout}${r.stderr}`);
+  assert.equal(r.status, 0, describeSpawn(r, `${script} ${args.join(' ')} exited ${r.status}:\n`));
   return r;
 }
 

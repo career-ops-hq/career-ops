@@ -1,6 +1,6 @@
 # 模式: apply — 实时表单填写助手
 
-当候选人在 Chrome 浏览器中填写职位投递表单时，此实时助手能读取当前屏幕内容、调取该职位的历史评估报告，并为表单中的每一个开放性或选择性问题生成个性化的高质量回答草稿。
+当候选人在本项目启动的 Playwright 浏览器中填写职位投递表单时，此实时助手能读取当前屏幕内容、调取该职位的历史评估报告，并为表单中的每一个开放性或选择性问题生成个性化的高质量回答草稿。
 
 ## 运行要求
 
@@ -10,7 +10,7 @@
 ## 实时工作流
 
 ```text
-1. 捕获 (DETECT)    → 读取当前 Chrome 活动标签页 (截图/URL/网页标题)
+1. 捕获 (DETECT)    → 用本项目的 Playwright 浏览器打开职位页面
 2. 识别 (IDENTIFY)  → 从页面中提取公司名称与职位名称
 3. 检索 (SEARCH)    → 匹配 reports/ 目录下已保存的评估报告
 4. 载入 (LOAD)      → 读取对应的评估报告及 H 部分的拟答草稿 (若存在)
@@ -20,11 +20,16 @@
 8. 呈现 (PRESENT)   → 输出可供直接复制粘贴的格式化文本
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ---
 
 ## 步骤 1 — 捕获当前职位表单
 
-**使用 Playwright**：对活动页面进行快照截图，并读取网页标题、URL 以及页面主体文本。
+**使用 Playwright**：运行 `node apply-scope.mjs launch-options`，在该窗口打开职位页面，并读取标题、URL 和页面正文。
 
 **不使用 Playwright**：提示候选人执行以下操作之一：
 - 发送当前表单页面的屏幕截图（Read 工具能识别并分析图片）。

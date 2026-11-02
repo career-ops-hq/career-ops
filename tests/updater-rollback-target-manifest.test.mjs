@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  MANIFEST_MODULE,
   MANIFEST_USER_PATH_OVERLAPS,
   isSafeManifestPath,
   manifestTreeFiles,
@@ -296,13 +297,30 @@ function rejectedBy(fn) {
   }
 }
 
-function sourceWithManifest(paths) {
-  const declaration = /((?:export\s+)?const SYSTEM_PATHS\s*=\s*)\[[\s\S]*?\n\];/;
-  if (!declaration.test(updaterSource)) {
-    throw new Error('fixture could not locate the SYSTEM_PATHS declaration');
+const manifestBody = (paths) => `[\n${paths.map((path) => `  ${JSON.stringify(path)},`).join('\n')}\n];`;
+
+/**
+ * Write a commit's updater and SYSTEM_PATHS in the given layout.
+ *
+ * 'module' is the layout since #5554: the real updater beside a
+ * lib/update-manifest.mjs that lists `paths` and, like the real one, itself.
+ * 'legacy' is the layout before it: no module, and the list as the first
+ * SYSTEM_PATHS literal in update-system.mjs, which is what an older updater's
+ * manifest looks like to extractArrayFromSource.
+ */
+function putManifest(dir, paths, layout = 'module') {
+  if (layout === 'legacy') {
+    const declaration = /(const SYSTEM_PATHS\s*=\s*)\[[\s\S]*?\n\s*\];/;
+    if (!declaration.test(updaterSource)) {
+      throw new Error('fixture could not locate the SYSTEM_PATHS declaration');
+    }
+    put(dir, 'update-system.mjs', updaterSource.replace(declaration, `$1${manifestBody(paths)}`));
+    rmSync(join(dir, ...MANIFEST_MODULE.split('/')), { force: true });
+    return;
   }
-  const body = `[\n${paths.map((path) => `  ${JSON.stringify(path)},`).join('\n')}\n];`;
-  return updaterSource.replace(declaration, `$1${body}`);
+  const listed = paths.includes(MANIFEST_MODULE) ? paths : [...paths, MANIFEST_MODULE];
+  put(dir, 'update-system.mjs', updaterSource);
+  put(dir, MANIFEST_MODULE, `export const SYSTEM_PATHS = ${manifestBody(listed)}\nObject.freeze(SYSTEM_PATHS);\n`);
 }
 
 function put(dir, path, bytes) {
@@ -334,7 +352,7 @@ function runRollback(dir, timeout = 30_000) {
 // git call, so the count is kept low and the length is carried by the names.
 const bulkFile = (i) => `system/nested/bulk/${'argv-length-'.repeat(11)}${String(i).padStart(4, '0')}.txt`;
 
-function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExisting = false, bulkFiles = 0 }) {
+function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExisting = false, bulkFiles = 0, backupLayout = 'module' }) {
   const fixture = makeUpdaterRepo({ prefix });
   const { dir, g } = fixture;
   const backup = paired
@@ -354,7 +372,7 @@ function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExistin
   ];
 
   try {
-    put(dir, 'update-system.mjs', sourceWithManifest(commonManifest));
+    putManifest(dir, commonManifest, backupLayout);
     put(dir, 'system/root.txt', 'backup root\n');
     put(dir, 'system/nested/keep.txt', 'backup nested\n');
     put(dir, 'writing-samples/README.md', 'backup scaffold\n');
@@ -367,7 +385,7 @@ function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExistin
     const backupCommit = g('rev-parse', 'HEAD');
     g('branch', backup, backupCommit);
 
-    put(dir, 'update-system.mjs', sourceWithManifest(targetManifest));
+    putManifest(dir, targetManifest);
     put(dir, 'system/root.txt', 'target root\n');
     put(dir, 'system/nested/keep.txt', 'target nested\n');
     put(dir, 'system/nested/target-only.txt', 'target-only nested\n');
@@ -431,6 +449,9 @@ function readMaybe(path) {
       'paired-ref fixture did not arrange its FETCH_HEAD distractor',
     );
 
+    // A withheld update leaves a durable baseline that rollback must clear.
+    g('update-ref', 'refs/career-ops/staged-update', 'HEAD');
+
     const result = runRollback(dir);
     const userCv = readMaybe(join(dir, 'cv.md'));
     const userSibling = readMaybe(join(dir, 'writing-samples/private.md'));
@@ -438,6 +459,11 @@ function readMaybe(path) {
       result.status === 0 && !result.error,
       'real rollback CLI succeeds with a readable paired target ref',
       `paired rollback failed (status ${result.status}): ${outputOf(result)}`,
+    );
+    check(
+      g('for-each-ref', '--format=%(refname)', 'refs/career-ops/staged-update') === '',
+      'successful rollback clears the withheld update baseline',
+      'rollback left the withheld update baseline behind',
     );
     check(
       readMaybe(join(dir, 'system/root.txt')) === 'backup root\n'
@@ -479,7 +505,7 @@ function readMaybe(path) {
     // Simulate local/current manifest drift after apply. The file is covered by
     // the paired target, but not by either updater consulted for restoration;
     // its presence in the backup tree is the only proof that it is not new.
-    put(dir, 'update-system.mjs', sourceWithManifest(commonManifest));
+    putManifest(dir, commonManifest);
 
     const result = runRollback(dir);
     check(
@@ -514,7 +540,7 @@ function readMaybe(path) {
   try {
     // Same manifest drift as section 7, but here the target changed the file.
     // Neither restore manifest lists it; only the paired target claims it.
-    put(dir, 'update-system.mjs', sourceWithManifest(commonManifest));
+    putManifest(dir, commonManifest);
 
     const result = runRollback(dir);
     check(
@@ -561,7 +587,7 @@ function readMaybe(path) {
     'caseexisting.mjs',
   ];
   try {
-    put(dir, 'update-system.mjs', sourceWithManifest(backupManifest));
+    putManifest(dir, backupManifest);
     put(dir, 'shape-dir/backup.txt', 'backup directory child\n');
     put(dir, 'shape-leaf', 'backup leaf\n');
     put(dir, 'CaseExisting.mjs', 'backup alias bytes\n');
@@ -570,7 +596,7 @@ function readMaybe(path) {
     const backupCommit = g('rev-parse', 'HEAD');
     g('branch', backup, backupCommit);
 
-    put(dir, 'update-system.mjs', sourceWithManifest(targetManifest));
+    putManifest(dir, targetManifest);
     rmSync(join(dir, 'shape-dir'), { recursive: true, force: true });
     put(dir, 'shape-dir', 'target file\n');
     rmSync(join(dir, 'shape-leaf'), { recursive: true, force: true });
@@ -625,13 +651,13 @@ function readMaybe(path) {
   const { dir, g } = fixture;
   const backup = 'backup-pre-update-1.2.3-20260907T150000Z';
   try {
-    put(dir, 'update-system.mjs', sourceWithManifest(['update-system.mjs', 'deep-shape/']));
+    putManifest(dir, ['update-system.mjs', 'deep-shape/']);
     put(dir, 'deep-shape/nested/deeper/backup.txt', 'backup deep child\n');
     g('add', '-A');
     g('commit', '-qm', 'backup deep shape state');
     g('branch', backup, g('rev-parse', 'HEAD'));
 
-    put(dir, 'update-system.mjs', sourceWithManifest(['update-system.mjs', 'deep-shape']));
+    putManifest(dir, ['update-system.mjs', 'deep-shape']);
     rmSync(join(dir, 'deep-shape'), { recursive: true, force: true });
     put(dir, 'deep-shape', 'target file\n');
     g('add', '-A');
@@ -1064,6 +1090,161 @@ function readMaybe(path) {
       readMaybe(join(dir, 'system/root.txt')) === 'backup root\n',
       'the restored files are still on disk when the commit fails',
       'a failed commit left the worktree unrestored',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 18b. Real CLI: with unrelated work staged, the recovery hint stays scoped ──
+//    A bare `git commit` here would take the user's staged file along with the
+//    rollback, so the hint has to name the pathspec file the failed commit left.
+{
+  const fixture = seedRollbackRepo('co-rollback-commit-fails-scoped-', {
+    paired: true,
+    fetchTarget: false,
+  });
+  const { dir, g } = fixture;
+  try {
+    put(dir, 'my-own-notes.txt', 'staged by the user before rollback\n');
+    g('add', '--', 'my-own-notes.txt');
+    const hooks = join(dir, '.git', 'failing-hooks');
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    g('config', 'core.hooksPath', hooks);
+
+    const output = outputOf(runRollback(dir));
+    const hint = output.match(/git --literal-pathspecs commit -m "([^"]+)" "--pathspec-from-file=([^"]+)" --pathspec-file-nul/);
+    check(
+      Boolean(hint),
+      'a failed scoped rollback commit prints a scoped recovery command',
+      `no scoped recovery command in: ${JSON.stringify(output.slice(-400))}`,
+    );
+    if (hint) {
+      g('config', '--unset', 'core.hooksPath');
+      g('--literal-pathspecs', 'commit', '-m', hint[1], `--pathspec-from-file=${hint[2]}`, '--pathspec-file-nul');
+      check(
+        !g('show', '--name-only', '--format=', 'HEAD').split('\n').includes('my-own-notes.txt')
+          && g('diff', '--cached', '--name-only') === 'my-own-notes.txt',
+        "running the printed command commits the rollback and leaves the user's file staged",
+        `commit: ${g('show', '--name-only', '--format=', 'HEAD')}; staged: ${g('diff', '--cached', '--name-only')}`,
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 19. Real CLI: a backup from before #5554 rolls back from the module layout ──
+//    The first update to the module layout leaves a backup whose manifest is
+//    in its update-system.mjs and a target whose manifest is in
+//    lib/update-manifest.mjs. Each must be read from its own file: the backup
+//    from update-system.mjs (no "backup manifest is unavailable" fallback),
+//    the target from the module, which lists itself, so the module is a
+//    target-only file and goes away with the rest of the update.
+{
+  const fixture = seedRollbackRepo('co-rollback-legacy-backup-', {
+    paired: true,
+    fetchTarget: false,
+    backupLayout: 'legacy',
+  });
+  const { dir, g, backupCommit } = fixture;
+  try {
+    let backupHasModule = true;
+    try {
+      g('cat-file', '-e', `${backupCommit}:${MANIFEST_MODULE}`);
+    } catch {
+      backupHasModule = false;
+    }
+    check(
+      !backupHasModule && existsSync(join(dir, ...MANIFEST_MODULE.split('/'))),
+      'legacy-backup fixture: the backup has no manifest module and the target does',
+      'legacy-backup fixture did not arrange the two layouts',
+    );
+
+    const result = runRollback(dir);
+    const output = outputOf(result);
+    check(
+      result.status === 0 && !result.error,
+      'rollback from the module layout to a pre-#5554 backup succeeds',
+      `legacy-backup rollback failed (status ${result.status}): ${output}`,
+    );
+    check(
+      !output.includes('backup manifest is unavailable') && !output.includes('paired target is missing or unavailable'),
+      "both manifests were read: the backup's from update-system.mjs, the target's from the module",
+      `rollback fell back on a manifest: ${JSON.stringify(output)}`,
+    );
+    check(
+      readMaybe(join(dir, 'system/root.txt')) === 'backup root\n'
+        && readMaybe(join(dir, 'system/nested/keep.txt')) === 'backup nested\n'
+        && readMaybe(join(dir, 'update-system.mjs')) === g('show', `${backupCommit}:update-system.mjs`) + '\n',
+      "rollback restores the backup's system files, its legacy updater included",
+      'rollback did not restore the legacy backup state',
+    );
+    check(
+      !existsSync(join(dir, ...MANIFEST_MODULE.split('/')))
+        && !existsSync(join(dir, 'target-only.mjs'))
+        && !existsSync(join(dir, 'system/nested/target-only.txt')),
+      `rollback removes ${MANIFEST_MODULE} and the other target-only files`,
+      `rollback left a target-only file behind: module=${existsSync(join(dir, ...MANIFEST_MODULE.split('/')))}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20. Real CLI: without the local manifest, rollback refuses ──
+//    The current manifest is part of the restore set. Running without it would
+//    restore only what the backup's manifest names, so rollback stops before
+//    touching anything and says how to put the file back.
+{
+  const fixture = seedRollbackRepo('co-rollback-no-local-manifest-', {
+    paired: true,
+    fetchTarget: false,
+  });
+  const { dir } = fixture;
+  try {
+    rmSync(join(dir, ...MANIFEST_MODULE.split('/')), { force: true });
+    const result = runRollback(dir);
+    const output = outputOf(result);
+    check(
+      result.status !== 0 && output.includes(`git checkout HEAD -- ${MANIFEST_MODULE}`),
+      'rollback without lib/update-manifest.mjs fails closed and names the restore command',
+      `rollback without the local manifest: status ${result.status}, output ${JSON.stringify(output)}`,
+    );
+    check(
+      readMaybe(join(dir, 'system/root.txt')) === 'target root\n' && existsSync(join(dir, 'target-only.mjs')),
+      'nothing was rolled back',
+      'rollback changed files after refusing',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20b. Real CLI: on a HEAD from before #5554 the hint restores the updater ──
+//    A failed first upgrade can leave the new updater on disk over a HEAD that
+//    has no lib/update-manifest.mjs. Checking that file out of HEAD would fail,
+//    so the hint names update-system.mjs, whose HEAD copy holds the full list.
+{
+  const fixture = seedRollbackRepo('co-rollback-pre-split-head-', {
+    paired: true,
+    fetchTarget: false,
+  });
+  const { dir, g } = fixture;
+  try {
+    putManifest(dir, ['update-system.mjs', 'system/root.txt'], 'legacy');
+    g('add', '-A');
+    g('commit', '-qm', 'pre-split HEAD');
+    put(dir, 'update-system.mjs', updaterSource);
+    const result = runRollback(dir);
+    const output = outputOf(result);
+    check(
+      result.status !== 0
+        && output.includes('git checkout HEAD -- update-system.mjs')
+        && !output.includes(`git checkout HEAD -- ${MANIFEST_MODULE}`),
+      'on a pre-split HEAD, rollback names the updater to restore, not the missing module',
+      `pre-split HEAD rollback hint: status ${result.status}, output ${JSON.stringify(output)}`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

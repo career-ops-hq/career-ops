@@ -37,20 +37,25 @@ import { existsSync, readFileSync, realpathSync } from 'fs';
 import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { stripEmptySections } from './cv-sections-core.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
+import { readLockedSections } from './theme-style.mjs';
 import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
 import { PARTIAL_SECTIONS, declaredSections, parseMeta } from './lib/template-manifest.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
+const trackerPath = resolveTrackerPath(DATA_ROOT);
+const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
-const PROFILE_PATH = resolve(DATA_ROOT, 'config', 'profile.yml');
+const PROFILE_PATH = getProfilePath();
 const PHOTO_MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -133,7 +138,7 @@ function sanitizeImageSrc(src) {
 // config/profile.yml (#5094). data: and http(s) URLs carry no local read.
 function profilePhotoValue() {
   try {
-    const doc = yaml.load(readFileSync(PROFILE_PATH, 'utf-8'));
+    const doc = loadYaml(readFileSync(PROFILE_PATH, 'utf-8'));
     const value = doc?.candidate?.photo;
     return typeof value === 'string' ? value.trim() : '';
   } catch {
@@ -735,7 +740,7 @@ function renderReport(payload, partials) {
   const candidate = payload.candidate || {};
   // The sheet this body has to fit is chosen by generate-pdf.mjs, so both read
   // the same resolver rather than each keeping a fallback of their own.
-  const pageWidth = PAGE_WIDTHS[resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH })];
+  const pageWidth = PAGE_WIDTHS[resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH, country: payload.country })];
 
   const substitutions = {
     LANG: escapeHtml(payload.lang || 'en'),
@@ -818,6 +823,12 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
   const { warnings = [], ...rest } = extra;
   const outDir = dirname(absOutput);
   if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
+
+  const lockedKeys = readLockedSections(PROFILE_PATH, sectionKey);
+  const cvPath = resolve(workspaceRoot, 'cv.md');
+  const cvMarkdown = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
+  validateLockedSections(html, cvMarkdown, lockedKeys);
+
   await writeFile(absOutput, html, 'utf-8');
 
   const fileInfo = await stat(absOutput);

@@ -4,10 +4,26 @@
  * tracker.mjs — SQLite derived index for the applications tracker (RFC #918, phase 1).
  *
  * data/applications.md stays the source of truth. The SQLite DB is a derived
- * index, built and rebuilt from the markdown — safe to delete at any time, it
- * regenerates on the next sync. Tools and agents READ through the index for
- * schema-validated, model-independent results; all writes keep going to the
- * markdown exactly as today (merge-tracker.mjs, hand edits).
+ * index, built and rebuilt from the markdown and from status-log.tsv. Tools and
+ * agents READ through the index for schema-validated, model-independent
+ * results; all writes keep going to the markdown exactly as today
+ * (merge-tracker.mjs, set-status.mjs, hand edits).
+ *
+ * Status history (`status_events`, read by `history`) and the transition
+ * ledger (status-log.tsv, the sibling of the tracker file that set-status.mjs
+ * appends to) are one record, not two (#5555; ADR #1754 rule 4). Every sync
+ * rebuilds a row's events from the ledger, folded through funnel-velocity.mjs's
+ * foldObservations() so `correction` and retraction lines apply. The ledger is
+ * authoritative; the table is derived from it, with one exception: a status
+ * the ledger does not explain — one changed by hand in applications.md, which
+ * writes no ledger row — is recorded as an event the sync observed, dated with
+ * the day of that sync. Nothing else holds such an event, so it is the one
+ * thing the index adds to the ledger.
+ *
+ * Safe to delete at any time: the next sync rebuilds every row and every
+ * ledger-derived event exactly. The only thing lost is the status changes no
+ * ledger row explains (the hand edits above). A row with no ledger rows then
+ * starts its history again from its current status, dated with its Date column.
  *
  * Why: at hundreds of rows, a markdown table degrades structurally — encoding
  * corruption propagates, columns drift, a `|` inside a cell shifts every
@@ -24,15 +40,15 @@
  * Usage:
  *   node tracker.mjs sync [--check]             # (re)build applications.db from applications.md
  *                                               # --check: diagnose only, no write; exit 1 if issues found
- *   node tracker.mjs query [--status Applied] [--company acme] [--role designer]
- *                          [--since 2026-01-01] [--id N] [--limit 20] [--json]
- *   node tracker.mjs history --id N             # status transition log observed across syncs
+ *   node tracker.mjs query [--status Applied] [--company acme] [--role designer] [--csv]
+ *                          [--since 2026-01-01] [--min-score 4] [--id N] [--limit 20] [--json]
+ *   node tracker.mjs history --id N             # status transitions: the ledger's, plus changes only a sync saw
  *   node tracker.mjs export [--out FILE] [--force]  # inverse: applications.db → markdown (stdout by default)
  *                                               # --force: write even when columns would be dropped
  *   node tracker.mjs delete --num N [--dry-run] # remove one application row from applications.md + reindex
  *
- * query/history auto-resync when applications.md changed since the last sync,
- * so the index can never serve stale reads.
+ * query/history auto-resync when applications.md or status-log.tsv changed
+ * since the last sync, so the index can never serve stale reads.
  */
 
 import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
@@ -42,15 +58,17 @@ import { pathToFileURL, fileURLToPath } from 'url';
 import { format } from 'util';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import {
-  resolveColumns, detectColumns, isHeaderRow, isSeparatorRow, LEGACY_COLMAP,
+  resolveColumns, detectColumns, isHeaderRow, isSeparatorRow, LEGACY_COLMAP, firstLinkTarget,
 } from './tracker-parse.mjs';
 import {
-  canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
+  canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic, loadCanonicalStates,
 } from './tracker-utils.mjs';
+import { parseStatusLog, foldObservations } from './funnel-velocity.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 
 /**
  * Where the derived SQLite index lives for a given tracker.
@@ -69,6 +87,19 @@ import { validateFlags } from './lib/cli-flags.mjs';
  */
 function resolveDbPath(mdPath, override) {
   return override || (mdPath.endsWith('.md') ? mdPath.slice(0, -3) + '.db' : mdPath + '.db');
+}
+
+/**
+ * Where the transition ledger lives for a given tracker: the sibling of the
+ * tracker file, the same rule set-status.mjs writes by and funnel-velocity.mjs,
+ * stats.mjs and followup-cadence.mjs read by. A CAREER_OPS_TRACKER redirect
+ * therefore moves the ledger with the tracker.
+ *
+ * @param {string} mdPath - The markdown tracker.
+ * @returns {string} Path to status-log.tsv.
+ */
+function resolveLedgerPath(mdPath) {
+  return join(dirname(mdPath), 'status-log.tsv');
 }
 
 /**
@@ -118,8 +149,18 @@ const SCHEMA_FIELDS = {
 // Bumped whenever the derived index gains data an older sync did not record.
 // ensureFresh() rebuilds on a mismatch, so a db written before `extras` and
 // the stored header existed cannot serve an export that would silently drop
-// the columns it never captured.
-const SCHEMA_VERSION = '2';
+// the columns it never captured. 3: status_events are rebuilt from the
+// ledger and carry a `source` (#5555).
+const SCHEMA_VERSION = '3';
+
+// Where a status_events row came from. Only 'ledger' rows are derived; the
+// other two exist because a sync saw them and nothing else recorded them.
+//   ledger  — from status-log.tsv; rebuilt on every sync
+//   tracker — the status the first sync saw on a row the ledger has nothing
+//             for, dated with the row's Date column
+//   sync    — a status change no ledger row explains (a hand edit in
+//             applications.md), dated with the day of the sync that saw it
+const EVENT_SOURCES = { ledger: 'ledger', tracker: 'tracker', sync: 'sync' };
 
 // ── node:sqlite loading ─────────────────────────────────────────────
 
@@ -180,7 +221,9 @@ export function openDb(DatabaseSync, path = defaultDbPath()) {
         id     INTEGER PRIMARY KEY AUTOINCREMENT,
         app_id INTEGER NOT NULL REFERENCES applications(id),
         status TEXT NOT NULL,
-        date   TEXT NOT NULL
+        date   TEXT NOT NULL,
+        -- ledger | tracker | sync, see EVENT_SOURCES.
+        source TEXT NOT NULL DEFAULT 'sync'
       );
       CREATE TABLE IF NOT EXISTS meta (
         key   TEXT PRIMARY KEY,
@@ -196,6 +239,15 @@ export function openDb(DatabaseSync, path = defaultDbPath()) {
     const columns = db.prepare('PRAGMA table_info(applications)').all().map(c => c.name);
     if (!columns.includes('extras')) {
       db.exec("ALTER TABLE applications ADD COLUMN extras TEXT NOT NULL DEFAULT '{}'");
+    }
+    // Before #5555 every event was an observation: the first one per row the
+    // status the first sync saw, each later one a change a sync saw. Labelled
+    // that way, the next sync replaces the ones the ledger explains and keeps
+    // the rest, which are the only record of a hand edit.
+    const eventColumns = db.prepare('PRAGMA table_info(status_events)').all().map(c => c.name);
+    if (!eventColumns.includes('source')) {
+      db.exec("ALTER TABLE status_events ADD COLUMN source TEXT NOT NULL DEFAULT 'sync'");
+      db.exec("UPDATE status_events SET source = 'tracker' WHERE id IN (SELECT MIN(id) FROM status_events GROUP BY app_id)");
     }
   } catch (err) {
     db.close();
@@ -213,7 +265,7 @@ function loadStates(ctx) {
     ctx.error(`Error: ${STATES_PATH} not found — cannot validate statuses (broken install: templates/states.yml ships with career-ops).`);
     throw new TrackerExit(1);
   }
-  const doc = yaml.load(readFileSync(STATES_PATH, 'utf-8'));
+  const doc = loadYaml(readFileSync(STATES_PATH, 'utf-8'));
   const byKey = new Map(); // lowercased label/alias → canonical label
   const labels = [];
   for (const s of doc?.states || []) {
@@ -223,7 +275,8 @@ function loadStates(ctx) {
     if (s.id) byKey.set(String(s.id).toLowerCase(), s.label);
     for (const alias of s.aliases || []) byKey.set(String(alias).toLowerCase(), s.label);
   }
-  return { byKey, labels };
+  // The shape parseStatusLog() resolves ledger states against.
+  return { byKey, labels, canonical: loadCanonicalStates(STATES_PATH) };
 }
 
 // Strip markdown bold, trailing dates, and surrounding noise, then resolve
@@ -524,6 +577,9 @@ function parseTracker(states, ctx) {
     apps.push({
       id, pos: apps.length, date, company, role, score: score || '—', status,
       pdf: pdf || '❌', report: report || '—', notes, extras: JSON.stringify(extras),
+      // Ledger rows name a row by the number in its # cell. A number the index
+      // assigned is not that, so such a row never claims ledger history.
+      ledgerKey: id !== 0,
     });
   }
   for (const app of apps) if (app.id === 0) app.id = ++maxId;
@@ -533,6 +589,95 @@ function parseTracker(states, ctx) {
 
 function mdHash(ctx) {
   return createHash('sha256').update(readFileSync(ctx.mdPath)).digest('hex');
+}
+
+/**
+ * The transition ledger, parsed. A tracker without one is normal (set-status
+ * has never run, or the user edits by hand only): every list comes back empty.
+ *
+ * @returns {{hash: string, observations: object[], unparseable: object[]}}
+ *   `hash` is '' when there is no ledger, so ensureFresh() sees one appear.
+ */
+function readLedger(states, ctx) {
+  const path = ctx.ledgerPath();
+  if (!existsSync(path)) return { hash: '', observations: [], unparseable: [] };
+  const content = readFileSync(path, 'utf-8');
+  const { observations, unparseable } = parseStatusLog(content, states.canonical);
+  return { hash: createHash('sha256').update(content).digest('hex'), observations, unparseable };
+}
+
+const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+/**
+ * One row's status history: the events the ledger derives, merged with the
+ * observations only a sync made (#5555).
+ *
+ * - Ledger events are the row's folded timeline (foldObservations(), so
+ *   corrections and retractions apply), preceded by the state the earliest
+ *   ledger line moved FROM, dated with the row's Date column. That start event
+ *   is what a first sync records for the row, so deleting the index and syncing
+ *   again gives the same history.
+ * - Every stored observation is merged in by date. Where two neighbouring
+ *   events carry the same status they are one state, so the run collapses to
+ *   one event, the ledger's when it has one: a pre-#5555 event the sync dated
+ *   after its ledger line is replaced by that line. An observation with no
+ *   same-status neighbour stays, including a hand edit that reverts to a state
+ *   the ledger reached earlier (Interview → Offer by hand → Interview by hand).
+ * - When the tracker's status is not the last event, nothing explains it: it
+ *   is recorded as an observation, dated `today` (or, on a row with no events
+ *   yet, with its Date column). Dated today, it sorts after the events it
+ *   followed on every later sync, so it is written once and keeps its date.
+ *
+ * @param {{date: string, status: string}} app - The indexed row.
+ * @param {object[]} observations - This row's parseStatusLog() observations.
+ * @param {{to: string, date: string}[]} timeline - This row's foldObservations() timeline.
+ * @param {{status: string, date: string, source: string}[]} observed - This row's
+ *   stored 'tracker'/'sync' events, oldest first.
+ * @param {string} today - Local YYYY-MM-DD (#3070).
+ * @returns {{status: string, date: string, source: string}[]} Events, oldest first.
+ */
+function buildStatusHistory(app, observations, timeline, observed, today) {
+  const rowDate = DATE_RE.test(app.date) ? app.date : null;
+  // Sorted the way foldObservations() sorts, so "earliest" means the same thing.
+  const first = [...observations].sort(byDate)[0];
+  const start = first?.from ?? null;
+
+  // Each event sorts by date, then `rank`; stable otherwise. On one day: the
+  // first status a sync saw, the ledger's start, transitions, then changes a
+  // sync saw — except one a same-day ledger line moved away FROM, which
+  // happened before that line and sorts just ahead of it.
+  const ranked = [];
+  // A change a sync saw TO the start state precedes the ledger and carries the
+  // day it was seen; the row's Date column would misdate it.
+  if (start && !observed.some(e => e.source === EVENT_SOURCES.sync && e.status === start)) {
+    const date = rowDate && rowDate <= first.date ? rowDate : first.date;
+    ranked.push({ status: start, date, source: EVENT_SOURCES.ledger, rank: 1 });
+  }
+  for (const t of timeline) ranked.push({ status: t.to, date: t.date, source: EVENT_SOURCES.ledger, rank: 3 });
+  for (const e of observed) {
+    if (e.source === EVENT_SOURCES.tracker) { ranked.push({ ...e, rank: 0 }); continue; }
+    const leftSameDay = observations.some(o => o.from === e.status && o.date === e.date);
+    ranked.push({ ...e, rank: leftSameDay ? 2 : 4 });
+  }
+  ranked.sort((a, b) => byDate(a, b) || a.rank - b.rank);
+
+  // Collapse runs of one status, keeping the ledger's event (else the first).
+  const events = [];
+  for (const { status, date, source } of ranked) {
+    const prev = events[events.length - 1];
+    if (prev?.status !== status) events.push({ status, date, source });
+    else if (prev.source !== EVENT_SOURCES.ledger && source === EVENT_SOURCES.ledger) {
+      events[events.length - 1] = { status, date, source };
+    }
+  }
+
+  const last = events.length ? events[events.length - 1].status : null;
+  if (app.status !== last) {
+    events.push(events.length === 0
+      ? { status: app.status, date: rowDate ?? today, source: EVENT_SOURCES.tracker }
+      : { status: app.status, date: today, source: EVENT_SOURCES.sync });
+  }
+  return events;
 }
 
 // ── Sync (markdown → derived index) ─────────────────────────────────
@@ -556,10 +701,17 @@ function reportDiagnostics(diag, ctx) {
 
 function syncIndex(db, states, ctx) {
   const { apps, diag, layout } = parseTracker(states, ctx);
-  // LOCAL calendar day (#3070). This dates a row in the status_events table,
-  // and that table is the one part of the index a resync does NOT rebuild
-  // identically — the comment below says events "persist across rebuilds, keyed
-  // by id", so a wrong day is written once and then sticks.
+  const ledger = readLedger(states, ctx);
+  const timelines = foldObservations(ledger.observations);
+  const observationsByNum = new Map();
+  for (const obs of ledger.observations) {
+    if (!observationsByNum.has(obs.num)) observationsByNum.set(obs.num, []);
+    observationsByNum.get(obs.num).push(obs);
+  }
+  // LOCAL calendar day (#3070). This dates a status change no ledger row
+  // explains, and such an event is the one part of the index a resync does NOT
+  // rebuild — it persists across syncs, keyed by id, so a wrong day is written
+  // once and then sticks.
   const today = localToday();
 
   db.exec('BEGIN');
@@ -569,20 +721,28 @@ function syncIndex(db, states, ctx) {
     const insertApp = db.prepare('INSERT INTO applications (id, pos, date, company, role, score, status, pdf, report, notes, extras) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const a of apps) insertApp.run(a.id, a.pos, a.date, a.company, a.role, a.score, a.status, a.pdf, a.report, a.notes, a.extras);
 
-    // Status history: events persist across rebuilds, keyed by id. An app whose
-    // status changed since the last sync gets a new event; rows that left the
-    // markdown lose their events (the index never outlives its source).
+    // Status history, rebuilt per row from the ledger plus the observations
+    // only a sync made (see buildStatusHistory). Rows that left the markdown
+    // lose their events (the index never outlives its source).
     db.exec('DELETE FROM status_events WHERE app_id NOT IN (SELECT id FROM applications)');
-    const latestEvent = db.prepare('SELECT status FROM status_events WHERE app_id = ? ORDER BY id DESC LIMIT 1');
-    const insertEvent = db.prepare('INSERT INTO status_events (app_id, status, date) VALUES (?, ?, ?)');
+    const observedEvents = db.prepare("SELECT status, date, source FROM status_events WHERE app_id = ? AND source <> 'ledger' ORDER BY id");
+    const clearEvents = db.prepare('DELETE FROM status_events WHERE app_id = ?');
+    const insertEvent = db.prepare('INSERT INTO status_events (app_id, status, date, source) VALUES (?, ?, ?, ?)');
     for (const a of apps) {
-      const last = latestEvent.get(a.id);
-      if (!last) insertEvent.run(a.id, a.status, DATE_RE.test(a.date) ? a.date : today);
-      else if (last.status !== a.status) insertEvent.run(a.id, a.status, today);
+      const events = buildStatusHistory(
+        a,
+        a.ledgerKey ? observationsByNum.get(a.id) ?? [] : [],
+        a.ledgerKey ? timelines.get(a.id) ?? [] : [],
+        observedEvents.all(a.id),
+        today,
+      );
+      clearEvents.run(a.id);
+      for (const e of events) insertEvent.run(a.id, e.status, e.date, e.source);
     }
 
     const setMeta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     setMeta.run('md_sha256', mdHash(ctx));
+    setMeta.run('ledger_sha256', ledger.hash);
     setMeta.run('schema_version', SCHEMA_VERSION);
     // The source layout, so export rebuilds this FILE rather than the default
     // skeleton: the header and separator it read, the lines around the table,
@@ -603,7 +763,7 @@ function syncIndex(db, states, ctx) {
     db.exec('ROLLBACK');
     throw err;
   }
-  return { apps, diag };
+  return { apps, diag, ledger };
 }
 
 async function sync(args, ctx) {
@@ -623,13 +783,21 @@ async function sync(args, ctx) {
 
   const DatabaseSync = await loadSqlite(ctx);
   const db = ctx.openDb(DatabaseSync);
-  const { apps, diag } = syncIndex(db, states, ctx);
+  const { apps, diag, ledger } = syncIndex(db, states, ctx);
   ctx.error(`Indexed ${apps.length} applications from ${ctx.mdPath} into ${ctx.dbPath()}`);
+  if (ledger.unparseable.length) {
+    // Not corruption in the tracker, so not part of reportDiagnostics() and
+    // not a --check failure; but the history of those rows is short of them.
+    ctx.error(`Warning: ${ledger.unparseable.length} line(s) of ${ctx.ledgerPath()} could not be parsed and are not in any row's history:`);
+    for (const u of ledger.unparseable) ctx.error(`  line ${u.line}: ${u.reason}`);
+  }
   reportDiagnostics(diag, ctx);
 }
 
-// query/history must never serve stale reads: if the markdown changed since
-// the last sync (or was never synced), rebuild the index first.
+// query/history must never serve stale reads: if the markdown or the ledger
+// changed since the last sync (or was never synced), rebuild the index first.
+// The ledger counts on its own: a `correction` line changes a row's history
+// without touching applications.md.
 function ensureFresh(db, states, ctx) {
   if (!existsSync(ctx.mdPath)) {
     ctx.error(`Error: ${ctx.mdPath} not found — the index has no source of truth to read from.`);
@@ -641,7 +809,9 @@ function ensureFresh(db, states, ctx) {
   // the columns an export needs, which is exactly the silent drop #3703 is
   // about. A version mismatch forces the rebuild that fills them in.
   const version = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version');
-  if (synced && synced.value === mdHash(ctx) && version?.value === SCHEMA_VERSION) return;
+  const ledger = db.prepare('SELECT value FROM meta WHERE key = ?').get('ledger_sha256');
+  if (synced && synced.value === mdHash(ctx) && version?.value === SCHEMA_VERSION
+      && ledger?.value === readLedger(states, ctx).hash) return;
   ctx.error(`(index stale — resyncing from ${ctx.mdPath})`);
   syncIndex(db, states, ctx);
 }
@@ -662,7 +832,45 @@ function rowToMarkdown(r) {
   return `| ${r.id} | ${cleanCell(r.date)} | ${cleanCell(r.company)} | ${cleanCell(r.role)} | ${cleanCell(r.score)} | ${cleanCell(r.status)} | ${cleanCell(r.pdf)} | ${cleanCell(r.report)} | ${cleanCell(r.notes)} |`;
 }
 
+// A spreadsheet sorts and filters on values, so `query --csv` parses the score,
+// PDF and report cells out of their markdown.
+const CSV_COLUMNS = [
+  ['id', (r) => r.id],
+  ['date', (r) => r.date],
+  ['company', (r) => r.company],
+  ['role', (r) => r.role],
+  ['score', (r) => csvScore(r.score)],
+  ['status', (r) => r.status],
+  ['pdf', (r) => (String(r.pdf ?? '').includes('✅') ? 'yes' : 'no')],
+  ['report', (r) => csvReport(r.report)],
+  ['notes', (r) => r.notes],
+];
+
+function csvScore(cell) {
+  const m = String(cell ?? '').replace(/\*\*/g, '').trim().match(/^(\d+(?:[.,]\d+)?)(?:\/5)?(?:\s.*)?$/);
+  return m ? Number(m[1].replace(',', '.')) : '';
+}
+
+function csvReport(cell) {
+  const text = String(cell ?? '').trim();
+  return firstLinkTarget(text) ?? (text === '—' || text === '-' ? '' : text);
+}
+
+function csvField(value) {
+  const cell = escapeFormulaCell(value);
+  return /[",\r\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+}
+
+function rowToCsv(r) {
+  return CSV_COLUMNS.map(([, read]) => csvField(read(r))).join(',');
+}
+
 async function query(args, ctx) {
+  if (args.includes('--csv') && args.includes('--json')) {
+    ctx.error('Error: --csv and --json are two output formats; pass one');
+    throw new TrackerExit(1);
+  }
+
   const DatabaseSync = await loadSqlite(ctx);
   const db = ctx.openDb(DatabaseSync);
   const states = loadStates(ctx);
@@ -685,6 +893,13 @@ async function query(args, ctx) {
     if (!DATE_RE.test(since)) { ctx.error('Error: --since must be YYYY-MM-DD'); throw new TrackerExit(1); }
     where.push('date >= ?'); params.push(since);
   }
+  if (args.some(arg => arg === '--min-score' || arg.startsWith('--min-score='))) {
+    const raw = flagValue(args, '--min-score') ?? '';
+    const minScore = raw.trim() === '' ? NaN : Number(raw);
+    if (!(minScore >= 0 && minScore <= 5)) { ctx.error('Error: --min-score must be a number from 0 to 5'); throw new TrackerExit(1); }
+    const scoreText = "REPLACE(TRIM(score, '*'), ',', '.')";
+    where.push(`${scoreText} GLOB '[0-9]*' AND CAST(${scoreText} AS REAL) >= ?`); params.push(minScore);
+  }
   const idRaw = flagValue(args, '--id');
   if (args.some(arg => arg === '--id' || arg.startsWith('--id='))) {
     const id = parseApplicationId(idRaw);
@@ -700,6 +915,9 @@ async function query(args, ctx) {
   const rows = db.prepare(sql).all(...params);
   if (args.includes('--json')) {
     ctx.log(JSON.stringify(rows, null, 2));
+  } else if (args.includes('--csv')) {
+    ctx.log(CSV_COLUMNS.map(([name]) => name).join(','));
+    for (const r of rows) ctx.log(rowToCsv(r));
   } else {
     ctx.log(HEADER);
     ctx.log(SEPARATOR);
@@ -717,8 +935,14 @@ async function history(args, ctx) {
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
   if (!app) { ctx.error(`Error: no application with id ${id}`); throw new TrackerExit(1); }
   ctx.log(`#${app.id} ${app.company} — ${app.role}`);
-  for (const e of db.prepare('SELECT status, date FROM status_events WHERE app_id = ? ORDER BY id').all(id)) {
-    ctx.log(`  ${e.date}  ${e.status}`);
+  const events = db.prepare('SELECT status, date, source FROM status_events WHERE app_id = ? ORDER BY id').all(id);
+  const width = Math.max(0, ...events.map(e => e.status.length));
+  for (const e of events) {
+    // A change only a sync saw is named as such: nothing in the ledger backs
+    // its date, which is the day of the sync, not the day of the change.
+    ctx.log(e.source === EVENT_SOURCES.sync
+      ? `  ${e.date}  ${e.status.padEnd(width)}  (no ledger row; observed at sync)`
+      : `  ${e.date}  ${e.status}`);
   }
 }
 
@@ -1008,16 +1232,17 @@ const SUBCOMMAND_FLAGS = {
       + '  --check: diagnose only, no write; exit 1 if issues found',
   },
   query: {
-    known: ['--status', '--company', '--role', '--since', '--id', '--limit', '--json', '--help', '-h'],
-    valueFlags: ['--status', '--company', '--role', '--since', '--id', '--limit'],
+    known: ['--status', '--company', '--role', '--since', '--min-score', '--id', '--limit', '--json', '--csv', '--help', '-h'],
+    valueFlags: ['--status', '--company', '--role', '--since', '--min-score', '--id', '--limit'],
     usage: 'Usage: node tracker.mjs query [--status Applied] [--company acme] [--role designer]\n'
-      + '                              [--since 2026-01-01] [--id N] [--limit 20] [--json]',
+      + '                              [--since 2026-01-01] [--min-score 4] [--id N] [--limit 20] [--json | --csv]\n'
+      + '  --csv: one spreadsheet row per application (numeric score, yes/no pdf, report path)',
   },
   history: {
     known: ['--id', '--help', '-h'],
     valueFlags: ['--id'],
     usage: 'Usage: node tracker.mjs history --id N\n'
-      + '  status transition log observed across syncs',
+      + '  status transitions from status-log.tsv, plus changes only a sync saw',
   },
   export: {
     known: ['--out', '--force', '--help', '-h'],
@@ -1047,6 +1272,8 @@ const SUBCOMMAND_FLAGS = {
  * @param {object} options
  * @param {string} options.mdPath - The markdown tracker (source of truth).
  * @param {string} [options.dbPath] - Derived index; defaults to the .db beside mdPath.
+ * @param {string} [options.ledgerPath] - Transition ledger; defaults to the
+ *   status-log.tsv beside mdPath, where set-status.mjs writes it.
  * @param {{write: Function}} [options.stdout=process.stdout] - Command output.
  * @param {{write: Function}} [options.stderr=process.stderr] - Diagnostics.
  * @returns {Promise<number>} The exit status the CLI exits with.
@@ -1080,6 +1307,9 @@ export async function runTracker(command, args = [], options = {}) {
         throw new TrackerExit(1);
       }
       return path;
+    },
+    ledgerPath() {
+      return options.ledgerPath || resolveLedgerPath(mdPath);
     },
   };
   // A bare top-level `--help`/`-h` is a request for usage, not an unknown

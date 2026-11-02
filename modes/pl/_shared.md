@@ -201,7 +201,7 @@ W polskich ofertach i negocjacjach pojawiają się terminy, które nie istnieją
 3. Cytuj dokładne wiersze z CV podczas matchingu
 4. Używaj WebSearch do danych o wynagrodzeniach i firmie
 5. Zapisuj w trackerze po każdej ocenie
-6. Generuj treść w języku oferty (polski, jeśli oferta jest po polsku; angielski w przeciwnym razie)
+6. Generuj treść dla użytkownika w `{language.output}` z `config/profile.yml` (angielski, jeśli nie ustawiono), niezależnie od języka oferty. Zachowuj terminy tego rynku i w razie potrzeby wyjaśniaj je w tym języku
 7. Bądź bezpośredni i konkretny -- bez gadania
 8. Naturalny, techniczny język polski dla generowanych tekstów. Krótkie zdania, czasowniki czynności, unikaj strony biernej. Nie tłumacz na siłę terminów technicznych (stack, pipeline, deployment, embedding)
 8b. **URL-e case studies w Professional Summary PDF-a:** Jeśli PDF wspomina case studies lub dema, URL-e MUSZĄ pojawić się w pierwszym akapicie (Professional Summary). Rekruterzy często czytają tylko summary. Wszystkie URL-e w HTML z `white-space: nowrap`

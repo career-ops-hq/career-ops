@@ -139,11 +139,13 @@ for (let i = 0; i < toProcess.length; i++) {
   const res = spawnSync('claude', claudeArgs, { stdio: 'inherit' });
   if (res.error) {
     console.error(`Error running claude: ${res.error.message}`);
+    process.exitCode = 1;
   } else if (res.status !== 0) {
     console.error(`Worker exited with status ${res.status}`);
+    process.exitCode = 1;
   } else {
     console.log(`✅ Finished tailoring for Report ${job.reportNum}`);
   }
 }
 
-console.log('\nBulk tailoring complete.');
+console.log(process.exitCode ? '\nBulk tailoring completed with worker failures.' : '\nBulk tailoring complete.');

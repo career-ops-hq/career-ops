@@ -30,6 +30,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # Without a limit a hung job holds its runner for GitHub's default of six
+    # hours. test-all.mjs kills a discovered suite that runs past its budget,
+    # but its inline sections and the install steps have no limit of their
+    # own. The slowest leg (macOS) takes about 11 minutes.
+    timeout-minutes: 30
     steps:
       # The repo is committed with LF; Windows runners default to autocrlf,
       # which would rewrite every text file on checkout and make regexes that
@@ -57,6 +62,9 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
+          # The module lives in dashboard/, so without this setup-go looks for
+          # go.sum at the root, warns, and caches nothing.
+          cache-dependency-path: dashboard/go.sum
       # Skip the postinstall (npx playwright install chromium); the tests
       # never launch a browser, so the ~170 MB download is pure CI overhead.
       - run: npm install --ignore-scripts
@@ -67,6 +75,8 @@ jobs:
 
   cv-visual:
     runs-on: ubuntu-latest
+    # About 3 minutes, image build included. Limited for the test job's reason.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -91,6 +101,8 @@ jobs:
   upgrade-gate:
     name: Upgrade regression gate
     runs-on: ubuntu-latest
+    # About 2 minutes. Limited for the test job's reason.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -102,6 +114,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.27'   # old updaters rebuild the dashboard during apply
+          cache-dependency-path: dashboard/go.sum
       - run: npm install --ignore-scripts
       - name: Upgrade PR gate (newest old release -> this commit)
         run: node upgrade-tests.mjs --pr-gate
@@ -111,3 +124,5 @@ jobs:
         run: node upgrade-tests.mjs --local-paths
       - name: User-layer manifest entry is refused, not fatal (#3782)
         run: node upgrade-tests.mjs --user-layer-refusal
+      - name: Failed npm install is reported, rollback reinstalls
+        run: node upgrade-tests.mjs --failed-install

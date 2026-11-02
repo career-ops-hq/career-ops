@@ -127,6 +127,13 @@ try {
   } else {
     fail(`cap: length=${capped.length}, tail=${JSON.stringify(capped.slice(-10))}`);
   }
+
+  const uncapped = htmlToText(longBody, { cap: Infinity });
+  if (uncapped.length === 'word '.repeat(1200).trim().length) {
+    pass('htmlToText(content, { cap: Infinity }) returns the whole text');
+  } else {
+    fail(`cap Infinity: length=${uncapped.length}`);
+  }
 } catch (e) {
   fail(`_html-to-text tests crashed: ${e.message}`);
 }

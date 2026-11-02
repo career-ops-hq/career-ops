@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'followup-cadence.mjs');
@@ -30,7 +31,7 @@ function runCadence(...args) {
 
 test('--help prints usage and exits 0', () => {
   const result = runCadence('--help');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
   assert.match(result.stdout, /node followup-cadence\.mjs/);
   assert.match(result.stdout, /--applied-days 10/);
@@ -38,7 +39,7 @@ test('--help prints usage and exits 0', () => {
 
 test('-h prints usage and exits 0', () => {
   const result = runCadence('-h');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
 });
 

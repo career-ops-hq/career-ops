@@ -97,13 +97,24 @@ try {
       pass('URL-specific history failures do not promote listing identity to aliases');
   } else fail('a URL-specific history failure promoted its listing identity');
 
-    for (const status of ['skipped_expired', 'skipped_no_apply_control']) {
+    // A verification rejection never lends its listing identity to a different
+    // URL, even when the scan meets the rejected URL before the alias. The two
+    // statuses differ only in what they do to their own URL: skipped_expired
+    // pins it until the recheck window releases it, while
+    // skipped_no_apply_control is observational (#4832) and pins nothing, since
+    // a missing Apply control is not proof the posting is closed and the next
+    // --verify scan loads that URL again.
+    for (const [status, pinsOwnUrl] of [['skipped_expired', true], ['skipped_no_apply_control', false]]) {
       const rejected = collectSeenUrls({
         scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key\n${acceptedUrl}\t2026-10-03\tgreenhouse\tStaff Engineer\tAcme\t${status}\tRemote\t\t\t\t\tacme\t\t\t${expectedKey}\n`,
       }, {}, { extraTokensFor: (_url, _portal, key) => key ? `listing:${key}` : null });
-      if (rejected.seen.has(acceptedUrl) && !rejected.seen.has(`listing:${expectedKey}`)
+      const ownUrlSeen = isOfferSeen(first, rejected.seen, rejected.identityPromotableUrls);
+      if (ownUrlSeen === pinsOwnUrl) {
+        pass(`${status} history ${pinsOwnUrl ? 'pins' : 'does not pin'} its own URL`);
+      } else fail(`${status} history ${pinsOwnUrl ? 'released' : 'pinned'} its own URL`);
+      if (!rejected.seen.has(`listing:${expectedKey}`)
           && !isOfferSeen(alias, rejected.seen, rejected.identityPromotableUrls)) {
-        pass(`${status} history pins only its rejected URL, leaving a live identity alias eligible`);
+        pass(`${status} history leaves a live identity alias eligible`);
       } else fail(`${status} history suppressed a different URL through rejected listing identity`);
     }
 

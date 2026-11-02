@@ -31,13 +31,13 @@ for (const [cli, command] of [['codex', 'exec'], ['opencode', 'run'], ['claude',
       rank(['--model', 'fixture/provider-model']);
       const args = JSON.parse(readFileSync(env.RANK_ARGS, 'utf8'));
       assert.equal(args[0], command);
-      assert.match(args[1], /POSTINGS:/);
-      assert.deepEqual(args.slice(2), ['--model', 'fixture/provider-model']);
+      assert.ok(args.some(arg => arg.includes('POSTINGS:')));
+      assert.deepEqual(args.slice(-2), ['--model', 'fixture/provider-model']);
       assert.equal(readFileSync(join(root, 'data', 'pipeline.md'), 'utf8'), `${raw} | rank: 4.0/5 — Fixture match`);
 
       writeFileSync(join(root, 'data', 'pipeline.md'), raw);
       rank([]);
-      assert.equal(JSON.parse(readFileSync(env.RANK_ARGS, 'utf8')).length, 2);
+      assert.equal(JSON.parse(readFileSync(env.RANK_ARGS, 'utf8')).includes('--model'), false);
     } finally {
       rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }

@@ -114,8 +114,11 @@ Die vollständige Bewertung in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` ab
 **Datum:** {YYYY-MM-DD}
 **Archetyp:** {erkannt}
 **Score:** {X/5}
+**Entscheidung:** {Bewerben | Prüfen | Zuerst recherchieren | Überspringen}
 **URL:** {URL der Stellenanzeige}
 **PDF:** {Pfad oder ausstehend}
+
+{der Bewerbungssatz, wortgleich kopiert}
 
 ---
 

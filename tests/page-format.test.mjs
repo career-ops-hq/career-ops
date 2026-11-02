@@ -35,6 +35,7 @@ import {
   normalizePageFormat,
   resolvePageFormat,
 } from '../lib/page-format.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 /** A throwaway workspace whose config/profile.yml states `pageFormat`, or none. */
 function workspace(pageFormat) {
@@ -224,7 +225,7 @@ test('generate-pdf: an unrecognized --format is still a hard error', () => {
     env: workspaceEnv(dir),
     encoding: 'utf-8',
   });
-  assert.notEqual(res.status, 0);
+  assert.ok(exitedNonZero(res), describeSpawn(res, 'expected a non-zero exit'));
   assert.match(res.stderr, /Invalid format "legal"/);
 });
 
@@ -250,6 +251,7 @@ function coverSandbox() {
     copyFileSync(join(ROOT, f), join(dir, f));
   }
   copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(dir, 'lib', 'is-main-module.mjs'));
+  copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(dir, 'lib', 'yaml-document.mjs'));
   // cv-templates.mjs decodes HTML entities when it reads a template's meta
   // block, so the sandbox needs this too. Without it the copied script dies at
   // module load with ERR_MODULE_NOT_FOUND and the format assertion below never

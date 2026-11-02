@@ -1,4 +1,4 @@
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 const DEFAULT_OUTPUT_LANGUAGE = 'en';
 
@@ -33,7 +33,7 @@ function normalizeOutputLanguage(value) {
 export function describeOutputLanguage(profileYaml) {
   let profile;
   try {
-    profile = yaml.load(String(profileYaml ?? '')) || {};
+    profile = loadYaml(String(profileYaml ?? '')) || {};
   } catch {
     return { language: DEFAULT_OUTPUT_LANGUAGE, source: 'unparseable' };
   }

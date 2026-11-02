@@ -1,6 +1,6 @@
 # Mode: melamar -- Asisten live untuk formulir lamaran
 
-Mode interaktif untuk saat kandidat mengisi formulir lamaran di Chrome. Membaca apa yang ada di layar, memuat konteks evaluasi lowongan sebelumnya, dan menghasilkan jawaban yang dipersonalisasi untuk setiap pertanyaan formulir.
+Mode interaktif untuk saat kandidat mengisi formulir lamaran di browser Playwright yang diluncurkan proyek ini. Membaca apa yang ada di layar, memuat konteks evaluasi lowongan sebelumnya, dan menghasilkan jawaban yang dipersonalisasi untuk setiap pertanyaan formulir.
 
 ## Prasyarat
 
@@ -10,7 +10,7 @@ Mode interaktif untuk saat kandidat mengisi formulir lamaran di Chrome. Membaca 
 ## Alur kerja
 
 ```text
-1. DETEKSI      -> Baca tab Chrome yang aktif (tangkapan layar/URL/judul)
+1. DETEKSI      -> Buka lowongan di browser Playwright proyek ini
 2. IDENTIFIKASI -> Ekstrak perusahaan + role dari halaman
 3. CARI         -> Cocokkan dengan report yang ada di reports/
 4. MUAT         -> Baca report lengkap + Blok G (jika ada)
@@ -20,9 +20,14 @@ Mode interaktif untuk saat kandidat mengisi formulir lamaran di Chrome. Membaca 
 8. SAJIKAN      -> Tampilkan jawaban terformat untuk copy-paste
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Langkah 1 -- Deteksi lowongan
 
-**Dengan Playwright:** Snapshot halaman aktif. Baca judul, URL, dan konten yang terlihat.
+**Dengan Playwright:** Jalankan `node apply-scope.mjs launch-options`, buka lowongan di jendela itu, lalu baca judul, URL, dan konten yang terlihat.
 
 **Tanpa Playwright:** Minta kandidat untuk:
 - Membagikan tangkapan layar formulir (Read tool bisa membaca gambar)

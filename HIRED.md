@@ -15,6 +15,20 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=18 level=handle handle=bravely role="Technical Lead Software Engineer" sector="Remote-first Health-tech Startup" geo="Remote US" weeks=22 link="https://github.com/career-ops-hq/career-ops/issues/5761" -->
+### Hire #18
+
+> `career-ops` was such a game changer, I'll never job hunt without it (or something like it) ever again. The portal scan/auto-evaluation pipeline made combing through jobs a breeze
+
+<a href="https://github.com/bravely"><img src="https://github.com/bravely.png?size=64" width="28" height="28" align="top" alt="@bravely"> **@bravely**</a> · Technical Lead Software Engineer · Remote US · 22 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/5761)
+
+<!-- hire n=17 level=handle handle=inesp role="Product Engineer" sector="remote-first, series D startup" geo="remote EU" weeks=6 link="https://github.com/career-ops-hq/career-ops/issues/5397" -->
+### Hire #17
+
+> Remote-first companies are hard to find. I was able to hand over the search to career-ops and it actually found jobs that fit me. The 2nd great feature is it's ability to read the
+
+<a href="https://github.com/inesp"><img src="https://github.com/inesp.png?size=64" width="28" height="28" align="top" alt="@inesp"> **@inesp**</a> · Product Engineer · remote EU · 6 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/5397)
+
 <!-- hire n=16 level=handle handle=rldzkl role="Senior Front-End Developer – UI/UX" sector="Energy sector" geo="Jakarta, Indonesia" weeks=12 link="https://github.com/career-ops-hq/career-ops/issues/5118" -->
 ### Hire #16
 

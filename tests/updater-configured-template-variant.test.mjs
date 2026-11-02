@@ -41,6 +41,7 @@ import {
   loadConfiguredTemplateVariants,
   configuredTemplateVariantsFromProfileSource,
   snapshotConfiguredTemplateVariants,
+  snapshotConfiguredTemplateVariantsAcrossProfiles,
   REEXEC_FALLBACK_FILES,
 } from '../update-system.mjs';
 
@@ -315,5 +316,100 @@ if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
     pass('with no configured variant, an absent-upstream cv-template.*.html is pruned exactly as before this fix');
   } else {
     fail('the fix changed behavior even when config/profile.yml sets no template — should be a no-op by default');
+  }
+}
+
+// ── 4. Two profiles in play (#5026): CAREER_OPS_PROFILE names one profile while ──
+// ──    the data root holds another. The templates dir is the data root's, so  ──
+// ──    a variant EITHER profile selects is protected, not only the override's. ──
+{
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-two-lane-'));
+  try {
+    mkdirSync(join(root, 'config'), { recursive: true });
+    mkdirSync(join(root, 'templates'), { recursive: true });
+    const overrideProfile = join(root, 'elsewhere.yml');
+    writeFileSync(overrideProfile, 'cv:\n  template: alpha\n', 'utf-8');
+    writeFileSync(join(root, 'config', 'profile.yml'), 'cv:\n  template: beta\n', 'utf-8');
+    for (const name of ['alpha', 'beta']) {
+      writeFileSync(join(root, 'templates', `cv-template.${name}.html`), `<p>mine ${name}</p>`, 'utf-8');
+    }
+    const remoteFiles = ['templates/cv-template.alpha.html', 'templates/cv-template.beta.html'];
+    const snapshot = await snapshotConfiguredTemplateVariantsAcrossProfiles({
+      dataRoot: root,
+      profilePaths: [overrideProfile, join(root, 'config', 'profile.yml')],
+      remoteFiles,
+      readRemoteContent: (file) => `<p>upstream ${file}</p>`,
+    });
+    if (JSON.stringify(snapshot.preservedPaths) === JSON.stringify(remoteFiles)) {
+      pass('a locally modified variant is preserved for the override profile AND the data-root profile');
+    } else {
+      fail(`two-profile preserve list was ${JSON.stringify(snapshot.preservedPaths)}, expected both variants`);
+    }
+    const stale = staleSystemFiles(
+      ['templates/cv-template.alpha.html', 'templates/cv-template.beta.html', 'templates/cv-template.gamma.html'],
+      ['templates/cv-template.html'], ['templates/'], [], snapshot.configuredVariants,
+    );
+    if (JSON.stringify(stale) === JSON.stringify(['templates/cv-template.gamma.html'])) {
+      pass('the stale-file prune spares a variant either profile selects and still prunes an unselected one');
+    } else {
+      fail(`two-profile stale list was ${JSON.stringify(stale)}, expected only gamma`);
+    }
+    const one = await snapshotConfiguredTemplateVariantsAcrossProfiles({
+      dataRoot: root, profilePaths: [overrideProfile, overrideProfile], remoteFiles,
+      readRemoteContent: (file) => `<p>upstream ${file}</p>`,
+    });
+    if (JSON.stringify(one.preservedPaths) === JSON.stringify(['templates/cv-template.alpha.html'])) {
+      pass('one distinct profile gives the single-profile answer (a repeated path is read once)');
+    } else {
+      fail(`repeated-profile preserve list was ${JSON.stringify(one.preservedPaths)}`);
+    }
+    // The first profile is the one in force; a later one is read only for the
+    // variants it protects. A stale or malformed data-root profile must not abort
+    // an update for a user whose override never reads it.
+    const brokenProfile = join(root, 'broken.yml');
+    writeFileSync(brokenProfile, 'cv:\n  template: [unterminated\n', 'utf-8');
+    const tolerant = await snapshotConfiguredTemplateVariantsAcrossProfiles({
+      dataRoot: root, profilePaths: [overrideProfile, brokenProfile], remoteFiles,
+      readRemoteContent: (file) => `<p>upstream ${file}</p>`,
+    });
+    if (JSON.stringify(tolerant.preservedPaths) === JSON.stringify(['templates/cv-template.alpha.html'])
+        && tolerant.warnings.length === 1 && tolerant.warnings[0].includes(brokenProfile)
+        && tolerant.warnings[0].split(brokenProfile).length === 2 && /not protected by this update/.test(tolerant.warnings[0])
+        && !/Fix the YAML/.test(tolerant.warnings[0]) && /\(\d+:\d+\)/.test(tolerant.warnings[0]) && !/\n/.test(tolerant.warnings[0])) {
+      pass('an unparsable non-active profile is skipped with a warning that keeps the parser location on one line, and the active profile still protects its variant');
+    } else {
+      fail(`unparsable non-active profile gave preserved ${JSON.stringify(tolerant.preservedPaths)} and warnings ${JSON.stringify(tolerant.warnings)}`);
+    }
+    // An unreadable profile is not a YAML error, and the warning must say what it
+    // was. A directory where the file should be fails to read on every platform
+    // (chmod 000 does nothing on Windows), with the code EISDIR.
+    const unreadableProfile = join(root, 'unreadable.yml');
+    mkdirSync(unreadableProfile);
+    const unreadable = await snapshotConfiguredTemplateVariantsAcrossProfiles({
+      dataRoot: root, profilePaths: [overrideProfile, unreadableProfile], remoteFiles,
+      readRemoteContent: (file) => `<p>upstream ${file}</p>`,
+    });
+    if (unreadable.warnings.length === 1 && /EISDIR/.test(unreadable.warnings[0])
+        && /could not be loaded/.test(unreadable.warnings[0]) && !/could not be parsed/.test(unreadable.warnings[0])) {
+      pass('an unreadable non-active profile is reported with its real reason, not as a YAML error');
+    } else {
+      fail(`unreadable non-active profile gave warnings ${JSON.stringify(unreadable.warnings)}`);
+    }
+    let activeRejected = false;
+    try {
+      await snapshotConfiguredTemplateVariantsAcrossProfiles({
+        dataRoot: root, profilePaths: [brokenProfile, overrideProfile], remoteFiles,
+        readRemoteContent: (file) => `<p>upstream ${file}</p>`,
+      });
+    } catch (err) {
+      activeRejected = /Failed to parse profile YAML/.test(err.message);
+    }
+    if (activeRejected) {
+      pass('an unparsable ACTIVE profile still aborts the update');
+    } else {
+      fail('an unparsable active profile no longer stops the update');
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 }

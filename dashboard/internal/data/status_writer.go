@@ -57,7 +57,10 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 	if err != nil {
 		return err
 	}
-	args := []string{script, "--report-link", report, status, "--json"}
+	// --detach-jd-archive: a move into Interview may start a JD archive that can
+	// outlast the 30s budget below, and this runs inside Bubble Tea's Update, so
+	// waiting froze the TUI and then reported a saved status as timed out.
+	args := []string{script, "--report-link", report, status, "--detach-jd-archive", "--json"}
 	repairKey := tracker + "\x00" + report
 	if strings.EqualFold(status, "applied") {
 		// Only a retry after a partial Applied save may repair missing

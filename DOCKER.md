@@ -5,10 +5,20 @@ Use this when the host can't install Playwright/Chromium directly (e.g. Ubuntu
 laptops). The image is based on Microsoft's official Playwright image, which
 ships Chromium preinstalled and works on any Linux kernel Docker supports.
 
-No feature is dropped: PDF generation, scanner, liveness checker, dashboard
-(Go), batch workers, update system — everything runs inside the container.
-Your project directory is bind-mounted, so reports, CVs, profile, tracker, and
-all generated artifacts live on the host as before.
+The container runs the project's scripts: PDF generation, scanner, liveness
+checker, dashboard (Go), LaTeX, the API-key evaluators (`./cops gemini:eval`)
+and the update system. Your project directory is bind-mounted, so reports, CVs,
+profile, tracker, and all generated artifacts live on the host as before.
+
+**The image has no AI coding CLI.** Claude Code, Codex, OpenCode, Gemini CLI
+and the others are not installed in it, so the agent modes (evaluating a pasted
+job, tailoring a CV, `apply`) run in the CLI on your host. Those modes call
+scripts such as `node generate-pdf.mjs` and `node check-liveness.mjs` directly,
+with the host's Node, so on a host where Playwright can't run, those steps fail
+just as they would without Docker. When one does, run the script yourself
+through `./cops`, for example `./cops pdf output/cv.html output/cv.pdf`.
+Batch mode (`batch/batch-runner.sh`) starts a worker CLI for every offer, so it
+can't run inside the container at all.
 
 ## Prerequisites
 
@@ -58,7 +68,8 @@ Unknown subcommands fall through to `docker compose exec` so anything works:
 ```bash
 ./cops up        # start (idempotent)
 ./cops down      # stop and remove the container (volumes kept)
-./cops rebuild   # full rebuild (use after Dockerfile or deps change)
+./cops rebuild   # rebuild the image and recreate the node_modules volume
+                 # (use after Dockerfile or deps change)
 ./cops logs      # tail container logs
 ```
 
@@ -68,7 +79,8 @@ Unknown subcommands fall through to `docker compose exec` so anything works:
   Go (for the dashboard), LaTeX (for `generate-latex.mjs`), and project deps.
 - `docker-compose.yml` — bind-mounts the project at `/app` so host edits appear
   inside the container immediately. `node_modules` lives in a named volume to
-  avoid host/container ABI mismatches.
+  avoid host/container ABI mismatches. Docker fills that volume from the image
+  only when it is created, so `./cops rebuild` removes and recreates it.
 - `.dockerignore` — keeps generated and personal data out of the build context.
 
 ## API keys
@@ -101,15 +113,17 @@ Career-ops updates work the same as native:
 ./cops update
 ```
 
-If `package.json` deps change, run `./cops rebuild` once to refresh the image
-layer that holds `node_modules`.
+If `package.json` deps change, run `./cops rebuild` once. It rebuilds the image
+and recreates the `node_modules` volume from it, so the container picks up the
+new packages.
 
 ## Troubleshooting
 
 **`docker: not found`** — install Docker Engine + Compose plugin first.
 
 **Playwright still complains** — you're running the host's Node, not the
-container's. Always go through `./cops`.
+container's. Always go through `./cops`. That includes a script an AI CLI on
+the host ran for you: run it again with `./cops node <script>`.
 
 **Permission errors on generated files** — the container runs as root by
 default. If host files end up root-owned, either:

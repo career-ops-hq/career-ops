@@ -1,13 +1,16 @@
-// tests/verifiers-plugin-providers.test.mjs — the scanner and both health
-// checkers must resolve providers through the SAME path (#4026).
+// tests/verifiers-plugin-providers.test.mjs — the scanner and every tool that
+// builds its own provider map must resolve providers through the SAME path
+// (#4026).
 //
 // scan.mjs folds enabled provider plugins into its map with
 // mergeProviderPlugins(). verify-pipeline.mjs and verify-portals.mjs did not,
 // so a supported `provider: <plugin-id>` portals entry was reported as an
-// "unknown provider" that "never scans" — while the scanner scanned it. The
-// divergence is the bug and it can reappear the moment a caller drifts, so it
-// is pinned structurally (three callers must run the call) AND behaviorally
-// (the real verifiers resolve an enabled plugin instead of flagging it).
+// "unknown provider" that "never scans" — while the scanner scanned it.
+// audit-portals.mjs, coverage-check.mjs and doctor.mjs --strict build their own
+// maps too and had the same gap. The divergence is the bug and it can reappear
+// the moment a caller drifts, so it is pinned structurally (every builder must
+// run the call) AND behaviorally (the real tools resolve an enabled plugin
+// instead of flagging it).
 import {
   readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync,
   readdirSync,
@@ -26,7 +29,8 @@ console.log('\nverifiers resolve provider plugins like the scanner (#4026)');
 // test never reads, writes, or deletes the developer's real files. Plugin code
 // resolves from this CODE_ROOT while config/plugins.yml resolves from the
 // separate Data Root, matching a split checkout. Copies the flat scripts plus
-// the four dirs the verifiers reach into; node_modules is symlinked.
+// the dirs the verifiers reach into (scaffolder/ for doctor.mjs); node_modules
+// is symlinked.
 function prepareFixtureCodeRoot(tmp) {
   const codeRoot = join(tmp, 'code-root');
   mkdirSync(codeRoot, { recursive: true });
@@ -35,7 +39,7 @@ function prepareFixtureCodeRoot(tmp) {
       cpSync(join(ROOT, entry.name), join(codeRoot, entry.name));
     }
   }
-  for (const dir of ['providers', 'plugins', 'templates', 'lib', 'batch']) {
+  for (const dir of ['providers', 'plugins', 'templates', 'lib', 'batch', 'scaffolder']) {
     if (existsSync(join(ROOT, dir))) cpSync(join(ROOT, dir), join(codeRoot, dir), { recursive: true });
   }
   // Through the shared helper, so this site and the one in test-all.mjs cannot
@@ -59,14 +63,19 @@ const MINIMAL_TRACKER =
   '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
   '| 1 | 2026-01-05 | Northwind | Backend Engineer | 4.2/5 | Applied | ❌ | - | fixture |\n';
 
-// ── 1. Structural: all three provider-map builders run mergeProviderPlugins ──
+// ── 1. Structural: every provider-map builder runs mergeProviderPlugins ──
+// scan-ats-full.mjs is not one of them on purpose: it scans boards derived
+// from ATS datasets and tracker URLs, never a `provider:` portals entry.
 {
-  const callers = ['scan.mjs', 'verify-pipeline.mjs', 'verify-portals.mjs'];
+  const callers = [
+    'scan.mjs', 'verify-pipeline.mjs', 'verify-portals.mjs',
+    'audit-portals.mjs', 'coverage-check.mjs', 'doctor.mjs',
+  ];
   const missing = callers.filter(
     (f) => !/\bmergeProviderPlugins\s*\(/.test(stripJsComments(readFileSync(join(ROOT, f), 'utf8'))),
   );
   if (missing.length === 0) {
-    pass('scan.mjs, verify-pipeline.mjs and verify-portals.mjs all run mergeProviderPlugins()');
+    pass(`${callers.join(', ')} all run mergeProviderPlugins()`);
   } else {
     fail(`these provider-map builders skip mergeProviderPlugins() and will disagree with the scanner: ${missing.join(', ')}`);
   }
@@ -156,6 +165,55 @@ providerFixture: {
       pass('verify-portals.mjs resolves `apify` to the actionable missing-env plugin stub');
     } else {
       fail(`verify-portals.mjs did not prove apify reached the missing-env plugin path (exit ${portalsRun.code})`);
+    }
+
+    // audit-portals.mjs: before the fix the apify entry audited as
+    // `no-provider`; now it reaches the plugin stub and reports its error.
+    const auditRun = runVerifier('audit-portals.mjs', ['--file', portals, '--json']);
+    let auditRows = null;
+    try { auditRows = JSON.parse(auditRun.out); } catch { /* reported below */ }
+    const auditApify = Array.isArray(auditRows) ? auditRows.find((r) => r.name === 'apify entry') : null;
+    const auditBogus = Array.isArray(auditRows) ? auditRows.find((r) => r.name === 'bogus entry') : null;
+    if (auditApify?.provider === 'apify' && /missing env APIFY_TOKEN/i.test(auditApify.detail || '')) {
+      pass('audit-portals.mjs resolves `apify` to the actionable missing-env plugin stub');
+    } else {
+      fail(`audit-portals.mjs did not resolve the apify plugin: ${JSON.stringify(auditApify) ?? auditRun.out.slice(0, 300)}`);
+    }
+    if (auditBogus && auditBogus.verdict !== 'ok' && auditBogus.provider !== 'definitely-not-a-provider') {
+      pass('audit-portals.mjs still does not resolve a genuinely unknown provider id');
+    } else {
+      fail(`audit-portals.mjs resolved an unknown provider id: ${JSON.stringify(auditBogus)}`);
+    }
+
+    // coverage-check.mjs: before the fix the same entry was diagnosed as
+    // tracked-no-provider ("unknown provider: apify").
+    const coverageRun = runVerifier('coverage-check.mjs', [
+      'https://example.com/jobs/1', '--company', 'apify entry', '--title', 'Backend Engineer', '--json',
+    ]);
+    let coverage = null;
+    try { coverage = JSON.parse(coverageRun.out); } catch { /* reported below */ }
+    const coverageEvidence = (coverage?.evidence || []).join(' | ');
+    if (/provider: apify/.test(coverageEvidence) && !/unknown provider:\s*apify/i.test(coverageEvidence)) {
+      pass('coverage-check.mjs resolves an enabled `apify` plugin provider instead of "unknown provider"');
+    } else {
+      fail(`coverage-check.mjs did not resolve the apify plugin (exit ${coverageRun.code}): ${coverageRun.out.slice(0, 300)}`);
+    }
+    // The plugin is enabled but has no token, so the scanner never reads the
+    // board: the fix must say so rather than "newer than the last scan".
+    if (/APIFY_TOKEN/.test(coverage?.fix || '')) {
+      pass('coverage-check.mjs names the missing APIFY_TOKEN in its fix for an inactive plugin provider');
+    } else {
+      fail(`coverage-check.mjs fix does not name the inactive plugin's reason: ${JSON.stringify(coverage?.fix)}`);
+    }
+
+    // doctor.mjs --strict probes portals.yml through its own provider map.
+    // Before the fix the apify entry was skipped as unclaimed and doctor said
+    // every entry resolves; now it reaches the stub, whose probe fails.
+    const doctorRun = runVerifier('doctor.mjs', ['--strict']);
+    if (/1 portals\.yml entry do not resolve/i.test(doctorRun.out)) {
+      pass('doctor.mjs --strict reports the apify portal entry as unresolved instead of skipping it');
+    } else {
+      fail(`doctor.mjs --strict did not report the apify portal entry (exit ${doctorRun.code}): ${doctorRun.out.slice(0, 600)}`);
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });

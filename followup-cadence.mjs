@@ -14,13 +14,14 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { resolveColumns, parseTrackerRow, firstLinkTarget } from './tracker-parse.mjs';
+import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseStatusLog, foldObservations } from './funnel-velocity.mjs';
 
 // templates/states.yml is System Layer — resolved from the codebase, not from
 // the user's data root (#3500).
@@ -28,8 +29,9 @@ const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 
-const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
+const FOLLOWUPS_FILE = process.env.CAREER_OPS_FOLLOWUPS || join(CAREER_OPS, 'data/follow-ups.md');
+const STATUS_LOG_FILE = join(dirname(APPS_FILE), 'status-log.tsv');
+const PROFILE_FILE = getProfilePath();
 
 
 // --- CLI args ---
@@ -84,7 +86,7 @@ export function loadProfileCadence(profilePath = PROFILE_FILE) {
   if (!profilePath || !existsSync(profilePath)) return {};
   let raw;
   try {
-    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
   } catch {
     return {};
   }
@@ -103,7 +105,7 @@ export function loadProfileCadence(profilePath = PROFILE_FILE) {
 export function loadFollowupsEnabled(profilePath = PROFILE_FILE) {
   if (!profilePath || !existsSync(profilePath)) return true;
   try {
-    return yaml.load(readFileSync(profilePath, 'utf-8'))?.follow_ups?.enabled !== false;
+    return loadYaml(readFileSync(profilePath, 'utf-8'))?.follow_ups?.enabled !== false;
   } catch {
     return true;
   }
@@ -421,19 +423,41 @@ export function isRealCalendarDate(iso) {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
 }
 
+// The day each row moved to Applied, read with funnel-velocity.mjs's ledger
+// rules so corrections and retractions resolve the same way in both reports.
+export function statusLogAppliedDates(statusLogContent) {
+  const dates = new Map();
+  if (!statusLogContent) return dates;
+  let states;
+  try {
+    states = loadCanonicalStates(join(CODEBASE_ROOT, 'templates', 'states.yml'));
+  } catch (err) {
+    console.error(`[followup-cadence] cannot read canonical states, ignoring status-log.tsv: ${err.message}`);
+    return dates;
+  }
+  for (const [num, timeline] of foldObservations(parseStatusLog(statusLogContent, states).observations)) {
+    const applied = timeline.filter(o => o.to === 'Applied' && o.dayMath && isRealCalendarDate(o.date)).pop();
+    if (applied) dates.set(num, applied.date);
+  }
+  return dates;
+}
+
 // Which date the cadence is measured from, and where it came from. A caller
 // cannot otherwise tell a real application date from the evaluation-date proxy,
 // so an inferred age reads exactly like a measured one — and acting on that
 // silently-wrong number is what pushes a live application into "cold".
-export function resolveAppliedDate(app) {
+//
+// Notes rank above the ledger, as in followup-seed.mjs: a transition logged
+// without --on carries the day it was logged, not the day it was sent.
+export function resolveAppliedDate(app, statusLogDate = null) {
   // requireValidCalendarDate: an impossible date in the notes must degrade to
   // the labelled fallback rather than be reported as a measured date. One bad
   // row must not fail the whole report, so this skips rather than throws —
   // unlike followup-seed.mjs, which refuses to pin a follow-up off a bad date.
   const fromNotes = parseAppliedDate(app?.notes, { requireValidCalendarDate: true });
-  return fromNotes
-    ? { appliedDate: fromNotes, appDateSource: 'notes' }
-    : { appliedDate: app?.date ?? null, appDateSource: 'evaluation-date-fallback' };
+  if (fromNotes) return { appliedDate: fromNotes, appDateSource: 'notes' };
+  if (statusLogDate) return { appliedDate: statusLogDate, appDateSource: 'status-log' };
+  return { appliedDate: app?.date ?? null, appDateSource: 'evaluation-date-fallback' };
 }
 
 export function daysBetween(d1, d2) {
@@ -658,7 +682,7 @@ export function loadSelfIdentities(profilePath = PROFILE_FILE) {
   if (!profilePath || !existsSync(profilePath)) return new Set();
   let raw;
   try {
-    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
   } catch {
     return new Set();
   }
@@ -772,13 +796,13 @@ export function contactLabel(contact) {
 
 // --- Resolve report path ---
 export function resolveReportPath(reportField, appsFile = APPS_FILE, repoRoot = CAREER_OPS) {
-  const match = reportField.match(/\]\(([^)]+)\)/);
-  if (!match) return null;
+  const target = firstLinkTarget(reportField);
+  if (target == null) return null;
   // Report links in the tracker are normalized relative to the tracker file's
   // own directory (see PR #760 — `merge-tracker.mjs --migrate`). Resolve against
   // dirname(APPS_FILE), not the project root, otherwise relative paths like
   // `../reports/...` (the data/applications.md layout) escape above the project.
-  const fullPath = join(dirname(appsFile), match[1]);
+  const fullPath = join(dirname(appsFile), target);
   const repoRelative = relative(repoRoot, fullPath).split(sep).join('/');
   if (repoRelative.startsWith('../') || repoRelative === '..' || !repoRelative.startsWith('reports/')) return null;
   return existsSync(fullPath) ? repoRelative : null;
@@ -844,7 +868,7 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 // requires followupCount >= applied_max_followups) simply never triggers —
 // no error, no guessing, matching the same "absent optional file = pass
 // through" convention used elsewhere in this project.
-export function analyzeFromContent(trackerContent, followupsContent = '', { enabled = true } = {}) {
+export function analyzeFromContent(trackerContent, followupsContent = '', { enabled = true, statusLogContent = '' } = {}) {
   if (!enabled) {
     return {
       followupsEnabled: false,
@@ -880,6 +904,7 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
   const followups = parseFollowups(followupsContent);
   const overrides = parseNextOverrides(String(followupsContent ?? ''));
   const cleared = parseClearedDirectives(followupsContent);
+  const appliedOn = statusLogAppliedDates(statusLogContent);
 
   // Group follow-ups by app number
   const followupsByApp = new Map();
@@ -895,10 +920,9 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
     const normalized = normalizeStatus(app.status);
     if (!ACTIONABLE_STATUSES.includes(normalized)) continue;
 
-    // Prefer the "Applied YYYY-MM-DD" date from notes; fall back to the column.
     // appDateSource travels with the entry so a consumer can tell a measured
     // age from one inferred off the evaluation date.
-    const { appliedDate, appDateSource } = resolveAppliedDate(app);
+    const { appliedDate, appDateSource } = resolveAppliedDate(app, appliedOn.get(app.num));
     const appDate = parseDate(appliedDate);
     if (!appDate) continue;
 
@@ -1014,7 +1038,8 @@ function analyze() {
   if (!loadFollowupsEnabled()) return analyzeFromContent('', '', { enabled: false });
   const trackerContent = existsSync(APPS_FILE) ? readFileSync(APPS_FILE, 'utf-8') : '';
   const followupsContent = existsSync(FOLLOWUPS_FILE) ? readFileSync(FOLLOWUPS_FILE, 'utf-8') : '';
-  return analyzeFromContent(trackerContent, followupsContent, { enabled: loadFollowupsEnabled() });
+  const statusLogContent = existsSync(STATUS_LOG_FILE) ? readFileSync(STATUS_LOG_FILE, 'utf-8') : '';
+  return analyzeFromContent(trackerContent, followupsContent, { enabled: loadFollowupsEnabled(), statusLogContent });
 }
 
 // --- Summary mode ---

@@ -198,7 +198,9 @@ export default {
       try {
         json = await fetchJsonWithRetry(ctx, url, { redirect: 'error' }, RETRY_POLICY);
       } catch (err) {
-        if (probing) throw err;
+        // Without a successful first page there is no partial board to keep;
+        // surface the failure so scan/portal-health do not record an empty board.
+        if (probing || page === 0) throw err;
         const attempts = err?.attempts ?? RETRY_POLICY.retries + 1;
         console.error(`⚠️  rippling: ${entry.name} truncated at page ${page + 1} of ${pagesToFetch} after ${attempts} attempts (${jobs.length} jobs): ${err.message}`);
         stopReason = STOP_REASON.FETCH_ERROR;
@@ -224,6 +226,9 @@ export default {
       stopReason = STOP_REASON.CAP;
       console.error(`⚠️  rippling: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length} jobs) — raise max_pages on this entry for more`);
     }
+
+    // Cap and fetch-error stops both leave the board partial; tag it (the workdayTruncated convention).
+    if (stopReason === STOP_REASON.CAP || stopReason === STOP_REASON.FETCH_ERROR) /** @type {any} */ (jobs).ripplingTruncated = true;
 
     return jobs;
   },

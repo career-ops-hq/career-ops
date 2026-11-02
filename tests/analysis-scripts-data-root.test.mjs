@@ -29,6 +29,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -123,7 +124,7 @@ test('system files still resolve from the CODE root, not the data root', () => {
   try {
     const r = run('funnel-velocity.mjs', ['--summary'], f);
     assert.doesNotMatch(r.all, /states\.yml|benchmarks\.yml/i, `a system template was reported missing:\n${r.all.slice(0, 400)}`);
-    assert.equal(r.status, 0, `exited ${r.status}: ${r.all.slice(0, 400)}`);
+    assert.equal(r.status, 0, describeSpawn(r, `exited ${r.status}: ${r.all.slice(0, 400)}`));
   } finally { cleanup(f); }
 });
 

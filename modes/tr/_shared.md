@@ -59,6 +59,15 @@ Değerlendirme 6 blok (A-F) üzerinden yapılır ve 1-5 arası global bir puan v
 - 3,5-3,9 → Kabul edilebilir ama ideal değil; kullanıcı belirli bir neden söylemedikçe başvurmamayı öner (AGENTS.md'deki Ethical Use sınırı 4,0'da çizer)
 - 3,5'in altı → Başvuru önerilmez (CLAUDE.md'deki Etik Kullanım bölümüne bakın)
 
+**"Kültürel Sinyaller" boyutu nasıl puanlanır:**
+1. `config/profile.yml` dosyasından `culture_screen.require` alanını okuyun. Eğer `culture_screen` eksik veya boşsa, yapısal puan kısıtlamasını atlayın ve boyutu şirket büyüklüğü, uzaktan çalışma politikası ve istikrara göre nitel olarak puanlayın.
+2. İş tanımında (JD) ve Blok G şirket araştırmasında bu gereksinimlere karşılık gelen kanıtları aktif olarak arayın (örn. ekip büyüklüğünden bahsedilmesi, organizasyon şemasının derinliği/yönetici katmanları, toplantı kültürü dili, şirket aşaması).
+3. **Eğer çoğu `require` kriteri için olumlu kanıt varsa** → 4-5 puan verin.
+4. **Eğer bazı kriterler için olumlu kanıt varsa ve hiçbiri çelişmiyorsa** → 3 puan verin.
+5. **Eğer kanıtlar `require` kriterleriyle çelişiyorsa** → **bu boyutu 2/5 ile sınırlayın** ve eksik olanı veya çelişeni belirten Blok A Kültürel Sinyaller alanına açık bir satır ekleyin. Yüksek bir CV eşleşme puanının bunu sessizce telafi etmesine izin vermeyin — bunu ön plana çıkarın, saklamayın.
+6. **Eğer hiçbir `require` kriteri için kanıt yoksa** → varsayılan olarak 3 puan verin, ancak `culture_screen.deprioritize_if_absent: true` ayarlanmışsa, bu durumda **bu boyutu 2/5 ile sınırlayın**.
+7. Genel olarak 4,5+ puan alan ancak Kültürel Sinyallerden 2 veya daha düşük alan bir rol, raporda açık bir uyarı taşımalıdır: "Yüksek teknik uyum, doğrulanmamış/zayıf kültür uyumu — başvurmadan önce doğrulayın."
+
 ## İlan Meşruiyeti (Blok G)
 
 Blok G, ilanın gerçek ve aktif bir açık pozisyon olup olmadığını değerlendirir. 1-5 global puanı **etkilemez** — ayrı bir nitel tespittir.
@@ -278,7 +287,7 @@ Türkçe iş ilanlarında ve sözleşme müzakerelerinde, yabancı piyasalarda k
 3. CV eşleştirmesinde dosyadan tam satır alıntıla
 4. Maaş ve şirket bilgisi için WebSearch kullan
 5. Değerlendirmeden sonra takipçiye kaydet
-6. İçeriği ilanın dilinde üret — ilan Türkçeyse Türkçe, İngilizce ise İngilizce
+6. Kullanıcıya yönelik içeriği, ilanın dili ne olursa olsun `config/profile.yml` içindeki `{language.output}` dilinde üret (ayarlı değilse İngilizce). Bu pazarın terimlerini koru ve gerektiğinde o dilde açıkla
 7. Doğrudan ve eyleme dönük ol — gereksiz ayrıntı yazma
 8. Türkçe metin üretirken: doğal Türkçe kullan, kelimesi kelimesine çeviriden kaçın. Kısa cümleler, aktif fiiller. Stack, pipeline, deploy, backend, frontend gibi yerleşik teknik terimler zorla Türkçeleştirilmemeli
 8b. **PDF Professional Summary'de vaka çalışması URL'leri:** Adayın demo veya proje linki varsa ilk paragrafta göster — recruiter genellikle sadece summary'i okur

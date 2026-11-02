@@ -189,6 +189,11 @@ try {
   } else {
     fail(`jibeapply fetch cap: expected a truncation warning, got ${JSON.stringify(jibeCapWarnings)}`);
   }
+  if (fetchedHuge.jibeapplyTruncated === true) {
+    pass('jibeapply.fetch() tags a cap-truncated board jibeapplyTruncated');
+  } else {
+    fail(`jibeapply cap-truncated board should carry jibeapplyTruncated, got ${fetchedHuge.jibeapplyTruncated}`);
+  }
 
   // fetch() pagination cap — entry.max_pages raises the cap for a genuinely
   // large tenant (e.g. a Workday-scale Deutsche Bank equivalent on JibeApply)
@@ -257,6 +262,11 @@ try {
     pass('jibeapply.fetch() warns (console.error) when a page fetch fails mid-pagination');
   } else {
     fail(`jibeapply fetch page failure: expected a fetch-failed warning, got ${JSON.stringify(jibeFlakyWarnings)}`);
+  }
+  if (fetchedFlaky.jibeapplyTruncated === true) {
+    pass('jibeapply.fetch() tags a failed-page board jibeapplyTruncated');
+  } else {
+    fail(`jibeapply failed-page board should carry jibeapplyTruncated, got ${fetchedFlaky.jibeapplyTruncated}`);
   }
 
   // fetch() with explicit entry.api (non-jibeapply.com host)

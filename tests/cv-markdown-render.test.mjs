@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -57,7 +58,7 @@ test('--markdown renders the payload with resolved titles in builder order', () 
 
 test('--markdown rejects an invalid payload and writes nothing', () => {
   const { r, outPath } = run({ ...payload, education: [{ institution: 'X', degree: 'Y' }] });
-  assert.notEqual(r.status, 0);
+  assert.ok(exitedNonZero(r), describeSpawn(r, 'expected a non-zero exit'));
   assert.equal(existsSync(outPath), false);
 });
 
@@ -66,7 +67,7 @@ test('--markdown without an output path fails with usage', () => {
   const inPath = join(dir, 'in.json');
   writeFileSync(inPath, JSON.stringify(payload));
   const r = spawnSync(process.execPath, ['build-cv-html.mjs', inPath, '--markdown'], { cwd: ROOT, encoding: 'utf8' });
-  assert.notEqual(r.status, 0);
+  assert.ok(exitedNonZero(r), describeSpawn(r, 'expected a non-zero exit'));
   assert.match(r.stderr, /--markdown <output\.md>/);
 });
 
@@ -98,7 +99,7 @@ test('--markdown refuses to overwrite the input file', () => {
   writeFileSync(inPath, original);
   const alias = join(dir, '.', 'in.json');
   const r = spawnSync(process.execPath, ['build-cv-html.mjs', inPath, '--markdown', alias], { cwd: ROOT, encoding: 'utf8' });
-  assert.notEqual(r.status, 0);
+  assert.ok(exitedNonZero(r), describeSpawn(r, 'expected a non-zero exit'));
   assert.match(r.stderr, /Output path is the input file/);
   assert.equal(readFileSync(inPath, 'utf8'), original);
 });

@@ -445,7 +445,7 @@ func GenerateInsights(sm model.StatsMetrics) []string {
 	if len(sm.WorkModes) > 0 {
 		topMode := sm.WorkModes[0]
 		insights = append(insights, fmt.Sprintf(i18n.Current.InsightWorkMode,
-			topMode.Pct, topMode.Label))
+			topMode.Pct, i18n.Current.WorkModeLabel(topMode.Label)))
 	}
 
 	// Pay insight

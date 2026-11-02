@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { trackerTsvLine as coreLine } from "../lib/tracker-addition.mjs";
 import { writeEvaluationArtifacts } from "../persist-evaluation-report.mjs";
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, "persist-evaluation-report.mjs");
@@ -109,7 +110,7 @@ test("a bad reportFile writes nothing", () => {
       input: JSON.stringify(payload({ reportFile: "../secret.md" })),
       encoding: "utf8",
     });
-    assert.notEqual(result.status, 0);
+    assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
     assert.match(result.stderr, /refusing to write report/);
     assert.equal(existsSync(join(root, "reports")), false);
     assert.equal(existsSync(join(root, "batch")), false);
@@ -126,7 +127,7 @@ test("stdin that is not JSON exits non-zero", () => {
       input: "not-json",
       encoding: "utf8",
     });
-    assert.notEqual(result.status, 0);
+    assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
     assert.match(result.stderr, /JSON/);
     assert.equal(existsSync(join(root, "reports")), false);
   } finally {

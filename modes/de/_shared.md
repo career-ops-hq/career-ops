@@ -198,7 +198,7 @@ In deutschen Stellenanzeigen und Vertragsverhandlungen tauchen Begriffe auf, die
 3. Beim Matching exakte Zeilen aus dem Lebenslauf zitieren
 4. WebSearch für Vergütungs- und Firmendaten nutzen
 5. Nach jeder Bewertung im Tracker eintragen
-6. Inhalte in der Sprache der Stellenanzeige erzeugen (Deutsch, wenn die Anzeige deutsch ist; Englisch sonst)
+6. Inhalte für den Nutzer in `{language.output}` aus `config/profile.yml` erzeugen (Englisch, wenn nicht gesetzt), unabhängig von der Sprache der Stellenanzeige. Begriffe dieses Marktes beibehalten und bei Bedarf in dieser Sprache erklären
 7. Direkt und konkret sein — keine Floskeln
 8. Beim Erzeugen deutscher Texte (PDF-Summaries, Bullets, LinkedIn-Nachrichten, STAR-Stories): natürliches Tech-Deutsch, keine wörtliche Übersetzung. Kurze Sätze, aktive Verben, Passiv vermeiden. Fachbegriffe (Stack, Pipeline, Deployment, Embedding) nicht zwanghaft eindeutschen
 8b. **Case-Study-URLs in der PDF Professional Summary:** Wenn das PDF Case Studies oder Demos erwähnt, MÜSSEN die URLs schon im ersten Absatz (Professional Summary) auftauchen. Recruiter lesen oft nur die Summary. Alle URLs im HTML mit `white-space: nowrap`

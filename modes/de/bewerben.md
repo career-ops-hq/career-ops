@@ -1,6 +1,6 @@
 # Modus: bewerben — Live-Assistent fürs Bewerbungsformular
 
-Interaktiver Modus für den Moment, in dem der Kandidat in Chrome ein Bewerbungsformular ausfüllt. Liest, was auf dem Bildschirm steht, lädt den Kontext der vorherigen Bewertung der Stellenanzeige und erzeugt passgenaue Antworten für jede Frage des Formulars.
+Interaktiver Modus für den Moment, in dem der Kandidat ein Bewerbungsformular in dem Playwright-Browser ausfüllt, den dieses Projekt startet. Liest, was auf dem Bildschirm steht, lädt den Kontext der vorherigen Bewertung der Stellenanzeige und erzeugt passgenaue Antworten für jede Frage des Formulars.
 
 ## Voraussetzungen
 
@@ -10,7 +10,7 @@ Interaktiver Modus für den Moment, in dem der Kandidat in Chrome ein Bewerbungs
 ## Workflow
 
 ```
-1. ERKENNEN     → aktiven Chrome-Tab lesen (Screenshot / URL / Titel)
+1. ERKENNEN     → Stellenanzeige in der Playwright-Sitzung dieses Projekts öffnen
 2. IDENTIFIZIEREN → Firma + Rolle aus der Seite extrahieren
 3. SUCHEN       → mit bestehenden Reports unter reports/ abgleichen
 4. LADEN        → vollständigen Report lesen + Block G (falls vorhanden)
@@ -20,9 +20,14 @@ Interaktiver Modus für den Moment, in dem der Kandidat in Chrome ein Bewerbungs
 8. PRÄSENTIEREN → Antworten formatiert zum Copy-Paste ausgeben
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Schritt 1 — Stellenanzeige erkennen
 
-**Mit Playwright:** Snapshot der aktiven Seite. Titel, URL und sichtbaren Inhalt lesen.
+**Mit Playwright:** `node apply-scope.mjs launch-options` ausführen, die Stellenanzeige in diesem Fenster öffnen und Titel, URL und sichtbaren Inhalt lesen.
 
 **Ohne Playwright:** Den Kandidaten bitten, eines der folgenden zu tun:
 - Einen Screenshot des Formulars teilen (das Read-Tool kann Bilder lesen)

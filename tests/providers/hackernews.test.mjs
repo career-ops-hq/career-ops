@@ -130,7 +130,8 @@ try {
       { objectID: 'c3', text: '' },                      // empty — should be skipped
       {
         objectID: 'c4',
-        text: 'Freelance gig, no URL here, DM me.',      // no URL — falls back to thread URL
+        id: 42424299,
+        text: 'Freelance gig, no URL here, DM me.',      // no URL — falls back to its own permalink
         created_at: '2025-06-01T11:00:00Z',
       },
     ],
@@ -194,8 +195,8 @@ try {
     fail(`hackernews.fetch() postedAt: ${JSON.stringify(jobs[0]?.postedAt)}`);
   }
 
-  if (jobs[1]?.url === FAKE_THREAD_URL) {
-    pass('hackernews.fetch() falls back to thread URL for comments with no link');
+  if (jobs[1]?.url === 'https://news.ycombinator.com/item?id=42424299' && jobs[1]?.url !== FAKE_THREAD_URL) {
+    pass('hackernews.fetch() falls back to the comment permalink, not the thread, for comments with no link');
   } else {
     fail(`hackernews.fetch() fallback url: ${JSON.stringify(jobs[1]?.url)}`);
   }

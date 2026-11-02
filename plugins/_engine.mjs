@@ -52,7 +52,7 @@ export const RESERVED_ENV = new Set([
   'PATH', 'HOME', 'NODE_OPTIONS', 'LD_PRELOAD', 'NODE_EXTRA_CA_CERTS',
 ]);
 
-const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+export const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_HOOK_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
 
@@ -112,13 +112,8 @@ export async function loadPluginConfig(root) {
   const file = pluginsConfigPath(root);
   if (!existsSync(file)) return {};
   try {
-    // Named, not `.default`: js-yaml 5 ships a native ESM build with no default
-    // export, so `.default` is undefined there and `yaml.load` throws straight
-    // into the catch below. That catch fails OPEN — it returns {}, so every
-    // configured plugin silently stops loading and the only trace is one ⚠️ line
-    // that reads like a malformed config. The named form resolves on 4.x and 5.x.
-    const { load } = await import('js-yaml');
-    const parsed = load(readFileSync(file, 'utf8'));
+    const { loadYaml } = await import('../lib/yaml-document.mjs');
+    const parsed = loadYaml(readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
     warnSkip('config/plugins.yml', `unreadable, ignoring — ${err.message}`);
@@ -223,6 +218,13 @@ export function validateManifest(m, dir, dirName) {
     if (isLoopback && !allowsLocalhost) { warnSkip(label, `allowedHosts contains a loopback host without allowsLocalhost: ${h}`); return null; }
   }
 
+  // Optional: the plugin's ingest/search results are job postings, so they get
+  // the scanner's discovery filters (data/blacklist.md, title_filter,
+  // location_filter) and a scan-history row. Absent means the results may be
+  // something else — an interview event, an enrichment record — and only the
+  // tracker/pipeline/scan-history dedup applies (#5478).
+  if (m.jobPostings !== undefined && typeof m.jobPostings !== 'boolean') { warnSkip(label, 'jobPostings must be true or false'); return null; }
+
   const entry = typeof m.entry === 'string' && m.entry.trim() ? m.entry : 'index.mjs';
   if (!entry.endsWith('.mjs')) { warnSkip(label, `entry "${entry}" must be a .mjs file`); return null; }
   const entryAbs = path.resolve(dir, entry);
@@ -253,6 +255,7 @@ export function validateManifest(m, dir, dirName) {
     entry,
     skill,
     humanInTheLoop: true,
+    jobPostings: m.jobPostings === true,
     name: typeof m.name === 'string' ? m.name : undefined,
     version: typeof m.version === 'string' ? m.version : undefined,
     homepage: typeof m.homepage === 'string' ? m.homepage : undefined,
@@ -749,6 +752,9 @@ export function filterResultsForId(results, id) {
 function inactiveProviderStub(id, reason) {
   return {
     id,
+    // Read by tools that diagnose without fetching (coverage-check.mjs), so
+    // they can say why the board is never scanned instead of calling it live.
+    inactiveReason: reason,
     detect: () => null,
     fetch: async () => { throw new Error(`plugin "${id}" inactive: ${reason}. Run \`node doctor.mjs\` for setup.`); },
   };

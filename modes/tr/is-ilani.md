@@ -137,9 +137,12 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
      eder; yapmaması gereken, kullanıcının gerçekten sahip olduğu bir hedefin yerine
      geçmektir. -->
 **Puan:** {X.X}/5
+**Karar:** {Başvur | Değerlendir | Önce araştır | Geç}
 **URL:** {ilan URL'si}
 **PDF:** ✅/❌
 **Meşruiyet:** {Güvenilir | Dikkatli İlerle | Şüpheli}
+
+{`## Karar (lead)` cümlesi, kelimesi kelimesine}
 
 ---
 

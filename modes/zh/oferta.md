@@ -246,8 +246,11 @@
 **URL:** {职位原链接}
 **Archetype:** {检测到的画像分类}
 **Score:** {X/5}
+**决定:** {申请 | 考虑 | 先调研 | 跳过}
 **Legitimacy:** {高置信度 | 谨慎推进 | 疑似虚假}
 **PDF:** {CV生成状态，如 ❌ 或 ✅}
+
+{`## 结论 (lead)` 的那一句，逐字复制}
 
 ---
 
@@ -285,7 +288,12 @@
 
 ## ATS 关键词提取
 (列出 15-20 个从该 JD 中提取的高频核心技术/业务关键词，用于简历优化)
+
+## Job Description (archived verbatim)
+（职位描述全文，逐字粘贴——见下方要求）
 ```
+
+**JD 存档（必须，#2789）：** 每份报告都必须包含 `## Job Description (archived verbatim)` 一节，原样粘贴职位描述全文，不得摘要或改写。该标题保持英文，因为 `check-jd-archive.mjs` 按名称查找它。`**URL:**` 不是存档：职位关闭后链接即失效，原始要求就再也找不回来。该节第一行写来源上可见的发布日期（`Posted: {日期或页面上显示的相对时间}`，确实没有时写 `Posted: not visible in source`），不要用报告文件自身的时间代替。若 JD 过长或无法完整引用，用 `archive-posting.mjs <url> --company={company-slug} --report={num}` 存档，并在该节中**只**写这一句：`See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`。不得用改写代替原文；完整规则见 `modes/oferta.md` 的 **JD archival**。
 
 ### 2. 登记到 Tracker 记录簿
 将此条记录登记到 tracker：写入 TSV 文件（`_shared.md` 的规则 9），再用 `node merge-tracker.mjs` 合并；严禁直接在 `data/applications.md` 中手动添加行。字段：

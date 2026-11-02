@@ -37,12 +37,17 @@ const RSS_SOURCES = {
     'https://www.prnewswire.com/rss/venture-capital-list.rss',
   ],
   guardian: ['https://www.theguardian.com/technology/rss'],
+  // Opt-in (not in DEFAULT_SOURCES): public, no-auth RSS checked 2026-10-16.
+  // Tech trade press that regularly carries funding announcements: a 1-month
+  // dry run read 30 items, 8 funding-like, and produced 4 candidates.
+  siliconangle: ['https://siliconangle.com/feed/'],
 };
 
 const SOURCE_HOSTS = {
   techcrunch: ['techcrunch.com'],
   prnewswire: ['prnewswire.com'],
   guardian: ['theguardian.com'],
+  siliconangle: ['siliconangle.com'],
   hacker_news: ['hn.algolia.com', 'news.ycombinator.com'],
 };
 
@@ -50,6 +55,7 @@ const SOURCE_RANK = {
   techcrunch: 70,
   prnewswire: 65,
   guardian: 50,
+  siliconangle: 45,
   hacker_news: 35,
   web: 5,
 };
@@ -94,6 +100,7 @@ Options:
   --months <n>            Recent-funding window. Default: 3.
   --sort <date|score>     Candidate ordering. Default: date.
   --sources <csv>         Sources. Default: techcrunch,prnewswire,guardian,hn.
+                          Also available: siliconangle.
   --dry-run               Print only; do not write report/JSON files.
   --json                  Print machine-readable JSON.
   --self-test             Run offline self-test.
@@ -141,7 +148,7 @@ function parseSources(value) {
     .map((s) => normalizeSourceName(s.trim()))
     .filter(Boolean);
   const unique = [...new Set(out)];
-  const allowed = new Set(['techcrunch', 'prnewswire', 'guardian', 'hn']);
+  const allowed = new Set(['techcrunch', 'prnewswire', 'guardian', 'siliconangle', 'hn']);
   for (const source of unique) {
     if (!allowed.has(source)) throw new Error(`unknown source in --sources: ${source}`);
   }
@@ -819,7 +826,7 @@ async function fetchHnDiscovery({ months = DEFAULT_MONTHS, now = new Date(), dia
 async function collectDiscoveryItems(opts, diagnostics) {
   const requested = new Set(opts.sources || DEFAULT_SOURCES);
   const hits = [];
-  for (const source of ['techcrunch', 'prnewswire', 'guardian']) {
+  for (const source of ['techcrunch', 'prnewswire', 'guardian', 'siliconangle']) {
     if (requested.has(source)) hits.push(...await fetchRssDiscovery(source, diagnostics));
   }
   if (requested.has('hn')) {

@@ -8,6 +8,7 @@ import {
   validateListingFingerprint,
   listingKey,
 } from '../listing-fingerprint.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const STRONG = { ats_provider: 'greenhouse', board_slug: 'example', posting_id: '12345' };
 // Pinned contract fixture: consumers must derive this key without URL context.
@@ -299,7 +300,7 @@ test('CLI rejects malformed JSON and records without leaking raw input or stack 
   for (const args of inputs) {
     const result = runCli(...args);
     assert.equal(result.error, undefined);
-    assert.notEqual(result.status, 0);
+    assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
     const output = result.stdout + result.stderr;
     assert.ok(output.trim().length > 0);
     assert.ok(!output.includes(privateValue));

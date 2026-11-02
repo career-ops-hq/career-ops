@@ -8,10 +8,12 @@ on:
   pull_request:
     paths:
       - 'web/**'
+      - '.github/workflows/web-ci.yml'
   push:
     branches: [main]
     paths:
       - 'web/**'
+      - '.github/workflows/web-ci.yml'
 
 permissions:
   contents: read
@@ -30,6 +32,12 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # The doctor parity test runs the real core doctor.mjs, which imports the
+      # core's own dependencies (js-yaml, dotenv). Installed the same way as
+      # test.yml: no lockfile at the root, and no browser download.
+      - name: Install core dependencies
+        run: npm install --ignore-scripts
+        working-directory: .
       - run: npm ci
       - run: npm test
       - run: npx tsc --noEmit

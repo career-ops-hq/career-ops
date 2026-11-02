@@ -1114,7 +1114,13 @@ export default {
           referer: `${ep.jobBase}/`,
         },
       };
-      const placeholders = jobs.filter((j) => isMultiLocationPlaceholder(j.location));
+      // A caller that will drop postings on their title (scan.mjs passes its
+      // title_filter as ctx.titleWanted) gets no detail GET spent on them: on a
+      // large tenant most placeholders belong to titles the scan discards.
+      const titleWanted = typeof ctx.titleWanted === 'function' ? ctx.titleWanted : null;
+      const allPlaceholders = jobs.filter((j) => isMultiLocationPlaceholder(j.location));
+      const placeholders = titleWanted ? allPlaceholders.filter((j) => titleWanted(j.title)) : allPlaceholders;
+      const skippedByTitle = allPlaceholders.length - placeholders.length;
       // The detail document lives at the same externalPath under the CXS host.
       // `job.url` is `jobBase + externalPath` (parseWorkdayResponse), so the
       // path is recovered by removing the prefix rather than by re-parsing a
@@ -1187,7 +1193,7 @@ export default {
           redated++;
         }
       }
-      if (placeholders.length > 0) {
+      if (allPlaceholders.length > 0) {
         const capped = pending.length > attempted ? `, ${pending.length - attempted} left unresolved by the ${MAX_DETAIL_REQUESTS}-request cap` : '';
         const unreadable = failed > 0 ? `, ${failed} detail document(s) unreadable` : '';
         const unroutable = unaddressable > 0 ? `, ${unaddressable} with no site-relative path` : '';
@@ -1195,7 +1201,8 @@ export default {
         // detail document can carry places but no parseable startDate. Folding
         // them into one number would hide that.
         const dated = redated > 0 ? `, ${redated} dated exactly from the detail document` : '';
-        console.error(`ℹ️  workday: ${entry.name} resolved ${resolved} of ${placeholders.length} multi-location placeholder(s)${unreadable}${unroutable}${capped}${dated}`);
+        const notWanted = skippedByTitle > 0 ? `, ${skippedByTitle} skipped by the title filter` : '';
+        console.error(`ℹ️  workday: ${entry.name} resolved ${resolved} of ${placeholders.length} multi-location placeholder(s)${unreadable}${unroutable}${capped}${dated}${notWanted}`);
       }
     }
 

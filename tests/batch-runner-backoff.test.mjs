@@ -103,6 +103,7 @@ function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429'
       return 1
     }
     qwen() { claude; }
+    run_worker() { "$@"; }
     sleep() { printf 'SLEEP:%s\n' "$1"; }
     update_state_retrying() { printf 'STATE:%s:%s:%s\n' "$3" "$8" "$9"; }
     worker() {

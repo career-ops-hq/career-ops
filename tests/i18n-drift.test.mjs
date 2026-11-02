@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { extractHeadings, compareStructure, discoverLangs, checkLang, formatReport, toJSON } from '../i18n-drift.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -307,13 +308,13 @@ test('CLI is advisory, accepts repeated language selection, and resolves modes o
   });
   installCLI(root);
   const result = runCLI(root, ['--lang', 'zh', '--lang=ar', '--json'], join(root, 'elsewhere'));
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   const output = JSON.parse(result.stdout);
   assert.deepEqual(output.map(({ lang }) => lang).sort(), ['ar', 'zh']);
   assert.equal(output.find(({ lang }) => lang === 'zh').summary.missingCount, 1);
   assert.equal(output.find(({ lang }) => lang === 'ar').summary.missingCount, 0);
   const summary = runCLI(root, ['--lang', 'zh', '--summary']);
-  assert.equal(summary.status, 0, summary.stderr);
+  assert.equal(summary.status, 0, describeSpawn(summary));
   assert.match(summary.stdout, /zh/);
 });
 
@@ -336,7 +337,7 @@ test('CLI help works without a modes directory, while a normal run reports the m
   const root = fixture(t);
   installCLI(root);
   const help = runCLI(root, ['--help']);
-  assert.equal(help.status, 0, help.stderr);
+  assert.equal(help.status, 0, describeSpawn(help));
   assert.match(help.stdout, /i18n-drift\.mjs/);
   assert.match(help.stdout, /--lang/);
   const result = runCLI(root, []);

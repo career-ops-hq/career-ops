@@ -228,11 +228,28 @@ Rules for the transcript:
 
 ---
 
+## Step 10 — Record the call on the tracker
+
+After the debrief is saved, record confirmed facts on the application. Match a new fact to a dealbreaker the user already wrote in `modes/_profile.md` or `config/profile.yml`. Show the fact and the profile sentence. Ask `Record this dealbreaker on the report and the tracker? [y/N]`. On yes, pass that sentence as `--dealbreaker`. On no, omit it.
+
+For each named person, ask `Save this contact to data/contacts.tsv? [y/N]`. On yes, pass the name, the email if one was given, and the type if the user named one.
+
+If the next step names one clear calendar day, pass `--next YYYY-MM-DD` with no second question. Resolve a weekday from the local calendar day, and today counts. If the phrase has no day, omit `--next`. If it is ambiguous (`next week`, two days), ask for one date and then pass it.
+
+Run `node debrief-sync.mjs` with those flags. Then, when a contact was saved, run `node contacts.mjs --summary`. When a day was pinned, run `node followup-cadence.mjs --summary`.
+
+Do not change status unless the user names a new status. That is a separate `set-status.mjs` call, before this command.
+
+A second run of the same command is safe.
+
+---
+
 ## Rules
 
 - **Debrief immediately.** Memory of interview details degrades fast — within hours, specific questions and reactions are forgotten. Run this skill the same day.
 - **Don't soften gaps.** A 🔴 gap that gets called 🟡 out of kindness will show up again in the next round.
-- **Never put invented claims in the candidate's mouth.** Correct/complete answers may draw on general domain knowledge, but any suggested personal claim or metric must come from what the candidate said, `cv.md`, `article-digest.md`, or the story bank.
+- **Never put invented claims in the candidate's mouth.** Correct/complete answers may draw on general domain knowledge, but any suggested personal claim or metric must come from what the candidate said, `cv.md`, `article-digest.md`, or the story bank under the provenance rule below.
+- **Story-bank figures need provenance.** The story bank supplies narrative and phrasing; its numbers are not `cv.md`-equivalent (AGENTS.md, Source-of-Truth Boundary). Before a story-bank figure goes into a corrected answer, a gap fix or a new story, run `node story-provenance-check.mjs --summary` and follow its bucket for that figure: `existing` may be used; `supportedByResume` and `derived-unverified` are never restated as fact, so either leave the number out or ask the candidate with AGENTS.md's four outcomes (confirm as stated, give the correct figure, narrative only, "I don't know") rather than a leading confirm/deny; `user-cannot-confirm` is never used as a figure, only as narrative. This mode does not write the `**Provenance:**` marker; the candidate's answer holds for this session.
 - **Retracted claims are a hard gate.** If a claim appears in `interview-prep/retracted-claims.md`, never suggest the candidate use it — even if they said it in the real interview. Flag it: "That claim is in your retracted list — it's not defensible under pressure. Here's a version that doesn't depend on it."
 - **Record new retractions.** If the debrief reveals a claim the candidate used in the real interview that they now agree isn't defensible, offer to append it to `interview-prep/retracted-claims.md`: `**"[claim]"** ([context]). Reason: [one-line reason + correct framing if applicable].`
 - **Extract vocabulary gaps explicitly.** If the candidate used an imprecise term where a precise one exists, add it to `interview-prep/interview-prep-guide.md` under the vocabulary section (if the candidate maintains one).

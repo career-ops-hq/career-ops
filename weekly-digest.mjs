@@ -40,7 +40,7 @@
 import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -109,7 +109,7 @@ export function parseSessionFile(content) {
   if (!match) return null;
   let front;
   try {
-    front = yaml.load(match[1]) || {};
+    front = loadYaml(match[1]) || {};
   } catch {
     return null;
   }

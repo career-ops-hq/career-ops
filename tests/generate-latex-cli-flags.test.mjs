@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'generate-latex.mjs');
@@ -34,7 +35,7 @@ test('generate-latex help prints usage instead of reading a file named --help', 
   for (const flag of ['--help', '-h']) {
     const result = runLatex(flag);
 
-    assert.equal(result.status, 0, `${flag} exited ${result.status}, want 0`);
+    assert.equal(result.status, 0, describeSpawn(result, `${flag} exited ${result.status}, want 0`));
     assert.match(result.stdout, /Usage:/i, `${flag} printed no usage block`);
     assert.match(result.stdout, /node generate-latex\.mjs/, `${flag} did not identify the command`);
     assert.doesNotMatch(result.all, /Error reading/i, `${flag} was still treated as an input path`);
