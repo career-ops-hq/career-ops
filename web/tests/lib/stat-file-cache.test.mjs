@@ -214,9 +214,21 @@ test("an unchanged inbox is not read again", () => {
     const first = readInbox([]);
     assert.equal(first.length, 1);
     assert.equal(first[0].company, "Lumenfold");
+    assert.equal(first[0].done, false);
     const afterFirst = counted("pipeline.md");
     assert.ok(afterFirst >= 1);
-    assert.equal(readInbox([]).length, 1);
+
+    // The tracker changes while pipeline.md does not. The cached rows must
+    // still be matched against the new tracker on every call.
+    writeFileSync(join(process.env.CAREER_OPS_ROOT, "data", "applications.md"), [
+      "| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |",
+      "|---|---|---|---|---|---|---|---|---|---|",
+      "| 1 | 2026-01-01 | Lumenfold | Platform Engineer |  | Applied |  |  |  | https://jobs.example.com/inbox/1 |",
+    ].join("\n"));
+    const second = readInbox(readApplications());
+    assert.equal(second.length, 1);
+    assert.equal(second[0].done, true);
+    assert.equal(readInbox([])[0].done, false);
     assert.equal(counted("pipeline.md"), afterFirst);
   });
 });
