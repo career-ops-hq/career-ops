@@ -4,7 +4,7 @@
 // from ROOT, not from this file's directory: the first version resolved
 // ./check-liveness.mjs relative to tests/ and every CI job died with
 // ERR_MODULE_NOT_FOUND before a single assertion ran.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
 import { spawnSync } from 'child_process';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
@@ -75,6 +75,7 @@ const batch = spawnSync(NODE, [scriptPath, '--no-record',
   timeout: 30000,
   env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: emptyBrowsers },
 });
+rmSync(emptyBrowsers, { recursive: true, force: true });
 const batchOut = `${batch.stdout || ''}${batch.stderr || ''}`;
 if (batch.status === 1) pass('a no-browser batch exits 1 (uncertain)');
 else fail(`a no-browser batch exits 1 (got status ${batch.status})`);

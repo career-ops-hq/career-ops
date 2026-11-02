@@ -576,6 +576,7 @@ try {
     ['greenhouse-embedded', 'https://www.acme.com/careers/job?gh_jid=12345'],
     ['smartrecruiters', 'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer'],
     ['zoho-recruit', 'https://acme.zohorecruit.com/jobs/Careers/100000000001853029/Senior-Engineer'],
+    ['ultipro', 'https://recruiting.ultipro.com/EXA1000EXCO/JobBoard/0c8a6f9e-2b1d-4e57-9a3c-5d7f1e2b4c60/OpportunityDetail?opportunityId=5e0c2b9a-7f41-4d2e-8b6a-1c9d3e7f2a10'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);
