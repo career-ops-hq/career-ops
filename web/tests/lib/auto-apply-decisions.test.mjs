@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { mergeDecision, saveDecision, validateDecisionRequest } from "../src/lib/auto-apply-decisions.mjs";
+import { mergeDecision, saveDecision, validateDecisionRequest } from "../../src/lib/auto-apply-decisions.mjs";
 
 test("rejects decision values outside approve and skip", () => {
   assert.throws(() => validateDecisionRequest({ url: "https://jobs.example/1", decision: "submit" }, new Set(["https://jobs.example/1"])), /Decision must/);

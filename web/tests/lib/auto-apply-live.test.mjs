@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseLiveLog, deriveStatus, openQueue } from "../src/lib/auto-apply-live.mjs";
+import { parseLiveLog, deriveStatus, openQueue } from "../../src/lib/auto-apply-live.mjs";
 
 test("openQueue drops skipped postings and keeps approved or undecided ones", () => {
   const events = [{ type: "queue", url: "a" }, { type: "queue", url: "b" }, { type: "queue", url: "c" }, { type: "run_end" }];
