@@ -56,6 +56,9 @@ function canonicalStates() {
 }
 
 function normalizeStatus(raw) {
+  // A dated cell's state. Text after the date is no part of it, so the whole
+  // cell moves to Notes rather than losing those words.
+  const dated = (status) => (statusTextAfterDate(raw) ? { status, moveToNotes: raw.trim() } : { status });
   // Strip markdown bold
   let s = raw.replace(/\*\*/g, '').trim();
   const lower = s.toLowerCase();
@@ -77,10 +80,10 @@ function normalizeStatus(raw) {
   // form this comment claims to handle, that states.yml lists as an alias, and that
   // the header of this file names. A bare "Rechazado" fell through to unknown.
   if (/^rechazad[oa]$/i.test(s)) return { status: 'Rejected' };
-  if (/^rechazado\s+\d{4}/i.test(s)) return { status: 'Rejected' };
+  if (/^rechazado\s+\d{4}/i.test(s)) return dated('Rejected');
 
   // Aplicado with date → Applied (strip date)
-  if (/^aplicado\s+\d{4}/i.test(s)) return { status: 'Applied' };
+  if (/^aplicado\s+\d{4}/i.test(s)) return dated('Applied');
 
   // CONDICIONAL / HOLD / EVALUAR / Verificar → Evaluated
   if (/^(condicional|hold|evaluar|verificar)$/i.test(s)) return { status: 'Evaluated' };
@@ -127,7 +130,7 @@ function normalizeStatus(raw) {
   const datedId = resolveCanonicalStateId(raw, canonicalStates());
   if (datedId) {
     const status = canonicalStates().find(st => st.id.toLowerCase() === datedId).label;
-    return statusTextAfterDate(raw) ? { status, moveToNotes: raw.trim() } : { status };
+    return dated(status);
   }
 
   // Unknown — flag it

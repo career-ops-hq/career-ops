@@ -84,6 +84,15 @@ ok('text after a date joined some other way is kept in Notes too', () => {
   assert.deepStrictEqual(normalizeStatus('Applied (2026-01-02)'), { status: 'Applied' }, 'the closing bracket is no text');
 });
 
+ok('the Spanish spellings keep what follows the date too', () => {
+  assert.deepStrictEqual(normalizeStatus('Aplicado 2026-01-02 via referral'),
+    { status: 'Applied', moveToNotes: 'Aplicado 2026-01-02 via referral' });
+  assert.deepStrictEqual(normalizeStatus('Rechazado 2026-01-02 tras la entrevista'),
+    { status: 'Rejected', moveToNotes: 'Rechazado 2026-01-02 tras la entrevista' });
+  assert.deepStrictEqual(normalizeStatus('Aplicado 2026-01-02'), { status: 'Applied' });
+  assert.deepStrictEqual(normalizeStatus('Aplicado 2026'), { status: 'Applied' }, 'a year alone still matches');
+});
+
 ok('a dated word that is no state is still reported as unknown', () => {
   assert.deepStrictEqual(normalizeStatus('Pending 2026-01-02'), { status: null, unknown: true });
 });
