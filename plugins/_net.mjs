@@ -66,14 +66,23 @@ function isBlockedV4(ip) {
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
+// How long to wait for DNS before giving up. The guarded fetch's own timeout only
+// starts once the connection is attempted, so without this a resolver that never
+// answers would hold a plugin call until the hook's outer timeout.
+export const DEFAULT_DNS_TIMEOUT_MS = 5_000;
+
 /**
  * Resolve a hostname and reject if ANY resolved address is blocked. Returns the
- * validated addresses. Throws on a blocked or unresolvable host.
+ * validated addresses. Throws on a blocked, unresolvable or too-slow host.
+ *
+ * The timeout stops WAITING; the underlying getaddrinfo call cannot be cancelled
+ * and finishes in the background, which is harmless (its result is discarded).
  * @param {string} hostname
- * @param {{ allowsLocalhost?: boolean }} [opts]
+ * @param {{ allowsLocalhost?: boolean, timeoutMs?: number, lookup?: typeof dnsLookup }} [opts]
+ *   `lookup` replaces the resolver (tests only).
  * @returns {Promise<string[]>}
  */
-export async function resolveAndValidate(hostname, { allowsLocalhost = false } = {}) {
+export async function resolveAndValidate(hostname, { allowsLocalhost = false, timeoutMs = DEFAULT_DNS_TIMEOUT_MS, lookup = dnsLookup } = {}) {
   // An IP literal host: validate directly (no DNS).
   if (isIP(hostname)) {
     if (isBlockedIp(hostname)) {
@@ -88,11 +97,26 @@ export async function resolveAndValidate(hostname, { allowsLocalhost = false } =
     return ['127.0.0.1'];
   }
 
+  const limit = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_DNS_TIMEOUT_MS;
   let addrs;
+  let timer;
   try {
-    addrs = await dnsLookup(hostname, { all: true });
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const err = new Error(`DNS lookup timed out after ${limit}ms`);
+        // @ts-ignore
+        err.code = 'dns_timeout';
+        reject(err);
+      }, limit);
+    });
+    // A late rejection from the abandoned lookup must not become an unhandled one.
+    const pending = Promise.resolve(lookup(hostname, { all: true }));
+    pending.catch(() => {});
+    addrs = await Promise.race([pending, timeout]);
   } catch (err) {
     throw new Error(`plugin egress: cannot resolve ${hostname} — ${err.message}`);
+  } finally {
+    clearTimeout(timer);
   }
   if (!addrs.length) throw new Error(`plugin egress: ${hostname} resolved to no addresses`);
   for (const { address } of addrs) {
