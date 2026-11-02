@@ -72,6 +72,16 @@ test("shift-click two rows, then a number key sets their status", { skip: liveSe
     if (n === cursorN) continue;
     assert.equal(statusOf(n), n === 10 ? outsideBefore : "Rejected", `#${n} is not the cursor row`);
   }
+
+  // No checked rows. A failed save on the cursor row still has to show the alert.
+  await page.route("**/api/status", (route) => route.request().method() === "POST"
+    ? route.fulfill({ status: 503, json: { error: "Fixture tracker busy" } })
+    : route.continue());
+  await page.keyboard.press("4");
+  const alert = page.locator('p[role="alert"]');
+  await until(async () => (await alert.count()) === 1);
+  assert.match(await alert.innerText(), new RegExp(`1 not saved: #${cursorN} \\(Fixture tracker busy\\)`));
+  assert.equal(statusOf(cursorN), "Offer");
   assert.ok(scrollBefore >= 0);
   assert.deepEqual(errors, []);
 });
