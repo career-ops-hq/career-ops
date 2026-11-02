@@ -41,9 +41,15 @@ import {
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
 import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+
+// Ambient guard over global fetch (idempotent); the explicit gate below is the
+// primary layer, this covers anything the script hands to fetch directly.
+installPiiInterceptor();
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -370,14 +376,15 @@ Object.assign(headers, endpointHeaders(endpointHost, SESSION_ID, careerOpsVersio
 
 let evaluationText;
 try {
+  // Privacy gate: inspect the complete serialized request before it leaves the
+  // machine. Shared boundary so openai-eval and openai-tailor cannot diverge.
+  // The retry is a second body, so it is checked on its own.
   // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
   // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
   // Header-Timeout, bevor die erste Zeile ankommt (8 t/s × 22k-Prefill).
   const signal = AbortSignal.timeout(timeoutMs);
-  const send = (withUsage) => fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
+  const send = (withUsage) => {
+    const requestBody = JSON.stringify({
       model:    modelName,
       messages: [
         buildSystemMessage(systemPrompt, endpointHost),
@@ -386,9 +393,15 @@ try {
       stream:      true,
       ...(withUsage && { stream_options: { include_usage: true } }),
       temperature: 0.4,
-    }),
-    signal,
-  });
+    });
+    assertLlmRequestAllowed(endpoint, requestBody);
+    return fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: requestBody,
+      signal,
+    });
+  };
 
   let res = await send(true);
   let body = res.ok ? '' : await res.text();
