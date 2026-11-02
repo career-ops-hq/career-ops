@@ -67,9 +67,13 @@ export function parseExperienceStart(period) {
  * @returns {number|null}
  */
 function numericMonth(before, after) {
-  const found = before.match(/(?<![\d/.-])(0?[1-9]|1[0-2])[/.-]$/)
-    ?? after.match(/^[/.-](0[1-9]|1[0-2])(?!\d)/);
-  return found ? Number(found[1]) : null;
+  const monthFirst = before.match(/(?<![\d/.-])(0?[1-9]|1[0-2])[/.-]$/);
+  if (monthFirst) return Number(monthFirst[1]);
+  // A number ahead of the year makes this a full date, so what follows the year
+  // is the end of the range ("09/15/2024-10/20/2024"), not this date's month.
+  if (/\d[/.-]$/.test(before)) return null;
+  const yearFirst = after.match(/^[/.-](0?[1-9]|1[0-2])(?!\d)/);
+  return yearFirst ? Number(yearFirst[1]) : null;
 }
 
 /**

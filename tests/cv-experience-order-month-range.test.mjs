@@ -41,7 +41,7 @@ test('a range stays in its year when it ends later in it, or its end is not a mo
 });
 
 test('a numeric month reads the way a named one does', () => {
-  for (const period of ['09/2024 – 12/2024', '9/2024 - 12/2024', '09.2024 - Present', '2024-09 – 2024-12', '2024/09 - Present', '2024-09-15 - Present']) {
+  for (const period of ['09/2024 – 12/2024', '9/2024 - 12/2024', '09.2024 - Present', '2024-09 – 2024-12', '2024/09 - Present', '2024-09-15 - Present', '2024-9 - Present', '2024-9']) {
     assert.deepEqual(parseExperienceStart(period), { year: 2024, month: 9 }, period);
   }
 });
@@ -49,6 +49,9 @@ test('a numeric month reads the way a named one does', () => {
 test('a number that is not clearly a month stays unread', () => {
   // Day first or month first depends on the country, so neither is guessed at.
   assert.deepEqual(parseExperienceStart('03/04/2024'), { year: 2024, month: null });
+  // The number after the year here belongs to the end date, not to the start.
+  assert.deepEqual(parseExperienceStart('03/04/2024-05/06/2024'), { year: 2024, month: null });
+  assert.deepEqual(parseExperienceStart('09/15/2024-10/20/2024'), { year: 2024, month: null });
   assert.deepEqual(parseExperienceStart('13/2024'), { year: 2024, month: null });
   assert.deepEqual(parseExperienceStart('2022-2024'), { year: 2022, month: null });
   assert.deepEqual(parseExperienceStart('2023-24'), { year: 2023, month: null });
@@ -58,6 +61,12 @@ test('two roles in one year written with numeric months are ordered by them', ()
   const cv = (first, second) => `<span class="job-period">${first}</span><span class="job-period">${second}</span>`;
   assert.doesNotThrow(() => validateCvExperienceOrder(cv('09/2024 - Present', '01/2024 - 08/2024')));
   assert.throws(() => validateCvExperienceOrder(cv('01/2024 - 08/2024', '09/2024 - Present')), /reverse-chronological/);
+});
+
+test('a named range is ordered by its first month, through the real order check', () => {
+  const cv = (first, second) => `<span class="job-period">${first}</span><span class="job-period">${second}</span>`;
+  assert.doesNotThrow(() => validateCvExperienceOrder(cv('Jul 2022 - Present', 'Jun - Aug 2022')));
+  assert.throws(() => validateCvExperienceOrder(cv('Jun - Aug 2022', 'Jul 2022 - Present')), /reverse-chronological/);
 });
 
 test('a comma before the year does not hide the month', () => {
