@@ -8,6 +8,7 @@
   },
   "scripts": {
     "doctor": "node doctor.mjs",
+    "dashboard": "node dashboard-html.mjs --open",
     "ui": "node scripts/ui-server.mjs",
     "or": "node openrouter-runner.mjs",
     "or:scan": "node openrouter-runner.mjs scan",

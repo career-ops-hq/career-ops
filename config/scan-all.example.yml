@@ -1,0 +1,48 @@
+# /scan-all settings. Copy to config/scan-all.yml (or just run /scan-all once:
+# it asks a few questions and writes this file for you). config/scan-all.yml is
+# gitignored: it stays on your computer.
+
+# What to search for. One search per keyword on every enabled site.
+keywords:
+  - frontend developer
+  - react developer
+  - javascript
+
+# Titles containing any of these words are skipped without reading the posting.
+exclude_titles:
+  - senior
+  - lead
+  - head of
+  - QA
+  - test automation
+
+# Experience you have, in years. Roles that demand much more are skipped.
+experience_years: 1
+
+# Lowest pay you'd accept (number + currency). Leave empty to keep everything.
+min_salary: ""            # e.g. "30000 UAH" or "1500 USD"
+
+# remote | hybrid | office | any
+work_format: remote
+# City for office/hybrid roles (ignored for remote).
+city: ""
+
+# Skip anything in these niches (free text, the agent reads it).
+skip_niches:
+  - gambling
+  - crypto
+
+# Where to look. Set false to turn a site off.
+sources:
+  gmail_alerts: true      # job-alert emails in Gmail (needs the Gmail connector; read-only)
+  djinni: true            # djinni.co (needs you logged in)
+  dou: true               # jobs.dou.ua
+  workua: true            # work.ua
+  robotaua: true          # robota.ua
+  jooble: true            # ua.jooble.org (aggregator: each lead is confirmed at the source)
+  linkedin: true          # linkedin.com (read-only, max 8 search pages per run)
+  upwork: false           # upwork.com freelance jobs (needs you logged in)
+  ats_portals: true       # company career pages from portals.yml (no browser needed)
+
+# Open the dashboard in your browser when the run finishes.
+open_dashboard: true
