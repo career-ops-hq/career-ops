@@ -28,7 +28,7 @@ import {
 import { randomUUID } from 'crypto';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveBatchStatePath } from './path-resolver.mjs';
 import {
   extractTrackerReportNumbers, parseTrackerRow, resolveColumns,
 } from './tracker-parse.mjs';
@@ -72,10 +72,13 @@ function trackerPathFor(options = {}) {
     : resolveTrackerPath(options.rootDir || ROOT);
 }
 
+// Read where batch-runner.sh writes it, in the checkout, as merge-tracker.mjs
+// reads it. With the data root elsewhere, a reservation made by hand read a
+// file that never exists and handed out numbers the runner recorded as failed.
 function batchStateFileFor(options = {}) {
   return resolve(options.batchStateFile
     || process.env.CAREER_OPS_BATCH_STATE
-    || join(options.rootDir || ROOT, 'batch/batch-state.tsv'));
+    || resolveBatchStatePath(options.rootDir || ROOT));
 }
 
 // Mirrors merge-tracker.mjs's loadFailedReportNumbers: a report number the

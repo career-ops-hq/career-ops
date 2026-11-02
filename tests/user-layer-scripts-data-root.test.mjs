@@ -221,13 +221,14 @@ test('openrouter-runner.mjs reserves and releases report numbers under DATA_ROOT
     'openrouter-runner.mjs still joins a user-layer directory onto __dirname');
 });
 
-// ── merge-tracker.mjs ────────────────────────────────────────────────────────
+// ── merge-tracker.mjs / reserve-report-num.mjs ───────────────────────────────
 //
 // batch/batch-runner.sh keeps batch-state.tsv beside itself, in the code root,
-// and exports its path to the workers it starts. merge-tracker.mjs skips a
-// report number it recorded as failed, but run by hand it looked for the file
-// under the data root, where the runner never writes it, and a merge after the
-// batch added the row the runner had refused.
+// and exports its path to the workers it starts. Both scripts skip a report
+// number it recorded as failed, but run by hand they looked for the file under
+// the data root, where the runner never writes it: a merge after the batch
+// added the row the runner had refused, and a reservation handed the number out
+// again.
 
 const BATCH_STATE_HEADER = 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n';
 const failedRow = (num) => `1\thttps://example.com/job\tfailed\t-\t-\t${num}\t-\tworker exited 1\t1\n`;
@@ -262,3 +263,13 @@ test('merge-tracker.mjs reads the data root batch-state.tsv when the code root h
   const f = mergeFixture(t, 'data');
   assertRefused(f, run(f, 'merge-tracker.mjs', [], envFor('CAREER_OPS_ROOT', f)));
 });
+
+for (const mode of MODES) {
+  test(`reserve-report-num.mjs reads batch-state.tsv from the code root (${mode})`, (t) => {
+    const f = fixture(t, 'reserve-report-num.mjs', { nodeModules: true, assets: ['tracker-aliases.json'] });
+    write(join(f.code, 'batch', 'batch-state.tsv'), BATCH_STATE_HEADER + failedRow('001'));
+    const result = run(f, 'reserve-report-num.mjs', [], envFor(mode, f));
+    assert.equal(result.status, 0, describeSpawn(result));
+    assert.equal(result.stdout.trim(), '002', `001 is recorded as failed and must not be handed out:\n${result.output}`);
+  });
+}
