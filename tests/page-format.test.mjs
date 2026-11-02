@@ -18,10 +18,10 @@
  * expected value back out of the module it pins compares that module to itself
  * and stays green whatever the module becomes.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -37,9 +37,17 @@ import {
 } from '../lib/page-format.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
+// Every workspace and cover sandbox this file makes, removed once its tests
+// have run, failed ones included.
+const scratchDirs = [];
+after(() => {
+  for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+});
+
 /** A throwaway workspace whose config/profile.yml states `pageFormat`, or none. */
 function workspace(pageFormat) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-page-format-'));
+  scratchDirs.push(dir);
   mkdirSync(join(dir, 'config'), { recursive: true });
   mkdirSync(join(dir, 'data'), { recursive: true });
   mkdirSync(join(dir, 'output'), { recursive: true });
@@ -243,6 +251,7 @@ function coverSandbox() {
   // import.meta.url against argv[1], and a spawned copy that fails that check
   // exits 0 having done nothing (#3165).
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-cover-format-')));
+  scratchDirs.push(dir);
   mkdirSync(join(dir, 'lib'), { recursive: true });
   mkdirSync(join(dir, 'providers'), { recursive: true });
   mkdirSync(join(dir, 'templates'), { recursive: true });

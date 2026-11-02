@@ -6,6 +6,7 @@ import { careerOpsRoot, isRegularContainedFile, pdfPathStatusForReport } from "@
 import { companySlug } from "@/lib/company-slug.mjs";
 import { inlineDisposition } from "@/lib/content-disposition.mjs";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
+import { TAILORED_CV_MISSING } from "@/lib/tailored-cv-ready.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest) {
   // Same invariant as the apply lookup: a company with no usable key serves
   // nothing rather than the newest unrelated CV (#2352).
   const key = companySlug(company);
-  if (!key) return new Response("no tailored CV found for this offer", { status: 404 });
+  if (!key) return new Response(TAILORED_CV_MISSING, { status: 404 });
   const { slug } = key;
   const dir = path.join(careerOpsRoot(), "output");
 
@@ -103,12 +104,12 @@ export async function GET(req: NextRequest) {
       // the same one the indexed path above applies.
       .filter((f) => isRegularContainedFile(path.join(dir, f), dir));
   } catch {
-    return new Response("no output directory", { status: 404 });
+    return new Response(TAILORED_CV_MISSING, { status: 404 });
   }
-  if (!files.length) return new Response("no tailored CV found for this offer", { status: 404 });
+  if (!files.length) return new Response(TAILORED_CV_MISSING, { status: 404 });
 
   const sorted = sortNewestFirst(dir, files);
-  if (!sorted.length) return new Response("no tailored CV found for this offer", { status: 404 });
+  if (!sorted.length) return new Response(TAILORED_CV_MISSING, { status: 404 });
   try {
     return servePdf(path.join(dir, sorted[0]));
   } catch {
