@@ -70,6 +70,8 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 // starts once the connection is attempted, so without this a resolver that never
 // answers would hold a plugin call until the hook's outer timeout.
 export const DEFAULT_DNS_TIMEOUT_MS = 5_000;
+// setTimeout treats anything above this (2^31-1 ms, ~24.8 days) as 1 ms.
+const MAX_TIMER_MS = 2_147_483_647;
 
 /**
  * Resolve a hostname and reject if ANY resolved address is blocked. Returns the
@@ -97,7 +99,7 @@ export async function resolveAndValidate(hostname, { allowsLocalhost = false, ti
     return ['127.0.0.1'];
   }
 
-  const limit = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_DNS_TIMEOUT_MS;
+  const limit = Number.isFinite(timeoutMs) && timeoutMs > 0 && timeoutMs <= MAX_TIMER_MS ? timeoutMs : DEFAULT_DNS_TIMEOUT_MS;
   let addrs;
   let timer;
   try {

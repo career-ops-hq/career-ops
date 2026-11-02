@@ -56,3 +56,9 @@ test('IP literals and loopback opt-in skip the lookup entirely', async () => {
   assert.deepEqual(await resolveAndValidate('93.184.216.34', { lookup: boom }), ['93.184.216.34']);
   assert.deepEqual(await resolveAndValidate('localhost', { allowsLocalhost: true, lookup: boom }), ['127.0.0.1']);
 });
+
+test('a timeoutMs above the timer limit is ignored instead of firing after 1 ms', async () => {
+  // setTimeout would run a delay over 2^31-1 ms after ~1 ms, failing a lookup that has plenty of time.
+  const lookup = () => new Promise((r) => setTimeout(() => r([{ address: '93.184.216.34', family: 4 }]), 50));
+  assert.deepEqual(await resolveAndValidate('ok.example.com', { timeoutMs: 2_147_483_648, lookup }), ['93.184.216.34']);
+});
