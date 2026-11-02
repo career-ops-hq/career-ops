@@ -1015,6 +1015,21 @@ export function statusTextAfterDate(input) {
 }
 
 /**
+ * A Notes cell with `entry` put first, as its own entry. set-status.mjs reads
+ * Notes as "; "-separated entries (--note, --replace-note), so text a writer
+ * moves out of another cell is joined the same way, or the note beside it can
+ * no longer be found. A "—" or "-" placeholder is no note, and gives way.
+ *
+ * @param {*} notes - The Notes cell as it stands.
+ * @param {string} entry - Text to put first.
+ * @returns {string}
+ */
+export function prependNote(notes, entry) {
+  const kept = String(notes ?? '').trim();
+  return kept && kept !== '—' && kept !== '-' ? `${entry}; ${kept}` : entry;
+}
+
+/**
  * Resolve a raw tracker status CELL to its canonical lowercase state id.
  *
  * The read-side twin of resolveCanonicalState(): scripts that bucket or compare

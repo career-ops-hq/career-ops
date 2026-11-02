@@ -120,7 +120,7 @@ import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
   resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate,
-  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
+  prependNote, normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
   appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot, resolveTrackerPathForWrite } from './path-resolver.mjs';
@@ -810,7 +810,7 @@ try {
   if (statusChanged && colmap.notes != null && statusTextAfterDate(oldStatus)) {
     const kept = (parts[colmap.notes] ?? '').trim();
     const moved = oldStatus.trim();
-    if (!kept.includes(moved)) replaceCellValue(colmap.notes, kept ? `${moved}. ${kept}` : moved);
+    if (!kept.includes(moved)) replaceCellValue(colmap.notes, prependNote(kept, moved));
   }
 
   if (note) {

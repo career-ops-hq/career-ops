@@ -14,7 +14,7 @@ const OVERRIDES = ['CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_PIPE
   'CAREER_OPS_PORTALS', 'CAREER_OPS_PROFILE', 'CAREER_OPS_FOLLOWUPS', 'CAREER_OPS_REPORTS', 'CAREER_OPS_CV',
   'CAREER_OPS_JDS', 'CAREER_OPS_ADDITIONS', 'CAREER_OPS_ACTIVITY_DIR'];
 
-function withRow(status, fn) {
+function withRow(status, fn, notesCell = '') {
   const root = mkdtempSync(join(tmpdir(), 'set-status-ledger-'));
   mkdirSync(join(root, 'data'));
   const tracker = join(root, 'data', 'applications.md');
@@ -22,7 +22,7 @@ function withRow(status, fn) {
     '# Applications Tracker', '',
     '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
     '|---|------|---------|------|-------|--------|-----|--------|-------|',
-    `| 1 | 2026-10-01 | Acme | Data Engineer | 4.2/5 | ${status} | ❌ | — | |`,
+    `| 1 | 2026-10-01 | Acme | Data Engineer | 4.2/5 | ${status} | ❌ | — | ${notesCell} |`,
     '',
   ].join('\n'));
   const env = { ...process.env, CAREER_OPS_ROOT: root };
@@ -89,5 +89,24 @@ test('a --note goes in beside the moved text, and a bare date moves nothing', ()
     assert.equal(run('set-status.mjs', '1', 'Interview').status, 0);
     assert.equal(notes(), '');
   });
+});
+
+test('moved text is its own Notes entry, so the note beside it can still be found', () => {
+  withRow('Applied 2026-10-02 via referral', ({ run, notes }) => {
+    assert.equal(run('set-status.mjs', '1', 'Interview').status, 0);
+    assert.equal(notes(), 'Applied 2026-10-02 via referral; call booked');
+    assert.equal(run('set-status.mjs', '1', 'Interview', '--note', 'call booked').status, 0);
+    assert.equal(notes(), 'Applied 2026-10-02 via referral; call booked', 'a note already there is not added again');
+    const replaced = run('set-status.mjs', '1', 'Interview', '--note', 'call done', '--replace-note', 'call booked');
+    assert.equal(replaced.status, 0, replaced.stderr || replaced.stdout);
+    assert.equal(notes(), 'Applied 2026-10-02 via referral; call done');
+  }, 'call booked');
+});
+
+test('a "—" in Notes is no note, and the moved text replaces it', () => {
+  withRow('Applied 2026-10-02 via referral', ({ run, notes }) => {
+    assert.equal(run('set-status.mjs', '1', 'Interview').status, 0);
+    assert.equal(notes(), 'Applied 2026-10-02 via referral');
+  }, '—');
 });
 

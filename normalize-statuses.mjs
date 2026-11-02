@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   openTrackerTransaction, rebuildRow,
-  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId, statusTextAfterDate,
+  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId, statusTextAfterDate, prependNote,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -224,7 +224,7 @@ for (let i = 0; i < lines.length; i++) {
   if (result.moveToNotes && COLS.notes != null) {
     const existing = parts[COLS.notes] || '';
     if (!existing.includes(result.moveToNotes)) {
-      parts[COLS.notes] = result.moveToNotes + (existing ? '. ' + existing : '');
+      parts[COLS.notes] = prependNote(existing, result.moveToNotes);
     }
   }
 

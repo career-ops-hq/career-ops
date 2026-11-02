@@ -157,3 +157,31 @@ ok('every cell verify-pipeline flags as dated comes out clean after normalizing'
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// set-status.mjs reads Notes as "; "-separated entries. Joined with ". ", the
+// moved text and the note beside it read as one entry, so --replace-note could
+// not find the note and --note added it a second time.
+ok('moved text is its own Notes entry, and a "—" placeholder gives way to it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'normalize-notes-test-'));
+  const env = { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '', CAREER_OPS_FOLLOWUPS: '',
+    CAREER_OPS_ACTIVITY_DIR: '' };
+  const run = (script, ...args) => spawnSync(process.execPath, [join(ROOT, script), ...args], { encoding: 'utf-8', env, cwd: dir });
+  try {
+    mkdirSync(join(dir, 'data'));
+    const tracker = join(dir, 'data', 'applications.md');
+    writeFileSync(tracker, ['# Applications Tracker', '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      '| 1 | 2026-01-04 | Initech | Analyst | 3.5/5 | Applied 2026-01-04 via referral | ❌ | — | call booked |',
+      '| 2 | 2026-01-04 | Globex | Analyst | 3.5/5 | Applied 2026-01-04 via referral | ❌ | — | — |',
+      ''].join('\n'));
+    const notes = () => readFileSync(tracker, 'utf-8').split('\n').filter(l => /^\|\s*\d+\s*\|/.test(l)).map(l => l.split('|')[9].trim());
+    assert.strictEqual(run('normalize-statuses.mjs').status, 0);
+    assert.deepStrictEqual(notes(), ['Applied 2026-01-04 via referral; call booked', 'Applied 2026-01-04 via referral']);
+    const replaced = run('set-status.mjs', '1', 'Applied', '--note', 'call done', '--replace-note', 'call booked');
+    assert.strictEqual(replaced.status, 0, replaced.stderr || replaced.stdout);
+    assert.strictEqual(notes()[0], 'Applied 2026-01-04 via referral; call done');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
