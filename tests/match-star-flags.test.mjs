@@ -1,9 +1,11 @@
-// tests/match-star-flags.test.mjs — match-star reads --jd=<file> and --top=<n>.
+// tests/match-star-flags.test.mjs — match-star reads --jd=<file> and --top=<n>,
+// and refuses a flag it does not know.
 //
 // The flags were looked up with indexOf(), which finds `--jd jds/acme.md` but
-// not `--jd=jds/acme.md`. The second form matched without the JD, and `--top=2`
-// printed one match. The answer is pasted into an application form as it
-// stands, so neither said anything was wrong.
+// not `--jd=jds/acme.md`. The second form matched without the JD, `--top=2`
+// printed one match, and a misspelled `--jdd jds/acme.md` was dropped while
+// `jds/acme.md` joined the question. The answer is pasted into an application
+// form as it stands, so none of these said anything was wrong.
 //
 // Run:  node --test tests/match-star-flags.test.mjs
 
@@ -73,3 +75,16 @@ test('--top=<n> prints that many matches, the same as --top <n>', () => {
   assert.equal(equals.stdout, run([QUESTION, '--top', '2']).stdout);
 });
 
+test('a misspelled flag is refused, not dropped with its value left in the question', () => {
+  const r = run([QUESTION, '--jdd', 'jds/acme.md']);
+  assert.equal(r.status, 1, describeSpawn(r));
+  assert.match(r.stderr, /unrecognized flag\(s\): --jdd/);
+  assert.doesNotMatch(r.stdout, /Question:/, 'nothing was matched');
+});
+
+test('--jd without a file is a usage error, not a match without the JD', () => {
+  const r = run([QUESTION, '--jd']);
+  assert.equal(r.status, 1, describeSpawn(r));
+  assert.match(r.stderr, /--jd requires a value/);
+  assert.doesNotMatch(r.stdout, /Question:/);
+});

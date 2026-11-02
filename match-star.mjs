@@ -26,7 +26,7 @@ import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseStories, splitStoryBlocks, isValidStory } from './lib/story-bank.mjs';
 import { parseStoryBlocks, classifyEntries } from './story-provenance-check.mjs';
-import { flagValue, safeIntFlag } from './lib/cli-flags.mjs';
+import { flagValue, safeIntFlag, validateFlags } from './lib/cli-flags.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -39,6 +39,14 @@ const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 const UNCONFIRMED = '[unconfirmed figure]';
 
+const USAGE = `Usage: node match-star.mjs "<behavioural question>" [--jd <file>] [--top <n>]
+       node match-star.mjs --list
+
+  --jd <file>   Also score the stories against this JD
+  --top <n>     Print the n best matches (default 1)
+  --list        List the stories in the bank with their tags
+  --help, -h    Show this help`;
+const KNOWN_FLAGS = ['--jd', '--top', '--list', '--help', '-h'];
 const VALUE_FLAGS = ['--jd', '--top'];
 
 // flagValue() reads `--jd=jds/acme.md` as well as `--jd jds/acme.md`. The
@@ -216,6 +224,10 @@ export { parseStories, tokenize, score, formatAts, STOPWORDS };
 // ── Main ─────────────────────────────────────────────────────────────
 
 if (isMainModule(import.meta.url)) {
+// Before the story bank is read: a mistyped flag was dropped and its value
+// joined the question, and --help without a bank printed the missing-bank error.
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
 if (!existsSync(STORY_BANK_PATH)) {
   console.error(`Error: ${STORY_BANK_PATH} not found.`);
   console.error('Run /career-ops interview-prep on a role first to populate your story bank.');
@@ -260,8 +272,7 @@ if (LIST_MODE) {
 }
 
 if (!question) {
-  console.error('Usage: node match-star.mjs "<behavioural question>" [--jd <file>] [--top <n>]');
-  console.error('       node match-star.mjs --list');
+  console.error(USAGE);
   process.exit(1);
 }
 
