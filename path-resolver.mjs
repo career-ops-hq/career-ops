@@ -282,3 +282,19 @@ export function resolveTrackerPathForWrite(root) {
   return join(root, 'data/applications.md');
 }
 
+
+/**
+ * batch/batch-state.tsv where batch/batch-runner.sh keeps it: beside itself, in
+ * the checkout, wherever the data root is. batch/ is System Layer, and
+ * batch-tailor.mjs, reconcile-pipeline.mjs, sync-batch-input.mjs and the
+ * dashboard (#5254) all read the file there. The data root's copy is used only
+ * when the checkout has none, so the default layout, where the two are one
+ * directory, is unchanged.
+ *
+ * @param {string} rootDir The career-ops data root directory
+ * @returns {string} Absolute path to batch-state.tsv
+ */
+export function resolveBatchStatePath(rootDir) {
+  const checkout = join(__dirname, 'batch', 'batch-state.tsv');
+  return existsSync(checkout) ? checkout : join(rootDir, 'batch', 'batch-state.tsv');
+}

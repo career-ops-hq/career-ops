@@ -220,3 +220,45 @@ test('openrouter-runner.mjs reserves and releases report numbers under DATA_ROOT
   assert.doesNotMatch(src, /path\.join\(\s*__dirname\s*,\s*'(?:reports|data)'/,
     'openrouter-runner.mjs still joins a user-layer directory onto __dirname');
 });
+
+// ── merge-tracker.mjs ────────────────────────────────────────────────────────
+//
+// batch/batch-runner.sh keeps batch-state.tsv beside itself, in the code root,
+// and exports its path to the workers it starts. merge-tracker.mjs skips a
+// report number it recorded as failed, but run by hand it looked for the file
+// under the data root, where the runner never writes it, and a merge after the
+// batch added the row the runner had refused.
+
+const BATCH_STATE_HEADER = 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n';
+const failedRow = (num) => `1\thttps://example.com/job\tfailed\t-\t-\t${num}\t-\tworker exited 1\t1\n`;
+
+function mergeFixture(t, stateRoot) {
+  const f = fixture(t, 'merge-tracker.mjs', { nodeModules: true, assets: ['templates/states.yml', 'tracker-aliases.json'] });
+  write(join(f[stateRoot], 'batch', 'batch-state.tsv'), BATCH_STATE_HEADER + failedRow('005'));
+  write(join(f.data, 'data', 'applications.md'), '# Applications Tracker\n\n'
+    + '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n'
+    + '|---|------|---------|------|-------|--------|-----|--------|-------|\n');
+  write(join(f.data, 'reports', '005-acme-2026-11-02.md'), '# Acme\n');
+  write(join(f.data, 'batch', 'tracker-additions', '005-acme.tsv'),
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n'
+    + '5\t2026-11-02\tAcme\tData Engineer\tEvaluated\t4.6/5\t❌\t[005](reports/005-acme-2026-11-02.md)\tfrom a failed worker\n');
+  return f;
+}
+
+function assertRefused(f, result) {
+  assert.match(result.output, /Skipping 005-acme\.tsv: report #5 is marked "failed"/, describeSpawn(result));
+  assert.doesNotMatch(readFileSync(join(f.data, 'data', 'applications.md'), 'utf-8'), /Acme/,
+    'the batch runner refused this row, so a merge run by hand must not add it');
+}
+
+for (const mode of MODES) {
+  test(`merge-tracker.mjs reads batch-state.tsv from the code root (${mode})`, (t) => {
+    const f = mergeFixture(t, 'code');
+    assertRefused(f, run(f, 'merge-tracker.mjs', [], envFor(mode, f)));
+  });
+}
+
+test('merge-tracker.mjs reads the data root batch-state.tsv when the code root has none', (t) => {
+  const f = mergeFixture(t, 'data');
+  assertRefused(f, run(f, 'merge-tracker.mjs', [], envFor('CAREER_OPS_ROOT', f)));
+});

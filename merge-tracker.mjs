@@ -28,7 +28,7 @@ import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveBatchStatePath } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
 import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
@@ -318,7 +318,8 @@ function formatUrlCell(raw, previousCell = '') {
  *   The CLI passes trackerLinkDirsFor(), which adds a symlinked tracker's own
  *   folder (#5374).
  * @param {string} [options.additionsDir] - Pending TSVs; defaults to `<dataRoot>/batch/tracker-additions`.
- * @param {string} [options.batchStateFile] - batch-state.tsv; defaults to `<dataRoot>/batch/batch-state.tsv`.
+ * @param {string} [options.batchStateFile] - batch-state.tsv; defaults to resolveBatchStatePath(dataRoot), the
+ *   checkout's copy, where batch-runner.sh writes it.
  * @param {string} [options.pdfIndexFile] - PDF manifest; defaults to `<workspace>/data/pdf-index.tsv`.
  * @param {string} [options.lockDir] - Tracker lock directory; defaults to trackerLockDirFor(appsFile).
  * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options.lock] - Lock timing.
@@ -344,7 +345,7 @@ export async function mergeTracker(options = {}) {
   const TRACKER_LINK_DIRS = options.trackerLinkDirs ?? [TRACKER_DIR];
   const ADDITIONS_DIR = options.additionsDir ?? join(DATA_ROOT, 'batch/tracker-additions');
   const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
-  const BATCH_STATE_FILE = options.batchStateFile ?? join(DATA_ROOT, 'batch/batch-state.tsv');
+  const BATCH_STATE_FILE = options.batchStateFile ?? resolveBatchStatePath(DATA_ROOT);
   const FAILED_REPORT_NUMBERS = loadFailedReportNumbers(BATCH_STATE_FILE);
   // Read only to explain a skip, never to lift one. Before #4391, a failed
   // worker's released number could be handed to the next offer, so one number
@@ -2418,7 +2419,10 @@ if (isMainModule(import.meta.url)) {
     // CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
     additionsDir: process.env.CAREER_OPS_ADDITIONS || join(DATA_ROOT, 'batch/tracker-additions'),
     // CAREER_OPS_BATCH_STATE overrides the batch-state.tsv path (used by tests).
-    batchStateFile: process.env.CAREER_OPS_BATCH_STATE || join(DATA_ROOT, 'batch/batch-state.tsv'),
+    // Without it the file is read where batch-runner.sh writes it, in the
+    // checkout: a merge run by hand after a batch, with the data root elsewhere,
+    // read a file that never exists and merged rows the runner had refused.
+    batchStateFile: process.env.CAREER_OPS_BATCH_STATE || resolveBatchStatePath(DATA_ROOT),
     pdfIndexFile: resolvePdfIndexPath(appsFile),
     lockDir: trackerLockDirFor(appsFile),
     lock: {
