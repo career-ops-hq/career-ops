@@ -316,7 +316,10 @@ function normalizeTextForATS(html) {
     // snake_case, a_b and docs/_draft_/cv.md stay literal. Text-only elements
     // (<title>, <textarea>, ...) would show <em> as literal text, so skip them.
     if (!plainUntil) {
-      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (_, inner) => {
+      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (match, inner, at, whole) => {
+        // Underscores inside an email address are the address.
+        const word = /\S*$/.exec(whole.slice(0, at))[0] + /^\S*/.exec(whole.slice(at))[0];
+        if (word.includes('@')) return match;
         bump('markdown-italic', 1);
         return `<em>${inner}</em>`;
       });
