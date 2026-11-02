@@ -290,7 +290,7 @@ npm i -g @santifer/career-ops
 
 `/career-ops` だけを入力するとコマンドメニューが表示されます（これを使う CLI の場合）。普通の言葉は対応するどの CLI でも使えます。Claude Code のプラグインとして使う場合、コマンドは `/career-ops:career-ops` です。
 
-どの CLI も 1 つのルーター `.agents/skills/career-ops/SKILL.md` と同じ `modes/*.md` ファイルを共有しているため、モードはどの CLI で実行しても同じように動作します。Codex ではスラッシュコマンドは保証されません。普通の言葉で頼むか、`codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` でプロンプトを 1 つヘッドレス実行してください（[docs/CODEX.md](docs/CODEX.md)）。対応する各 CLI での実行方法、ヘッドレスコマンドがある CLI のそのコマンド、CLI ごとのセットアップ上の注意は [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) にあります。
+どの CLI も 1 つのルーター `.agents/skills/career-ops/SKILL.md` と同じ `modes/*.md` ファイルを共有しているため、どの CLI でもリクエストは同じように振り分けられます（ブラウザを多用するモードには Playwright ツールも必要です）。Codex ではスラッシュコマンドは保証されません。普通の言葉で頼むか、`codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` でプロンプトを 1 つヘッドレス実行してください（[docs/CODEX.md](docs/CODEX.md)）。対応する各 CLI での実行方法、ヘッドレスコマンドがある CLI のそのコマンド、CLI ごとのセットアップ上の注意は [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) にあります。
 
 ### 日常的に使うコマンド
 
@@ -298,7 +298,7 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | *URL または求人票を貼り付ける* | フルパイプライン：掲載確認（URL のみ）、A-G 評価（高スコア時は H も）、レポート、調整済み CV（既定では PDF）、トラッカー行 |
 | `scan` | ポータルをスキャンして新しい求人を見つけ、受信箱（`data/pipeline.md`）に追加する |
-| `pipeline` | 受信箱で待っている URL を順に処理し、明らかに合わないものは飛ばす |
+| `pipeline` | 受信箱で待っている URL を順に処理する（standard と premium の階層では、明らかに合わないものを飛ばすことがある） |
 | `apply` | 応募フォームをあなたと一緒に項目ごとに入力する。送信の手前で止まる |
 | `tracker` | 各応募の状況 |
 | `followup` | フォローアップの時期が来ている応募と、その下書き |
