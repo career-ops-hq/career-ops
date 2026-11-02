@@ -14,13 +14,25 @@ function placed(el) {
 }
 
 // display:none reports a zero box at the origin. Treating that as the start
-// of the CV turns the body margin into extra height.
+// of the CV turns the body margin into extra height. display:contents has no
+// box either, but its children can, so those still count.
 function hasBox(el) {
   if (!el) return false;
   const rect = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
   const width = Math.max(rect && Number.isFinite(rect.width) ? rect.width : 0, el.offsetWidth || 0);
   const height = Math.max(rect && Number.isFinite(rect.height) ? rect.height : 0, el.offsetHeight || 0, el.scrollHeight || 0);
   return width > 0 || height > 0;
+}
+
+function firstRendered(nodes) {
+  if (!nodes || typeof nodes[Symbol.iterator] !== "function") return null;
+  for (const el of nodes) {
+    if (!el) continue;
+    if (hasBox(el)) return el;
+    const nested = firstRendered(el.children);
+    if (nested) return nested;
+  }
+  return null;
 }
 
 // A footer can sit after .page. The body's own scroll height cannot be used
@@ -47,13 +59,7 @@ function heightAfterPages(body, pages) {
 function contentAbovePages(body, pages) {
   const kids = body.children;
   if (!kids || typeof kids[Symbol.iterator] !== "function" || pages.length === 0) return 0;
-  let first = null;
-  for (const el of kids) {
-    if (hasBox(el)) {
-      first = el;
-      break;
-    }
-  }
+  const first = firstRendered(kids);
   if (!first) return 0;
   const above = Math.min(...pages.map((page) => placed(page).top)) - placed(first).top;
   return above > 0 ? above : 0;

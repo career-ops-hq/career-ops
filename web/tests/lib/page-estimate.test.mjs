@@ -129,6 +129,23 @@ test("a footer margin is part of the preview height", () => {
   assert.equal(previewPageCount(contentHeightPx(withGap)), 2);
 });
 
+test("a header inside a boxless wrapper counts toward the preview height", () => {
+  const header = { getBoundingClientRect: () => ({ top: 0, height: 200, width: 800 }) };
+  const wrap = { getBoundingClientRect: () => ({ top: 0, height: 0, width: 0 }), children: [header] };
+  const page = { scrollHeight: 900, getBoundingClientRect: () => ({ top: 200, height: 900, width: 800 }) };
+  const one = {
+    body: {
+      children: [wrap, page],
+      scrollHeight: 1100,
+      querySelector: () => page,
+      querySelectorAll: () => [page],
+    },
+  };
+  assert.equal(contentHeightPx(one), 1100);
+  assert.equal(frameHeightPx(one), 1100);
+  assert.equal(previewPageCount(contentHeightPx(one)), 2);
+});
+
 test("a hidden element before the page does not add a page", () => {
   const hidden = { getBoundingClientRect: () => ({ top: 0, height: 0, width: 0 }) };
   const page = { scrollHeight: 1050, getBoundingClientRect: () => ({ top: 8, height: 1050, width: 800 }) };
