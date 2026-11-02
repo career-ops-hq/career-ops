@@ -60,6 +60,45 @@
           "path": "claude-directory/README.md"
         },
         {
+          "type": "json",
+          "path": "openai-directory/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "openai-directory/skills/career-ops/SKILL.md"
+        },
+        {
+          "type": "generic",
+          "path": "openai-directory/README.md"
+        },
+        {
+          "type": "json",
+          "path": "cursor-directory/.cursor-plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "cursor-directory/skills/career-ops/SKILL.md"
+        },
+        {
+          "type": "generic",
+          "path": "cursor-directory/README.md"
+        },
+        {
+          "type": "json",
+          "path": "antigravity-directory/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "antigravity-directory/skills/career-ops/SKILL.md"
+        },
+        {
+          "type": "generic",
+          "path": "antigravity-directory/README.md"
+        },
+        {
           "type": "generic",
           "path": ".agents/skills/career-ops/SKILL.md"
         }
