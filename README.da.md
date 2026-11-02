@@ -249,8 +249,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Start using
-# Paste a job URL or JD text to trigger auto-pipeline.
-# Every other mode, and how to ask for it in your CLI: see Usage below.
+# Indsæt en job-URL eller teksten fra en jobbeskrivelse for at starte auto-pipeline.
+# Alle andre tilstande, og hvordan du beder om dem i din CLI: se Brug nedenfor.
 ```
 
 </details>
@@ -290,7 +290,7 @@ Indsæt en job-URL eller jobbeskrivelse i din AI-CLI. career-ops tjekker, at et 
 
 `/career-ops` uden noget efter sig viser kommandomenuen i de CLI'er, der bruger den. Almindeligt sprog virker i alle understøttede CLI'er. Som Claude Code-plugin er kommandoen `/career-ops:career-ops`.
 
-De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `modes/*.md`-filer, så en tilstand opfører sig ens, uanset hvilken CLI der kører den. Slash-kommandoer er ikke garanteret i Codex: bed om det i almindeligt sprog, eller kør ét prompt headless med `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Hvordan du kører det i hver understøttet CLI, headless-kommandoer hvor en CLI har en, og opsætningsnoter for den enkelte CLI står i [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `modes/*.md`-filer, så alle CLI'er router en forespørgsel på samme måde (browsertunge tilstande kræver også Playwright-værktøjer). Slash-kommandoer er ikke garanteret i Codex: bed om det i almindeligt sprog, eller kør ét prompt headless med `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Hvordan du kører det i hver understøttet CLI, headless-kommandoer hvor en CLI har en, og opsætningsnoter for den enkelte CLI står i [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Hverdagens kommandoer
 
@@ -298,7 +298,7 @@ De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `mod
 | --- | --- |
 | *indsæt en URL eller jobbeskrivelse* | Hele pipelinen: tjek af om opslaget stadig er aktivt (kun URL'er), A-G-vurdering plus H ved høje scorer, rapport, tilpasset CV (PDF som standard), tracker-række |
 | `scan` | Scan dine portaler for nye opslag og læg dem i indbakken (`data/pipeline.md`) |
-| `pipeline` | Vurdér hver URL, der venter i indbakken |
+| `pipeline` | Gennemgår de URL'er, der venter i indbakken (standard- og premium-niveauet kan springe åbenlyse uoverensstemmelser over) |
 | `apply` | Udfyld en ansøgningsformular sammen med dig, felt for felt. Den stopper før Send |
 | `tracker` | Hvor hver ansøgning står |
 | `followup` | Hvilke ansøgninger der skal følges op, med udkast |
@@ -313,10 +313,10 @@ De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `mod
 | Kommando | Hvad den gør |
 | --- | --- |
 | [`scan`](modes/scan.md) | Scan portaler og find nye opslag |
-| [`discover`](modes/discover.md) | Omsæt en liste over firmanavne til scanbare ATS-boards og føj dem til `portals.yml` (uden tokens) |
+| [`discover`](modes/discover.md) | Omsæt en liste over firmanavne til scanbare ATS-boards. Viser som standard kun en forhåndsvisning og føjer dem først til `portals.yml` med `--write` (uden tokens) |
 | [`pipeline`](modes/pipeline.md) | Behandl ventende URL'er fra indbakken (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Hurtig første sortering (kør/kør ikke) ud fra `modes/_brief.md`, før en fuld vurdering (skriver ingen filer) |
-| [`batch`](modes/batch.md) | Vurdér mange opslag med parallelle headless-workers |
+| [`batch`](modes/batch.md) | Vurdér mange opslag med headless-workers (parallelt med Claude, ét ad gangen med andre CLI'er) |
 | [`titles`](modes/titles.md) | Foreslå beslægtede jobtitler ud fra dit CV for at udvide søgningen |
 
 **Vurdér en stilling**
