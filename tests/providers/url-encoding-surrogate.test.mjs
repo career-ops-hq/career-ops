@@ -52,6 +52,18 @@ try {
     ([bad, good]) => bad === null && good !== null && good.url.includes('ok-123'),
   );
 
+  // deel.parseDeelBoard — .map() over the board's jobPostings array.
+  const { parseDeelBoard } = await load('deel.mjs');
+  const deelPage = (rows) => `<script>self.__next_f.push([1,${JSON.stringify(`2:{"jobPostings":${JSON.stringify(rows)}}\n`)}])</script>`;
+  check(
+    'deel.parseDeelBoard',
+    () => parseDeelBoard(
+      deelPage([{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 'ok-5', title: 'Good Id' }]),
+      { slug: 'x', company: 'X' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://jobs.deel.com/x/job-details/ok-5/overview',
+  );
+
   // bamboohr.parseBambooHRResponse — .map() over one page.
   const { parseBambooHRResponse } = await load('bamboohr.mjs');
   check(
@@ -61,6 +73,17 @@ try {
       'X', 'https://x.bamboohr.com',
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
+  );
+
+  // keka.parseKekaResponse — for…of over the top-level jobs array.
+  const { parseKekaResponse } = await load('keka.mjs');
+  check(
+    'keka.parseKekaResponse',
+    () => parseKekaResponse(
+      [{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 5, title: 'Good Id' }],
+      'X', 'https://x.keka.com',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.keka.com/careers/jobdetails/5',
   );
 
   // jibeapply.parseJibeapplyResponse — .map().filter(Boolean) over one page.
@@ -318,8 +341,8 @@ try {
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
   const CONVERTED = [
-    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
-    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
+    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
+    'kalibrr.mjs', 'keka.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
     'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
 

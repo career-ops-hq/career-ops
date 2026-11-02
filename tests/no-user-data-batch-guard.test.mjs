@@ -167,9 +167,13 @@ test('the guard exempts every tracked source under batch/', () => {
   // Without this the assertion below is satisfied by an empty list, which is
   // what a failed git call or a renamed directory produces.
   assert.ok(
-    tracked.length >= 6,
+    tracked.length >= 7,
     `git ls-files found only ${tracked.length} tracked files under batch/ — the exemption ` +
       'check would pass vacuously',
+  );
+  assert.ok(
+    tracked.includes('batch/batch-prompt-match.md'),
+    'expected tracked batch/ files to include batch/batch-prompt-match.md',
   );
 
   const blocked = tracked.filter(isBlocked);
