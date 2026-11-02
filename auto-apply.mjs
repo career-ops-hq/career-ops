@@ -2,7 +2,8 @@
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { load as loadYaml } from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { execFileSync } from 'child_process';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { findBlacklistEntry, loadBlacklist } from './scan.mjs';
@@ -130,4 +131,4 @@ export async function run({ dryRun=true, submit=false, approve=[], limit=Infinit
   const summary=`# Auto-apply daily summary: ${day}\n\n- Mode: ${dryRun?'dry-run':submit?'submit':'live; approval required'}\n- Date: ${day}\n\n${block('Submitted',submitted,x=>`- ${x.company} | ${x.role} | ${x.url} | ${x.evidence} | ${x.text}`)}${block('Queued',queued,x=>`- ${x.company} | ${x.role} | ${x.gate} | ${x.detail}`)}${block('Skipped',skipped,x=>`- ${x.company} | ${x.role} | ${x.reason}`)}## Cap used\n\n- ${used}/${cap}\n`;
   writeFileSync(join(out,`auto-apply-${day}.md`),summary,'utf8'); emit({type:'run_end',submitted:submitted.length,queued:queued.length,skipped:skipped.length}); return {used,cap,submitted:submitted.length,dryRun,queued,skipped,summary};
 }
-if(process.argv[1]&&import.meta.url===new URL(`file://${process.argv[1].replaceAll('\\','/')}`).href) console.log(JSON.stringify(await run(parseCli(process.argv.slice(2)))));
+if(isMainModule(import.meta.url)) console.log(JSON.stringify(await run(parseCli(process.argv.slice(2)))));
