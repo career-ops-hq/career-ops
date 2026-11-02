@@ -1,0 +1,31 @@
+{
+  "name": "career-ops",
+  "displayName": "career-ops",
+  "version": "1.38.0",
+  "description": "Open-source AI job search agent: finds openings at the companies you choose, scores each job posting against your CV (1-5, A-H report), tailors your CV and cover letter, preps interviews and tracks applications. Runs locally; you press Submit.",
+  "author": {
+    "name": "santifer",
+    "url": "https://santifer.io"
+  },
+  "homepage": "https://career-ops.org",
+  "repository": "https://github.com/career-ops-hq/career-ops",
+  "license": "MIT",
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://career-ops.org/docs",
+  "supportUrl": "https://github.com/career-ops-hq/career-ops/issues",
+  "privacyPolicyUrl": "https://github.com/career-ops-hq/career-ops/blob/main/claude-directory/README.md#what-it-runs-sends-and-fetches",
+  "keywords": [
+    "job-search",
+    "career",
+    "cv",
+    "resume",
+    "ats",
+    "job-board",
+    "open-source",
+    "ai-job-search",
+    "job-search-agent",
+    "interview-prep",
+    "cover-letter",
+    "job-application"
+  ]
+}

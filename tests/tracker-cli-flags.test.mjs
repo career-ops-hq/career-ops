@@ -154,7 +154,7 @@ for (const { args, typo } of OTHER_TYPOS) {
   const r = runTracker(['--help'], sb);
   const expected = [
     'sync [--check]', '--status', '--company', '--role', '--since', '--min-score',
-    '--limit', '--csv', 'history --id N', 'export [--out FILE] [--force]', 'delete --num N [--dry-run]',
+    '[--id N]', '--limit', '[--json | --csv]', '--csv', 'history --id N', 'export [--out FILE] [--force]', 'delete --num N [--dry-run]',
   ];
   const missing = expected.filter((needle) => !r.all.includes(needle));
   if (r.status === 0 && missing.length === 0) pass('tracker.mjs --help lists every subcommand and its flags');

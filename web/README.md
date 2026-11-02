@@ -43,7 +43,9 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
-  CV editing with preview, settings.
+  CV editing with preview, settings. In **CV**, use **Upload PDF / TeX** to
+  import a replacement, review the converted Markdown, then select **Update cv.md**.
+  Conversion uses your configured AI CLI; saving backs up the previous CV.
 
 ### Full or focused evaluation
 
