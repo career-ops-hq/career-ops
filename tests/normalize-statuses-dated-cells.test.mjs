@@ -18,7 +18,7 @@ import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { loadCanonicalStates, resolveCanonicalStateId } from '../tracker-utils.mjs';
+import { loadCanonicalStates, resolveCanonicalStateId, stripStatusDecoration } from '../tracker-utils.mjs';
 import { normalizeStatus } from '../normalize-statuses.mjs';
 
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
@@ -39,6 +39,28 @@ ok('every states.yml label and alias with a date appended normalizes to that sta
     }
   }
   assert.deepStrictEqual(wrong, []);
+});
+
+ok('a date reads the same however it joins the state, for every spelling', () => {
+  const joined = (s) => [`${s} (2026-01-02)`, `${s} - 2026-01-02`, `${s} – 2026-01-02`, `${s} — 2026-01-02`,
+    `${s}, 2026-01-02`, `${s}: 2026-01-02`, `${s} / 2026-01-02`, `${s} on 2026-01-02`, `${s}-2026-01-02`,
+    `2026-01-02 ${s}`, `2026-01-02: ${s}`, `**${s}** (2026-01-02)`];
+  const wrong = [];
+  for (const state of STATES) {
+    for (const spelling of [state.label, ...state.aliases]) {
+      for (const cell of joined(spelling)) {
+        if (stripStatusDecoration(cell) !== spelling) wrong.push(`${cell} → ${stripStatusDecoration(cell)}`);
+        if (normalizeStatus(cell).status !== state.label) wrong.push(`${cell} → ${JSON.stringify(normalizeStatus(cell))}`);
+      }
+    }
+  }
+  assert.deepStrictEqual(wrong, []);
+});
+
+ok('a date alone, or next to a word that is no state, still resolves to nothing', () => {
+  assert.strictEqual(resolveCanonicalStateId('2026-01-02', STATES), null);
+  assert.strictEqual(resolveCanonicalStateId('Pending (2026-01-02)', STATES), null);
+  assert.deepStrictEqual(normalizeStatus('Pending - 2026-01-02'), { status: null, unknown: true });
 });
 
 ok('the result is the state the readers resolve the same cell to', () => {
