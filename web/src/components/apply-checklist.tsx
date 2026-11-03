@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { PageFrame } from "@/components/page-frame";
+import { BackLink } from "@/components/back-link";
 import { MarkPdfReadyButton } from "@/components/mark-pdf-ready-button";
 import { saveStatus } from "@/lib/pipeline-status.mjs";
 
@@ -13,7 +14,7 @@ type PdfFile = { relativePath: string; downloadHref: string } | null;
 type Tip = { portal: string; tip: string };
 
 const PILL =
-  "inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60";
 
 export function ApplyChecklist({
   company,
@@ -52,14 +53,14 @@ export function ApplyChecklist({
 }) {
   return (
     <PageFrame className="max-w-3xl">
-      <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
+      <BackLink href={backHref} className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text">
         <ArrowLeft className="size-4" /> Pipeline
-      </Link>
+      </BackLink>
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">Apply checklist</p>
         <h1 className="mt-2 font-display text-3xl tracking-tight text-landing">{company}</h1>
         {role && <p className="mt-1 text-muted">{role}</p>}
-        <Link href={reportHref} className="mt-3 inline-flex text-sm text-brand hover:underline">
+        <Link href={reportHref} className="mt-3 inline-flex text-sm text-brand-text hover:underline">
           Back to the report
         </Link>
       </header>

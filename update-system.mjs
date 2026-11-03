@@ -5875,6 +5875,19 @@ export async function dismiss(argv = process.argv, ctx = {}) {
 // actually matters — a divergence here would make this copy answer differently
 // from the helper on exactly the platforms the helper was hardened for.
 const canonicalizePath = realpathSync.native ?? realpathSync;
+
+// Imported at the point of use, like every other local module here (see the
+// NOTE at the top): an older path-resolver.mjs without the export reads as
+// "not a plugin install".
+async function managedByPlugin() {
+  try {
+    const { isPluginInstallCopy } = await import('./path-resolver.mjs');
+    return typeof isPluginInstallCopy === 'function' && isPluginInstallCopy(ROOT);
+  } catch {
+    return false;
+  }
+}
+
 const entryPath = process.argv[1] ? resolve(process.argv[1]) : '';
 const selfPath = fileURLToPath(import.meta.url);
 let isCli = Boolean(process.argv[1]) && entryPath === selfPath;
@@ -5886,6 +5899,19 @@ if (isCli) {
   const cmd = process.argv[2] || 'check';
 
   try {
+    // A Claude Code plugin install is a copy Claude Code owns and replaces on
+    // every plugin update, with no .git of its own, so this updater has
+    // nothing to act on there. `managed-by-plugin` joins the statuses agents
+    // stay silent on (AGENTS.md → Update Check).
+    if (cmd !== 'status' && await managedByPlugin()) {
+      if (cmd === 'check') {
+        console.log(JSON.stringify({ status: 'managed-by-plugin', local: localVersion() }));
+        process.exit(0);
+      }
+      console.error('career-ops is installed here as a Claude Code plugin, which Claude Code updates: run /plugin, open the Installed tab and update career-ops. Nothing was changed.');
+      process.exit(1);
+    }
+
     // From a linked worktree the update belongs on main, not this branch.
     const redirected = redirectToMainCheckout(cmd);
     if (redirected !== null) process.exit(redirected);

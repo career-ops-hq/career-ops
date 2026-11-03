@@ -43,6 +43,7 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { syncTrackerPdfFlags } from './sync-pdf-flags.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { occupiedTrackerNumbersFromLedgers } from './reserve-report-num.mjs';
 
 const MERGE_TRACKER_USAGE = `Usage: node merge-tracker.mjs [options]
 
@@ -1663,7 +1664,9 @@ export async function mergeTracker(options = {}) {
     // taken and must never be handed out again. Used below so a new entry's number
     // is checked against every number actually on the tracker, not just the largest
     // one the existingApps loop saw.
-    const usedNumbers = new Set();
+    // Removed rows can still own ledger history. Both a requested number and
+    // the collision fallback must leave those identities with their old owner.
+    const usedNumbers = occupiedTrackerNumbersFromLedgers(APPS_FILE, { rootDir: DATA_ROOT });
     const MAX_COL_IDX = Math.max(...Object.values(COLMAP));
     for (const line of appLines) {
       if (!line.startsWith('|')) continue;

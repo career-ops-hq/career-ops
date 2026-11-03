@@ -54,8 +54,8 @@ export function MarkPdfReadyButton({
         disabled={busy || done}
         className={
           done
-            ? `${PILL} border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400`
-            : `${PILL} border-border text-muted hover:border-brand/40 hover:text-brand`
+            ? `${PILL} border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400`
+            : `${PILL} border-border text-muted hover:border-brand/40 hover:text-brand-text`
         }
       >
         {done && <Check className="size-3.5" />}

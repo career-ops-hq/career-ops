@@ -289,6 +289,30 @@ try {
   if (getroAged.length === 0 && getroAgePages === 1) pass('getro.fetch() stops pagination once postings cross getro_max_age_days');
   else fail(`getro.fetch() age-cutoff handling: ${getroAgePages} pages, ${getroAged.length} jobs kept`);
 
+  // A board can pin `featured` postings above the newest-first order. An old pin
+  // is dropped, but it must not stop the walk: the pages after it are still new.
+  const freshCreatedAt = Math.floor((Date.now() - 2 * 86_400_000) / 1000);
+  const row = (id, createdAt, featured = false) => ({ title: id, url: `https://jobs.examplevc.example/${id}`, organization: { name: 'Acme' }, created_at: createdAt, featured });
+  const pinnedPages = [
+    [row('pin-fresh', freshCreatedAt, true), row('pin-old', staleCreatedAt, true), row('a', freshCreatedAt)],
+    [row('b', freshCreatedAt)],
+    [row('c', staleCreatedAt), row('d', freshCreatedAt)],
+    [row('never-read', freshCreatedAt)],
+  ];
+  let pinnedCalls = 0;
+  const pinned = await getro.fetch({ ...okEntry, getro_max_age_days: 90 }, {
+    fetchJson: async () => {
+      const jobs = pinnedPages[pinnedCalls++] || [];
+      return { results: { count: 80, jobs } };
+    },
+  });
+  const pinnedTitles = pinned.map((j) => j.title).join(',');
+  if (pinnedCalls === 3 && pinnedTitles === 'pin-fresh,a,b,d') {
+    pass('getro.fetch() drops an old featured pin without stopping the walk, and still stops at an old posting in order');
+  } else {
+    fail(`getro.fetch() featured pin: ${pinnedCalls} pages, kept ${pinnedTitles}`);
+  }
+
   // A transient failure (timeout/abort — no .status set, matching a real AbortError)
   // is retried and recovers transparently instead of truncating the board (#2506).
   let getroRetryAttempts = 0;

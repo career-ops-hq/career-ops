@@ -24,7 +24,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
 
-// engines allows Node >=22.13, but importing a .ts file needs type stripping
+// engines allows Node 22.13+ (23.4+ on 23.x), but importing a .ts file needs type stripping
 // (default from 22.18 / 23.6) and module.registerHooks (22.15 / 23.5). CI runs
 // 24; on an older local Node the three cases skip rather than fail — which is
 // why registerHooks is looked up at runtime rather than imported by name: a

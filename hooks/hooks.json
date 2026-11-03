@@ -1,0 +1,16 @@
+{
+  "description": "career-ops: install the plugin's Node packages and create the data folder",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/claude-plugin-session-start.mjs\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

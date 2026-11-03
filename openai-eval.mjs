@@ -3,7 +3,7 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, Together, Groq, DeepSeek, Zhipu GLM,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, Together, Groq, DeepSeek, Zhipu GLM,
  * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
@@ -41,9 +41,15 @@ import {
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
 import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+
+// Ambient guard over global fetch (idempotent); the explicit gate below is the
+// primary layer, this covers anything the script hands to fetch directly.
+installPiiInterceptor();
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -96,7 +102,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <id>     Model id            (env OPENAI_MODEL, default gpt-4o-mini)
+    --model <id>     Model id            (env OPENAI_MODEL; MiniMax direct default
+                                         MiniMax-M3.1-Flash, otherwise gpt-4o-mini)
     --url <base>     OpenAI-compatible base URL, including any /v1
                      (env OPENAI_BASE_URL, default https://api.openai.com/v1)
     --key <key>      API key             (env OPENAI_API_KEY)
@@ -115,10 +122,13 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     Cheaper Inference: --url https://api.cheaperinference.com/v1  --model gpt-5.4-mini
     API Route:   --url https://global.api-route.com/v1  --model gpt-5.5
     Runcrate:    --url https://api.runcrate.ai/v1  --model deepseek-ai/DeepSeek-V4.1-Flash
+    CloudGPU:    --url https://cloudgpu.app/v1  --model deepseek-v4.1-flash
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
     Zhipu GLM:   --url https://open.bigmodel.cn/api/paas/v4  --model glm-4-flash
+    MiniMax:     --url https://api.minimax.io/v1       --model MiniMax-M3.1-Flash
+                 --url https://api.minimax.cn/v1       --model MiniMax-M3
     LM Studio:   --url http://localhost:1234/v1        --model <loaded-model>   (no key)
 
   EXAMPLES
@@ -131,7 +141,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 // Parse flags
 let jdText     = '';
 let postingUrl = '';
-let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+let modelName  = process.env.OPENAI_MODEL || '';
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 let apiKey     = process.env.OPENAI_API_KEY || '';
 let saveReport = true;
@@ -201,6 +211,13 @@ let endpointHost;
     process.exit(1);
   }
   endpointHost = parsed.hostname;
+  // Resolve the default after CLI flags, without replacing saved/custom models.
+  // Limit this to the direct API; subscription and gateway routes are separate.
+  if (!modelName) {
+    const isMiniMax = ['https://api.minimax.io', 'https://api.minimax.cn'].includes(parsed.origin)
+      && parsed.pathname === '/v1';
+    modelName = isMiniMax ? 'MiniMax-M3.1-Flash' : 'gpt-4o-mini';
+  }
   const isLoopback = endpointHost === 'localhost' || endpointHost === '127.0.0.1' || endpointHost === '::1';
 
   if (!isLoopback && parsed.protocol !== 'https:') {
@@ -359,21 +376,25 @@ Object.assign(headers, endpointHeaders(endpointHost, SESSION_ID, careerOpsVersio
 
 let evaluationText;
 try {
+  // Privacy gate: inspect the complete serialized request before it leaves the
+  // machine. Shared boundary so openai-eval and openai-tailor cannot diverge.
+  const requestBody = JSON.stringify({
+    model:    modelName,
+    messages: [
+      buildSystemMessage(systemPrompt, endpointHost),
+      { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
+    ],
+    stream:      true,
+    temperature: 0.4,
+  });
+  assertLlmRequestAllowed(endpoint, requestBody);
   // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
   // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
   // Header-Timeout, bevor die erste Zeile ankommt (8 t/s × 22k-Prefill).
   const res = await fetch(endpoint, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model:    modelName,
-      messages: [
-        buildSystemMessage(systemPrompt, endpointHost),
-        { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
-      ],
-      stream:      true,
-      temperature: 0.4,
-    }),
+    body: requestBody,
     signal: AbortSignal.timeout(timeoutMs),
   });
 

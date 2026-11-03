@@ -413,8 +413,9 @@ test('the scanner resolves every call the four known writers contain', () => {
   // would catch masking that is correct in miniature and wrong at scale.
   // scan.mjs went 5 → 7 when the location and posting-age cuts started
   // recording what they drop (`skipped_location`, `skipped_age`), and 7 → 8
-  // when the title cut did (`skipped_title`, #2695).
-  for (const [file, expected] of [['scan.mjs', 8], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
+  // when the title cut did (`skipped_title`, #2695), and 8 → 9 when the
+  // experience filter did (`skipped_experience`).
+  for (const [file, expected] of [['scan.mjs', 9], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     const naive = [...src.matchAll(/(?<!function )\bappendToScanHistory\s*\(/g)].length;
     assert.equal(naive, expected, `${file}: expected ${expected} call sites, source has ${naive} — update this expectation deliberately`);

@@ -119,7 +119,7 @@ export function KeywordCoverage({ reportId }: { reportId: string }) {
 function Header() {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <ScanSearch className="size-4 text-brand" />
+      <ScanSearch className="size-4 text-brand-text" />
       <h2 className="font-display text-base text-landing">ATS keyword coverage</h2>
       <span className="text-xs text-faint">this JD vs your CV</span>
     </div>

@@ -51,7 +51,7 @@ export function AiSearchBox({
     <div>
       <style>{STYLE}</style>
       <div className="co-aibox p-4">
-        <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-brand">
+        <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-brand-text">
           <Sparkles className="size-3.5" /> Describe the role — an AI hunts the open web for it
         </div>
         <textarea
@@ -99,7 +99,7 @@ export function AiSearchBox({
             key={ex}
             type="button"
             onClick={() => onIntent(ex)}
-            className="rounded-full border border-border bg-surface/40 px-3 py-1.5 text-[12px] text-muted transition hover:border-brand/40 hover:text-brand"
+            className="rounded-full border border-border bg-surface/40 px-3 py-1.5 text-[12px] text-muted transition hover:border-brand/40 hover:text-brand-text"
           >
             {ex}
           </button>
