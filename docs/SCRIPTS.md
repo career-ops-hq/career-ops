@@ -1336,7 +1336,14 @@ same Playwright pipeline as CVs.
 ```bash
 npm run cover-letter -- payload.json
 node generate-cover-letter.mjs --payload payload.json --out output/slug-cover.pdf
+node generate-cover-letter.mjs --payload payload.json --report 42 --max-pages 1 --strict-pages
 ```
+
+Flags are parsed strictly: an unknown flag, a stray argument, or a flag with
+no value (`--report --out x.pdf`) exits 1 with the usage text instead of being
+ignored. `--report` takes a numeric report number. The page budget defaults to
+1 page and only warns when the letter runs longer; `--max-pages N` changes the
+budget and `--strict-pages` makes overflow an error.
 
 ---
 

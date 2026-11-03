@@ -1337,10 +1337,12 @@ export function reorderCvSections(html, order) {
  * force content under the limit.
  *
  * @param {number} pageCount - Actual pages in the rendered PDF.
- * @param {{ maxPages?: number, strictPages?: boolean }} [options]
+ * @param {{ maxPages?: number, strictPages?: boolean, kind?: string }} [options]
+ *   `kind` names the artifact in the message: a cover letter that overflows
+ *   is reported as one, with advice that fits a letter, not as "CV is N pages".
  * @returns {void}
  */
-export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false } = {}) {
+export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false, kind = 'cv' } = {}) {
   if (!Number.isInteger(pageCount) || pageCount < 1) {
     throw new Error(`Could not determine the rendered PDF page count (received ${pageCount}).`);
   }
@@ -1351,9 +1353,12 @@ export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false
 
   const actualLabel = 'pages';
   const allowedLabel = maxPages === 1 ? 'page' : 'pages';
+  const isCover = kind === 'cover';
   const message =
-    `CV is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
-    'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.';
+    `${isCover ? 'Cover letter' : 'CV'} is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
+    (isCover
+      ? 'Shorten the opening, the profile intro, or the achievements, then regenerate.'
+      : 'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.');
 
   if (strictPages) {
     throw new Error(`${message} (--strict-pages requested)`);
@@ -2308,7 +2313,11 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
       console.log(`📊 Pages: ${result.pageCount}`);
       // The painter's own warning goes nowhere, so repeat it here. A strict
       // overflow already came back as an error.
-      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false });
+      enforcePageBudget(result.pageCount, {
+        maxPages: opts.maxPages ?? 2,
+        strictPages: false,
+        kind: resolveArtifactKind(opts.kind, outputPath).kind ?? 'cv',
+      });
       console.log(`📦 Size: ${(result.size / 1024).toFixed(1)} KB`);
       return result;
     } catch (err) {
@@ -2469,6 +2478,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     enforcePageBudget(pageCount, {
       maxPages: opts.maxPages ?? 2,
       strictPages: opts.strictPages ?? false,
+      kind: artifactKind,
     });
 
     console.log(`✅ PDF generated: ${outputPath}`);
