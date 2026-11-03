@@ -1845,6 +1845,7 @@ process_offer() {
         # file holds it, so releasing now would hand it to the next job before
         # the merge. merge_tracker releases it once the row is in the tracker.
         update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "-" "dealbreaker: \"$skip_rule\"" "$retries" || true
+        log_discard "$id" "$url" "dealbreaker: \"$skip_rule\"" || true
         echo "    ⏭️  Skipped (dealbreaker): $url — \"$skip_rule\""
         return 0
       fi
@@ -1902,6 +1903,7 @@ process_offer() {
       # MIN_SCORE comparison would silently run on truncated integers.
       if LC_ALL=C awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
         update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
+        log_discard "$id" "$url" "below-min-score ($score < $MIN_SCORE)" || true
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0
