@@ -37,6 +37,12 @@ function originalOf(htmlPath: string) {
   return htmlPath.replace(new RegExp(`${EDITED_SUFFIX}\\.html$`), ".html");
 }
 
+/**
+ * The tailored HTML for a report: the HTML path recorded in data/pdf-index.tsv
+ * when it sits inside output/, else the sibling of the recorded PDF, else the
+ * newest output/ HTML for the report's company. An edited copy is never a
+ * source, because edits are always made against the original the tailor wrote.
+ */
 async function findTailoredHtml(reportNum: string, slug: string): Promise<string | null> {
   const dir = path.join(careerOpsRoot(), "output");
   const indexed = await pdfPathStatusForReport(reportNum);
