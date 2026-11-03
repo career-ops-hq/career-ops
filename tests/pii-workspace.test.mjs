@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   scrub,
@@ -255,6 +255,72 @@ test('restore removes token map when completed with none unresolved and keeps it
     assert.equal(resUnresolved.status, 0);
     assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Alice and PRIVACY_VALUE_99');
     assert.equal(fs.existsSync(tokenMap), true, 'token map should be preserved when tokens remain unresolved');
+  });
+});
+
+test('restore retains token map when entries remain unaccounted for in restored files', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+
+    // Token map has 2 entries, but cv.md only has PRIVACY_VALUE_1 and other user files are absent
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({ PRIVACY_VALUE_1: 'Alice', PRIVACY_VALUE_2: 'SecretCompany' }),
+      'utf8'
+    );
+    fs.writeFileSync(cvFile, 'Candidate: PRIVACY_VALUE_1', 'utf8');
+
+    const res = spawnSync(process.execPath, [scriptPath, 'restore'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(res.status, 0);
+    assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Alice');
+    assert.equal(fs.existsSync(tokenMap), true, 'token map must be kept when map entries remain unaccounted for');
+    assert.match(res.stderr + res.stdout, /1 token map entry\(ies\) not restored; retaining/);
+  });
+});
+
+test('restore reports deletion failure and sets nonzero exit code when token map cannot be unlinked', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+
+    fs.writeFileSync(tokenMap, JSON.stringify({ PRIVACY_VALUE_1: 'Alice' }), 'utf8');
+    fs.writeFileSync(cvFile, 'Candidate: PRIVACY_VALUE_1', 'utf8');
+
+    const scriptUrl = pathToFileURL(scriptPath).href;
+    const preload = `
+      import fs from 'node:fs';
+      const orig = fs.unlinkSync;
+      fs.unlinkSync = (p) => {
+        if (typeof p === 'string' && p.includes('.pii-token-map.json')) {
+          const err = new Error('simulated permission denied');
+          err.code = 'EPERM';
+          throw err;
+        }
+        return orig(p);
+      };
+      process.argv = [process.argv[0], 'pii-workspace.mjs', 'restore'];
+      await import(${JSON.stringify(scriptUrl)});
+    `;
+
+    const res = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', preload],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, CAREER_OPS_ROOT: dir },
+      }
+    );
+
+    assert.equal(res.status, 1, 'process must exit nonzero on deletion failure');
+    assert.match(res.stderr + res.stdout, /Error removing token map at/);
+    assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Alice', 'file should still be restored');
+    assert.equal(fs.existsSync(tokenMap), true, 'token map remains on disk after failed unlink');
   });
 });
 

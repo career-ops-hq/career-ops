@@ -39,6 +39,11 @@ import {
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
+import {
+  replaceUserFile,
+  writeFileAtomic,
+  userFileWriteTarget,
+} from './tracker-utils.mjs';
 
 const USER_FILES = ['cv.md', 'config/profile.yml', 'modes/_profile.md'];
 const TOKEN_MAP_NAME = '.pii-token-map.json';
@@ -75,61 +80,23 @@ function loadTokenMap(explicitPath) {
 }
 
 function atomicWriteFileSync(targetPath, content, options = {}) {
-  let resolvedTarget = targetPath;
-  try {
-    const stat = fs.lstatSync(targetPath);
-    if (stat.isSymbolicLink()) {
-      resolvedTarget = fs.realpathSync(targetPath);
-    }
-  } catch {
-    /* ignore if target does not exist or lstat/realpath fails */
-  }
-
-  const dir = path.dirname(resolvedTarget);
-  fs.mkdirSync(dir, { recursive: true });
-
+  const target = userFileWriteTarget(targetPath);
+  const exists = fs.existsSync(target);
   const opts = typeof options === 'string' ? { encoding: options } : { ...options };
-
   let mode = opts.mode;
-  if (mode === undefined && fs.existsSync(resolvedTarget)) {
+  if (mode === undefined && exists) {
     try {
-      mode = fs.statSync(resolvedTarget).mode & 0o777;
+      mode = fs.statSync(target).mode & 0o777;
     } catch {
       /* ignore */
     }
   }
-  if (mode === undefined) {
-    mode = 0o600;
-  }
-
-  const tempPath = path.join(
-    dir,
-    `.tmp-${path.basename(resolvedTarget)}-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
-  let renamed = false;
-  try {
-    fs.writeFileSync(tempPath, content, { ...opts, mode });
-    try {
-      fs.chmodSync(tempPath, mode);
-    } catch {
-      /* on Windows chmod is limited, ignore chmod failures */
-    }
-    fs.renameSync(tempPath, resolvedTarget);
-    renamed = true;
-  } finally {
-    if (!renamed) {
-      try {
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-      } catch {
-        /* ignore cleanup failures */
-      }
-    }
-  }
+  writeFileAtomic(target, content, { mode: mode ?? 0o600 });
 }
 
 function saveTokenMap(map, explicitPath) {
   const mapPath = explicitPath ?? tokenMapPath;
-  atomicWriteFileSync(mapPath, JSON.stringify(map, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  writeFileAtomic(mapPath, JSON.stringify(map, null, 2), { mode: 0o600 });
 }
 
 /**
@@ -165,7 +132,7 @@ function scrub(text, guard, map) {
   return out;
 }
 
-function rehydrate(text, map) {
+function rehydrate(text, map, restoredTokens = null) {
   if (!map || Object.keys(map).length === 0) return text;
 
   // Match complete numeric tokens (PRIVACY_VALUE_\d+) and legacy tokens in a
@@ -183,7 +150,17 @@ function rehydrate(text, map) {
   );
 
   return text.replace(pattern, (matched) => {
-    return Object.prototype.hasOwnProperty.call(map, matched) ? map[matched] : matched;
+    if (Object.prototype.hasOwnProperty.call(map, matched)) {
+      if (restoredTokens) {
+        if (Array.isArray(restoredTokens)) {
+          restoredTokens.push(matched);
+        } else if (typeof restoredTokens.add === 'function') {
+          restoredTokens.add(matched);
+        }
+      }
+      return map[matched];
+    }
+    return matched;
   });
 }
 
@@ -243,6 +220,7 @@ async function main() {
   try {
     const map = loadTokenMap();
     let hasUnresolved = false;
+    const restoredTokens = new Set();
 
     for (const file of USER_FILES) {
       const filePath = path.join(root, file);
@@ -254,14 +232,14 @@ async function main() {
         if (scrubbed !== content) {
           // Persist the token map immediately before each rewritten file loses its real values.
           saveTokenMap(map);
-          atomicWriteFileSync(filePath, scrubbed, 'utf8');
+          replaceUserFile(filePath, scrubbed);
           console.log(`[privacy] ${file}: tokenized`);
         } else {
           console.log(`[privacy] ${file}: no configured text values found (unchanged)`);
         }
       } else if (mode === 'restore') {
-        const restored = rehydrate(content, map);
-        if (restored !== content) atomicWriteFileSync(filePath, restored, 'utf8');
+        const restored = rehydrate(content, map, restoredTokens);
+        if (restored !== content) replaceUserFile(filePath, restored);
         const unresolved = restored.match(/PRIVACY_VALUE_\d+/g);
         if (unresolved && unresolved.length > 0) {
           hasUnresolved = true;
@@ -280,13 +258,24 @@ async function main() {
 
     if (mode === 'scrub' && Object.keys(map).length > 0) {
       saveTokenMap(map);
-    } else if (mode === 'restore' && !hasUnresolved) {
-      try {
-        if (fs.existsSync(tokenMapPath)) {
-          fs.unlinkSync(tokenMapPath);
+    } else if (mode === 'restore') {
+      const mapTokens = Object.keys(map);
+      const unrestored = mapTokens.filter((t) => !restoredTokens.has(t));
+      if (unrestored.length > 0) {
+        console.warn(
+          `[privacy] WARNING: ${unrestored.length} token map entry(ies) not restored; retaining ${TOKEN_MAP_NAME}`
+        );
+      } else if (!hasUnresolved) {
+        try {
+          if (fs.existsSync(tokenMapPath)) {
+            fs.unlinkSync(tokenMapPath);
+          }
+        } catch (err) {
+          if (err.code !== 'ENOENT') {
+            console.error(`[privacy] Error removing token map at ${tokenMapPath}: ${err.message}`);
+            process.exitCode = 1;
+          }
         }
-      } catch {
-        /* ignore error if token map could not be removed */
       }
     }
   } finally {
@@ -308,6 +297,7 @@ export {
   TOKEN_MAP_NAME,
   loadTokenMap,
   atomicWriteFileSync,
+  replaceUserFile,
   saveTokenMap,
   scrub,
   rehydrate,
