@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Check, Circle, CircleDashed } from "lucide-react";
-import { readSavedCliId } from "@/lib/saved-cli";
+import { resolveCliId } from "@/lib/saved-cli";
 import { PREREQS, onboardingChecklist } from "@/lib/home/onboarding-checklist.mjs";
 
 // The "profile that grows while you talk": a live checklist of the four setup
@@ -15,11 +15,6 @@ import { PREREQS, onboardingChecklist } from "@/lib/home/onboarding-checklist.mj
 type Doctor = { available: boolean; onboardingNeeded: boolean; missing: string[] };
 type Section = { id: string; heading: string; state: "filled" | "template" | "missing" };
 
-// Same reader the rest of the app uses, so "configured" cannot mean one thing
-// here and another in Config (an empty-string cliId is not configured).
-function hasCli(): boolean {
-  return !!readSavedCliId();
-}
 
 export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   const [doctor, setDoctor] = useState<Doctor | null>(null);
@@ -34,11 +29,16 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   }, []);
 
   useEffect(() => {
-    setCli(hasCli());
+    // The same check a Run makes, so "configured" cannot mean one thing here and
+    // another when the assistant starts: a saved id counts only while it is
+    // installed (#4012), and an empty one never does.
+    let live = true;
+    resolveCliId().then((id) => { if (live) setCli(!!id); });
     refetch();
     window.addEventListener("co-onboarding-changed", refetch);
     window.addEventListener("co-job-done", refetch);
     return () => {
+      live = false;
       window.removeEventListener("co-onboarding-changed", refetch);
       window.removeEventListener("co-job-done", refetch);
     };
