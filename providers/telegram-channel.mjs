@@ -164,6 +164,9 @@ const YEAR_RE = /(?<!\d)(19|20)\d{2}(?!\d)/;
 // never fires next to a Cyrillic letter, and its list is short. Closed on
 // purpose: the cities, countries and regions RU/CIS channels post for.
 const PLACE_RE = /^(?:москва|мск|санкт-петербург|петербург|спб|питер|новосибирск|екатеринбург|казань|нижний новгород|краснодар|ростов-на-дону|самара|пермь|воронеж|уфа|омск|томск|иннополис|калининград|минск|киев|київ|львов|алматы|астана|ташкент|бишкек|тбилиси|батуми|ереван|баку|белград|нови-сад|лимассол|кипр|дубай|оаэ|стамбул|анталья|варшава|берлин|лиссабон|бали|таиланд|россия|рф|беларусь|казахстан|узбекистан|кыргызстан|армения|грузия|азербайджан|сербия|черногория|турция|польша|германия|португалия|испания|европа|снг|moscow|saint petersburg|st petersburg|minsk|kyiv|kiev|almaty|astana|tashkent|bishkek|tbilisi|batumi|yerevan|baku|belgrade|novi sad|limassol|cyprus|dubai|uae|istanbul|warsaw|berlin|london|lisbon|amsterdam|prague|bali|thailand|russia|belarus|kazakhstan|uzbekistan|kyrgyzstan|armenia|georgia|azerbaijan|serbia|montenegro|turkey|türkiye|poland|germany|portugal|spain|netherlands|uk|usa|us|eu|europe|emea|apac|latam|cis|mena|asia)$/iu;
+// The employer withheld under an NDA, given where the name would be
+// ("Компания: NDA"); "NDA Group" is a name and keeps it.
+const NDA_RE = /^(?:под\s+|under\s+)?nda$/iu;
 // The employer phrase "X ищет …" opens a line (Proglib channels: "💻
 // Wildberries ищет iOS-разработчика"; POSTER channels: "💎 Plus8Soft ищет
 // Senior Frontend Developer"; "Компания «Top Selection» ищет …"). Singular
@@ -198,6 +201,12 @@ function plausibleEmployer(name, fromTitle) {
   if (LOCATIONISH_RE.test(n) || ANONYMOUS_RE.test(n)) return '';
   if (fromTitle && (DATE_LIKE_RE.test(n) || /\d/.test(n))) return '';
   if (!/\p{Lu}/u.test(n)) return '';
+  // Where every shape puts the employer, a place, a reach or an NDA is not
+  // one: the hashtag template's second line "Worldwide 🌏" and "Компания:
+  // NDA" (@remote_jobs_relocate, @backend_frontend_jobs, measured
+  // 2026-11-03) were emitted as employers.
+  const bare = n.replace(/[^\p{L}\p{N}]+$/u, '');
+  if (PLACE_RE.test(bare) || FORMAT_ONLY_RE.test(bare) || NDA_RE.test(bare)) return '';
   return n;
 }
 
@@ -233,8 +242,6 @@ function positionalEmployer(raw) {
   if (!n || !/^[\p{Lu}\p{N}]/u.test(n) || /[()[\]«»]/.test(n)) return '';
   if (YEAR_RE.test(n) || ROLE_WORD_RE.test(n) || GENERIC_ORG_RE.test(n) || CONTRACT_RE.test(n) || PERSON_RE.test(n)) return '';
   if (WORK_FORMAT_RE.test(n) || FUNCTION_WORD_RE.test(n) || isDepartment(n)) return '';
-  const bare = n.replace(/[^\p{L}\p{N}]+$/u, '');
-  if (PLACE_RE.test(bare) || FORMAT_ONLY_RE.test(bare)) return '';
   return n;
 }
 

@@ -209,6 +209,7 @@ try {
     [['☁️ Middle Golang Developer — Timeweb Cloud', 'Зарплата не указана'], 'Timeweb Cloud', '"Title — Employer" (@godevjob)'],
     [['Python Backend Developer — YLAB Development'], 'YLAB Development', 'a brand token keeps a name ending in a department word'],
     [['Senior Python Developer — Moscow Exchange'], 'Moscow Exchange', 'a name that only starts with a place keeps it'],
+    [['Backend Developer', 'Компания: NDA Group'], 'NDA Group', 'a name that only starts with NDA keeps it'],
     [['Backend Engineer', 'The Trade Desk is a global advertising technology company.'], 'The Trade Desk', 'a three-word name opening with "The" before "is a"'],
     [['iOS Engineer – Creative App', 'ElevenLabs is an AI research and product company.'], 'ElevenLabs', '"Employer is a …" on the second line beats the team after the dash (@forallmobile)'],
     [['Data Engineer (со знанием Java или Groovy)', 'от 200 000 до 230 000 ₽', 'WILIX', 'WILIX - аккредитованная IT - компания.'], 'WILIX', 'a finder.work mirror\'s employer after the salary line (@jc_it)'],
@@ -246,6 +247,8 @@ try {
     [['QA Engineer / Worldwide'], 'a reach after the slash'],
     [['Data Engineer', 'от 200 000 до 230 000 ₽', 'Москва'], 'a city after the salary line'],
     [['#Develpment', 'Custom Software Development', 'Worldwide 🌏'], 'a line of business on the hashtag template'],
+    [['#Marketing', 'Worldwide 🌏', 'SEO / AI, Affiliate iGaming', 'remote'], 'a reach on the hashtag template (@remote_jobs_relocate)'],
+    [['AI-разработчик (Python/Go) — автоматизация в AdTech', 'Локация: Удалённо', 'Компания: NDA'], 'an NDA after the `Компания:` label (@backend_frontend_jobs)'],
   ];
   for (const [lines, label] of positionalRefused) {
     const got = employerName(lines);
