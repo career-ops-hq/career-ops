@@ -55,6 +55,7 @@ const SUITES = {
   "back-link-scroll": { url: "BACK_SCROLL_TEST_URL", root: "BACK_SCROLL_TEST_ROOT", fixture: "pipeline-long" },
   "cv-editor-keep": { url: "CV_EDITOR_KEEP_TEST_URL", root: "CV_EDITOR_KEEP_TEST_ROOT", fixture: "blank" },
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
+  "cv-studio-keep": { url: "CV_STUDIO_KEEP_TEST_URL", root: "CV_STUDIO_KEEP_TEST_ROOT", fixture: "cv-studio" },
   "cv-studio-preview": { url: "CV_STUDIO_PREVIEW_TEST_URL", fixture: "cv-studio-preview" },
   "cv-upload": { url: "CV_UPLOAD_TEST_URL", root: "CV_UPLOAD_TEST_ROOT", fixture: "cv-upload" },
   "employer-preset": { url: "EXPLORE_EMPLOYER_TEST_URL", fixture: "blank" },
