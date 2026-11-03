@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { moveCursor, rangeKeys, selectionAfterFailedSave, trackerCommand, typingFromTarget } from "../../src/lib/tracker-keys.mjs";
+import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "../../src/lib/tracker-keys.mjs";
 
 test("digits set a canonical status and 7 archives as Discarded", () => {
   assert.deepEqual(trackerCommand({ key: "1" }), { name: "status", status: "Evaluated" });
@@ -54,24 +54,4 @@ test("a failed save keeps the failed row and a row checked while the save ran", 
   assert.deepEqual(selectionAfterFailedSave(selected, attempted, new Set(["4"]), keyOf), ["n:4", "n:9"]);
   assert.deepEqual(selectionAfterFailedSave(selected, attempted, new Set(), keyOf), ["n:9"]);
   assert.deepEqual(selectionAfterFailedSave(["n:9"], attempted, new Set(["4"]), keyOf), ["n:9"]);
-});
-
-test("the cursor stays on a real row", () => {
-  assert.equal(moveCursor(-1, 4, 1), 0);
-  assert.equal(moveCursor(-1, 4, -1), 3);
-  assert.equal(moveCursor(0, 4, -1), 0);
-  assert.equal(moveCursor(3, 4, 1), 3);
-  assert.equal(moveCursor(1, 0, 1), -1);
-});
-
-test("a row checkbox keeps the keys, a text field or dialog takes them", () => {
-  assert.equal(typingFromTarget({ tagName: "INPUT", type: "checkbox" }), false);
-  assert.equal(typingFromTarget({ tagName: "INPUT", type: "search" }), true);
-  assert.equal(typingFromTarget({ tagName: "INPUT" }), true);
-  assert.equal(typingFromTarget({ tagName: "SELECT" }), true);
-  assert.equal(typingFromTarget({ tagName: "TEXTAREA" }), true);
-  assert.equal(typingFromTarget({ tagName: "BUTTON", closestDialog: true }), true);
-  assert.equal(typingFromTarget({ tagName: "BUTTON" }), false);
-  assert.equal(typingFromTarget({ tagName: "DIV", isContentEditable: true }), true);
-  assert.equal(typingFromTarget(null), false);
 });

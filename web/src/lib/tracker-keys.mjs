@@ -23,27 +23,6 @@ export function trackerCommand(input) {
   return null;
 }
 
-const NOT_TYPING_INPUTS = new Set(["checkbox", "radio", "button", "submit", "reset"]);
-
-/**
- * A text field, a select, or anything in a dialog takes the keys. A row
- * checkbox does not: it keeps focus after a click, and the status key comes next.
- * @param {{ tagName?: string, type?: string, isContentEditable?: boolean, closestDialog?: boolean } | null | undefined} target
- */
-export function typingFromTarget(target) {
-  if (!target) return false;
-  if (target.closestDialog) return true;
-  const tag = String(target.tagName || "").toUpperCase();
-  if (tag === "INPUT") return !NOT_TYPING_INPUTS.has(String(target.type || "text").toLowerCase());
-  return tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable === true;
-}
-
-export function moveCursor(index, count, delta) {
-  if (count <= 0) return -1;
-  const start = index < 0 ? (delta < 0 ? count - 1 : 0) : index + delta;
-  return Math.max(0, Math.min(count - 1, start));
-}
-
 /**
  * Selection after a status save. A row that saved is cleared. A row checked
  * while that save was running stays, because it was not part of the attempt.
