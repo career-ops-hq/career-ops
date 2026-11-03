@@ -57,7 +57,7 @@ try {
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
 let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
-let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable;
+let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv;
 try {
   [
     { hasYamlContent, loadYaml },
@@ -66,7 +66,7 @@ try {
     { validateProfile, EXAMPLE_PATH },
     { resolveExtractorMode },
     { auditUserTemplates },
-    { browserLaunchOptions, resolveBrowserExecutable },
+    { browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv },
   ] = await Promise.all([
     import('./lib/yaml-document.mjs'),
     import('dotenv'),
@@ -487,7 +487,7 @@ function playwrightDepsFix() {
   return `Run: ${sudo}npx playwright install-deps chromium`;
 }
 
-async function checkPlaywright() {
+async function checkPlaywright(browserProcessEnv) {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -512,9 +512,12 @@ async function checkPlaywright() {
   let browser;
   // The configured browser, so the check tests what the rest of the repo will
   // actually launch rather than always probing the bundled Chromium.
-  const override = resolveBrowserExecutable({ projectRoot });
+  const override = resolveBrowserExecutable({ projectRoot, processEnv: browserProcessEnv });
   try {
-    browser = await chromium.launch(browserLaunchOptions({ headless: true }, { projectRoot }));
+    browser = await chromium.launch(browserLaunchOptions(
+      { headless: true },
+      { projectRoot, processEnv: browserProcessEnv },
+    ));
     return {
       pass: true,
       label: override
@@ -1328,6 +1331,7 @@ async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
 
+  const browserProcessEnv = snapshotBrowserProcessEnv();
   const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
   // A data root inside the plugin copy is deleted on the next plugin update,
   // so the checks that create User Layer folders and files skip it.
@@ -1345,7 +1349,7 @@ async function main() {
     checkWebDependencies(),
     checkTrackedBakFiles(codeRoot),
     checkSkillEntrypoints(codeRoot),
-    await checkPlaywright(),
+    await checkPlaywright(browserProcessEnv),
     checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),

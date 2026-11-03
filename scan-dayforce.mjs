@@ -69,6 +69,8 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import {
   appendToPipeline,
   appendToScanHistory,
+  BROWSER_PROCESS_ENV,
+  DATA_ROOT as SCAN_DATA_ROOT,
   loadSeenUrls,
   normalizeUrlForDedup,
   buildTitleFilter,
@@ -593,7 +595,10 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
  */
 export async function scanBoardWithRetry(boardCfg, filters, {
   debug = false,
-  launch = () => chromium.launch(browserLaunchOptions({ headless: true })),
+  launch = () => chromium.launch(browserLaunchOptions(
+    { headless: true },
+    { projectRoot: SCAN_DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+  )),
   retryDelayMs = RETRY_DELAY_MS,
 } = {}) {
   let lastError = null;

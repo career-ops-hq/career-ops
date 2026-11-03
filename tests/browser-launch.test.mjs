@@ -36,11 +36,46 @@ if (/import\s*\{[^}]*\bbrowserLaunchOptions\b[^}]*\}\s*from\s*['"]\.\/lib\/brows
 }
 
 const scanSource = readFileSync(new URL('../scan.mjs', import.meta.url), 'utf8');
-if (/export\s+const\s+BROWSER_PROCESS_ENV\s*=\s*snapshotBrowserProcessEnv\(\)/.test(scanSource)
+if (/export\s+const\s+DATA_ROOT\s*=\s*getCareerOpsRoot\(\)/.test(scanSource)
+    && /export\s+const\s+BROWSER_PROCESS_ENV\s*=\s*snapshotBrowserProcessEnv\(\)/.test(scanSource)
     && /browserLaunchOptions\([\s\S]*?\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\}/.test(scanSource)) {
   pass('scan verification preserves shell-vs-data-root browser setting origin');
 } else {
   fail('scan verification does not preserve the origin of data-root browser settings');
+}
+
+for (const [file, label] of [
+  ['scan-ats-full.mjs', 'reverse-ATS liveness'],
+  ['scan-dayforce.mjs', 'Dayforce'],
+  ['scan-interamt.mjs', 'Interamt'],
+]) {
+  const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+  if (/import\s*\{[\s\S]*?BROWSER_PROCESS_ENV[\s\S]*?DATA_ROOT\s+as\s+SCAN_DATA_ROOT[\s\S]*?\}\s*from\s*['"]\.\/scan\.mjs['"]/.test(source)
+      && /browserLaunchOptions\(\s*\{\s*headless:\s*true\s*\},\s*\{\s*projectRoot:\s*SCAN_DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\}/.test(source)) {
+    pass(`${label} preserves shell-vs-data-root browser setting origin`);
+  } else {
+    fail(`${label} does not pass scan's original browser setting context`);
+  }
+}
+
+const doctorSource = readFileSync(new URL('../doctor.mjs', import.meta.url), 'utf8');
+if (/const\s+browserProcessEnv\s*=\s*snapshotBrowserProcessEnv\(\);[\s\S]*?resolveActiveCli\(\)/.test(doctorSource)
+    && /resolveBrowserExecutable\(\{\s*projectRoot,\s*processEnv:\s*browserProcessEnv\s*\}\)/.test(doctorSource)
+    && /browserLaunchOptions\([\s\S]*?\{\s*projectRoot,\s*processEnv:\s*browserProcessEnv\s*\}/.test(doctorSource)) {
+  pass('doctor snapshots browser settings before loading the data-root .env');
+} else {
+  fail('doctor loses browser setting origin after loading the data-root .env');
+}
+
+const pdfServerSource = readFileSync(new URL('../lib/pdf-server.mjs', import.meta.url), 'utf8');
+if (/sharedPdfSocketPath\(rootDir,\s*workspaceRoot\s*=\s*getCareerOpsRoot\(\)\)/.test(pdfServerSource)
+    && /resolveBrowserExecutable\(\{\s*projectRoot:\s*workspaceRoot\s*\}\)/.test(pdfServerSource)
+    && /CAREER_OPS_PDF_WORKSPACE_ROOT:\s*workspaceRoot/.test(pdfServerSource)
+    && /ensureSharedPdfServer\(\s*generatePdfPath,\s*opts\.workspaceRoot\s*\|\|\s*getCareerOpsRoot\(\)/.test(pdfServerSource)
+    && /projectRoot:\s*process\.env\.CAREER_OPS_PDF_WORKSPACE_ROOT\s*\|\|\s*getCareerOpsRoot\(\)/.test(generatePdfSource)) {
+  pass('shared PDF painters are keyed and launched by the requested workspace root');
+} else {
+  fail('shared PDF painters can reuse browser settings from another workspace');
 }
 
 const openrouterSource = readFileSync(new URL('../openrouter-runner.mjs', import.meta.url), 'utf8');

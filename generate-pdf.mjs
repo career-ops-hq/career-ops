@@ -2574,7 +2574,10 @@ async function runPdfServer() {
   const { startPdfServer } = await import('./lib/pdf-server.mjs');
   const server = await startPdfServer({
     rootDir: __dirname,
-    launchBrowser: launchChromium,
+    launchBrowser: (options) => launchChromium({
+      ...options,
+      projectRoot: process.env.CAREER_OPS_PDF_WORKSPACE_ROOT || getCareerOpsRoot(),
+    }),
     render: (browser, html, outputPath, opts) => renderInPage(browser, html, outputPath, opts),
   });
   if (server.alreadyRunning) return;

@@ -40,3 +40,29 @@ test('shared painters isolate socket identity by PLAYWRIGHT_CHROMIUM_EXECUTABLE_
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('shared painters isolate socket identity by workspace root', () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), 'co-pdf-data-root-'));
+  const workspaceA = mkdtempSync(join(tmpdir(), 'co-pdf-workspace-a-'));
+  const workspaceB = mkdtempSync(join(tmpdir(), 'co-pdf-workspace-b-'));
+  const savedSocket = process.env.CAREER_OPS_PDF_SOCKET;
+  const savedRoot = process.env.CAREER_OPS_ROOT;
+  const savedDataDir = process.env.CAREER_OPS_DATA_DIR;
+  try {
+    delete process.env.CAREER_OPS_PDF_SOCKET;
+    process.env.CAREER_OPS_ROOT = dataRoot;
+    delete process.env.CAREER_OPS_DATA_DIR;
+    assert.notEqual(
+      sharedPdfSocketPath(ROOT, workspaceA),
+      sharedPdfSocketPath(ROOT, workspaceB),
+    );
+  } finally {
+    if (savedSocket === undefined) delete process.env.CAREER_OPS_PDF_SOCKET;
+    else process.env.CAREER_OPS_PDF_SOCKET = savedSocket;
+    if (savedRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = savedRoot;
+    if (savedDataDir === undefined) delete process.env.CAREER_OPS_DATA_DIR;
+    else process.env.CAREER_OPS_DATA_DIR = savedDataDir;
+    for (const dir of [dataRoot, workspaceA, workspaceB]) rmSync(dir, { recursive: true, force: true });
+  }
+});

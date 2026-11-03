@@ -22,7 +22,14 @@ import { chromium } from 'playwright';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
-import { appendToPipeline, appendToScanHistory, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import {
+  appendToPipeline,
+  appendToScanHistory,
+  BROWSER_PROCESS_ENV,
+  DATA_ROOT as SCAN_DATA_ROOT,
+  PORTALS_PATH,
+  SCAN_HISTORY_PATH,
+} from './scan.mjs';
 import { createAdmissionGate } from './lib/admission-gate.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -299,7 +306,10 @@ async function main() {
   // blacklist, location or date skip that is meant to be revisited later.
   const handledThisRun = new Set();
 
-  const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
+  const browser = await chromium.launch(browserLaunchOptions(
+    { headless: true },
+    { projectRoot: SCAN_DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+  ));
   const context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
   const page = await context.newPage();
 
