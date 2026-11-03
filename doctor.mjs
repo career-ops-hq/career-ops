@@ -8,7 +8,7 @@
 import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { delimiter, join, dirname, relative, resolve, sep } from 'path';
+import { delimiter, join, dirname, isAbsolute, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
@@ -1288,18 +1288,21 @@ function checkUserTemplates(root) {
 function checkProfileShape(root) {
   const profilePath = profilePathFor(root);
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
+  // Name the file actually read. With --target that is the target's
+  // profile, not the CAREER_OPS_PROFILE path the default label comes from.
+  // A CAREER_OPS_PROFILE outside the root keeps its absolute path, since a
+  // ../../ path says less than the one the user exported.
+  const rel = relative(root, profilePath);
+  const label = rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? rel.split(sep).join('/') : profilePath;
   let findings;
   try {
     const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
-    // Name the file actually read. With --target that is the target's
-    // profile, not the CAREER_OPS_PROFILE path the default label comes from.
-    const label = relative(root, profilePath).split(sep).join('/') || profilePath;
     findings = validateProfile(readFileSync(profilePath, 'utf-8'), example, label).findings;
   } catch (err) {
-    return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
+    return { warn: true, label: `${label} could not be read (${err.message})` };
   }
   const actionable = findings.filter((f) => f.level !== 'info');
-  if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  if (actionable.length === 0) return { pass: true, label: `${label}: shape OK` };
   // A bad value sits under a key the readers know. Calling it an unrecognized
   // key would send the user to delete a setting they only need to correct.
   const badValues = actionable.some((f) => f.code === 'bad-value');
@@ -1311,7 +1314,7 @@ function checkProfileShape(root) {
       : 'settings under an unrecognized key have no effect';
   return {
     warn: true,
-    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — ${why}`,
+    label: `${label}: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — ${why}`,
     fix: actionable.map((f) => f.message),
   };
 }

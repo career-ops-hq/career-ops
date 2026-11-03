@@ -148,3 +148,27 @@ test('doctor --target names the target profile even with CAREER_OPS_PROFILE set'
   assert.match(out, /config\/profile\.yml: spend_tier/, out);
   assert.doesNotMatch(out, /elsewhere\.yml: spend_tier/, out);
 });
+
+test('doctor names a CAREER_OPS_PROFILE outside the root in the warning summary', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-profile-root-'));
+  const other = mkdtempSync(join(tmpdir(), 'co-profile-other-'));
+  t.after(() => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  });
+  mkdirSync(join(dir, 'config'));
+  writeFileSync(join(dir, 'config', 'profile.yml'), 'spend_tier: standard\n');
+  const elsewhere = join(other, 'elsewhere.yml');
+  writeFileSync(elsewhere, 'spend_tier: gold\n');
+  const r = spawnSync(process.execPath, [join(ROOT, 'doctor.mjs')], {
+    cwd: dir,
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: elsewhere },
+  });
+  const out = r.stdout + r.stderr;
+  const summary = out.split('\n').find((l) => l.includes('1 issue —'));
+  assert.ok(summary, out);
+  assert.ok(summary.includes(`${elsewhere}: 1 issue`), summary);
+  assert.doesNotMatch(summary, /config\/profile\.yml/);
+});
