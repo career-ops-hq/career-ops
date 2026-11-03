@@ -196,12 +196,9 @@ const KNOWN_WITHOUT_HELP = new Set([
   // instead of turning it into a seven-script fix; the ratchet's rule is
   // unchanged and the list may only get shorter from here.
   //
-  // keyword-match.mjs is the one worth a second look: it PRINTS usage for
-  // `--help`, which reads as handled, but only because the flag falls through
-  // to its "report file not found" path — so it exits 1 and would run the
-  // comparison if a file by that name existed.
+  // keyword-match.mjs left once --help printed usage and exited 0
+  // before it looked for a report.
   'batch/aggregate-tokens.mjs',
-  'keyword-match.mjs',
   'plugins/h1b-sponsor/install-h1b-index.mjs',
   'plugins/h1b-sponsor/token.mjs',
 

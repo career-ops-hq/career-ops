@@ -605,13 +605,13 @@ Report header:
 
 ---
 
-## Job Description (archived verbatim)
-
-{the JD text from {{JD_FILE}} pasted here verbatim}
+{the sections listed below, from `## A) Role Summary` to `## Keyword Coverage`, in that order}
 
 ---
 
-{the sections listed below, from `## A) Role Summary` to `## Keyword Coverage`, in that order}
+## Job Description (archived verbatim)
+
+{the JD text from {{JD_FILE}} pasted here verbatim}
 
 ---
 
@@ -671,11 +671,10 @@ risk_summary:
 ```
 ```
 
-`**Decision:**` is Machine Summary `final_decision`, and the line under the header fields is the `## Verdict (lead)` sentence copied word for word. The JD archive pushes the lead block a few hundred lines down, so these two lines are what a reader sees on opening the file. Fill them in last, from the finished `final_decision` and lead block; they add nothing of their own. Keep the label `Decision`, never `Verdict:`: the web app reads the first `VERDICT:` in a worker's output as its score line.
+`**Decision:**` is Machine Summary `final_decision`, and the line under the header fields is the `## Verdict (lead)` sentence copied word for word. Blocks A to G come before the lead block, so these two lines are what a reader sees on opening the file. Fill them in last, from the finished `final_decision` and lead block; they add nothing of their own. Keep the label `Decision`, never `Verdict:`: the web app reads the first `VERDICT:` in a worker's output as its score line.
 
 The report's sections, in this order:
 
-- `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is). Never paraphrase or restate it under this heading. If you cannot reproduce the text in full, capture it with `archive-posting.mjs` as **Command arguments** below shows (`company` is the same slug as in the report filename, `report` is `{{REPORT_NUM}}`) and use the pointer sentence from `modes/oferta.md` instead; `check-jd-archive.mjs` does not credit a section that calls itself a paraphrase.
 - `## A) Role Summary`
 - `## B) CV Match`
 - `## C) Level and Strategy`
@@ -688,6 +687,7 @@ The report's sections, in this order:
 - `## Score Evidence`
 - `## Extracted Keywords`
 - `## Keyword Coverage`, the block the `keyword-match.mjs` command under **Command arguments** below prints for this report, pasted after the keyword list. A report without both sections leaves the coverage check in `modes/pdf.md` Step 22 with nothing to read.
+- `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is). Never paraphrase or restate it under this heading. If you cannot reproduce the text in full, capture it with `archive-posting.mjs` as **Command arguments** below shows (`company` is the same slug as in the report filename, `report` is `{{REPORT_NUM}}`) and use the pointer sentence from `modes/oferta.md` instead; `check-jd-archive.mjs` does not credit a section that calls itself a paraphrase.
 - `## Machine Summary`, the YAML fence above, always the last section. Scripts find it by its heading, not its position, so it goes last, where it does not stand between the reader and Block A.
 
 **Command arguments (#5853):** never type the posting URL, the company slug or the report path into a command line, not even inside quotes: a URL's `&`, `'`, `$` or spaces are shell syntax. Write the values to a JSON file with your file tool and run the fixed command for it, which checks each value and passes each one to the script as its own argument, with no shell (same rule as `modes/oferta.md`). A value that fails its check stops the run: fix the value, never the check. For the archive capture the file is `{"url": "…", "company": "{company-slug}", "report": "{{REPORT_NUM}}"}`:
