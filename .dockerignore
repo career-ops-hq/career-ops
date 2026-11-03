@@ -9,7 +9,7 @@ batch/batch-input.tsv
 batch/tracker-additions
 jds/*
 !jds/.gitkeep
-reports/*.md
+reports
 .env
 .update-dismissed
 .update-lock
@@ -36,6 +36,12 @@ modes/_custom.md
 modes/_brief.md
 .career-ops-web
 plugins.local
+# Per-application CVs and cover letters saved under templates/. The shipped
+# cv-template* and cover-letter-template* files stay in the context.
+templates/cv-*.html
+!templates/cv-template*.html
+templates/cover-*.html
+!templates/cover-letter-template*.html
 
 # Build output
 web/.next
