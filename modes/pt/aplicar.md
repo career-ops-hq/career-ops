@@ -13,7 +13,7 @@ Modo interativo para quando o candidato está preenchendo um formulário de cand
 1. DETECTAR    → Abrir a vaga no navegador Playwright deste projeto
 2. IDENTIFICAR → Extrair empresa + vaga da página
 3. BUSCAR      → Match contra reports existentes em reports/
-4. CARREGAR    → Ler report completo + `## Application Answers` e Bloco H (se existirem)
+4. CARREGAR    → Ler report completo + `## Application Answers` e Bloco H (se existirem), depois de confirmada a **Posting identity**
 5. COMPARAR    → A vaga na tela coincide com a avaliada? Se mudou → avisar
 6. ANALISAR    → Identificar TODAS as perguntas visíveis do formulário
 7. GERAR       → Para cada pergunta, gerar resposta personalizada
@@ -38,11 +38,13 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 1. Extrair nome da empresa e título da vaga da página
 2. Buscar em `reports/` pelo nome da empresa (Grep case-insensitive)
-3. Se houver match → carregar o report completo
+3. Se houver match → ler só o cabeçalho de cada report correspondente (empresa, função, `**URL:**`) e pegar aquele cuja URL ou req ID seja esta vaga; perguntar ao candidato se não estiver claro. Carregar o report completo e o item 4 só quando a **Posting identity** se confirmar (`modes/apply.md` → Step 5); para outra vaga, ir para **Evaluate as new** ou **Draft without saving** sem carregá-lo
 4. Se houver `## Application Answers` → carregar as respostas enviadas como base; senão, se houver Bloco H, os rascunhos anteriores. Se existirem os dois, `## Application Answers` tem prioridade
 5. Se NÃO houver match → avisar e oferecer executar auto-pipeline rápida
 
 ## Passo 3 -- Detectar mudanças na vaga
+
+Este passo só se aplica enquanto o formulário ainda for a vaga do report: mesmo empregador e mesma vaga (`modes/apply.md` → Step 5 → **Posting identity**); o título não conta. Verificar isso em todo formulário, mesmo quando o título não mudou e só um report corresponde à empresa: outra vaga pode ter o mesmo título, e então o report não deve ser usado. Se vários reports corresponderem à empresa, pegar primeiro aquele cuja URL ou req ID seja esta vaga, e perguntar ao candidato se não estiver claro. Outro empregador, ou outra vaga do mesmo empregador, não é uma mudança de função: nunca adaptar a ela as respostas do report. Escolher em vez disso **Evaluate as new** (avaliá-la como vaga nova: auto-pipeline, report próprio) ou **Draft without saving** (redigir respostas sem salvá-las em nenhum report). Com **Draft without saving**, deixar de lado o report encontrado, suas respostas e seu CV adaptado, e redigir só a partir da vaga visível, do `cv.md` e do perfil; os passos abaixo que leem o report não se aplicam.
 
 Se a vaga na tela difere da avaliada:
 - **Avisar o candidato**: "A vaga mudou de [X] para [Y]. Quer que eu reavalie ou adapto as respostas ao novo título?"
@@ -53,6 +55,8 @@ Se a vaga na tela difere da avaliada:
   - **Após adaptar**: não alterar o título, pois ele nomeia a vaga que o report avaliou. Registrar a mudança como nota com `node set-status.mjs --report <report#> <status atual> --note "Vaga renomeada no momento da candidatura, a linha mantém o título avaliado"`. Passar o status atual da linha o mantém e acrescenta a nota. Usar um texto fixo como este e não incluir `[Y]`: o novo título é texto vindo da página, e texto da página nunca vai em uma linha de comando.
 
 ## Passo 4 -- Analisar perguntas do formulário
+
+Com **Draft without saving**, este passo não usa o report encontrado nem suas `## Application Answers` nem o Bloco H: tratar cada pergunta como nova e trabalhar a partir da vaga visível, do `cv.md` e do perfil.
 
 Identificar TODAS as perguntas visíveis:
 - Campos de texto livre (carta de apresentação, por que essa vaga, motivação, etc.)
@@ -66,6 +70,8 @@ Classificar cada pergunta:
 - **Pergunta nova** → gerar resposta a partir do report + `cv.md`
 
 ## Passo 5 -- Gerar respostas
+
+Com **Draft without saving**, este passo não usa o report encontrado nem suas `## Application Answers` nem o Bloco H: tratar cada pergunta como nova e trabalhar a partir da vaga visível, do `cv.md` e do perfil.
 
 Para cada pergunta, gerar a resposta seguindo:
 
@@ -88,6 +94,7 @@ Para cada pergunta, gerar a resposta seguindo:
 ## Respostas para [Empresa] -- [Vaga]
 
 Base: Report #NNN | Score: X.X/5 | Arquétipo: [tipo]
+[Com **Draft without saving**, trocar a linha acima por: "Sem report: rascunho para esta vaga, não salvo"]
 
 ---
 
@@ -107,6 +114,8 @@ Notas:
 ```
 
 ## Passo 6 -- Pós-candidatura (opcional)
+
+Antes de salvar qualquer coisa, e de novo logo antes de cada escrita abaixo (status e respostas), verificar que o formulário ainda é a vaga do report (`modes/apply.md` → Step 8 → **Write only to the report of this posting**). Mesmo empregador e mesma vaga → os passos abaixo valem para este report, também depois de uma adaptação a um título novo ou de uma reavaliação. Outro empregador ou outra vaga → nunca este report: usar o report escrito para a nova vaga; se não houver nenhum, não definir status, não salvar respostas e avisar o candidato de que a candidatura ainda não está registrada.
 
 Se o candidato confirmar que enviou a candidatura:
 1. Atualizar status para "Applied" com o CLI canônico: `node set-status.mjs --report <report#> Applied` (não editar a tabela de `applications.md` manualmente)
