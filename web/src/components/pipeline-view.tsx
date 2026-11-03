@@ -23,6 +23,7 @@ import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { LinkedInPaste } from "@/components/linkedin-paste";
 import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
@@ -546,6 +547,7 @@ export function PipelineView({
             </div>
           ) : (
             <>
+              <LinkedInPaste />
               <InboxTriage inbox={inbox} />
               {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
             </>
