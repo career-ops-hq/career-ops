@@ -3,7 +3,7 @@
  *
  * Plain .mjs (same pattern as pdf-paths.mjs / clean-chips.mjs) so this can be
  * unit-tested with `node --test`, no TypeScript build step. `spawnFn`,
- * `execPath`, and `root` are injected rather than importing node:child_process
+ * `execPath`, and `coreRoot` (the code checkout — the scripts live there, not in the data root) are injected rather than importing node:child_process
  * or career-ops.ts directly, keeping this module free of TypeScript
  * dependencies and letting tests substitute a fake child process.
  *
@@ -90,10 +90,10 @@ export function writeCvHtml({ pdfPaths, html }) {
 
 /**
  * Spawn generate-pdf.mjs as a plain child process and resolve once it exits.
- * @param {{spawnFn: Function, execPath: string, root: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string}} args
  * @returns {Promise<{ok: boolean, stderr: string}>}
  */
-export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, format, reportNum }) {
+export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, reportNum }) {
   return new Promise((resolve) => {
     const child = spawnFn(
       execPath,
@@ -101,10 +101,14 @@ export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, form
       // from the template's fixed markup order, so this guard would otherwise
       // hard-fail every web-triggered render — same bypass a human already
       // applies manually via the CLI when this diverges.
-      [path.join(root, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, `--report=${reportNum}`, "--allow-reorder"],
+      [path.join(coreRoot, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, `--report=${reportNum}`, "--allow-reorder"],
       // windowsHide: see api/doctor/route.ts — a stale inherited console
       // kills every child with 0xC0000142 on Windows; never inherit one.
-      { cwd: root, windowsHide: true },
+      {
+        cwd: coreRoot,
+        windowsHide: true,
+        env: { ...process.env, CAREER_OPS_PDF_SHARED: "1" },
+      },
     );
     let stderr = "";
     child.stderr.on("data", (d) => { stderr += d.toString(); });
@@ -119,12 +123,12 @@ export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, form
  * a failure exit when --json is passed) so a caller can surface the specific
  * reason (not-found / ambiguous / lock-timeout / ...) rather than raw stderr.
  * `code` is the exit code, or null when the child never started.
- * @param {{spawnFn: Function, execPath: string, root: string, reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, reportNum: string}} args
  * @returns {Promise<{ok: boolean, code: number | null, data: {error?: string} | null, stderr: string}>}
  */
-export function markTrackerReady({ spawnFn, execPath, root, reportNum }) {
+export function markTrackerReady({ spawnFn, execPath, coreRoot, reportNum }) {
   return new Promise((resolve) => {
-    const child = spawnFn(execPath, [path.join(root, "mark-pdf-ready.mjs"), reportNum, "--json"], { cwd: root, windowsHide: true });
+    const child = spawnFn(execPath, [path.join(coreRoot, "mark-pdf-ready.mjs"), reportNum, "--json"], { cwd: coreRoot, windowsHide: true });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => { stdout += d.toString(); });
@@ -202,13 +206,13 @@ export function keepTailoredHtml(pdfPaths, warnings) {
  * Call after writeCvHtml for the same pdfPaths — this reads the HTML that
  * function wrote. `format` is passed in rather than read back off disk, so the two
  * no longer share a file and the only coupling left is the HTML itself.
- * @param {{spawnFn: Function, execPath: string, root: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string}} args
  * @returns {Promise<RenderResult>}
  */
-export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, format, reportNum }) {
+export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, format, reportNum }) {
   const warnings = [];
 
-  const render = await spawnGeneratePdf({ spawnFn, execPath, root, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
+  const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
   if (render.ok) keepTailoredHtml(pdfPaths, warnings);
   cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
 
@@ -232,7 +236,7 @@ export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, form
   // tracker-sync miss (e.g. the row was edited away mid-flight) doesn't fail
   // the whole job, but it must still be visible to whoever is watching this
   // run, not just a server-side log nobody sees.
-  const mark = await markTrackerReady({ spawnFn, execPath, root, reportNum });
+  const mark = await markTrackerReady({ spawnFn, execPath, coreRoot, reportNum });
   if (!mark.ok) {
     console.error(`mark-pdf-ready.mjs failed for report #${reportNum}: ${mark.data?.error ?? mark.stderr}`);
     warnings.push(
