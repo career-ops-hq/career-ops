@@ -29,9 +29,9 @@ Do not submit the form. Stop before Submit, Send, or Apply. Continue only after 
 1. DETECT      → Open the posting in this project's Playwright browser
 2. IDENTIFY    → Extract company + role from the page
 3. SEARCH      → Match against existing reports in reports/
-4. LOAD        → Read full report + Section H / Application Answers (if they exist)
-4b. TAILORED   → Resolve the tailored CV for that report; it, not cv.md, sources experience fields
-5. PREFLIGHT   → Confirm posting liveness + company/role match before drafting
+4. LOAD        → Read the matched reports' headers; the full report + Section H / Application Answers (if they exist) once **Posting identity** holds
+4b. TAILORED   → Resolve the tailored CV for that report once its posting is confirmed; it, not cv.md, sources experience fields
+5. PREFLIGHT   → Confirm posting liveness + that the form is the report's posting (**Posting identity**) before drafting
 5b. PRE-SCAN   → Scan page for knock-out questions (degree, experience, work authorization/visa, sponsorship, salary floors)
 5d. STATUS     → Warn if a form question screens for a specific immigration status rather than work authorization (warn-only; candidate decides)
 
@@ -41,7 +41,7 @@ Do not submit the form. Stop before Submit, Send, or Apply. Continue only after 
 7. GENERATE    → For each question, generate a personalized response
 7b. SWEEP      → Enumerate the step's required controls and assert each is non-empty before Save/Next/Continue/Submit
 8. PRESENT     → Show formatted responses for copy-paste
-9. PERSIST     → Save the final filled/submitted answers into the report
+9. PERSIST     → Save the final filled/submitted answers into the report of this posting, never another one
 ```
 
 ## Step 5 — Preflight gate
@@ -68,13 +68,23 @@ This is a reminder, not a gate — surface it and continue drafting immediately;
 2. If a URL is available, verify liveness with Playwright:
    - active posting evidence: title/role + job description or form fields + submit/apply path
    - closed posting evidence: expired/closed/no longer accepting applications, missing JD with only nav/footer, hard redirect to generic careers/search, or 404/410
-3. Compare the visible company and role against the matched report.
-4. If company or title changed materially, stop before drafting and ask:
-   "The form appears to be for [visible company] — [visible role], but the matched report is [report company] — [report role]. Do you want me to re-evaluate, adapt with this mismatch, or stop?"
-5. If the posting appears closed, refuse to generate final copy unless the candidate explicitly overrides with a known reason.
-6. If liveness cannot be verified because the candidate only pasted questions or a screenshot, state that limitation and ask the candidate to confirm the company, role, and active posting before drafting.
+3. Compare the visible company and posting against the matched report (see **Posting identity** below).
+4. If the identity does not hold, the matched report belongs to a different application. Stop before drafting and ask:
+   "The form appears to be for [visible company] — [visible role], which is not the posting in the matched report, [report company] — [report role]. Do you want me to evaluate this posting as a new one, draft answers without saving them to a report, or stop?"
+   - **Evaluate as new**: run the auto-pipeline for the visible posting. It writes its own report and tracker row; continue with that report.
+   - **Draft without saving**: set the matched report and its tailored CV aside before drafting, and draft from the visible posting, `cv.md` and the candidate's profile only. The report's blocks, its Section H and its tailored CV were written for another posting. Step 8 writes no `## Application Answers` and Step 9 sets no status, because no report belongs to this application.
+   - Never adapt the matched report's answers into it: they were drafted for another posting, and saving them there would overwrite the record of the application that report is for.
+5. If the identity holds but the title changed, Step 3 decides: adapt the answers to the new title or re-evaluate.
+6. If the posting appears closed, refuse to generate final copy unless the candidate explicitly overrides with a known reason.
+7. If liveness cannot be verified because the candidate only pasted questions or a screenshot, state that limitation and ask the candidate to confirm the company, role, and active posting before drafting.
 
 Do not continue to Step 6 until this preflight is resolved.
+
+**Posting identity (#5854).** The matched report and the form are the same application when both of these hold:
+- **Same employer**: the visible company is the report's company, ignoring case and punctuation, or the candidate confirms it is the same employer under another name (a subsidiary, a brand, a rename, or an agency posting for that client).
+- **Same posting**: the visible URL or req ID is the report's posting, or the candidate confirms it is. The application form often lives on a different host than the report's `**URL:**` (see "Job-board host ≠ application host" below), so a host change alone does not break the match. A different req ID, or a different posting at the same employer, does.
+
+The title is not part of the identity. A posting retitled since the evaluation is still the same application, and its answers still belong in its report. An exact title match would turn that legitimate case into a mismatch, so do not require one.
 
 ## Step 5b — Pre-scan for knock-out questions
 
@@ -159,7 +169,7 @@ Before drafting answers, read the matched report's Block G fixed-term finding an
 
 1. Extract company name and role title from the page
 2. Search `reports/` under every root printed by `node apply-scope.mjs root` (this checkout, plus the configured data root when set) by company name (case-insensitive grep). Do not search only the checkout when the data root holds the reports.
-3. If there is a match → load the full report
+3. If there is a match → read only the header of each matching report (company, role, `**URL:**`). If more than one report matches the company, first compare the posting URL or req ID with each report's `**URL:**`. A report whose posting matches is the one, even if its stored role differs: the posting may have been retitled, and Step 3 handles that. Use the role only to narrow reports that the URL or req ID could not decide. If more than one is still possible, ask the candidate which report belongs to this form before loading any of them: Step 8 writes into the report loaded here. Load the full report, its answers (item 4), its Section H and its tailored CV (Step 4b) only once Step 5 confirms the **Posting identity**: the header is all Step 5 compares. For a different posting, Step 5 offers **Evaluate as new** or **Draft without saving**, and nothing past the header is loaded.
 4. If there is a `## Application Answers` section → recover it through the strict reader, never by re-reading the rendered markdown as prose:
 
    ```bash
@@ -180,6 +190,8 @@ Before drafting answers, read the matched report's Block G fixed-term finding an
 5. If there is NO match → notify and offer to run a quick auto-pipeline
 
 ## Step 3 — Detect changes in the role
+
+This step covers one case: the form is still the report's posting (Step 5 → **Posting identity**: same employer, same posting), but the role on screen differs from the one evaluated. A different employer, or a different posting at the same employer, is not a role change: Step 5 handles it, and neither path below applies to it.
 
 If the role on screen differs from the one evaluated:
 - **Notify the candidate**: "The role has changed from [X] to [Y]. Do you want me to re-evaluate or adapt the responses to the new title?"
@@ -272,6 +284,8 @@ Identify ALL visible questions:
 - Salary fields (range, expectation)
 - Upload fields (resume, cover letter PDF)
 
+On the **Draft without saving** path (Step 5), no report belongs to this posting: classify every question as new, and leave the matched report, its Section H, its `## Application Answers` and its tailored CV out of the answers.
+
 Classify each question:
 - **Already answered in Section H or `## Application Answers`** → adapt the existing response
 - **New question** → generate response from the report plus the Step 4b sources, at the Step 4b precedence: the tailored CV for anything it covers, `cv.md` only for a whole section it omits
@@ -289,6 +303,8 @@ For every free-text field, inspect the **rendered form control** before drafting
 
 
 ## Step 7 — Generate responses
+
+On the **Draft without saving** path (Step 5), skip items 1 and 2 below and the tailored CV: they come from the matched report, which belongs to another posting. Generate from the visible posting, `cv.md` and the candidate's profile.
 
 For each question, generate the response following:
 
@@ -308,6 +324,7 @@ Before marking any free-text answer ready for copy-paste, count the **final** re
 ## Responses for [Company] — [Role]
 
 Based on: Report #NNN | Score: X.X/5 | Archetype: [type]
+[On **Draft without saving**, replace the line above with: "No report: drafted for this posting, not saved"]
 
 ---
 
@@ -373,6 +390,17 @@ errors on a real application, after the step had already been reported as filled
 
 After the final answers are filled into the form or handed to the candidate for copy-paste, update the matched report with an additive `## Application Answers` section. If the candidate later confirms submission, update that same section from `filled` to `submitted`.
 
+**Write only to the report of this posting (#5854).** Before each write, here and in Step 9, check that the form is still the posting Step 5 confirmed (**Posting identity**). A form can move to another posting after Step 5, for example when "Apply" hands off to another host or the candidate opens a sibling posting. If it no longer matches, stop and ask before writing anything. Otherwise, the target depends on how Steps 3 and 5 ended:
+
+| Case | Where the answers go |
+|------|----------------------|
+| Same employer and posting, same title | The matched report. |
+| Same employer and posting, title changed, candidate chose **adapt** | The matched report. Its metadata and the tracker row keep the evaluated title; the Step 3 note records the retitling. |
+| Same employer and posting, Step 3 **re-evaluated** | The matched report, updated in place for the visible title, so it matches again. |
+| Different employer, or a different posting at the same employer | Never the matched report. The report the auto-pipeline wrote for the visible posting in Step 5, or none at all when the candidate chose to draft without saving. Say so when nothing is saved. |
+
+The script writes to whatever `--report` it is given and cannot tell one posting from another, so this check is yours to make before calling it.
+
 The section must include:
 - `**Date:** YYYY-MM-DD`
 - `**State:** filled` or `**State:** submitted`
@@ -390,6 +418,8 @@ node application-answers.mjs --report reports/NNN-company-role-date.md --input a
 ```
 
 ## Step 9 — Post-apply (optional)
+
+Every step below acts on the report Step 8 wrote to, chosen by the same check (**Write only to the report of this posting**). When Step 8 wrote to no report (the candidate drafted for a different posting without saving), set no status on the matched report's row: that row is another application. Tell the candidate the submission is not tracked yet, and offer the `tracker` mode to add it.
 
 If the candidate confirms that they submitted the application:
 1. Update status to Applied via the canonical CLI: `node set-status.mjs --report <report#> Applied` (never hand-edit the table). If the candidate submitted on a different day than today, add `--on YYYY-MM-DD` with the actual submission date — the status-log ledger should record when it happened, not when it was typed in.
