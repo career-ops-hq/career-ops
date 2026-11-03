@@ -356,6 +356,18 @@ try {
     fail(`getro.fetch() cap warning: ${capHit.calls} pages, warnings ${JSON.stringify(capHit.capWarnings)}`);
   }
 
+  // At the hard cap, raising getro_max_pages reads nothing more, so the warning
+  // must not tell the user to; below it, it does.
+  const capHard = await capRun({ getro_max_pages: 5000 }, { count: 40000, pages: 1600 });
+  if (capHard.calls === 1500 && capHard.capWarnings.length === 1
+      && capHard.capWarnings[0].includes('truncated at getro_max_pages=1500 (30000 of 40000 jobs) — the 1500-page hard cap')
+      && !capHard.capWarnings[0].includes('raise getro_max_pages on this entry')
+      && capHit.capWarnings[0]?.includes('— raise getro_max_pages on this entry for more')) {
+    pass('getro.fetch() names the hard cap instead of advising a higher getro_max_pages when it is the 1500-page ceiling');
+  } else {
+    fail(`getro.fetch() hard-cap warning: ${capHard.calls} pages, ${JSON.stringify(capHard.capWarnings)}`);
+  }
+
   const capExact = await capRun({ getro_max_pages: 2 }, { count: 40, pages: 2 });
   const capProbe = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5, maxPages: 1 });
   const capAged = await capRun({ getro_max_pages: 2, getro_max_age_days: 90 }, { count: 100, pages: 2, lastPageCreatedAt: staleCreatedAt });

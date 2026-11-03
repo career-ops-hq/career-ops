@@ -334,7 +334,12 @@ export default {
     if (page >= maxPages && lastPageRows >= HITS_PER_PAGE && page * HITS_PER_PAGE < total
         && requestedMaxPages < ctxCap) {
       const of = Number.isFinite(total) ? ` of ${total}` : '';
-      console.error(`⚠️  getro: ${entry.name || collectionId} truncated at getro_max_pages=${maxPages} (${out.length}${of} jobs) — raise getro_max_pages on this entry for more`);
+      // At the hard ceiling a higher getro_max_pages is clamped back to it, so
+      // raising the entry's value would read nothing more: say so instead.
+      const advice = requestedMaxPages >= HARD_MAX_PAGES
+        ? `the ${HARD_MAX_PAGES}-page hard cap, so raising getro_max_pages reads no more`
+        : 'raise getro_max_pages on this entry for more';
+      console.error(`⚠️  getro: ${entry.name || collectionId} truncated at getro_max_pages=${maxPages} (${out.length}${of} jobs) — ${advice}`);
     }
     return out;
   },
