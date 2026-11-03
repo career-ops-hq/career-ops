@@ -19,12 +19,19 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run img-to-pdf` | `img-to-pdf.mjs` | Convert a single screenshot/image into a single-page PDF |
 | `node build-cv-latex.mjs` | `build-cv-latex.mjs` | Build .tex from structured JSON payload |
 | `npm run sync-check` | `cv-sync-check.mjs` | Validate CV/profile consistency |
+| `npm run cv:verify-facts` | `verify-cv-facts.mjs` | Check a generated CV against `cv.md` and `article-digest.md` (read-only) |
+| `npm run cv:verify-ats` | `verify-ats.mjs` | Score a generated CV HTML for ATS parseability, 0–100 (read-only) |
+| `npm run test:cv-visual` | `playwright.cv.config.mjs` | Visual regression suite for CV templates; canonical run is the Linux container in [CV_VISUAL_TESTING.md](CV_VISUAL_TESTING.md) |
 | `npm run patterns` | `analyze-patterns.mjs` | Analyze tracker outcomes and report patterns |
+| `npm run keyword-match` | `keyword-match.mjs` | Report which keywords from a report the CV actually covers (read-only; never edits the CV) |
+| `npm run calibrate` | `calibrate.mjs` | Compare your evaluation scores with recorded outcomes (read-only) |
+| `npm run career-profile` | `career-profile.mjs` | Import CV facts into `data/career-profile.yml` (preview by default; `--review` to save) |
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
 | `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
+| `npm run update:test` | `updater-migration-tests.mjs` | Developer check: source-level safety tests for the updater (not a job-search command) |
 | `node update-system.mjs status` | `update-system.mjs status` | Print installed version + short SHA |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
 | `node check-liveness.mjs --tracker [--status=Evaluated,Applied]` | `check-liveness.mjs` | Check the postings of open tracker rows (`Evaluated` and `Applied` by default). Each row's posting is its URL cell or its report's `**URL:**`. Rows with neither are listed by number |
@@ -34,6 +41,8 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
 | `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
 | `npm run scan:hn` | `scan-hn.mjs` | Hacker News "Who is hiring?" scanner, filtered by `hn_hiring.keywords` |
+| `npm run scan:interamt` | `scan-interamt.mjs` | Interamt.de scanner via Playwright (the board has no HTTP API). `--dry-run` writes nothing |
+| `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing; `--tenant NAME` scans one board |
 | `node web/scripts/scheduled-jobs-runner.mjs` | `web/scripts/scheduled-jobs-runner.mjs` | Run one due local scheduled scan (normally invoked by the OS scheduler: Task Scheduler, launchd or cron) |
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `sh web/scripts/install-scan-schedule.sh` | `web/scripts/install-scan-schedule.sh` | Install the 15-minute scheduled-jobs queue worker on macOS (launchd) or Linux (cron) for the current user |
@@ -44,14 +53,14 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run find` | `find.mjs` | Resolve a report#/tracker#/company query to its full pipeline identity |
 | `npm run ics-interview -- invite.ics` | `ics-interview.mjs` | Read an interview invite's `.ics` (first VEVENT: start/end/length, time zone, link, organizer) and print a row to paste into `data/active-interviews.md` (read-only) |
 | `npm run panelist-roles -- invite.txt` | `panelist-roles.mjs` | Classify the panelists named in an interview invite (pasted text or `.ics`) by title into recruiter / hiring manager / privacy-compliance / technical / peer / executive, with a one-line prep focus per role (offline, read-only) |
-| `npm run invite-match` | `invite-match.mjs` | Fuzzy-match a pasted interview-invite email against `data/applications.md` |
+| `npm run invite-match` | `invite-match.mjs` | Fuzzy-match a pasted interview-invite email against `data/applications.md`; invites also get a draft-only clarification email (`--no-clarification-draft` to omit) |
 | `npm run application:init` | `application-artifacts.mjs` | Initialize one versioned application-scoped JD/CV/PDF artifact bundle |
 | `npm run paste-reply` | `paste-reply.mjs` | Manual/no-Gmail input into the `reply-watch.mjs` classification pipeline |
 | `npm run closing-soon` | `closing-soon.mjs` | List tracker rows whose Notes (or matching `jds/` capture) carry a closing date within N days, plus separate `overdue` and `unparsed` groups (read-only) |
 | `npm run close-stale` | `close-stale.mjs` | Close long-silent `Applied` rows in bulk (dry run by default; `--confirm` writes through the locked tracker path, tags the note and logs each transition) |
 | `npm run reeval-candidates` | `reeval-candidates.mjs` | List `Evaluated` tracker rows whose last evaluation predates the latest change to `cv.md`, `article-digest.md`, `config/profile.yml` or `modes/_profile.md` (read-only) |
 | `npm run freshness` | `check-table-freshness.mjs` | Staleness validator for jurisdiction data tables (`as_of` / `next_effective` watchdog) |
-| `npm run jd-archive` | `check-jd-archive.mjs` | Validate every `reports/*.md` has an archived JD (embedded section or `jds/` capture) — flags `missing-jd-archive` |
+| `npm run jd-archive` | `check-jd-archive.mjs` | Validate every `reports/*.md` has an archived JD (embedded section, numbered `jds/` capture, or a capture its tracker row links) — `missing-jd-archive` with no tracker to join, `jd-archive-review-due` for a live row |
 | `npm run openai:tailor` | `openai-tailor.mjs` | Tailor a CV via any OpenAI-compatible endpoint (headless companion to `openai-eval.mjs`) |
 | `npm run or` | `openrouter-runner.mjs` | Run scan/evaluate/pipeline/apply on OpenRouter free models — no Claude CLI required |
 | `npm run reconcile` | `reconcile-pipeline.mjs` | Remove batch-evaluated offers from pipeline.md "Pendientes" |
@@ -66,10 +75,12 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run gemini:eval` | `gemini-eval.mjs` | Evaluate a JD with Google Gemini (free-tier alternative) |
 | `npm run ollama:eval` | `ollama-eval.mjs` | Evaluate a JD with a local Ollama model |
 | `npm run openai:eval` | `openai-eval.mjs` | Evaluate a JD via any OpenAI-compatible endpoint |
+| `npm run eval:golden` | `eval-golden.mjs` | Compare a candidate model's score block to the frozen golden set (`--replay` is offline) |
 | `npm run star` | `match-star.mjs` | Match a behavioural question to your best STAR story (zero-LLM) |
 | `npm run archive` | `archive-posting.mjs` | Save a live job posting as PDF before it disappears |
 | `npm run prepare:application` | `prepare-application.mjs` | Print an ATS prefill summary (read-only, never POSTs) |
 | `npm run build:dashboard` | `build-dashboard.mjs` | Build the Go TUI dashboard binary cross-platform |
+| `npm run manifesto` | `manifesto.mjs` | Print the manifesto couplet and open the signing page in a browser |
 | `node upgrade-tests.mjs --pr-gate` | `upgrade-tests.mjs` | Upgrade an install seeded from the newest old release to this commit and prove user data survived (CI gate; `--canary` proves the gate can fail) |
 | `node linkedin-join.mjs` | `linkedin-join.mjs` | Warm-intro finder — join a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?" (offline, zero-token, read-only; see [LINKEDIN_JOIN.md](LINKEDIN_JOIN.md)) |
 
@@ -77,7 +88,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 
 ## doctor
 
-Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
+Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
 
 ```bash
 npm run doctor
@@ -362,6 +373,45 @@ npm run sync-check
 
 ---
 
+## cv:verify-facts
+
+Checks a generated CV (HTML, Markdown, or `.tex`) against the user's own source files. It reports quantified claims that do not appear in those sources. It does not edit the CV. Default sources are `cv.md` and `article-digest.md` in the data root; `--source` replaces that list (repeatable) and `--config` points at a different `config/cv-facts.json`.
+
+```bash
+npm run cv:verify-facts -- output/cv.html
+npm run cv:verify-facts -- output/cv.html --source cv.md --source article-digest.md
+npm run cv:verify-facts -- --self-test
+```
+
+PDF generation calls the same check, so a document that fails here fails there too.
+
+---
+
+## cv:verify-ats
+
+Scores one generated CV HTML for whether an applicant-tracking system can parse it. Deterministic and read-only: no model, no network, no writes. Prints a 0–100 structural score, a letter grade, and a list of fixable issues. Keyword coverage is reported only when you pass `--keywords` or `--role`, and it never changes the structural score.
+
+```bash
+npm run cv:verify-ats -- output/cv.html
+npm run cv:verify-ats -- output/cv.html --keywords "python,kubernetes" --role "Senior Backend Engineer"
+npm run cv:verify-ats -- output/cv.html --min-score 80 --json
+npm run cv:verify-ats -- --self-test
+```
+
+Exit `0` when the structural score is at least `--min-score` (default 70) and there is no critical issue; `1` otherwise.
+
+---
+
+## test:cv-visual
+
+Playwright visual regression suite for the CV templates. It renders fictional fixtures only — it does not read `cv.md`, a profile, or a photo. The committed snapshots are Linux baselines, so the canonical run is the container in [CV_VISUAL_TESTING.md](CV_VISUAL_TESTING.md), which also covers `npm run test:cv-visual:update` for an intentional, reviewed snapshot update. Do not commit snapshots taken on macOS, Windows, or ARM.
+
+```bash
+npm run test:cv-visual
+```
+
+---
+
 ## patterns
 
 Analyzes application outcomes, scores, archetypes, blockers, remote policy, and company size from `data/applications.md` and linked reports. New reports should include `## Machine Summary` YAML; `analyze-patterns.mjs` uses it first and falls back to legacy markdown parsing for older reports.
@@ -399,6 +449,46 @@ node upskill.mjs --self-test
 In targeted mode a local `--url-text` path is a **required** input, so it is read strictly: a path that is missing, a directory, unreadable, or empty prints one `Fatal:` line to stderr and exits `1`. The optional `cv.md`/`config/profile.yml` reads keep the opposite contract — unreadable degrades to empty rather than aborting the run.
 
 **Exit codes:** `0` analysis succeeded (including graceful `{error}` JSON for insufficient data), `1` self-test failure, a missing `--url-text` argument, unreadable targeted input, a failed JD fetch, a redirect blocked by the URL security check, or any other unexpected failure inside targeted analysis.
+
+---
+
+## keyword-match
+
+Diagnostic only. Reads the keyword section of an evaluation report and a CV, and reports which of those keywords the CV actually covers, the way an ATS parser would. It never edits the CV and never inserts keywords. `.html` passed to `--cv` is text-extracted first, so you can point it at the tailored CV you are about to send. Defaults to `cv.md` in the data root.
+
+```bash
+npm run keyword-match -- reports/001-acme.md
+npm run keyword-match -- reports/001-acme.md --cv output/cv.html
+npm run keyword-match -- reports/001-acme.md --json
+npm run keyword-match -- --self-test
+```
+
+---
+
+## calibrate
+
+Reads the tracker and the outcome journals under `data/outcomes/` and reports whether higher evaluation scores actually convert better for you. Advisory and read-only: it never edits scoring rules, thresholds, or any user file. Applications still in flight are excluded from every rate and counted separately. A score band with fewer than `--min-band-n` resolved applications (default 5) is printed without a percentage.
+
+```bash
+npm run calibrate
+npm run calibrate -- --json
+npm run calibrate -- --min-band-n 5
+npm run calibrate -- --self-test
+```
+
+---
+
+## career-profile
+
+Imports facts from a CV into `data/career-profile.yml`, a reviewable profile where every item keeps a pointer back to the source line. `import` previews candidates and writes nothing. `--review` asks you to approve, edit, or skip each item, and only approved items are saved. `validate` checks structure and source evidence. `prepare-cv` and `verify-cv` take JSON paths resolved from the data root; neither renders a CV and neither replaces `cv:verify-facts`.
+
+```bash
+npm run career-profile -- import cv.md
+npm run career-profile -- import cv.md --review
+npm run career-profile -- validate
+npm run career-profile -- prepare-cv --payload base.json --selection selection.json
+npm run career-profile -- verify-cv --payload base.json --selection selection.json --prepared prepared.json
+```
 
 ---
 
@@ -512,7 +602,7 @@ Default silence window: `templates/benchmarks.yml` `days_first_response.range_da
 
 ## contacts
 
-Your job-search phonebook, exportable to your phone. Reads `data/contacts.tsv` (one contact per line — the schema is the vCard fields, nothing more) and emits vCard 3.0 (`VERSION:3.0` for iOS/Android import compatibility) with CRLF line endings, byte-safe 75-octet line folding, and a stable deterministic UID `careerops-{uidPart(name)}--{uidPart(company)}` (double-dash boundary between the two parts). Each `uidPart` is the lowercase slug of the raw value (non-alphanumeric runs collapsed to single dashes, ends trimmed) suffixed with an 8-hex sha1 of the *raw* value — e.g. `jane-doe-cac7bbb6`; when the slug is empty — a fully non-ASCII value such as a CJK name — the part is the bare 8-hex hash. Hashing the raw value (not the lossy slug) keeps distinct inputs that slug identically — e.g. `José` and `Josè` both slug to `jos` (the accented char drops out), and `Acme Inc` and `Acme, Inc.` both to `acme-inc` — from colliding into one UID. Re-importing updates existing entries instead of duplicating them on platforms that honor vCard UID (iOS fallback: assign imports to a group, delete the group to bulk-remove). `--caller-id` renders the display name as `Jane Doe (Acme recruiter)` so the lock screen tells you which recruiter is calling — useful when a phone number is known (often it isn't). Malformed rows are reported in a `quality` block, never dropped silently.
+Your job-search phonebook, exportable to your phone. Reads `data/contacts.tsv` (one contact per line — the schema is the vCard fields, nothing more) and emits vCard 3.0 (`VERSION:3.0` for iOS/Android import compatibility) with CRLF line endings, byte-safe 75-octet line folding, and a stable deterministic UID `careerops-{uidPart(name)}--{uidPart(company)}` (double-dash boundary between the two parts). Each `uidPart` starts from the value with letter case, whitespace and Unicode composition (NFC vs NFD) folded and accents kept; the part is that value's lowercase slug (non-alphanumeric runs collapsed to single dashes, ends trimmed) suffixed with an 8-hex sha1 of the same folded value — e.g. `jane-doe-bc225ac5`; when the slug is empty — a fully non-ASCII value such as a CJK name — the part is the bare 8-hex hash. Hashing the folded value (not the lossy slug) keeps distinct inputs that slug identically — e.g. `José` and `Josè` both slug to `jos` (the accented char drops out), and `Acme Inc` and `Acme, Inc.` both to `acme-inc` — from colliding into one UID. Re-importing updates existing entries instead of duplicating them on platforms that honor vCard UID (iOS fallback: assign imports to a group, delete the group to bulk-remove). Exports made before composition was folded into the slug gave an NFD spelling (an `e` plus a combining accent rather than `é`) a different UID, so the first re-import after updating can add a second card for that contact; remove or merge the old card by hand. `--caller-id` renders the display name as `Jane Doe (Acme recruiter)` so the lock screen tells you which recruiter is calling — useful when a phone number is known (often it isn't). Malformed rows are reported in a `quality` block, never dropped silently.
 
 ```bash
 node contacts.mjs                    # JSON (contacts + quality + total)
@@ -689,12 +779,27 @@ node check-table-freshness.mjs --self-test
 
 Validator for JD archival (#2789). A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes, which reliably happens somewhere between applying and a later interview round. `modes/oferta.md` and `modes/pdf.md` require every report to archive the JD's verbatim text, primarily as an embedded `## Job Description (archived verbatim)` section (the report is the one artifact guaranteed to get written and tracked), with a `jds/{file}` capture as an acceptable alternative. This script is the watchdog: zero LLM, zero network, zero writes.
 
-A report counts as archived when EITHER holds:
+A report counts as archived when ANY of these holds:
 
-- it carries a `## Job Description` section (with or without the `(archived verbatim)` suffix) containing at least 40 non-whitespace characters after stripping HTML comments — enough to reject an empty placeholder or a "TBD" stub, or
-- a corresponding `jds/` capture exists for it, resolved via `jd-capture.mjs`'s `findCaptureForReport` (the same report-number lookup `outcome.mjs` already relies on) using the report number and company slug parsed straight from the report's own filename (`{###}-{company-slug}-{YYYY-MM-DD}.md`). Only captures written with a numeric report-number prefix (`archive-posting.mjs --report=N`) are resolvable this way — the other `jds/` naming conventions in play (date-prefixed, sha1-suffixed, bare company-role slugs; see "JD captures (`jds/`)" below) have no report number to key on, so they cannot be credited here. Prefer `--report=N` when archiving to a side file for this reason.
+- it carries a `## Job Description` section (with or without the `(archived verbatim)` suffix) at least 40 characters long once HTML comments are stripped and its ends trimmed (whitespace inside the text counts), and the section is none of the shapes below, which are rejected however long they are:
+  - the unfilled placeholder from `modes/oferta.md` or a localized evaluation mode (the set is read from the templates), alone or under a filled-in `Posted:` line;
+  - the pointer sentence alone (`See jds/{file} for the full archive.`): the capture it names has to resolve through one of the next two rules instead;
+  - a page that was never the posting: a sign-in/login wall, a 404 shell, a paywall, a "please enable JavaScript" shell, or a bot-verification page;
+  - a paraphrase or restatement that says so, in the section or in its heading (`## Job Description (paraphrase, not verbatim)`);
+- a `jds/` capture with a numeric report-number prefix exists for it, resolved via `jd-capture.mjs`'s `findCaptureForReport` (the same report-number lookup `outcome.mjs` already relies on) using the report number and company slug parsed straight from the report's own filename (`{###}-{company-slug}-{YYYY-MM-DD}.md`). `archive-posting.mjs --report=N` writes captures this way; or
+- the report's tracker row links a `jds/` capture ending in `.md`, `.txt` or `.pdf`, under any name, in its Report or Notes cell (`local:jds/acme-senior-engineer.md`). The file has to exist, and a link that leads outside the data root is ignored. This is how the date-prefixed, sha1-suffixed and bare company-role captures (see "JD captures (`jds/`)" below) are credited, since they have no report number to key on.
 
-Reports missing both are flagged `missing-jd-archive`.
+A report with none of these gets a finding, and its severity depends on the report's own tracker row:
+
+| Tracker | Finding |
+|---------|---------|
+| none to join against: no tracker file, an unreadable tracker or `templates/states.yml`, or `--no-tracker` | `missing-jd-archive`, which fails the run |
+| the row is in a terminal state: Rejected, Discarded, SKIP or Hired | none |
+| the row is in a live state (Evaluated, Applied, Responded, Assessment, Interview, Offer), no row links the report, two rows do, or the status is not a canonical state | `jd-archive-review-due`, a warning that never fails the run |
+
+Offer counts as live even though `templates/states.yml` marks it terminal, since the JD may still be needed for negotiation or comparison. When the section was rejected as a page that was never the posting, or as a paraphrase, the finding's `detail` names the reason ("looks like a sign-in/login wall, not a posting").
+
+The JSON output (and the `--summary` table) also carries `unarchivedApplications`: tracker rows in a sent state (Applied, Responded, Interview, Offer, Hired, Rejected) with no report file and no linked capture, each typed `application-no-archive`. The report scan never sees these rows, since they have no report to scan. They never change the exit code.
 
 ```bash
 npm run jd-archive
@@ -702,10 +807,13 @@ node check-jd-archive.mjs                      # JSON
 node check-jd-archive.mjs --summary             # human-readable table
 node check-jd-archive.mjs --reports-dir <path>  # override reports/ (testing)
 node check-jd-archive.mjs --jds-dir <path>      # override jds/ (testing)
+node check-jd-archive.mjs --tracker <path>      # override data/applications.md (testing)
+node check-jd-archive.mjs --no-tracker          # skip the tracker join: every miss is missing-jd-archive
 node check-jd-archive.mjs --self-test
+node check-jd-archive.mjs --help
 ```
 
-**Exit codes:** `1` if any `missing-jd-archive` finding, `0` otherwise (including the empty-repo case — `reports/*.md` is gitignored, so a fresh checkout has nothing to scan). Wired into `test-all.mjs`'s `--self-test` invocation; backfilling JD text for pre-existing reports that predate this validator is explicitly out of scope (#2789) — this only prevents the gap going forward.
+**Exit codes:** `1` if any `missing-jd-archive` finding, `0` otherwise: with only `jd-archive-review-due` findings, and in the empty-repo case (`reports/*.md` is gitignored, so a fresh checkout has nothing to scan). Wired into `test-all.mjs`'s `--self-test` invocation; backfilling JD text for pre-existing reports that predate this validator is explicitly out of scope (#2789) — this only prevents the gap going forward.
 
 ---
 
@@ -722,6 +830,20 @@ node rejection-latency.mjs --self-test
 ```
 
 **Exit codes:** `0` always (missing data files produce an explanatory empty result), `1` self-test failure.
+
+---
+
+## role-clarity
+
+Six-point role-clarity check on one posting's text (#6091). For each of: direct supervisor and department, scope of work, deliverables and their format, success measure in the first 3-6 months, teams or people the role coordinates with, and delivery cadence, it reports `present`, `partial` or `missing` with the quoted evidence (always an exact substring of the posting). A separate soft-verb signal lists wording such as "participate in", "support", "potential implementation" and "other duties as assigned"; three or more hits mark it `heavy`. When three or more points are `missing`, `askBeforeYouCommit` is true and `questions` lists one question per missing or partial point, which `modes/oferta.md` (Block G, Role-clarity check) turns into a recruiter question draft. Advisory only: it never changes the 1-5 score, never sends anything and never writes a file. The posting is treated as data and only pattern-matched. English keyword matching only; locale mode sets can pass `extraSoftVerbs` to `analyzeRoleClarity()` to extend the soft-verb list.
+
+```bash
+node role-clarity.mjs jds/{slug}.md             # JSON
+node role-clarity.mjs jds/{slug}.md --summary   # human-readable
+node role-clarity.mjs --self-test
+```
+
+**Exit codes:** `0` on success (an empty posting returns `emptyInput: true`), `1` for a missing file, an unrecognized flag, or a self-test failure.
 
 ---
 
@@ -880,6 +1002,16 @@ npm run rollback
 ```
 
 **Exit codes:** `0` success, `1` no backup branch found, git error, or a failed `npm install` after the files were restored (rollback reinstalls so `node_modules` matches the restored `package.json`; run `npm install`).
+
+---
+
+## update:test
+
+Developer check for the updater, not a job-search command. Runs the source-level migration safety tests in `updater-migration-tests.mjs`: an older installed updater must be able to fetch newly introduced system paths without touching user data.
+
+```bash
+npm run update:test
+```
 
 ---
 
@@ -1108,6 +1240,39 @@ The keywords are this scanner's positive list, since a post header is not an ATS
 
 With `GEMINI_API_KEY` set (also read by `gemini-eval`), Gemini extracts the company, title and location of each post that already matched the keywords; a post that matches none is never sent. `GEMINI_MODEL` overrides the model. If every Gemini call fails, the run exits 1.
 
+---
+
+## scan:interamt
+
+Scans [Interamt.de](https://interamt.de) public-sector postings. The site is a stateful Apache Wicket app with no HTTP API, so this drives a real Chromium session (same reason as `scan:dayforce`) and does not fit `scan.mjs`'s HTTP-only provider contract. It reads `interamt_searches` from `portals.yml`, and falls back to a generic set of German IT keywords when that section is absent.
+
+```bash
+npm run scan:interamt
+npm run scan:interamt -- --dry-run
+npm run scan:interamt -- --all                      # skip the date filter; use for a first scan
+npm run scan:interamt -- --keyword "Softwareentwickler"
+npm run scan:interamt -- --debug                    # save a screenshot and the page HTML to output/
+```
+
+`--dry-run` scans and reports, and writes nothing to the pipeline or scan history.
+
+---
+
+## scan:dayforce
+
+Scans Dayforce (Ceridian) Recruiting boards listed under `dayforce_boards` in `portals.yml`. The job-search API is behind Cloudflare and a NextAuth CSRF token, so a plain `fetch` is refused and this script drives Playwright instead. It fetches the full posting text only for listings that already passed the title, location, content, country, and visa filters.
+
+```bash
+npm run scan:dayforce
+npm run scan:dayforce -- --dry-run
+npm run scan:dayforce -- --tenant gnghcm            # one configured tenant; the `--tenant=name` form is ignored
+npm run scan:dayforce -- --debug                    # keep the browser visible
+```
+
+`--dry-run` writes nothing to the pipeline or scan history. Session cookies are not saved; each tenant gets a fresh browser context that is closed when that tenant finishes.
+
+---
+
 ## company:funded
 
 Review-first discovery for companies that recently raised funding. It reads structured public RSS/API sources and prints a candidate report for manual review. It never edits `portals.yml` and does not probe company websites.
@@ -1146,6 +1311,7 @@ node tracker.mjs query --company acme --json
 node tracker.mjs query --since 2026-09-01 --csv > output/tracker.csv  # open in a spreadsheet
 node tracker.mjs query --status Evaluated --min-score 4  # scored 4.0/5 or higher, not yet applied to
 node tracker.mjs history --id 42          # status transitions from status-log.tsv (Applied → Interview → ...)
+node tracker.mjs history 42               # same read as --id 42
 node tracker.mjs export                   # inverse: index → markdown table on stdout
 node tracker.mjs export --out repaired.md # write to a file (existing file backed up to .bak first)
 node tracker.mjs export --out repaired.md --force  # write even when columns would be dropped
@@ -1219,7 +1385,8 @@ node ics-interview.mjs < invite.ics
 ```
 
 - Display zone: `--tz`, else `config/profile.yml` `location.timezone` (when Intl recognizes it), else the machine zone. A value that is not a zone is reported, not guessed.
-- Unreadable fields are an em dash in the row. All-day events are reported as a date, floating times (no zone, no `Z`) as written without conversion, and a `TZID` that is not an IANA name (e.g. a Windows zone name) as `unknown-tzid` without conversion. `RRULE` is ignored with a warning.
+- Unreadable fields are an em dash in the row. All-day events are reported as a date, floating times (no zone, no `Z`) as written without conversion, and a `TZID` that is not an IANA name (e.g. Outlook's `Eastern Standard Time`) is converted with the file's own `VTIMEZONE` block. Without a readable `VTIMEZONE` it is reported as `unknown-tzid` without conversion. `RRULE` is ignored with a warning.
+- A cancellation (`METHOD:CANCEL` or `STATUS:CANCELLED`) gives no row and a `cancelled` warning, since it carries the same start and end as the invite it cancels.
 - `--match` hands the invite text (or a file holding it) to `invite-match.mjs` to suggest the tracker row; Company and Role are filled in only when exactly one candidate matches the company exactly. The length shown comes from the `.ics`.
 - Hand-written parser for the handful of properties needed; zero-LLM, no dependency.
 
@@ -1450,6 +1617,19 @@ npm run openai:eval -- "JD text"
 
 ---
 
+## eval:golden
+
+Compares a candidate model's `---SCORE_SUMMARY---` block to the frozen golden cases in `evals/`. The metric is agreement with that reference, not absolute correctness. Archetype agreement is the pass/fail gate; score agreement is a tolerance band around the reference score. See [evals/README.md](../evals/README.md).
+
+```bash
+npm run eval:golden -- --replay --model cheap-stub     # offline, deterministic, no API key
+npm run eval:golden -- --live --model gpt-4o-mini      # calls openai-eval; needs a key and cv.md
+```
+
+`--replay` reads a recorded fixture. `--live` spends tokens.
+
+---
+
 ## star
 
 Zero-LLM, zero-browser behavioural question matcher. Parses
@@ -1508,11 +1688,21 @@ npm run prepare:application -- --url https://boards.greenhouse.io/acme/jobs/123
 Cross-platform build wrapper for the Go TUI dashboard: picks the
 platform-correct output name (`career-dashboard.exe` on Windows, else
 `career-dashboard`), since a bare `go build -o` writes an extension-less
-binary on Windows. Requires Go 1.24+.
+binary on Windows. Requires Go 1.26+.
 
 ```bash
 npm run build:dashboard
 npm run serve:dashboard    # or run the TUI directly without building
+```
+
+---
+
+## manifesto
+
+Prints the opening couplet of [MANIFESTO.md](../MANIFESTO.md) and opens the public signing page (`https://career-ops.org/manifesto`) in the system browser. It does not change any file. If no browser opener is available, the URL is still printed.
+
+```bash
+npm run manifesto
 ```
 
 ---
@@ -1547,6 +1737,8 @@ These have no `npm run` binding — modes and agents call them with
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
 | `node validate-template-registry.mjs [--root <dir>]` | Shape gate for `templates-registry/<id>.json` files |
+| `node batch-evaluate-gemini.mjs [--model=NAME] [--limit=N] [--concurrency=N]` | Batch-evaluate pending `pipeline.md` rows with the Gemini SDK. Needs `GEMINI_API_KEY`. Writes reports and checks the rows off. `--limit` caps how many pending rows this run takes (default: all); `--concurrency` defaults to 2 |
+| `node batch-tailor.mjs [--min-score N]` | Bulk-generate tailored CVs for batch jobs at or above the score (default 4.0). `--help` prints usage |
 
 ---
 

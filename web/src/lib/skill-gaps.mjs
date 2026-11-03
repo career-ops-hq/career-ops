@@ -48,12 +48,13 @@ export function skillGapModel(payload, limit = 8) {
   /** @type {Caveat[]} */
   const caveats = [];
 
-  // upskill.mjs's own comment: a CV that yields no known skills "would flood the
-  // gap map with false gaps", because nothing can be subtracted as already-held.
-  // The map still renders, which is exactly why this has to be said out loud —
-  // a list of skills you already have, presented as things to learn, is worse
-  // than no list.
-  if (num(m.knownSkillCount) === 0) {
+  // upskill.mjs says a CV that yields no known skills floods the gap map,
+  // because nothing can be subtracted as already-held. Say that only when a
+  // gap list is actually shown. A missing count is not a counted zero: num()
+  // turns an absent field into 0, and the no-tracker payload has no metadata.
+  // An empty install then claimed the CV had no recognised skills beside
+  // "No recurring gaps yet", which is the opposite of what happened.
+  if (gaps.length > 0 && m.knownSkillCount === 0) {
     caveats.push({
       kind: "no-known-skills",
       text:

@@ -57,7 +57,7 @@ export function CompanyEvidence({ company }: { company: string }) {
   return (
     <section className="mt-8 rounded-2xl border border-border bg-surface/40 px-5 py-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Building2 className="size-4 text-brand" />
+        <Building2 className="size-4 text-brand-text" />
         <h2 className="font-display text-base text-landing">What you already know about {model.company ?? company}</h2>
       </div>
 
@@ -96,7 +96,7 @@ function Row({ verdict }: { verdict: Verdict | null }) {
   return (
     <div className="flex items-start gap-2.5">
       <Icon
-        className={`mt-0.5 size-4 shrink-0 ${isConclusion(verdict) ? "text-brand" : "text-faint"}`}
+        className={`mt-0.5 size-4 shrink-0 ${isConclusion(verdict) ? "text-brand-text" : "text-faint"}`}
         aria-hidden
       />
       <div className="min-w-0">

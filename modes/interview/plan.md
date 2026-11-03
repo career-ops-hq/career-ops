@@ -168,6 +168,7 @@ Save the plan to `interview-prep/{company-slug}-{role-slug}.md` if a file doesn'
 ## Rules
 
 - **AI-tools constraint.** If the invite carries a `no-ai` constraint (`node invite-match.mjs` prints `[constraint:no-ai]`), remind the candidate in one line: practice with the assistant beforehand, but never use any AI tool during the real interview.
+- **Clarification draft.** For an invite, `node invite-match.mjs` also prints a draft-only email asking who the role reports to, the first-three-month deliverables, and whether the posting is the full scope (`clarificationDraft`). Offer it before the candidate accepts the slot; never send it. It is skipped when the tracker notes or report already record a reporting line.
 - **Calibrate to the round.** A screening prep plan looks very different from a design-panel prep plan. Don't default to maximum depth for every interview.
 - **Stated priorities choose among existing evidence; they never add to it.** They steer which of the candidate's real stories and proof points to lead with. If a priority has no matching experience on file, say so; don't draft a claim to fit it (AGENTS.md, Source-of-Truth Boundary).
 - **Gaps first.** Time is finite. The candidate's strengths don't need prep — their gaps do.

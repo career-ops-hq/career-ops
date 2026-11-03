@@ -5,15 +5,15 @@ external service — things the zero-keys, local-first core doesn't carry. They 
 **opt-in**, sandboxed-by-convention, and additive: with no plugins enabled, the
 core runs exactly as it always has.
 
-> This is **not** the Claude Code plugin (`.claude-plugin/`). These plugins
-> extend career-ops itself.
+> This is **not** the Claude Code plugin (`.claude-plugin/`, see
+> [CLAUDE_PLUGIN.md](CLAUDE_PLUGIN.md)). These plugins extend career-ops itself.
 
 ## Using plugins
 
 ```bash
 node plugins.mjs list          # what's installed + its trust badge
 node plugins.mjs available     # bundled + community plugins we've approved
-node plugins.mjs add <name>    # install an approved community plugin
+node plugins.mjs add <name>    # install an approved community plugin (`install` does the same)
 node plugins.mjs enable <id>   # show the capability card (then add --confirm)
 node plugins.mjs skill <id>    # print a plugin's how-to (if it ships one)
 ```

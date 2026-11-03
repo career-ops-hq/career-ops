@@ -36,20 +36,28 @@ const routes = [
 const template = "candidate:\n  full_name: Template Candidate\n  location: Template City\ncompensation:\n  currency: USD\n";
 
 async function withFixture(source, fn) {
+  // Split layout: user files live in `root`, system files (the example profile)
+  // in a separate code checkout — the template must come from the latter.
   const root = mkdtempSync(path.join(tmpdir(), "career-ops-profile-shape-"));
+  const code = mkdtempSync(path.join(tmpdir(), "career-ops-profile-shape-code-"));
   const config = path.join(root, "config");
   const file = path.join(config, "profile.yml");
   mkdirSync(config);
-  writeFileSync(path.join(config, "profile.example.yml"), template);
+  mkdirSync(path.join(code, "config"));
+  writeFileSync(path.join(code, "config", "profile.example.yml"), template);
   if (source !== undefined) writeFileSync(file, source);
-  const previous = process.env.CAREER_OPS_ROOT;
+  const previous = { root: process.env.CAREER_OPS_ROOT, code: process.env.CAREER_OPS_CODE_ROOT };
   process.env.CAREER_OPS_ROOT = root;
+  process.env.CAREER_OPS_CODE_ROOT = code;
   try {
     await fn({ config, file });
   } finally {
-    if (previous === undefined) delete process.env.CAREER_OPS_ROOT;
-    else process.env.CAREER_OPS_ROOT = previous;
+    if (previous.root === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = previous.root;
+    if (previous.code === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = previous.code;
     rmSync(root, { recursive: true, force: true });
+    rmSync(code, { recursive: true, force: true });
   }
 }
 
@@ -110,7 +118,7 @@ for (const route of routes) {
       if (route.name === "profile") expected.candidate.full_name = route.patch.name;
       else expected.followup_cadence = route.patch;
       assert.deepEqual(yaml.load(readFileSync(file, "utf8")), expected);
-      assert.deepEqual(readdirSync(config).sort(), ["profile.example.yml", "profile.yml"]);
+      assert.deepEqual(readdirSync(config).sort(), ["profile.yml"]);
     });
   });
 }

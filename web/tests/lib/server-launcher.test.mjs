@@ -20,7 +20,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -286,6 +286,82 @@ test("an unknown command prints usage and exits 1 without starting next", () => 
   assert.equal(run.status, 1);
   assert.equal(run.argv, null, "next must not run for an unknown command");
   assert.ok(run.stderr.includes("Usage: node server.mjs"), "usage should be printed");
+});
+
+test("starting the dashboard starts the PDF painter from the repo root and does not wait for it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "career-ops-launcher-"));
+  const web = join(root, "web");
+  const marker = join(root, "painter.pid");
+  let pid = 0;
+  let painterCwd = "";
+  try {
+    mkdirSync(join(web, "src"), { recursive: true });
+    cpSync(join(WEB_ROOT, "server.mjs"), join(web, "server.mjs"));
+    cpSync(join(WEB_ROOT, "src", "lib"), join(web, "src", "lib"), { recursive: true });
+    const nextDir = join(web, "node_modules", "next", "dist", "bin");
+    mkdirSync(nextDir, { recursive: true });
+    writeFileSync(
+      join(web, "node_modules", "next", "package.json"),
+      JSON.stringify({ name: "next", version: "0.0.0-stub", bin: { next: "./dist/bin/next.js" } }),
+    );
+    writeFileSync(join(nextDir, "next.js"), "console.log(JSON.stringify(process.argv.slice(2)));\n");
+    writeFileSync(
+      join(root, "generate-pdf.mjs"),
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, process.pid + "\\n" + process.cwd());\nsetInterval(() => {}, 1e9);\n`,
+    );
+    const started = Date.now();
+    const result = spawnSync(process.execPath, [join(web, "server.mjs"), "dev"], {
+      encoding: "utf8",
+      timeout: 15_000,
+      env: { PATH: process.env.PATH },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout.trim()), ["dev", "-H", "127.0.0.1"]);
+    assert.ok(Date.now() - started < 10_000, "the launcher waited for the painter");
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      try {
+        const [first, cwd] = readFileSync(marker, "utf8").split("\n");
+        if (!cwd) throw new Error("not written yet");
+        pid = Number(first);
+        painterCwd = cwd;
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    assert.ok(pid > 0, "the painter did not start");
+    process.kill(pid, 0);
+    assert.equal(realpathSync(painterCwd), realpathSync(root), "the painter runs from the repo root, like the export child");
+  } finally {
+    // An assertion above can fail before the marker loop assigns pid. The
+    // painter is already detached, so read the marker here and stop it.
+    if (!(pid > 0)) {
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline && !(pid > 0)) {
+        try {
+          const [first, cwd] = readFileSync(marker, "utf8").split("\n");
+          if (cwd && Number(first) > 0) pid = Number(first);
+        } catch { /* not written yet */ }
+        if (!(pid > 0)) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    if (pid > 0) {
+      try { process.kill(pid, "SIGTERM"); } catch {}
+      // The painter's cwd is the temp root now, and Windows will not remove a
+      // directory a live process is sitting in. Wait for it to exit first.
+      const gone = Date.now() + 5_000;
+      while (Date.now() < gone) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
 
 // --- the scripts that reach it --------------------------------------------

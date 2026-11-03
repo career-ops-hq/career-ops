@@ -37,6 +37,15 @@
  *      role but never merges titles that differ by a city, country, language,
  *      segment or seniority word.
  *
+ *   3. SAME SOURCE. A repost is the same site listing the role again under a
+ *      new URL. scan-history.tsv mixes many sources — the employer's ATS, job
+ *      boards, aggregators, alert emails — and one live opening is routinely
+ *      picked up by two of them on different days: the ATS scan finds it on
+ *      Monday, a job-board copy arrives on Thursday. Grouped across sources,
+ *      that reads as a repost even though the opening was listed once and
+ *      never changed. Membership therefore also requires the same source host
+ *      (see sourceHost); a cross-source sighting is a duplicate, not a repost.
+ *
  * ONE CASE THE TITLE RULE CANNOT SETTLE: a multi-employer aggregator. Its board
  * carries many different employers' postings under its own name, so identical
  * titles there are genuinely different jobs and every rule above rests on an
@@ -387,8 +396,21 @@ function detectRepostsInGroup(rows, windowDays, minSpan = MIN_REPOST_SPAN_DAYS) 
   return results;
 }
 
+// The site a posting URL belongs to, for constraint 3 of the header: hostname,
+// lowercased, without `www.` or a two-letter regional prefix (`de.linkedin.com`
+// and `www.linkedin.com` are one site; a role re-listed across them is still a
+// repost). Unparseable URLs keep the raw string, so they never merge with
+// anything but themselves.
+export function sourceHost(url) {
+  let host;
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return String(url); }
+  const labels = host.split('.');
+  if (labels.length > 2 && (labels[0] === 'www' || /^[a-z]{2}$/.test(labels[0]))) labels.shift();
+  return labels.join('.');
+}
+
 // Group one company's rows into title groups: all rows sharing a
-// titleIdentityKey land in one group.
+// titleIdentityKey and a sourceHost land in one group.
 //
 // This is a single O(N) bucketing pass. It replaced a nested loop that compared
 // every pair of titles with roleFuzzyMatch, and then an inverted token index
@@ -412,7 +434,7 @@ function groupRowsByTitle(rows) {
   const groups = [];
   const groupOfKey = new Map();
   for (const row of rows) {
-    const key = titleIdentityKey(row.title);
+    const key = `${titleIdentityKey(row.title)}\u0000${sourceHost(row.url)}`;
     let idx = groupOfKey.get(key);
     if (idx === undefined) {
       idx = groups.length;
@@ -598,6 +620,20 @@ function runSelfTest() {
     scanRow('https://jobs.example.com/initech/2', '2026-01-10', 'Channel Account Manager - Spain', 'Initech'),
   ];
   check(detectReposts(perCountry, DEFAULT_WINDOW_DAYS).length === 0, 'two countries\' requisitions are not a repost');
+
+  // Shape 4 — one opening picked up by two sources on different days: the
+  // employer's ATS first, a job-board copy later. Same company, same title,
+  // different URLs, a real span — and still one listing, not a repost.
+  const crossSource = [
+    scanRow('https://jobs.ashbyhq.com/hooli/1', '2026-01-10', 'Senior Product Manager', 'Hooli'),
+    scanRow('https://www.jobboard.example/jobs/hooli-senior-pm-77', '2026-01-14', 'Senior Product Manager', 'Hooli'),
+  ];
+  check(detectReposts(crossSource, DEFAULT_WINDOW_DAYS).length === 0, 'one opening seen on two sources is not a repost');
+  check(
+    detectReposts([...crossSource, scanRow('https://jobs.ashbyhq.com/hooli/2', '2026-02-20', 'Senior Product Manager', 'Hooli')], DEFAULT_WINDOW_DAYS).length === 1,
+    'the same source re-listing the role under a new URL is still a repost',
+  );
+  check(sourceHost('https://de.linkedin.com/jobs/view/1') === sourceHost('https://www.linkedin.com/jobs/view/2'), 'regional subdomains are one source');
   check(
     detectReposts(perCountry, DEFAULT_WINDOW_DAYS, 0).length === 0,
     'a trailing country word splits the titles even with the span floor disabled',

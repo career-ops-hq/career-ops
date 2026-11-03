@@ -37,7 +37,7 @@ export function AiHuntView({ cliName }: { cliName?: string }) {
         <span className="co-aiorb">
           <span className="co-aiorb__glow" />
           <span className="co-aiorb__ring" />
-          <Sparkles className="size-6 text-brand" />
+          <Sparkles className="size-6 text-brand-text" />
         </span>
 
         <div>
