@@ -2317,7 +2317,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   }
   const launchBrowser = opts.launchBrowser || ((options) => launchChromium({
     ...options,
-    projectRoot: opts.workspaceRoot || workspaceRoot,
+    projectRoot: opts.workspaceRoot || getCareerOpsRoot(),
   }));
   let browser = null;
   try {

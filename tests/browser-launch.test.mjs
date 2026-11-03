@@ -28,17 +28,18 @@ if (/import\s*\{[^}]*\bbrowserLaunchOptions\b[^}]*\}\s*from\s*['"]\.\/lib\/brows
     && /export\s+async\s+function\s+launchChromium\b/.test(generatePdfSource)
     && /const\s*\{\s*projectRoot\s*,\s*\.\.\.launchOptions\s*\}\s*=\s*options/.test(generatePdfSource)
     && /chromium\.launch\(browserLaunchOptions\(launchOptions,\s*\{\s*projectRoot\s*\}\)\)/.test(generatePdfSource)
-    && /projectRoot:\s*opts\.workspaceRoot\s*\|\|\s*workspaceRoot/.test(generatePdfSource)) {
-  pass('generate-pdf delegates launch options and its effective workspace root to the shared resolver');
+    && /projectRoot:\s*opts\.workspaceRoot\s*\|\|\s*getCareerOpsRoot\(\)/.test(generatePdfSource)) {
+  pass('generate-pdf delegates launch options and defaults browser settings to the data root');
 } else {
-  fail('generate-pdf launchChromium is not backed by the workspace-aware shared browser resolver');
+  fail('generate-pdf launchChromium is not backed by the data-root-aware shared browser resolver');
 }
 
 const scanSource = readFileSync(new URL('../scan.mjs', import.meta.url), 'utf8');
-if (/browserLaunchOptions\(\{\s*headless:\s*true\s*\},\s*\{\s*projectRoot:\s*DATA_ROOT\s*\}\)/.test(scanSource)) {
-  pass('scan verification resolves its browser from the scan data root');
+if (/const\s+BROWSER_PROCESS_ENV\s*=\s*\{\s*\.\.\.process\.env\s*\}/.test(scanSource)
+    && /browserLaunchOptions\([\s\S]*?\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\}/.test(scanSource)) {
+  pass('scan verification preserves shell-vs-data-root browser setting origin');
 } else {
-  fail('scan verification does not pass its data root to the shared browser resolver');
+  fail('scan verification does not preserve the origin of data-root browser settings');
 }
 
 // Several suites run a copied generate-pdf.mjs in an isolated directory. A
@@ -160,6 +161,20 @@ try {
     pass('relative .env paths resolve from the data root while shell paths stay unchanged');
   } else {
     fail(`relative executable path resolution is wrong: ${JSON.stringify(relativeFromFile)} / ${JSON.stringify(relativeFromShell)}`);
+  }
+
+  // scan.mjs loads DATA_ROOT/.env through dotenv before it needs a browser.
+  // Passing the pre-dotenv shell snapshot makes the resolver re-read the file,
+  // retaining the path's origin instead of misclassifying it as a shell value.
+  setEnv({ exe: 'browsers/brave', root: relativeEnvRoot });
+  const fromDotenvLoadedProcess = resolveBrowserExecutable({
+    projectRoot: relativeEnvRoot,
+    processEnv: {},
+  });
+  if (fromDotenvLoadedProcess?.path === join(relativeEnvRoot, 'browsers', 'brave')) {
+    pass('a dotenv-loaded relative path retains the data-root .env as its origin');
+  } else {
+    fail(`dotenv-loaded path lost its file origin: ${JSON.stringify(fromDotenvLoadedProcess)}`);
   }
 
   // A shell variable that is present but empty switches off what .env sets.

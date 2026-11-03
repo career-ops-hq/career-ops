@@ -86,6 +86,11 @@ import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
+// Preserve the actual shell environment before dotenv adds data-root values to
+// process.env. The browser resolver uses this snapshot to distinguish an
+// explicit shell path (which keeps cwd-relative behavior) from a path read from
+// DATA_ROOT/.env (which must resolve relative to that file's directory).
+const BROWSER_PROCESS_ENV = { ...process.env };
 
 try {
   const { config } = await import('dotenv');
@@ -3911,7 +3916,10 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       }
       try {
         browser = await chromium.launch(
-          browserLaunchOptions({ headless: true }, { projectRoot: DATA_ROOT }),
+          browserLaunchOptions(
+            { headless: true },
+            { projectRoot: DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+          ),
         );
       } catch (err) {
         throw new Error(
