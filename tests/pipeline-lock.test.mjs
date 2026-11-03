@@ -22,8 +22,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Worker } from 'node:worker_threads';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { tryAcquireDirLockSync } from '../lib/dir-lock.mjs';
 import {
@@ -42,6 +41,8 @@ const REPO_ROOT = dirname(dirname(SELF));
 // synchronous timer callback, so an in-process waiter can never slip through
 // the gap — from its point of view the lock is busy the entire time, but busy
 // with a DIFFERENT holder each window. Returns a stop() and the handoff count.
+// Every test that uses it runs on the virtual clock (useVirtualClock below), so
+// a handoff lands every `everyMs` of virtual time, however slow the runner is.
 function churnLock(lockDir, everyMs) {
   let handoffs = 0;
   const takeIt = () => {
@@ -62,58 +63,39 @@ function churnLock(lockDir, everyMs) {
   };
 }
 
-// churnLock's handoffs, made on a worker thread's own event loop. A test whose
-// subject is the extension rule needs a holder that keeps making progress even
-// when the main thread stalls. The in-process timer above cannot promise that:
-// a stall keeps it from firing between the two fingerprint samples the wait
-// policy compares, the lock then reads as wedged, and the caller gives up early.
-// Real holders are other processes, so this is the closer model.
+// The tests that wait on churnLock run on a virtual clock: node:test's mock
+// timers for setTimeout, setInterval and Date. Their subject is the wait
+// policy, and on the real clock the runner could overrule it.
 //
-// The directory is created once and never removed. Each handoff swaps in a new
-// owner.json by rename, retried through Windows contention. A rename is atomic,
-// so the waiter never sees a free lock.
-// A remove-then-create swap would leave a gap another thread can slip through.
-// Resolves once the first owner is on disk; stop() is async because it ends the
-// worker.
-async function churnLockInWorker(lockDir, everyMs) {
-  const worker = new Worker(`
-    const { mkdirSync, writeFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { workerData, parentPort } = require('node:worker_threads');
-    (async () => {
-      const { renameSyncWithRetry } = await import(workerData.trackerUtilsUrl);
-      const owner = join(workerData.lockDir, 'owner.json');
-      const staged = join(workerData.lockDir, 'owner.json.next');
-      let handoffs = 0;
-      const stamp = () => JSON.stringify({
-        pid: process.pid, token: 'handoff-' + handoffs++, started_at: new Date().toISOString(),
-      });
-      mkdirSync(workerData.lockDir, { recursive: true });
-      writeFileSync(owner, stamp(), 'utf-8');
-      parentPort.postMessage('ready');
-      setInterval(() => {
-        writeFileSync(staged, stamp(), 'utf-8');
-        renameSyncWithRetry(staged, owner);
-      }, workerData.everyMs);
-    })();
-  `, {
-    eval: true,
-    workerData: {
-      lockDir,
-      everyMs,
-      trackerUtilsUrl: pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', 'tracker-utils.mjs')).href,
-    },
-  });
-  await new Promise((resolve, reject) => {
-    worker.once('message', resolve);
-    worker.once('error', reject);
-  });
-  return {
-    async stop() {
-      await worker.terminate();
-      rmSync(lockDir, { recursive: true, force: true });
-    },
-  };
+// The policy reads a lock that has not changed hands for timeoutMs as wedged.
+// These tests shrink timeoutMs to 100-150ms, and a starved macOS runner can
+// leave the holder unscheduled for that long. The waiter then gives up early,
+// or the holder makes too few handoffs for the test to prove anything. Moving
+// the holder to a worker thread (#5142) did not cure it: the worker goes
+// unscheduled too, and the same assertion kept failing on macos-latest.
+//
+// On the virtual clock, time moves only when settleOnVirtualClock moves it, and
+// every timer due by then has already fired. A slow runner makes these tests
+// slower, but it cannot change what the waiter sees. The lock code runs as it
+// is: it reads Date.now() and sleeps on setTimeout, and here both are mocked.
+function useVirtualClock(t) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now() });
+}
+
+// settleOrGiveUp for the virtual clock. Advances it one millisecond at a time
+// until `promise` settles, or until `limitMs` of virtual time has passed. Each
+// step then waits for one setImmediate, which stays on the real clock, so the
+// waiter's `await sleep()` continuation runs before the clock moves again.
+async function settleOnVirtualClock(t, promise, limitMs) {
+  let outcome;
+  promise
+    .then((lock) => { lock.release(); return 'ACQUIRED'; }, (err) => err)
+    .then((value) => { outcome = value; }, (err) => { outcome = err; });
+  for (let ms = 0; outcome === undefined && ms < limitMs; ms += 1) {
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return outcome ?? 'NEVER_SETTLED';
 }
 
 function fixtureRoot() {
@@ -475,10 +457,12 @@ test('LockTimeoutError carries the live holder it was blocked by (#2834 diagnost
   }
 });
 
-// Both ceiling tests race the acquire against a wall-clock bound rather than
-// awaiting it. Against a lock that churns for ever, a broken ceiling does not
-// return at all, and a bare await would hang the suite instead of failing it.
-// The retry loop yields on every pass, so the racing timer does get to run.
+// The ceiling tests race the acquire against a bound rather than awaiting it.
+// Against a lock that churns for ever, a broken ceiling does not return at all,
+// and a bare await would hang the suite instead of failing it. The retry loop
+// yields on every pass, so the racing timer does get to run. This is the
+// wall-clock race, for the one test whose blocker is a live holder; the churn
+// tests run the same race on the virtual clock (settleOnVirtualClock).
 async function settleOrGiveUp(promise, ms) {
   return Promise.race([
     promise.then((lock) => { lock.release(); return 'ACQUIRED'; }, (err) => err),
@@ -488,55 +472,58 @@ async function settleOrGiveUp(promise, ms) {
 
 
 
-test('acquirePipelineLock: a lock that keeps changing hands does not time out a waiting caller', async () => {
+test('acquirePipelineLock: a lock that keeps changing hands does not time out a waiting caller', async (t) => {
   const root = fixtureRoot();
+  useVirtualClock(t);
+  const p = join(root, 'data', 'pipeline.md');
+  const churn = churnLock(`${p}.lock`, 40);
   try {
-    const p = join(root, 'data', 'pipeline.md');
-    const churn = churnLock(`${p}.lock`, 40);
     // Let the lock change hands for several times the caller's timeout, then
     // free it. The caller must still be waiting, not dead.
-    const freeItLater = sleep(600).then(() => churn.stop());
+    setTimeout(() => churn.stop(), 600);
 
     const startedAt = Date.now();
     // The old absolute deadline killed this caller at 150ms with
     // LockTimeoutError even though the lock was healthy and briskly shared —
     // which for agent-inbox.mjs meant its request was silently dropped. The
     // timeout is for a WEDGED holder, not for losing the retry lottery.
-    const lock = await acquirePipelineLock(p, { timeoutMs: 150, retryMs: 15 });
+    const outcome = await settleOnVirtualClock(t, acquirePipelineLock(p, { timeoutMs: 150, retryMs: 15 }), 3000);
     const elapsed = Date.now() - startedAt;
-    lock.release();
-    await freeItLater;
 
+    assert.equal(outcome, 'ACQUIRED', `the caller gave up on a lock that kept changing hands: ${outcome}`);
     assert.ok(elapsed > 400, `acquired after only ${elapsed}ms — the lock was not actually contended`);
     assert.ok(churn.handoffs() > 5, `only ${churn.handoffs()} handoffs — the deadline was never crossed mid-contention`);
   } finally {
+    churn.stop();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('acquirePipelineLock: extended waiting is still bounded by maxWaitMs, so endless churn cannot hang a caller', async () => {
+test('acquirePipelineLock: extended waiting is still bounded by maxWaitMs, so endless churn cannot hang a caller', async (t) => {
   const root = fixtureRoot();
-  const churn = await churnLockInWorker(`${root}/data/pipeline.md.lock`, 30);
+  useVirtualClock(t);
+  const churn = churnLock(join(root, 'data', 'pipeline.md.lock'), 30);
   try {
     const p = join(root, 'data', 'pipeline.md');
     // Progress must buy patience, never immortality: a lock handed round for
     // ever still has to fail the caller rather than block it indefinitely.
     const startedAt = Date.now();
-    await assert.rejects(
-      () => acquirePipelineLock(p, { timeoutMs: 100, retryMs: 10, maxWaitMs: 400 }),
-      (err) => err instanceof LockTimeoutError,
+    const outcome = await settleOnVirtualClock(
+      t, acquirePipelineLock(p, { timeoutMs: 100, retryMs: 10, maxWaitMs: 400 }), 3000,
     );
     const elapsed = Date.now() - startedAt;
+    assert.ok(outcome instanceof LockTimeoutError, `expected the ceiling to end an endless churn, got: ${outcome}`);
     assert.ok(elapsed >= 400, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
     assert.ok(elapsed < 3000, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
   } finally {
-    await churn.stop();
+    churn.stop();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('acquirePipelineLock: an explicit maxWaitMs below timeoutMs is honored, not raised to it', async () => {
+test('acquirePipelineLock: an explicit maxWaitMs below timeoutMs is honored, not raised to it', async (t) => {
   const root = fixtureRoot();
+  useVirtualClock(t);
   const churn = churnLock(`${root}/data/pipeline.md.lock`, 25);
   try {
     const p = join(root, 'data', 'pipeline.md');
@@ -545,9 +532,8 @@ test('acquirePipelineLock: an explicit maxWaitMs below timeoutMs is honored, not
     // more than 200ms" bought five seconds. It was also only consulted inside
     // the per-holder deadline branch, which this caller never reaches.
     const startedAt = Date.now();
-    const outcome = await settleOrGiveUp(
-      acquirePipelineLock(p, { timeoutMs: 5000, retryMs: 20, maxWaitMs: 200 }),
-      3000,
+    const outcome = await settleOnVirtualClock(
+      t, acquirePipelineLock(p, { timeoutMs: 5000, retryMs: 20, maxWaitMs: 200 }), 3000,
     );
     const elapsed = Date.now() - startedAt;
     assert.ok(outcome instanceof LockTimeoutError, `expected the ceiling to end it, got: ${outcome}`);
@@ -562,8 +548,9 @@ test('acquirePipelineLock: an explicit maxWaitMs below timeoutMs is honored, not
   }
 });
 
-test('acquirePipelineLock: a lock freed after maxWaitMs is refused, not acquired', async () => {
+test('acquirePipelineLock: a lock freed after maxWaitMs is refused, not acquired', async (t) => {
   const root = fixtureRoot();
+  useVirtualClock(t);
   const churn = churnLock(`${root}/data/pipeline.md.lock`, 25);
   try {
     const p = join(root, 'data', 'pipeline.md');
@@ -574,7 +561,7 @@ test('acquirePipelineLock: a lock freed after maxWaitMs is refused, not acquired
     // not a bounded error. It must refuse.
     const attempt = acquirePipelineLock(p, { timeoutMs: 5000, retryMs: 120, maxWaitMs: 150 });
     setTimeout(() => churn.stop(), 200);
-    const outcome = await settleOrGiveUp(attempt, 3000);
+    const outcome = await settleOnVirtualClock(t, attempt, 3000);
     assert.ok(
       outcome instanceof LockTimeoutError,
       `the ceiling had already expired; acquiring anyway returns a lock past the documented limit (got: ${outcome})`,
@@ -585,8 +572,9 @@ test('acquirePipelineLock: a lock freed after maxWaitMs is refused, not acquired
   }
 });
 
-test('acquirePipelineLock: a maxWaitMs of 0 means no waiting, not the default ceiling', async () => {
+test('acquirePipelineLock: a maxWaitMs of 0 means no waiting, not the default ceiling', async (t) => {
   const root = fixtureRoot();
+  useVirtualClock(t);
   const churn = churnLock(`${root}/data/pipeline.md.lock`, 20);
   const previous = process.env.CAREER_OPS_PIPELINE_LOCK_MAX_WAIT_MS;
   try {
@@ -598,7 +586,7 @@ test('acquirePipelineLock: a maxWaitMs of 0 means no waiting, not the default ce
     // idiom lived, and against a churning lock so only the ceiling can end it.
     process.env.CAREER_OPS_PIPELINE_LOCK_MAX_WAIT_MS = '0';
     const startedAt = Date.now();
-    const outcome = await settleOrGiveUp(acquirePipelineLock(p, { timeoutMs: 400, retryMs: 20 }), 3000);
+    const outcome = await settleOnVirtualClock(t, acquirePipelineLock(p, { timeoutMs: 400, retryMs: 20 }), 3000);
     const elapsed = Date.now() - startedAt;
     assert.ok(outcome instanceof LockTimeoutError, `expected an immediate ceiling, got: ${outcome}`);
     assert.ok(elapsed < 300, `waited ${elapsed}ms for a zero ceiling — the 0 was read as "unset"`);
@@ -646,8 +634,9 @@ test('acquirePipelineLock: a negative or -Infinity ceiling takes the default rat
   }
 });
 
-test('acquirePipelineLock: a non-numeric maxWaitMs falls back to the default instead of removing the ceiling', async () => {
+test('acquirePipelineLock: a non-numeric maxWaitMs falls back to the default instead of removing the ceiling', async (t) => {
   const root = fixtureRoot();
+  useVirtualClock(t);
   const churn = churnLock(`${root}/data/pipeline.md.lock`, 25);
   try {
     const p = join(root, 'data', 'pipeline.md');
@@ -655,9 +644,8 @@ test('acquirePipelineLock: a non-numeric maxWaitMs falls back to the default ins
     // loudly — it silently deleted the only bound on waiting. Against a lock
     // that never stops changing hands that is an unbounded wait, which is the
     // exact outcome the ceiling exists to prevent.
-    const outcome = await settleOrGiveUp(
-      acquirePipelineLock(p, { timeoutMs: 100, retryMs: 10, maxWaitMs: Number('not a number') }),
-      4000,
+    const outcome = await settleOnVirtualClock(
+      t, acquirePipelineLock(p, { timeoutMs: 100, retryMs: 10, maxWaitMs: Number('not a number') }), 4000,
     );
     assert.ok(
       outcome instanceof LockTimeoutError,
