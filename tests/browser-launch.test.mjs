@@ -89,6 +89,14 @@ if (/import\s*\{[\s\S]*?BROWSER_PROCESS_ENV[\s\S]*?\}\s*from\s*['"]\.\/scan\.mjs
   fail('OpenRouter does not pass the pre-dotenv browser environment snapshot');
 }
 
+const batchGeminiSource = readFileSync(new URL('../batch-evaluate-gemini.mjs', import.meta.url), 'utf8');
+if (/const\s+BROWSER_PROCESS_ENV\s*=\s*snapshotBrowserProcessEnv\(\);[\s\S]*?await\s+import\(['"]dotenv['"]\)/.test(batchGeminiSource)
+    && /browserLaunchOptions\(\s*\{\s*headless:\s*true\s*\},\s*\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\}/.test(batchGeminiSource)) {
+  pass('Gemini batch preserves shell-vs-data-root browser setting origin');
+} else {
+  fail('Gemini batch does not preserve browser settings before loading dotenv');
+}
+
 const windowsSnapshot = snapshotBrowserProcessEnv({
   playwright_chromium_executable_path: 'C:\\Browsers\\brave.exe',
   career_ops_browser_autodetect: '',
