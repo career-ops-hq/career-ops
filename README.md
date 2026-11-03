@@ -354,7 +354,7 @@ In Codex, slash commands are not guaranteed. Use the same mode names in a prompt
 
 ## How It Works
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), the tailored CV in the format set by cv.output_format — a PDF by default — and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI Integration
 
@@ -453,12 +453,12 @@ pi
 ### One-shot Pi (`pi -p`)
 
 ```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
+pi -a -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -a -p "Run career-ops scan mode and summarize new matches."
+pi -a -p "Run career-ops tracker mode and summarize the current statuses."
 ```
 
-If a Pi build gates project resources behind a trust decision, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
+If a Pi build gates project resources behind a trust decision, interactive usage can use `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes), while a headless invocation that needs to trust project resources should use the `-a` option (`pi -a -p "prompt"`), which trusts a single run and needs no restart.
 
 ### Standalone Gemini API Script (No CLI install needed)
 
