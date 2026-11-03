@@ -384,12 +384,56 @@ export function buildHtml(payload, templatePath) {
   _require(candidate, ["name"], "candidate");
   _require(letter, ["role_title", "opening", "profile_intro"], "letter");
 
+  // modes/_custom.md (added 2026-09-02): every cover letter with achievement
+  // bullets needs a transition sentence immediately before them — never drop
+  // the bullets straight in after profile_intro. This was missed by hand six
+  // separate times (see memory cover-letter-transition-sentence-recurring-miss.md)
+  // because "remember to add it" isn't a real gate. Making it a required field
+  // the generator refuses to render without is: a payload with achievements but
+  // no transition fails loudly here instead of silently shipping a PDF without one.
+  if (Array.isArray(letter.achievements) && letter.achievements.length > 0) {
+    _require(letter, ["transition"], "letter");
+  }
+
+  // modes/_custom.md (added 2026-10-05): confirmed ATS-critical keywords must
+  // reach at least 80% coverage before a cover letter is presented for
+  // approval. Missed by hand twice (Automattic 1/5, Trustonic 2/8 — see memory
+  // cover-letter-step10-keyword-check-skipped.md) because "remember to count
+  // them" is advice, not an executed check. letter.keywords is optional (a
+  // payload built outside the Step 4 confirmation flow has no list to check
+  // against); when present, coverage below 80% throws instead of silently
+  // shipping an under-covered letter.
+  if (Array.isArray(letter.keywords) && letter.keywords.length > 0) {
+    const bodyText = [
+      letter.opening,
+      letter.profile_intro,
+      letter.transition,
+      ...(letter.achievements || []).flatMap(a => [a?.lead, a?.impact]),
+      letter.problems_section,
+      letter.closing,
+      letter.language_closing,
+    ].filter(Boolean).join(" ").toLowerCase();
+    const missing = letter.keywords.filter(kw => !bodyText.includes(String(kw).toLowerCase()));
+    const matched = letter.keywords.length - missing.length;
+    const coveragePct = Math.round((matched / letter.keywords.length) * 100);
+    if (matched / letter.keywords.length < 0.8) {
+      throw new Error(
+        `ATS keyword coverage ${matched}/${letter.keywords.length} (${coveragePct}%) is below the required 80% minimum. ` +
+        `Missing: ${missing.join(", ")}`
+      );
+    }
+  }
+
   const resolvedPath = templatePath || resolveCoverTemplatePath(payload);
   let html = readFileSync(resolvedPath, "utf-8");
 
   // Optional salutation (e.g. "Dear Jane Smith,"). Omitted -> no salutation,
   // preserving the original behavior for payloads that don't set it.
   const greetingBlock = letter.greeting ? `<p class="greeting">${escapeHtml(letter.greeting)}</p>` : "";
+  // Transition sentence before the achievement bullets (required whenever
+  // achievements are present, enforced above; optional otherwise so a
+  // no-achievements payload stays backward compatible).
+  const transitionBlock = letter.transition ? `<p>${escapeHtml(letter.transition)}</p>` : "";
   const closingBlock = letter.closing ? `<p>${escapeHtml(letter.closing)}</p>` : "";
   const languageClosingBlock = letter.language_closing
     ? `<p class="language-closing">${escapeHtml(letter.language_closing)}</p>`
@@ -420,6 +464,7 @@ export function buildHtml(payload, templatePath) {
     "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),
     "{{PROFILE_INTRO}}": escapeHtml(letter.profile_intro),
+    "{{TRANSITION_BLOCK}}": transitionBlock,
     "{{ACHIEVEMENTS_BLOCK}}": buildAchievementsBlock(letter.achievements),
     "{{PROBLEMS_BLOCK}}": problemsBlock,
     "{{CLOSING_BLOCK}}": closingBlock,

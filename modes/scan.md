@@ -252,6 +252,8 @@ Levels are additive — they are executed in order, and results are merged and d
    - `applications.md` → normalized company + role already evaluated
    - `pipeline.md` → exact URL already in pending or processed list
 
+   **Batch triage never substitutes for per-URL logging (caught 2026-10-29).** It's fine, and efficient, to cross-check a whole batch of Level 3 candidates against the 3 dedup sources up front before spending Playwright verification time on anything — that's good triage. But "I already know this one's a duplicate, skip verifying it" is not the same decision as "skip recording it." A run once filtered ~32 Level 3 duplicates this way, verified and wrote rows only for the survivors, and reported an aggregate "32 duplicates" count in its final summary with zero corresponding `skipped_dup` rows in `scan-history.tsv` to back it up — breaking the audit trail `detect-reposts.mjs` and the cross-listing fingerprint check both depend on (a URL that never gets a row looks like a fresh first-sighting if it resurfaces later, instead of a detected repost). Every URL discarded as a duplicate during triage still gets its own `scan-history.tsv` row with status `skipped_dup`, same as one caught later in the per-URL loop — batch the writes if that's cheaper than one append per URL, but don't drop them.
+
 7.1. **Cross-listing check (#1597)** — automatic in `scan.mjs`, warn only:
    - Each new offer's JD body (when the provider's list API ships one, e.g. Lever) is fingerprinted (64-bit SimHash, stored as the 8th `scan-history.tsv` column).
    - A near-identical body seen within 90 days under a **different company** is flagged in the scan summary — the usual cause is an agency re-posting a direct listing with the employer name stripped, which URL and company+role dedup both miss.
@@ -282,7 +284,7 @@ Levels are additive — they are executed in order, and results are merged and d
    b. Record in `scan-history.tsv` with status `added`. Write the row with `formatScanHistoryRow` / `appendToScanHistory` from `scan.mjs` rather than composing the tab-separated line by hand — the column set has grown and will grow again, and a hand-written row is silently short.
 
 9. **Offers filtered by title**: record in `scan-history.tsv` with status `skipped_title`.
-10. **Duplicate offers**: record with status `skipped_dup`.
+10. **Duplicate offers**: record with status `skipped_dup` — including ones identified during an upfront batch triage pass, not only ones caught in the per-URL loop (see the note under Step 7).
 11. **Expired offers (Level 3)**: record with status `skipped_expired`.
 12. **Scan errors / failures**: record in `scan-history.tsv` with status `skipped_error`.
 

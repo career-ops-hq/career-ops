@@ -235,6 +235,9 @@ Why applying + functional summary. Derived from Angle A. Uses JD mirror vocabula
 Years of experience, current/most recent role, domain. Read from cv.md summary.
 Tone matches user's choice from Step 6D.
 
+[Transition — 1 short sentence, mandatory whenever achievements are included]
+A short lead-in immediately before the bullets (e.g. "A few examples of what that's looked like in practice:"). Never drop the bullets straight in after the profile-intro paragraph with no transition — `generate-cover-letter.mjs` enforces this at Step 9 (`letter.transition` is a required field whenever `letter.achievements` is non-empty, and the generator throws rather than rendering without it).
+
 [Achievements — 4-5 bullets]
 • **Lead phrase,** impact sentence with metric.
 • **Lead phrase,** impact sentence with metric.
@@ -331,12 +334,14 @@ Assemble the JSON payload:
     "greeting": "{optional salutation, e.g. 'Dear Jane Smith,'; omit the key to skip the salutation}",
     "opening": "{approved opening paragraph}",
     "profile_intro": "{approved profile intro}",
+    "transition": "{approved transition sentence — REQUIRED whenever achievements is non-empty; generate-cover-letter.mjs throws otherwise}",
     "achievements": [
       {"lead": "...", "impact": "..."}
     ],
     "problems_section": "{approved problems paragraph}",
     "closing": "{approved closing}",
-    "language_closing": "{approved language sentence or null}"
+    "language_closing": "{approved language sentence or null}",
+    "keywords": ["{the confirmed ATS-critical keyword list from Step 4 — optional, but when present generate-cover-letter.mjs throws if coverage across opening/profile_intro/transition/achievements/problems_section/closing falls below 80%}"]
   },
   "user_inputs": [
     "{each Step 5 answer, verbatim}",
@@ -366,7 +371,7 @@ Report the output path and file size.
 
 After the PDF is confirmed, add a brief note:
 
-- Any JD keywords from Step 4 that could not be incorporated naturally (flag for manual review)
+- **State the exact ATS-keyword coverage fraction and percentage** (e.g. "7/8, 88%") — never a qualitative substitute like "most keywords landed." Pass the confirmed Step 4 keyword list as `letter.keywords` in the Step 9 payload so `generate-cover-letter.mjs` computes this for real and throws before rendering if coverage is under 80%, rather than relying on a manual recount after the fact.
 - Which gap acknowledgments were included and which were omitted, and why
 - Whether the word count hit the 350-420 target (if short or long, note it)
 

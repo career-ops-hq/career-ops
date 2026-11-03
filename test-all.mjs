@@ -19894,6 +19894,127 @@ try {
   fail(`sponsors check: ${e.message}`);
 }
 
+// ── 77. COVER LETTER TRANSITION SENTENCE REQUIRED WHEN ACHIEVEMENTS PRESENT ──
+// modes/_custom.md (added 2026-09-02): every cover letter with achievement
+// bullets needs a transition sentence immediately before them. Missed by hand
+// six times (memory: cover-letter-transition-sentence-recurring-miss.md)
+// before being converted into a hard field requirement here.
+
+console.log('\n77. Cover letter transition sentence required when achievements present');
+
+try {
+  const { buildHtml } = await import(pathToFileURL(join(ROOT, 'generate-cover-letter.mjs')).href);
+
+  const withAchievements = {
+    candidate: { name: 'Jane Doe' },
+    letter: {
+      role_title: 'Head of Applied AI',
+      opening: 'Opening.',
+      profile_intro: 'PROFILE_MARKER intro.',
+      achievements: [{ lead: 'Shipped X', impact: 'cut latency 40%.' }],
+    },
+  };
+
+  // (a) achievements present, no transition → throws instead of silently rendering.
+  let threw = false;
+  try {
+    buildHtml(withAchievements);
+  } catch (e) {
+    threw = /letter\.transition/.test(e.message);
+  }
+  if (threw) {
+    pass('buildHtml throws a clear error when achievements are present but transition is missing');
+  } else {
+    fail('buildHtml did not require letter.transition when achievements were present');
+  }
+
+  // (b) achievements present, transition supplied → renders between profile_intro and the bullets.
+  const withTransition = buildHtml({
+    ...withAchievements,
+    letter: { ...withAchievements.letter, transition: 'TRANSITION_MARKER sentence.' },
+  });
+  const introIdx = withTransition.indexOf('PROFILE_MARKER');
+  const transitionIdx = withTransition.indexOf('TRANSITION_MARKER');
+  const bulletIdx = withTransition.indexOf('Shipped X');
+  if (introIdx !== -1 && transitionIdx !== -1 && bulletIdx !== -1 && introIdx < transitionIdx && transitionIdx < bulletIdx) {
+    pass('Transition sentence renders between profile_intro and the achievement bullets');
+  } else {
+    fail(`Transition block missing or misordered (intro=${introIdx}, transition=${transitionIdx}, bullet=${bulletIdx})`);
+  }
+
+  // (c) no achievements at all → transition stays optional, fully backward compatible.
+  const noAchievements = buildHtml({
+    candidate: { name: 'Jane Doe' },
+    letter: {
+      role_title: 'Head of Applied AI',
+      opening: 'Opening.',
+      profile_intro: 'Intro, no bullets.',
+    },
+  });
+  if (!noAchievements.includes('{{TRANSITION_BLOCK}}')) {
+    pass('No-achievements payload renders cleanly without requiring transition (backward compatible)');
+  } else {
+    fail('No-achievements payload left an unreplaced {{TRANSITION_BLOCK}} token');
+  }
+} catch (e) {
+  fail(`Cover letter transition requirement test crashed: ${e.message}`);
+}
+
+// ── 78. COVER LETTER ATS-KEYWORD 80% COVERAGE GATE ──────────────
+// modes/_custom.md (added 2026-10-05): confirmed ATS-critical keywords must
+// reach at least 80% coverage before a cover letter is presented. Missed by
+// hand twice (Automattic 1/5, Trustonic 2/8 — memory:
+// cover-letter-step10-keyword-check-skipped.md) before being converted into
+// a hard field check here, same pattern as test 77's transition requirement.
+
+console.log('\n78. Cover letter ATS-keyword 80% coverage gate');
+
+try {
+  const { buildHtml } = await import(pathToFileURL(join(ROOT, 'generate-cover-letter.mjs')).href);
+
+  const basePayload = {
+    candidate: { name: 'Jane Doe' },
+    letter: {
+      role_title: 'Head of Applied AI',
+      opening: 'Opening sentence.',
+      profile_intro: 'Intro sentence.',
+      transition: 'A few examples:',
+      achievements: [{ lead: 'Shipped X', impact: 'cut latency 40%.' }],
+    },
+  };
+
+  // (a) below 80% → throws with the exact fraction, percentage, and missing list.
+  let belowMsg = null;
+  try {
+    buildHtml({ ...basePayload, letter: { ...basePayload.letter, keywords: ['Shipped', 'latency', 'foo', 'bar', 'baz'] } });
+  } catch (e) {
+    belowMsg = e.message;
+  }
+  if (belowMsg && belowMsg.includes('2/5') && belowMsg.includes('40%') && belowMsg.includes('foo') && belowMsg.includes('bar') && belowMsg.includes('baz')) {
+    pass('buildHtml throws with exact coverage fraction/percentage and missing keywords when under 80%');
+  } else {
+    fail(`buildHtml did not throw the expected under-80% error (got: ${belowMsg})`);
+  }
+
+  // (b) exactly 80% (4/5) → passes, renders normally.
+  const atThreshold = buildHtml({ ...basePayload, letter: { ...basePayload.letter, keywords: ['Shipped', 'latency', 'Opening', 'Intro', 'foo'] } });
+  if (atThreshold.includes('Jane Doe')) {
+    pass('Exactly 80% keyword coverage renders without throwing');
+  } else {
+    fail('80% coverage payload did not render correctly');
+  }
+
+  // (c) no keywords field at all → backward compatible, no gate applied.
+  const noKeywords = buildHtml(basePayload);
+  if (noKeywords.includes('Jane Doe')) {
+    pass('Payload with no keywords field renders cleanly (backward compatible, gate skipped)');
+  } else {
+    fail('No-keywords payload did not render correctly');
+  }
+} catch (e) {
+  fail(`Cover letter keyword-coverage gate test crashed: ${e.message}`);
+}
+
 // ── INLINE SECTIONS: END ────────────────────────────────────────
 
 if (INLINE_CHILD !== null) {
