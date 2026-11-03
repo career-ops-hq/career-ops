@@ -126,3 +126,25 @@ test('doctor calls a bad value a bad value, not an unrecognized key', (t) => {
   const both = doctorProfileWarning(t, 'spend_tier: gold\nspend_teir: standard\n');
   assert.match(both, /2 issues — unrecognized keys and invalid values have no effect/);
 });
+
+test('doctor --target names the target profile even with CAREER_OPS_PROFILE set', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-profile-target-'));
+  const other = mkdtempSync(join(tmpdir(), 'co-profile-other-'));
+  t.after(() => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  });
+  mkdirSync(join(dir, 'config'));
+  writeFileSync(join(dir, 'config', 'profile.yml'), 'spend_tier: gold\n');
+  const elsewhere = join(other, 'elsewhere.yml');
+  writeFileSync(elsewhere, 'spend_tier: standard\n');
+  const r = spawnSync(process.execPath, [join(ROOT, 'doctor.mjs'), '--target', dir], {
+    cwd: dir,
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: elsewhere },
+  });
+  const out = r.stdout + r.stderr;
+  assert.match(out, /config\/profile\.yml: spend_tier/, out);
+  assert.doesNotMatch(out, /elsewhere\.yml: spend_tier/, out);
+});

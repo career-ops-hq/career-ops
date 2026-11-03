@@ -8,7 +8,7 @@
 import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { delimiter, join, dirname, resolve } from 'path';
+import { delimiter, join, dirname, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
@@ -1291,7 +1291,10 @@ function checkProfileShape(root) {
   let findings;
   try {
     const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
-    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example).findings;
+    // Name the file actually read. With --target that is the target's
+    // profile, not the CAREER_OPS_PROFILE path the default label comes from.
+    const label = relative(root, profilePath).split(sep).join('/') || profilePath;
+    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example, label).findings;
   } catch (err) {
     return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
   }
