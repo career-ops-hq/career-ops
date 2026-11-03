@@ -1226,6 +1226,7 @@ search_queries:
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
+#   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (the company id is required; a bare tenant host is not claimed)
 #   solidjobs       solid.jobs/public-api/offers/<division>
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
 #   personio        <slug>.jobs.personio.(de|com)
@@ -1350,6 +1351,11 @@ search_queries:
 #
 # - name: Example Keka Co
 #   careers_url: https://exampleco.keka.com/careers       # any <tenant>.keka.com host
+#   enabled: true
+#
+# - name: Example Darwinbox Co
+#   careers_url: https://exampleco.darwinbox.in/ms/candidatev2/main/careers/allJobs   # keep the id after /candidatev2/ as your link has it
+#   max_pages: 20          # optional page cap (50 jobs/page, default 20, max 200)
 #   enabled: true
 #
 # - name: Example Paylocity Co
@@ -2039,6 +2045,10 @@ search_queries:
 #
 # - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
 #   provider: larajobs
+#   enabled: true
+#
+# - name: GermanTechJobs                  # German IT jobs, salary on every posting (public RSS feed)
+#   provider: germantechjobs              # whole board in one request; rows carry no location
 #   enabled: true
 #
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)

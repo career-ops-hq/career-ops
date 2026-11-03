@@ -30,4 +30,5 @@ Queste competenze presuppongono l'esistenza dei seguenti file (valori predefinit
 | `interview-prep/question-bank.md` | Banca delle domande con tracciamento delle lacune (creata al primo utilizzo) |
 | `interview-prep/interview-prep-guide.md` | Principi generali per il colloquio (opzionale) |
 | `interview-prep/{company}-{role}.md` | File di preparazione specifico per il ruolo |
+| `interview-prep/sessions/*.md` | Trascrizioni per ogni round; front matter `stated_priorities` opzionale (priorità del ruolo dichiarate dall'intervistatore) scritto da debrief, letto da plan e practice |
 | `interview-prep/retracted-claims.md` | Affermazioni che il candidato ha ritirato in quanto non difendibili — sbarramento rigido durante pratica e debriefing (formato: `**"[claim]"** ([context]). Reason: [motivo di una riga + eventuale framing corretto].`) |

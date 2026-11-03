@@ -25,6 +25,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import {
   appendToPipeline,
   appendToScanHistory,
+  appendUnrecordedToScanHistory,
   BROWSER_PROCESS_ENV,
   DATA_ROOT as SCAN_DATA_ROOT,
   PORTALS_PATH,
@@ -362,10 +363,12 @@ async function main() {
   if (!DRY_RUN) {
     if (newOffers.length > 0) await appendToPipeline(newOffers);
     if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
-    if (titleSkipped.length > 0) await appendToScanHistory(titleSkipped, date, 'skipped_title');
-    if (locationSkipped.length > 0) await appendToScanHistory(locationSkipped, date, 'skipped_location');
-    if (dateSkipped.length > 0) await appendToScanHistory(dateSkipped, date, 'skipped_date');
-    if (dupeSkipped.length > 0) await appendToScanHistory(dupeSkipped, date, 'skipped_dup');
+    // Every search hands the same skipped postings back, so each is recorded
+    // once per status, not once per run (#2695, as scan.mjs records its own).
+    await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
+    await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
+    await appendUnrecordedToScanHistory(dateSkipped, date, 'skipped_date');
+    await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
   // Summary

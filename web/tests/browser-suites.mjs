@@ -53,7 +53,9 @@ const SUITES = {
   "assistant-request-feedback": { url: "ASSISTANT_FEEDBACK_TEST_URL", fixture: "blank" },
   "assistant-status-recovery": { url: "ASSISTANT_STATUS_TEST_URL", fixture: "blank" },
   "back-link-scroll": { url: "BACK_SCROLL_TEST_URL", root: "BACK_SCROLL_TEST_ROOT", fixture: "pipeline-long" },
+  "cv-editor-keep": { url: "CV_EDITOR_KEEP_TEST_URL", root: "CV_EDITOR_KEEP_TEST_ROOT", fixture: "blank" },
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
+  "cv-studio-keep": { url: "CV_STUDIO_KEEP_TEST_URL", root: "CV_STUDIO_KEEP_TEST_ROOT", fixture: "cv-studio" },
   "cv-studio-preview": { url: "CV_STUDIO_PREVIEW_TEST_URL", fixture: "cv-studio-preview" },
   "cv-upload": { url: "CV_UPLOAD_TEST_URL", root: "CV_UPLOAD_TEST_ROOT", fixture: "cv-upload" },
   "employer-preset": { url: "EXPLORE_EMPLOYER_TEST_URL", fixture: "blank" },
@@ -68,6 +70,7 @@ const SUITES = {
   "pipeline-return": { url: "PIPELINE_RETURN_TEST_URL", root: "PIPELINE_RETURN_TEST_ROOT", fixture: "pipeline-status" },
   "pipeline-views": { url: "PIPELINE_VIEWS_TEST_URL", root: "PIPELINE_VIEWS_TEST_ROOT", fixture: "pipeline-status" },
   "skip-link": { url: "SKIP_LINK_TEST_URL", fixture: "blank" },
+  "tracker-search": { url: "TRACKER_SEARCH_TEST_URL", root: "TRACKER_SEARCH_TEST_ROOT", fixture: "pipeline-status" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },
 };
 
