@@ -260,3 +260,23 @@ test("explore dedup does not re-read scan history while the file is unchanged", 
     assert.equal(counted("scan-history.tsv"), afterFirst);
   });
 });
+
+test("a file deleted between the stat and the read is null, not an error", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "stat-cache-gone-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "scan-history.tsv");
+  writeFileSync(file, "url\tfirst_seen\n");
+  const wrapped = fs.readFileSync;
+  fs.readFileSync = function (path, ...args) {
+    if (String(path) === file) rmSync(file, { force: true });
+    return wrapped.call(fs, path, ...args);
+  };
+  try {
+    assert.equal(cachedFileValue(file, "gone-test", (text) => text.length), null);
+  } finally {
+    fs.readFileSync = wrapped;
+  }
+  // Nothing was cached for the vanished file, so a new one is read.
+  writeFileSync(file, "abc");
+  assert.equal(cachedFileValue(file, "gone-test", (text) => text.length), 3);
+});

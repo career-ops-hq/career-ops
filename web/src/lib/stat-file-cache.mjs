@@ -57,7 +57,17 @@ export function cachedFileValue(file, kind, parse, deps) {
   const hit = slots.get(key);
   if (hit && hit.token === token) return hit.value;
 
-  const text = fs.readFileSync(file, "utf8");
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    // Deleted after the stat: same answer as a file that was never there.
+    if (err && err.code === "ENOENT") {
+      slots.delete(key);
+      return null;
+    }
+    throw err;
+  }
   const value = parse(text);
   let after;
   try {
