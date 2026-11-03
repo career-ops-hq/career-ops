@@ -497,9 +497,25 @@ const USPS_STATES = Object.freeze([
 // English "in"/"or"/"me" in "Remote, Belgium or France" must not impersonate
 // Indiana/Oregon/Maine. State *names* still use compileLocationKeyword.
 // Unicode letters and marks are part of the token: "Montréal" is not "AL".
+//
+// The comma form also requires the code to END its comma segment, because a
+// comma in front of a conjunction satisfies everything else about it: in
+// "Canada - Remote (ON, AB, BC, or NS Only)" the ", or " read as Oregon and
+// cleared a United-States-only always_allow. The guard above only covers a
+// conjunction that no comma precedes ("Belgium or France"), and none of ON, AB,
+// BC or NS is a USPS code, so the conjunction alone admitted the posting.
+// placesWithoutCountryCode() does not split it either: the string has no ";"
+// and its last comma segment ("or ns only") is not a 2-letter country code.
+//
+// "Ends its segment" is spelled as "not followed by whitespace then a letter",
+// which is what separates a label from a list: a real state label is followed
+// by the end of the string, a comma, a ZIP, or bracketed/punctuated trailing
+// detail ("Austin, TX 78701", "San Francisco, CA (Hybrid)", "Seattle, WA -
+// Remote"), never by another bare word. Digits are deliberately not letters
+// here, or every "City, ST ZIP" string would stop matching.
 function compileUsStateAbbrev(abbr) {
   const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`(?:,\\s*${escaped}(?![\\p{L}\\p{M}\\p{N}])|(?:^|[^\\p{L}\\p{M}\\p{N}])${escaped}[^\\p{L}\\p{M}\\p{N}]*$)`, 'u');
+  const re = new RegExp(`(?:,\\s*${escaped}(?![\\p{L}\\p{M}\\p{N}])(?!\\s+\\p{L})|(?:^|[^\\p{L}\\p{M}\\p{N}])${escaped}[^\\p{L}\\p{M}\\p{N}]*$)`, 'u');
   return (lower) => placesWithoutCountryCode(lower).some((place) => re.test(place));
 }
 
