@@ -33,7 +33,7 @@ Claude будет читать файлы из этого каталога. Ес
 
 ```yaml
 language:
-  primary: ru
+  output: ru
   modes_dir: modes/ru
 ```
 

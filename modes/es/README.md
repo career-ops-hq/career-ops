@@ -29,7 +29,7 @@ Añade en `config/profile.yml`:
 
 ```yaml
 language:
-  primary: es
+  output: es
   modes_dir: modes/es
 ```
 
