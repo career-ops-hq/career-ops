@@ -243,10 +243,12 @@ cv:
   # sections: [skills, education, certifications, awards]
   #
   # (Optional) Page budget for every rendered CV PDF (#6325). Without it a CV
-  # may run to 2 pages, with a warning past that. Students, new graduates and
-  # early-career candidates usually want 1. strict_pages: true turns an
-  # overflow into a failed render instead of a warning. A --max-pages or
-  # --strict-pages flag on generate-pdf.mjs still wins for a single render.
+  # may run to 2 pages. Past the budget the render is kept as a sibling
+  # {name}.overflow.pdf draft and the real PDF path is left untouched (#6377):
+  # with a warning by default, or as a failed render with strict_pages: true.
+  # Students, new graduates and early-career candidates usually want 1. A
+  # --max-pages or --strict-pages flag on generate-pdf.mjs still wins for a
+  # single render.
   # A value that is set but unusable (max_pages: 0, strict_pages: "yes") stops
   # a CV render with a message naming it, rather than falling back to 2 pages,
   # unless a flag passed for that render overrides the key.
