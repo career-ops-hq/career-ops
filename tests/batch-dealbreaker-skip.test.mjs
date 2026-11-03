@@ -47,6 +47,7 @@ cd "$(dirname "$0")"
 REPORTS_DIR="$PWD/reports"
 TRACKER_DIR="$PWD/tracker-additions"
 LOGS_DIR="$PWD/logs"
+DISCARD_LOG="$LOGS_DIR/discard.log"
 mkdir -p "$TRACKER_DIR" "$LOGS_DIR"
 log_file="$PWD/worker.log"
 MAX_RETRIES=2
@@ -57,6 +58,7 @@ append_recovery_record() { printf '%s\\n' "$@" > recovery; }
 sleep() { :; }
 ${functionCode('update_state_retrying')}
 ${functionCode('has_report_file')}
+${functionCode('log_discard')}
 release_report_num() { printf '%s' "$1" > released; }
 is_decimal_number() { [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]; }
 handle_result() {
@@ -97,6 +99,8 @@ handle_result
     assert.equal(existsSync(join(work, 'released')), false, 'the SKIP row holds its number until the merge');
     assert.equal(readFileSync(join(work, 'tracker-additions', '1.tsv'), 'utf8'), skipRow(), 'the SKIP row stays for the merge');
     assert.equal(existsSync(join(work, 'logs', 'quarantine')), false);
+    const discard = readFileSync(join(work, 'logs', 'discard.log'), 'utf8').trimEnd().split('\t');
+    assert.deepEqual(discard.slice(1), ['1', URL, `dealbreaker: "${RULE}"`], 'the skip is in the discard log (#6440)');
     assert.match(output, /Skipped \(dealbreaker\)/);
     assert.doesNotMatch(output, /Needs confirmation|Failed/);
   });

@@ -715,12 +715,17 @@ resolve_worker_model() {
 # Append a one-line, auditable record of a pre-screen-gate discard to
 # batch/logs/discard.log (see modes/batch.md — Pre-screen gate). Format:
 # {ISO8601 timestamp}\t{job id}\t{url}\t{reason}
+#
+# Callers write the "skipped" state first, and that row keeps the same id, url
+# and reason, so a failed append is reported, not fatal: the record can be
+# rebuilt from batch-state.tsv instead of aborting the run.
 log_discard() {
   local id="$1" url="$2" reason="$3"
-  mkdir -p "$LOGS_DIR"
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"
+  if ! { mkdir -p "$LOGS_DIR" && printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"; } 2>/dev/null; then
+    echo "    ⚠️  Could not append to $DISCARD_LOG for #$id; its skipped row in batch-state.tsv keeps the reason" >&2
+  fi
 }
 
 
@@ -1845,7 +1850,7 @@ process_offer() {
         # file holds it, so releasing now would hand it to the next job before
         # the merge. merge_tracker releases it once the row is in the tracker.
         update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "-" "dealbreaker: \"$skip_rule\"" "$retries" || true
-        log_discard "$id" "$url" "dealbreaker: \"$skip_rule\"" || true
+        log_discard "$id" "$url" "dealbreaker: \"$skip_rule\""
         echo "    ⏭️  Skipped (dealbreaker): $url — \"$skip_rule\""
         return 0
       fi
@@ -1903,7 +1908,7 @@ process_offer() {
       # MIN_SCORE comparison would silently run on truncated integers.
       if LC_ALL=C awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
         update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
-        log_discard "$id" "$url" "below-min-score ($score < $MIN_SCORE)" || true
+        log_discard "$id" "$url" "below-min-score ($score < $MIN_SCORE)"
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0
