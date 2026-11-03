@@ -51,10 +51,10 @@ DISCARD_LOG="$LOGS_DIR/discard.log"
 mkdir -p "$TRACKER_DIR" "$LOGS_DIR"
 log_file="$PWD/worker.log"
 MAX_RETRIES=2
-MIN_SCORE=0
+MIN_SCORE="\${MIN_SCORE:-0}"
 RECOVERY_DIR="$PWD/recovery"
-update_state() { printf '%s\\n' "$@" > state; }
-append_recovery_record() { printf '%s\\n' "$@" > recovery; }
+update_state() { [[ -z "\${FAIL_STATE:-}" ]] || return 1; printf '%s\\n' "$@" > state; }
+append_recovery_record() { [[ -z "\${FAIL_STATE:-}" ]] || return 1; printf '%s\\n' "$@" > recovery; }
 sleep() { :; }
 ${functionCode('update_state_retrying')}
 ${functionCode('has_report_file')}
@@ -73,13 +73,13 @@ handle_result
     rmSync(join(work, 'logs'), { recursive: true, force: true });
     for (const f of readdirSync(join(work, 'reports'))) rmSync(join(work, 'reports', f), { force: true });
   };
-  const handle = (payload, { tsv, report } = {}) => {
+  const handle = (payload, { tsv, report, env } = {}) => {
     reset();
     mkdirSync(join(work, 'tracker-additions'), { recursive: true });
     if (tsv !== undefined) writeFileSync(join(work, 'tracker-additions', '1.tsv'), tsv);
     if (report) writeFileSync(join(work, 'reports', '042-fabrikam-2026-01-31.md'), '# Fictional report\n');
     writeFileSync(join(work, 'worker.log'), `\`\`\`json\n${JSON.stringify(payload)}\n\`\`\`\n`);
-    const res = spawnSync(getBash(), [harness], { encoding: 'utf8', timeout: 30000 });
+    const res = spawnSync(getBash(), [harness], { encoding: 'utf8', timeout: 30000, env: { ...process.env, ...env } });
     const path = existsSync(join(work, 'state')) ? 'state' : 'recovery';
     return {
       status: res.status,
@@ -103,6 +103,24 @@ handle_result
     assert.deepEqual(discard.slice(1), ['1', URL, `dealbreaker: "${RULE}"`], 'the skip is in the discard log (#6440)');
     assert.match(output, /Skipped \(dealbreaker\)/);
     assert.doesNotMatch(output, /Needs confirmation|Failed/);
+  });
+
+  const discardLog = join(work, 'logs', 'discard.log');
+  check('a dealbreaker skip that no state or recovery write recorded is not logged as a discard', () => {
+    const { output } = handle(skipPayload(), { tsv: skipRow(), env: { FAIL_STATE: '1' } });
+    assert.equal(existsSync(discardLog), false, output);
+  });
+
+  check('a below-min-score skip is logged as a discard with its score', () => {
+    const { fields, output } = handle({ status: 'completed', id: '1', score: 2.5, error: null }, { report: true, env: { MIN_SCORE: '3' } });
+    assert.equal(fields[2], 'skipped', output);
+    assert.equal(fields[7], 'below-min-score');
+    assert.deepEqual(readFileSync(discardLog, 'utf8').trimEnd().split('\t').slice(1), ['1', URL, 'below-min-score (2.5 < 3)']);
+  });
+
+  check('a below-min-score skip that nothing recorded is not logged as a discard', () => {
+    const { output } = handle({ status: 'completed', id: '1', score: 2.5, error: null }, { report: true, env: { MIN_SCORE: '3', FAIL_STATE: '1' } });
+    assert.equal(existsSync(discardLog), false, output);
   });
 
   check('rule text with tabs or line breaks cannot split the state row', () => {
