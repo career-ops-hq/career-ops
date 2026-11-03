@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,5 +64,47 @@ test('shared painters isolate socket identity by workspace root', () => {
     if (savedDataDir === undefined) delete process.env.CAREER_OPS_DATA_DIR;
     else process.env.CAREER_OPS_DATA_DIR = savedDataDir;
     for (const dir of [dataRoot, workspaceA, workspaceB]) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shared painters resolve browser settings independently of the render workspace', () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), 'co-pdf-data-root-'));
+  const workspace = mkdtempSync(join(tmpdir(), 'co-pdf-workspace-'));
+  const browserRootA = mkdtempSync(join(tmpdir(), 'co-pdf-browser-a-'));
+  const browserRootB = mkdtempSync(join(tmpdir(), 'co-pdf-browser-b-'));
+  const saved = {
+    executable: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    autodetect: process.env.CAREER_OPS_BROWSER_AUTODETECT,
+    socket: process.env.CAREER_OPS_PDF_SOCKET,
+    root: process.env.CAREER_OPS_ROOT,
+    dataDir: process.env.CAREER_OPS_DATA_DIR,
+  };
+  try {
+    delete process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+    delete process.env.CAREER_OPS_BROWSER_AUTODETECT;
+    delete process.env.CAREER_OPS_PDF_SOCKET;
+    process.env.CAREER_OPS_ROOT = dataRoot;
+    delete process.env.CAREER_OPS_DATA_DIR;
+    writeFileSync(join(browserRootA, '.env'), 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=browser-a/chrome\n');
+    writeFileSync(join(browserRootB, '.env'), 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=browser-b/chrome\n');
+
+    assert.notEqual(
+      sharedPdfSocketPath(ROOT, workspace, browserRootA),
+      sharedPdfSocketPath(ROOT, workspace, browserRootB),
+    );
+  } finally {
+    for (const [name, value] of [
+      ['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH', saved.executable],
+      ['CAREER_OPS_BROWSER_AUTODETECT', saved.autodetect],
+      ['CAREER_OPS_PDF_SOCKET', saved.socket],
+      ['CAREER_OPS_ROOT', saved.root],
+      ['CAREER_OPS_DATA_DIR', saved.dataDir],
+    ]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    for (const dir of [dataRoot, workspace, browserRootA, browserRootB]) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 });

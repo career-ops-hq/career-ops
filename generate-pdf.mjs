@@ -2381,6 +2381,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
         outputPath,
         { ...opts, workspaceRoot: opts.workspaceRoot || workspaceRoot },
         fileURLToPath(import.meta.url),
+        getCareerOpsRoot(),
       );
       console.log(`✅ PDF generated: ${result.outputPath}`);
       console.log(`📊 Pages: ${result.pageCount}`);
@@ -2688,7 +2689,7 @@ async function runPdfServer() {
     rootDir: __dirname,
     launchBrowser: (options) => launchChromium({
       ...options,
-      projectRoot: process.env.CAREER_OPS_PDF_WORKSPACE_ROOT || getCareerOpsRoot(),
+      projectRoot: process.env.CAREER_OPS_PDF_BROWSER_ROOT || getCareerOpsRoot(),
     }),
     render: (browser, html, outputPath, opts) => renderInPage(browser, html, outputPath, opts),
   });

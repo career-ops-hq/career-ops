@@ -38,10 +38,11 @@ if (/import\s*\{[^}]*\bbrowserLaunchOptions\b[^}]*\}\s*from\s*['"]\.\/lib\/brows
 const scanSource = readFileSync(new URL('../scan.mjs', import.meta.url), 'utf8');
 if (/export\s+const\s+DATA_ROOT\s*=\s*getCareerOpsRoot\(\)/.test(scanSource)
     && /export\s+const\s+BROWSER_PROCESS_ENV\s*=\s*snapshotBrowserProcessEnv\(\)/.test(scanSource)
-    && /browserLaunchOptions\([\s\S]*?\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\}/.test(scanSource)) {
-  pass('scan verification preserves shell-vs-data-root browser setting origin');
+    && /browserLaunchOptions\([\s\S]*?\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\}/.test(scanSource)
+    && /createHeadedPageProvider\(chromium,\s*\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV,?\s*\}/.test(scanSource)) {
+  pass('scan verification preserves browser setting origin for headless and headed launches');
 } else {
-  fail('scan verification does not preserve the origin of data-root browser settings');
+  fail('scan verification does not preserve browser setting origin for every launch');
 }
 
 for (const [file, label] of [
@@ -68,14 +69,16 @@ if (/const\s+browserProcessEnv\s*=\s*snapshotBrowserProcessEnv\(\);[\s\S]*?resol
 }
 
 const pdfServerSource = readFileSync(new URL('../lib/pdf-server.mjs', import.meta.url), 'utf8');
-if (/sharedPdfSocketPath\(rootDir,\s*workspaceRoot\s*=\s*getCareerOpsRoot\(\)\)/.test(pdfServerSource)
-    && /resolveBrowserExecutable\(\{\s*projectRoot:\s*workspaceRoot\s*\}\)/.test(pdfServerSource)
+if (/sharedPdfSocketPath\([\s\S]*?workspaceRoot\s*=\s*getCareerOpsRoot\(\),[\s\S]*?browserRoot\s*=\s*getCareerOpsRoot\(\)/.test(pdfServerSource)
+    && /resolveBrowserExecutable\(\{\s*projectRoot:\s*browserRoot\s*\}\)/.test(pdfServerSource)
     && /CAREER_OPS_PDF_WORKSPACE_ROOT:\s*workspaceRoot/.test(pdfServerSource)
-    && /ensureSharedPdfServer\(\s*generatePdfPath,\s*opts\.workspaceRoot\s*\|\|\s*getCareerOpsRoot\(\)/.test(pdfServerSource)
-    && /projectRoot:\s*process\.env\.CAREER_OPS_PDF_WORKSPACE_ROOT\s*\|\|\s*getCareerOpsRoot\(\)/.test(generatePdfSource)) {
-  pass('shared PDF painters are keyed and launched by the requested workspace root');
+    && /CAREER_OPS_PDF_BROWSER_ROOT:\s*browserRoot/.test(pdfServerSource)
+    && /ensureSharedPdfServer\([\s\S]*?opts\.workspaceRoot\s*\|\|\s*getCareerOpsRoot\(\),\s*browserRoot/.test(pdfServerSource)
+    && /renderViaSharedPdfServer\([\s\S]*?fileURLToPath\(import\.meta\.url\),\s*getCareerOpsRoot\(\)/.test(generatePdfSource)
+    && /projectRoot:\s*process\.env\.CAREER_OPS_PDF_BROWSER_ROOT\s*\|\|\s*getCareerOpsRoot\(\)/.test(generatePdfSource)) {
+  pass('shared PDF painters keep render workspace and browser setting roots separate');
 } else {
-  fail('shared PDF painters can reuse browser settings from another workspace');
+  fail('shared PDF painters conflate the render workspace with browser settings');
 }
 
 const openrouterSource = readFileSync(new URL('../openrouter-runner.mjs', import.meta.url), 'utf8');

@@ -3953,7 +3953,10 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       }
       page = await newLivenessPage(browser);
       await installLivenessRouteGuard(page);
-      headed = headedFallback ? createHeadedPageProvider(chromium) : null;
+      headed = headedFallback ? createHeadedPageProvider(chromium, {
+        projectRoot: DATA_ROOT,
+        processEnv: BROWSER_PROCESS_ENV,
+      }) : null;
     }
     // Space only browser work, including a search after an API 404 and the
     // offer after a successful migration. API-only verdicts need no WAF delay.
