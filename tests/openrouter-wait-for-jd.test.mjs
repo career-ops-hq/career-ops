@@ -178,3 +178,29 @@ test('waitForJobText does not wait on an HTTP error status', { timeout: 60_000 }
   const elapsed = Date.now() - started;
   assert.ok(elapsed < 1000, `waited ${elapsed} ms on a 404`);
 });
+
+// A visible Apply control is a decisive liveness verdict (apply_control_visible)
+// even on a page whose description still says "Loading...". The wait holds
+// until the text the read keeps is readable, so the read does not get the
+// skeleton.
+const APPLY_SKELETON_PAGE = `<!doctype html><html><head><title>Job</title></head><body>
+<main><div id="app">Loading...</div>
+<a href="#apply" style="display:inline-block;padding:8px">Apply now</a></main>
+<script>
+  setTimeout(() => {
+    document.getElementById('app').textContent = ${JSON.stringify(JD)};
+  }, 3000);
+</script></body></html>`;
+
+test('waitForJobText keeps waiting past an Apply button while the description still says Loading...', { timeout: 60_000 }, async (t) => {
+  if (launchError) {
+    if (toolRequired('browser')) throw launchError;
+    t.skip('no Chromium');
+    return;
+  }
+  const page = await browser.newPage();
+  await page.setContent(APPLY_SKELETON_PAGE);
+  await waitForJobText(page, { status: 200 });
+  const main = await page.evaluate(() => (document.querySelector('main')?.innerText || '').trim());
+  assert.ok(main.includes('Senior Platform Engineer at Acme Corp.'), `waited only until "${main.slice(0, 40)}" (${main.length} chars)`);
+});

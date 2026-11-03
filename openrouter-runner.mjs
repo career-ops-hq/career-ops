@@ -739,9 +739,12 @@ const JD_TEXT_CAP = 16_000;
 // still said "Loading...". The count leaves the live DOM alone; the read strips
 // it afterwards. A page that stays shorter (a short posting) ends the wait at
 // the first decisive liveness verdict instead, the rule liveness-browser.mjs
-// polls by: any code outside HYDRATING_CODES. Not when the text stops changing,
-// as a spinner holds it constant on a live page. An HTTP error status (`status`
-// >= 400) has nothing to wait for; the caller reads the status.
+// polls by: any code outside HYDRATING_CODES. A decisive verdict ends it only
+// for a closed posting, or when the text the read keeps passes
+// unreadableJobPage: an apply control above a "Loading..." description is
+// decisive but not yet readable. Not when the text stops changing, as a
+// spinner holds it constant on a live page. An HTTP error status (`status` >=
+// 400) has nothing to wait for; the caller reads the status.
 export async function waitForJobText(page, { status = 0, url = '' } = {}) {
   if (status >= 400) return;
   const deadline = Date.now() + 15_000;
@@ -752,13 +755,15 @@ export async function waitForJobText(page, { status = 0, url = '' } = {}) {
         const root = document.querySelector('main, [role="main"], article') || document.body || document;
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         let length = 0;
+        const parts = [];
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
           const el = node.parentElement;
           if (!el || el.closest(selector) || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) continue;
           length += node.nodeValue.trim().length;
           if (length > 1500) return { long: true };
+          parts.push(node.nodeValue);
         }
-        return { long: false, bodyText: document.body?.innerText ?? '' };
+        return { long: false, bodyText: document.body?.innerText ?? '', kept: parts.join(' ') };
       }, NON_CONTENT_SELECTOR);
       if (reading.long) return;
       // The apply controls are read as liveness-browser's readPage reads them,
@@ -771,8 +776,16 @@ export async function waitForJobText(page, { status = 0, url = '' } = {}) {
         pageUrl: finalUrl,
         idPattern: JOB_ID_PATTERN,
       });
-      const { code } = classifyLiveness({ status, requestedUrl: url, finalUrl, ...reading, applyControls });
-      if (!HYDRATING_CODES.has(code)) return;
+      const { bodyText, kept } = reading;
+      const verdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
+      if (!HYDRATING_CODES.has(verdict.code)) {
+        // An apply control is a decisive verdict even over a description that
+        // still says "Loading...": the wait ends only on a closed posting or
+        // once the text the read keeps is readable.
+        if (verdict.result === 'expired') return;
+        const text = kept.replace(/\s+/g, ' ').trim();
+        if (!unreadableJobPage({ status, requestedUrl: url, finalUrl, text })) return;
+      }
     } catch {
       // the page navigated or rebuilt its DOM mid-read; try again
     }
