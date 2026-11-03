@@ -115,11 +115,13 @@ A post is also dropped when it says, anywhere in the text, that the employer's n
 
 | | before | after |
 |---|---|---|
-| posts emitted | 284 | 833 |
-| previously emitted posts with the same company, url and title | — | 283 of 284 |
-| previously emitted posts now refused | — | 1 (`Custom Software Development`, a line of business read as the employer) |
+| posts emitted | 284 | 654 |
+| previously emitted posts with the same company, url and title | — | 271 of 284 |
+| previously emitted posts now refused | — | 13: 12 that name no employer (`Worldwide 🌏` ×10 and `NDA` read from the hashtag template and a `Компания:` label, `Custom Software Development`, a line of business), and 1 that linked a Remocate page, read until now as the employer's own site |
 
-The 550 new posts name 316 distinct employers. Each employer name was reviewed by hand against its post, and the false attributions found were turned into the refusals above, each with a test. The links were not opened one by one: they pass the same `classifyLink()` rules as before, plus five mirror hosts added to the board list (remocate.app, offerclaw.app, hellowehire.com, ingamejob.com, vseti.app).
+The 383 new posts name 246 distinct employers. Each employer name was reviewed by hand against its post, and the false attributions found were turned into the refusals above, each with a test. The links were not opened one by one: they pass the same `classifyLink()` rules as before, plus two mirror hosts added to the board list (vseti.app, ingamejob.com: 6 and 2 of the new posts).
+
+**Hosts refused instead (`UNDECLARED_HOSTS`).** A host that is on no list is read as the employer's own site whenever its path looks like a vacancy, so a mirror left off the board list still passes, as the employer. Three hosts the measured channels link are refused outright until they can be declared: remocate.app (a relocation job board; its "Apply Now" redirects to the employer's own ATS, but its operator is not named on the site and has been asked), offerclaw.app (unreachable while measured, so neither its operator nor candidate access could be checked), and hellowehire.com (a shared ATS for freelance recruiters, run by Plus8Soft; a vacancy page there is a recruiter's intake form, and its employer field is often blank). In the corpus they carry 168 otherwise attributable posts (112, 55 and 1). A host moves to the board list in its own PR once its operator is declared here.
 
 **Board mirrors added to the board list (rule 4).** A post that links a mirror's vacancy page rather than the employer's own is emitted with the mirror page as `url`, so each mirror host is declared here with its operator.
 

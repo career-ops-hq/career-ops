@@ -271,8 +271,13 @@ try {
     ['https://career.habr.com/companies/yandex/vacancies', null, 'a Habr Career company\'s vacancy list'],
     ['https://career.habr.com/vacancies?q=go', null, 'a Habr Career search'],
     ['https://habr.com/ru/articles/912345/', null, 'a Habr article'],
-    ['https://www.remocate.app/jobs/staff-software-engineer-backend-recoveries-affirm', 'board', 'a Remocate mirror page'],
-    ['https://offerclaw.app/vacancy/chief-technology-officer-tekhnicheskiy-direktor-83351aab', 'board', 'an offerclaw mirror page'],
+    ['https://www.vseti.app/vakansii/3474384343943943943434343', 'board', 'a vseti.app mirror page (operator declared)'],
+    ['https://ingamejob.com/en/job/qa-game-tester', 'board', 'an InGame Job vacancy page (operator declared)'],
+    // A mirror whose operator is not declared yet is refused, not read as
+    // the employer's own site.
+    ['https://www.remocate.app/jobs/staff-software-engineer-backend-recoveries-affirm', null, 'a Remocate mirror page (operator not declared yet)'],
+    ['https://offerclaw.app/vacancy/chief-technology-officer-tekhnicheskiy-direktor-83351aab', null, 'an offerclaw mirror page (operator not declared yet)'],
+    ['https://hellowehire.com/jobs/middle-business-analyst-t24-vietnam-company-fdcfb8fcb5', null, 'a recruiter intake page on a shared ATS'],
     ['https://getmatch.ru/companies/PLln3LRJ-ostrovok', null, 'a board\'s company page'],
     ['https://www.linkedin.com/posts/example-user-000000000_activity-1', null, 'a LinkedIn post'],
     ['https://acme.example/blog/2024/company-update', null, 'a dated blog post (a bare year segment is not a vacancy id)'],
@@ -434,9 +439,9 @@ try {
   if (salaryHidden?.company === 'YADRO' && salaryHidden.url === HABR) pass('a post that withholds only the salary ("Зарплата не раскрыта") keeps its employer and Habr Career link');
   else fail(`salary-hidden post = ${JSON.stringify(salaryHidden)}`);
 
-  // A Remocate title carries the link it points to; cut at TITLE_CAP it would
+  // A Remocate-template title carries the link it points to; cut at TITLE_CAP it would
   // end in "… :…".
-  const remocateUrl = 'https://www.remocate.app/jobs/senior-product-manager-core-platform-tabby-with-a-long-slug';
+  const remocateUrl = 'https://tabby.ai/careers/senior-product-manager-core-platform-with-a-long-slug';
   const remocate = postToJob(parseChannelPage(page(post(12458, '2026-09-04T10:00:00+00:00', `Senior Product Manager, Core Platform в Tabby : ${A(remocateUrl)}<br/>Помогают с релокацией (Сербия).`)), 'devjobs').posts[0]);
   if (remocate?.title === 'Senior Product Manager, Core Platform в Tabby' && remocate.company === 'Tabby' && remocate.url === remocateUrl) pass('a pasted link at the end of the title line is the url, not part of the title');
   else fail(`remocate post = ${JSON.stringify(remocate)}`);

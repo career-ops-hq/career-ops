@@ -23,8 +23,10 @@
 // shorteners); every rejection is a post the policy could not attribute, not
 // a parser failure. Re-measured 2026-10-31 over 2,973 posts from 51 public
 // RU/CIS channels, after the positional employer shapes and the Habr Career
-// fix: 284 → 833 pass; of the 284 the earlier rules attributed, 283 come out
-// identical and one wrong one ("Custom Software Development") is refused.
+// fix: 284 → 654 pass. Of the 284 the earlier rules emitted, 271 come out
+// identical and 13 are refused: 12 named no employer ("Worldwide 🌏", "NDA",
+// "Custom Software Development") and one linked a mirror whose operator is
+// not declared (see UNDECLARED_HOSTS).
 //
 // A private channel, one with the preview switched off, or a page whose
 // markup no longer parses is reported as an error — never as an empty board.
@@ -57,7 +59,15 @@ const FORM_HOSTS = /(^|\.)(forms\.gle|docs\.google\.com|forms\.yandex\.ru|typefo
 // subdomain of habr.com, which is a long-read host — tested the other way
 // round, every Habr Career vacancy link (all the Proglib channels link there)
 // was dropped as a blog link.
-const BOARD_HOSTS = /(^|\.)(getmatch\.ru|finder\.work|geekjob\.ru|geeklink\.io|linkedin\.com|hh\.ru|career\.habr\.com|djinni\.co|indeed\.com|glassdoor\.com|weworkremotely\.com|remoteok\.com|arbeitnow\.com|cryptojobslist\.com|relocate\.me|lemon\.io|remocate\.app|offerclaw\.app|hellowehire\.com|ingamejob\.com|vseti\.app)$/i;
+const BOARD_HOSTS = /(^|\.)(getmatch\.ru|finder\.work|geekjob\.ru|geeklink\.io|linkedin\.com|hh\.ru|career\.habr\.com|djinni\.co|indeed\.com|glassdoor\.com|weworkremotely\.com|remoteok\.com|arbeitnow\.com|cryptojobslist\.com|relocate\.me|lemon\.io|ingamejob\.com|vseti\.app)$/i;
+// Hosts channels link instead of the employer that career-ops does not read:
+// mirrors whose operator is not declared under the source policy yet
+// (remocate.app, offerclaw.app) and a shared ATS for freelance recruiters,
+// where the employer is often left blank (hellowehire.com). Refused outright:
+// left off BOARD_HOSTS alone, their vacancy pages would pass as the
+// employer's own site. A mirror moves to BOARD_HOSTS once its operator is
+// declared in docs/SOURCE_INDEXING_LOG.md.
+const UNDECLARED_HOSTS = /(^|\.)(remocate\.app|offerclaw\.app|hellowehire\.com)$/i;
 // What makes a link a vacancy page rather than "somewhere on the employer's
 // site": a vacancy/job/career word in the path, a numeric id (`…-4554989/`,
 // `/vacancy/6743104…`), an ATS-shaped key (`/j/EDB9E5C27E/`, a UUID), or an
@@ -404,7 +414,7 @@ export function classifyLink(href) {
   if (u.protocol !== 'https:') return null;
   const host = u.hostname.replace(/^www\./, '').toLowerCase();
   const board = BOARD_HOSTS.test(host);
-  if (!host || (!board && NON_APPLY_HOSTS.test(host)) || SHORTENER_HOSTS.test(host) || FORM_HOSTS.test(host)) return null;
+  if (!host || (!board && NON_APPLY_HOSTS.test(host)) || UNDECLARED_HOSTS.test(host) || SHORTENER_HOSTS.test(host) || FORM_HOSTS.test(host)) return null;
   const path = u.pathname.replace(/\/+$/, '');
   if (host === 'linkedin.com' || host.endsWith('.linkedin.com')) return /\/jobs\/view\//.test(path) ? 'board' : null;
   // Only a vacancy page: "/companies/job", "/companies/<slug>/vacancies" and
@@ -556,7 +566,7 @@ export function postToJob(post) {
     if (!better) return null;
     title = headline([better]);
   }
-  // "Title в Tabby : https://www.remocate.app/jobs/…" — the link is the url,
+  // "Title в Tabby : https://tabby.ai/careers/…" — the link is the url,
   // and cut by headline() it would leave "Title в Tabby :…".
   else if (/https?:\/\/\S+$/u.test(post.lines[0] || '')) {
     title = headline([post.lines[0].replace(/\s*[:—–-]?\s*https?:\/\/\S+$/u, '')]) || title;
