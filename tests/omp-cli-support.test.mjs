@@ -552,6 +552,8 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     // 4u. disabledProviders takes precedence over enabledProviders across config layers
     rmSync(join(dir, 'mcp.json'), { force: true });
     rmSync(join(dir, '.claude'), { recursive: true, force: true });
+    rmSync(join(isolatedAgentDir, 'mcp.json'), { force: true });
+    rmSync(join(isolatedAgentDir, '.mcp.json'), { force: true });
     mkdirSync(join(isolatedHome, '.claude'), { recursive: true });
     writeFileSync(join(isolatedHome, '.claude', 'mcp.json'), JSON.stringify({
       mcpServers: {
@@ -576,6 +578,44 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
       pass('doctor respects disabledProviders over enabledProviders across config layers');
     } else {
       fail(`doctor failed when disabledProviders should win: ${JSON.stringify(resDisabledProvidersWins)}`);
+    }
+
+    // Removing user disabledProviders allows project enabledProviders to discover Claude MCP
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+
+    const resEnabledProvidersActive = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resEnabledProvidersActive.playwright_mcp?.omp === true
+        && !resEnabledProvidersActive.warnings.some((w) => w.includes('Playwright MCP'))) {
+      pass('doctor discovers Claude user MCP when enabledProviders is active without disabledProviders');
+    } else {
+      fail(`doctor failed when enabledProviders is active without disabledProviders: ${JSON.stringify(resEnabledProvidersActive)}`);
+    }
+
+    // 4v. doctor ignores inactive .omp/config.yaml in project settings
+    writeFileSync(join(dir, '.omp', 'config.yaml'), 'disabledProviders: []\n');
+    writeFileSync(join(dir, '.omp', 'settings.json'), JSON.stringify({
+      disabledProviders: ['claude'],
+      enabledProviders: ['claude'],
+    }));
+
+    const resIgnoreProjectConfigYaml = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
+      cwd: dir,
+      env: isolatedEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    if (resIgnoreProjectConfigYaml.playwright_mcp?.omp === false
+        && resIgnoreProjectConfigYaml.warnings.some((w) => w.includes('Playwright MCP tools not detected'))) {
+      pass('doctor ignores inactive .omp/config.yaml and respects .omp/settings.json disabledProviders');
+    } else {
+      fail(`doctor failed to ignore inactive project config.yaml: ${JSON.stringify(resIgnoreProjectConfigYaml)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

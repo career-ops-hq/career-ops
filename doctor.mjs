@@ -647,14 +647,22 @@ function ompConfigEnableProjectState(cfg) {
 // OMP allows disabling project MCP configuration via mcp.enableProjectConfig: false
 // in project settings (.omp/config.yml, .omp/settings.json) or user settings
 // (~/.omp/agent/config.yml, ~/.omp/settings.json). When false, project-level MCP
+// Active project-level settings files for OMP (docs/settings.md).
+// Excludes inactive variants like .omp/config.yaml that OMP does not load.
+function ompProjectConfigFiles(root) {
+  if (!root) return [];
+  return [
+    join(root, '.omp', 'config.yml'),
+    join(root, '.omp', 'settings.json'),
+  ];
+}
+
+// OMP honors mcp.enableProjectConfig (boolean)
+// in project settings (.omp/config.yml, .omp/settings.json) or user settings
+// (~/.omp/agent/config.yml, ~/.omp/settings.json). When false, project-level MCP
 // sources are excluded from discovery (docs/mcp-config.md). Defaults to true.
 function isOmpProjectMcpEnabled(root) {
-  const projectFiles = root ? [
-    join(root, '.omp', 'config.yml'),
-    join(root, '.omp', 'config.yaml'),
-    join(root, '.omp', 'settings.json'),
-  ] : [];
-  for (const file of projectFiles) {
+  for (const file of ompProjectConfigFiles(root)) {
     const state = ompConfigEnableProjectState(readOmpConfigIfPresent(file));
     if (state !== undefined) return state;
   }
@@ -669,11 +677,7 @@ function isOmpProjectMcpEnabled(root) {
 // but setting CLAUDE_CONFIG_DIR implicitly enables it unless disabledProviders lists it.
 function isOmpClaudeUserProviderEnabled(root) {
   const configs = [
-    ...(root ? [
-      join(root, '.omp', 'config.yml'),
-      join(root, '.omp', 'config.yaml'),
-      join(root, '.omp', 'settings.json'),
-    ] : []),
+    ...ompProjectConfigFiles(root),
     ...ompUserConfigFiles(),
   ].map(readOmpConfigIfPresent).filter(Boolean);
 
@@ -832,12 +836,7 @@ function ompConfigBrowserState(cfg) {
 // is explicitly disabled in project settings (.omp/config.yml, .omp/settings.json)
 // or user settings (~/.omp/agent/config.yml, ~/.omp/settings.json).
 function isOmpBrowserDisabled(root) {
-  const projectFiles = [
-    join(root, '.omp', 'config.yml'),
-    join(root, '.omp', 'config.yaml'),
-    join(root, '.omp', 'settings.json'),
-  ];
-  for (const file of projectFiles) {
+  for (const file of ompProjectConfigFiles(root)) {
     const state = ompConfigBrowserState(readOmpConfigIfPresent(file));
     if (state !== undefined) return state === false;
   }
