@@ -1054,6 +1054,13 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 	return runStatusWriter(careerOpsPath, app.ReportNumber, newStatus, notesAppend)
 }
 
+// IsCanonicalStatusName reports whether status is one of the states.yml
+// stages, matched case-insensitively. The pipeline screen uses it to decide
+// which rows belong on the OTHER tab.
+func IsCanonicalStatusName(status string) bool {
+	return isCanonicalStatusName(status)
+}
+
 // Reject malformed UI input cheaply; the writer validates against states.yml.
 func isCanonicalStatusName(status string) bool {
 	switch strings.ToLower(status) {

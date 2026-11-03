@@ -192,17 +192,6 @@ const (
 	filterOther      = "other"
 )
 
-// canonicalPipelineStatus is a stage the pipeline already names. hold is
-// normalized to evaluated before this check, so it stays on that tab.
-func canonicalPipelineStatus(norm string) bool {
-	switch norm {
-	case "hired", "interview", "offer", "assessment", "responded", "applied", "evaluated", "skip", "rejected", "discarded":
-		return true
-	default:
-		return false
-	}
-}
-
 type pipelineTab struct {
 	filter string
 	label  string
@@ -1358,7 +1347,7 @@ func (m *PipelineModel) applyFilterAndSort() {
 				filtered = append(filtered, app)
 			}
 		case filterOther:
-			if !canonicalPipelineStatus(norm) {
+			if !data.IsCanonicalStatusName(norm) {
 				filtered = append(filtered, app)
 			}
 		default:
@@ -1802,7 +1791,7 @@ func (m PipelineModel) countForFilter(filter string) int {
 				count++
 			}
 		case filterOther:
-			if !canonicalPipelineStatus(norm) {
+			if !data.IsCanonicalStatusName(norm) {
 				count++
 			}
 		default:
@@ -1834,7 +1823,7 @@ func (m PipelineModel) renderMetrics() string {
 
 	other := 0
 	for status, count := range m.metrics.ByStatus {
-		if count == 0 || canonicalPipelineStatus(status) {
+		if count == 0 || data.IsCanonicalStatusName(status) {
 			continue
 		}
 		other += count
