@@ -121,6 +121,10 @@ A post is also dropped when it says, anywhere in the text, that the employer's n
 
 The 550 new posts name 316 distinct employers. Each employer name was reviewed by hand against its post, and the false attributions found were turned into the refusals above, each with a test. The links were not opened one by one: they pass the same `classifyLink()` rules as before, plus five mirror hosts added to the board list (remocate.app, offerclaw.app, hellowehire.com, ingamejob.com, vseti.app).
 
+**Board mirrors added to the board list (rule 4).** A post that links a mirror's vacancy page rather than the employer's own is emitted with the mirror page as `url`, so each mirror host is declared here with its operator.
+
+- **vseti.app** ("СЕТИ — агрегатор IT & Digital вакансий"). Operator: ООО «Цифровые решения», named in the site footer and as «Исполнитель» in its [terms of use](https://www.vseti.app/docs); contact help@vseti.app. Rule 1: a vacancy page is free to read without an account, and its "Ссылка на вакансию" and "Посмотреть контакты" both give the employer's own vacancy link, with no sign-in and no payment. The site also sells services to candidates next to the listings (CV placement for 800 ₽, paid mentors); none of them gates a listing or an application. Rule 2: the vacancy page carries the employer's link in plain HTML, but the provider reads only the post, which carries the vseti page, so the vseti page is the `url`. Rule 3: the site has sections for employers and advertisers; whether an employer pays to be listed is not visible. Rule 6: `User-agent: *` / `Allow: /`. Checked 2026-11-03; no out-of-band confirmation from help@vseti.app yet.
+
 Still out of reach by design: posts whose only application path is a Telegram contact or an e-mail address, digests carrying several vacancy links, and channels that link only through teletype or telegra.ph.
 
 ---
