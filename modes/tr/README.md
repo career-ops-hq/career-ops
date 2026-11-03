@@ -42,7 +42,7 @@ Ardından ilk oturumda Claude'a bu ayarı hatırlat ("profile.yml'e baktım, `la
 | Dosya | Kaynak | Amaç |
 |-------|--------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | Paylaşılan bağlam, arketipler, global kurallar, Türkiye piyasa özelinde terimler |
-| `is-ilani.md` | `modes/oferta.md` (ES) | Tek bir ilanın tam değerlendirmesi (Bloklar A-G) |
+| `is-ilani.md` | `modes/oferta.md` (ES) | Tek bir ilanın tam değerlendirmesi (Bloklar A-H) |
 | `basvuru.md` | `modes/apply.md` (EN) | Başvuru formu için canlı asistan |
 | `pipeline.md` | `modes/pipeline.md` (ES) | URL gelen kutusu / biriktirilmiş ilanlar için ikinci beyin |
 | `project.md` | `modes/project.md` (EN) | Portfolyo projesi değerlendirmesi |
@@ -127,5 +127,5 @@ Bir çeviriyi iyileştirmek veya başka bir modu Türkçeleştirmek istersen:
 1. `CONTRIBUTING.md`'ye göre bir Issue aç
 2. Yukarıdaki kelime kılavuzuna uy — tutarlı ton için
 3. Kelimesi kelimesine çeviri değil, anlam ve deyim bakımından doğal çeviri yap
-4. Yapısal öğeleri (Blok A-G, tablolar, kod blokları, araç talimatları) aynen koru
+4. Yapısal öğeleri (Blok A-H, tablolar, kod blokları, araç talimatları) aynen koru
 5. PR açmadan önce gerçek bir Türkçe ilan (Kariyer.net veya Yenibiris.com) üzerinde test et

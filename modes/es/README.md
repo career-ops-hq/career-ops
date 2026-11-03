@@ -42,7 +42,7 @@ Esta primera iteración cubre los cuatro modos de mayor impacto:
 | Archivo | Traducido desde | Rol |
 |---------|-----------------|-----|
 | `_shared.md` | `modes/_shared.md` (EN) | Contexto compartido, arquetipos, reglas globales, especificidades del mercado hispanohablante |
-| `oferta.md` | `modes/oferta.md` (ES) | Evaluación completa de una oferta (Bloques A-F) |
+| `oferta.md` | `modes/oferta.md` (ES) | Evaluación completa de una oferta (Bloques A-H) |
 | `aplicar.md` | `modes/apply.md` (EN) | Asistente en vivo para rellenar formularios de candidatura |
 | `pipeline.md` | `modes/pipeline.md` (ES) | Bandeja de URLs / Second Brain para las ofertas recopiladas |
 
@@ -101,5 +101,5 @@ Para mejorar una traducción o añadir un modo:
 1. Abre un Issue con tu propuesta (ver `CONTRIBUTING.md`)
 2. Respeta el glosario anterior para mantener un tono coherente
 3. Traduce de forma idiomática — sin traducción palabra por palabra
-4. Conserva los elementos estructurales (Bloques A-F, tablas, bloques de código, instrucciones de herramientas) tal cual
+4. Conserva los elementos estructurales (Bloques A-H, tablas, bloques de código, instrucciones de herramientas) tal cual
 5. Prueba con una oferta hispanohablante real (InfoJobs, LinkedIn ES, Indeed ES) antes de enviar el PR

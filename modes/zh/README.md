@@ -46,7 +46,7 @@ language:
 | 文件名 | 基础模板 | 用途 |
 |---|---|---|
 | `_shared.md` | `modes/_shared.md` | 共享上下文、画像检测、全局规则及中国大陆市场特性 |
-| `oferta.md` | `modes/oferta.md` | 完整的职位评估（Block A-F + G 真实性评估） |
+| `oferta.md` | `modes/oferta.md` | 完整的职位评估（Block A-H） |
 | `apply.md` | `modes/apply.md` | 网页表单填写实时助手 |
 | `pipeline.md` | `modes/pipeline.md` | URL 收件箱 / 收集职位的第二大脑 |
 
