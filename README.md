@@ -453,12 +453,12 @@ pi
 ### One-shot Pi (`pi -p`)
 
 ```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
+pi -a -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -a -p "Run career-ops scan mode and summarize new matches."
+pi -a -p "Run career-ops tracker mode and summarize the current statuses."
 ```
 
-If a Pi build gates project resources behind a trust decision, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
+If a Pi build gates project resources behind a trust decision, interactive usage can use `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes), while a headless invocation that needs to trust project resources should use the `-a` option (`pi -a -p "prompt"`), which trusts a single run and needs no restart.
 
 ### Standalone Gemini API Script (No CLI install needed)
 
