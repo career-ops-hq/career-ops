@@ -127,3 +127,62 @@ test("web mirrors core normalization for a single trailing DNS root dot", () => 
   assert.equal(webKey(doubled), coreKey(doubled));
   assert.notEqual(webKey(doubled), webKey("https://jobs.example.com/role/123"));
 });
+
+// postingLanguageKey / postingUrlRelation: the language rule What's New
+// suppression compares posting URLs with (#5684). Cases are the core's own
+// (tests/url-key.test.mjs, "postingLanguageKey() / postingUrlRelation()").
+const {
+  postingLanguageKey: coreLanguageKey,
+  postingUrlRelation: coreRelation,
+} = await import(pathToFileURL(join(ROOT, "url-key.mjs")).href);
+const { postingLanguageKey: webLanguageKey, postingUrlRelation: webRelation } = await import(
+  "../../src/lib/core/url-key.mjs"
+);
+
+test("web postingLanguageKey matches core: the language param leaves the key", () => {
+  const CASES = [
+    "https://acme.recruitee.com/o/qa-lead",
+    "https://acme.recruitee.com/o/qa-lead?lang=de",
+    "https://acme.jobs.personio.de/job/1?language=en-GB&utm_source=x",
+    "https://jobs.example.com/j/1?Locale=fr_CA&id=7",
+    "https://acme.recruitee.com/o/a?lang=zh-Hant",
+    "https://acme.recruitee.com/o/a?lang=English%20(US)",
+    "",
+    "N/A",
+    null,
+    "local:jds/x.md",
+  ];
+  for (const input of CASES) {
+    assert.deepEqual(webLanguageKey(input), coreLanguageKey(input), `parity: ${JSON.stringify(input)}`);
+  }
+  assert.deepEqual(webLanguageKey("https://acme.recruitee.com/o/qa-lead?lang=de"), {
+    key: webKey("https://acme.recruitee.com/o/qa-lead"),
+    language: "de",
+    script: "",
+  });
+});
+
+test("web postingUrlRelation matches core on every relation", () => {
+  const R = "https://acme.recruitee.com/o/a";
+  const U = (q) => `${R}?lang=${q}`;
+  const CASES = [
+    [R, "https://acme.recruitee.com/o/b", "distinct"],
+    [R, "N/A", "no-key"],
+    ["", R, "no-key"],
+    [R, U("de"), "one-sided-language"],
+    ["https://acme.jobs.personio.de/job/1?language=en", "https://acme.jobs.personio.de/job/1", "one-sided-language"],
+    [U("zh-Hant"), U("zh-Hans"), "distinct"],
+    [U("zh-TW"), U("zh-CN"), "distinct"],
+    [U("sr-Latn"), U("sr-Cyrl"), "distinct"],
+    [U("zh"), U("zh-Hant"), "same"],
+    [U("de"), U("de-AT"), "same"],
+    [U("pt-BR"), U("pt-PT"), "same"],
+    [U("de"), U("en"), "distinct"],
+    [U("en-GB"), U("en"), "same"],
+    ["http://acme.recruitee.com/o/a/?utm_source=x", R, "same"],
+  ];
+  for (const [a, b, expected] of CASES) {
+    assert.equal(webRelation(a, b), expected, `web: ${a} vs ${b}`);
+    assert.equal(webRelation(a, b), coreRelation(a, b), `parity: ${a} vs ${b}`);
+  }
+});

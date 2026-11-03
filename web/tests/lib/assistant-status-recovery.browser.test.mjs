@@ -79,7 +79,7 @@ test("status confirmations recover from busy writes without replaying ambiguous 
     assert.fail(message);
   }
   const input = page.getByRole("textbox", { name: "Message to assistant", exact: true });
-  const open = page.getByRole("button", { name: "Open assistant", exact: true });
+  const open = page.getByRole("button", { name: "Ask the assistant", exact: true });
   const summary = n => `Mark #${n} → Rejected?`;
   const card = n => page.getByRole("group", { name: summary(n), exact: true });
   const button = (verb, n) => page.getByRole("button", { name: `${verb}: ${summary(n)}`, exact: true });

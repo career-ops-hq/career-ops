@@ -56,7 +56,7 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
     }
     assert.fail("control is not keyboard reachable");
   }
-  const opener = (page) => page.getByRole("button", { name: "Open assistant", exact: true });
+  const opener = (page) => page.getByRole("button", { name: "Ask the assistant", exact: true });
   const composer = (page) => page.getByRole("textbox", { name: "Message to assistant", exact: true });
   const panel = (page) => page.getByRole("region", { name: "Assistant", exact: true });
   async function openWithKeyboard(page, target = opener(page)) {
@@ -113,7 +113,7 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
   assert.equal(await focused(composer(page)), true);
   assert.equal(requests[1].message, "Unsent draft");
   // Leave the modeless panel: replies and repeated open events cannot pull back.
-  const search = page.getByRole("textbox", { name: "Search company or role…", exact: true });
+  const search = page.getByRole("searchbox", { name: "Search applications", exact: true });
   await tabTo(page, search);
   await page.keyboard.press("Escape");
   assert.equal(await panel(page).count(), 1);

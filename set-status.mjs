@@ -18,6 +18,8 @@
  *     assign the same # to two rows), --role narrows it, otherwise it fails
  *     ambiguous with a candidate list instead of silently editing whichever
  *     row was found first
+ *   - a comma-separated list of numbers is not a company. The command updates
+ *     one row, so it exits usage and prints one command per number
  *   - otherwise → company match (normalized, same key as merge-tracker dedup);
  *     multiple hits are narrowed with --role (fuzzy, role-matcher.mjs), and
  *     anything still ambiguous fails with a numbered candidate list.
@@ -119,9 +121,9 @@ import { localToday } from './lib/local-today.mjs';
 import {
   resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
-  appendLedgerRows,
+  appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPathForWrite } from './path-resolver.mjs';
 import {
   claimStatusActivity, appendStatusTransition, statusLogPath, seedFollowupOnApplied, archiveJdOnInterview,
 } from './lib/status-hooks.mjs';
@@ -152,6 +154,7 @@ const USAGE = `Usage: node set-status.mjs <tracker#|company> <state> [--note "..
        node set-status.mjs <tracker#|company> --undo [--dry-run] [--json]
 
   <tracker#|company> Row selector: tracker # (exact) or company name (normalized match)
+                     A list such as 14,78 is not a company. Run one command per row.
   <state>            Canonical state from templates/states.yml (aliases accepted)
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
@@ -389,11 +392,44 @@ if (!flags.undo && !requestedStatus) {
   failWith(EXIT_USAGE, 'invalid-state', `"${stateInput}" is not a canonical state. Valid states: ${valid}`);
 }
 
+// "14,78" is one argv token. It is not a company, and this command writes one
+// row. Checked after the state is known, so a bad state still wins, and before
+// the tracker is opened, so a missing file does not hide the usage error.
+// "Acme, Inc." stays a company name: a non-numeric piece is not an id list.
+function trackerIdList(value) {
+  if (typeof value !== 'string' || !value.includes(',')) return null;
+  const parts = value.split(',').map((part) => part.trim());
+  if (parts.length < 2) return null;
+  if (!parts.every((part) => part === '' || /^\d+$/.test(part))) return null;
+  if (!parts.some((part) => /^\d+$/.test(part))) return null;
+  return parts;
+}
+
+if (selector !== null) {
+  const idList = trackerIdList(selector);
+  if (idList) {
+    const nums = idList.filter((part) => /^\d+$/.test(part));
+    const shown = nums.slice(0, 8);
+    const action = flags.undo ? '--undo' : requestedStatus;
+    // These numbers are tracker rows. A bare `14 Applied` is rejected when that
+    // row's report id differs, so the command that means "tracker row" is --row.
+    const lines = shown.map((id) => `node set-status.mjs --row ${id} ${action}`);
+    const extra = nums.length - shown.length;
+    const more = extra > 0 ? `\n... and ${extra} more` : '';
+    const empty = idList.some((part) => part === '') ? ' The list has an empty slot.' : '';
+    failUsage(`set-status updates one row.${empty} Run one command per tracker number:\n${lines.join('\n')}${more}`);
+  }
+}
+
 // ── tracker access ───────────────────────────────────────────────
 
 const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(APPS_FILE)) {
-  failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
+  // The read path falls back to <root>/applications.md when nothing exists yet.
+  // A first evaluation writes data/applications.md (or CAREER_OPS_TRACKER).
+  // Naming the fallback points the first status change at a file that will never appear.
+  const writePath = resolveTrackerPathForWrite(DATA_ROOT);
+  failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${writePath}. The tracker is created when you evaluate your first offer.`);
 }
 
 /**
@@ -500,8 +536,15 @@ function resolveRow(rows) {
 
   const key = normalizeCompany(selector);
   if (!key) failUsage(`Selector "${selector}" is empty after normalization`);
+  // Exact key first. A legal suffix (Inc, LLC) is a different key, so fall
+  // back to the same corporate-form rule outcome and dedup already use.
+  // Only when nothing matched exactly. Two hits stay ambiguous.
+  let matches = rows.filter(r => normalizeCompany(r.company) === key);
+  if (matches.length === 0) {
+    matches = rows.filter(r => companiesMatchIgnoringCorporateForm(selector, r.company));
+  }
   return resolveCandidates(
-    rows.filter(r => normalizeCompany(r.company) === key),
+    matches,
     {
       notFound: `No tracker row with company matching "${selector}"`,
       ambiguous: (count, listing) =>
