@@ -302,17 +302,79 @@ function buildSignatureBlock(signature, candidateName) {
 
 // Resolve the cover-letter template through the shared resolver so a
 // `cover_letter.template` profile default, an explicit `payload.template`, and
-// installed template packs are all honored. Any resolver failure (no profile,
-// no templates dir, bad config) falls back to the base template, preserving the
-// original hardcoded behavior.
+// installed template packs are all honored. With nothing configured the
+// resolver returns the base template (its default name is `standard`).
+//
+// Resolver errors propagate (#6370). This used to pass `fallback: true` and
+// catch everything, returning the base template, so a malformed
+// config/profile.yml, a template name that does not exist, or a template
+// missing required placeholders all rendered a plain letter with no warning:
+// the candidate's letterhead, signature or layout silently dropped. That
+// contradicts modes/cover.md Step 8 and `cv-templates.mjs resolve cover`,
+// which both surface the error. main() already prints a buildHtml error and
+// exits 1. A caller can still pass `{ fallback: true }` in opts, but that only
+// covers a template NAME that does not exist (it then resolves `standard`). A
+// malformed profile or an invalid template is an error either way: falling
+// back over those is exactly the silent substitution this function stopped
+// doing.
 export function resolveCoverTemplatePath(payload = {}, opts = {}) {
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const base = resolve(scriptDir, "templates", "cover-letter-template.html");
-  try {
-    return resolveTemplate("cover", payload.template, { format: "html", fallback: true, ...opts });
-  } catch {
-    return base;
+  return resolveTemplate("cover", payload.template, { format: "html", strict: true, ...opts });
+}
+
+/**
+ * Replace every balanced `{{ … }}` token in `text` in a single pass.
+ *
+ * Depth-aware: `{{` opens a level and `}}` closes one, and a token is the span
+ * from an opening `{{` to the `}}` that brings the depth back to zero. So
+ * `{{ outer {{ inner }} }}` is ONE token, not `{{ outer {{ inner }}` followed by
+ * a stray ` }}`. Single braces (`({})`) do not count.
+ *
+ * An opening `{{` that is never closed is left as literal text and the scan
+ * continues just after it. Giving up there instead would leave every later
+ * token in the template unfilled and unreported, which is worse than what a
+ * regex did.
+ *
+ * Each token is replaced by `replaceToken(token)`, and the result is never
+ * re-scanned, so a substituted value that contains `{{…}}` stays literal.
+ *
+ * @param {string} text
+ * @param {(token: string) => string} replaceToken
+ * @returns {string}
+ */
+export function replaceBalancedTokens(text, replaceToken) {
+  let out = "";
+  let emitted = 0;
+  let searchFrom = 0;
+  while (true) {
+    const start = text.indexOf("{{", searchFrom);
+    if (start === -1) break;
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < text.length - 1; ) {
+      if (text[i] === "{" && text[i + 1] === "{") {
+        depth++;
+        i += 2;
+      } else if (text[i] === "}" && text[i + 1] === "}") {
+        depth--;
+        i += 2;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      } else {
+        i++;
+      }
+    }
+    if (end === -1) {
+      // Unterminated: keep this `{{` literal and look for the next one.
+      searchFrom = start + 2;
+      continue;
+    }
+    out += text.slice(emitted, start) + replaceToken(text.slice(start, end));
+    emitted = end;
+    searchFrom = end;
   }
+  return out + text.slice(emitted);
 }
 
 export function buildHtml(payload, templatePath) {
@@ -377,8 +439,20 @@ export function buildHtml(payload, templatePath) {
   // scanning the result: a scan of the output cannot tell a template token from
   // the same sequence appearing inside a substituted value, which is exactly
   // what the single pass above is careful to leave literal.
+  //
+  // The pass visits EVERY `{{…}}` sequence, not only `{{UPPER_SNAKE}}` ones.
+  // Matching only the shape the map uses meant a lowercase, digit-bearing,
+  // hyphenated or space-padded token (`{{role_title}}`, `{{OPENING2}}`,
+  // `{{ COMPANY }}`) was never visited, so it was neither filled nor reported
+  // and shipped verbatim in the PDF (#6374). Lookup stays exact on purpose:
+  // `{{ COMPANY }}` is not `{{COMPANY}}`, and guessing would hide the typo.
+  //
+  // Tokens are found by balancing `{{` against `}}` (replaceBalancedTokens),
+  // not by a regex, so a token that contains braces — `{{ config | default({}) }}`
+  // — or another token — `{{ outer {{ inner }} }}` — is visited and reported
+  // whole, rather than cut at the first `}}` it happens to contain.
   const unresolved = new Set();
-  const rendered = html.replace(/\{\{[A-Z_]+\}\}/g, (token) => {
+  const rendered = replaceBalancedTokens(html, (token) => {
     const value = replacements[token];
     if (value == null) {
       unresolved.add(token);
