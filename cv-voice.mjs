@@ -63,6 +63,16 @@ function linesOf(text) {
     .filter(Boolean);
 }
 
+// The PDF path prints a long dash as "-", a curly quote as a straight one, and
+// a no-break space as a space. The phrase check reads both sides that way, so
+// "Results\u2013driven" is still "results-driven". The dash warning reads the raw line.
+function wordingOf(text) {
+  return String(text)
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/\u00A0/g, ' ');
+}
+
 function hasPhrase(text, phrase) {
   const body = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, 'iu').test(text);
@@ -141,7 +151,7 @@ export function voiceIssues(generated, source) {
   const sourceLines = new Set(sourceLineNorms);
   // Emphasis is still the candidate's phrase: "best **practices**" matches
   // "best practices". Line breaks stay, so two neighboring lines do not join.
-  const sourcePhrases = stripMarkup(sourceText, { keepLineBreaks: true });
+  const sourcePhrases = wordingOf(stripMarkup(sourceText, { keepLineBreaks: true }));
   const issues = [];
   const seen = new Set();
   const push = (kind, value) => {
@@ -162,8 +172,9 @@ export function voiceIssues(generated, source) {
     const prose = line.replace(DATE_RANGE_DASH, '$1 ');
     if (prose.includes(EM_DASH)) push('em-dash', 'em dash');
     if (prose.includes(EN_DASH)) push('em-dash', 'en dash');
+    const wording = wordingOf(line);
     for (const phrase of BANNED_PHRASES) {
-      if (!hasPhrase(line, phrase)) continue;
+      if (!hasPhrase(wording, phrase)) continue;
       if (hasPhrase(sourcePhrases, phrase)) continue;
       push('banned-phrase', phrase);
     }

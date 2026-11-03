@@ -79,6 +79,20 @@ test('an en dash in a new line warns and a copied en dash does not', () => {
   assert.match(warning, /LaTeX and CV Studio leave the dash/);
 });
 
+test('a stock phrase written with a long dash or curly quote still fails', () => {
+  const issues = voiceIssues('Results\u2013driven lead for the refund page', SOURCE);
+  assert.ok(issues.some((issue) => issue.kind === 'banned-phrase' && issue.value === 'results-driven'));
+  assert.ok(issues.some((issue) => issue.kind === 'em-dash' && issue.value === 'en dash'));
+  assert.match(voiceTellMessage(issues), /"results-driven"/);
+  const edge = voiceIssues('Shipped cutting\u2014edge refund tools', SOURCE);
+  assert.ok(edge.some((issue) => issue.value === 'cutting-edge'));
+  const quote = voiceIssues('Calm in today\u2019s fast-paced world of refunds', SOURCE);
+  assert.ok(quote.some((issue) => issue.value === "in today's fast-paced world"));
+  const own = `${SOURCE}- Results-driven about the refund queue\n`;
+  const copied = voiceIssues('Results\u2013driven lead for the refund page', own);
+  assert.equal(copied.some((issue) => issue.kind === 'banned-phrase'), false);
+});
+
 test('a short line copied whole from the CV keeps its dash', () => {
   const source = 'Program Manager\n2021\u20132024\n';
   assert.deepEqual(voiceIssues('2021\u20132024', source).filter((issue) => issue.kind === 'em-dash'), []);
