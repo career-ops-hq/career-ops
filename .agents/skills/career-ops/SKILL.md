@@ -236,7 +236,16 @@ Applies to: `triage`
 
 ### Modes delegated to subagent
 
-For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as a worker/subagent with the resolved shared context + `_profile.md` (if exists) + `_custom.md` (if exists) + the resolved selected mode file injected into the worker prompt. If your CLI exposes an `Agent(...)` primitive, the call looks like this:
+For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as a worker/subagent to avoid consuming the main interactive context. **Delegation mechanism depends on your CLI:**
+
+| CLI | Subagent Support | How to Delegate (Programmatic) |
+|-----|------------------|--------------------------------|
+| **Claude Code** | ✅ Native `Agent()` primitive | `Agent(subagent_type="general-purpose", ...)` |
+| **OpenCode** | ✅ Built-in `general` subagent | `task` tool with `agent: "general"` |
+| **VS Code Copilot** | ✅ `runSubagent` tool | `runSubagent` tool with appropriate prompt |
+| **All other CLIs** | ❌ No ad-hoc subagent API | **Run mode directly** in main context |
+
+#### Claude Code — `Agent()` Primitive
 
 ```python
 Agent(
@@ -245,6 +254,39 @@ Agent(
   description="career-ops {mode}"
 )
 ```
+
+#### OpenCode — `task` tool → `general` subagent
+
+The primary agent invokes the built-in `general` subagent via the `task` tool:
+
+```json
+{
+  "tool": "task",
+  "arguments": {
+    "prompt": "[output language directive]\n\nPROJECT_ROOT: [resolved absolute PROJECT_ROOT]\nDATA_ROOT: [resolved absolute DATA_ROOT]\nRun every script from PROJECT_ROOT. Resolve User Layer paths against DATA_ROOT and every other path against PROJECT_ROOT.\n\n[content of modes/_shared.md, or resolved shared context: every declared _shared.md once]\n\n[content of modes/_profile.md if exists]\n\n[content of modes/_custom.md if exists]\n\n[content of modes/{mode}.md, or resolved selected mode file; primary evaluation file for Blocks A-F]\n\n[invocation-specific data]",
+    "description": "career-ops {mode}",
+    "agent": "general"
+  }
+}
+```
+
+**Permissions required:** The primary agent needs `permission.task: "general": "allow"` in `opencode.json` (or the subagent's `permission.task` allows it).
+
+#### VS Code Copilot — `runSubagent` tool
+
+```json
+{
+  "tool": "runSubagent",
+  "arguments": {
+    "prompt": "[output language directive]...\n\n[full prompt as above]",
+    "description": "career-ops {mode}"
+  }
+}
+```
+
+#### All Other CLIs — Direct Execution
+
+**Do not attempt subagent delegation.** Run the mode directly in the current session. For headless/batch workers, use the CLI's native headless invocation (`codex exec`, `opencode run`, `pi -p`, etc.) which provides isolation without subagent API.
 
 For `apply` (with Playwright), ask the worker to return the role title and employer it found (and any agency the posting came through) alongside its result. The interactive parent then applies **Session Title** from those values, after any agency confirmation has resolved. The worker never renames anything itself.
 
