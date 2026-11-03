@@ -79,10 +79,20 @@ function containedInOutput(absPath) {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-/** Assert that a payload object contains the required keys. */
+/** Assert that a payload object contains the required keys and that their values are non-empty strings. */
 function _require(obj, keys, context) {
   for (const key of keys) {
-    if (!obj || typeof obj !== "object" || !(key in obj)) {
+    const value = obj && typeof obj === "object" ? obj[key] : undefined;
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(`Missing required field: ${context}.${key}`);
+    }
+  }
+}
+
+/** Assert that a payload contains the required object-shaped fields. */
+function _requireObject(obj, keys, context) {
+  for (const key of keys) {
+    if (!obj || typeof obj !== "object" || !(key in obj) || typeof obj[key] !== "object" || obj[key] === null) {
       throw new Error(`Missing required field: ${context}.${key}`);
     }
   }
@@ -144,9 +154,10 @@ function buildDateline(letter, hasRecipientBlock = false) {
   // one; either way, dropping company and city would lose them with nothing
   // taking their place. The shipped base template is the second case, so it
   // keeps the full join exactly as before.
+  const company = typeof letter.company === "string" ? letter.company : "";
   const parts = hasRecipientBlock
     ? [letter.date]
-    : [letter.company, letter.city, letter.date];
+    : [company, letter.city, letter.date];
   return parts.filter(Boolean).map(escapeHtml).join(" &nbsp;&nbsp; ");
 }
 
@@ -378,7 +389,7 @@ export function replaceBalancedTokens(text, replaceToken) {
 }
 
 export function buildHtml(payload, templatePath) {
-  _require(payload, ["candidate", "letter"], "payload");
+  _requireObject(payload, ["candidate", "letter"], "payload");
   const candidate = payload.candidate;
   const letter = payload.letter;
   _require(candidate, ["name"], "candidate");
@@ -545,8 +556,13 @@ Usage:
   }
 
   if (!payload.output_path) {
-    const company = (payload.letter?.company || "company").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
+    const company = (typeof payload.letter?.company === "string" ? payload.letter.company : "company")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-");
+    const role = (typeof payload.letter?.role_title === "string" ? payload.letter.role_title : "role")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 30);
     payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
   } else {
     try {
