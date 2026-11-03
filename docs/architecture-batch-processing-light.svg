@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="446" viewBox="0 0 760 446" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-labelledby="batch-processing-title">
+  <title id="batch-processing-title">Batch processing: batch/batch-input.tsv lists the offers (id, url, source, notes). The orchestrator, batch/batch-runner.sh, records progress in batch/batch-state.tsv so a run can retry and resume, and hands each offer to one of N headless CLI workers running the self-contained prompt batch/batch-prompt.md. Workers are claude -p by default and run in parallel (--parallel, default 3); any other CLI runs one offer at a time. Each worker writes a report (reports/NNN-*.md), a PDF (output/*.pdf) and a tracker TSV line (batch/tracker-additions/). After the batch, merge-tracker.mjs merges the TSV lines into the canonical tracker, data/applications.md.</title>
+  <rect width="760" height="446" rx="12" fill="#ffffff"/>
+  <rect x="35" y="16" width="210" height="76" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="bp-input"><rect x="35" y="16" width="210" height="76" rx="10"/></clipPath>
+  <rect x="35" y="16" width="6" height="76" fill="#DD7627" clip-path="url(#bp-input)"/>
+  <text x="140" y="40" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">Input offers</text>
+  <text x="140" y="60" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">batch/batch-input.tsv</text>
+  <text x="140" y="79" text-anchor="middle" font-size="12.5" fill="#59636e">id, url, source, notes</text>
+  <rect x="275" y="16" width="210" height="76" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="bp-runner"><rect x="275" y="16" width="210" height="76" rx="10"/></clipPath>
+  <rect x="275" y="16" width="6" height="76" fill="#DD7627" clip-path="url(#bp-runner)"/>
+  <text x="380" y="40" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">Orchestrator</text>
+  <text x="380" y="60" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">batch/batch-runner.sh</text>
+  <text x="380" y="79" text-anchor="middle" font-size="12.5" fill="#59636e">parallelism, retries, resume</text>
+  <rect x="515" y="16" width="210" height="76" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="bp-workers"><rect x="515" y="16" width="210" height="76" rx="10"/></clipPath>
+  <rect x="515" y="16" width="6" height="76" fill="#DD7627" clip-path="url(#bp-workers)"/>
+  <text x="620" y="40" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">N headless workers</text>
+  <text x="620" y="60" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">batch/batch-prompt.md</text>
+  <text x="620" y="79" text-anchor="middle" font-size="12.5" fill="#59636e">parallel only with claude -p</text>
+  <line x1="245" y1="54" x2="268" y2="54" stroke="#8c959f" stroke-width="2"/><path d="M266 48 L266 60 L275 54 Z" fill="#8c959f"/><line x1="485" y1="54" x2="508" y2="54" stroke="#8c959f" stroke-width="2"/><path d="M506 48 L506 60 L515 54 Z" fill="#8c959f"/>
+  <line x1="380" y1="99" x2="380" y2="121" stroke="#8c959f" stroke-width="2"/><path d="M374 101 L386 101 L380 92 Z" fill="#8c959f"/><path d="M374 119 L386 119 L380 128 Z" fill="#8c959f"/>
+  <text x="390" y="114" font-size="12" fill="#59636e">reads + writes</text>
+  <rect x="275" y="128" width="210" height="64" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <clipPath id="bp-state"><rect x="275" y="128" width="210" height="64" rx="10"/></clipPath>
+  <rect x="275" y="128" width="6" height="64" fill="#DD7627" clip-path="url(#bp-state)"/>
+  <text x="380" y="155" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">Progress</text>
+  <text x="380" y="176" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">batch/batch-state.tsv</text>
+  <line x1="620" y1="92" x2="620" y2="222" stroke="#8c959f" stroke-width="2"/>
+  <text x="630" y="160" font-size="12" fill="#59636e">each worker writes</text>
+  <line x1="140" y1="222" x2="620" y2="222" stroke="#8c959f" stroke-width="2" stroke-linecap="round"/>
+  <line x1="140" y1="222" x2="140" y2="239" stroke="#8c959f" stroke-width="2"/><path d="M134 237 L146 237 L140 246 Z" fill="#8c959f"/><line x1="380" y1="222" x2="380" y2="239" stroke="#8c959f" stroke-width="2"/><path d="M374 237 L386 237 L380 246 Z" fill="#8c959f"/><line x1="620" y1="222" x2="620" y2="239" stroke="#8c959f" stroke-width="2"/><path d="M614 237 L626 237 L620 246 Z" fill="#8c959f"/>
+  <rect x="35" y="246" width="210" height="72" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
+  <text x="140" y="270" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">Report</text>
+  <text x="140" y="290" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">reports/NNN-*.md</text>
+  <text x="140" y="309" text-anchor="middle" font-size="12.5" fill="#59636e">A-H evaluation</text>
+  <rect x="275" y="246" width="210" height="72" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
+  <text x="380" y="270" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">PDF</text>
+  <text x="380" y="290" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">output/*.pdf</text>
+  <text x="380" y="309" text-anchor="middle" font-size="12.5" fill="#59636e">tailored CV</text>
+  <rect x="515" y="246" width="210" height="72" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
+  <text x="620" y="270" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2328">Tracker TSV</text>
+  <text x="620" y="290" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">batch/tracker-additions/</text>
+  <text x="620" y="309" text-anchor="middle" font-size="12.5" fill="#59636e">one line per offer</text>
+  <line x1="620" y1="318" x2="620" y2="359" stroke="#8c959f" stroke-width="2"/><path d="M614 357 L626 357 L620 366 Z" fill="#8c959f"/>
+  <text x="610" y="339" text-anchor="end" font-size="12" fill="#59636e">after the batch:</text>
+  <text x="610" y="356" text-anchor="end" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">merge-tracker.mjs</text>
+  <rect x="515" y="366" width="210" height="64" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
+  <text x="620" y="393" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">Canonical tracker</text>
+  <text x="620" y="414" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">data/applications.md</text>
+</svg>

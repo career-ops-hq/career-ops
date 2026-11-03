@@ -22,7 +22,7 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail, ROOT, NODE } from './helpers.mjs';
-import { listTemplates, resolveTemplate, validateTemplate } from '../cv-templates.mjs';
+import { listTemplates, resolveTemplate, validateTemplate, DEFAULT_TEMPLATES_DIR } from '../cv-templates.mjs';
 import { stripEmptySections } from '../cv-sections-core.mjs';
 
 console.log('\nNamed CV templates (compact / executive / jake / leadership / modern)');
@@ -72,7 +72,7 @@ const PAYLOAD = {
   skills: [{ category: 'Languages', items: ['Go', 'TypeScript'] }],
 };
 
-const listed = listTemplates('cv');
+const listed = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR });
 const dir = mkdtempSync(join(tmpdir(), 'cv-named-templates-'));
 const input = join(dir, 'payload.json');
 writeFileSync(input, JSON.stringify(PAYLOAD));

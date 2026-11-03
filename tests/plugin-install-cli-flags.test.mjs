@@ -43,7 +43,7 @@ test('plugin-install.mjs -h exits 0 and prints usage', () => {
 
 test('plugin-install.mjs rejects an unrecognized flag', () => {
   const r = run('--nonsense');
-  assert.equal(r.status, 1, `--nonsense exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `--nonsense exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i, 'the unrecognized flag was not reported');
   assert.ok(r.all.includes('--nonsense'), 'the unrecognized flag was not echoed back');
 });
@@ -52,7 +52,7 @@ test('plugin-install.mjs rejects an unrecognized flag', () => {
 // BEFORE --help short-circuits, or a typo alongside --help exits 0 unreported.
 test('plugin-install.mjs --help --bogus still errors', () => {
   const r = run('--help', '--bogus');
-  assert.equal(r.status, 1, `--help --bogus exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `--help --bogus exited ${r.status}, want 1`));
   assert.match(r.all, /unrecognized flag/i);
   assert.doesNotMatch(r.stdout, /Usage:/, '--help was honoured despite the unrecognized flag');
 });
@@ -61,7 +61,7 @@ test('plugin-install.mjs --help --bogus still errors', () => {
 // `add`/`new`) must not read as a silent success either.
 test('plugin-install.mjs rejects a stray operand and names plugins.mjs', () => {
   const r = run('santifer/career-ops-plugin-example');
-  assert.equal(r.status, 1, `a stray operand exited ${r.status}, want 1`);
+  assert.equal(r.status, 1, describeSpawn(r, `a stray operand exited ${r.status}, want 1`));
   assert.match(r.stderr, /takes no arguments/i);
   assert.match(r.stderr, /plugins\.mjs/, 'the error did not say where the commands live');
 });

@@ -240,9 +240,10 @@ Seviyeler eklenebilirdir (additive) — sırasıyla çalıştırılırlar ve son
       - **Aktif (Active)**: görünür iş başlığı + rol açıklaması + ana içerik alanında Apply/Submit/Apply Now butonu mevcut. Standart başlık (header)/gezinme (navbar)/alt bilgi (footer) metinlerini hesaba katma.
       - **Süresi Dolmuş (Expired)** (bu sinyallerden herhangi biri):
         - Son URL `?error=true` içeriyor (Greenhouse, teklif kapandığında buraya yönlendirir).
-        - Sayfa şu metinleri içeriyor: "job no longer available" (iş artık mevcut değil) / "no longer open" (artık açık değil) / "position has been filled" (pozisyon dolduruldu) / "this job has expired" (bu ilanın süresi doldu) / "page not found" (sayfa bulunamadı).
-        - Hiçbir JD içeriği olmadan yalnızca gezinme (navbar) ve alt bilgi (footer) görünür durumda (içerik < ~300 karakter).
-   d. Süresi dolmuşsa (expired): `scan-history.tsv` dosyasına `skipped_expired` durumu ile kaydet ve reddet.
+        - Sayfanın HTTP yanıt durumu 404 veya 410. 200 yanıtındaki bir "Page not found" (sayfa bulunamadı) mesajı bu sinyal değildir.
+        - Sayfa şu metinleri içeriyor: "job no longer available" (iş artık mevcut değil) / "no longer open" (artık açık değil) / "position has been filled" (pozisyon dolduruldu) / "this job has expired" (bu ilanın süresi doldu).
+      - **Doğrulanamadı (Unconfirmed)**: hiçbir JD içeriği olmadan yalnızca gezinme (navbar) ve alt bilgi (footer) görünür durumda (içerik < ~300 karakter) ve yukarıdaki süresi dolmuş sinyallerinden hiçbiri yok. İlan henüz yüklenmemiş olabilir; bu, kapandığının kanıtı değildir.
+   d. Süresi dolmuşsa (expired): `scan-history.tsv` dosyasına `skipped_expired` durumu ile kaydet ve reddet. Doğrulanamadıysa (unconfirmed): bu taramada kaydetmeden atla; bir sonraki tarama tekrar kontrol eder.
    e. Aktif ise (active): 8. adıma geç.
 
    **Tek bir URL hata verirse tüm taramayı iptal etme.** Eğer `browser_navigate` hata verirse (zaman aşımı - timeout, 403 vb.), kalıcı `skipped_expired` durumu atamak yerine `skipped_error` (veya unconfirmed) olarak işaretle ve bir sonrakine geç; böylece geçici ağ hataları ilanları kalıcı olarak tamamen yok saymaz.

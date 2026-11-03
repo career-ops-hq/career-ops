@@ -12,6 +12,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const COPIED = [
@@ -54,7 +55,7 @@ test('missing web dependencies are named, with the install command, before any U
   const dir = launcherTree();
   try {
     const run = await launch(dir);
-    assert.equal(run.status, 1);
+    assert.equal(run.status, 1, describeSpawn(run));
     assert.match(run.stderr, /Web UI dependencies are not installed/);
     assert.match(run.stderr, /npm --prefix web ci/);
     assert.doesNotMatch(run.stdout, /Web UI:/);
@@ -72,7 +73,7 @@ test('a server that exits during startup is not blamed on the port', async () =>
     writeFileSync(join(nextDir, 'package.json'), JSON.stringify({ name: 'next', version: '15.0.0', bin: { next: 'cli.js' } }));
     writeFileSync(join(dir, 'web', 'server.mjs'), 'process.exitCode = 3;\n');
     const run = await launch(dir);
-    assert.equal(run.status, 3);
+    assert.equal(run.status, 3, describeSpawn(run));
     assert.doesNotMatch(run.stderr, /Port may be occupied/);
     assert.match(run.stderr, /exited with code 3 before it was ready/);
   } finally {

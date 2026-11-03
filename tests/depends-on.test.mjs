@@ -594,21 +594,54 @@ function workflowJobs() {
   for (const file of readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/i.test(f))) {
     const doc = yaml.load(readFileSync(join(WORKFLOWS, file), 'utf-8'));
     for (const [job, spec] of Object.entries(doc?.jobs ?? {})) {
-      const steps = spec?.steps ?? [];
-      const sparse = steps.flatMap((s) => {
-        const declared = s?.with?.['sparse-checkout'];
-        const lines = Array.isArray(declared) ? declared : String(declared ?? '').split('\n');
-        return lines.map((p) => p.trim().replace(/^\/+|\/+$/g, '')).filter(Boolean);
-      });
-      // A step with its own working directory resolves its paths somewhere else.
-      // This sweep reads repo-root-relative paths only.
-      const run = steps.filter((s) => s?.run && !s['working-directory']).map((s) => s.run).join('\n');
-      const live = stripShellComments(run);
-      out.push({ file, job, sparse, invoked: paths(INVOKES, live), guarded: paths(GUARDS, live) });
+      out.push({ file, job, ...sweepSteps(spec?.steps ?? []) });
     }
   }
   return out;
 }
+
+/**
+ * The paths one job's steps name. `invoked`/`guarded` are repo-root paths, for
+ * the on-disk and sparse-checkout checks; `invokedRaw`/`guardedRaw` are the
+ * paths as written, for comparing a guard with what it guards.
+ * @param {object[]} steps
+ */
+// `./base/x.mjs` and `base/x.mjs` name one file.
+const dotless = (p) => p.replace(/^(?:\.\/+)+/, '');
+
+function sweepSteps(steps) {
+  const sparse = steps.flatMap((s) => {
+    const declared = s?.with?.['sparse-checkout'];
+    const lines = Array.isArray(declared) ? declared : String(declared ?? '').split('\n');
+    return lines.map((p) => p.trim().replace(/^\/+|\/+$/g, '')).filter(Boolean);
+  });
+  // A step with its own working directory resolves its paths somewhere else.
+  // This sweep reads repo-root-relative paths only.
+  const run = steps.filter((s) => s?.run && !s['working-directory']).map((s) => s.run).join('\n');
+  const live = stripShellComments(run);
+  // A second checkout of THIS repository into a subdirectory (`path: base`,
+  // used to run a validator the PR cannot edit) holds the same tree one level
+  // down, so `node base/x.mjs` names `x.mjs` at the repo root. A checkout of
+  // another repository (`repository:`) says nothing about this one and is not
+  // unwrapped. Unwrapping is for locating the file only: `base/x.mjs` and
+  // `x.mjs` are two different files on the runner, so a guard is compared
+  // with what it guards before unwrapping.
+  const prefixes = steps
+    .filter((s) => String(s?.uses ?? '').startsWith('actions/checkout@') && s.with?.path && !s.with.repository)
+    .map((s) => `${dotless(String(s.with.path)).replace(/\/+$/, '')}/`);
+  const unwrap = (p) => { const q = dotless(p); const pre = prefixes.find((x) => q.startsWith(x)); return pre ? q.slice(pre.length) : q; };
+  const invokedRaw = paths(INVOKES, live);
+  const guardedRaw = paths(GUARDS, live);
+  return {
+    sparse, invokedRaw, guardedRaw,
+    invoked: [...new Set(invokedRaw.map(unwrap))].sort(),
+    guarded: [...new Set(guardedRaw.map(unwrap))].sort(),
+  };
+}
+
+// The guard and the run are compared as written: unwrapping `base/` would make
+// a guard on the PR's copy look like a guard on the base copy it does not read.
+const guardsWhatItRuns = (j) => JSON.stringify(j.guardedRaw) === JSON.stringify(j.invokedRaw);
 
 // Runs first on purpose. Every assertion below iterates what this sweep
 // collected. An empty collection passes all of them without reading a byte of
@@ -645,8 +678,32 @@ test('every script a workflow names is on disk', () => {
 test('an absent-means-pass guard tests the path its job runs', () => {
   for (const j of workflowJobs()) {
     if (!j.guarded.length) continue;
-    assert.deepEqual(j.guarded, j.invoked, `${j.file} (${j.job}) guards a different path than it runs`);
+    assert.ok(guardsWhatItRuns(j), `${j.file} (${j.job}) guards a different path than it runs`);
   }
+});
+
+test('a ./ prefix on the run or on the checkout path still unwraps base/', () => {
+  for (const [path, run] of [['base', 'node ./base/x.mjs'], ['./base', 'node base/x.mjs'], ['./base/', 'node ./base/x.mjs']]) {
+    const j = sweepSteps([
+      { uses: 'actions/checkout@0000000000000000000000000000000000000000', with: { path } },
+      { run: `if [ ! -f ./base/x.mjs ]; then exit 0; fi\n${run}` },
+    ]);
+    assert.deepEqual(j.invoked, ['x.mjs'], `${path} / ${run}`);
+    assert.deepEqual(j.guarded, ['x.mjs'], `${path} / ${run}`);
+  }
+});
+
+test('a guard on the root copy does not stand for a run of the base/ copy', () => {
+  const steps = [
+    { uses: 'actions/checkout@0000000000000000000000000000000000000000' },
+    { uses: 'actions/checkout@0000000000000000000000000000000000000000', with: { path: 'base' } },
+    { run: 'if [ ! -f x.mjs ]; then exit 0; fi\nnode base/x.mjs' },
+  ];
+  const j = sweepSteps(steps);
+  assert.deepEqual(j.invoked, j.guarded, 'both name x.mjs at the repo root');
+  assert.equal(guardsWhatItRuns(j), false, 'the guard reads x.mjs while the step runs base/x.mjs');
+  steps[2].run = 'if [ ! -f base/x.mjs ]; then exit 0; fi\nnode base/x.mjs';
+  assert.equal(guardsWhatItRuns(sweepSteps(steps)), true, 'a guard on the file it runs still passes');
 });
 
 // The script arrives through the sparse checkout. A sparse path that stops

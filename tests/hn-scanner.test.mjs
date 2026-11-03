@@ -132,7 +132,7 @@ test('scan-hn reports AI errors and exits non-zero when every Gemini call fails'
     assert.match(r.stdout, /AI errors:\s+2 of 2/, `summary line missing:\n${r.stdout}`);
     assert.match(r.stderr, /2 of 2 Gemini extractions failed/);
     assert.match(r.stderr, /API key not valid/);
-    assert.equal(r.status, 1, `expected exit 1 when every Gemini call fails, got ${r.status}\n${r.stderr}`);
+    assert.equal(r.status, 1, describeSpawn(r, `expected exit 1 when every Gemini call fails, got ${r.status}\n`));
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -154,7 +154,7 @@ test('scan-hn --help prints usage and an unknown flag is refused, neither runs t
     assert.match(help.stdout, /data\/pipeline\.md/, 'usage should say what the scan writes');
 
     const bogus = runScanHn(dir, preload, ['--dry-run']);
-    assert.equal(bogus.status, 1, `expected an unknown flag to exit 1, got ${bogus.status}\n${bogus.stdout}`);
+    assert.equal(bogus.status, 1, describeSpawn(bogus, `expected an unknown flag to exit 1, got ${bogus.status}\n`));
     assert.match(bogus.stderr, /unrecognized flag\(s\): --dry-run/);
 
     assert.equal(existsSync(unexpected), false, 'a flag-only run reached the network');
@@ -187,7 +187,7 @@ test('scan-hn refuses a portals.yml that does not parse instead of scanning with
     const refused = writeFetchFixture(dir, { serveHn: false });
     writeFileSync(portals, `${keywords}title_filter:\n  positive: ["unclosed\n`);
     const broken = runScanHn(dir, refused.preload, [], { GEMINI_API_KEY: '' });
-    assert.equal(broken.status, 1, `expected a parse error to exit 1, got ${broken.status}\n${broken.stdout}`);
+    assert.equal(broken.status, 1, describeSpawn(broken, `expected a parse error to exit 1, got ${broken.status}\n`));
     assert.match(broken.stderr, /Error: failed to parse .*portals\.yml: /);
     assert.doesNotMatch(broken.stdout, /Match:/);
     assert.equal(existsSync(refused.unexpected), false, 'a run with an unparseable portals.yml reached the network');

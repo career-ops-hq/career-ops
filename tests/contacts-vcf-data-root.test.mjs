@@ -87,7 +87,7 @@ test('--vcf still refuses a target outside the data root', () => {
   try {
     const outside = join(f.workDir, 'escape.vcf');
     const r = run(f, ['--vcf', outside]);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stderr, /Refusing to write the vCard outside the project directory/);
     assert.ok(!existsSync(outside), 'the guard leaves no file outside the data root');
   } finally {
@@ -102,7 +102,7 @@ test('--vcf refuses a path into the checkout when the data root is elsewhere', (
   const inCheckout = join(ROOT, 'output', `contacts-vcf-guard-${process.pid}-${Date.now()}.vcf`);
   try {
     const r = run(f, ['--vcf', inCheckout]);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stderr, /Refusing to write the vCard outside the project directory/);
     assert.ok(!existsSync(inCheckout), 'nothing written into the checkout');
   } finally {

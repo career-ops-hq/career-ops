@@ -18,10 +18,10 @@
  * expected value back out of the module it pins compares that module to itself
  * and stays green whatever the module becomes.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -37,9 +37,17 @@ import {
 } from '../lib/page-format.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
+// Every workspace and cover sandbox this file makes, removed once its tests
+// have run, failed ones included.
+const scratchDirs = [];
+after(() => {
+  for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+});
+
 /** A throwaway workspace whose config/profile.yml states `pageFormat`, or none. */
 function workspace(pageFormat) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-page-format-'));
+  scratchDirs.push(dir);
   mkdirSync(join(dir, 'config'), { recursive: true });
   mkdirSync(join(dir, 'data'), { recursive: true });
   mkdirSync(join(dir, 'output'), { recursive: true });
@@ -153,7 +161,7 @@ test('injectPrintPageCss: the flagless sheet comes from the profile', () => {
       '',
     ].join('\n'));
     const res = spawnSync(NODE, [probe], { env: workspaceEnv(dir), encoding: 'utf-8' });
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     assert.match(res.stdout, new RegExp(`@page \\{ size: ${PAGE_CSS_SIZE[declared]};`), res.stdout + res.stderr);
   }
 });
@@ -172,7 +180,7 @@ test('build-cv-html: a payload with no page_format takes the profile width', () 
     env: workspaceEnv(dir),
     encoding: 'utf-8',
   });
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   const html = readFileSync(out, 'utf-8');
   assert.ok(html.includes(PAGE_WIDTHS.a4), `expected the a4 body width ${PAGE_WIDTHS.a4}\n${res.stdout}`);
   assert.ok(!html.includes(PAGE_WIDTHS.letter), 'the letter body width leaked into an a4 render');
@@ -191,7 +199,7 @@ test('build-cv-html: a payload stating its own page_format outranks the profile'
     env: workspaceEnv(dir),
     encoding: 'utf-8',
   });
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   const html = readFileSync(out, 'utf-8');
   assert.ok(html.includes(PAGE_WIDTHS.letter), `expected the letter body width ${PAGE_WIDTHS.letter}\n${res.stdout}`);
   assert.ok(!html.includes(PAGE_WIDTHS.a4), 'the a4 body width leaked into a letter render');
@@ -243,6 +251,7 @@ function coverSandbox() {
   // import.meta.url against argv[1], and a spawned copy that fails that check
   // exits 0 having done nothing (#3165).
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-cover-format-')));
+  scratchDirs.push(dir);
   mkdirSync(join(dir, 'lib'), { recursive: true });
   mkdirSync(join(dir, 'providers'), { recursive: true });
   mkdirSync(join(dir, 'templates'), { recursive: true });

@@ -2,8 +2,9 @@
 // hyphenated word on one line (#4908). A line break after a hard hyphen splits
 // the term in the PDF text layer ("go-" / "to-market"), so the ATS loses it.
 // The string checks always run; the layout check renders in headless Chromium
-// and is skipped with a warning where Chromium is not installed.
-import { pass, fail, warn, ROOT } from './helpers.mjs';
+// and is skipped with a warning where Chromium is not installed (a failure under
+// `test-all.mjs --needs browser`, which the tool-suites CI job runs).
+import { pass, fail, toolUnavailable, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
@@ -128,7 +129,7 @@ try {
   try {
     browser = await chromium.launch({ headless: true });
   } catch (e) {
-    warn(`hyphen layout check skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
+    toolUnavailable('browser', `hyphen layout check skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
   }
   if (browser) {
     const page = await browser.newPage();

@@ -6,9 +6,10 @@ import http from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.WORKER_FEEDBACK_TEST_URL;
-test("workers expose task-specific state and notify once without moving focus", { skip: !url, timeout: 120_000 }, async () => {
+test("workers expose task-specific state and notify once without moving focus", { skip: liveServerSkip("WORKER_FEEDBACK_TEST_URL"), timeout: 120_000 }, async () => {
   const parsed = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname));
   const origin = parsed.origin;
@@ -70,7 +71,7 @@ test("workers expose task-specific state and notify once without moving focus", 
     await page.route('**/api/runs/save', (route) => route.fulfill({ json: { ok: true } }));
     for (const path of ['assistant', 'run']) await page.route('**/api/' + path, (route) => route.continue({ url: 'http://127.0.0.1:' + fixture.address().port + '/' + path }));
     const input = page.getByRole('textbox', { name: 'Message to assistant', exact: true });
-    const opener = page.getByRole('button', { name: 'Open assistant', exact: true });
+    const opener = page.getByRole('button', { name: 'Ask the assistant', exact: true });
     const status = page.getByRole('status', { name: 'Assistant request status', exact: true });
     async function until(check, message) {
       for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise((r) => setTimeout(r, 30)); }
@@ -249,7 +250,7 @@ test("workers expose task-specific state and notify once without moving focus", 
 });
 
 // Settled fictional history exercises the shared control without starting jobs.
-test("worker dismiss stays discoverable without hover and by keyboard", { skip: !url, timeout: 60_000 }, async (t) => {
+test("worker dismiss stays discoverable without hover and by keyboard", { skip: liveServerSkip("WORKER_FEEDBACK_TEST_URL"), timeout: 60_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");

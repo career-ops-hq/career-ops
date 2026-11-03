@@ -5,8 +5,9 @@
  * Returns the same shape as classifyLiveness: { result, reason }.
  */
 
-import { classifyLiveness } from './liveness-core.mjs';
+import { classifyLiveness, jobIdToken, JOB_ID_PATTERN } from './liveness-core.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
+import { SINKHOLE_ADDRESSES } from './providers/_ip-guard.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
 // Single-page-app ATS render the posting after domcontentloaded, so the page
@@ -39,6 +40,13 @@ const FRAME_CONTENT_POLL_MS = 500;
 // this long. A goto that timed out has nothing to wait for: no error page
 // commits, and the next goto cancels it.
 const FAILED_NAVIGATION_COMMIT_MS = 2_000;
+
+// The query parameters that carry a posting's own id, from the providers that
+// put it there: UltiPro's opportunityId, SchoolSpring's and Deutsche Bahn's
+// jobId, Tencent's postId, AppliTrack's AppliTrackJobId, Meituan's jobUnionId,
+// and gh_jid on a careers page that embeds Greenhouse. Any other query value,
+// such as a campaign or tracking number, is not the posting's id.
+const POSTING_ID_PARAMS = new Set(['opportunityid', 'jobid', 'postid', 'applitrackjobid', 'jobunionid', 'gh_jid']);
 
 // BambooHR's client bundle can throw during first paint — a failed
 // /globals/locale request followed by an uncaught TypeError reading
@@ -300,14 +308,6 @@ async function resolveDnsCached(hostname) {
   }
 }
 
-// What a DNS filter answers for a name it blocks: 0.0.0.0 and ::. That is
-// Pi-hole's default, and what AdGuard DNS and Control D answered for the
-// trackers they blocked on 2026-10-11; hosts-file blocklists map names to
-// 0.0.0.0 too. No site is published at either address, so an answer whose only
-// private addresses are these is the user's own filter at work, not a host
-// resolving into private space. The request is blocked all the same.
-const SINKHOLE_ADDRESSES = new Set(['0.0.0.0', '::']);
-
 // Second layer of the egress guard: `rejectPrivateOrInvalid` only sees the
 // literal host, so a public hostname that *resolves* to private space still
 // gets through it. Resolve and re-check every address before the request is
@@ -483,7 +483,49 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRe
     // interstitial needs a moment to clear before the first read.
     if (extraSettleMs > 0) await page.waitForTimeout(extraSettleMs);
 
-    const extractApplyControls = () => {
+    const extractApplyControls = ({ postingId, postingSegment, pageUrl, idPattern }) => {
+      // Page chrome (nav, header, footer) is skipped because its links are the
+      // site's own: Jobs, Careers, Sign in. A link to this posting's own page,
+      // on the page's own origin, is not chrome, wherever it sits; a link to
+      // another site says nothing about this page's posting, even with its id
+      // in the path. Tech in Asia puts its only Apply control,
+      // "APPLY FOR JOB" -> /jobs/<id>/apply, in the page header: measured
+      // 2026-10-22, 20 of 20 live postings read no_apply_control without this,
+      // and 40 of 40 closed ones answer "Job not found" with no such link. Only
+      // the path counts, so a sign-in link that carries the posting in its
+      // return address (?returnUrl=/jobs/<id>) is still chrome, and so is a
+      // link back into this page under another query, fragment or trailing
+      // slash, such as a skip link to #main-content. A sign-in or sign-up page
+      // is chrome even under the posting's own path (/jobs/<id>/login): it is
+      // the site's sign-in, not the posting. In a frame, the page the
+      // frame sits in is this page too; its address is passed in, because a
+      // frame sandboxed without allow-same-origin cannot read window.top. The
+      // id has to be the link's own: its last path segment that carries an id,
+      // whole, so posting 12345 claims neither /jobs/123456/apply nor
+      // /jobs/job-12345/apply, nor /jobs/12345/related/67890/apply, whose own
+      // posting is 67890. A posting whose own segment carries the id with more
+      // around it claims that whole segment too: posting job-12345 claims
+      // /jobs/job-12345/apply.
+      const idBearing = new RegExp(idPattern, 'i');
+      const signIn = /^(?:log-?in|sign[-_]?(?:in|up)|register)(?:\.\w+)?$/;
+      const linksToPosting = (element) => {
+        const href = postingId && element.getAttribute('href');
+        if (!href) return false;
+        try {
+          const target = new URL(href, document.baseURI);
+          const pageKey = (u) => u.origin + u.pathname.replace(/\/+$/, '');
+          const thisPage = [location.href, pageUrl].map((u) => pageKey(new URL(u)));
+          if (thisPage.includes(pageKey(target))) return false;
+          if (target.origin !== new URL(pageUrl).origin) return false;
+          const segments = target.pathname.toLowerCase().split('/');
+          if (segments.some((s) => signIn.test(s))) return false;
+          const own = segments.filter((s) => idBearing.test(s)).pop();
+          return own === postingId || own === postingSegment;
+        } catch {
+          return false;
+        }
+      };
+
       // A design-system button is a custom element: UKG Pro (UltiPro) renders
       // Apply as <ukg-button>Apply now</ukg-button>, with no role on it. The
       // native <button> inside its shadow root has no text of its own (the
@@ -497,7 +539,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRe
 
       return candidates
         .filter((element) => {
-          if (element.closest('nav, header, footer')) return false;
+          if (element.closest('nav, header, footer') && !linksToPosting(element)) return false;
           if (element.closest('[aria-hidden="true"]')) return false;
 
           const style = window.getComputedStyle(element);
@@ -541,19 +583,55 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRe
             }
           });
 
+    // The posting's id, from the address of the page being read, so a posting
+    // reached through a redirect (/jobs/senior-engineer to /jobs/12345) is
+    // matched by the address it landed on. A page whose address lost the
+    // requested URL's id reads as off the posting whatever its controls (the
+    // redirect guard), and one whose own id is another posting's claims
+    // nothing in the chrome: /jobs/12345 that lands on
+    // /jobs/67890?returnUrl=/jobs/12345 passes the guard, but the page is
+    // posting 67890. The id in the last path segment, so a number in the
+    // query (?campaign=123456) is not taken for it. When that segment has
+    // none, the id in a query parameter that names the posting, and only then
+    // the last id in the path: on UltiPro,
+    // /JobBoard/{board}/OpportunityDetail?opportunityId={posting}, the path's
+    // only id is the board's, and every link under the board's path has it.
+    // The segment itself is kept only when the id came from it, so a generic
+    // last segment (/jobs/12345/details) claims nothing.
+    const postingIdentity = (address) => {
+      const postingUrl = new URL(address);
+      const lastSegment = postingUrl.pathname.split('/').filter(Boolean).pop() ?? '';
+      const queryId = [...postingUrl.searchParams]
+        .filter(([name]) => POSTING_ID_PARAMS.has(name.toLowerCase()))
+        .map(([, value]) => jobIdToken(value))
+        .find(Boolean);
+      return {
+        postingId: jobIdToken(lastSegment) ?? queryId ?? jobIdToken(postingUrl.pathname),
+        postingSegment: jobIdToken(lastSegment) ? lastSegment.toLowerCase() : null,
+      };
+    };
+    const requested = postingIdentity(url);
+
     // One reading of the page: the top-level document plus every same-origin
     // child frame, so a posting rendered inside a frame and one rendered inline
     // are judged the same way. A top-level read that throws propagates; a frame
     // that detaches or turns cross-origin mid-read is skipped.
     const readPage = async () => {
       const finalUrl = page.url();
+      const landed = postingIdentity(finalUrl);
+      const anotherPosting = requested.postingId && landed.postingId !== requested.postingId;
+      const walkArgs = {
+        ...(anotherPosting ? { postingId: null, postingSegment: null } : landed),
+        pageUrl: finalUrl,
+        idPattern: JOB_ID_PATTERN,
+      };
       let bodyText = await page.evaluate(() => document.body?.innerText ?? '');
-      let applyControls = await page.evaluate(extractApplyControls);
+      let applyControls = await page.evaluate(extractApplyControls, walkArgs);
       for (const frame of childFrames(finalUrl)) {
         try {
           const text = await frame.evaluate(() => document.body?.innerText ?? '');
           if (text && text.trim()) bodyText += '\n' + text;
-          applyControls = applyControls.concat(await frame.evaluate(extractApplyControls));
+          applyControls = applyControls.concat(await frame.evaluate(extractApplyControls, walkArgs));
         } catch {
           // detached or cross-origin mid-read; the rest of the reading still stands
         }
@@ -683,7 +761,8 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRe
     // iCIMS note above). Measured over 218 loads on 17 ATS: 18 were still empty
     // when the poll ended, 16 of them live postings. Only a body with no text at
     // all qualifies: a short page ("Page not found", a header and footer) keeps
-    // insufficient_content.
+    // insufficient_content, also `uncertain` but with a code that says the page
+    // did render something.
     if (verdict.code === 'insufficient_content' && !reading.bodyText.trim()) {
       verdict = {
         result: 'uncertain',

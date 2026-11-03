@@ -21,6 +21,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, chmodS
 import { join, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getBash, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SRC = readFileSync(new URL('../batch/batch-runner.sh', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const RESOLVER = readFileSync(new URL('../path-resolver.mjs', import.meta.url), 'utf8');
@@ -137,7 +138,7 @@ function run(f, { profile, dryRun = true, model, careerOpsRoot = f.dataRoot } = 
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 30000,
   });
-  assert.equal(result.status, 0, `runner exited ${result.status}:\n${result.stdout}\n${result.stderr}`);
+  assert.equal(result.status, 0, describeSpawn(result, `runner exited ${result.status}:\n\n`));
   return result;
 }
 

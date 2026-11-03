@@ -29,7 +29,7 @@ version: 1.0.0
 
   :root {
     --accent-color: hsl(213 45% 24%);
-    --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     --font-size: 10.5px;
     /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
        appended later by injectPrintPageCss reading this same variable. */
@@ -386,12 +386,12 @@ version: 1.0.0
 
   /* === CJK fallback === */
   html[lang="ja"] body {
-    font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'Hiragino Sans',
+    font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'Arial Unicode MS', 'Hiragino Sans',
       'Yu Gothic', 'Noto Sans CJK JP', Meiryo, sans-serif;
   }
   html[lang="zh-CN"] body,
   html[lang="zh"] body {
-    font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'PingFang SC',
+    font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'Arial Unicode MS', 'PingFang SC',
       'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
     line-break: strict;
     word-break: normal;

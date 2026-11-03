@@ -86,7 +86,9 @@ export function createRunnerSandbox(prefix) {
         cwd: sandbox,
         encoding: 'utf-8',
         timeout: 120_000,
-        env: { ...process.env, CAREER_OPS_TEST_JOBS: '', ...env },
+        // CAREER_OPS_TEST_QUEUE=0: a fixture run must not wait behind a real
+        // full run in another session (lib/test-queue.mjs).
+        env: { ...process.env, CAREER_OPS_TEST_JOBS: '', CAREER_OPS_TEST_QUEUE: '0', ...env },
       });
       // The runner names a suite by its path relative to the repo, in the
       // platform's own spelling: `tests\order\a.test.mjs` on Windows. The

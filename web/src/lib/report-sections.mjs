@@ -114,7 +114,11 @@ export const APPLY_LINE = 4.0;
 /** @param {unknown} legitimacy */
 function flaggedPosting(legitimacy) {
   const s = String(legitimacy ?? "").toLowerCase();
-  return /caut|precau|suspic|sospech|scam|fake/.test(s);
+  // Turkish reports (modes/tr/is-ilani.md) write the tier in Turkish:
+  // Dikkatli İlerle (caution), Şüpheli (suspicious). Chinese reports
+  // (modes/zh/oferta.md, modes/zh-TW/oferta.md) write it in Chinese:
+  // 谨慎推进 / 審慎推進 (caution), 疑似虚假 / 疑似虛假 (suspicious).
+  return /caut|precau|suspic|sospech|scam|fake|dikkatli|şüpheli|谨慎|審慎|疑似/.test(s);
 }
 
 /**
@@ -131,6 +135,21 @@ export function applyLineLabel(score, legitimacy) {
   if (!Number.isFinite(n)) return null;
   if (n < APPLY_LINE) return "Below the apply line";
   return flaggedPosting(legitimacy) ? "Check the posting first" : "Recommended";
+}
+
+/**
+ * Block-G legitimacy tier → badge tone. Matches the same localized tiers as
+ * flaggedPosting (English, Spanish, Turkish, Chinese).
+ *
+ * @param {string} l
+ * @returns {"good" | "warn" | "bad" | "muted"}
+ */
+export function legitimacyTone(l) {
+  const s = l.toLowerCase();
+  if (s.includes("high") || s.includes("confian") || s.includes("legit") || s.includes("güven") || s.includes("高置信") || s.includes("高信心")) return "good";
+  if (s.includes("caution") || s.includes("precau") || s.includes("caut") || s.includes("dikkatli") || s.includes("谨慎") || s.includes("審慎")) return "warn";
+  if (s.includes("suspic") || s.includes("sospech") || s.includes("scam") || s.includes("fake") || s.includes("şüpheli") || s.includes("疑似")) return "bad";
+  return "muted";
 }
 
 /**
@@ -214,6 +233,10 @@ function plainInline(text) {
  * @param {string} body
  * @returns {{ intro: string, sections: Section[] }}
  */
+function normalizeNewlines(text) {
+  return String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 export function splitSections(body) {
   /** @type {string[]} */
   const intro = [];
@@ -221,7 +244,7 @@ export function splitSections(body) {
   const sections = [];
   /** @type {{ heading: string, letter: string | null, lines: string[] } | null} */
   let cur = null;
-  for (const line of body.split("\n")) {
+  for (const line of normalizeNewlines(body).split("\n")) {
     const h = line.match(/^##\s+(.*)$/);
     if (h) {
       if (cur) sections.push({ heading: cur.heading, letter: cur.letter, content: cur.lines.join("\n").trim() });

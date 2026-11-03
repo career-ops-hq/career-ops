@@ -62,6 +62,7 @@ import readline from 'node:readline';
 import { resolveTrackerPath, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseFileInput, collectInteractive } from './paste-reply.mjs';
@@ -167,7 +168,7 @@ export async function appendContact(contact, contactsPath = CONTACTS_PATH) {
     const key = (name, company) => `${identityPart(name)}\0${identityPart(company)}`;
     const storedKey = (name, company) => `${identityPart(name, true)}\0${identityPart(company, true)}`;
     const incomingKey = key(contact.name, contact.company);
-    const existingIndex = lines.findIndex((line) => {
+    const existingIndex = lines.findLastIndex((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
       const cells = line.split('\t');
@@ -349,7 +350,9 @@ async function main() {
   const contactType = typeOverride || inferContactType(`${candidate.subject} ${candidate.body_snippet}`);
 
   const replyType = classifyReply(candidate).type;
-  const today = new Date().toISOString().slice(0, 10);
+  // The local day: this lands in the user's contacts.tsv, and the UTC day is
+  // tomorrow all evening west of Greenwich (#3070).
+  const today = localToday();
   const contact = {
     name,
     company,

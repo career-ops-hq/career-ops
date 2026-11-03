@@ -4,7 +4,7 @@ Xử lý các URL tin tuyển dụng lưu trong `data/pipeline.md`. Người dù
 
 ## Quét liveness (Liveness sweep)
 
-**Chạy bước này trước khi xử lý bất kỳ URL nào.** Các mục do scanner thêm ở chế độ headless/batch mang `**Verification:** unconfirmed (batch mode)` vì lúc quét không có Playwright -- chúng chưa từng được kiểm tra còn mở hay không. Nếu không quét, tin đã chết sẽ lọt vào bước đánh giá từng tab một, đốt thời gian và token cho các vai trò ma (một hộp thư 8 URL cũ tạo ra 8 lượt đánh giá vô ích).
+**Chạy bước này trước khi xử lý bất kỳ URL nào.** Các mục trong hộp thư thường chưa được kiểm tra: `scan.mjs` thêm tin tuyển dụng mà không kiểm tra từng tin còn mở hay không, trừ khi chạy với `--verify`, còn URL người dùng tự dán thì chưa từng được kiểm tra. Nếu không quét, tin đã chết sẽ lọt vào bước đánh giá từng tab một, đốt thời gian và token cho các vai trò ma (một hộp thư 8 URL cũ tạo ra 8 lượt đánh giá vô ích).
 
 Quét mọi URL đang chờ trong một lượt bằng bộ kiểm tra liveness không tốn token trước vòng lặp từng URL:
 

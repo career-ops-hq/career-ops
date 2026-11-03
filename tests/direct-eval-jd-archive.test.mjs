@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { withJdArchiveSection, JD_ARCHIVE_HEADING } from '../lib/jd-archive-section.mjs';
 import { hasEmbeddedJdArchive, extractStrippedJdSection } from '../check-jd-archive.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -93,7 +94,7 @@ function onlyReport(dir, log) {
 function assertCheckPasses(dir) {
   const r = spawnSync(process.execPath, [join(ROOT, 'check-jd-archive.mjs'), '--no-tracker',
     '--reports-dir', join(dir, 'reports'), '--jds-dir', join(dir, 'jds')], { encoding: 'utf-8', timeout: 30_000 });
-  assert.equal(r.status, 0, `check-jd-archive.mjs failed:\n${r.stdout}${r.stderr}`);
+  assert.equal(r.status, 0, describeSpawn(r, `check-jd-archive.mjs failed:\n`));
   assert.doesNotMatch(r.stdout, /missing-jd-archive/);
 }
 

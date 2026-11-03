@@ -35,6 +35,7 @@ import {
   DayforceChallengeError,
   ALLOWED_HOST,
 } from '../scan-dayforce.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 test('importing the scanner ignores the caller argv', () => {
   const moduleUrl = new URL('../scan-dayforce.mjs', import.meta.url).href;
@@ -43,7 +44,7 @@ test('importing the scanner ignores the caller argv', () => {
     ['--input-type=module', '--eval', `await import(${JSON.stringify(moduleUrl)})`, '--', '--tenant'],
     { encoding: 'utf8' },
   );
-  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(result.status, 0, describeSpawn(result));
   assert.strictEqual(result.stderr, '');
 });
 

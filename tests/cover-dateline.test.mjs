@@ -101,15 +101,18 @@ test('a template without the slot keeps the company and city in the dateline', (
   assert.equal(d, 'Example Corp &nbsp;&nbsp; Boston, MA &nbsp;&nbsp; September 8, 2026');
 });
 
-test('the shipped base template has no {{RECIPIENT_BLOCK}} slot', () => {
-  // The premise of the test above, asserted directly: if the shipped template
-  // ever gains an address block, the gate starts firing for it and this test is
-  // the one that says so.
+test('the shipped base template carries {{RECIPIENT_BLOCK}} directly under the dateline', () => {
+  // The slot-less case above stays covered by a synthetic template, since a
+  // pack can still ship one. The shipped template gained the slot in #5937, so
+  // the gate fires for it and the address block sits right after the dateline.
   const shipped = readFileSync(
     new URL('../templates/cover-letter-template.html', import.meta.url), 'utf-8');
 
   assert.ok(shipped.includes('{{DATELINE}}'), 'the shipped template has a dateline slot');
-  assert.ok(!shipped.includes('{{RECIPIENT_BLOCK}}'), 'the shipped template has no address block');
+  assert.match(
+    shipped,
+    /<div class="dateline">\{\{DATELINE\}\}<\/div>\s*\{\{RECIPIENT_BLOCK\}\}/,
+    'the shipped template places the address block under the dateline');
 });
 
 test('a name-only recipient keeps the company and city somewhere in the letter', () => {

@@ -1,0 +1,21 @@
+{
+  "name": "career-ops-plugin-keenable",
+  "id": "keenable",
+  "repo": "https://github.com/keenableai/career-ops-plugin-keenable",
+  "author": "keenableai",
+  "hooks": [
+    "search",
+    "provider"
+  ],
+  "description": "Find job postings on employers' own ATS pages (Greenhouse, Lever, Ashby and more) with Keenable web search; works with no API key.",
+  "requiredEnv": [],
+  "allowedHosts": [
+    "api.keenable.ai"
+  ],
+  "skill": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "sha": "d29861a5f5bf62bb7dd87011c4ba9dc14771eb94",
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/5685",
+  "addedAt": "2026-10-22"
+}

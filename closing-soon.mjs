@@ -32,10 +32,18 @@
  *      node closing-soon.mjs --status Evaluated,Applied
  *      node closing-soon.mjs --today 2026-10-17     (deterministic runs/tests)
  *      node closing-soon.mjs --tracker path/to/applications.md --jds path/to/jds
+ *      node closing-soon.mjs --clashes              (interview days with closings piling up)
+ *      node closing-soon.mjs --clashes --clash-min 3 --interviews path/to/active-interviews.md
+ *
+ * --clashes is opt-in: it reads data/active-interviews.md (leading YYYY-MM-DD of
+ * the Date/Time cell; rows in a terminal Status are skipped) and, for each
+ * interview date inside the window, counts the closing-soon rows that close on
+ * that day or the day before. At --clash-min (default 2) or more it adds a
+ * `clashes` group. Without the flag the output is unchanged.
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 
@@ -46,12 +54,17 @@ import { localToday } from './lib/local-today.mjs';
 import { parseDate } from './lib/parse-date.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { parseActiveInterviews, findColumn } from './process-quality.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
 
 export const DEFAULT_WITHIN_DAYS = 7;
 export const DEFAULT_STATUS = 'Evaluated';
+export const DEFAULT_CLASH_MIN = 2;
+
+/** Interview Status values that no longer hold a date (emoji prefixes tolerated). */
+const TERMINAL_INTERVIEW_RE = /\b(?:rejected|declined|ghosted|done)\b/i;
 
 /**
  * A `Mon D` date (no year) that already passed by more than this many days is
@@ -374,13 +387,52 @@ export function computeClosingSoon(trackerMd, { today, within = DEFAULT_WITHIN_D
   return { closingSoon, overdue, unparsed, rowsChecked };
 }
 
+/**
+ * Interview days that closing dates pile up on.
+ *
+ * @param {object[]} closingSoon - `closingSoon` rows from computeClosingSoon.
+ * @param {string} interviewsMd - data/active-interviews.md content.
+ * @param {object} opts
+ * @param {Date} opts.today - UTC-midnight Date.
+ * @param {number} [opts.within] - Same window as the closing-soon report.
+ * @param {number} [opts.clashMin] - Closing rows needed to call it a clash.
+ * @returns {{date: string, interview: {company: string, role: string, time: string}, closing: object[]}[]}
+ *   Soonest interview first. Interviews in a terminal Status, or whose Date/Time
+ *   cell has no readable leading YYYY-MM-DD, are skipped.
+ */
+export function computeClashes(closingSoon, interviewsMd, { today, within = DEFAULT_WITHIN_DAYS, clashMin = DEFAULT_CLASH_MIN }) {
+  const clashes = [];
+  const rows = parseActiveInterviews(String(interviewsMd ?? '').replace(/\r\n/g, '\n'));
+  for (const row of rows) {
+    if (TERMINAL_INTERVIEW_RE.test(findColumn(row, 'status'))) continue;
+    const time = findColumn(row, 'date/time').trim();
+    const lead = /^(\d{4}-\d{2}-\d{2})(?!\d)/.exec(time);
+    const when = lead ? parseDate(lead[1]) : null;
+    if (!when) continue;
+    const daysAway = daysBetween(today, when);
+    if (daysAway < 0 || daysAway > within) continue;
+    const day = isoDay(when);
+    const eve = isoDay(new Date(when.getTime() - MS_PER_DAY));
+    const closing = closingSoon.filter(r => r.closes === day || r.closes === eve);
+    if (closing.length < clashMin) continue;
+    clashes.push({
+      date: day,
+      interview: { company: findColumn(row, 'company').trim(), role: findColumn(row, 'role').trim(), time },
+      closing,
+    });
+  }
+  clashes.sort((a, b) => a.date.localeCompare(b.date));
+  return clashes;
+}
+
 // --- CLI ---
 
 const KNOWN_FLAGS = [
   '--within', '--status', '--today', '--tracker', '--jds',
+  '--clashes', '--clash-min', '--interviews',
   '--json', '--summary', '--help', '-h',
 ];
-const VALUE_FLAGS = ['--within', '--status', '--today', '--tracker', '--jds'];
+const VALUE_FLAGS = ['--within', '--status', '--today', '--tracker', '--jds', '--clash-min', '--interviews'];
 
 const USAGE = `Usage:
   node closing-soon.mjs                         # JSON report (default)
@@ -390,6 +442,9 @@ const USAGE = `Usage:
   node closing-soon.mjs --today <YYYY-MM-DD>    # evaluate as of a fixed date
   node closing-soon.mjs --tracker <path>        # a different applications.md
   node closing-soon.mjs --jds <dir>             # a different jds/ captures directory
+  node closing-soon.mjs --clashes               # also flag interview days with closings piling up
+  node closing-soon.mjs --clash-min <N>         # closings needed for a clash (default ${DEFAULT_CLASH_MIN}; needs --clashes)
+  node closing-soon.mjs --interviews <path>     # a different active-interviews.md (needs --clashes)
   node closing-soon.mjs --help                  # show this message
 
 Read-only: reads Notes (and jds/ captures when Notes have no closing marker)
@@ -401,7 +456,7 @@ function fail(message) {
 }
 
 function printSummary(report) {
-  const { metadata, closingSoon, overdue, unparsed } = report;
+  const { metadata, closingSoon, overdue, unparsed, clashes } = report;
   const clip = (s, n) => (String(s).length > n ? `${String(s).slice(0, n - 1)}\u2026` : String(s));
   const table = (rows, lastLabel, lastOf) => {
     console.log(`  ${'#'.padEnd(5)}${'Company'.padEnd(24)}${'Role'.padEnd(30)}${'Status'.padEnd(11)}${'Closes'.padEnd(12)}${lastLabel}`);
@@ -422,6 +477,15 @@ function printSummary(report) {
   console.log(`\nClosing marker found but date not readable: ${unparsed.length}`);
   for (const r of unparsed) {
     console.log(`  #${r.num} ${clip(r.company, 22)} \u2014 "${r.text}" (${r.reason}; ${r.source})`);
+  }
+  if (clashes) {
+    console.log(`\nInterview-day clashes: ${clashes.length}`);
+    for (const c of clashes) {
+      const who = [c.interview.company, c.interview.role].filter(Boolean).join(' — ');
+      console.log(`  ${c.date} ${who} (${c.interview.time})`);
+      for (const r of c.closing) console.log(`    #${r.num} ${clip(r.company, 22)} — ${clip(r.role, 28)} (closes ${r.closes})`);
+      console.log(`  -> ${c.closing.length} posting(s) close on or the day before this interview: submit these before the interview.`);
+    }
   }
   console.log(`\nRows checked: ${metadata.rowsChecked}\n`);
 }
@@ -450,6 +514,19 @@ if (isMainModule(import.meta.url)) {
       fail(`--within expects a non-negative whole number of days, received "${withinArg}".`);
     }
     within = Number(withinArg);
+  }
+
+  const clashesOn = hasFlag(args, '--clashes');
+  if (!clashesOn && (hasFlag(args, '--clash-min') || hasFlag(args, '--interviews'))) {
+    fail('--clash-min and --interviews only apply together with --clashes.');
+  }
+  let clashMin = DEFAULT_CLASH_MIN;
+  const clashMinArg = valueOf('--clash-min');
+  if (clashMinArg !== null) {
+    if (!/^\d+$/.test(clashMinArg) || !Number.isSafeInteger(Number(clashMinArg)) || Number(clashMinArg) < 1) {
+      fail(`--clash-min expects a whole number of at least 1, received "${clashMinArg}".`);
+    }
+    clashMin = Number(clashMinArg);
   }
 
   let statuses;
@@ -487,6 +564,27 @@ if (isMainModule(import.meta.url)) {
     unparsed: result.unparsed,
     warnings,
   };
+
+  if (clashesOn) {
+    const interviewsDefault = existsSync(join(dataRoot, 'data/active-interviews.md'))
+      ? join(dataRoot, 'data/active-interviews.md')
+      : join(dataRoot, 'active-interviews.md');
+    // A relative --interviews override is resolved from the data root, not the cwd;
+    // an absolute one is kept as given.
+    const interviewsOverride = valueOf('--interviews');
+    const interviewsPath = interviewsOverride ? resolve(dataRoot, interviewsOverride) : interviewsDefault;
+    let interviewsMd = '';
+    if (existsSync(interviewsPath)) {
+      try {
+        interviewsMd = readFileSync(interviewsPath, 'utf-8');
+      } catch (err) {
+        warnings.push(`Cannot read interviews file at ${interviewsPath} (${err.code || err.message}); no clashes to check.`);
+      }
+    } else {
+      warnings.push(`No interviews file found at ${interviewsPath}; no clashes to check.`);
+    }
+    report.clashes = computeClashes(result.closingSoon, interviewsMd, { today, within, clashMin });
+  }
 
   if (hasFlag(args, '--summary')) {
     printSummary(report);

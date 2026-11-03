@@ -3,7 +3,8 @@
  */
 
 export const RATES = {
-  // MiniMax models
+  // MiniMax models (legacy entries remain available for explicit model requests)
+  'MiniMax-M3.1-Flash': { input: 0.15 / 1000000, output: 0.60 / 1000000, cachedInput: 0.015 / 1000000 },
   'MiniMax-M3': { input: 0.60 / 1000000, output: 2.40 / 1000000, cachedInput: 0.12 / 1000000 },
   'MiniMax-M2.7': { input: 0.30 / 1000000, output: 1.20 / 1000000, cachedInput: 0.06 / 1000000 },
 
@@ -69,9 +70,10 @@ export function estimateCost(model, usage, provider) {
   }
 
   if (!rate) {
-    if (provider === 'openai') {
-      rate = RATES['gpt-4o-mini'];
-    } else if (provider === 'gemini') {
+    // No 'openai' fallback: openai-eval also talks to local OpenAI-compatible
+    // servers, and pricing an unknown model at gpt-4o-mini's rate would show a
+    // cost for a model that charges nothing. Unknown means "est. cost n/a".
+    if (provider === 'gemini') {
       rate = RATES['gemini-3.6-flash'];
     } else if (provider === 'claude' || provider === 'anthropic') {
       rate = RATES['claude-3-5-sonnet'];
@@ -134,7 +136,7 @@ export class TokenAccumulator {
   }
 }
 
-function formatK(tokens) {
+export function formatK(tokens) {
   return (tokens / 1000).toFixed(1) + 'k';
 }
 

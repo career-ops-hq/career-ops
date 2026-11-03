@@ -42,7 +42,8 @@ import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
 //     in <strong> inside the anchor and the location is a SIBLING
 //     <div class="job-location"> after </a>, so the parser also looks between
 //     one anchor and the next. The location element is a span, p or div
-//     depending on the tenant; the job-location class is what stays constant.
+//     depending on the tenant; its class is `job-location`, or a bare
+//     `location` on careers.arm.com.
 //
 // TRANSPORT: the plain `?p=N` HTML page is the fallback, not the preference —
 // on these tenants it is catastrophically wasteful. A UHG results page is
@@ -199,8 +200,11 @@ export function readFragmentTotals(html) {
 }
 
 // The element carrying the location varies per tenant (span on UHG/KP, div on
-// Barclays); the class is the stable part.
-const LEGACY_LOCATION_RE = /class="[^"]*\bjob-location\b[^"]*"[^>]*>([\s\S]*?)<\/(?:span|p|div)>/i;
+// Barclays); the class is the stable part. It is `job-location` on those
+// tenants and a bare `location` token on careers.arm.com
+// (`<span class="location">Toronto, Canada</span>` beside the anchor). The bare
+// token must be the whole class word, so `location-icon` and the like never match.
+const LEGACY_LOCATION_RE = /class="(?:[^"]*\bjob-location\b[^"]*|(?:[^"]*\s)?location(?:\s[^"]*)?)"[^>]*>([\s\S]*?)<\/(?:span|p|div)>/i;
 
 /**
  * Parse the LEGACY markup: the anchor IS the row, with no list-item class to

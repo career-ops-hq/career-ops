@@ -110,6 +110,18 @@ function selfTest() {
 
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`Usage:
+  node seed-fixture.mjs <targetDir> [--state name]
+  node seed-fixture.mjs --self-test
+  node seed-fixture.mjs --help
+
+Options:
+  --state <name>  Fixture state to materialize (default: state-v1.18)
+  --self-test     Run internal fixture integrity checks
+  --help, -h      Print this usage block and exit`);
+    process.exit(0);
+  }
   if (args[0] === '--self-test') selfTest();
   else if (args[0] && !args[0].startsWith('--')) {
     const stateIdx = args.indexOf('--state');

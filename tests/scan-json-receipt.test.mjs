@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import { atomicWriteFile, isIgnorableDirectoryFsyncError } from '../scan.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = join(ROOT, 'scan.mjs');
@@ -106,7 +107,7 @@ test('--json emits exactly one clean successful receipt', () => {
   const root = workspace('tracked_companies: []\njob_boards: []\n');
   try {
     const result = runJson(root);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     const receipt = JSON.parse(result.stdout);
     assert.match(receipt.date, /^\d{4}-\d{2}-\d{2}$/);
     assert.deepEqual(receipt, {
@@ -139,7 +140,7 @@ test('--json returns exit 2 and structured errors for a partial failure', () => 
   ].join('\n'));
   try {
     const result = runJson(root);
-    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.status, 2, describeSpawn(result));
     const receipt = JSON.parse(result.stdout);
     assert.equal(receipt.version, 'careerops.scan.receipt@1');
     assert.equal(receipt.dry_run, true);
@@ -162,7 +163,7 @@ test('a receipt larger than the pipe buffer drains completely', () => {
     encoding: 'utf-8',
     maxBuffer: 8 * 1024 * 1024,
   });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   const receipt = JSON.parse(result.stdout);
   assert.equal(receipt.added_urls.length, 20000);
   assert.ok(Buffer.byteLength(result.stdout) > 65536);

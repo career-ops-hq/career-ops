@@ -128,17 +128,62 @@ test('system files still resolve from the CODE root, not the data root', () => {
   } finally { cleanup(f); }
 });
 
+/**
+ * The names a source binds to its own directory: __dirname and
+ * import.meta.dirname always, plus every constant assigned
+ * dirname(fileURLToPath(import.meta.url)), __dirname or import.meta.dirname.
+ *
+ * The check used to key on two fixed names, CAREER_OPS and CODE_ROOT. Those
+ * are what company-history.mjs and funnel-velocity.mjs call it, but stats.mjs
+ * calls its code root ROOT, and calibrate.mjs and weekly-digest.mjs declare
+ * none today, so `join(ROOT, 'data', …)` in stats.mjs, or a reintroduced
+ * __dirname in the other two, passed unseen. Three of the five files were
+ * outside the check that names them.
+ */
+function codeRootNames(src) {
+  const names = new Set(['__dirname', 'import.meta.dirname']);
+  const BINDING = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:(?:path\.)?dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\)|__dirname\b|import\.meta\.dirname\b)/g;
+  for (const m of src.matchAll(BINDING)) names.add(m[1]);
+  return names;
+}
+
+/** Lines that join or resolve a user-layer path onto a code-root name. */
+function userLayerJoins(src) {
+  const names = [...codeRootNames(src)].map((n) => n.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')).join('|');
+  const USER_LAYER = new RegExp(
+    `(?:^|[^\\w$.])(?:path\\.)?(?:join|resolve)\\(\\s*(?:${names})\\s*,\\s*['"\`](?:data|interview-prep|reports|output|jds|documents|config)[/'"\`]`,
+  );
+  return src.split('\n').filter((line) => USER_LAYER.test(line));
+}
+
+test('the code-root detector finds the binding whatever it is named', () => {
+  const flagged = (src) => userLayerJoins(src).length;
+  assert.equal(flagged("const ROOT = dirname(fileURLToPath(import.meta.url));\nconst T = join(ROOT, 'data', 'applications.md');"), 1);
+  assert.equal(flagged("const here = path.dirname(fileURLToPath(import.meta.url));\nconst R = path.resolve(here, 'reports');"), 1);
+  assert.equal(flagged("const p = join(__dirname, 'interview-prep/story-bank.md');"), 1);
+  assert.equal(flagged("const p = join(import.meta.dirname, 'output');"), 1);
+  // The data root and a system file under the code root are both fine.
+  assert.equal(flagged("const DATA_ROOT = getCareerOpsRoot();\nconst T = join(DATA_ROOT, 'data', 'applications.md');"), 0);
+  assert.equal(flagged("const ROOT = dirname(fileURLToPath(import.meta.url));\nconst S = join(ROOT, 'templates/states.yml');"), 0);
+  assert.equal(flagged("const ROOT = dirname(fileURLToPath(import.meta.url));\nconst P = join(ROOT, 'config', 'profile.yml');"), 1);
+  assert.equal(flagged("const DATA_ROOT = getCareerOpsRoot();\nconst P = join(DATA_ROOT, 'config', 'profile.yml');"), 0);
+});
+
 test('no analysis script derives a data path from its own directory', () => {
   // The structural half, in the spirit of #3511's check 6. That one greps for a
   // bare relative string literal; this spelling assigns __dirname to a constant
   // and joins user-layer paths onto it, which reads as correct and is not.
   const offenders = [];
-  const USER_LAYER = /join\(\s*(CAREER_OPS|CODE_ROOT)\s*,\s*'(data|interview-prep|reports|output|jds|documents)[/']/;
+  const bound = {};
   for (const file of ['funnel-velocity.mjs', 'calibrate.mjs', 'weekly-digest.mjs', 'stats.mjs', 'company-history.mjs']) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
-    for (const line of src.split('\n')) {
-      if (USER_LAYER.test(line)) offenders.push(`${file}: ${line.trim().slice(0, 80)}`);
-    }
+    bound[file] = [...codeRootNames(src)];
+    for (const line of userLayerJoins(src)) offenders.push(`${file}: ${line.trim().slice(0, 80)}`);
   }
+  // Premise: the files that do bind their directory are seen to, under the
+  // names they actually use.
+  assert.ok(bound['stats.mjs'].includes('ROOT'), `stats.mjs's code root not found: ${bound['stats.mjs']}`);
+  assert.ok(bound['funnel-velocity.mjs'].includes('CODE_ROOT'), `funnel-velocity.mjs's code root not found: ${bound['funnel-velocity.mjs']}`);
+  assert.ok(bound['company-history.mjs'].includes('CAREER_OPS'), `company-history.mjs's code root not found: ${bound['company-history.mjs']}`);
   assert.deepEqual(offenders, [], `user-layer path(s) joined onto the code root:\n${offenders.join('\n')}`);
 });

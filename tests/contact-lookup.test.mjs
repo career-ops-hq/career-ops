@@ -162,7 +162,7 @@ test('CLI: missing --company value is a usage error, not a silent default', () =
   const dataRoot = seedDataRoot();
   try {
     const result = runLookup(dataRoot, ['--company']);
-    assert.equal(result.status, 1);
+    assert.equal(result.status, 1, describeSpawn(result));
     assert.match(result.stderr, /--company requires a value/);
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
@@ -173,7 +173,7 @@ test('CLI: --company omitted entirely is a usage error', () => {
   const dataRoot = seedDataRoot();
   try {
     const result = runLookup(dataRoot, []);
-    assert.equal(result.status, 1);
+    assert.equal(result.status, 1, describeSpawn(result));
     assert.match(result.stderr, /--company is required/);
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
@@ -194,7 +194,7 @@ test('CLI: --help exits 0 and prints Usage', () => {
 
 test('CLI: unknown flag exits 1 and names the bad flag', () => {
   const result = spawnSync(process.execPath, [SCRIPT, '--bogus'], { cwd: CODE_ROOT, encoding: 'utf-8', timeout: 30_000 });
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.match(result.stderr, /--bogus/);
 });
 

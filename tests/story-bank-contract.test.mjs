@@ -33,6 +33,7 @@ import { splitStoryBlocks, isValidStory, parseStories, getField, STORY_FIELDS } 
 import { parseStories as matchStarParseStories } from '../match-star.mjs';
 import { parseStoryBlocks, classifyStoryBank, malformedEntries } from '../story-provenance-check.mjs';
 import { analyze } from '../negotiation-roi.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = readFileSync(join(ROOT, 'templates', 'story-bank.template.md'), 'utf-8');
@@ -349,7 +350,7 @@ test('npm run star names unreadable table rows instead of "no stories"', () => {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' },
     });
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stderr, /2 table row\(s\)/);
     assert.match(r.stderr, /templates\/story-bank\.template\.md/);
   } finally {

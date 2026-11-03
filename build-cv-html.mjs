@@ -42,7 +42,7 @@ import { stripEmptySections } from './cv-sections-core.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
 import { readLockedSections } from './theme-style.mjs';
-import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { hasRequiredFields, templateSlotWarnings, validatePayload } from './lib/cv-payload-schema.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
 import { PARTIAL_SECTIONS, declaredSections, parseMeta } from './lib/template-manifest.mjs';
@@ -82,6 +82,14 @@ const DEFAULT_SECTION_TITLES = {
 // that change meaning in markup so tailored bullets containing &, <, >, quotes
 // (e.g. "R&D", "scaled 10x < budget", 'the "north star" metric') render as
 // literal text instead of breaking the document or injecting tags.
+//
+// Braces too, because they change meaning in the TEMPLATE: it is filled by
+// successive {{KEY}} replacements over the whole document, so escaped text is
+// scanned by every replacement after its own. A company of "Acme {{BULLETS}}
+// Corp" got the bullet list spliced into it, a summary naming {{SKILLS}} got
+// the skills grid, and a bullet about "{{FIRST_NAME}} merge fields" failed the
+// build as an unresolved placeholder. As entities they render the same and can
+// never read as a placeholder.
 function escapeHtml(text) {
   // Blank out only truly absent/structural values. A number or boolean scalar
   // (e.g. a payload with `year: 2024` instead of `"2024"`) must render its value,
@@ -93,7 +101,9 @@ function escapeHtml(text) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/'/g, '&#39;')
+    .replace(/\{/g, '&#123;')
+    .replace(/\}/g, '&#125;');
 }
 
 // Normalize a URL: only allow the schemes the template's contact row uses,
@@ -146,6 +156,21 @@ function profilePhotoValue() {
   }
 }
 
+// A relative candidate.photo comes from config/profile.yml, a user-layer file,
+// so it is read from the data root, where that file and the user's other files
+// live. It used to resolve against this script's directory, so with the user
+// layer moved out of the checkout (CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR or a
+// .career-ops-data marker) the photo sitting next to the profile was never
+// found and the build failed. The checkout stays as a fallback, so a photo kept
+// there by an install that moved its data root still resolves. Without a data
+// root override the two are the same directory.
+function resolveProfileRelative(photo) {
+  const fromDataRoot = resolve(DATA_ROOT, photo);
+  if (existsSync(fromDataRoot)) return fromDataRoot;
+  const fromCheckout = resolve(__dirname, photo);
+  return existsSync(fromCheckout) ? fromCheckout : fromDataRoot;
+}
+
 async function prepareCandidatePhoto(candidate) {
   const c = candidate && typeof candidate === 'object' ? { ...candidate } : {};
   const photo = typeof c.photo === 'string' ? c.photo.trim() : '';
@@ -181,7 +206,7 @@ async function prepareCandidatePhoto(candidate) {
     throw new Error(`Profile photo path ${photo} does not match candidate.photo in config/profile.yml; a local photo path is read only from the profile`);
   }
 
-  const photoPath = isAbsolute(photo) ? photo : resolve(__dirname, photo);
+  const photoPath = isAbsolute(photo) ? photo : resolveProfileRelative(photo);
   const mime = PHOTO_MIME_BY_EXT.get(extname(photoPath).toLowerCase());
   if (!mime) {
     throw new Error(`Unsupported profile photo format: ${photo} (expected PNG, JPEG, WebP, or GIF)`);
@@ -879,6 +904,22 @@ function mdUrl(url) {
     c => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
 }
 
+// The {{TOKEN}} that renders each payload section, for templateSlotWarnings.
+// renderHtml fills the content slot; renderMarkdown keeps a section only where
+// the template places its title (templateSectionOrder below), and the consent
+// footer only where the template has one.
+const HTML_SECTION_SLOTS = {
+  summary: 'SUMMARY_TEXT', competencies: 'COMPETENCIES', experience: 'EXPERIENCE',
+  projects: 'PROJECTS', education: 'EDUCATION', certifications: 'CERTIFICATIONS',
+  awards: 'AWARDS', interests: 'INTERESTS', skills: 'SKILLS', consent: 'CONSENT',
+};
+function markdownSectionSlots() {
+  return {
+    ...Object.fromEntries(Object.keys(DEFAULT_SECTION_TITLES).map((key) => [key, `SECTION_${key.toUpperCase()}`])),
+    consent: 'CONSENT',
+  };
+}
+
 // Section keys in the order the template places their {{SECTION_*}} titles.
 function templateSectionOrder(template) {
   return Object.keys(DEFAULT_SECTION_TITLES)
@@ -983,6 +1024,13 @@ async function runMarkdown(args) {
     console.error(`Input file not found: ${absInput}`);
     process.exit(1);
   }
+  const inputStat = await stat(absInput, { bigint: true });
+  const outputStat = existsSync(absOutput) ? await stat(absOutput, { bigint: true }) : null;
+  if (outputStat && (realpathSync.native(absOutput) === realpathSync.native(absInput)
+    || (inputStat.ino !== 0n && inputStat.dev === outputStat.dev && inputStat.ino === outputStat.ino))) {
+    console.error(`Output path is the input file: ${absOutput}`);
+    process.exit(1);
+  }
   // Never overwrite the source payload with its own rendering (a swapped or
   // repeated argument). realpath also catches a symlink or a ./-relative alias.
   if (absOutput === absInput || (existsSync(absOutput) && realpathSync(absOutput) === realpathSync(absInput))) {
@@ -1007,9 +1055,10 @@ async function runMarkdown(args) {
     console.error(JSON.stringify({ valid: false, errors, warnings }, null, 2));
     process.exit(1);
   }
+  const template = await readFile(templatePath, 'utf-8');
+  warnings.push(...templateSlotWarnings(payload, template, markdownSectionSlots(), basename(templatePath)));
   for (const message of warnings) console.error(`Warning: ${message}`);
   await mkdir(dirname(absOutput), { recursive: true });
-  const template = await readFile(templatePath, 'utf-8');
   await writeFile(absOutput, renderMarkdown(payload, template), 'utf-8');
   console.log(JSON.stringify({ file: basename(absOutput), path: absOutput, format: 'markdown', warnings, valid: true }, null, 2));
   process.exit(0);
@@ -1068,6 +1117,13 @@ async function main() {
     console.error(`Input file not found: ${absInput}`);
     process.exit(1);
   }
+  const inputStat = await stat(absInput, { bigint: true });
+  const outputStat = existsSync(absOutput) ? await stat(absOutput, { bigint: true }) : null;
+  if (outputStat && (realpathSync.native(absOutput) === realpathSync.native(absInput)
+    || (inputStat.ino !== 0n && inputStat.dev === outputStat.dev && inputStat.ino === outputStat.ino))) {
+    console.error(`Output path is the input file: ${absOutput}`);
+    process.exit(1);
+  }
   if (!existsSync(templatePath)) {
     console.error(`Template not found: ${templatePath}`);
     process.exit(1);
@@ -1089,9 +1145,10 @@ async function main() {
     console.error(JSON.stringify({ valid: false, errors, warnings }, null, 2));
     process.exit(1);
   }
-  for (const message of warnings) console.error(`Warning: ${message}`);
 
   const template = await readFile(templatePath, 'utf-8');
+  warnings.push(...templateSlotWarnings(payload, template, HTML_SECTION_SLOTS, basename(templatePath)));
+  for (const message of warnings) console.error(`Warning: ${message}`);
 
   let html;
   try {

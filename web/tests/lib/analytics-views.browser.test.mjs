@@ -5,12 +5,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.ANALYTICS_TEST_URL;
 const root = process.env.ANALYTICS_TEST_ROOT;
 
 test("Analytics rebase retains Progress, Search stats and core Insights", {
-  skip: !url || !root,
+  skip: liveServerSkip("ANALYTICS_TEST_URL", "ANALYTICS_TEST_ROOT"),
   timeout: 120_000,
 }, async (t) => {
   const origin = new URL(url);

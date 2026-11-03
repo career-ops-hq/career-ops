@@ -5,15 +5,15 @@
  * Checks all prerequisites and prints a pass/fail checklist.
  */
 
-import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { join, dirname, resolve } from 'path';
+import { delimiter, join, dirname, isAbsolute, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
-import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
-import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
+import { discoverPlugins, pluginRoots, pluginStatus, resolveSuccessorIds } from './plugins/_engine.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy } from './path-resolver.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
@@ -21,9 +21,34 @@ import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
 import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
+import { LINKEDIN_DOCTOR_LABEL, linkedInPluginFix } from './lib/linkedin-import.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
+
+// path-resolver.mjs refuses an explicit data root inside a plugin install copy,
+// and some modules loaded below resolve the root as they load. Ask once, first,
+// so the refusal reaches the user as a report instead of a stack trace.
+try {
+  getCareerOpsRoot();
+} catch (err) {
+  if (err?.code !== 'CAREER_OPS_UNSAFE_DATA_ROOT') throw err;
+  if (argv.includes('--json')) {
+    // Same keys as a normal --json run, so an agent reading `warnings` sees it;
+    // onboardingNeeded stays true so nothing proceeds on this root.
+    console.log(JSON.stringify({
+      onboardingNeeded: true,
+      missing: [],
+      unpersonalized: [],
+      warnings: [err.message],
+      autoCopied: [],
+      dataRootError: { code: err.code, source: err.source, root: err.root },
+    }));
+  } else {
+    console.log(`\ncareer-ops doctor\n================\n\n✗ ${err.message}\n`);
+  }
+  process.exit(1);
+}
 
 // Modules that import an npm package (directly or through their own imports)
 // load here, after the fact, instead of as static imports. A static import of
@@ -32,7 +57,7 @@ const argv = process.argv.slice(2);
 // copy made without `npm install`) died with a raw ERR_MODULE_NOT_FOUND stack
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
-let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH, resolveExtractorMode;
+let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH, resolveExtractorMode, auditUserTemplates;
 try {
   [
     { hasYamlContent, loadYaml },
@@ -40,12 +65,14 @@ try {
     { AGENT_CLIS },
     { validateProfile, EXAMPLE_PATH },
     { resolveExtractorMode },
+    { auditUserTemplates },
   ] = await Promise.all([
     import('./lib/yaml-document.mjs'),
     import('dotenv'),
     import('./lib/agent-cli.mjs'),
     import('./validate-profile.mjs'),
     import('./browser-extract.mjs'),
+    import('./cv-templates.mjs'),
   ]);
 } catch (err) {
   let missing = [];
@@ -227,8 +254,25 @@ function checkDependencies() {
   return {
     pass: false,
     label: `Dependencies missing: ${missing.join(', ')}`,
-    fix: 'Run: npm install',
+    fix: isPluginInstallCopy(codeRoot)
+      ? 'Start a new Claude Code session: the plugin\'s SessionStart hook installs them and reports any npm error'
+      : 'Run: npm install',
   };
+}
+
+// A Claude Code plugin install runs from a copy under ~/.claude/plugins/ that
+// Claude Code replaces on every plugin update, so the data root must live
+// outside it. Null for a checkout, which is not a copy.
+function checkPluginInstall(root) {
+  if (explicitTarget || !isPluginInstallCopy(codeRoot)) return null;
+  if (isPluginInstallCopy(root)) {
+    return {
+      pass: false,
+      label: `Data root ${root} is inside the Claude Code plugin install, which is replaced on every plugin update`,
+      fix: 'Set CAREER_OPS_ROOT to an absolute path outside ~/.claude/plugins, or unset it to use ~/career-ops-data',
+    };
+  }
+  return { pass: true, label: `Claude Code plugin install: your files live in ${root}` };
 }
 
 // The web UI is optional, so missing web/ dependencies are a warning: only
@@ -945,10 +989,68 @@ function isPlaywrightMcpConfigured(root, activeCli) {
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
 // runtime marker (OPENCODE=1 → opencode) > checkout hint (an opencode.json
-// with no Claude MCP config beside it) > default ('claude'). An unknown value
-// at ANY level returns the sentinel 'unknown' and produces no output —
-// CLI-dependent checks are silently skipped. .env parsing is best-effort:
-// missing file is normal, malformed values are caught per call below.
+// with no Claude MCP config beside it) > one other CLI executable on PATH >
+// several other CLIs on PATH (unset, so the user picks) > default ('claude').
+// An unknown value at ANY explicit level returns the sentinel 'unknown' and
+// produces no MCP output — CLI-dependent checks are silently skipped. .env
+// parsing is best-effort: missing file is normal, malformed values are caught
+// per call below.
+//
+// The binary name is the id, except Antigravity, which installs as `agy`.
+// Same mapping the web UI uses. A new CLI in AGENT_CLIS is found under its id.
+const CLI_BIN = Object.fromEntries(AGENT_CLIS.map((id) => [id, id === 'antigravity' ? 'agy' : id]));
+
+// Executable file on PATH. stat + X_OK, never a --version spawn: doctor stays
+// offline, and a CLI that prints to the terminal on startup must not run just
+// because setup is being checked. A directory, or a file without the execute
+// bit, is not an install.
+function cliExecutableOnPath(bin) {
+  const pathEnv = process.env.PATH;
+  // Unset or empty PATH means nothing is installed. A hermetic run keeps the
+  // claude default. A set PATH can still contain an empty component.
+  if (!pathEnv) return false;
+  const exts = process.platform === 'win32'
+    ? ['', ...(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map((ext) => ext.trim()).filter(Boolean)]
+    : [''];
+  for (const dir of pathEnv.split(delimiter)) {
+    // POSIX searches the current directory for an empty component (a leading,
+    // trailing, or doubled separator). Windows does not.
+    const searchDir = dir || (process.platform === 'win32' ? '' : '.');
+    if (!searchDir) continue;
+    for (const ext of exts) {
+      const candidate = join(searchDir, bin + ext);
+      try {
+        if (!statSync(candidate).isFile()) continue;
+        accessSync(candidate, constants.X_OK);
+        return true;
+      } catch {
+        // Absent, or present but not executable.
+      }
+    }
+  }
+  return false;
+}
+
+// PATH is only consulted when nothing else named a CLI. claude on PATH, or no
+// known CLI at all, keeps the historical default so a hermetic run (CI, a
+// machine with nothing installed) does not change. One other CLI is unambiguous.
+// Two or more, with claude absent, is a guess — report them and ask for
+// remember-cli instead of checking Claude's plugin.
+function resolveCliFromPath() {
+  const present = AGENT_CLIS.filter((id) => cliExecutableOnPath(CLI_BIN[id]));
+  if (present.includes('claude') || present.length === 0) {
+    return { cli: 'claude', source: 'default' };
+  }
+  if (present.length === 1) {
+    return { cli: present[0], source: 'path' };
+  }
+  return {
+    cli: 'unset',
+    source: 'path',
+    warning: `Several agent CLIs are on PATH (${present.join(', ')}) and none is selected. Pick one with \`node remember-cli.mjs <cli>\`.`,
+  };
+}
+
 function resolveActiveCli() {
   if (cliFlag !== undefined && cliFlag !== null) {
     if (!AGENT_CLIS.includes(cliFlag)) {
@@ -994,12 +1096,14 @@ function resolveActiveCli() {
   if (hasOpenCodeCfg && !hasClaudeCfg) {
     return { cli: 'opencode', source: 'auto' };
   }
-  return { cli: 'claude', source: 'default' };
+  return resolveCliFromPath();
 }
 
 function checkPlaywrightMcp(root, activeCli) {
-  // Unknown CLI (typo / not in AGENT_CLIS).
-  if (activeCli === 'unknown') return null;
+  // Unknown CLI (typo / not in AGENT_CLIS), or several CLIs on PATH and no
+  // selection yet. Neither has a config to scan, and neither should be handed
+  // another CLI's install command.
+  if (activeCli === 'unknown' || activeCli === 'unset') return null;
 
   // Known CLI without an MCP file mapping.
   const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
@@ -1103,7 +1207,7 @@ const USER_LAYER_PREREQS = [
   },
 ];
 
-const CLI_NAMES = 'claude, codex, gemini, opencode, qwen, agy or grok';
+const CLI_NAMES = 'claude, codex, opencode, qwen, agy or grok';
 
 // The lane variables (CAREER_OPS_PORTALS, CAREER_OPS_PIPELINE) move one file
 // out of the data root, and the scanner reads them (path-resolver.mjs), so
@@ -1325,9 +1429,28 @@ function readPluginConfigSync(root) {
 
 // Plugin layer health: list discovered plugins + whether each enabled one's keys
 // are present. WARN-not-FAIL so a half-configured plugin never blocks setup.
+// plugins.mjs loads the data root .env before it checks plugin keys. Doctor
+// skips that load when --cli or CAREER_OPS_CLI picks the CLI, so the file is
+// read here without touching process.env.
+function pluginState(manifest, cfg) {
+  const s = pluginStatus(manifest, cfg);
+  let fileEnv = {};
+  try { fileEnv = dotenv.parse(readFileSync(join(projectRoot, '.env'))); } catch { /* no .env */ }
+  const missingEnv = s.missingEnv.filter((name) => !fileEnv[name]);
+  return { ...s, missingEnv, enabled: s.configured && missingEnv.length === 0 };
+}
+
+function activePlugins(root) {
+  return discoverPlugins(pluginRoots(root), resolveSuccessorIds(root));
+}
+
 function checkPlugins(root) {
   let manifests;
-  try { manifests = discoverPlugins(pluginRoots(root)); } catch { return { pass: true, label: 'Plugins: none' }; }
+  // Plugin files live in the code checkout. config/plugins.yml lives in the
+  // data root. Reading plugins from the data root reports "none installed"
+  // while `node plugins.mjs list` on the same install lists them. --target
+  // sets codeRoot to the directory it was given.
+  try { manifests = activePlugins(codeRoot); } catch { return { pass: true, label: 'Plugins: none' }; }
   if (manifests.length === 0) return { pass: true, label: 'Plugins: none installed' };
   const { cfg, error: cfgError } = readPluginConfigSync(root);
   // Reported before the per-plugin lines, because when the config did not parse
@@ -1343,9 +1466,13 @@ function checkPlugins(root) {
   const lines = [];
   const fixes = [];
   for (const m of manifests) {
-    const s = pluginStatus(m, cfg);
+    const s = pluginState(m, cfg);
     lines.push(`${m.id} (${s.enabled ? 'enabled' : s.configured ? `missing ${s.missingEnv.join(', ')}` : 'off'})`);
-    if (s.configured && s.missingEnv.length) fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    if (s.configured && s.missingEnv.length) {
+      const paste = linkedInPluginFix(m.id);
+      if (paste) fixes.push(paste);
+      fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    }
   }
   const label = `Plugins: ${lines.join(', ')}`;
   return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
@@ -1395,21 +1522,66 @@ function checkCvShape(root) {
   };
 }
 
+// The user's own templates under data/templates/ (#5777). Advisory: a template
+// that stopped resolving, or lost a slot every shipped variant keeps, is named
+// here instead of surfacing at render time.
+function checkUserTemplates(root) {
+  let findings;
+  try {
+    // The shipped baseline is the checkout being diagnosed, when it has one. A
+    // --target that holds only user data has no templates/, so the executing
+    // checkout's own default stays the baseline there.
+    const shipped = join(codeRoot, 'templates');
+    findings = auditUserTemplates({
+      userDir: join(root, 'data', 'templates'),
+      ...(existsSync(join(shipped, 'cv-template.html')) ? { dir: shipped } : {}),
+    });
+  } catch (err) {
+    return { warn: true, label: `data/templates: could not be audited (${err.message})` };
+  }
+  if (findings.length === 0) return null;
+  return {
+    warn: true,
+    label: `data/templates: ${findings.length} template${findings.length === 1 ? '' : 's'} need${findings.length === 1 ? 's' : ''} attention`,
+    fix: findings.flatMap((f) => f.problems.map((p) => {
+      const file = f.path.split(/[\\/]/).pop();
+      return p.type === 'invalid' || p.type === 'name'
+        ? `${file}: ${p.detail}`
+        : `${file}: lacks ${p.missing.map((m) => `{{${m}}}`).join(', ')}, which every shipped ${f.kind === 'cv' ? 'CV' : 'cover-letter'} variant keeps`;
+    })),
+  };
+}
+
 function checkProfileShape(root) {
   const profilePath = profilePathFor(root);
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
+  // Name the file actually read. With --target that is the target's
+  // profile, not the CAREER_OPS_PROFILE path the default label comes from.
+  // A CAREER_OPS_PROFILE outside the root keeps its absolute path, since a
+  // ../../ path says less than the one the user exported.
+  const rel = relative(root, profilePath);
+  const label = rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? rel.split(sep).join('/') : profilePath;
   let findings;
   try {
     const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
-    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example).findings;
+    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example, label).findings;
   } catch (err) {
-    return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
+    return { warn: true, label: `${label} could not be read (${err.message})` };
   }
   const actionable = findings.filter((f) => f.level !== 'info');
-  if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  if (actionable.length === 0) return { pass: true, label: `${label}: shape OK` };
+  // A bad value sits under a key the readers know. Calling it an unrecognized
+  // key would send the user to delete a setting they only need to correct.
+  const badValues = actionable.some((f) => f.code === 'bad-value');
+  const otherIssues = actionable.some((f) => f.code !== 'bad-value');
+  const why = badValues && otherIssues
+    ? 'unrecognized keys and invalid values have no effect'
+    : badValues
+      ? 'known settings hold values the readers ignore'
+      : 'settings under an unrecognized key have no effect';
   return {
     warn: true,
-    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — settings under an unrecognized key have no effect`,
+    label: `${label}: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — ${why}`,
     fix: actionable.map((f) => f.message),
   };
 }
@@ -1419,6 +1591,10 @@ async function main() {
   console.log('================\n');
 
   const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
+  // A data root inside the plugin copy is deleted on the next plugin update,
+  // so the checks that create User Layer folders and files skip it.
+  const pluginInstall = checkPluginInstall(projectRoot);
+  const userLayerWritable = !pluginInstall || pluginInstall.pass;
 
   const checks = [
     checkNodeVersion(),
@@ -1427,6 +1603,7 @@ async function main() {
     geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
+    pluginInstall,
     checkWebDependencies(),
     checkTrackedBakFiles(codeRoot),
     checkSkillEntrypoints(codeRoot),
@@ -1439,11 +1616,12 @@ async function main() {
     checkProfileShape(projectRoot),
     checkTitleFilterConflicts(projectRoot),
     checkCvShape(projectRoot),
-    checkAutoDir('data'),
-    checkPipelineFile(),
-    checkAutoDir('output'),
-    checkAutoDir('reports'),
+    checkUserTemplates(projectRoot),
+    ...(userLayerWritable
+      ? [checkAutoDir('data'), checkPipelineFile(), checkAutoDir('output'), checkAutoDir('reports')]
+      : []),
     checkPlugins(projectRoot),
+    { pass: true, label: LINKEDIN_DOCTOR_LABEL },
     // checkPrereq already explains the .env case when the profile is missing.
     prereqPresent(projectRoot, { path: 'config/profile.yml' }) ? checkEnvFileProfile(projectRoot) : null,
   ].filter(Boolean);
@@ -1669,6 +1847,9 @@ function checkTitleFilterConflicts(root) {
 
 function onboardingState(root) {
   const autoCopied = [];
+  // Same rule as main(): never seed User Layer files inside a plugin copy.
+  const pluginInstall = checkPluginInstall(root);
+  const userLayerWritable = !pluginInstall || pluginInstall.pass;
   const templates = [
     { target: 'modes/_profile.md', template: 'modes/_profile.template.md' },
     { target: 'modes/_custom.md', template: 'modes/_custom.template.md' },
@@ -1680,7 +1861,7 @@ function onboardingState(root) {
     const rootTemplatePath = join(root, ...template.split('/'));
     const templatePath = existsSync(rootTemplatePath) ? rootTemplatePath : join(__dirname, ...template.split('/'));
     // Diagnosis must not create user files. Copy only during explicit onboarding.
-    if (INIT_TEMPLATES && !existsSync(targetPath) && existsSync(templatePath)) {
+    if (INIT_TEMPLATES && userLayerWritable && !existsSync(targetPath) && existsSync(templatePath)) {
       try {
         mkdirSync(dirname(targetPath), { recursive: true });
         copyFileSync(templatePath, targetPath, constants.COPYFILE_EXCL);
@@ -1713,18 +1894,21 @@ function onboardingState(root) {
   const bakCheck = checkTrackedBakFiles(codeRoot);
   const skillCheck = checkSkillEntrypoints(codeRoot);
   const cvShape = checkCvShape(root);
+  const userTemplates = checkUserTemplates(root);
   const envFileProfile = checkEnvFileProfile(root);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
+    ...(pluginInstall && !pluginInstall.pass ? [`${pluginInstall.label}\n→ ${pluginInstall.fix}`] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
     ...(bakCheck.warn ? [`${bakCheck.label}\n→ ${[].concat(bakCheck.fix || []).join('\n  ')}`] : []),
     ...(skillCheck.warn ? [`${skillCheck.label}\n→ ${[].concat(skillCheck.fix || []).join('\n  ')}`] : []),
     ...(cvShape?.warn ? [`${cvShape.label}\n→ ${[].concat(cvShape.fix || []).join('\n  ')}`] : []),
+    ...(userTemplates?.warn ? [`${userTemplates.label}\n→ ${[].concat(userTemplates.fix || []).join('\n  ')}`] : []),
     ...(envFileProfile ? [`${envFileProfile.label}\n→ ${envFileProfile.fix.join('\n  ')}`] : []),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 
-  const playwrightMcp = activeCli !== 'unknown' && MCP_CONFIGS.find((c) => c.cli === activeCli)
+  const playwrightMcp = activeCli !== 'unknown' && activeCli !== 'unset' && MCP_CONFIGS.find((c) => c.cli === activeCli)
     ? { [activeCli]: mcpCheck?.pass === true }
     : {};
 
@@ -1735,8 +1919,8 @@ function onboardingState(root) {
     // Travels in the JSON so a consumer can tell "nothing enabled" from "the
     // config did not parse" — the two used to be the same empty list.
     pluginConfigError = error;
-    plugins = discoverPlugins(pluginRoots(root)).map((m) => {
-      const s = pluginStatus(m, cfg);
+    plugins = activePlugins(codeRoot).map((m) => {
+      const s = pluginState(m, cfg);
       return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };
     });
   } catch { plugins = []; }

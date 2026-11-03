@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listTree } from '../lib/walk-tree.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -116,8 +117,9 @@ function runLatex(root, ...args) {
     cwd: root,
     encoding: 'utf-8',
     timeout: 30_000,
-    // No engine on PATH: the gate must decide before compilation is attempted,
-    // and a passing document then stops at "No LaTeX engine found".
+    // No engine on PATH: the gate must decide before compilation is attempted.
+    // A repo-local tectonic (node install-latex-engine.mjs) is still found,
+    // since resolveLatexEngine() tries it before PATH.
     env: { ...envWithoutPath(), CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '', PATH: dirname(process.execPath) },
   });
   let report = null;
@@ -130,12 +132,13 @@ test('generate-latex blocks an unsupported claim and does not compile', (t) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'output', 'cv.tex'), tex('Google', String.raw`Reduced latency by 95\%.`));
   const result = runLatex(root, 'output/cv.tex', 'output/cv.pdf');
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.equal(result.report?.factCheck?.verdict, 'block', result.stdout + result.stderr);
   assert.match(result.report.factCheck.reason, /95%/);
   assert.match(result.report.factCheck.reason, /organization=google/);
   assert.equal(result.report.compiled, false);
   assert.equal(result.report.compileError, undefined, 'compilation was attempted after the gate blocked');
+  assert.equal(result.report.engine, undefined, 'compilation was attempted after the gate blocked');
   assert.match(result.stderr, /Fact check failed for cv\.tex/);
 });
 
@@ -145,7 +148,11 @@ test('generate-latex lets a supported document through to compilation', (t) => {
   writeFileSync(join(root, 'output', 'cv.tex'), tex('Acme Corp', String.raw`Reduced latency by 15\%.`));
   const result = runLatex(root, 'output/cv.tex', 'output/cv.pdf', '--compile-only');
   assert.equal(result.report?.factCheck?.verdict, 'pass', result.stdout + result.stderr);
-  assert.match(result.report.compileError ?? '', /No LaTeX engine found/, 'the gate passed but compilation was never reached');
+  // Reaching compilation is what this proves, not how it ends: with no engine
+  // it stops at "No LaTeX engine found", and with a repo-local tectonic it
+  // compiles the fixture for real, which fails on the fixture's undefined macros.
+  const reached = result.report.engine !== undefined || /No LaTeX engine found/.test(result.report.compileError ?? '');
+  assert.ok(reached, `the gate passed but compilation was never reached: ${result.stdout}`);
 });
 
 test('generate-latex --source counts the user\'s own .tex as evidence', (t) => {
@@ -165,10 +172,11 @@ test('generate-latex names a --source file that does not exist', (t) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'output', 'cv.tex'), tex('Acme Corp', 'Led a team of 4 engineers.'));
   const result = runLatex(root, 'output/cv.tex', '--compile-only', '--source', 'no-such.tex');
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.equal(result.report?.factCheck?.verdict, 'block', result.stdout + result.stderr);
   assert.match(result.report.factCheck.reason, /--source file not found: .*no-such\.tex/);
   assert.equal(result.report.compileError, undefined, 'compilation was attempted after a missing --source');
+  assert.equal(result.report.engine, undefined, 'compilation was attempted after a missing --source');
 });
 
 test('generate-latex --skip-fact-check and a missing cv.md skip the gate', (t) => {

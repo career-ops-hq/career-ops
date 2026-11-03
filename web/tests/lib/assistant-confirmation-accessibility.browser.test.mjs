@@ -5,10 +5,11 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.ASSISTANT_CONFIRM_TEST_URL;
 
-test("assistant confirmation context and keyboard continuation during streaming", { skip: !url, timeout: 120_000 }, async (t) => {
+test("assistant confirmation context and keyboard continuation during streaming", { skip: liveServerSkip("ASSISTANT_CONFIRM_TEST_URL"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   let response;
@@ -65,7 +66,7 @@ test("assistant confirmation context and keyboard continuation during streaming"
   const proposal = (n, status) => `\n<<act:setStatus ${JSON.stringify({ n, status })}>>`;
 
   await page.goto(`${origin.origin}/pipeline?tab=ALL`);
-  const open = page.getByRole("button", { name: "Open assistant", exact: true });
+  const open = page.getByRole("button", { name: "Ask the assistant", exact: true });
   await open.waitFor();
   await tabTo(open);
   await page.keyboard.press("Enter");

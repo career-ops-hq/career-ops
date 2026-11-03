@@ -2,11 +2,12 @@
 // Real Chromium DOM / AX-tree checks, not manual screen-reader speech verification.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 const base = process.env.EXPLORE_EMPLOYER_TEST_URL;
 
 test(
   "employer preset keyboard flow, accessible validation and all terminal outcomes",
-  { skip: !base, timeout: 180_000 },
+  { skip: liveServerSkip("EXPLORE_EMPLOYER_TEST_URL"), timeout: 180_000 },
   async (t) => {
     const origin = new URL(base);
     assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname));
@@ -263,7 +264,7 @@ test(
 
 test(
   "legacy ATS and employer cards keep pipeline-add and evaluation behind explicit actions",
-  { skip: !base, timeout: 90_000 },
+  { skip: liveServerSkip("EXPLORE_EMPLOYER_TEST_URL"), timeout: 90_000 },
   async (t) => {
     const { chromium } = await import("playwright-core");
     const browser = await chromium.launch({

@@ -1,13 +1,13 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download, FileText } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { CANONICAL_STATES, canonStatus, scoreNum, scoreTone } from "@/lib/format";
+import { CANONICAL_STATES, scoreNum, scoreTone } from "@/lib/format";
 import { StatusSelect } from "@/components/status-select";
 import { applicationKey, applySavedStatus, saveStatuses } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
@@ -17,25 +17,41 @@ import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
-import { PIPELINE_TABS, pipelineQuery, pipelineTab } from "@/lib/pipeline-navigation.mjs";
+import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/lib/pipeline-navigation.mjs";
+import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
+import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { LinkedInPaste } from "@/components/linkedin-paste";
+import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
+import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
+import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
+import { listEntrySync } from "@/lib/history-back.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
+type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
 
 const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
+const VIEWS_KEY = "career-ops:pipeline-views";
+const REMOVAL_WARNING = "This removal is not saved yet. Reloading brings the view back.";
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
   applications,
   inbox,
   inboxCount,
+  trackerShape = "rows",
+  cvRows = [],
 }: {
   applications: Application[];
   inbox: InboxJob[] | null;
   inboxCount: number;
+  trackerShape?: "missing" | "empty" | "malformed" | "rows";
+  /** Tracker row numbers that have a tailored CV PDF on disk. */
+  cvRows?: string[];
 }) {
+  const hasCv = useMemo(() => new Set(cvRows), [cvRows]);
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -49,6 +65,14 @@ export function PipelineView({
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState("");
+  const [views, setViews] = useState<SavedView[]>([]);
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [viewError, setViewError] = useState("");
+  const [removalWarning, setRemovalWarning] = useState("");
+  const storageRejected = useRef(false);
+  const omittedWhileRejected = useRef(new Set<string>());
+  const pendingWhileRejected = useRef(new Set<string>());
   const activeTab = useRef<HTMLButtonElement>(null);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
@@ -60,46 +84,146 @@ export function PipelineView({
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
   const sortKey: SortKey = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : "score";
-  const sort = { key: sortKey, dir: (params.get("dir") === "1" ? 1 : -1) as 1 | -1 };
+  const sortDir: 1 | -1 = params.get("dir") === "1" ? 1 : -1;
+  const sort = { key: sortKey, dir: sortDir };
 
-  // Search stays LOCAL for snappy typing; seeded from the URL and re-synced only
-  // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
-  const [q, setQ] = useState(params.get("q") ?? "");
-  // Typing stays local, so include it explicitly when leaving the list.
-  const detailQuery = pipelineQuery(params.toString(), q);
-  const lastUrlQ = useRef(params.get("q") ?? "");
-  useEffect(() => {
-    const urlQ = params.get("q") ?? "";
-    if (urlQ !== lastUrlQ.current) {
-      lastUrlQ.current = urlQ;
-      setQ(urlQ);
-    }
-  }, [params]);
-
-  const setParams = useCallback(
+  // Search filters locally. The URL catches up once typing pauses, so a
+  // reload or the browser Back button still has it. Tab changes include the
+  // typed value immediately, before that pause.
+  const qRef = useRef(params.get("q") ?? "");
+  const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
-      const sp = new URLSearchParams(params.toString());
-      for (const [k, v] of Object.entries(updates)) {
-        if (v == null || v === "") sp.delete(k);
-        else sp.set(k, String(v));
+      const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
+      if (qs === params.toString()) return false;
+      const href = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Search already filtered the rows. A transition would hide them.
+      if (isSearchOnlyWrite(updates)) {
+        router.replace(href, { scroll: false });
+        return true;
       }
-      const qs = sp.toString();
-      if (qs === params.toString()) return;
       if (Object.prototype.hasOwnProperty.call(updates, "tab")) {
         const nextTab = String(updates.tab ?? "INBOX").toUpperCase();
         if ((PIPELINE_TABS as readonly string[]).includes(nextTab)) setPendingTab(nextTab as Tab);
       }
       startRouteProgress();
       startNavigation(() => {
-        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+        router.replace(href, { scroll: false });
       });
+      return true;
     },
     [params, router, pathname, startNavigation],
   );
+  const { q, setQ, setParams, cancelPendingSearch } = useListSearch(params, commitParams, qRef);
+  // Typing stays local until the URL catches up, so include it when leaving.
+  const detailQuery = pipelineQuery(params.toString(), q);
+  // The list entry has to carry that search too. Otherwise Back compares the
+  // return link with an older URL and opens a fresh list at the top.
+  function syncTypedSearch(event: MouseEvent<HTMLAnchorElement>) {
+    // A modified click leaves Pipeline open and opens the link elsewhere.
+    // replaceState would show the typed search while Next still has the old
+    // params, so the next sort deletes it. The other tab already has the href.
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1) return;
+    // The search timer would router.replace this list and can steal the click
+    // if the list is still mounted while the next page loads.
+    cancelPendingSearch();
+    const next = listEntrySync(pathname, params.toString(), q);
+    if (!next) return;
+    const state = window.history.state;
+    if (!state || state.__NA !== true) return;
+    window.history.replaceState(state, "", next);
+  }
 
   useEffect(() => {
     if (!isPending) setPendingTab(null);
   }, [isPending]);
+
+  useEffect(() => {
+    try {
+      setViews(parseViews(localStorage.getItem(VIEWS_KEY) || "[]"));
+    } catch {
+      setViews([]);
+    }
+  }, []);
+
+  function writeSavedViews(action: "save" | "remove", next: SavedView[]) {
+    const payload = savedViewPayload(action, next);
+    if (payload == null) return false;
+    try {
+      localStorage.setItem(VIEWS_KEY, payload);
+      storageRejected.current = false;
+      omittedWhileRejected.current.clear();
+      pendingWhileRejected.current.clear();
+      setViewError("");
+      setRemovalWarning("");
+      return true;
+    } catch {
+      storageRejected.current = true;
+      if (action === "remove") setRemovalWarning(REMOVAL_WARNING);
+      else setViewError("This view stays on this page only.");
+      return false;
+    }
+  }
+
+  function mutationBase(extraOmitted: string[] = []) {
+    const omitted = [...omittedWhileRejected.current, ...extraOmitted];
+    const pending = [...pendingWhileRejected.current];
+    try {
+      const stored = parseViews(localStorage.getItem(VIEWS_KEY) || "[]");
+      return { stored, base: viewsForMutation(views, stored, storageRejected.current, omitted, pending) };
+    } catch {
+      // Disk could not be read, so keep the in-memory list rather than dropping unchanged views.
+      return { stored: [] as SavedView[], base: viewsForMutation(views, [], true, omitted) };
+    }
+  }
+
+  function saveCurrentView(name: string) {
+    const view = normalizeView({ name, tab, q, min: minFilter, sort: sort.key, dir: sort.dir });
+    if (!view) {
+      setViewError("Name the view first.");
+      return;
+    }
+    const { stored, base } = mutationBase();
+    const next = upsertView(base, view);
+    const added = base.some((item) => item.name === view.name) || next.length > base.length;
+    const allow = [...omittedWhileRejected.current];
+    const pending = [...pendingWhileRejected.current];
+    if (!added || !keepsStoredNames(next, stored, allow) || !keepsPendingNames(next, pending, allow)) {
+      setViewError("Remove a view first.");
+      return;
+    }
+    omittedWhileRejected.current = new Set(omissionAfterAttempt(allow, view.name, true));
+    setViews(next);
+    setNaming(false);
+    setDraftName("");
+    setViewError("");
+    if (!writeSavedViews("save", next)) pendingWhileRejected.current.add(view.name);
+  }
+
+  function removeSavedView(name: string) {
+    const allow = [...omittedWhileRejected.current, name];
+    const pending = [...pendingWhileRejected.current];
+    const { stored, base } = mutationBase([name]);
+    const next = removeView(base, name);
+    if (!keepsStoredNames(next, stored, allow) || !keepsPendingNames(next, pending, allow)) {
+      // One removal may not free room for every pending view. Remember it
+      // and wait for a later write that can keep those views.
+      omittedWhileRejected.current.add(name);
+      pendingWhileRejected.current.delete(name);
+      setViews((current) => current.filter((view) => view.name !== name));
+      setRemovalWarning(REMOVAL_WARNING);
+      return;
+    }
+    setViews(next);
+    if (!writeSavedViews("remove", next)) {
+      omittedWhileRejected.current.add(name);
+      pendingWhileRejected.current.delete(name);
+    }
+  }
+
+  function applySaved(view: SavedView) {
+    setQ(view.q);
+    setParams(viewUpdates(view));
+  }
 
   // The table filters on a deferred copy of the search text. The input shows
   // each keystroke at once; re-filtering and re-rendering every tracker row
@@ -107,29 +231,68 @@ export function PipelineView({
   // keystroke arrives, so typing no longer waits on the whole table.
   const deferredQ = useDeferredValue(q);
 
-  const filtered = useMemo(() => {
-    if (tab === "INBOX") return [];
-    let rows = visibleApplications;
-    if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
-    if (minFilter != null) {
-      rows = rows.filter((r) => {
+  const query = deferredQ.trim();
+  const matchesFilters = useCallback(
+    (r: Application) => {
+      if (minFilter != null) {
         const n = scoreNum(r.score);
-        return !Number.isNaN(n) && n >= minFilter;
-      });
-    }
-    if (deferredQ.trim()) {
-      const needle = deferredQ.toLowerCase();
-      rows = rows.filter((r) => companySearchText(r).toLowerCase().includes(needle));
-    }
-    // scoreNum is the real score parser (it handles the tracker's "4.2/5"
-    // cells); sortRows takes it rather than keeping a second copy (#4333).
-    return sortRows(
-      rows,
-      sort,
-      scoreNum,
-      (row) => companyPresentation(row).label,
-    ) as Application[];
-  }, [visibleApplications, tab, deferredQ, sort, minFilter]);
+        if (Number.isNaN(n) || n < minFilter) return false;
+      }
+      return !query || companySearchText(r).toLowerCase().includes(query.toLowerCase());
+    },
+    [minFilter, query],
+  );
+
+  const tabRows = useMemo(() => {
+    if (tab === "INBOX") return [];
+    if (tab === "ALL") return visibleApplications;
+    return visibleApplications.filter((r) => rowOnPipelineTab(r.status, tab));
+  }, [visibleApplications, tab]);
+
+  const filtered = useMemo(
+    () =>
+      // scoreNum is the real score parser (it handles the tracker's "4.2/5"
+      // cells); sortRows takes it rather than keeping a second copy (#4333).
+      sortRows(
+        tabRows.filter(matchesFilters),
+        { key: sortKey, dir: sortDir },
+        scoreNum,
+        (row) => companyPresentation(row).label,
+      ) as Application[],
+    [tabRows, matchesFilters, sortKey, sortDir],
+  );
+
+  const filtering = query !== "" || minFilter != null;
+  const tabLabel = tab === "ALL" ? null : tab.charAt(0) + tab.slice(1).toLowerCase();
+  // The empty state needs the All-tab match count. Memoize it with the same
+  // inputs as the table filter so a keystroke, while the deferred query is
+  // unchanged, does not scan the tracker again.
+  const matchesInAll = useMemo(
+    () => visibleApplications.filter(matchesFilters).length,
+    [visibleApplications, matchesFilters],
+  );
+  const emptyState =
+    filtered.length > 0
+      ? null
+      : trackerEmptyState({ tabLabel, query, minScore: minFilter, matchesInAll });
+  const searchInput = useRef<HTMLInputElement>(null);
+
+  function clearSearch() {
+    setQ("");
+    searchInput.current?.focus();
+  }
+
+  const empty =
+    emptyState &&
+    emptyStateView(emptyState, {
+      tabLabel,
+      query,
+      minFilter,
+      showAll: () => setParams({ tab: "ALL" }),
+      clearSearch,
+      clearMin: () => setParams({ min: null }),
+    });
+  const filterStatus = isPending || !filtering ? "" : empty ? empty.heading : `${filtered.length} of ${tabRows.length} shown`;
 
   const filteredKeys = filtered.map(applicationKey);
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
@@ -183,11 +346,30 @@ export function PipelineView({
             <div className="relative w-64 max-w-[40vw]">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
               <input
+                ref={searchInput}
+                type="search"
+                aria-label="Search applications"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && q) {
+                    e.preventDefault();
+                    setQ("");
+                  }
+                }}
                 placeholder="Search company or role…"
-                className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+                className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-9 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 [&::-webkit-search-cancel-button]:appearance-none"
               />
+              {q && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={clearSearch}
+                  className="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-faint transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              )}
             </div>
             <button
               type="button"
@@ -203,6 +385,64 @@ export function PipelineView({
         )}
       </div>
 
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {visibleTab !== "INBOX" && <label className="inline-flex items-center gap-2 text-xs text-muted">
+          Score
+          <select
+            aria-label="Minimum score"
+            value={minFilter ?? ""}
+            onChange={(event) => setParams({ min: event.target.value === "" ? null : event.target.value })}
+            className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground"
+          >
+            <option value="">Any</option>
+            {minFilter != null && !SCORE_FLOORS.includes(minFilter) && (
+              <option value={String(minFilter)}>{minFilter}+</option>
+            )}
+            {SCORE_FLOORS.map((floor) => (
+              <option key={floor} value={String(floor)}>{floor.toFixed(1)}+</option>
+            ))}
+          </select>
+        </label>}
+        {views.map((view) => {
+          const active = view.tab === tab && view.q === q && view.min === minFilter && view.sort === sort.key && view.dir === sort.dir;
+          return (
+            <span key={view.name} className={cn("inline-flex items-center rounded-full border", active ? "border-brand/40 bg-brand-soft" : "border-border bg-surface/60")}>
+              <button type="button" onClick={() => applySaved(view)} className="px-2.5 py-1 text-xs font-medium text-foreground">
+                {view.name}
+              </button>
+              <button type="button" aria-label={`Remove view ${view.name}`} onClick={() => removeSavedView(view.name)} className="px-1.5 text-xs text-faint hover:text-foreground">
+                ×
+              </button>
+            </span>
+          );
+        })}
+        {naming ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveCurrentView(draftName);
+            }}
+            className="inline-flex items-center gap-2"
+          >
+            <input
+              aria-label="View name"
+              value={draftName}
+              autoFocus
+              onChange={(event) => setDraftName(event.target.value)}
+              className="w-36 rounded-md border border-border bg-surface px-2 py-1 text-sm outline-none focus:border-brand/50"
+            />
+            <button type="submit" className="text-xs font-medium text-brand-text">Save</button>
+            <button type="button" onClick={() => { setNaming(false); setDraftName(""); setViewError(""); }} className="text-xs text-muted">Cancel</button>
+          </form>
+        ) : (
+          <button type="button" onClick={() => { setViewError(""); setNaming(true); }} className="rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted hover:text-foreground">
+            Save view
+          </button>
+        )}
+        {viewError && <span role="alert" className="text-xs text-red-500">{viewError}</span>}
+        {removalWarning && <span role="alert" className="text-xs text-red-500">{removalWarning}</span>}
+      </div>
+
       {/* tabs */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
         {PIPELINE_TABS.map((t) => {
@@ -211,7 +451,8 @@ export function PipelineView({
               ? inboxCount
               : t === "ALL"
                 ? visibleApplications.length
-                : visibleApplications.filter((r) => canonStatus(r.status).includes(t)).length;
+                : visibleApplications.filter((r) => rowOnPipelineTab(r.status, t)).length;
+          if (t === "OTHER" && count === 0 && visibleTab !== "OTHER") return null;
           return (
             <button
               key={t}
@@ -242,13 +483,19 @@ export function PipelineView({
           <button
             type="button"
             onClick={() => setParams({ min: null })}
-            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
+            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text transition-colors hover:bg-brand/15"
             title="Clear score filter"
           >
             score ≥ {minFilter.toFixed(1)}
             <X className="size-3" />
           </button>
         </div>
+      )}
+
+      {visibleTab !== "INBOX" && (
+        <p role="status" className={cn("text-xs tabular-nums text-muted", empty ? "sr-only" : filterStatus && "mt-3")}>
+          {filterStatus}
+        </p>
       )}
 
       {visibleTab !== "INBOX" && selectedRows.length > 0 && (
@@ -270,14 +517,15 @@ export function PipelineView({
             type="button"
             onClick={applyBulkStatus}
             disabled={!bulkStatus || bulkBusy}
-            className="rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand disabled:opacity-50"
+            className="rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text disabled:opacity-50"
           >
             {bulkBusy ? "Saving…" : "Apply"}
           </button>
           {selectedRows.length >= 2 && selectedRows.length <= COMPARE_MAX && (
             <Link
-              href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}`}
-              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand"
+              href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}${detailQuery ? `&${detailQuery}` : ""}`}
+              onClick={syncTypedSearch}
+              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand-text"
             >
               Compare
             </Link>
@@ -303,6 +551,7 @@ export function PipelineView({
             </div>
           ) : (
             <>
+              <LinkedInPaste />
               <InboxTriage inbox={inbox} />
               {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
             </>
@@ -345,6 +594,7 @@ export function PipelineView({
                     </button>
                   </th>
                 ))}
+                <th className="whitespace-nowrap px-4 py-2.5 font-medium">resume</th>
               </tr>
             </thead>
             {/* Keep editors mounted while query navigation is pending: sorting
@@ -366,26 +616,26 @@ export function PipelineView({
                       />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
-                      <Link href={detailHref} tabIndex={-1} className="transition-colors group-hover:text-brand">
+                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch} className="transition-colors group-hover:text-brand-text">
                         #{r.n}
                       </Link>
                     </td>
                     <td className="px-4 py-3 font-medium">
-                      <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+                      <Link href={detailHref} onClick={syncTypedSearch} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
                         <CompanyLogo name={company.logoName} size={20} />
                         {company.label}
                       </Link>
                     </td>
                   <td className="px-4 py-3 text-muted">
                     <div className="flex items-center gap-2">
-                      <Link href={detailHref} tabIndex={-1}>{r.role}</Link>
+                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch}>{r.role}</Link>
                       {posting && (
                         <a
                           href={posting}
                           target="_blank"
                           rel="noreferrer"
                           title={posting}
-                          className="inline-flex shrink-0 items-center gap-1 text-xs text-brand hover:underline"
+                          className="inline-flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline"
                         >
                           {postingLabel(posting)}
                           <ExternalLink className="size-3" />
@@ -406,7 +656,7 @@ export function PipelineView({
                         // If this focused row leaves its tab, preserve a useful
                         // focus target. Do not interrupt someone using search.
                         const focusedRow = document.activeElement?.closest("tr");
-                        if (tab !== "ALL" && !canonStatus(status).includes(tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
+                        if (tab !== "ALL" && !rowOnPipelineTab(status, tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
                           activeTab.current?.focus();
                         }
                         setAnnouncement(`Application #${r.n} status saved as ${status}.`);
@@ -418,6 +668,21 @@ export function PipelineView({
                     />
                   </td>
                   <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {hasCv.has(r.n) ? (
+                      <a
+                        href={`/api/cv-pdf?application=${encodeURIComponent(r.n)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open the tailored CV PDF"
+                        className="inline-flex items-center gap-1.5 text-brand-text hover:underline"
+                      >
+                        <FileText aria-hidden="true" className="size-3.5" /> PDF
+                      </a>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
                   </tr>
                 );
               })}
@@ -429,13 +694,79 @@ export function PipelineView({
             )}
           </table>
         </div>
-      ) : (
+      ) : trackerEmptyMessage({ shape: trackerShape, query, min: minFilter, tab }).kind === "filtered" ? (
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-          <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
+          <h2 className="font-display text-lg">{empty?.heading}</h2>
+          {empty && empty.actions.length > 0 && (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {empty.actions.map(({ label, run }, i) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={run}
+                  className={cn(
+                    "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-brand/40",
+                    i === 0
+                      ? "border-brand/40 bg-brand-soft text-brand-text hover:bg-brand/15"
+                      : "border-border text-muted hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+      ) : (
+        <EmptyTracker shape={trackerShape} query={deferredQ} min={minFilter} tab={tab} />
       )}
     </PageFrame>
+  );
+}
+
+function emptyStateView(
+  state: TrackerEmptyState,
+  ctx: {
+    tabLabel: string | null;
+    query: string;
+    minFilter: number | null;
+    showAll: () => void;
+    clearSearch: () => void;
+    clearMin: () => void;
+  },
+): { heading: string; actions: { label: string; run: () => void }[] } {
+  const copy = trackerEmptyPresentation(state, { tabLabel: ctx.tabLabel, query: ctx.query, minScore: ctx.minFilter });
+  const run = {
+    "show-all": ctx.showAll,
+    "clear-search": ctx.clearSearch,
+    "clear-min": ctx.clearMin,
+  };
+  return {
+    heading: copy.heading,
+    actions: copy.actions.map((action) => ({ label: action.label, run: run[action.id] })),
+  };
+}
+
+function EmptyTracker({
+  shape,
+  query,
+  min,
+  tab,
+}: {
+  shape: string;
+  query: string;
+  min: number | null;
+  tab: string;
+}) {
+  const copy = trackerEmptyMessage({ shape, query, min, tab });
+  return (
+    <div
+      role={copy.kind === "malformed" ? "alert" : "status"}
+      className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center"
+    >
+      <p className="font-display text-lg">{copy.title}</p>
+      <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{copy.detail}</p>
+    </div>
   );
 }
 
@@ -452,7 +783,7 @@ function InboxEmpty({ tracked }: { tracked: number }) {
       </div>
       <div className="px-6 py-10 text-center">
         <p className="font-display text-lg">
-          Your <span className="text-brand">inbox</span> is empty.
+          Your <span className="text-brand-text">inbox</span> is empty.
         </p>
         {tracked > 0 && (
           <p className="mx-auto mt-2 max-w-sm text-sm text-muted">

@@ -21,6 +21,10 @@
  *                                        # the update completes, rollback leaves it alone
  *   node upgrade-tests.mjs --failed-install # npm install fails: apply says so and exits 1,
  *                                        # rollback reinstalls the restored package.json
+ *   node upgrade-tests.mjs --local-edit  # a system file this install changed is kept by
+ *                                        # apply and replaced only by apply --force (#2337)
+ *   node upgrade-tests.mjs --local-edit-canary # the same leg on an inverted --force
+ *                                        # branch must go RED
  */
 import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -726,6 +730,157 @@ function failedInstallLeg() {
   process.exit(failures.length ? 1 : 0);
 }
 
+/** Local-edit leg (#2337, #5759): a system file this install changed itself is
+ *  kept by a real `apply`, and overwritten only under `--force`.
+ *
+ *  Until this leg, the decision inside apply() was checked by a regex over its
+ *  source that matched the inverted branch just as well, and no leg committed
+ *  a local edit before applying, so the keep/overwrite path never ran in CI.
+ *
+ *  The mirror gets one commit on top of the commit under test that changes
+ *  EDITED, so upstream moves the file too and the local edit is really at risk.
+ *  Two fresh installs at the old tag commit the same local fix to EDITED; one
+ *  runs `apply --confirm`, the other `apply --force --confirm`.
+ *
+ *  Expected: the plain apply keeps the local file byte for byte, writes a .bak
+ *  of it and names the file as kept; the forced apply lands the target's blob,
+ *  leaves the local fix in the .bak and says it overwrote. Both exit 0.
+ *
+ *  Non-vacuity: `--local-edit-canary` inverts the `if (updateForce)` branch in
+ *  the target's updater and must see this leg go RED. A leg never seen red
+ *  proves nothing.
+ */
+const LOCAL_EDIT_FILE = 'modes/README.md';
+const FORCE_BRANCH = "      if (updateForce) {\n        console.log('--force: overwriting them with the upstream version.');";
+
+function localEditLeg({ invertForce = false } = {}) {
+  const label = invertForce ? 'local-edit-canary' : 'local-edit';
+  const baseSha = git(ROOT, 'rev-parse', 'HEAD');
+  const oldTag = newestAncestorTag(baseSha);
+  if (!oldTag) { console.error('No release tag is an ancestor of HEAD — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
+
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-localedit-')));
+  const failures = [];
+  const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [${label}] ${msg}`); if (!cond) failures.push(msg); };
+  const commit = (cwd, msg) => git(cwd, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test',
+    '-c', 'commit.gpgsign=false', 'commit', '-qm', msg);
+  const outputs = [];
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+    try { git(mirror, 'cat-file', '-e', `${oldTag}:${LOCAL_EDIT_FILE}`); } catch {
+      throw new Error(`${LOCAL_EDIT_FILE} is not in ${oldTag} — pick another system file for this leg`);
+    }
+
+    // Upstream changes the same file, so the target's blob differs from both
+    // the old tag's and the local fix.
+    const wt = join(work, 'upstream-wt');
+    git(mirror, 'worktree', 'add', wt, 'main');
+    writeFileSync(join(wt, LOCAL_EDIT_FILE), `${readFileSync(join(wt, LOCAL_EDIT_FILE), 'utf-8')}\n<!-- upstream change (upgrade-tests --local-edit) -->\n`);
+    git(wt, 'add', LOCAL_EDIT_FILE);
+    if (invertForce) {
+      const updater = readFileSync(join(wt, 'update-system.mjs'), 'utf-8');
+      if (!updater.includes(FORCE_BRANCH)) throw new Error('Could not find the --force branch to invert (apply() changed?) — update FORCE_BRANCH');
+      writeFileSync(join(wt, 'update-system.mjs'), updater.replace(FORCE_BRANCH, FORCE_BRANCH.replace('if (updateForce)', 'if (!updateForce)')));
+      git(wt, 'add', 'update-system.mjs');
+    }
+    commit(wt, invertForce ? 'canary: upstream edit + inverted --force branch' : 'upstream: change a file this install also changed');
+    const targetSha = git(wt, 'rev-parse', 'HEAD');
+    git(mirror, 'worktree', 'remove', '--force', wt);
+    git(mirror, 'update-ref', 'refs/heads/main', targetSha);
+    const targetBlob = git(mirror, 'rev-parse', `${targetSha}:${LOCAL_EDIT_FILE}`);
+    const cfg = writeGitConfig(work, mirror);
+
+    for (const force of [false, true]) {
+      const mode = force ? 'apply --force' : 'apply';
+      const install = join(work, force ? 'install-force' : 'install-keep');
+      git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+      git(install, 'remote', 'set-url', 'origin', CANONICAL);
+      const { manifest } = seedFixture(install, { state: fixtureStateFor(oldTag) });
+
+      // The install's own fix, committed the way a user versions it.
+      const edited = join(install, LOCAL_EDIT_FILE);
+      writeFileSync(edited, `${readFileSync(edited, 'utf-8')}\n<!-- local fix: this install's own change -->\n`);
+      git(install, 'add', LOCAL_EDIT_FILE);
+      commit(install, 'local: fix a system file');
+      const localContent = readFileSync(edited, 'utf-8');
+
+      const run = spawnSync(process.execPath, ['update-system.mjs', 'apply', ...(force ? ['--force'] : []), '--confirm'], {
+        cwd: install, encoding: 'utf-8', timeout: 300000,
+        env: { ...hermeticEnv(cfg), CAREER_OPS_UPDATE_CONFIRM: '1' },
+      });
+      const exitCode = run.status ?? 1;
+      const output = `${run.stdout ?? ''}${run.stderr ?? ''}${run.error ? `\n${run.error.message}` : ''}`;
+      outputs.push([mode, output]);
+
+      ok(exitCode === 0, `${mode} exits 0 (got ${exitCode})`);
+      ok(output.includes(`${LOCAL_EDIT_FILE}  (local copy saved: ${LOCAL_EDIT_FILE}.bak)`),
+        `${mode} lists ${LOCAL_EDIT_FILE} as changed by this install`);
+      const bak = `${edited}.bak`;
+      ok(existsSync(bak) && readFileSync(bak, 'utf-8') === localContent, `${mode} leaves the local fix in ${LOCAL_EDIT_FILE}.bak`);
+      const onDisk = existsSync(edited) ? readFileSync(edited, 'utf-8') : null;
+      if (force) {
+        ok(onDisk !== null && git(install, 'hash-object', LOCAL_EDIT_FILE) === targetBlob,
+          `${mode} replaces the local fix with the target's ${LOCAL_EDIT_FILE}`);
+        ok(output.includes('--force: overwriting them with the upstream version.'), `${mode} says it overwrote`);
+      } else {
+        ok(onDisk === localContent, `${mode} keeps the local fix byte-identical`);
+        ok(output.includes('Keeping your versions.'), `${mode} says it kept the local version`);
+      }
+      // The rest of the update lands either way.
+      ok(git(install, 'rev-parse', 'HEAD:update-system.mjs') === git(mirror, 'rev-parse', `${targetSha}:update-system.mjs`),
+        `${mode}: the rest of the update landed (updater matches the target)`);
+      for (const [f, hash] of Object.entries(manifest)) {
+        const p = join(install, f);
+        ok(existsSync(p) && sha256(p) === hash, `${mode}: user file byte-identical: ${f}`);
+      }
+    }
+  } finally {
+    if (failures.length && !invertForce) {
+      for (const [mode, output] of outputs) {
+        console.log(`  --- ${mode} output tail [${label}] ---`);
+        console.log(output.split('\n').slice(-20).join('\n'));
+      }
+    }
+    rmSync(work, { recursive: true, force: true });
+  }
+  return failures;
+}
+
+function localEdit() {
+  const failures = localEditLeg();
+  console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
+  process.exit(failures.length ? 1 : 0);
+}
+
+/** The local-edit leg against a target whose `if (updateForce)` is inverted:
+ *  the plain apply then overwrites the local fix, the forced apply keeps it,
+ *  and exactly those four assertions MUST fail. Any other failure (setup, the
+ *  backup, the rest of the update, a user file) is not the flip being caught,
+ *  so it turns the canary red instead of passing for it. */
+const LOCAL_EDIT_CANARY_FAILURES = [
+  'apply keeps the local fix byte-identical',
+  'apply says it kept the local version',
+  `apply --force replaces the local fix with the target's ${LOCAL_EDIT_FILE}`,
+  'apply --force says it overwrote',
+];
+
+function localEditCanary() {
+  const failures = localEditLeg({ invertForce: true });
+  const expected = new Set(LOCAL_EDIT_CANARY_FAILURES);
+  const missing = LOCAL_EDIT_CANARY_FAILURES.filter((f) => !failures.includes(f));
+  const unexpected = failures.filter((f) => !expected.has(f));
+  if (missing.length === 0 && unexpected.length === 0 && failures.length === expected.size) {
+    console.log('CANARY GREEN: the local-edit leg caught the inverted --force branch, and failed nothing else');
+    process.exit(0);
+  }
+  console.error('CANARY RED: the local-edit leg did not fail exactly as the inverted --force branch should — do not trust that leg');
+  if (missing.length) console.error(`  expected to fail but passed: ${missing.join('; ')}`);
+  if (unexpected.length) console.error(`  failed but not expected to: ${unexpected.join('; ')}`);
+  if (failures.length !== new Set(failures).size) console.error(`  an assertion failed more than once: ${failures.join('; ')}`);
+  process.exit(1);
+}
+
 if (isMainModule(import.meta.url)) {
   const mode = process.argv[2];
   if (mode === '--pr-gate') prGate();
@@ -733,5 +888,7 @@ if (isMainModule(import.meta.url)) {
   else if (mode === '--local-paths') localPathsLeg();
   else if (mode === '--user-layer-refusal') userLayerRefusalLeg();
   else if (mode === '--failed-install') failedInstallLeg();
-  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths | --user-layer-refusal | --failed-install'); process.exit(1); }
+  else if (mode === '--local-edit') localEdit();
+  else if (mode === '--local-edit-canary') localEditCanary();
+  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths | --user-layer-refusal | --failed-install | --local-edit | --local-edit-canary'); process.exit(1); }
 }

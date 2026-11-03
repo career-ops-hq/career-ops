@@ -13,15 +13,16 @@ import type { Application } from "@/lib/career-ops";
 import type { CardReason } from "@/lib/machine-summary.mjs";
 
 const DECISION_TONE: Record<string, string> = {
-  Apply: "text-emerald-600 dark:text-emerald-400",
+  Apply: "text-emerald-800 dark:text-emerald-400",
   Consider: "text-sky-600 dark:text-sky-400",
-  "Research first": "text-amber-600 dark:text-amber-400",
+  "Research first": "text-amber-800 dark:text-amber-400",
   Skip: "text-muted",
 };
 
 // Awaiting-decision row: a scored role with no terminal status. Primary action
-// opens the report (PDF + Apply live there). Skip / Applied still write status.
-export function DecisionCard({ app, reason }: { app: Application; reason?: CardReason }) {
+// opens the report (PDF + Apply live there). Skip / Applied still write status,
+// and onDecided lets the parent offer an undo once the card is gone.
+export function DecisionCard({ app, reason, onDecided }: { app: Application; reason?: CardReason; onDecided?: (status: "Applied" | "Discarded") => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
@@ -48,6 +49,7 @@ export function DecisionCard({ app, reason }: { app: Application; reason?: CardR
         return;
       }
       setDone(status);
+      onDecided?.(status);
       router.refresh();
     } catch {
       setError("Could not confirm the change. Check your connection and pipeline, then retry.");
@@ -72,7 +74,7 @@ export function DecisionCard({ app, reason }: { app: Application; reason?: CardR
           <span
             className={cn(
               "shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold tabular-nums",
-              tone === "good" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : tone === "warn" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-surface-hover text-muted",
+              tone === "good" ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" : tone === "warn" ? "bg-amber-500/10 text-amber-800 dark:text-amber-400" : "bg-surface-hover text-muted",
             )}
           >
             {app.score}
@@ -82,8 +84,8 @@ export function DecisionCard({ app, reason }: { app: Application; reason?: CardR
       {reason && (
         <div data-testid="card-reason" className="space-y-0.5 text-xs leading-snug">
           {reason.decision && <p className={cn("font-medium", DECISION_TONE[reason.decision] ?? "text-muted")}>{reason.decision}</p>}
-          {reason.plus && <p className="line-clamp-1 text-muted"><span className="text-emerald-600 dark:text-emerald-400">+</span> {reason.plus}</p>}
-          {reason.minus && <p className="line-clamp-1 text-muted"><span className="text-red-600 dark:text-red-400">−</span> {reason.minus}</p>}
+          {reason.plus && <p className="line-clamp-1 text-muted"><span className="text-emerald-800 dark:text-emerald-400">+</span> {reason.plus}</p>}
+          {reason.minus && <p className="line-clamp-1 text-muted"><span className="text-red-700 dark:text-red-400">−</span> {reason.minus}</p>}
         </div>
       )}
       <div className="flex items-center gap-2">
@@ -115,7 +117,7 @@ export function DecisionCard({ app, reason }: { app: Application; reason?: CardR
         </button>
       </div>
       {error && (
-        <div role="alert" className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
+        <div role="alert" className="flex items-start gap-2 text-xs text-red-700 dark:text-red-400">
           <p className="min-w-0 flex-1">{error}</p>
           {failedStatus && <button type="button" disabled={!!busy} onClick={() => setStatus(failedStatus)} className="shrink-0 underline disabled:opacity-60 max-sm:min-h-[44px]">Retry</button>}
         </div>

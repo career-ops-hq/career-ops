@@ -45,6 +45,9 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { visibleText } from './_html-to-text.mjs';
+
+export { visibleText } from './_html-to-text.mjs';
 
 const TRUSTED_HOST = 'careerviet.vn';
 const BASE_URL = 'https://careerviet.vn/viec-lam';
@@ -106,20 +109,6 @@ function assertCareerVietUrl(url) {
   return url;
 }
 
-/**
- * Collapse a markup fragment to its visible text.
- * @param {string} fragment
- * @returns {string}
- */
-export function visibleText(fragment) {
-  return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 /**
  * Only Ho Chi Minh's code was confirmed live on 2026-08-26. Hanoi/Da Nang

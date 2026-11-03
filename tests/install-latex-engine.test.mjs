@@ -269,7 +269,7 @@ test('install-latex-engine --help prints usage and exits 0', () => {
 
 test('install-latex-engine rejects an unrecognized flag before doing anything', () => {
   const result = run(SCRIPT, ['--chekc']);
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.match(result.all, /unrecognized flag\(s\): --chekc/i);
   assert.doesNotMatch(result.all, /Downloading/);
 });

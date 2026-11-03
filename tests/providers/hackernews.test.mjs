@@ -104,6 +104,84 @@ try {
     fail(`parseHnComment body-paragraph URL: ${JSON.stringify(parsedBleed?.url)}`);
   }
 
+  // parseHnComment ─ posting URL selection. Taking the first URL anywhere picked
+  // up company homepages, links to other HN comments, videos and referral links.
+  const PERMALINK = 'https://news.ycombinator.com/item?id=7001';
+  const homepageFirst = '<p>Acme | Backend Engineer | Remote<p>Acme (<a href="https://acme.example.com">https://acme.example.com</a>) builds rockets. '
+    + 'Demo: https://video.example.com/watch?v=abc. Apply: <a href="https://boards.greenhouse.io/acme/jobs/123">here</a>';
+  const pickedAts = parseHnComment(homepageFirst, PERMALINK);
+  if (pickedAts?.url === 'https://boards.greenhouse.io/acme/jobs/123') {
+    pass('parseHnComment prefers a known-ATS URL over an earlier homepage / video link');
+  } else {
+    fail(`parseHnComment ATS preference: ${JSON.stringify(pickedAts?.url)}`);
+  }
+
+  const hnLinkFirst = 'Acme | Data Engineer | Berlin\nSee my earlier post https://news.ycombinator.com/item?id=6000 '
+    + 'and our homepage https://acme.example.com. Openings: https://acme.example.com/careers/data-engineer';
+  const pickedPath = parseHnComment(hnLinkFirst, PERMALINK);
+  if (pickedPath?.url === 'https://acme.example.com/careers/data-engineer') {
+    pass('parseHnComment prefers a /careers path over an HN comment link and a homepage');
+  } else {
+    fail(`parseHnComment careers-path preference: ${JSON.stringify(pickedPath?.url)}`);
+  }
+
+  const headerUrl = 'Acme | SRE | Remote | https://acme.example.com/apply\nAlso hiring: https://jobs.lever.co/acme/abc';
+  const pickedHeader = parseHnComment(headerUrl, PERMALINK);
+  if (pickedHeader?.url === 'https://acme.example.com/apply') {
+    pass('parseHnComment takes the header URL field before any URL in the body');
+  } else {
+    fail(`parseHnComment header URL field: ${JSON.stringify(pickedHeader?.url)}`);
+  }
+
+  const noJobLink = 'Acme | Designer | Remote\nWe were featured at https://press.example.com/acme-raises. '
+    + 'Ping me via https://refer.example.com/r/xyz or https://acme.example.com';
+  const pickedFallback = parseHnComment(noJobLink, PERMALINK);
+  if (pickedFallback?.url === PERMALINK) {
+    pass('parseHnComment falls back to the comment permalink when no URL looks like a job link');
+  } else {
+    fail(`parseHnComment permalink fallback: ${JSON.stringify(pickedFallback?.url)}`);
+  }
+
+  // parseHnComment ─ company is the cleaned first header field
+  const urlCompany = parseHnComment('Acme https://acme.example.com | Engineer | Remote', PERMALINK);
+  if (urlCompany?.company === 'Acme') {
+    pass('parseHnComment strips a URL out of the company field');
+  } else {
+    fail(`parseHnComment company with URL: ${JSON.stringify(urlCompany?.company)}`);
+  }
+  const bareUrlCompany = parseHnComment('https://acme.example.com | Engineer | Remote', PERMALINK);
+  const placeholderCompany = parseHnComment('name | Engineer | Remote | https://acme.example.com/jobs/1', PERMALINK);
+  const bracketPlaceholder = parseHnComment('[Company Name] | Engineer | Remote', PERMALINK);
+  if (bareUrlCompany?.company === '' && placeholderCompany?.company === '' && bracketPlaceholder?.company === '') {
+    pass('parseHnComment leaves company empty for a bare URL or a placeholder like "name"');
+  } else {
+    fail(`parseHnComment placeholder company: ${JSON.stringify([bareUrlCompany?.company, placeholderCompany?.company, bracketPlaceholder?.company])}`);
+  }
+  const parenCompany = parseHnComment('Acme (https://acme.example.com) | Engineer | Remote', PERMALINK);
+  if (parenCompany?.company === 'Acme') {
+    pass('parseHnComment drops the empty parentheses a stripped URL leaves behind');
+  } else {
+    fail(`parseHnComment paren company: ${JSON.stringify(parenCompany?.company)}`);
+  }
+  const bracketed = parseHnComment('Acme | Engineer | Remote | [https://acme.example.com/jobs/123]', PERMALINK);
+  if (bracketed?.url === 'https://acme.example.com/jobs/123') {
+    pass('parseHnComment trims the closing bracket around a bracketed link');
+  } else {
+    fail(`parseHnComment bracketed url: ${JSON.stringify(bracketed?.url)}`);
+  }
+  const ipv6 = parseHnComment('Acme | Engineer | Remote | http://[::1]/jobs/123', PERMALINK);
+  if (ipv6?.url === 'http://[::1]/jobs/123') {
+    pass('parseHnComment keeps the brackets of an IPv6 host');
+  } else {
+    fail(`parseHnComment ipv6 url: ${JSON.stringify(ipv6?.url)}`);
+  }
+  const bracketedIpv6 = parseHnComment('Acme | Engineer | Remote | [http://[::1]/jobs/123]', PERMALINK);
+  if (bracketedIpv6?.url === 'http://[::1]/jobs/123') {
+    pass('parseHnComment trims the wrapper bracket around an IPv6 link');
+  } else {
+    fail(`parseHnComment bracketed ipv6 url: ${JSON.stringify(bracketedIpv6?.url)}`);
+  }
+
   // parseHnComment ─ deleted / empty comments return null
   if (parseHnComment('', '') === null && parseHnComment(null, '') === null) {
     pass('parseHnComment returns null for empty / null input');

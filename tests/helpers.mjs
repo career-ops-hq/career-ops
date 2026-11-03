@@ -4,12 +4,13 @@
 import { execFileSync } from 'child_process';
 import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { basename, join, dirname, resolve, sep } from 'path';
+import { basename, join, dirname, resolve, sep, delimiter } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { localToday } from '../lib/local-today.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
+import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -31,6 +32,11 @@ export const NODE = process.execPath;
 // overwritten by a later .env load (#4707 did the same for one test and
 // CAREER_OPS_PIPELINE). A test that needs the override sets its own.
 process.env.CAREER_OPS_TRACKER = '';
+
+// A shell that opted into the shared PDF painter must not make the suite
+// attach to that painter or start one. Blanked rather than deleted, same as
+// the tracker override above. A test that wants the painter sets it itself.
+process.env.CAREER_OPS_PDF_SHARED = '';
 
 // The same rule for the data root itself, which is where everything else a
 // script reads and writes is resolved from (#5113). Left alone, the suite ran
@@ -118,7 +124,7 @@ pinSandboxDataRoot();
  * @returns {NodeJS.ProcessEnv}
  */
 export function ownRootEnv(extra = {}) {
-  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', ...extra };
+  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_PDF_SHARED: '', ...extra };
 }
 
 let realRootChecked = false;
@@ -249,6 +255,22 @@ export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
  * @returns {void}
  */
 export function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
+
+/**
+ * Report that a tool this suite needs is missing (see tests/required-tools.mjs).
+ *
+ * A warning on a machine that simply lacks the tool, and a failure in a run
+ * that must have it (`test-all.mjs --needs <tool>`, or its variable set to 1),
+ * where a skip would turn the check green without running it.
+ *
+ * @param {'browser'|'latex'} tool
+ * @param {string} msg - What was skipped and why.
+ * @returns {void}
+ */
+export function toolUnavailable(tool, msg) {
+  if (toolRequired(tool)) fail(`${msg} — ${REQUIRED_TOOL_ENV[tool]}=1, so a missing ${tool} is a failure in this run`);
+  else warn(msg);
+}
 
 /** Current counter snapshot. */
 export function results() { return { passed, failed, warnings }; }
@@ -428,6 +450,12 @@ function resolveAllowedExecutable(cmd) {
   for (const candidate of WINDOWS_BASH_CANDIDATES) {
     if (cmd === candidate) return candidate;
   }
+  // The PATH probe resolves bash to an install dir the candidate list does not
+  // know (a Git outside Program Files/Scoop, e.g. D:\Git). Allow exactly the
+  // path getBash() itself resolved and memoized — never an arbitrary caller
+  // string: bash callers reach it as run(getBash(), ...), so the cache is set
+  // by construction, and what it holds is the same shell the probes ran.
+  if (bashCache !== null && cmd === bashCache) return cmd;
   throw new Error(`run(): executable not in the test-helper allowlist: ${cmd}`);
 }
 
@@ -473,6 +501,9 @@ export function run(cmd, args = [], opts = {}) {
     lastFailure = {
       status: e?.status ?? null,
       signal: e?.signal ?? null,
+      // 'ETIMEDOUT' when the timeout killed the child. A killed child has no
+      // exit status, so this is the only field that says it ran out of time.
+      code: e?.code ?? null,
       stdout: e?.stdout == null ? '' : String(e.stdout),
       stderr: e?.stderr == null ? '' : String(e.stderr),
     };
@@ -490,7 +521,7 @@ let lastFailure = null;
  * Cleared by a successful run so a stale record is never attributed to a later
  * command. The suite is sequential, so "most recent" is unambiguous.
  *
- * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string}|null}
+ * @returns {{status: number|null, signal: string|null, code: string|null, stdout: string, stderr: string}|null}
  */
 // describeSpawn lives in helpers/describe-spawn.mjs and is re-exported here so
 // the 410 tests that already import from this file can reach it. It is a
@@ -502,6 +533,39 @@ export { describeSpawn } from './helpers/describe-spawn.mjs';
 
 export function lastRunFailure() {
   return lastFailure;
+}
+
+// A V8 stack frame as Node prints it for an uncaught exception:
+// `    at fn (/path/file.mjs:12:5)`, `    at /path/file.mjs:12:5`.
+const STACK_FRAME_RE = /^ {4}at \S.*:\d+:\d+\)?$/m;
+
+/**
+ * Run a command that is expected to refuse its input, and report whether it
+ * refused it the intended way.
+ *
+ * `run(...) === null` is not that check. run() returns null for every failure:
+ * the intended rejection, but also an uncaught TypeError (Node exits 1 for that
+ * too), a signal, and the 30 s timeout. A script that crashed on the bad input
+ * therefore read as "correctly rejected". This requires the expected exit
+ * status, no signal, the expected message on stderr, and no stack trace there,
+ * so a crash whose text happens to contain the message still fails.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} args - Argument vector.
+ * @param {{stderr: string|RegExp, status?: number|null}} expected - The rejection:
+ *   a substring (or pattern) stderr must contain, and the exit status (default 1).
+ *   A signal-killed child has status null; it still never passes, since any
+ *   signal is refused.
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {boolean} True only for the intended rejection. On false,
+ *   formatRunFailure() describes what the child actually did.
+ */
+export function runRejects(cmd, args, { stderr, status = 1 }, opts = {}) {
+  if (run(cmd, args, opts) !== null) return false;
+  const f = lastFailure;
+  if (!f || f.signal !== null || f.status !== status) return false;
+  if (STACK_FRAME_RE.test(f.stderr)) return false;
+  return typeof stderr === 'string' ? f.stderr.includes(stderr) : stderr.test(f.stderr);
 }
 
 /**
@@ -1187,9 +1251,9 @@ let bashSourceCache = null;
  * Which probe in getBash() produced the current bash, or null before the first
  * getBash() call.
  *
- * getBash() returns the bare string 'bash' from three different branches -- the
- * WSL probe, the PATH probe, and the give-up path -- so its return value alone
- * cannot tell a caller which shell it is about to run. On Windows those are not
+ * getBash() returns the bare string 'bash' from two different branches -- the
+ * WSL probe and the give-up path -- so its return value alone cannot tell a
+ * caller which shell it is about to run. On Windows those are not
  * interchangeable: 'bash' via WSL is a different OS with a different PATH and a
  * different mount scheme (/mnt/c/... vs /c/...). Recording the branch is what
  * lets a failure name the shell instead of leaving the reader to infer it
@@ -1242,6 +1306,45 @@ function warnFallbackShell(exe) {
 }
 
 /**
+ * The absolute path of `name` as the ambient PATH resolves it, or null when
+ * no PATH entry holds it.
+ *
+ * The bare command name only resolves through the process's own PATH, and
+ * several bash-driven fixtures deliberately spawn with PATH replaced by a
+ * POSIX-only list (`SYSTEM_PATH`, e.g. tests/batch-runner-dry-run-without-cli
+ * .test.mjs). On Windows that override hides every real install directory, so
+ * a bare `bash` cached from the probe comes back ENOENT at spawn time. Resolve
+ * the file once here, while the ambient PATH is still intact, and later spawns
+ * need no PATH at all.
+ *
+ * Follows Windows executable resolution order (current directory unless
+ * NoDefaultCurrentDirectoryInExePath is set, then PATH directories in order,
+ * checking executable extensions: .com before .exe).
+ *
+ * @param {string} name - Executable base name, e.g. 'bash'.
+ * @returns {string|null} Absolute path, or null if not found on PATH.
+ */
+function resolveOnPath(name) {
+  const pathEnv = process.env.PATH || '';
+  const pathext = ['.com', '.exe'];
+  const includeCwd = !process.env.NoDefaultCurrentDirectoryInExePath;
+  const dirs = [
+    ...(includeCwd ? ['.'] : []),
+    ...pathEnv.split(delimiter).filter(Boolean),
+  ];
+  for (const entry of dirs) {
+    const dir = entry.replace(/^"|"$/g, ''); // Windows PATH entries may be quoted
+    for (const ext of pathext) {
+      for (const e of [ext, ext.toUpperCase()]) {
+        const candidate = join(dir, `${name}${e}`);
+        try { if (statSync(candidate).isFile()) return resolve(candidate); } catch {}
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve the bash executable to use for shell-script checks, lazily.
  *
  * The Windows probes below shell out up to four times (the WSL probe can even
@@ -1272,7 +1375,10 @@ export function getBash() {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
       bashSourceCache = 'path';
-      return (bashCache = cmd);
+      // The probe proved `bash` resolves on the ambient PATH; cache the file
+      // it resolved to, not the bare name — a spawn that overrides PATH (the
+      // POSIX-only SYSTEM_PATH fixtures) cannot re-resolve it on Windows.
+      return (bashCache = resolveOnPath(cmd) || cmd);
     } catch {}
   }
   bashSourceCache = 'unresolved';

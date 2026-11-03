@@ -33,7 +33,18 @@ const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget r
 const TIMEOUT_MS = 15_000;
 
 async function main() {
-  const url = process.argv[2];
+  const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`Usage:
+  node fetch-jd.mjs <url>
+  node fetch-jd.mjs --help
+
+Options:
+  --help, -h  Print this usage block and exit`);
+    process.exit(0);
+  }
+
+  const url = args[0];
 
   if (!url) {
     console.error('usage: node fetch-jd.mjs <url>');

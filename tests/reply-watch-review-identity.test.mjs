@@ -3,11 +3,21 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
+import { pass, fail, ROOT, NODE, rmSync, DEFAULT_SCRIPT_TIMEOUT_MS } from './helpers.mjs';
 import { openTrackerTransaction } from '../tracker-utils.mjs';
 
 const header = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|---|---|---|---|---|---|---|---|\n';
 const original = '| 1 | 2026-06-01 | Acme | Backend Engineer | 4/5 | Applied | - | - | |\n';
+
+// One review is a chain of cold Node starts: reply-watch up to its prompt,
+// then, after the answer, set-status and `tracker.mjs sync`, each run by
+// reply-watch with execFileSync. A case normally takes about a second on the
+// Windows runner, but a flat 15s for the whole chain has run out there, in a
+// different case each time: an occasional stall, not the usual pace. Each
+// phase gets the per-script budget run() uses, which rides out a short stall,
+// and a timeout names the phase it was in, with the child's output, so the
+// next stall shows where it happens.
+const PHASE_BUDGET_MS = DEFAULT_SCRIPT_TIMEOUT_MS;
 
 async function review(change, expectsConflict = true) {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-reply-identity-'));
@@ -26,19 +36,32 @@ async function review(change, expectsConflict = true) {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '', changed = false;
+    const startedAt = Date.now();
+    let answeredAt = null;
     const result = await new Promise((resolve, reject) => {
-      timer = setTimeout(() => { child.kill(); reject(new Error('review did not finish')); }, 15_000);
+      const arm = phase => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          child.kill();
+          reject(new Error(`review did not finish: still ${phase} after ${PHASE_BUDGET_MS}ms `
+            + `(${Date.now() - startedAt}ms in all)\nstdout: ${stdout}\nstderr: ${stderr}`));
+        }, PHASE_BUDGET_MS);
+      };
+      arm('waiting for the review prompt');
       child.on('error', reject);
       child.stderr.on('data', data => { stderr += data; });
       child.stdout.on('data', async data => {
         stdout += data;
         if (changed || !stdout.includes('Apply recommended status updates')) return;
         changed = true;
+        arm('changing the tracker as the second writer');
         try {
           // A second authorized writer changes the row while the human prompt is open.
           const transaction = await openTrackerTransaction(tracker);
           try { transaction.replace(header + change(original)); }
           finally { transaction.close(); }
+          answeredAt = Date.now();
+          arm('applying the answer (set-status, then tracker sync)');
           child.stdin.end('y\n');
         } catch (error) { child.kill(); reject(error); }
       });
@@ -54,6 +77,7 @@ async function review(change, expectsConflict = true) {
       assert.doesNotMatch(result.stderr, /tracker row changed or became ambiguous during review/);
       assert.match(result.stdout, /No change for #1: already Interview/);
     }
+    return `answered after ${answeredAt - startedAt}ms, exit ${Date.now() - answeredAt}ms later`;
   } finally {
     clearTimeout(timer);
     child?.kill();
@@ -72,16 +96,16 @@ for (const [field, change] of [
 ]) {
   const label = `legacy reply review refuses a concurrent ${field} change`;
   try {
-    await review(change);
-    pass(label);
+    const timing = await review(change);
+    pass(`${label} (${timing})`);
   } catch (error) {
     fail(`${label}: ${error.message}`);
   }
 }
 
 try {
-  await review(row => row.replace('| Applied |', '| Interview |'), false);
-  pass('an unchanged application already updated by another writer remains a no-op');
+  const timing = await review(row => row.replace('| Applied |', '| Interview |'), false);
+  pass(`an unchanged application already updated by another writer remains a no-op (${timing})`);
 } catch (error) {
   fail(`an unchanged application already updated by another writer remains a no-op: ${error.message}`);
 }

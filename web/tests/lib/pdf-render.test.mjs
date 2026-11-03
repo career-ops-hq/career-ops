@@ -64,7 +64,7 @@ test("spawnGeneratePdf: clean exit -> ok:true, invokes generate-pdf.mjs with --a
   const spawnFn = (execPath, args, opts) => { calls.push({ execPath, args, opts }); return fakeChild({ exitCode: 0 }); };
 
   // When spawning the render
-  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "/root/x.html", finalPdf: "/root/output/x.pdf", format: "letter", reportNum: "018" });
+  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", coreRoot: "/root", html: "/root/x.html", finalPdf: "/root/output/x.pdf", format: "letter", reportNum: "018" });
 
   // Then it reports ok:true and invoked generate-pdf.mjs with the expected args
   assert.deepEqual(result, { ok: true, stderr: "" });
@@ -72,6 +72,9 @@ test("spawnGeneratePdf: clean exit -> ok:true, invokes generate-pdf.mjs with --a
   assert.match(calls[0].args[0], /generate-pdf\.mjs$/);
   assert.deepEqual(calls[0].args.slice(1), ["/root/x.html", "/root/output/x.pdf", "--format=letter", "--report=018", "--allow-reorder"]);
   assert.equal(calls[0].opts.cwd, "/root");
+  // No console to inherit: a stale one kills the child on Windows (#3809)
+  assert.equal(calls[0].opts.windowsHide, true);
+  assert.equal(calls[0].opts.env.CAREER_OPS_PDF_SHARED, "1");
 });
 
 test("spawnGeneratePdf: non-zero exit -> ok:false, stderr surfaced", async () => {
@@ -79,7 +82,7 @@ test("spawnGeneratePdf: non-zero exit -> ok:false, stderr surfaced", async () =>
   const spawnFn = () => fakeChild({ exitCode: 1, stderr: "section order guard failed" });
 
   // When spawning the render
-  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "x.html", finalPdf: "x.pdf", format: "a4", reportNum: "1" });
+  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", coreRoot: "/root", html: "x.html", finalPdf: "x.pdf", format: "a4", reportNum: "1" });
 
   // Then it reports ok:false with that stderr
   assert.deepEqual(result, { ok: false, stderr: "section order guard failed" });
@@ -90,7 +93,7 @@ test("spawnGeneratePdf: spawn error -> ok:false, descriptive stderr", async () =
   const spawnFn = () => fakeChild({ spawnError: new Error("ENOENT") });
 
   // When spawning the render
-  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "x.html", finalPdf: "x.pdf", format: "letter", reportNum: "1" });
+  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", coreRoot: "/root", html: "x.html", finalPdf: "x.pdf", format: "letter", reportNum: "1" });
 
   // Then it reports ok:false with a descriptive message, not a raw crash
   assert.equal(result.ok, false);
@@ -102,15 +105,18 @@ test("spawnGeneratePdf: spawn error -> ok:false, descriptive stderr", async () =
 test("markTrackerReady: clean exit with JSON stdout -> ok:true, data parsed", async () => {
   // Given mark-pdf-ready.mjs succeeds and prints a --json payload
   const stdout = JSON.stringify({ changed: true, num: 5, company: "Acme" });
-  const spawnFn = () => fakeChild({ exitCode: 0, stdout });
+  const calls = [];
+  const spawnFn = (execPath, args, opts) => { calls.push({ execPath, args, opts }); return fakeChild({ exitCode: 0, stdout }); };
 
   // When marking the tracker ready
-  const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
+  const result = await markTrackerReady({ spawnFn, execPath: "node", coreRoot: "/root", reportNum: "5" });
 
   // Then it reports ok:true with the parsed payload
   assert.equal(result.ok, true);
   assert.equal(result.code, 0);
   assert.deepEqual(result.data, { changed: true, num: 5, company: "Acme" });
+  // and launched without a console to inherit (#3809)
+  assert.equal(calls[0].opts.windowsHide, true);
 });
 
 test("markTrackerReady: failure exit with parseable --json error -> data.error available", async () => {
@@ -119,7 +125,7 @@ test("markTrackerReady: failure exit with parseable --json error -> data.error a
   const spawnFn = () => fakeChild({ exitCode: 2, stdout });
 
   // When marking the tracker ready
-  const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
+  const result = await markTrackerReady({ spawnFn, execPath: "node", coreRoot: "/root", reportNum: "5" });
 
   // Then it reports ok:false with the specific error available for callers to surface
   assert.equal(result.ok, false);
@@ -132,7 +138,7 @@ test("markTrackerReady: failure exit with no/garbled stdout -> data:null, raw st
   const spawnFn = () => fakeChild({ exitCode: 1, stderr: "unexpected crash" });
 
   // When marking the tracker ready
-  const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
+  const result = await markTrackerReady({ spawnFn, execPath: "node", coreRoot: "/root", reportNum: "5" });
 
   // Then it reports ok:false with data:null, falling back to the raw stderr
   assert.equal(result.ok, false);
@@ -145,7 +151,7 @@ test("markTrackerReady: spawn error -> ok:false, descriptive stderr", async () =
   const spawnFn = () => fakeChild({ spawnError: new Error("EACCES") });
 
   // When marking the tracker ready
-  const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
+  const result = await markTrackerReady({ spawnFn, execPath: "node", coreRoot: "/root", reportNum: "5" });
 
   // Then it reports ok:false with a descriptive message
   assert.equal(result.ok, false);
@@ -241,7 +247,7 @@ test("renderAndMarkPdf: happy path -> rendered with no warnings, scratch cleaned
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "a4", reportNum: "1" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "a4", reportNum: "1" });
 
     // Then it reports rendered with no warnings, and scratch is cleaned up
     assert.deepEqual(result, { kind: "rendered", warnings: [] });
@@ -269,7 +275,7 @@ test("renderAndMarkPdf: generate-pdf.mjs fails -> render-failed, mark-pdf-ready 
   });
   try {
     // When rendering
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "3" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "letter", reportNum: "3" });
 
     // Then it reports render-failed with the render's stderr, never calls mark-pdf-ready, and still cleans scratch
     assert.deepEqual(result, { kind: "render-failed", error: "Refusing to write the PDF outside the project directory" });
@@ -292,7 +298,7 @@ test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails with a parseabl
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "4" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "letter", reportNum: "4" });
 
     // Then the PDF is still reported rendered, but the warning carries mark-pdf-ready's specific error
     assert.equal(result.kind, "rendered");
@@ -314,7 +320,7 @@ test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails with no parseab
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "5" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "letter", reportNum: "5" });
 
     // Then the PDF is still reported rendered, with the generic fallback
     // warning (no mark.data.error to quote) rather than the crash text
@@ -344,7 +350,7 @@ test("renderAndMarkPdf: successful render with stderr -> that stderr is surfaced
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "6" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "letter", reportNum: "6" });
 
     // Then the PDF is reported rendered and every stderr line reaches the caller,
     // one warning per line, rather than being collected and dropped
@@ -369,7 +375,7 @@ test("renderAndMarkPdf: successful render with empty stderr -> no warnings inven
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "7" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "letter", reportNum: "7" });
 
     // Then a clean run still reports zero warnings — blank lines must not
     // become empty warnings the user has to read past

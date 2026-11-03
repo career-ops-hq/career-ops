@@ -13,7 +13,7 @@
  * Fold: per (tracker#, type), highest trust tier wins, then latest date.
  *   actual:     contract > offer-letter > recruiter-verbal > user
  *   desired:    user > profile
- *   advertised: user > recruiter-verbal > jd
+ *   advertised: user > recruiter-verbal > jd > third-party (unverified estimate; flagged `unverified`)
  *
  * `stated` observations are a separate, narrower-purpose log: a specific number
  * the candidate verbally committed to, in a specific interview round, to a
@@ -72,6 +72,7 @@ import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-res
 import { resolveColumns, parseTrackerRow, extractTrackerReportLinks, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { parseAmount, compensationPeriod } from './providers/_salary-text.mjs';
 
@@ -143,7 +144,10 @@ const relocHomeLocationFlag = flagValue(args, '--home-location') ?? null;
 const TRUST = {
   actual: { contract: 3, 'offer-letter': 2, 'recruiter-verbal': 1, user: 0 },
   desired: { user: 1, profile: 0 },
-  advertised: { user: 2, 'recruiter-verbal': 1, jd: 0 },
+  // `third-party` = an unverified pay estimate from an aggregator / salary-estimate
+  // site (not the employer, not a recruiter). Lowest tier, advertised-only, so any
+  // jd / recruiter-verbal / user row for the same tracker# supersedes it.
+  advertised: { user: 2, 'recruiter-verbal': 1, jd: 0, 'third-party': -1 },
 };
 
 const VALID_TYPES = new Set(['desired', 'advertised', 'actual', 'stated']);
@@ -188,7 +192,7 @@ export function getStatedObservations(observations, num) {
 // while yamlStr below only extracts `key: value` lines — a json fence would "match"
 // and silently yield null company/role/advertised_comp. Rejecting it outright means
 // the report falls back to the legacy no-Machine-Summary path instead.
-const FENCE_RE = /##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
+const FENCE_RE = /^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
 const yamlStr = (body, key) => {
   const m = body.match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
   if (!m) return null;
@@ -200,7 +204,7 @@ const yamlStr = (body, key) => {
 // Extracts advertised_comp + company + role from one report's Machine Summary.
 // num/date come from the filename ({###}-{slug}-{YYYY-MM-DD}.md).
 export function reportToObservation(content, num, date) {
-  const fence = String(content || '').match(FENCE_RE);
+  const fence = machineSummarySection(content).match(FENCE_RE);
   if (!fence) return null;
   const body = fence[1];
   const company = yamlStr(body, 'company');
@@ -521,6 +525,8 @@ function pickEffective(type, candidates) {
     currency: top.currency, raw: top.amount,
     period: top.period ?? compensationPeriod(top.amount),
     postingLocation: top.postingLocation ?? null,
+    // only present when true, so output for data without third-party rows is unchanged
+    ...(top.source === 'third-party' ? { unverified: true } : {}),
   };
 }
 
@@ -602,7 +608,7 @@ export function fold(observations, apps, profileDesired) {
   for (const a of applications) {
     if (!a.actual) continue;
     const cur = a.actual.currency || 'UNKNOWN';
-    byCurrency[cur] ??= { confirmed: 0, advGaps: [], atOrAboveAdvertised: 0, atOrAboveDesired: 0, newestActual: null };
+    byCurrency[cur] ??= { confirmed: 0, advGaps: [], atOrAboveAdvertised: 0, desiredCompared: 0, atOrAboveDesired: 0, newestActual: null };
     const agg = byCurrency[cur];
     agg.confirmed += 1;
     agg.newestActual = [agg.newestActual, a.actual.date].filter(Boolean).sort().pop();
@@ -612,7 +618,10 @@ export function fold(observations, apps, profileDesired) {
       agg.advGaps.push(a.advToActPct);
       if (a.actual.value >= a.advertised.value) agg.atOrAboveAdvertised += 1;
     }
-    if (a.desiredToActPct !== null && a.actual.value >= a.desired.value) agg.atOrAboveDesired += 1;
+    if (a.desiredToActPct !== null) {
+      agg.desiredCompared += 1;
+      if (a.actual.value >= a.desired.value) agg.atOrAboveDesired += 1;
+    }
 
     // Legacy reports (no Machine Summary) fold with null company/role — without
     // a fallback every legacy row would collapse into one shared "null|null"
@@ -627,6 +636,14 @@ export function fold(observations, apps, profileDesired) {
     if (a.advToActPct !== null) byCompanyRole[key].advToActPcts.push(a.advToActPct);
   }
   for (const agg of Object.values(byCurrency)) {
+    // The mean, the median and atOrAboveAdvertised cover only the actuals that
+    // also have an advertised figure in the same currency, usually a minority
+    // (most reports carry no advertised_comp), so their n is kept beside them.
+    // `confirmed` counts every actual and is not their denominator; with the
+    // list deleted it was the only count left, and a mean over one offer read
+    // as a mean over all of them. desiredCompared does the same for
+    // atOrAboveDesired.
+    agg.advertisedCompared = agg.advGaps.length;
     agg.meanAdvToActPct = agg.advGaps.length ? agg.advGaps.reduce((s, v) => s + v, 0) / agg.advGaps.length : null;
     agg.medianAdvToActPct = agg.advGaps.length ? median(agg.advGaps) : null;
     delete agg.advGaps;
@@ -1527,7 +1544,7 @@ function loadProfileLocation() {
 
 // --- Output ---
 const fmtVal = (v) => (v >= 1000 && v % 500 === 0 ? `${v / 1000}k` : String(v));
-const fmtEff = (e) => (e ? `${fmtVal(e.value)} ${e.currency || ''} (${e.source}, ${e.date})`.replace('  ', ' ') : '—');
+const fmtEff = (e) => (e ? `${e.unverified ? '~ ' : ''}${fmtVal(e.value)} ${e.currency || ''} (${e.source}, ${e.date})${e.unverified ? ' [unverified estimate]' : ''}`.replace('  ', ' ') : '—');
 const fmtPct = (p) => (p === null || p === undefined ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`);
 const daysOld = (date) => Math.max(0, Math.round((Date.now() - Date.parse(date)) / 86400000));
 // Rounded to the nearest $100 — this is a bracket-only estimate, never claim
@@ -1564,7 +1581,7 @@ function printSummary(result) {
     if (currencies.length) {
       console.log('\n  Aggregates (per currency — no FX conversion):');
       for (const [cur, agg] of currencies) {
-        console.log(`  ${cur}: mean advertised→actual ${fmtPct(agg.meanAdvToActPct)}, median ${fmtPct(agg.medianAdvToActPct)}, at/above advertised ${agg.atOrAboveAdvertised}, at/above desired ${agg.atOrAboveDesired}`);
+        console.log(`  ${cur}: ${agg.confirmed} confirmed actual${agg.confirmed === 1 ? '' : 's'} | advertised→actual over ${agg.advertisedCompared}: mean ${fmtPct(agg.meanAdvToActPct)}, median ${fmtPct(agg.medianAdvToActPct)}, at/above advertised ${agg.atOrAboveAdvertised} of ${agg.advertisedCompared} | at/above desired ${agg.atOrAboveDesired} of ${agg.desiredCompared}`);
       }
     }
     const companyRoles = Object.entries(aggregates.byCompanyRole);

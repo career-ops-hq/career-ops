@@ -41,6 +41,27 @@ export async function saveStatus(n, current, next, request = fetch) {
   return result.status;
 }
 
+/** Take back the row's last logged status change. Resolves to the restored status.
+ * @param {string} n
+ * @param {typeof fetch} [request]
+ * @returns {Promise<string>}
+ */
+export async function undoStatus(n, request = fetch) {
+  const response = await request("/api/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ n, undo: true }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(typeof result?.error === "string" ? result.error : "Could not undo. Please try again.");
+  }
+  if (result?.ok !== true || typeof result.status !== "string") {
+    throw new Error("Could not confirm the undo. Refresh before trying again.");
+  }
+  return result.status;
+}
+
 /** One status for many rows. Saves run one at a time, because each save takes
  * the tracker lock and parallel saves would only queue on it or time out.
  * A failed row does not stop the rest.

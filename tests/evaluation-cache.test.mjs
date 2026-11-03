@@ -360,7 +360,7 @@ test('cache CLI help works without identity dependency and rejects unknown flags
     assert.match(result.all, /usage:/i);
   }
   const bad = runCli('--help', '--bogus');
-  assert.equal(bad.status, 1);
+  assert.equal(bad.status, 1, describeSpawn(bad));
   assert.match(bad.all, /unrecognized|unknown/i);
 });
 
@@ -375,7 +375,7 @@ test('cache CLI rejects incomplete flags and malformed JSON without leaking inpu
   const path = join(root, 'broken.json');
   writeFileSync(path, `{ ${PRIVATE}`);
   const result = runCli('--identity', path, '--liveness', path, '--reports', root);
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.ok(!result.all.includes(PRIVATE));
   assert.doesNotMatch(result.all, /\n\s+at /);
 });

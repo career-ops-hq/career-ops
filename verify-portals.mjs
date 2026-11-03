@@ -286,7 +286,8 @@ const AGGREGATOR_HOSTS = [
   'greenhouse.io', 'ashbyhq.com', 'lever.co', 'myworkdayjobs.com', 'workday.com',
   'smartrecruiters.com', 'jobvite.com', 'icims.com', 'bamboohr.com', 'gem.com',
   'recruitee.com', 'teamtailor.com', 'personio.com', 'workable.com', 'breezy.hr',
-  'linkedin.com', 'indeed.com', 'glassdoor.com', 'ycombinator.com', 'wellfound.com',
+  'paylocity.com', 'join.com', 'linkedin.com', 'indeed.com', 'glassdoor.com',
+  'ycombinator.com', 'wellfound.com',
 ];
 
 /** Subdomain labels that describe a careers site rather than the company. */
