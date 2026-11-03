@@ -240,6 +240,9 @@ export default {
     // used every page it was allowed from one that ended on its own: every
     // `break` leaves `page` below `maxPages`.
     let page = 0;
+    // Rows the API returned on the last page read, before any is dropped: a
+    // short last page means the board ended there, whatever the cap.
+    let lastPageRows = 0;
     for (; page < maxPages && page * HITS_PER_PAGE < total; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
@@ -287,6 +290,7 @@ export default {
       const results = json?.results || {};
       const jobs = Array.isArray(results.jobs) ? results.jobs : [];
       if (typeof results.count === 'number') total = results.count;
+      lastPageRows = jobs.length;
       if (jobs.length === 0) break;
 
       let reachedOld = false;
@@ -322,9 +326,13 @@ export default {
       if (reachedOld) break;
     }
     // The page cap ended the walk while the board still had postings left, so
-    // the list is partial. Only the entry's own cap warns: a ctx.maxPages cut
-    // (a health probe) is the caller's choice, not something to raise.
-    if (page >= maxPages && page * HITS_PER_PAGE < total && maxPages === requestedMaxPages) {
+    // the list is partial: every allowed page was read, the last one was full,
+    // and the board's count (when it gives one) says more remain. Only the
+    // entry's own cap warns: when a ctx.maxPages cut (a health probe) is at or
+    // below it, the probe is what stopped the walk, and that is not something
+    // to raise on the entry.
+    if (page >= maxPages && lastPageRows >= HITS_PER_PAGE && page * HITS_PER_PAGE < total
+        && requestedMaxPages < ctxCap) {
       const of = Number.isFinite(total) ? ` of ${total}` : '';
       console.error(`⚠️  getro: ${entry.name || collectionId} truncated at getro_max_pages=${maxPages} (${out.length}${of} jobs) — raise getro_max_pages on this entry for more`);
     }
