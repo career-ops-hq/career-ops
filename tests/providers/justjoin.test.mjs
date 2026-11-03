@@ -63,6 +63,23 @@ try {
     fail(`justjoin parser mapped fields incorrectly: ${JSON.stringify(parsed[0])}`);
   }
 
+  const dated = parseJustJoinResponse({
+    data: [
+      { slug: 'acme-refreshed', title: 'Refreshed', publishedAt: '2026-06-12T10:00:00.000Z', lastPublishedAt: '2026-05-20T08:00:00.000Z' },
+      { slug: 'acme-legacy', title: 'Legacy', publishedAt: '2026-06-12T10:00:00.000Z' },
+      { slug: 'acme-bad-last', title: 'Bad Last', publishedAt: '2026-06-12T10:00:00.000Z', lastPublishedAt: 'not a date' },
+      { slug: 'acme-undated', title: 'Undated' },
+    ],
+  });
+  const refreshedAt = Date.parse('2026-05-20T08:00:00.000Z');
+  const bumpedAt = Date.parse('2026-06-12T10:00:00.000Z');
+  if (dated[0].postedAt === refreshedAt) pass('justjoin parser dates a refreshed offer by lastPublishedAt, not the refresh date');
+  else fail(`justjoin parser should prefer lastPublishedAt, got ${dated[0].postedAt}`);
+  if (dated[1].postedAt === bumpedAt && dated[2].postedAt === bumpedAt) pass('justjoin parser falls back to publishedAt when lastPublishedAt is missing or invalid');
+  else fail(`justjoin parser fallback wrong: ${dated[1].postedAt} / ${dated[2].postedAt}`);
+  if (dated[3].postedAt === undefined) pass('justjoin parser leaves postedAt undefined when the offer carries no date');
+  else fail(`justjoin parser should leave postedAt undefined, got ${dated[3].postedAt}`);
+
   let capturedUrl = '';
   let capturedOpts = null;
   const fetched = await jj.fetch(

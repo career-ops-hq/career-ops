@@ -65,18 +65,17 @@ const floor = NODE_MIN.split('.').slice(0, 2).join('.');
   }
 
   // web/ kept its own ">=22.6.0" for weeks after #4801 raised the floor, because
-  // nothing here checked it. It states the floor as a single lower bound rather
-  // than NODE_ENGINES: tests/web-test-layout.test.mjs (#2360) refuses `||`
-  // ranges, since it cannot prove their floor without a semver parser.
-  const webEngines = `>=${NODE_MIN}`;
+  // nothing here checked it. It states the full NODE_ENGINES range, 23.0–23.3
+  // gap included; tests/web-test-layout.test.mjs (#2360) parses that union to
+  // prove its glob-discovery floor (#5929).
   const webGot = engines('web/package.json');
-  ok(webGot === webEngines, `web/package.json engines.node is "${webEngines}" (found ${JSON.stringify(webGot)})`);
+  ok(webGot === NODE_ENGINES, `web/package.json engines.node is "${NODE_ENGINES}" (found ${JSON.stringify(webGot)})`);
 
   // The lockfile's root entry restates engines too. Only `npm install`
   // regenerates it, so a hand edit to web/package.json can leave it behind.
   const lock = JSON.parse(readFileSync(join(ROOT, 'web', 'package-lock.json'), 'utf8'));
   const lockGot = lock.packages?.['']?.engines?.node;
-  ok(lockGot === webEngines, `web/package-lock.json root engines.node is "${webEngines}" (found ${JSON.stringify(lockGot)})`);
+  ok(lockGot === NODE_ENGINES, `web/package-lock.json root engines.node is "${NODE_ENGINES}" (found ${JSON.stringify(lockGot)})`);
 
   // The CI floor job. Exact match: a bare major ('22') resolves to the newest
   // 22.x, so it would run without testing the floor.

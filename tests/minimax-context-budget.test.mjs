@@ -1,7 +1,7 @@
 import { pass, fail } from './helpers.mjs';
 import { buildBudgetedPrompt, DEFAULT_MAX_TOKENS, DEFAULT_SAFETY_MARGIN } from '../lib/context-budget.mjs';
 
-const cases = [["MiniMax-M3", 1000000], ["MiniMax-M2.7", 204800]];
+const cases = [["MiniMax-M3.1-Flash", 1000000], ["MiniMax-M3", 1000000], ["MiniMax-M2.7", 204800]];
 for (const [modelName, contextWindow] of cases) {
   const jdText = 'x'.repeat((DEFAULT_MAX_TOKENS + 1000) * 4);
   const result = buildBudgetedPrompt({ modelName, jdText });
