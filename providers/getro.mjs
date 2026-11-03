@@ -36,7 +36,8 @@
 // BOUND for efficiency (don't page through thousands of stale jobs); each job
 // still carries `postedAt` (epoch ms) for any downstream freshness handling.
 // The bound default (90d) is deliberately wide. `getro_max_pages` (default
-// 40, hard-capped at 1500) is a safety ceiling independent of the age cutoff.
+// 40, hard-capped at 1500) is a safety ceiling independent of the age cutoff;
+// a walk that reaches it with postings left warns, naming the entry.
 // Jobs with no created_at are kept ("missing data = pass", same rule as the
 // location filter).
 //
@@ -235,7 +236,11 @@ export default {
 
     const out = [];
     let total = Infinity;
-    for (let page = 0; page < maxPages && page * HITS_PER_PAGE < total; page++) {
+    // Declared outside the loop so the cap check below can tell a walk that
+    // used every page it was allowed from one that ended on its own: every
+    // `break` leaves `page` below `maxPages`.
+    let page = 0;
+    for (; page < maxPages && page * HITS_PER_PAGE < total; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       let json;
@@ -315,6 +320,13 @@ export default {
       }
       // Once we've crossed the age cutoff, all later pages are older still.
       if (reachedOld) break;
+    }
+    // The page cap ended the walk while the board still had postings left, so
+    // the list is partial. Only the entry's own cap warns: a ctx.maxPages cut
+    // (a health probe) is the caller's choice, not something to raise.
+    if (page >= maxPages && page * HITS_PER_PAGE < total && maxPages === requestedMaxPages) {
+      const of = Number.isFinite(total) ? ` of ${total}` : '';
+      console.error(`⚠️  getro: ${entry.name || collectionId} truncated at getro_max_pages=${maxPages} (${out.length}${of} jobs) — raise getro_max_pages on this entry for more`);
     }
     return out;
   },

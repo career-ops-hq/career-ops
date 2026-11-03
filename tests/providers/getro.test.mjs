@@ -313,6 +313,49 @@ try {
     fail(`getro.fetch() featured pin: ${pinnedCalls} pages, kept ${pinnedTitles}`);
   }
 
+  // The page cap warns only when it is what ended the walk with postings left.
+  // Undated rows, so the age cutoff never applies unless a case dates them.
+  const capRun = async (entryExtra, { count, pages, maxPages, lastPageCreatedAt } = {}) => {
+    const warnings = [];
+    const origError = console.error;
+    console.error = (m) => warnings.push(String(m));
+    let calls = 0;
+    try {
+      await getro.fetch({ ...okEntry, ...entryExtra }, {
+        ...(maxPages ? { maxPages } : {}),
+        fetchJson: async () => {
+          const p = calls++;
+          if (p >= pages) return { results: { count, jobs: [] } };
+          const jobs = Array.from({ length: 20 }, (_, i) => ({
+            title: `t${p}-${i}`, url: `https://jobs.examplevc.example/cap-${p}-${i}`, organization: { name: 'Acme' },
+            ...(p === pages - 1 && lastPageCreatedAt ? { created_at: lastPageCreatedAt } : {}),
+          }));
+          return { results: { count, jobs } };
+        },
+      });
+    } finally {
+      console.error = origError;
+    }
+    return { calls, capWarnings: warnings.filter((w) => w.includes('getro_max_pages')) };
+  };
+
+  const capHit = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5 });
+  if (capHit.calls === 2 && capHit.capWarnings.length === 1
+      && capHit.capWarnings[0].includes('ExampleVC truncated at getro_max_pages=2 (40 of 100 jobs)')) {
+    pass('getro.fetch() warns, naming the entry, when getro_max_pages ends the walk with postings left');
+  } else {
+    fail(`getro.fetch() cap warning: ${capHit.calls} pages, warnings ${JSON.stringify(capHit.capWarnings)}`);
+  }
+
+  const capExact = await capRun({ getro_max_pages: 2 }, { count: 40, pages: 2 });
+  const capProbe = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5, maxPages: 1 });
+  const capAged = await capRun({ getro_max_pages: 2, getro_max_age_days: 90 }, { count: 100, pages: 2, lastPageCreatedAt: staleCreatedAt });
+  if (capExact.capWarnings.length === 0 && capProbe.capWarnings.length === 0 && capAged.capWarnings.length === 0) {
+    pass('getro.fetch() does not warn when the board ends at the cap, a ctx.maxPages probe cuts it, or the age cutoff ends the last page');
+  } else {
+    fail(`getro.fetch() cap warning misfired: exact ${capExact.capWarnings.length}, probe ${capProbe.capWarnings.length}, aged ${capAged.capWarnings.length}`);
+  }
+
   // A transient failure (timeout/abort — no .status set, matching a real AbortError)
   // is retried and recovers transparently instead of truncating the board (#2506).
   let getroRetryAttempts = 0;
