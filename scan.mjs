@@ -89,8 +89,10 @@ const DATA_ROOT = getCareerOpsRoot();
 // Preserve the actual shell environment before dotenv adds data-root values to
 // process.env. The browser resolver uses this snapshot to distinguish an
 // explicit shell path (which keeps cwd-relative behavior) from a path read from
-// DATA_ROOT/.env (which must resolve relative to that file's directory).
-const BROWSER_PROCESS_ENV = { ...process.env };
+// DATA_ROOT/.env (which must resolve relative to that file's directory). The
+// helper also retains Windows' case-insensitive environment lookup when the
+// result becomes an ordinary object.
+export const BROWSER_PROCESS_ENV = snapshotBrowserProcessEnv();
 
 try {
   const { config } = await import('dotenv');
@@ -107,7 +109,7 @@ const parseYaml = loadYaml;
 
 // ── Config ──────────────────────────────────────────────────────────
 import { resolveTrackerPath } from './path-resolver.mjs';
-import { browserLaunchOptions } from './lib/browser-launch.mjs';
+import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-launch.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 // An explicit override wins; otherwise the root fixed above, since the .env just

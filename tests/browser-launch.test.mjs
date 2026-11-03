@@ -16,6 +16,7 @@ import { join } from 'path';
 import {
   resolveBrowserExecutable,
   browserLaunchOptions,
+  snapshotBrowserProcessEnv,
   __resetBrowserLaunchCacheForTest,
 } from '../lib/browser-launch.mjs';
 
@@ -35,11 +36,32 @@ if (/import\s*\{[^}]*\bbrowserLaunchOptions\b[^}]*\}\s*from\s*['"]\.\/lib\/brows
 }
 
 const scanSource = readFileSync(new URL('../scan.mjs', import.meta.url), 'utf8');
-if (/const\s+BROWSER_PROCESS_ENV\s*=\s*\{\s*\.\.\.process\.env\s*\}/.test(scanSource)
+if (/export\s+const\s+BROWSER_PROCESS_ENV\s*=\s*snapshotBrowserProcessEnv\(\)/.test(scanSource)
     && /browserLaunchOptions\([\s\S]*?\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\}/.test(scanSource)) {
   pass('scan verification preserves shell-vs-data-root browser setting origin');
 } else {
   fail('scan verification does not preserve the origin of data-root browser settings');
+}
+
+const openrouterSource = readFileSync(new URL('../openrouter-runner.mjs', import.meta.url), 'utf8');
+if (/import\s*\{[\s\S]*?BROWSER_PROCESS_ENV[\s\S]*?\}\s*from\s*['"]\.\/scan\.mjs['"]/.test(openrouterSource)
+    && /browserLaunchOptions\(\s*\{\s*headless:\s*true\s*\},\s*\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\}/.test(openrouterSource)) {
+  pass('OpenRouter preserves shell-vs-data-root browser setting origin');
+} else {
+  fail('OpenRouter does not pass the pre-dotenv browser environment snapshot');
+}
+
+const windowsSnapshot = snapshotBrowserProcessEnv({
+  playwright_chromium_executable_path: 'C:\\Browsers\\brave.exe',
+  career_ops_browser_autodetect: '',
+  UNRELATED: 'ignored',
+}, 'win32');
+if (windowsSnapshot.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH === 'C:\\Browsers\\brave.exe'
+    && windowsSnapshot.CAREER_OPS_BROWSER_AUTODETECT === ''
+    && Object.keys(windowsSnapshot).length === 2) {
+  pass('the pre-dotenv snapshot keeps Windows case-insensitive browser settings');
+} else {
+  fail(`Windows browser setting snapshot lost canonical keys: ${JSON.stringify(windowsSnapshot)}`);
 }
 
 // Several suites run a copied generate-pdf.mjs in an isolated directory. A
