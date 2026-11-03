@@ -2092,12 +2092,28 @@ export function diagnoseCoverage(targetText) {
  * instead of widening them. The union can only ever allow more, never less.
  */
 function allowedMetricSet(sourceText, allowMetrics) {
-  const allowed = new Set(metricClaims(sourceText));
+  const allowed = sourceMetricClaims(sourceText);
   for (const entry of allowMetrics || []) {
     allowed.add(normalizeClaim(entry));
-    for (const canonical of metricClaims(String(entry))) allowed.add(canonical);
+    for (const canonical of sourceMetricClaims(String(entry))) allowed.add(canonical);
   }
   return allowed;
+}
+
+// normalizeTextForATS in generate-pdf.mjs prints € and £ as currency codes, and
+// the gate reads the printed document. The metric patterns read "50 000 EUR" but
+// not "50 000 €", the way French, German and Spanish write it, so a source read
+// only as written could not back the amount it states (#6361). foldAtsGlyphs
+// does the same for titles.
+function spellAtsCurrency(text) {
+  return text.replace(/€/g, 'EUR ').replace(/£/g, 'GBP ');
+}
+
+/** Metric claims a source supports, read as written and as the text pass prints it. */
+function sourceMetricClaims(text, options) {
+  const claims = metricClaims(text, options);
+  for (const claim of metricClaims(spellAtsCurrency(text), options)) claims.add(claim);
+  return claims;
 }
 
 /** Compare generated metric claims against source text without reading files. */
@@ -2406,7 +2422,7 @@ function plannedClaims(targetText, planTexts) {
   // keepPlanHorizons: answers often say "In my first 6 months I will…"; the
   // target-side horizon rule still drops those from invented claims, but the
   // plan evidence must retain the number so the letter can restate it.
-  const inPlans = metricClaims(planText, { keepPlanHorizons: true });
+  const inPlans = sourceMetricClaims(planText, { keepPlanHorizons: true });
   const clean = spellNumbers(stripMarkup(targetText, { keepLineBreaks: true }));
   const forward = new Set();
   const past = new Set();
@@ -3083,6 +3099,25 @@ export function printFactWarnings(result, print = console.warn) {
     print(`  - not checked: ${result.coverage.message}`);
     for (const span of result.coverage.spans.slice(0, 8)) print(`      ${span}`);
   }
+}
+
+/**
+ * What a second check of a document found that the first did not, ready for
+ * printFactWarnings(): a caller that checks twice has already reported the rest.
+ *
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} first
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} second
+ * @returns {{warnings: string[], advisoryFacts: object[], coverage: object|null}|null}
+ *   null when there is nothing new.
+ */
+export function newFactWarnings(first, second) {
+  const factKey = ({ kind, value }) => `${kind}\u0000${value}`;
+  const seenFacts = new Set((first.advisoryFacts ?? []).map(factKey));
+  const seenPhrases = new Set(first.warnings ?? []);
+  const warnings = (second.warnings ?? []).filter((phrase) => !seenPhrases.has(phrase));
+  const advisoryFacts = (second.advisoryFacts ?? []).filter((fact) => !seenFacts.has(factKey(fact)));
+  const coverage = first.coverage ? null : (second.coverage ?? null);
+  return warnings.length || advisoryFacts.length || coverage ? { warnings, advisoryFacts, coverage } : null;
 }
 
 /** Run the fact validator CLI and return its process exit code. */

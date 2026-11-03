@@ -18,7 +18,7 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
-import { assertFacts, printFactWarnings } from "./verify-cv-facts.mjs";
+import { assertFacts, newFactWarnings, printFactWarnings } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { PAGE_FORMATS, normalizePageFormat, pageFormatForCountry } from "./lib/page-format.mjs";
@@ -564,10 +564,11 @@ Usage:
     // Cover letters are candidate-facing documents too. Reuse the CV fact
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
-    const factCheck = assertFacts(html, {
+    const factOptions = {
       label: "cover letter",
       planTexts: letterInputTexts(payload),
-    });
+    };
+    const factCheck = assertFacts(html, factOptions);
     // Ahead of the verdict, because it qualifies it: with no config the phrase
     // lists are empty, so a silent gate here covers metrics and facts only.
     if (factCheck.configMissing) {
@@ -579,9 +580,22 @@ Usage:
     }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.
-    const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
+    const { normalizeTextForATS, reportAtsReplacements, renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
-    await renderHtmlToPdf(html, outputPath, {
+    // The pass a CV gets before it prints. Without it a letter kept its em
+    // dashes and curly quotes, and printed a draft's **bold** with the asterisks.
+    const { html: printed, replacements } = normalizeTextForATS(html);
+    reportAtsReplacements(replacements, console.error);
+    // As for a CV, the gate also reads the document that prints: the pass can
+    // spell out a phrase the draft hid, as `self–starter` prints as
+    // `self-starter`. A forbidden one stops here. Anything advisory is reported,
+    // unless the check above already named it.
+    const printedWarnings = newFactWarnings(factCheck, assertFacts(printed, factOptions));
+    if (printedWarnings) {
+      console.error(`CV fact check warning: cover letter`);
+      printFactWarnings(printedWarnings, console.error);
+    }
+    await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.
