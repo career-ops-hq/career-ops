@@ -140,3 +140,41 @@ test('waitForJobText counts the main content, not a consent panel outside it', {
   const main = await page.evaluate(() => (document.querySelector('main')?.innerText || '').trim());
   assert.ok(main.includes('Senior Platform Engineer at Acme Corp.'), `waited only until "${main.slice(0, 40)}" (${main.length} chars)`);
 });
+
+// A short posting that is already readable ends the wait on the first decisive
+// liveness verdict (here an apply control), not after the 15 s cap. Under 1500
+// chars so the long-text fast path does not apply.
+const SHORT_JD = ('Senior Platform Engineer at Acme Corp. ' + SENTENCE.repeat(4)).slice(0, 900);
+const SHORT_PAGE = `<!doctype html><html><head><title>Job</title></head><body>
+<main><h1>Senior Platform Engineer</h1><p>${SHORT_JD}</p>
+<a href="#apply" style="display:inline-block;padding:8px">Apply now</a></main>
+</body></html>`;
+
+test('waitForJobText returns early on a short posting that is already readable', { timeout: 60_000 }, async (t) => {
+  if (launchError) {
+    if (toolRequired('browser')) throw launchError;
+    t.skip('no Chromium');
+    return;
+  }
+  const page = await browser.newPage();
+  await page.setContent(SHORT_PAGE);
+  const started = Date.now();
+  await waitForJobText(page, { status: 200 });
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 3000, `waited ${elapsed} ms on a page that was readable at once`);
+});
+
+// An HTTP error page has nothing to wait for: the caller reads the status.
+test('waitForJobText does not wait on an HTTP error status', { timeout: 60_000 }, async (t) => {
+  if (launchError) {
+    if (toolRequired('browser')) throw launchError;
+    t.skip('no Chromium');
+    return;
+  }
+  const page = await browser.newPage();
+  await page.setContent(PAGE); // would wait 3 s for its description
+  const started = Date.now();
+  await waitForJobText(page, { status: 404 });
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 1000, `waited ${elapsed} ms on a 404`);
+});

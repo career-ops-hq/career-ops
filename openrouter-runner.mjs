@@ -41,8 +41,9 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
-import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
+import { classifyLiveness, isUnreadableVerdict, JOB_ID_PATTERN } from './liveness-core.mjs';
 import { fetchJdViaKnownApi } from './browser-extract.mjs';
+import { HYDRATING_CODES, extractApplyControls, postingIdentity } from './liveness-browser.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 
@@ -731,26 +732,53 @@ const NON_CONTENT_SELECTOR = 'script,style,nav,footer,header';
 // too, so it does not cut the text short of what the slices below would keep.
 const JD_TEXT_CAP = 16_000;
 
-// Wait for a single-page app to render its job description: until the text the
-// read will keep (the main content, minus nav/header/footer and what is not
-// shown) holds more than 1500 chars, or 15 s. Counting the whole body let a
-// long nav or a consent panel pass while the description still said
-// "Loading...". The count leaves the live DOM alone; the read strips it
-// afterwards. A page that never gets that long (a short posting) is read as it
-// stands.
-export async function waitForJobText(page) {
-  await page.waitForFunction((selector) => {
-    const root = document.querySelector('main, [role="main"], article') || document.body || document;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let length = 0;
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const el = node.parentElement;
-      if (!el || el.closest(selector) || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) continue;
-      length += node.nodeValue.trim().length;
-      if (length > 1500) return true;
+// Wait for a single-page app to render its job description, at most 15 s. The
+// wait ends once the text the read will keep (the main content, minus
+// nav/header/footer and what is not shown) holds more than 1500 chars. Counting
+// the whole body let a long nav or a consent panel pass while the description
+// still said "Loading...". The count leaves the live DOM alone; the read strips
+// it afterwards. A page that stays shorter (a short posting) ends the wait at
+// the first decisive liveness verdict instead, the rule liveness-browser.mjs
+// polls by: any code outside HYDRATING_CODES. Not when the text stops changing,
+// as a spinner holds it constant on a live page. An HTTP error status (`status`
+// >= 400) has nothing to wait for; the caller reads the status.
+export async function waitForJobText(page, { status = 0, url = '' } = {}) {
+  if (status >= 400) return;
+  const deadline = Date.now() + 15_000;
+  const requested = url ? postingIdentity(url) : { postingId: null };
+  for (;;) {
+    try {
+      const reading = await page.evaluate((selector) => {
+        const root = document.querySelector('main, [role="main"], article') || document.body || document;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let length = 0;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const el = node.parentElement;
+          if (!el || el.closest(selector) || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) continue;
+          length += node.nodeValue.trim().length;
+          if (length > 1500) return { long: true };
+        }
+        return { long: false, bodyText: document.body?.innerText ?? '' };
+      }, NON_CONTENT_SELECTOR);
+      if (reading.long) return;
+      // The apply controls are read as liveness-browser's readPage reads them,
+      // with the same posting identity.
+      const finalUrl = page.url();
+      const landed = postingIdentity(finalUrl);
+      const anotherPosting = requested.postingId && landed.postingId !== requested.postingId;
+      const applyControls = await page.evaluate(extractApplyControls, {
+        ...(anotherPosting ? { postingId: null, postingSegment: null } : landed),
+        pageUrl: finalUrl,
+        idPattern: JOB_ID_PATTERN,
+      });
+      const { code } = classifyLiveness({ status, requestedUrl: url, finalUrl, ...reading, applyControls });
+      if (!HYDRATING_CODES.has(code)) return;
+    } catch {
+      // the page navigated or rebuilt its DOM mid-read; try again
     }
-    return false;
-  }, NON_CONTENT_SELECTOR, { timeout: 15_000, polling: 250 }).catch(() => {});
+    if (Date.now() + 250 > deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }
 
 // `fetchApi` is a test seam for the ATS API fetch; the default is the real one.
@@ -788,7 +816,7 @@ export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) 
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await waitForJobText(page); // wait for SPA render
+      await waitForJobText(page, { status: response?.status() ?? 0, url }); // wait for SPA render
       const text = await page.evaluate((selector) => {
         document.querySelectorAll(selector).forEach(el => el.remove());
         return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
