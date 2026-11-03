@@ -14,7 +14,7 @@
     --tag-color: hsl(187, 74%, 28%);
     --tag-bg: hsl(187, 40%, 95%);
     --tag-border: hsl(187, 40%, 88%);
-    --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     --font-size: 11px;
     /* Matches generate-pdf.mjs's PDF_PAGE_MARGIN — the actual PDF page margin
        comes from the later @page rule injectPrintPageCss appends (which reads
@@ -38,7 +38,10 @@
      glyph advances that make PDF text extractors inject spurious spaces inside
      words (e.g. "SUM M ARY", "Germ any") — which corrupts ATS keyword parsing.
      This template's job is clean machine-readable parsing, so we use a standard
-     static system sans stack instead. Verified clean via pypdf text extraction.
+     static system sans stack instead. Arial Unicode MS is last among the named
+     faces. Headless Chromium embeds that face for Han text. Naming Hiragino,
+     PingFang, or Noto does not embed them, and 山 and 田 are then stored as
+     Kangxi radicals. Verified clean via pypdf text extraction.
      The lang="ja" rules reuse this Latin base stack (with a CJK fallback added);
      the lang="ar" rules below intentionally define their own Arabic stack. */
 
