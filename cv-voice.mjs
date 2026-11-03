@@ -74,7 +74,9 @@ function wordingOf(text) {
 }
 
 function hasPhrase(text, phrase) {
-  const body = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // stripMarkup puts a space where bold or a tag ended, so "**Results**-driven"
+  // reads "Results -driven". A space on either side of a hyphen still matches.
+  const body = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/-/g, ' ?- ?');
   return new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, 'iu').test(text);
 }
 

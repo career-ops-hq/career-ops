@@ -93,6 +93,16 @@ test('a stock phrase written with a long dash or curly quote still fails', () =>
   assert.equal(copied.some((issue) => issue.kind === 'banned-phrase'), false);
 });
 
+test('bold or a tag next to a hyphen does not split a stock phrase', () => {
+  const bold = `${SOURCE}- **Results**-driven about the refund queue\n`;
+  const copied = voiceIssues('Results\u2013driven lead for the refund page', bold);
+  assert.equal(copied.some((issue) => issue.kind === 'banned-phrase'), false);
+  const html = voiceIssues('<p><strong>Results</strong>-driven lead for the refund page</p>', SOURCE);
+  assert.ok(html.some((issue) => issue.value === 'results-driven'));
+  const edge = voiceIssues('<p>Shipped cutting-<em>edge</em> refund tools</p>', SOURCE);
+  assert.ok(edge.some((issue) => issue.value === 'cutting-edge'));
+});
+
 test('a short line copied whole from the CV keeps its dash', () => {
   const source = 'Program Manager\n2021\u20132024\n';
   assert.deepEqual(voiceIssues('2021\u20132024', source).filter((issue) => issue.kind === 'em-dash'), []);
