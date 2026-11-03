@@ -79,7 +79,7 @@ handle_result
     if (tsv !== undefined) writeFileSync(join(work, 'tracker-additions', '1.tsv'), tsv);
     if (report) writeFileSync(join(work, 'reports', '042-fabrikam-2026-01-31.md'), '# Fictional report\n');
     writeFileSync(join(work, 'worker.log'), `\`\`\`json\n${JSON.stringify(payload)}\n\`\`\`\n`);
-    const res = spawnSync(getBash(), [harness], { encoding: 'utf8', timeout: 30000, env: { ...process.env, ...env } });
+    const res = spawnSync(getBash(), [harness], { encoding: 'utf8', timeout: 30000, env: { ...process.env, MIN_SCORE: '0', FAIL_STATE: '', ...env } });
     const path = existsSync(join(work, 'state')) ? 'state' : 'recovery';
     return {
       status: res.status,
@@ -111,11 +111,12 @@ handle_result
     assert.equal(existsSync(discardLog), false, output);
   });
 
-  check('a below-min-score skip is logged as a discard with its score', () => {
+  check('a below-min-score skip is logged with the reason its state row keeps', () => {
     const { fields, output } = handle({ status: 'completed', id: '1', score: 2.5, error: null }, { report: true, env: { MIN_SCORE: '3' } });
     assert.equal(fields[2], 'skipped', output);
+    assert.equal(fields[6], '2.5');
     assert.equal(fields[7], 'below-min-score');
-    assert.deepEqual(readFileSync(discardLog, 'utf8').trimEnd().split('\t').slice(1), ['1', URL, 'below-min-score (2.5 < 3)']);
+    assert.deepEqual(readFileSync(discardLog, 'utf8').trimEnd().split('\t').slice(1), ['1', URL, 'below-min-score']);
   });
 
   check('a below-min-score skip that nothing recorded is not logged as a discard', () => {

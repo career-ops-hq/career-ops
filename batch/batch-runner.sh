@@ -1916,7 +1916,7 @@ process_offer() {
         local score_state_rc=0
         update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || score_state_rc=$?
         if (( score_state_rc != 2 )); then
-          log_discard "$id" "$url" "below-min-score ($score < $MIN_SCORE)"
+          log_discard "$id" "$url" "below-min-score"
         fi
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
