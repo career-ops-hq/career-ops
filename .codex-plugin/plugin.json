@@ -6,6 +6,10 @@
     "name": "santifer",
     "url": "https://santifer.io"
   },
+  "homepage": "https://career-ops.org",
+  "repository": "https://github.com/career-ops-hq/career-ops",
+  "license": "MIT",
+  "keywords": ["job-search", "career", "cv", "resume", "ai", "claude-code", "codex", "opencode"],
   "skills": [
     "./.agents/skills/career-ops"
   ]
