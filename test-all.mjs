@@ -14981,6 +14981,8 @@ try {
     .replace(/\{\{LINKEDIN_DISPLAY\}\}/g, 'linkedin.com/in/test')
     .replace(/\{\{GITHUB_URL\}\}/g, 'https://github.com/test')
     .replace(/\{\{GITHUB_DISPLAY\}\}/g, 'github.com/test')
+    .replace(/\{\{PORTFOLIO_BLOCK\}\}/g, ' ~ \\href{https://zhangwei.example.com}{\\raisebox{-0.2\\height}\\faGlobe\\ \\underline{zhangwei.example.com}}')
+    .replace(/\{\{SUMMARY\}\}/g, '五年前端工程师，专注于交互性能与设计系统')
     .replace(/\{\{EDUCATION\}\}/g, '    \\resumeSubheading\n      {示例大学}{Toronto, ON}\n      {计算机科学硕士学位}{2023 - 2025}')
     .replace(/\{\{EXPERIENCE\}\}/g, '    \\resumeSubheading\n      {示例公司}{2022 - Present}\n      {软件工程师}{Remote}\n      \\resumeItemListStart\n            \\resumeItem{设计并交付了多个内部工具}\n      \\resumeItemListEnd')
     .replace(/\{\{PROJECTS\}\}/g, '    \\resumeProjectHeading\n      {\\textbf{示例项目}}{2024}\n      \\resumeItemListStart\n            \\resumeItem{构建了一个交互式数据分析平台}\n      \\resumeItemListEnd')
