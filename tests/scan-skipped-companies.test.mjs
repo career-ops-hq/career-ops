@@ -32,6 +32,11 @@ const PORTALS = [
   '    parser:',
   '      command: node',
   '      script: tests/providers/_fixture-local-parser.mjs',
+  '  - name: Pinecrest Tools, LLC',
+  '    careers_url: https://self-hosted.example.com/pinecrest',
+  '    parser:',
+  '      command: node',
+  '      script: tests/providers/_fixture-local-parser.mjs',
   '  - name: Closed Co',
   '    careers_url: https://boards.example.com/closed',
   '    enabled: false',
@@ -67,13 +72,14 @@ test('names each company no provider claims, and warns when enabled is not a boo
   assert.match(result.text, /https:\/\/boards\.example\.com\/brassbound/);
   assert.match(result.text, /String Off/);
   assert.match(result.text, /enabled is "false"/);
-  assert.match(result.text, /still scanned/);
+  assert.match(result.text, /stays in the run and is scanned if a provider matches it/);
+  assert.doesNotMatch(result.text, /still scanned/);
   assert.doesNotMatch(result.text, /Closed Co/);
 });
 
 test('--company with no matching tracked company exits non-zero', () => {
   const result = runScan(['--company', 'Nope Labs']);
-  assert.notEqual(result.status, 0, describeSpawn(result));
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.match(result.text, /no tracked company matches "Nope Labs"/);
   assert.doesNotMatch(result.text, /New offers/);
 });
@@ -83,5 +89,12 @@ test('--company matches a row when only the legal suffix differs', () => {
   assert.equal(result.status, 0, describeSpawn(result));
   assert.match(result.text, /Scanning 1 companies/);
   assert.doesNotMatch(result.text, /Brassbound Freight/);
+  assert.doesNotMatch(result.text, /no tracked company matches/);
+});
+
+test('--company matches a row whose name differs only in punctuation', () => {
+  const result = runScan(['--company', 'Pinecrest Tools LLC']);
+  assert.equal(result.status, 0, describeSpawn(result));
+  assert.match(result.text, /Scanning 1 companies/);
   assert.doesNotMatch(result.text, /no tracked company matches/);
 });

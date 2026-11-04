@@ -4233,12 +4233,14 @@ async function main() {
         }
         continue;
       }
-      // Substring, plus the same legal-suffix rule the tracker uses.
+      // Substring, the tracker's normalized equality ("Acme Labs Inc" for
+      // "Acme Labs, Inc."), plus the same legal-suffix rule the tracker uses.
       // "Acme Labs, Inc." selects a row named "Acme Labs". A bare extra word
       // that is not a corporate form still does not. A disabled row still
       // counts, so --company does not say the company is missing when it is
       // only turned off.
       if (filterCompany && !entry.name.toLowerCase().includes(filterCompany)
+        && normalizeCompany(entry.name) !== normalizeCompany(filterCompanyRaw)
         && !companiesMatchIgnoringCorporateForm(entry.name, filterCompanyRaw)) continue;
       if (filterCompanyRaw != null) companyFilterMatched = true;
       if (entry.enabled === false) continue;
@@ -4248,7 +4250,7 @@ async function main() {
       // with the name, because scan does not run that validator.
       if (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') {
         enabledWarnings.push(
-          `${entry.name}: enabled is ${JSON.stringify(entry.enabled)}, not a boolean. Only boolean false turns a company off, so this one is still scanned.`,
+          `${entry.name}: enabled is ${JSON.stringify(entry.enabled)}, not a boolean. Only boolean false turns a company off, so this one stays in the run and is scanned if a provider matches it.`,
         );
       }
 
