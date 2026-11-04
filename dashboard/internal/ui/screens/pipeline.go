@@ -189,6 +189,7 @@ const (
 	filterRejected   = "rejected"
 	filterDiscarded  = "discarded"
 	filterTop        = "top"
+	filterOther      = "other"
 )
 
 type pipelineTab struct {
@@ -208,6 +209,7 @@ func getPipelineTabs() []pipelineTab {
 		{filterSkip, i18n.Current.TabSkip},
 		{filterRejected, i18n.Current.TabRejected},
 		{filterDiscarded, i18n.Current.TabDiscarded},
+		{filterOther, i18n.Current.TabOther},
 	}
 }
 
@@ -656,19 +658,13 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 		m.scrollOffset = 0
 
 	case "f", "right", "l":
-		m.activeTab++
-		if m.activeTab >= len(getPipelineTabs()) {
-			m.activeTab = 0
-		}
+		m.stepTab(1)
 		m.applyFilterAndSort()
 		m.cursor = 0
 		m.scrollOffset = 0
 
 	case "left", "h":
-		m.activeTab--
-		if m.activeTab < 0 {
-			m.activeTab = len(getPipelineTabs()) - 1
-		}
+		m.stepTab(-1)
 		m.applyFilterAndSort()
 		m.cursor = 0
 		m.scrollOffset = 0
@@ -1293,8 +1289,48 @@ func matchesSearch(app model.CareerApplication, query string) bool {
 	return false
 }
 
+// stepTab moves the active tab by delta, wrapping, and skips Other when that
+// bucket is empty so a clean tracker never lands on a blank tab.
+func (m *PipelineModel) stepTab(delta int) {
+	tabs := getPipelineTabs()
+	n := len(tabs)
+	if n == 0 || delta == 0 {
+		return
+	}
+	next := m.activeTab
+	for range n {
+		next += delta
+		if next >= n {
+			next = 0
+		} else if next < 0 {
+			next = n - 1
+		}
+		if tabs[next].filter == filterOther && m.countForFilter(filterOther) == 0 {
+			continue
+		}
+		m.activeTab = next
+		return
+	}
+}
+
+// clampActiveTab keeps the selection on a tab the tracker can show.
+func (m *PipelineModel) clampActiveTab() {
+	tabs := getPipelineTabs()
+	if len(tabs) == 0 {
+		m.activeTab = 0
+		return
+	}
+	if m.activeTab < 0 || m.activeTab >= len(tabs) {
+		m.activeTab = 0
+	}
+	if tabs[m.activeTab].filter == filterOther && m.countForFilter(filterOther) == 0 {
+		m.activeTab = 0
+	}
+}
+
 // applyFilterAndSort rebuilds the filtered list from apps.
 func (m *PipelineModel) applyFilterAndSort() {
+	m.clampActiveTab()
 	var filtered []model.CareerApplication
 
 	currentFilter := getPipelineTabs()[m.activeTab].filter
@@ -1308,6 +1344,10 @@ func (m *PipelineModel) applyFilterAndSort() {
 			filtered = append(filtered, app)
 		case filterTop:
 			if app.Score >= 4.0 && norm != "skip" {
+				filtered = append(filtered, app)
+			}
+		case filterOther:
+			if !data.IsCanonicalStatusName(norm) {
 				filtered = append(filtered, app)
 			}
 		default:
@@ -1646,12 +1686,20 @@ func (m PipelineModel) renderTabs() string {
 		width  int
 	}
 	src := getPipelineTabs()
-	items := make([]tabItem, len(src))
+	items := make([]tabItem, 0, len(src))
 	total := 0
+	activeIdx := 0
 	for i, tab := range src {
+		// An empty Other tab is not a place to land. Keep it while it is selected.
+		if tab.filter == filterOther && m.countForFilter(filterOther) == 0 && i != m.activeTab {
+			continue
+		}
 		label := fmt.Sprintf(" %s (%d) ", tab.label, m.countForFilter(tab.filter))
-		items[i] = tabItem{label: label, active: i == m.activeTab, width: lipgloss.Width(label)}
-		total += items[i].width
+		if i == m.activeTab {
+			activeIdx = len(items)
+		}
+		items = append(items, tabItem{label: label, active: i == m.activeTab, width: lipgloss.Width(label)})
+		total += items[len(items)-1].width
 	}
 
 	avail := m.width - 2 // Padding(0, 1) on the tab row
@@ -1660,7 +1708,8 @@ func (m PipelineModel) renderTabs() string {
 	}
 	start, end := 0, len(items)
 	if total > avail && len(items) > 0 {
-		start, end = m.activeTab, m.activeTab+1
+		// Other may have been omitted, so this is the visible tab, not the full list index.
+		start, end = activeIdx, activeIdx+1
 		if start < 0 {
 			start = 0
 		}
@@ -1741,6 +1790,10 @@ func (m PipelineModel) countForFilter(filter string) int {
 			if app.Score >= 4.0 && norm != "skip" {
 				count++
 			}
+		case filterOther:
+			if !data.IsCanonicalStatusName(norm) {
+				count++
+			}
 		default:
 			if norm == filter {
 				count++
@@ -1766,6 +1819,18 @@ func (m PipelineModel) renderMetrics() string {
 		color := statusColors[status]
 		s := lipgloss.NewStyle().Foreground(color)
 		parts = append(parts, s.Render(fmt.Sprintf("%s:%d", statusLabel(status), count)))
+	}
+
+	other := 0
+	for status, count := range m.metrics.ByStatus {
+		if count == 0 || data.IsCanonicalStatusName(status) {
+			continue
+		}
+		other += count
+	}
+	if other > 0 {
+		s := lipgloss.NewStyle().Foreground(m.theme.Yellow)
+		parts = append(parts, s.Render(fmt.Sprintf("%s:%d", i18n.Current.StatusOther, other)))
 	}
 
 	inner := m.width - 4
