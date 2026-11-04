@@ -20,26 +20,35 @@ function scan(...args) {
     const env = { ...process.env, CAREER_OPS_ROOT: root };
     for (const key of OVERRIDES) env[key] = '';
     const r = spawnSync(process.execPath, [join(ROOT, 'scan.mjs'), ...args], { cwd: root, encoding: 'utf8', timeout: 30000, env });
-    return `${r.stdout}\n${r.stderr}`;
+    return { status: r.status, error: r.error, output: `${r.stdout ?? ''}\n${r.stderr ?? ''}` };
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 }
 
+// Past the flags, the run stops at the missing portals.yml. That message, not
+// only the absence of a flag error, shows the form was accepted: a crash or a
+// timeout prints no flag error either.
+function assertAccepted(r) {
+  assert.equal(r.error, undefined, r.error?.message);
+  assert.equal(r.status, 1, r.output);
+  assert.match(r.output, /portals\.yml not found/);
+}
+
 test('the documented --throttle=<ms> gets past flag validation', () => {
-  assert.doesNotMatch(scan('--verify', '--throttle=8000', '--dry-run'), /unrecognized flag/i);
+  assertAccepted(scan('--verify', '--throttle=8000', '--dry-run'));
 });
 
 test('the bare form still does', () => {
-  assert.doesNotMatch(scan('--verify', '--throttle', '--dry-run'), /unrecognized flag/i);
+  assertAccepted(scan('--verify', '--throttle', '--dry-run'));
 });
 
 test('a value that is not a positive number is still refused', () => {
   for (const flag of ['--throttle=abc', '--throttle=0', '--throttle=-5', '--throttle=']) {
-    assert.match(scan('--verify', flag, '--dry-run'), /unrecognized flag/i, flag);
+    assert.match(scan('--verify', flag, '--dry-run').output, /unrecognized flag/i, flag);
   }
 });
 
 test('the flag after --throttle is not swallowed as its value', () => {
-  assert.match(scan('--throttle', '--bogus'), /unrecognized flag\(s\): --bogus/i);
+  assert.match(scan('--throttle', '--bogus').output, /unrecognized flag\(s\): --bogus/i);
 });
