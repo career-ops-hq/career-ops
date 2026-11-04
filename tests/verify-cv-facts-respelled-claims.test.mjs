@@ -42,6 +42,29 @@ test('currency codes and words fold onto the symbol form', () => {
   assert.deepEqual(invented('Managed a 300K USD budget.'), [], 'the source says $300K');
 });
 
+test('a source with € or £ after the amount backs the code the text pass prints', async () => {
+  // generate-pdf.mjs prints € as "EUR " and £ as "GBP ", and the gate reads the
+  // printed text. French, German and Spanish write the symbol after the amount,
+  // which the metric patterns do not read, so cv.md read only as written backed
+  // nothing (#6361).
+  const { normalizeTextForATS } = await import('../generate-pdf.mjs');
+  const printed = (text) => normalizeTextForATS(`<p>${text}</p>`).html;
+  for (const source of [
+    'Cut supplier costs by 50 000 € a year.',
+    'Cut supplier costs by 50 000 € a year.',
+    'Cut supplier costs by 2.500 € a month.',
+    'Won a € 1,5M deal.',
+    'Saved 40 000 £ a year.',
+  ]) {
+    assert.notDeepEqual(claims(printed(source)), [], `the printed amount is read: ${printed(source)}`);
+    assert.deepEqual(invented(printed(source), source), [], source);
+  }
+  assert.deepEqual(invented(printed('Cut supplier costs by 50 000 € a year.'), 'Cut supplier costs by 40 000 € a year.'),
+    ['€50000'], 'a different amount is still refused');
+  assert.deepEqual(auditClaims(printed('Saved 50 000 € a year.'), '', { allow_metrics: ['50 000 €'] }).invented, [],
+    'an allow_metrics entry written the same way');
+});
+
 test('lowercase currency codes and a bare "pounds" are not money', () => {
   assert.deepEqual(claims('Shipped 20 pounds of parts.'), []);
   assert.deepEqual(claims('Wrote 3 gbp converters.'), []);

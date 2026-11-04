@@ -49,7 +49,8 @@ function tone(family, shade) {
 }
 
 function themeColor(selector, name) {
-  const block = GLOBALS.match(new RegExp(`^${selector.replace(".", "\\.")} \\{([^}]*)\\}`, "m"));
+  // `.dark` sits inside `@media screen` so print stays on the light palette.
+  const block = GLOBALS.match(new RegExp(`^\\s*${selector.replace(".", "\\.")} \\{([^}]*)\\}`, "m"));
   const m = block?.[1].match(new RegExp(`--${name}:\\s*#([0-9a-f]{6})`, "i"));
   assert.ok(m, `globals.css declares a hex --${name} under ${selector}`);
   return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);

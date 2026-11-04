@@ -29,7 +29,9 @@ import { parseOutputLanguage } from './profile-language.mjs';
 import {
   normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-launch.mjs';
 const execFileAsync = promisify(execFile);
+const BROWSER_PROCESS_ENV = snapshotBrowserProcessEnv();
 try {
   const { config } = await import('dotenv');
   config();
@@ -564,7 +566,10 @@ async function main() {
     return;
   }
   console.log(`Found ${pendingIndices.length} pending offers.`);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunchOptions(
+    { headless: true },
+    { projectRoot: DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+  ));
   
   const results = await processPipelineBatch(pendingIndices, CONCURRENCY, (lineIdx, runIdx) => {
     return processOffer(browser, pipelineLines[lineIdx], runIdx);

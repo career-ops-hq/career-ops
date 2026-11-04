@@ -33,7 +33,9 @@ import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils
 import { anonymizeContext } from './utils/privacy-filter.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
-import { appendToPipeline, appendToScanHistory, atomicWriteFile } from './scan.mjs';
+import {
+  appendToPipeline, appendToScanHistory, atomicWriteFile, BROWSER_PROCESS_ENV,
+} from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -44,6 +46,7 @@ import { locateApplyReport } from './apply-scope.mjs';
 import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // Ambient privacy guard over global fetch. Installed explicitly here (rather
 // than relying on NODE_OPTIONS) so the OpenRouter path is guarded in a plain
@@ -738,7 +741,10 @@ async function fetchJobPage(url) {
     let browser;
     let unreadable = null;
     try {
-      browser = await chromium.launch({ headless: true });
+      browser = await chromium.launch(browserLaunchOptions(
+        { headless: true },
+        { projectRoot: DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+      ));
       const page = await browser.newPage();
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.waitForTimeout(2000); // wait for SPA render

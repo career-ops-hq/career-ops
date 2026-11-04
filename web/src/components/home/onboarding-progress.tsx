@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Check, Circle, CircleDashed } from "lucide-react";
-import { readSavedCliId } from "@/lib/saved-cli";
+import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
 import { PREREQS, onboardingChecklist } from "@/lib/home/onboarding-checklist.mjs";
 
 // The "profile that grows while you talk": a live checklist of the four setup
@@ -15,16 +15,13 @@ import { PREREQS, onboardingChecklist } from "@/lib/home/onboarding-checklist.mj
 type Doctor = { available: boolean; onboardingNeeded: boolean; missing: string[] };
 type Section = { id: string; heading: string; state: "filled" | "template" | "missing" };
 
-// Same reader the rest of the app uses, so "configured" cannot mean one thing
-// here and another in Config (an empty-string cliId is not configured).
-function hasCli(): boolean {
-  return !!readSavedCliId();
-}
 
 export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
-  const [cli, setCli] = useState(true);
+  // null while resolveCliId() is in flight: the action shows, disabled, so it
+  // neither flashes nor opens an assistant that has no CLI to send with.
+  const [cli, setCli] = useState<boolean | null>(null);
 
   const refetch = useCallback(() => {
     fetch("/api/doctor").then((r) => r.json()).then(setDoctor).catch(() => {});
@@ -34,11 +31,18 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   }, []);
 
   useEffect(() => {
-    setCli(hasCli());
+    // The same check a Run makes, so "configured" cannot mean one thing here and
+    // another when the assistant starts: a saved id counts only while it is
+    // installed (#4012), and an empty one never does.
+    let live = true;
+    // The assistant sends with the saved id, so a pick that could not be
+    // saved (blocked storage) does not count either.
+    resolveCliId().then((id) => { if (live) setCli(!!id && readSavedCliId() === id); });
     refetch();
     window.addEventListener("co-onboarding-changed", refetch);
     window.addEventListener("co-job-done", refetch);
     return () => {
+      live = false;
       window.removeEventListener("co-onboarding-changed", refetch);
       window.removeEventListener("co-job-done", refetch);
     };
@@ -78,10 +82,11 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
         ))}
       </ul>
 
-      {cli ? (
+      {cli !== false ? (
         <button
+          disabled={cli === null}
           onClick={() => window.dispatchEvent(new CustomEvent("co-assistant", { detail: { message: kickoff } }))}
-          className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
+          className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:cursor-wait disabled:opacity-60"
         >
           <Sparkles className="size-4" /> Continue with the assistant
         </button>
