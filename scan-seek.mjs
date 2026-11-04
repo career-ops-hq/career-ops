@@ -43,6 +43,8 @@ import {
   appendScanRunSummary,
 } from './scan.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 // Filters, role key and seen-role index shared with scan-linkedin.mjs.
 import { makeJobClassifier, loadRoleIndex } from './scan-local-lib.mjs';
 
@@ -372,7 +374,7 @@ async function main() {
     }
 
     if (toAdd.length && !DRY_RUN) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localToday();
       await appendToScanHistory(toAdd, today);
       await appendToPipeline(toAdd);
       counters.newAdded += toAdd.length;
@@ -404,7 +406,7 @@ async function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   main().catch((e) => { console.error(e); process.exit(1); });
 }
 

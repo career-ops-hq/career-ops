@@ -176,7 +176,7 @@ test('check-table-freshness --today still overrides, and reports the date it use
 test('each scanner that writes scan-history imports localToday', () => {
   // The check above is satisfied by deleting the date argument entirely. This
   // asserts the replacement is actually present.
-  for (const file of ['scan.mjs', 'scan-ats-full.mjs', 'scan-hn.mjs', 'scan-interamt.mjs']) {
+  for (const file of ['scan.mjs', 'scan-ats-full.mjs', 'scan-hn.mjs', 'scan-interamt.mjs', 'scan-seek.mjs', 'scan-dayforce.mjs']) {
     const src = readFileSync(join(ROOT, file), 'utf8');
     assert.match(
       src, /import\s*{[^}]*\blocalToday\b[^}]*}\s*from\s*['"][^'"]*local-today\.mjs['"]/,
