@@ -6,8 +6,15 @@ import path from "node:path";
 import { register } from "node:module";
 import "../helpers/web-ts-alias-loader.mjs";
 
-// Node's ESM resolver needs the extension; Next's bundler supplies it in-app.
-register(`data:text/javascript,${encodeURIComponent('export function resolve(specifier, context, nextResolve) { return nextResolve(specifier === "next/server" ? "next/server.js" : specifier, context); }')}`, import.meta.url);
+// Required core CI installs root dependencies only, without Next. Stub just
+// its response adapter; exercise the actual save handler, core paths and files.
+const frameworkAdapter = `data:text/javascript,${encodeURIComponent('export const NextResponse = { json: (body, init) => Response.json(body, init) };')}`;
+register(`data:text/javascript,${encodeURIComponent(`
+  export function resolve(specifier, context, nextResolve) {
+    if (specifier === "next/server") return { url: ${JSON.stringify(frameworkAdapter)}, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+`)}`, import.meta.url);
 const { POST } = await import("../../src/app/api/runs/save/route.ts");
 
 test("the actual run-log writer retains a gate's status, reason and confirmation guidance without a score", async t => {
