@@ -177,9 +177,20 @@ function toLines(input) {
   // A marker may also end its line: `<li>\n<p>text` and `<li></li>` arrive as a
   // bare "-", and headingKind would take it for a heading and hide the real one
   // above it. In a 2026-10-30 sample, 654 of 3,573 postings had such a line.
-  return text.replace(/[’‘]/g, "'").replace(/[^\S\r\n]+/g, ' ').split(/\r?\n/)
-    .map(l => ({ text: l.replace(LIST_MARKER, '').trim(), item: LIST_MARKER.test(l) }))
-    .filter(l => l.text);
+  // The item's text then starts the next line with text, so that line is the
+  // item: read without its marker, "Strong analytical skills" under Preferred
+  // opened a Required section. A heading after an empty `<li></li>` looks the
+  // same, and the flag only ever keeps a line without a colon from opening one.
+  const lines = [];
+  let marker = false;
+  for (const l of text.replace(/[’‘]/g, "'").replace(/[^\S\r\n]+/g, ' ').split(/\r?\n/)) {
+    const item = LIST_MARKER.test(l);
+    const rest = l.replace(LIST_MARKER, '').trim();
+    if (!rest) { marker ||= item; continue; }
+    lines.push({ text: rest, item: item || marker });
+    marker = false;
+  }
+  return lines;
 }
 
 /**
@@ -213,8 +224,10 @@ function headingKind(line, item) {
   if (/\d/.test(line) && !known) return null;
   // "Excellent communication skills" and "Experience in fintech" are items that
   // happen to hold a heading word. Read as Required, one under Preferred
-  // Qualifications turned the bars after it into a confident drop.
-  if (known === 'required' && !/:$/.test(bare) && (item || /^experience (?:in|with|of)\b/i.test(bare))) return null;
+  // Qualifications turned the bars after it into a confident drop. A colon
+  // makes a list item a heading, but "Experience in fintech:" introduces the
+  // items after it, not a section.
+  if (known === 'required' && ((item && !/:$/.test(bare)) || /^experience (?:in|with|of)\b/i.test(bare))) return null;
   return known ?? 'other';
 }
 
