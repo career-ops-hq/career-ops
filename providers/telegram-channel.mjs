@@ -125,7 +125,7 @@ const GENERIC_ORG_RE = /(компани|команд|стартап|проект
 // A work format where the employer would be: Proglib's third line is
 // "Удаленно (Москва)" / "Офис/гибрид (Москва)". LOCATIONISH_RE cannot catch
 // these: its \b never fires next to a Cyrillic letter.
-const WORK_FORMAT_RE = /(?<![\p{L}])(удал[её]н\p{L}*|гибрид\p{L}*|офис\p{L}*|релокац\p{L}*|relocation|remote|hybrid|onsite|on-site|office)(?![\p{L}])/iu;
+const WORK_FORMAT_RE = /(?<![\p{L}])(удал[её]н\p{L}*|гибрид\p{L}*|офис\p{L}*|релокац\p{L}*|remote|hybrid|onsite|on-site|office)(?![\p{L}])/iu;
 // A line that is nothing but a work format, a reach or an employment term
 // ("Worldwide 🌏", "remote", "Релокация", "Full-time"; "Удалённо · Москва"
 // is not: it names a city) — never a title.
@@ -239,6 +239,20 @@ function bareLine(line) {
 }
 
 /**
+ * A work format leading a phrase about where the work is: a format word,
+ * then a function word, a place or another format ("Релокация в Сербию",
+ * "Relocation to Serbia", "Гибрид Москва"). "Relocation Today" is not one.
+ *
+ * @param {string} name
+ */
+function isFormatPhrase(name) {
+  const m = name.match(/^(\S+)\s+(.+)$/u);
+  if (!m || !FORMAT_ONLY_RE.test(m[1])) return false;
+  const rest = m[2].replace(/[^\p{L}\p{N}]+$/u, '');
+  return FUNCTION_WORD_RE.test(rest) || PLACE_RE.test(rest) || FORMAT_ONLY_RE.test(rest);
+}
+
+/**
  * plausibleEmployer() for the shapes that take the employer from its position
  * in a line rather than from a marker: also refuses a sector, a unit, a
  * contract term, a role, a person, a year, a place, and a name that does not
@@ -331,10 +345,12 @@ export function employerName(lines) {
     const hashtagEmployer = plausibleEmployer(second, false);
     // A line of business is not a name either: "#Develpment\nCustom Software
     // Development" (@remote_jobs_relocate, measured 2026-10-31).
-    // Nor is a work format with more words ("Релокация в Сербию"), which
-    // FORMAT_ONLY_RE in plausibleEmployer() lets through.
+    // Nor is a work format followed by a destination ("Релокация в Сербию",
+    // "Relocation to Serbia"), which FORMAT_ONLY_RE in plausibleEmployer()
+    // lets through. A name that merely holds a format word stays one:
+    // "Relocation Today".
     if (hashtagEmployer && !ROLE_WORD_RE.test(hashtagEmployer) && !isDepartment(hashtagEmployer)
-        && !WORK_FORMAT_RE.test(hashtagEmployer)) return hashtagEmployer;
+        && !isFormatPhrase(hashtagEmployer)) return hashtagEmployer;
   }
   // The six positional shapes below run only when every marked shape above
   // found nothing, so no post those attribute changes. Measured 2026-10-31 on

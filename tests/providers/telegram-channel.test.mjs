@@ -169,6 +169,7 @@ try {
     [['#lead', 'Руководитель отдела'], 'a hashtag-only first line whose next line names a head of department'],
     [['#remote', 'Релокация', 'Senior Engineer'], 'a relocation term on the hashtag template'],
     [['#remote', 'Relocation to Serbia', 'Senior Engineer'], 'a relocation phrase on the hashtag template'],
+    [['#remote', 'Гибрид Москва', 'Senior Engineer'], 'a work format and a city on the hashtag template'],
     // #4455: a title packing several pipe-delimited metadata tags is a
     // different shape from "Title | Employer" — the non-greedy `[^|]`
     // capture can only land on the LAST segment, which is whichever tag the
@@ -212,6 +213,8 @@ try {
     [['Python Backend Developer — YLAB Development'], 'YLAB Development', 'a brand token keeps a name ending in a department word'],
     [['Senior Python Developer — Moscow Exchange'], 'Moscow Exchange', 'a name that only starts with a place keeps it'],
     [['Backend Developer', 'Компания: NDA Group'], 'NDA Group', 'a name that only starts with NDA keeps it'],
+    [['#remote', 'Relocation Today', 'Backend Engineer'], 'Relocation Today', 'a name that holds a format word keeps it on the hashtag template'],
+    [['Backend Developer / Relocation Today'], 'Relocation Today', 'a name that holds a format word keeps it after the slash'],
     [['Backend Engineer', 'The Trade Desk is a global advertising technology company.'], 'The Trade Desk', 'a three-word name opening with "The" before "is a"'],
     [['iOS Engineer – Creative App', 'ElevenLabs is an AI research and product company.'], 'ElevenLabs', '"Employer is a …" on the second line beats the team after the dash (@forallmobile)'],
     [['Data Engineer (со знанием Java или Groovy)', 'от 200 000 до 230 000 ₽', 'WILIX', 'WILIX - аккредитованная IT - компания.'], 'WILIX', 'a finder.work mirror\'s employer after the salary line (@jc_it)'],
