@@ -316,6 +316,7 @@ try {
       // handshake to degrade gracefully — the POST is still attempted.
       let redirectDegradedPostCalled = false;
       await consider.fetch(okEntry, {
+        sleep: async () => {},
         fetchResponse: async () => { throw new TypeError('fetch failed'); },
         fetchJson: async () => { redirectDegradedPostCalled = true; return { jobs: [] }; },
       });
@@ -428,6 +429,126 @@ try {
     } else {
       fail(`consider POST context host = ${JSON.stringify(guardedHosts['/api-boards/search-jobs'])}`);
     }
+  }
+
+  // ── Retry ──────────────────────────────────────────────────────────────────
+  const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+  const oneJob = { jobs: [{ title: 'T', url: 'https://jobs.acmevc.example/r', companyName: 'Acme' }] };
+
+  let postAttempts = 0;
+  const retriedPost = await consider.fetch(okEntry, {
+    _acquireHandshake: noHandshake,
+    sleep: async () => {},
+    fetchJson: async () => {
+      postAttempts++;
+      if (postAttempts === 1) throw httpError(500);
+      return oneJob;
+    },
+  });
+  if (postAttempts === 2 && retriedPost.length === 1) pass('consider.fetch() retries a POST that answers 500 and keeps the board');
+  else fail(`consider.fetch() POST retry: ${postAttempts} attempts, ${retriedPost.length} jobs`);
+
+  let refusedAttempts = 0;
+  let refusedStatus = null;
+  try {
+    await consider.fetch(okEntry, {
+      _acquireHandshake: noHandshake,
+      sleep: async () => {},
+      fetchJson: async () => { refusedAttempts++; throw httpError(412); },
+    });
+  } catch (e) { refusedStatus = e.status; }
+  if (refusedAttempts === 1 && refusedStatus === 412) pass('consider.fetch() does not retry a 412 and still throws it');
+  else fail(`consider.fetch() 412: ${refusedAttempts} attempts, status ${refusedStatus}`);
+
+  let handshakeAttempts = 0;
+  let retriedHandshakeHeaders = null;
+  await consider.fetch(okEntry, {
+    sleep: async () => {},
+    fetchResponse: async () => {
+      handshakeAttempts++;
+      if (handshakeAttempts === 1) throw httpError(503);
+      return new Response('<script>\n  window.serverInitialData = {"csrfToken":"token-after-retry"};\n</script>', { status: 200 });
+    },
+    fetchJson: async (_url, opts) => { retriedHandshakeHeaders = opts.headers; return { jobs: [] }; },
+  });
+  if (handshakeAttempts === 2 && retriedHandshakeHeaders?.['x-csrf-token'] === 'token-after-retry') {
+    pass('consider.fetch() retries the board page GET and uses its token');
+  } else {
+    fail(`consider.fetch() handshake retry: ${handshakeAttempts} attempts, headers ${JSON.stringify(retriedHandshakeHeaders)}`);
+  }
+
+  let probeGets = 0;
+  let probePosts = 0;
+  let probeThrew = false;
+  try {
+    await consider.fetch(okEntry, {
+      maxPages: 1,
+      sleep: async () => {},
+      fetchResponse: async () => { probeGets++; throw httpError(503); },
+      fetchJson: async () => { probePosts++; throw httpError(500); },
+    });
+  } catch { probeThrew = true; }
+  if (probeGets === 1 && probePosts === 1 && probeThrew) pass('consider.fetch() does not retry under a ctx.maxPages probe');
+  else fail(`consider.fetch() probe: ${probeGets} GETs, ${probePosts} POSTs, threw ${probeThrew}`);
+
+  // ── consider_size ──────────────────────────────────────────────────────────
+  // Runs one fetch with `rows` rows and the board's `total`, and returns the size
+  // the POST asked for and the warnings printed.
+  const sizeRun = async (consider_size, { rows, total, maxPages } = {}) => {
+    const warnings = [];
+    const realConsoleError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    let requested = null;
+    try {
+      await consider.fetch({ ...okEntry, ...(consider_size ? { consider_size } : {}) }, {
+        _acquireHandshake: noHandshake,
+        ...(maxPages ? { maxPages } : {}),
+        fetchJson: async (_url, opts) => {
+          requested = JSON.parse(opts.body).meta.size;
+          const jobs = Array.from({ length: rows }, (_, i) => ({ title: `T${i}`, url: `https://jobs.acmevc.example/j${i}`, companyName: 'Acme' }));
+          return { jobs, ...(total === undefined ? {} : { total }) };
+        },
+      });
+    } finally {
+      console.error = realConsoleError;
+    }
+    return { requested, warnings };
+  };
+
+  const clamped = await sizeRun(5000, { rows: 1, total: 1 });
+  const atMaximum = await sizeRun(1000, { rows: 1, total: 1 });
+  const byDefault = await sizeRun(undefined, { rows: 1, total: 1 });
+  if (clamped.requested === 1000 && atMaximum.requested === 1000 && byDefault.requested === 500) {
+    pass('consider.fetch() clamps consider_size to 1000 and defaults to 500');
+  } else {
+    fail(`consider.fetch() size: clamped ${clamped.requested}, at maximum ${atMaximum.requested}, default ${byDefault.requested}`);
+  }
+
+  const belowMaximum = await sizeRun(100, { rows: 100, total: 300 });
+  if (belowMaximum.warnings.length === 1
+      && belowMaximum.warnings[0].includes('Acme Ventures truncated at consider_size=100 (100 of 300 jobs) — raise consider_size on this entry for more')) {
+    pass('consider.fetch() warns and advises a higher consider_size below the maximum');
+  } else {
+    fail(`consider.fetch() warning below the maximum: ${JSON.stringify(belowMaximum.warnings)}`);
+  }
+
+  const maximumHit = await sizeRun(1000, { rows: 1000, total: 4719 });
+  if (maximumHit.warnings.length === 1
+      && maximumHit.warnings[0].includes('truncated at consider_size=1000 (1000 of 4719 jobs) — 1000 is the most one request can return')
+      && !maximumHit.warnings[0].includes('raise consider_size')) {
+    pass('consider.fetch() does not advise a higher consider_size at the maximum');
+  } else {
+    fail(`consider.fetch() warning at the maximum: ${JSON.stringify(maximumHit.warnings)}`);
+  }
+
+  const wholeBoard = await sizeRun(1000, { rows: 840, total: 840 });
+  const exactFit = await sizeRun(100, { rows: 100, total: 100 });
+  const noTotal = await sizeRun(100, { rows: 100 });
+  const underProbe = await sizeRun(100, { rows: 100, total: 300, maxPages: 1 });
+  if ([wholeBoard, exactFit, noTotal, underProbe].every((run) => run.warnings.length === 0)) {
+    pass('consider.fetch() does not warn on a complete board, a missing total or a probe');
+  } else {
+    fail(`consider.fetch() false warning: ${JSON.stringify([wholeBoard, exactFit, noTotal, underProbe].map((run) => run.warnings))}`);
   }
 } catch (e) {
   fail(`consider provider tests crashed: ${e.message}`);

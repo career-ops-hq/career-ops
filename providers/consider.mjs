@@ -1,7 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchResponseWithRetry } from './_http.mjs';
 
 // Consider provider — multi-employer board adapter for `job_boards:`.
 // VC "talent network" portfolio boards built on Consider (consider.com) and
@@ -32,8 +32,14 @@ import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
 // id would save no request. `consider_board: <id>` on the entry wins over the
 // page; it is needed only when the page stops carrying the id.
 //
-// `consider_size` (default 500) caps how many newest/featured jobs are pulled in
-// the single request. Boards larger than that are truncated (rare for VC boards).
+// `consider_size` (default 500, maximum 1000) caps how many jobs the single
+// request pulls. A board with more jobs than that is truncated, with a warning.
+// The API orders jobs by its own score, so the newest jobs come first only
+// roughly.
+//
+// Both requests are retried on a transient failure, through the shared helpers
+// in _http.mjs. A verify-portals probe (ctx.maxPages set) gets no retries, so it
+// receives a failure at once.
 
 // Consider's `timeStamp` arrives as epoch ms on some boards and an ISO string
 // on others, so both shapes are handled. Non-positive values are treated as
@@ -52,6 +58,8 @@ function toEpochMs(value) {
 
 const ENDPOINT_PATH = '/api-boards/search-jobs';
 const DEFAULT_SIZE = 500;
+// The API answers HTTP 500 to a larger size, so an entry's value is clamped to it.
+const MAX_SIZE = 1000;
 // Budget for the anonymous GET that seeds the session cookie and csrfToken.
 // Shorter than the POST budget so a slow board page can't eat the full timeout.
 const HANDSHAKE_TIMEOUT_MS = 8_000;
@@ -143,6 +151,16 @@ function extractBoard(data) {
 // unguarded request.
 const NO_HANDSHAKE = Object.freeze({ cookie: null, csrfToken: null, board: null });
 
+/** A verify-portals probe sets ctx.maxPages. */
+function isProbe(ctx) {
+  return Number(ctx?.maxPages) > 0;
+}
+
+/** The retry policy for one request: none for a probe, the shared default otherwise. */
+function retryPolicy(ctx) {
+  return isProbe(ctx) ? { retries: 0 } : {};
+}
+
 async function acquireCsrfHandshake(origin, ctx) {
   if (typeof ctx.fetchResponse !== 'function') return NO_HANDSHAKE;
   try {
@@ -156,11 +174,11 @@ async function acquireCsrfHandshake(origin, ctx) {
     // only refuse it, so 'error' is the simpler choice — the resulting
     // TypeError is caught below as a degraded handshake (all null), which is
     // correct.
-    const res = await ctx.fetchResponse(`${origin}/jobs`, {
+    const res = await fetchResponseWithRetry(ctx, `${origin}/jobs`, {
       headers: { 'user-agent': BROWSER_LIKE_USER_AGENT, accept: 'text/html,*/*' },
       redirect: 'error',
       timeoutMs: HANDSHAKE_TIMEOUT_MS,
-    });
+    }, retryPolicy(ctx));
     // ctx.fetchResponse throws on a non-2xx, so this only fires for a ctx that
     // hands one back anyway. Either way a refused GET must not be scraped.
     if (!res.ok) return NO_HANDSHAKE;
@@ -222,7 +240,8 @@ export default {
   async fetch(entry, ctx) {
     const origin = resolveOrigin(entry);
     if (!origin) throw new Error(`consider: ${entry.name} needs an https careers_url on a public host`);
-    const size = Number.isInteger(entry.consider_size) && entry.consider_size > 0 ? entry.consider_size : DEFAULT_SIZE;
+    const size = Number.isInteger(entry.consider_size) && entry.consider_size > 0
+      ? Math.min(entry.consider_size, MAX_SIZE) : DEFAULT_SIZE;
 
     // Perform the CSRF handshake before the POST. ctx._acquireHandshake is a
     // test seam: set it to a stub in unit tests so no real network call is made.
@@ -243,7 +262,7 @@ export default {
     if (cookie) csrfHeaders.cookie = cookie;
     if (csrfToken) csrfHeaders['x-csrf-token'] = csrfToken;
 
-    const json = await ctx.fetchJson(origin + ENDPOINT_PATH, {
+    const json = await fetchJsonWithRetry(ctx, origin + ENDPOINT_PATH, {
       method: 'POST',
       // redirect:'error' so a 3xx from the (config-driven) board host can't be
       // followed to a private/metadata IP — the host guard above pins the first hop.
@@ -259,9 +278,17 @@ export default {
         board: { id: board.id, isParent: board.isParent },
         query: { promoteFeatured: true },
       }),
-    });
+    }, retryPolicy(ctx));
 
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    if (!isProbe(ctx) && jobs.length >= size && Number.isInteger(json?.total) && json.total > jobs.length) {
+      // At the maximum a higher consider_size is clamped back to it, so raising
+      // the entry's value would read nothing more.
+      const advice = size >= MAX_SIZE
+        ? `${MAX_SIZE} is the most one request can return`
+        : 'raise consider_size on this entry for more';
+      console.error(`⚠️  consider: ${entry.name} truncated at consider_size=${size} (${jobs.length} of ${json.total} jobs) — ${advice}`);
+    }
     return jobs
       .map(j => {
         const rawUrl = j.url || j.applyUrl || '';
