@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Check, Circle, CircleDashed } from "lucide-react";
-import { resolveCliId } from "@/lib/saved-cli";
+import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
 import { PREREQS, onboardingChecklist } from "@/lib/home/onboarding-checklist.mjs";
 
 // The "profile that grows while you talk": a live checklist of the four setup
@@ -19,7 +19,9 @@ type Section = { id: string; heading: string; state: "filled" | "template" | "mi
 export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
-  const [cli, setCli] = useState(true);
+  // null while resolveCliId() is in flight: the action shows, disabled, so it
+  // neither flashes nor opens an assistant that has no CLI to send with.
+  const [cli, setCli] = useState<boolean | null>(null);
 
   const refetch = useCallback(() => {
     fetch("/api/doctor").then((r) => r.json()).then(setDoctor).catch(() => {});
@@ -33,7 +35,9 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
     // another when the assistant starts: a saved id counts only while it is
     // installed (#4012), and an empty one never does.
     let live = true;
-    resolveCliId().then((id) => { if (live) setCli(!!id); });
+    // The assistant sends with the saved id, so a pick that could not be
+    // saved (blocked storage) does not count either.
+    resolveCliId().then((id) => { if (live) setCli(!!id && readSavedCliId() === id); });
     refetch();
     window.addEventListener("co-onboarding-changed", refetch);
     window.addEventListener("co-job-done", refetch);
@@ -78,10 +82,11 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
         ))}
       </ul>
 
-      {cli ? (
+      {cli !== false ? (
         <button
+          disabled={cli === null}
           onClick={() => window.dispatchEvent(new CustomEvent("co-assistant", { detail: { message: kickoff } }))}
-          className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
+          className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:cursor-wait disabled:opacity-60"
         >
           <Sparkles className="size-4" /> Continue with the assistant
         </button>

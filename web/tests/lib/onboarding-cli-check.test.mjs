@@ -21,11 +21,21 @@ for (const rel of ["onboarding-banner.tsx", "home/onboarding-progress.tsx"]) {
 
   test(`${rel} decides "has a CLI" with resolveCliId()`, () => {
     assert.match(src, /import\s*{[^}]*\bresolveCliId\b[^}]*}\s*from\s*"@\/lib\/saved-cli"/);
-    assert.match(src, /resolveCliId\(\)\.then\(\(id\)\s*=>\s*{\s*if\s*\(live\)\s*setCli\(!!id\);?\s*}\)/);
+    // The assistant console sends the SAVED id, so a resolved pick counts only
+    // once it is the one in storage (a blocked write leaves nothing to send).
+    assert.match(src, /resolveCliId\(\)\.then\(\(id\)\s*=>\s*{\s*if\s*\(live\)\s*setCli\(!!id && readSavedCliId\(\) === id\);?\s*}\)/);
+  });
+
+  test(`${rel} keeps the assistant action disabled until the CLI check settles`, () => {
+    // While /api/clis is pending the action must neither open an assistant
+    // with no CLI to send the kickoff with nor flash the Config fallback.
+    assert.match(src, /useState<boolean \| null>\(null\)/);
+    assert.match(src, /\{cli !== false \? \(/);
+    assert.match(src, /disabled=\{cli === null\}/);
   });
 
   test(`${rel} no longer trusts the saved cliId on its own`, () => {
-    assert.doesNotMatch(src, /\breadSavedCliId\b/, "the saved id alone stays truthy after its CLI is uninstalled");
+    assert.doesNotMatch(src, /setCli\(!!readSavedCliId\(\)\)/, "the saved id alone stays truthy after its CLI is uninstalled");
     assert.doesNotMatch(src, /localStorage\.getItem\("career-ops:config"\)/, "read the config through lib/saved-cli");
   });
 
