@@ -105,16 +105,28 @@ The LinkedIn profile isn't in the primary files, so check its current text befor
 | 2 | About | Not reviewed | Open with the platform serving 4 engineering teams and deployment cut from 2 weeks to 4 hours | Leads with the strongest platform proof |
 | 3 | TechFin Corp entry | Not reviewed | Match the reordered CV bullets | The CV and profile should tell one story |
 | 4 | Featured | Not reviewed | Link LLM Eval Toolkit and FraudShield | Public proof a reviewer can open |
-| 5 | Skills | Not reviewed | Pin MLOps, Kubernetes and Python | All three are on the CV and in the JD |
+| 5 | Skills | Not reviewed | Pin Kubernetes, AWS and Python | All three are on the CV and in the JD |
 
 ## F) Interview Plan
 
-| # | JD Requirement | STAR Story | S | T | A | R |
-|---|---------------|------------|---|---|---|---|
-| 1 | Platform ownership | ML platform at TechFin | Model deployment took 2 weeks | Build an internal platform for 4 engineering teams | Model registry, A/B testing framework, feature store, CI/CD pipeline | Deployment time from 2 weeks to 4 hours |
-| 2 | Serving under latency budgets | Fraud detection pipeline at TechFin | Fraud decisions had to run in real time | Design the pipeline | Kafka, feature computation, model inference, decision engine | 99.7% precision at 50ms p99 |
+| # | JD Requirement | STAR+R Story | S | T | A | R | Reflection |
+|---|----------------|--------------|---|---|---|---|------------|
+| 1 | Platform ownership | ML platform at TechFin | Model deployment took 2 weeks | Build an internal platform for 4 engineering teams | Model registry, A/B testing framework, feature store | An internal MLOps platform serving 4 engineering teams | Would agree the deployment target with those teams before choosing tools |
+| 2 | Serving LLMs inside latency budgets | Fraud detection pipeline at TechFin | Fraud decisions had to run in real time | Design the pipeline | Kafka, feature computation, model inference, decision engine | 99.7% precision at 50ms p99 | Would treat the latency budget as a design input from day one, which carries over to LLM serving |
+| 3 | Evaluation harness that gates releases | LLM Eval Toolkit | LLM applications need repeatable evaluation | Build a framework for it | Custom metrics, regression testing, CI integration | Open-source framework with CI integration | A gate only works if it runs in CI, so CI integration should come first |
+| 4 | Monitoring, drift detection and alerting | Model monitoring at TechFin | Models in production needed watching | Establish monitoring | Drift detection, Grafana dashboards, automated retraining triggers | Monitoring and automated retraining triggers in place | Would add alerting as an explicit part of the design |
+| 5 | CI/CD for models | Deployment pipeline at TechFin | Model deployment took 2 weeks | Shorten it | CI/CD pipeline with GitHub Actions and SageMaker | Deployment time from 2 weeks to 4 hours | Faster deploys only help when a release gate is checking what ships |
+| 6 | Mentoring two mid-level engineers | Leading the ML platform team | A platform team of 3 engineers | Lead the team | Led the team that built the MLOps tooling | An internal MLOps platform serving 4 engineering teams | Would be explicit about what each engineer should learn from the work |
+| 7 | Production ML systems in Python | Recommendation engine at TechFin | Lending products needed recommendations | Build the engine | Collaborative filtering plus LLM reranking | 18% conversion uplift | The closest LLM work on the CV, so worth leading with in the serving round |
 
-**Recommended case study:** LLM Eval Toolkit, for the evaluation-harness requirement.
+The Reflection column is draft wording for the candidate to confirm: `cv.md` records what happened, not what they learned.
+
+**Recommended case study:** LLM Eval Toolkit, for the evaluation-harness requirement. Walk through how a metric becomes a regression test and then a CI check, since that is the gate the JD describes.
+
+**Red-flag questions:**
+- **"Have you run LLMs in production?"** Not with vLLM or TGI. The closest work is LLM reranking in the recommendation engine, and the 50ms p99 fraud pipeline shows the latency discipline. Say so plainly.
+- **"Do you have a team of reports?"** Led a platform team of 3 engineers at TechFin. Don't describe it as more than that.
+- **"What have you been doing since 2024?"** `cv.md` ends in 2024 and doesn't say. The candidate needs to answer this one in their own words before the interview.
 
 ## G) Posting Legitimacy
 
@@ -122,11 +134,14 @@ The LinkedIn profile isn't in the primary files, so check its current text befor
 
 | Signal | Finding | Weight |
 |--------|---------|--------|
-| Posting age | Posted 6 days ago | Positive |
-| Description specificity | Names the stack, the team size, the reporting line and the interview stages | Positive |
-| Salary transparency | Base range and equity stated | Positive |
-| Employer careers page | Same role listed on Acme's own board | Positive |
+| Posting freshness | Posted 6 days ago, Apply button active | Positive |
+| Description quality | Names the stack, team size, reporting line, a 90-day success measure and the salary, with no contradictions | Positive |
+| Company hiring signals | No layoffs or hiring freeze found | Neutral |
+| Reposting detection | Company and title not in the scan history under another URL | Positive |
+| Role market context | Common role that fits an AI company | Neutral |
 | Employment classification | No contractor language | Neutral |
+| AI claims vs. infrastructure | Consistent: 0 of 3 mismatch signals, with a named stack and a 6-engineer team | Neutral |
+| Employer careers page | Same role listed on Acme's own board | Positive |
 | Fixed-term contract | No fixed-term language | Neutral |
 
 **Context Notes:** None.
