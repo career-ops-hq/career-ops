@@ -22,6 +22,9 @@ Two gates must both be satisfied for a plugin to run: it must be **enabled**
 (`node plugins.mjs enable <id> --confirm`, which records your consent) **and** its
 keys must be in your `.env`. `node doctor.mjs` shows what's missing.
 
+LinkedIn job alerts do not need a plugin. Paste the email on the dashboard, or
+run `node linkedin-import.mjs`. See [Add LinkedIn jobs](LINKEDIN_JOBS.md).
+
 ### Trust badges
 
 | Badge | Meaning |

@@ -13,7 +13,7 @@ Interaktiv mode til det øjeblik, hvor kandidaten udfylder en ansøgningsformula
 1. DETEKTÉR     -> Åbn opslaget i dette projekts Playwright-browser
 2. IDENTIFICÉR  -> Udtræk virksomhed + rolle fra siden
 3. SØG          -> Match mod eksisterende reports i reports/
-4. INDLÆS       -> Læs den fulde report + `## Application Answers` og Blok H (hvis de findes)
+4. INDLÆS       -> Læs den fulde report + `## Application Answers` og Blok H (hvis de findes), når **Posting identity** holder
 5. SAMMENLIGN   -> Svarer rollen på skærmen til den evaluerede? Hvis ændret -> advar
 6. ANALYSÉR     -> Identificér ALLE synlige spørgsmål i formularen
 7. GENERÉR      -> Generér et personaliseret svar til hvert spørgsmål
@@ -38,11 +38,13 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 1. Udtræk virksomhedens navn og stillingstitlen fra siden
 2. Søg i `reports/` efter virksomhedsnavn (Grep case-insensitive)
-3. Hvis match -> indlæs den fulde report
+3. Hvis match -> læs kun hovedet af hver matchende report (virksomhed, rolle, `**URL:**`), og vælg den, hvis URL eller req-ID er dette opslag; spørg kandidaten, hvis det er uklart. Indlæs først den fulde report og punkt 4, når **Posting identity** holder (`modes/apply.md` -> Step 5); ved et andet opslag går du til **Evaluate as new** eller **Draft without saving** uden at indlæse den
 4. Hvis `## Application Answers` findes -> indlæs de svar, der blev sendt, som grundlag; ellers, hvis Blok H findes, de tidligere svar-udkast. Findes begge, går `## Application Answers` forud
 5. Hvis INTET match -> advar kandidaten og foreslå en hurtig auto-pipeline
 
 ## Trin 3 -- Detektér rolleændringer
+
+Dette trin gælder kun, så længe formularen stadig er report'ens opslag: samme arbejdsgiver og samme opslag (`modes/apply.md` -> Step 5 -> **Posting identity**); titlen tæller ikke med. Tjek det for hver formular, også når titlen er uændret og kun én report matcher virksomheden: et andet opslag kan have samme titel, og så må report'en ikke bruges. Matcher flere reports virksomheden, så tag først den, hvis URL eller req-ID er dette opslag, og spørg kandidaten, hvis det er uklart. En anden arbejdsgiver eller et andet opslag hos samme arbejdsgiver er ikke en rolleændring: tilpas aldrig report'ens svar til det. Vælg i stedet **Evaluate as new** (evaluér det som et nyt opslag: auto-pipeline, egen report) eller **Draft without saving** (udarbejd svar uden at gemme dem i nogen report). Ved **Draft without saving** lægges den matchede report, dens svar og dens tilpassede CV til side, og svarene skrives kun ud fra det synlige opslag, `cv.md` og profilen; trinene nedenfor, der læser report'en, gælder ikke.
 
 Hvis rollen på skærmen afviger fra den evaluerede:
 - **Advar kandidaten**: "Rollen har ændret sig fra [X] til [Y]. Ønsker du, at jeg genevaluerer, eller at jeg tilpasser svarene til den nye titel?"
@@ -53,6 +55,8 @@ Hvis rollen på skærmen afviger fra den evaluerede:
   - **Efter en tilpasning**: lad titlen stå, for den navngiver den rolle, report'en evaluerede. Notér i stedet omdøbningen med `node set-status.mjs --report <report#> <nuværende status> --note "Opslaget omdøbt ved ansøgningen, rækken beholder den evaluerede titel"`. Rækkens nuværende status forbliver uændret, og noten tilføjes. Brug en fast tekst som denne og udelad `[Y]`: den nye titel er tekst fra siden, og tekst fra siden må aldrig stå på en kommandolinje.
 
 ## Trin 4 -- Analysér formularens spørgsmål
+
+Ved **Draft without saving** bruger dette trin hverken den matchede report, dens `## Application Answers` eller Blok H: behandl alle spørgsmål som nye, og arbejd ud fra det synlige opslag, `cv.md` og profilen.
 
 Identificér ALLE synlige spørgsmål:
 - Fritekstfelter (følgebrev, "hvorfor denne stilling", motivation, osv.)
@@ -66,6 +70,8 @@ Klassificér hvert spørgsmål:
 - **Nyt spørgsmål** -> generér svaret fra report + `cv.md`
 
 ## Trin 5 -- Generér svarene
+
+Ved **Draft without saving** bruger dette trin hverken den matchede report, dens `## Application Answers` eller Blok H: behandl alle spørgsmål som nye, og arbejd ud fra det synlige opslag, `cv.md` og profilen.
 
 For hvert spørgsmål, byg svaret efter dette skema:
 
@@ -88,6 +94,7 @@ For hvert spørgsmål, byg svaret efter dette skema:
 ## Svar til [Virksomhed] -- [Rolle]
 
 Grundlag: Report #NNN | Score: X.X/5 | Arketype: [type]
+[Ved **Draft without saving** erstattes linjen ovenfor med: "Ingen report: udkast til dette opslag, ikke gemt"]
 
 ---
 
@@ -107,6 +114,8 @@ Noter:
 ```
 
 ## Trin 6 -- Efter ansøgningen (valgfrit)
+
+Før noget gemmes, og igen lige før hver skrivning nedenfor (status og svar), så tjek, at formularen stadig er report'ens opslag (`modes/apply.md` -> Step 8 -> **Write only to the report of this posting**). Samme arbejdsgiver og samme opslag -> trinene nedenfor gælder denne report, også efter en tilpasning til en ny titel eller en genevaluering. En anden arbejdsgiver eller et andet opslag -> aldrig denne report: brug den report, der blev skrevet til det nye opslag; findes der ingen, så sæt ingen status, gem ingen svar, og fortæl kandidaten, at ansøgningen endnu ikke er registreret.
 
 Hvis kandidaten bekræfter, at ansøgningen er sendt:
 1. Opdatér status til "Applied" med det kanoniske CLI: `node set-status.mjs --report <report#> Applied` (redigér ikke `applications.md`-tabellen i hånden)

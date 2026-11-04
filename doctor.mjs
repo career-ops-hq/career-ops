@@ -8,7 +8,7 @@
 import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { delimiter, join, dirname, resolve } from 'path';
+import { delimiter, join, dirname, isAbsolute, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
@@ -21,6 +21,7 @@ import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
 import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
+import { LINKEDIN_DOCTOR_LABEL, linkedInPluginFix } from './lib/linkedin-import.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -56,7 +57,8 @@ try {
 // copy made without `npm install`) died with a raw ERR_MODULE_NOT_FOUND stack
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
-let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH, resolveExtractorMode, auditUserTemplates;
+let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
+let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv;
 try {
   [
     { hasYamlContent, loadYaml },
@@ -65,6 +67,7 @@ try {
     { validateProfile, EXAMPLE_PATH },
     { resolveExtractorMode },
     { auditUserTemplates },
+    { browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv },
   ] = await Promise.all([
     import('./lib/yaml-document.mjs'),
     import('dotenv'),
@@ -72,6 +75,7 @@ try {
     import('./validate-profile.mjs'),
     import('./browser-extract.mjs'),
     import('./cv-templates.mjs'),
+    import('./lib/browser-launch.mjs'),
   ]);
 } catch (err) {
   let missing = [];
@@ -484,7 +488,7 @@ function playwrightDepsFix() {
   return `Run: ${sudo}npx playwright install-deps chromium`;
 }
 
-async function checkPlaywright() {
+async function checkPlaywright(browserProcessEnv) {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -507,19 +511,39 @@ async function checkPlaywright() {
   // tests the exact binary the runtime uses and catches stub-installs (directory
   // present but no binary — just ABOUT + LICENSE files).
   let browser;
+  // The configured browser, so the check tests what the rest of the repo will
+  // actually launch rather than always probing the bundled Chromium.
+  const override = resolveBrowserExecutable({ projectRoot, processEnv: browserProcessEnv });
   try {
-    browser = await chromium.launch({ headless: true });
-    return { pass: true, label: 'Playwright chromium installed' };
+    browser = await chromium.launch(browserLaunchOptions(
+      { headless: true },
+      { projectRoot, processEnv: browserProcessEnv },
+    ));
+    return {
+      pass: true,
+      label: override
+        ? `Playwright chromium installed (using the ${override.source === 'env' ? 'configured' : 'auto-detected'} browser at ${override.path})`
+        : 'Playwright chromium installed',
+    };
   } catch (err) {
     // Only a missing binary is fixed by installing it. Everything else means
     // the binary is present and failed to start, so the advice follows the
     // error Playwright reported instead of repeating a no-op install.
     const cause = classifyChromiumLaunchError(err);
+    // Either cause can be sidestepped by pointing career-ops at a
+    // Chromium-family browser the machine already has.
+    const overrideHint = override
+      ? ` The browser it tried is the one configured for career-ops (${override.path}); clear that setting to fall back to the bundled Chromium.`
+      : ' Or, to use a browser this machine already has instead of the bundled'
+        + ' Chromium (e.g. on an OS too old for it), set'
+        + ' PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/path/to/browser, or'
+        + ' CAREER_OPS_BROWSER_AUTODETECT=true to detect an installed'
+        + ' Brave/Chrome/Edge, in your shell or the data-root .env.';
     if (cause.kind === 'missing-executable') {
       return {
         pass: false,
         label: 'Playwright chromium not installed',
-        fix: playwrightInstallFix(),
+        fix: playwrightInstallFix() + overrideHint,
       };
     }
     if (cause.kind === 'missing-libraries') {
@@ -533,7 +557,7 @@ async function checkPlaywright() {
     return {
       pass: false,
       label: `Playwright chromium is installed but failed to launch: ${cause.detail}`,
-      fix: 'Reinstalling will not fix this, because the browser is already installed. If doctor runs inside a sandbox or container, check that it allows a browser process to start.',
+      fix: 'Reinstalling will not fix this, because the browser is already installed. If doctor runs inside a sandbox or container, check that it allows a browser process to start.' + overrideHint,
     };
   } finally {
     try { await browser?.close(); } catch { /* ignore */ }
@@ -1205,7 +1229,11 @@ function checkPlugins(root) {
   for (const m of manifests) {
     const s = pluginState(m, cfg);
     lines.push(`${m.id} (${s.enabled ? 'enabled' : s.configured ? `missing ${s.missingEnv.join(', ')}` : 'off'})`);
-    if (s.configured && s.missingEnv.length) fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    if (s.configured && s.missingEnv.length) {
+      const paste = linkedInPluginFix(m.id);
+      if (paste) fixes.push(paste);
+      fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    }
   }
   const label = `Plugins: ${lines.join(', ')}`;
   return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
@@ -1288,18 +1316,33 @@ function checkUserTemplates(root) {
 function checkProfileShape(root) {
   const profilePath = profilePathFor(root);
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
+  // Name the file actually read. With --target that is the target's
+  // profile, not the CAREER_OPS_PROFILE path the default label comes from.
+  // A CAREER_OPS_PROFILE outside the root keeps its absolute path, since a
+  // ../../ path says less than the one the user exported.
+  const rel = relative(root, profilePath);
+  const label = rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? rel.split(sep).join('/') : profilePath;
   let findings;
   try {
     const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
-    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example).findings;
+    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example, label).findings;
   } catch (err) {
-    return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
+    return { warn: true, label: `${label} could not be read (${err.message})` };
   }
   const actionable = findings.filter((f) => f.level !== 'info');
-  if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  if (actionable.length === 0) return { pass: true, label: `${label}: shape OK` };
+  // A bad value sits under a key the readers know. Calling it an unrecognized
+  // key would send the user to delete a setting they only need to correct.
+  const badValues = actionable.some((f) => f.code === 'bad-value');
+  const otherIssues = actionable.some((f) => f.code !== 'bad-value');
+  const why = badValues && otherIssues
+    ? 'unrecognized keys and invalid values have no effect'
+    : badValues
+      ? 'known settings hold values the readers ignore'
+      : 'settings under an unrecognized key have no effect';
   return {
     warn: true,
-    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — settings under an unrecognized key have no effect`,
+    label: `${label}: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — ${why}`,
     fix: actionable.map((f) => f.message),
   };
 }
@@ -1308,6 +1351,7 @@ async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
 
+  const browserProcessEnv = snapshotBrowserProcessEnv();
   const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
   // A data root inside the plugin copy is deleted on the next plugin update,
   // so the checks that create User Layer folders and files skip it.
@@ -1325,7 +1369,7 @@ async function main() {
     checkWebDependencies(),
     checkTrackedBakFiles(codeRoot),
     checkSkillEntrypoints(codeRoot),
-    await checkPlaywright(),
+    await checkPlaywright(browserProcessEnv),
     checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
@@ -1339,6 +1383,7 @@ async function main() {
       ? [checkAutoDir('data'), checkPipelineFile(), checkAutoDir('output'), checkAutoDir('reports')]
       : []),
     checkPlugins(projectRoot),
+    { pass: true, label: LINKEDIN_DOCTOR_LABEL },
     // checkPrereq already explains the .env case when the profile is missing.
     prereqPresent(projectRoot, { path: 'config/profile.yml' }) ? checkEnvFileProfile(projectRoot) : null,
   ].filter(Boolean);
