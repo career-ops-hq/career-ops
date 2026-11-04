@@ -19,6 +19,7 @@
  *      node keyword-match.mjs --url <posting-url> [--cv path] [--json]
  *      node keyword-match.mjs --jd-text <file> [--cv path] [--json]
  *      node keyword-match.mjs --self-test                 (built-in assertions)
+ *      node keyword-match.mjs --help                      (this list, exit 0)
  *
  * Exactly one JD source per run: a report path, --url, or --jd-text. URL fetch
  * uses fetchJdViaKnownApi only (no browser). Thin / unreachable / zero-skill
@@ -30,6 +31,14 @@ import { join, isAbsolute, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { extractSkills } from './skill-extract.mjs';
+
+// A normal path stays readable. A space or other shell syntax is quoted so the
+// example stays one argument.
+function shellExampleArg(value) {
+  const text = String(value);
+  if (!/[\s'"$`!*?;&|()<>#{}]/.test(text)) return text;
+  return `'${text.replace(/'/g, "'\\''")}'`;
+}
 
 /**
  * Small, deliberately conservative map of interchangeable ATS surface forms.
@@ -758,6 +767,7 @@ export async function resolveKeywords(input, root) {
   const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
   if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
     console.error(`Report not found: ${reportArg}`);
+    console.error(`Example: node keyword-match.mjs ${shellExampleArg(join(getCareerOpsRoot(), 'reports', '001-role.md'))}`);
     process.exit(1);
   }
 
@@ -911,9 +921,14 @@ async function runKeywordMatch(args) {
 }
 
 if (isMainModule(import.meta.url)) {
+  const argv = process.argv.slice(2);
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   let args;
   try {
-    args = parseMatchArgs(process.argv.slice(2));
+    args = parseMatchArgs(argv);
   } catch (err) {
     console.error(err?.message || err);
     process.exit(1);
