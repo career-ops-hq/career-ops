@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const target = process.env.WORKER_GATE_TEST_URL;
 const missing = "This evaluation didn't produce a report to save, so it isn't in your tracker — re-run it to verify. (The agent emitted no <<report-md>> envelope, so there is no report to save.)";
@@ -13,7 +14,7 @@ const gateMessage = "The role requires residence outside your allowed location."
 const machineText = 'Stopped before scoring.\n<<evaluation-gate>>\n' + JSON.stringify({ status: "needs_confirmation", reason: "dealbreaker", message: gateMessage }) + '\n<</evaluation-gate>>\nVERDICT: N/A/5 — Location rule.';
 const fixture = (id, text, label = missing) => ({ id, title: id, kind: "evaluate", status: "error", input: `https://example.com/${id}`, steps: [{ kind: "status", label }], text, startedAt: 1, endedAt: 2 });
 
-test("intentional evaluation stops and old missing-report history need review without concealing real errors", { skip: !target, timeout: 120_000 }, async () => {
+test("intentional evaluation stops and old missing-report history need review without concealing real errors", { skip: liveServerSkip("WORKER_GATE_TEST_URL"), timeout: 120_000 }, async () => {
   const origin = new URL(target);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");
