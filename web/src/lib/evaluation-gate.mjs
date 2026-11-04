@@ -16,6 +16,8 @@ function validMessage(value) {
     && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
 }
 function gate(reason, message) { return { reason, message: message.trim(), confirmationRequired: true }; }
+// CommonMark line endings: normalize before scanning or calculating offsets.
+function normalizeLineEndings(text) { return text.replace(/\r\n?/g, "\n"); }
 
 function narration(text) {
   const lines = []; let fence = null;
@@ -93,7 +95,7 @@ function dedicatedBlocks(text) {
 /** @returns {{reason:string,message:string,confirmationRequired:true}|null} */
 export function classifyEvaluationGate(text) {
   if (typeof text !== "string" || !text.trim() || text.length > 2_000_000) return null;
-  const normalized = text.replace(/\r\n/g, "\n").trim();
+  const normalized = normalizeLineEndings(text).trim();
   if (/^<<\/?report-md>>[ \t]*$/m.test(normalized)) return null;
   const visible = narration(normalized).text;
   const opens = [...visible.matchAll(/^<<evaluation-gate>>[ \t]*$/gm)];
@@ -129,7 +131,7 @@ export function classifyEvaluationGate(text) {
  */
 export function stripEvaluationGate(text) {
   if (typeof text !== "string" || !classifyEvaluationGate(text)) return text;
-  const normalized = text.replace(/\r\n/g, "\n");
+  const normalized = normalizeLineEndings(text);
   const leading = normalized.length - normalized.trimStart().length;
   const blocks = dedicatedBlocks(normalized.slice(leading));
   if (blocks.length !== 1) return text; // legacy declarations remain unchanged
@@ -142,7 +144,7 @@ export function stripEvaluationGate(text) {
  */
 export function evaluationGateConflictsWithReport(text) {
   if (typeof text !== "string" || text.length > 2_000_000) return false;
-  const normalized = text.replace(/\r\n/g, "\n");
+  const normalized = normalizeLineEndings(text);
   const open = [...normalized.matchAll(/^<<report-md>>[ \t]*$/gm)];
   const close = [...normalized.matchAll(/^<<\/report-md>>[ \t]*$/gm)];
   if (open.length !== 1 || close.length !== 1 || open[0].index >= close[0].index) return false;

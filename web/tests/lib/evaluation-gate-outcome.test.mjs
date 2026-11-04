@@ -115,6 +115,19 @@ test("non-LF separators in fence info cannot hide a real stop or expose quoted s
   }
 });
 
+test("CommonMark line endings close examples before real stops and keep display offsets aligned", () => {
+  for (const ending of ["\n", "\r\n", "\r"]) {
+    for (const marker of ["```", "````", "~~~~"]) {
+      const example = `${marker}text${ending}${marker}`;
+      assert.match(runOutcome(`${report}\n${example}\n${stop}`).message, /both a report and a confirmation stop/);
+      assert.equal(classifyEvaluationGate(stop.replace(/\n/g, ending))?.reason, "dealbreaker");
+      const text = ` ${ending}\t${structured().replace(/\n/g, ending)}${ending} \t`;
+      assert.equal(classifyEvaluationGate(text)?.reason, "agency_confirmation");
+      assert.equal(stripEvaluationGate(text), " \n\t\nVERDICT: N/A/5 — Agency confirmation required.\n \t");
+    }
+  }
+});
+
 test("display stripping detects leading whitespace and preserves normalized surrounding output", () => {
   const prefix = " \n\t";
   const suffix = "\n \t";
