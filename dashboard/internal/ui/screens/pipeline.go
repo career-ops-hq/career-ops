@@ -2268,6 +2268,9 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	return padStyle.MaxWidth(max(1, m.width)).MaxHeight(1).Render(line)
 }
 
+// renderPreview renders the selected application's details within the current terminal width.
+// @param None.
+// @returns The newline-separated preview.
 func (m PipelineModel) renderPreview() string {
 	app, ok := m.CurrentApp()
 	if !ok {
@@ -2326,8 +2329,18 @@ func (m PipelineModel) renderPreview() string {
 				labelStyle.Render("Archetype: ")+valueStyle.Render(summary.archetype)))
 		}
 		if summary.tldr != "" {
+			label := "TL;DR: "
+			value := summary.tldr
+			valueWidth := max(0, m.width-4-ansi.StringWidth(label))
+			if ansi.StringWidth(value) > valueWidth {
+				if valueWidth <= ansi.StringWidth("...") {
+					value = ansi.Truncate(value, valueWidth, "")
+				} else {
+					value = ansi.Truncate(value, valueWidth, "...")
+				}
+			}
 			lines = append(lines, padStyle.Render(
-				labelStyle.Render("TL;DR: ")+valueStyle.Render(summary.tldr)))
+				labelStyle.Render(label)+valueStyle.Render(value)))
 		}
 		if summary.comp != "" {
 			lines = append(lines, padStyle.Render(
