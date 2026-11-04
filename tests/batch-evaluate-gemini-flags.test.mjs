@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseBatchArgs, pendingOfferIndices } from '../batch-evaluate-gemini.mjs';
+import { parseBatchArgs, parseCliMode, pendingOfferIndices } from '../batch-evaluate-gemini.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const work = mkdtempSync(join(tmpdir(), 'co-batch-flags-'));
@@ -63,5 +63,23 @@ for (const args of [['--limt', '1'], ['--limit=1', '--limit', 'all'], ['--limit'
     const r = run(args);
     assert.equal(r.status, 1);
     assert.doesNotMatch(r.stdout + r.stderr, /GEMINI_API_KEY|pending offers/);
+  });
+}
+
+test('--mode and --single-pass pass the flag check and pick the evaluation mode', () => {
+  for (const args of [['--mode', 'match', '--limit', '1'], ['--mode=full', '--limit=1'], ['--single-pass', '--limit', '1']]) {
+    assert.equal(parseBatchArgs(args).limit, 1, args.join(' '));
+  }
+  assert.equal(parseCliMode(['--mode', 'match']), 'match');
+  assert.equal(parseCliMode(['--single-pass']), 'match');
+  assert.equal(parseCliMode([]), 'full');
+});
+
+for (const args of [['--mode', 'match'], ['--single-pass']]) {
+  test(`${args.join(' ')} reaches the API key check instead of a usage error`, () => {
+    const r = run(args);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /GEMINI_API_KEY not found/);
+    assert.doesNotMatch(r.stderr, /Unknown|unknown flag|Usage:/);
   });
 }

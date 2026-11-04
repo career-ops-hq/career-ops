@@ -156,9 +156,11 @@ Needs GEMINI_API_KEY in .env. Every evaluation spends Gemini quota.
   --limit N        Evaluate only the first N pending offers (default: all)
   --concurrency N  Offers evaluated at the same time (default: 2)
   --model NAME     Gemini model (default: from spend_tier in config/profile.yml)
+  --mode MODE      full (default) or match, the single-pass CV-match evaluation
+  --single-pass    Same as --mode match
   --help, -h       Print this help and exit`;
 
-const VALUE_FLAGS = ['--limit', '--concurrency', '--model'];
+const VALUE_FLAGS = ['--limit', '--concurrency', '--model', '--mode'];
 
 /**
  * Read the CLI flags. `--flag N` and `--flag=N` mean the same; an unknown flag
@@ -169,7 +171,7 @@ const VALUE_FLAGS = ['--limit', '--concurrency', '--model'];
  *   limit 0 means every pending offer.
  */
 export function parseBatchArgs(args) {
-  validateFlags(args, [...VALUE_FLAGS, '--help', '-h'], USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  validateFlags(args, [...VALUE_FLAGS, '--single-pass', '--help', '-h'], USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   for (const flag of VALUE_FLAGS) {
     if (args.filter((a) => a === flag || a.startsWith(`${flag}=`)).length > 1) {
       console.error(`Error: ${flag} can be given only once`);
