@@ -10,7 +10,7 @@
 **Work Auth:** ➖ Not needed
 **PDF:** output/cv-alex-chen-acme-ai-2026-10-29.pdf
 
-**Apply.** The role's core is production ML platform work the CV already proves, the only gaps are LLM-specific and partial, and Block G returned High Confidence.
+**Apply.** The role's core is production ML platform work the CV already proves, no gap is a hard stop, and Block G returned High Confidence.
 
 ---
 
@@ -37,14 +37,17 @@ Work authorization: the role is US-remote and the candidate is US-based, so spon
 | LLM serving and inference optimization | high (structural) | ⚠️ Partial | What you'll do section, first item | Real-time inference at "99.7% precision at 50ms p99" proves serving under latency budgets; no LLM serving stack on the CV |
 | Evaluation and regression testing for models | high (structural) | ✅ Strong | What you'll do section, second item, repeated in the deliverable and success lines | LLM Eval Toolkit: "Evaluation framework for LLM applications. Supports custom metrics, regression testing, CI integration" |
 | Kubernetes and cloud infrastructure | high (stated) | ✅ Strong | "Kubernetes and AWS experience is required" | Skills: "Kubernetes, Kafka, Redis, PostgreSQL, AWS" |
+| Mentoring other engineers | meaningful (structural) | ⚠️ Partial | Opening paragraph, after the team size | "Led ML platform team (3 engineers)" shows team leadership; the CV doesn't mention mentoring |
 | Model monitoring and observability | meaningful (structural) | ✅ Strong | What you'll do section, third item | "Established model monitoring: drift detection, performance dashboards (Grafana), automated retraining triggers" |
-| Mentoring other engineers | meaningful (structural) | ✅ Strong | Opening paragraph, after the team size | "Led ML platform team (3 engineers)" |
 
 ### Gaps
 
 **LLM serving stack (vLLM / TGI).** High importance, ⚠️ Partial. Not a hard blocker: the 50ms p99 fraud pipeline is adjacent experience, but no project on the CV covers LLM serving.
 - **Interview risk:** a system design round asks how the candidate would size and batch inference on vLLM or TGI. The CV has no LLM serving to answer from, so a vague answer reads as not ready to own serving, the JD's first duty.
 - **Mitigation:** say plainly that these two stacks are new, then walk through the latency budget from the fraud pipeline as the same problem. Don't claim the stack on the CV. Cover-letter phrase: "I've kept real-time inference at 50ms p99 and would apply that discipline to LLM serving."
+
+**Mentoring.** Meaningful importance, ⚠️ Partial. Not a hard blocker: leading a team of 3 engineers is adjacent experience, but the CV doesn't say the candidate mentored anyone.
+- **Mitigation:** the candidate confirms whether they mentored anyone on that team. If so, add it to `cv.md` in their own words. If not, describe it as team leadership.
 
 **LLM evaluation in a production role.** Nice-to-have, since Block B already rates evaluation ✅ Strong. LLM Eval Toolkit is direct proof.
 - **Mitigation:** lead with the toolkit in the summary and describe its regression testing and CI integration, without implying it ran at TechFin.
@@ -54,7 +57,7 @@ Work authorization: the role is US-remote and the candidate is US-based, so spon
 **Detected level:** Senior (IC4-IC5)
 **Candidate's natural level:** Senior, with platform-lead scope
 
-**"Sell senior without lying" plan:** Lead with platform ownership at TechFin: "an internal MLOps platform serving 4 engineering teams". The JD's mentoring line fits "Led ML platform team (3 engineers)" without overselling it as management.
+**"Sell senior without lying" plan:** Lead with platform ownership at TechFin: "an internal MLOps platform serving 4 engineering teams". "Led ML platform team (3 engineers)" is the closest evidence for the JD's mentoring line, so don't present it as management or as mentoring.
 
 **"If they downlevel me" plan:** Accept only if the base stays inside the advertised range. Negotiate a review at 6 months, and get the promotion criteria in writing, tied to shipping the evaluation harness.
 
@@ -116,10 +119,10 @@ The LinkedIn profile isn't in the primary files, so check its current text befor
 | 3 | Evaluation harness that gates releases | LLM Eval Toolkit | LLM applications need repeatable evaluation | Build a framework for it | Custom metrics, regression testing, CI integration | Open-source framework with CI integration | A gate only works if it runs in CI, so CI integration should come first |
 | 4 | Monitoring, drift detection and alerting | Model monitoring at TechFin | Models in production needed watching | Establish monitoring | Drift detection, Grafana dashboards, automated retraining triggers | Monitoring and automated retraining triggers in place | Would add alerting as an explicit part of the design |
 | 5 | CI/CD for models | Deployment pipeline at TechFin | Model deployment took 2 weeks | Shorten it | CI/CD pipeline with GitHub Actions and SageMaker | Deployment time from 2 weeks to 4 hours | Faster deploys only help when a release gate is checking what ships |
-| 6 | Mentoring two mid-level engineers | Leading the ML platform team | A platform team of 3 engineers | Lead the team | Led the team that built the MLOps tooling | An internal MLOps platform serving 4 engineering teams | Would be explicit about what each engineer should learn from the work |
+| 6 | Mentoring two mid-level engineers | Leading the ML platform team (confirm first) | A platform team of 3 engineers | Lead the team | Led the team that built the MLOps tooling | An internal MLOps platform serving 4 engineering teams | Would be explicit about what each engineer should learn from the work |
 | 7 | Production ML systems in Python | Recommendation engine at TechFin | Lending products needed recommendations | Build the engine | Collaborative filtering plus LLM reranking | 18% conversion uplift | The closest LLM work on the CV, so worth leading with in the serving round |
 
-The Reflection column is draft wording for the candidate to confirm: `cv.md` records what happened, not what they learned.
+The Reflection column is draft wording for the candidate to confirm: `cv.md` records what happened, not what they learned. Story 6 shows team leadership, not mentoring, so the candidate confirms whether they mentored anyone before using it for that requirement.
 
 **Recommended case study:** LLM Eval Toolkit, for the evaluation-harness requirement. Walk through how a metric becomes a regression test and then a CI check, since that is the gate the JD describes.
 
@@ -161,7 +164,7 @@ Advisory only: this check has no effect on the score, the Assessment tier or the
 
 ## Verdict (lead)
 
-**Apply.** The role's core is production ML platform work the CV already proves, the only gaps are LLM-specific and partial, and Block G returned High Confidence.
+**Apply.** The role's core is production ML platform work the CV already proves, no gap is a hard stop, and Block G returned High Confidence.
 
 ## Risk Summary
 
@@ -262,6 +265,7 @@ hard_stops: []
 soft_gaps:
   - "LLM serving at scale (vLLM / TGI) is not on the CV"
   - "Evaluation tooling exists only as an open-source project, not in a production role"
+  - "Mentoring is not on the CV; the closest evidence is leading a team of 3 engineers"
 top_strengths:
   - "Led an internal ML platform used by 4 teams at TechFin Corp"
   - "Real-time inference at 50ms p99 (fraud detection)"
@@ -306,13 +310,13 @@ requirement_importance:
     evidence: "stated"
     importance: "high"
     match: "strong"
-  - requirement: "Model monitoring and observability"
-    jd_signal: "What you'll do section, third item"
-    evidence: "structural"
-    importance: "meaningful"
-    match: "strong"
   - requirement: "Mentoring other engineers"
     jd_signal: "Opening paragraph, after the team size"
+    evidence: "structural"
+    importance: "meaningful"
+    match: "partial"
+  - requirement: "Model monitoring and observability"
+    jd_signal: "What you'll do section, third item"
     evidence: "structural"
     importance: "meaningful"
     match: "strong"
