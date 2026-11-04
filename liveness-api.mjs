@@ -344,15 +344,25 @@ const ATS_PROVIDERS = [
     match(u) {
       if (u.hostname !== 'www.arbeitsagentur.de') return null;
       const m = u.pathname.match(/^\/jobsuche\/jobdetail\/([^/]+)\/?$/);
-      return m ? { refnr: m[1] } : null;
+      if (!m) return null;
+      // The path holds the reference number encoded up to twice (a slash is
+      // %252F, a colon %3A or bare), and the API takes the base64url of the
+      // real number. Only that base64url form is passed on: the real number can
+      // hold characters the safe-value check refuses.
+      try {
+        const refnr = decodeURIComponent(decodeURIComponent(m[1]));
+        return { refnrBase64: Buffer.from(refnr).toString('base64url') };
+      } catch {
+        return null;
+      }
     },
-    api: ({ refnr }) => `https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/${Buffer.from(refnr).toString('base64url')}`,
+    api: ({ refnrBase64 }) => `https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/${refnrBase64}`,
     headers: { 'X-API-Key': 'jobboerse-jobsuche' },
     api404Authoritative: false, // no expired real-job control; absence stays unknown
-    async interpret(res, { refnr }) {
+    async interpret(res, { refnrBase64 }) {
       let posting;
       try { posting = await res.json(); } catch { return null; }
-      return posting?.referenznummer === refnr && posting?.stellenangebotsTitel
+      return posting?.referenznummer === Buffer.from(refnrBase64, 'base64url').toString() && posting?.stellenangebotsTitel
         ? { result: 'active', code: 'arbeitsagentur_api_active', reason: 'Arbeitsagentur returns the matching job detail' }
         : null;
     },
