@@ -8,7 +8,7 @@
 import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { delimiter, join, dirname, resolve } from 'path';
+import { delimiter, join, dirname, isAbsolute, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
@@ -21,6 +21,7 @@ import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
 import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
+import { LINKEDIN_DOCTOR_LABEL, linkedInPluginFix } from './lib/linkedin-import.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -1205,7 +1206,11 @@ function checkPlugins(root) {
   for (const m of manifests) {
     const s = pluginState(m, cfg);
     lines.push(`${m.id} (${s.enabled ? 'enabled' : s.configured ? `missing ${s.missingEnv.join(', ')}` : 'off'})`);
-    if (s.configured && s.missingEnv.length) fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    if (s.configured && s.missingEnv.length) {
+      const paste = linkedInPluginFix(m.id);
+      if (paste) fixes.push(paste);
+      fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    }
   }
   const label = `Plugins: ${lines.join(', ')}`;
   return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
@@ -1288,18 +1293,33 @@ function checkUserTemplates(root) {
 function checkProfileShape(root) {
   const profilePath = profilePathFor(root);
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
+  // Name the file actually read. With --target that is the target's
+  // profile, not the CAREER_OPS_PROFILE path the default label comes from.
+  // A CAREER_OPS_PROFILE outside the root keeps its absolute path, since a
+  // ../../ path says less than the one the user exported.
+  const rel = relative(root, profilePath);
+  const label = rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? rel.split(sep).join('/') : profilePath;
   let findings;
   try {
     const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
-    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example).findings;
+    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example, label).findings;
   } catch (err) {
-    return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
+    return { warn: true, label: `${label} could not be read (${err.message})` };
   }
   const actionable = findings.filter((f) => f.level !== 'info');
-  if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  if (actionable.length === 0) return { pass: true, label: `${label}: shape OK` };
+  // A bad value sits under a key the readers know. Calling it an unrecognized
+  // key would send the user to delete a setting they only need to correct.
+  const badValues = actionable.some((f) => f.code === 'bad-value');
+  const otherIssues = actionable.some((f) => f.code !== 'bad-value');
+  const why = badValues && otherIssues
+    ? 'unrecognized keys and invalid values have no effect'
+    : badValues
+      ? 'known settings hold values the readers ignore'
+      : 'settings under an unrecognized key have no effect';
   return {
     warn: true,
-    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — settings under an unrecognized key have no effect`,
+    label: `${label}: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — ${why}`,
     fix: actionable.map((f) => f.message),
   };
 }
@@ -1339,6 +1359,7 @@ async function main() {
       ? [checkAutoDir('data'), checkPipelineFile(), checkAutoDir('output'), checkAutoDir('reports')]
       : []),
     checkPlugins(projectRoot),
+    { pass: true, label: LINKEDIN_DOCTOR_LABEL },
     // checkPrereq already explains the .env case when the profile is missing.
     prereqPresent(projectRoot, { path: 'config/profile.yml' }) ? checkEnvFileProfile(projectRoot) : null,
   ].filter(Boolean);

@@ -214,6 +214,21 @@ function resolvePdfCliPath(p) {
 mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
 
 /**
+ * Say what normalizeTextForATS() rewrote, so a changed character in a document
+ * going to an employer is never a silent one.
+ *
+ * @param {Record<string, number>} replacements - Count per kind of rewrite.
+ * @param {(line: string) => void} [print] - Where the line goes.
+ * @returns {void}
+ */
+function reportAtsReplacements(replacements, print = console.log) {
+  const total = Object.values(replacements).reduce((a, b) => a + b, 0);
+  if (total === 0) return;
+  const breakdown = Object.entries(replacements).map(([k, v]) => `${k}=${v}`).join(', ');
+  print(`🧹 ATS normalization: ${total} replacements (${breakdown})`);
+}
+
+/**
  * Normalize text for ATS compatibility by converting problematic Unicode.
  *
  * ATS parsers and legacy systems often fail on em-dashes, smart quotes,
@@ -333,7 +348,11 @@ function normalizeTextForATS(html) {
     // snake_case, a_b and docs/_draft_/cv.md stay literal. Text-only elements
     // (<title>, <textarea>, ...) would show <em> as literal text, so skip them.
     if (!plainUntil) {
-      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (_, inner) => {
+      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (match, inner, at, whole) => {
+        // Underscores inside an email address are the address. Underscores
+        // around the whole address enclose its @, and are italics.
+        const word = /\S*$/.exec(whole.slice(0, at))[0] + /^\S*/.exec(whole.slice(at))[0];
+        if (word.includes('@') && !inner.includes('@')) return match;
         bump('markdown-italic', 1);
         return `<em>${inner}</em>`;
       });
@@ -2000,11 +2019,7 @@ async function generatePDF() {
   html = normalized.html;
   // After normalization, so the length is that of the text that prints.
   warnLongPortalFields(html, outputPath);
-  const totalReplacements = Object.values(normalized.replacements).reduce((a, b) => a + b, 0);
-  if (totalReplacements > 0) {
-    const breakdown = Object.entries(normalized.replacements).map(([k, v]) => `${k}=${v}`).join(', ');
-    console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
-  }
+  reportAtsReplacements(normalized.replacements);
 
   // Fact gate, on the normalized HTML: the document that actually prints.
   if (!skipFactCheck) {
@@ -2712,4 +2727,4 @@ if (isMain && process.argv[2] === '--pdf-server') {
   });
 }
 
-export { normalizeTextForATS, sectionKey };
+export { normalizeTextForATS, reportAtsReplacements, sectionKey };
