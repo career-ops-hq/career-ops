@@ -25,6 +25,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseFollowups } from './followup-cadence.mjs';
+import { performance } from 'node:perf_hooks';
 
 // Every file here is user layer, so it resolves against the data root
 // (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data marker), never the
@@ -417,24 +418,25 @@ async function main() {
 
       // Sync tracker DB if tracker.mjs exists. Time the call so a stall shows
       // where the time goes; written to stderr so it cannot alter stdout output.
-      const syncStartedAt = Date.now();
-      let syncDurationMs = 0;
+      const syncStartedAt = performance.now();
       try {
         const stdio = DEBUG ? ['ignore', 'ignore', 'inherit'] : 'ignore';
         execFileSync(process.execPath, [path.join(CODE_ROOT, 'tracker.mjs'), 'sync'], {
           stdio,
           env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT, CAREER_OPS_TRACKER: APPS_FILE },
         });
-        syncDurationMs = Date.now() - syncStartedAt;
-        // Surface a slow sync even when debug is off, but keep stdout untouched
-        // and the normal fast path silent. Debug builds forward tracker.mjs's
-        // own stderr timing line through as well.
-        if (DEBUG || syncDurationMs > 5000) {
-          console.error(`tracker.mjs sync took ${syncDurationMs}ms`);
-        }
         console.log('Synced database index (applications.db).');
       } catch (e) {
         // ignore
+      } finally {
+        const syncDurationMs = Math.round(performance.now() - syncStartedAt);
+        // Surface a slow sync even when debug is off, but keep stdout untouched
+        // and the normal fast path silent. Debug builds forward tracker.mjs's
+        // own stderr timing line through as well. Runs in finally so it also
+        // fires when execFileSync throws.
+        if (DEBUG || syncDurationMs > 5000) {
+          console.error(`tracker.mjs sync took ${syncDurationMs}ms`);
+        }
       }
     } else {
       console.log('Updates skipped.');

@@ -57,6 +57,7 @@ import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { format } from 'util';
+import { performance } from 'node:perf_hooks';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
@@ -705,12 +706,12 @@ function reportDiagnostics(diag, ctx) {
 }
 
 function syncIndex(db, states, ctx) {
-  const rebuildStarted = Date.now();
+  const rebuildStarted = performance.now();
   const { apps, diag, layout } = parseTracker(states, ctx);
-  const parsedAt = Date.now();
+  const parsedAt = performance.now();
   const ledger = readLedger(states, ctx);
   const timelines = foldObservations(ledger.observations);
-  const ledgeredAt = Date.now();
+  const ledgeredAt = performance.now();
   const observationsByNum = new Map();
   for (const obs of ledger.observations) {
     if (!observationsByNum.has(obs.num)) observationsByNum.set(obs.num, []);
@@ -771,10 +772,10 @@ function syncIndex(db, states, ctx) {
     db.exec('ROLLBACK');
     throw err;
   }
-  const committedAt = Date.now();
+  const committedAt = performance.now();
   if (DEBUG) {
-    ctx.error(`tracker.mjs sync: indexed ${apps.length} applications in ${committedAt - rebuildStarted}ms `
-      + `(parse ${parsedAt - rebuildStarted}ms, ledger ${ledgeredAt - parsedAt}ms, write ${committedAt - ledgeredAt}ms)`);
+    ctx.error(`tracker.mjs sync: indexed ${apps.length} applications in ${Math.round(committedAt - rebuildStarted)}ms `
+      + `(parse ${Math.round(parsedAt - rebuildStarted)}ms, ledger ${Math.round(ledgeredAt - parsedAt)}ms, write ${Math.round(committedAt - ledgeredAt)}ms)`);
   }
   return { apps, diag, ledger };
 }

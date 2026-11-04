@@ -92,10 +92,12 @@ async function review(change, expectsConflict = true) {
     let stdout = '', stderr = '', changed = false;
     const startedAt = Date.now();
     let answeredAt = null;
+    let timedOut = false;
     const result = await new Promise((resolve, reject) => {
       const arm = phase => {
         clearTimeout(timer);
         timer = setTimeout(() => {
+          timedOut = true;
           child.kill();
           reject(new Error(`review did not finish: still ${phaseNameAtTimeout(phase, stdout)} after ${PHASE_BUDGET_MS}ms `
             + `(${Date.now() - startedAt}ms in all)\nstdout: ${stdout}\nstderr: ${stderr}`));
@@ -112,10 +114,20 @@ async function review(change, expectsConflict = true) {
         // A second authorized writer changes the row while the human prompt is open.
         try {
           const transaction = await openTrackerTransaction(tracker);
+          if (timedOut) {
+            // The phase timer already fired: close without mutating the row
+            // and don't arm the next phase.
+            transaction.close();
+            return;
+          }
           try { transaction.replace(header + change(original)); }
           finally { transaction.close(); }
           answeredAt = Date.now();
-        } catch (error) { child.kill(); reject(error); }
+        } catch (error) {
+          child.kill();
+          reject(error);
+          return;
+        }
         arm('applying the answer (set-status, then tracker sync)');
         child.stdin.end('y\n');
       });
