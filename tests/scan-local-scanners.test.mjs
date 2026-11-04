@@ -93,6 +93,27 @@ test('slugify and decodeHtml', () => {
   assert.strictEqual(slugify('Data  Analyst / BI'), 'data-analyst-bi');
   assert.strictEqual(slugify('Māori Liaison'), 'maori-liaison');
   assert.strictEqual(decodeHtml(' A &amp; B <b>x</b> '), 'A & B x');
+  // &amp; must resolve AFTER other entities so &amp;lt; → &lt;, not <
+  assert.strictEqual(decodeHtml('&amp;lt;'), '&lt;');
+  // out-of-range numeric entity is left as-is (no RangeError)
+  assert.strictEqual(decodeHtml('&#99999999;'), '&#99999999;');
+});
+
+test('politeFetch retries network-level errors with back-off', async () => {
+  const waits = [];
+  let attempt = 0;
+  const networkErr = new TypeError('fetch failed');
+  const body = await politeFetch('https://x.test', {
+    fetchImpl: async () => {
+      if (attempt++ < 2) throw networkErr;
+      return { ok: true, status: 200, text: async () => 'recovered' };
+    },
+    sleepImpl: async (ms) => waits.push(ms),
+    backoffMs: 100,
+    timeoutMs: 5000,
+  });
+  assert.strictEqual(body, 'recovered');
+  assert.strictEqual(waits.length, 2);
 });
 
 test('local gate: title, seen URL, same-role dedup within and across runs', () => {
@@ -179,10 +200,16 @@ test('seek page parsing reads SEEK_REDUX_DATA, dedups ids, decodes text', () => 
   assert.strictEqual(offers[1].postedAt, '');
 });
 
-test('seek page parsing tolerates pages without data', () => {
-  assert.deepStrictEqual(parseSeekPage('<html>blocked</html>'), []);
+test('seek page parsing throws descriptively for blocked/malformed pages', () => {
+  assert.throws(
+    () => parseSeekPage('<html>blocked</html>'),
+    /SEEK_REDUX_DATA/,
+  );
   assert.strictEqual(extractReduxJson('window.SEEK_REDUX_DATA = {"a": '), null);
-  assert.deepStrictEqual(parseSeekPage('window.SEEK_REDUX_DATA = {not json};'), []);
+  assert.throws(
+    () => parseSeekPage('window.SEEK_REDUX_DATA = {not json};'),
+    /SEEK_REDUX_DATA/,
+  );
 });
 
 test('seek searches config: minimal { keyword, location? } schema', () => {
@@ -225,10 +252,11 @@ test('linkedin cards parse to offers with clean URLs and dedup by id', () => {
   assert.deepStrictEqual(parseSearchCards('<html>nothing</html>'), []);
 });
 
-test('linkedin JD parsing returns text, or empty for unknown markup', () => {
+test('linkedin JD parsing returns text with line breaks preserved, or empty for unknown markup', () => {
   const jd = parseJobPosting('<div class="show-more-less-html__markup"><p>Build things.</p><ul><li>Go</li><li>K8s</li></ul></div>');
   assert.match(jd, /Build things\./);
   assert.match(jd, /- Go/);
+  assert.match(jd, /Build things\.\n- Go/);
   assert.strictEqual(parseJobPosting('<html></html>'), '');
 });
 

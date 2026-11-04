@@ -124,9 +124,15 @@ export function parseSearchCards(html) {
 export function parseJobPosting(html) {
   const body = html.match(/show-more-less-html__markup[^>]*>([\s\S]*?)<\/div>/)?.[1];
   if (!body) return '';
-  return decodeHtml(body.replace(/<br\s*\/?>|<\/(p|li|ul)>/gi, '\n').replace(/<li[^>]*>/gi, '- '));
+  return body
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|li|ul)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '- ')
+    .split('\n')
+    .map(decodeHtml)
+    .filter(Boolean)
+    .join('\n');
 }
-
 export async function fetchJobPosting(id, options) {
   return parseJobPosting(await politeFetch(buildJobPostingUrl(id), options));
 }

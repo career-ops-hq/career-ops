@@ -45,8 +45,9 @@ export function parseRetryAfter(value, now = Date.now()) {
 }
 
 /**
- * GET a URL politely. Retries 429 and 5xx up to `retries` times, waiting for
- * Retry-After when the server sends it, otherwise backing off exponentially.
+ * GET a URL politely. Retries 429, 5xx, and network-level errors up to
+ * `retries` times, waiting for Retry-After when the server sends it, otherwise
+ * backing off exponentially. Each attempt is cancelled after `timeoutMs` ms.
  * Resolves to the body text, or throws once retries are exhausted or on any
  * other non-2xx status (a 403/404 is not retried).
  *
@@ -56,6 +57,7 @@ export function parseRetryAfter(value, now = Date.now()) {
  * @param {number} [options.retries]
  * @param {number} [options.backoffMs]
  * @param {number} [options.maxWaitMs] - Cap on any single wait.
+ * @param {number} [options.timeoutMs] - Per-attempt timeout in ms (default 30 s).
  * @param {(ms: number) => Promise<void>} [options.sleepImpl]
  */
 export async function politeFetch(url, {
@@ -63,14 +65,24 @@ export async function politeFetch(url, {
   retries = 3,
   backoffMs = 2000,
   maxWaitMs = 60000,
+  timeoutMs = 30000,
   sleepImpl = sleep,
   headers = {},
 } = {}) {
   let lastStatus = 0;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const res = await fetchImpl(url, {
-      headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'en', ...headers },
-    });
+    let res;
+    try {
+      res = await fetchImpl(url, {
+        headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'en', ...headers },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (networkErr) {
+      // Network-level failure (DNS, reset, timeout): retry with back-off.
+      if (attempt === retries) throw networkErr;
+      await sleepImpl(Math.min(maxWaitMs, backoffMs * 2 ** attempt));
+      continue;
+    }
     if (res.ok) return res.text();
     lastStatus = res.status;
     const retryable = res.status === 429 || res.status >= 500;
@@ -97,12 +109,12 @@ export function slugify(text) {
 export function decodeHtml(text) {
   return String(text ?? '')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#0?39;|&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#(\d+);/g, (m, n) => (Number(n) <= 0x10FFFF ? String.fromCodePoint(Number(n)) : m))
+    .replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ')
     .trim();
 }

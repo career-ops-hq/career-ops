@@ -129,13 +129,13 @@ function toArray(v) {
  */
 export function parseSeekPage(html) {
   const raw = extractReduxJson(html);
-  if (!raw) return [];
+  if (!raw) throw new Error('SEEK_REDUX_DATA not found — page may be blocked or layout changed');
   let data;
   try {
     // Redux dumps serialize JS undefined as a bare token.
     data = JSON.parse(raw.replace(/:\s*undefined\b/g, ':null'));
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(`SEEK_REDUX_DATA is not valid JSON: ${err.message}`);
   }
   const seen = new Set();
   const offers = [];
