@@ -81,7 +81,7 @@ Cap at Tier B and flag recency doubt when the profile looks stale (the person ma
 
 Dispatch a single subagent per the delegation guide in `.agents/skills/career-ops/SKILL.md` → **Modes delegated to subagent**. **Never nest subagents.**
 
-For CLIs without subagent support (Codex, Antigravity, Qwen, Grok, Kimi, Pi, Copilot CLI, Hermes): run the audit inline in the main session. It adds web research cost but avoids the delegation gap. **State in the output that the audit ran inline** (the value of this pass is that it is not self-auditing; degrading silently would misrepresent the result).
+For CLIs without subagent support (Codex, Antigravity, Qwen, Grok, Kimi, Pi, Hermes): run the audit inline in the main session. It adds web research cost but avoids the delegation gap. **State in the output that the audit ran inline** (the value of this pass is that it is not self-auditing; degrading silently would misrepresent the result).
 
 The brief contains:
 

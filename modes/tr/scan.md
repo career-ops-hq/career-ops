@@ -8,7 +8,7 @@ Yapılandırılmış iş portallarını tara, başlık ilgisine göre filtrele v
 
 ## Önerilen Çalıştırma (Recommended Execution)
 
-`.agents/skills/career-ops/SKILL.md` → **Modes delegated to subagent** bölümündeki devretme kılavuzuna göre worker/subagent olarak çalıştırın. Bu, ana etkileşimli bağlamı tüketmeyi önler.
+`.agents/skills/career-ops/SKILL.md` → **Modes delegated to subagent** bölümündeki devretme kılavuzuna göre worker/subagent olarak çalıştırın. Bu, ana etkileşimli bağlamı tüketmeyi önler. **CLI destekliyorsa arka plan çalıştırması (`run_in_background: true`) kullanın**, böylece tarama ana oturumla eşzamanlı çalışır.
 
 Oluşturulan worker **tek geçişli bir çalışandır** (single-pass worker): aşağıda adlandırılan ayrıştırıcılar (parsers)/API'ler/Playwright/WebSearch ile taramayı doğrudan çalıştırır. Başka alt ajanlar oluşturmamalı veya diğer becerileri (skills) çağırmamalıdır (bkz. `modes/_shared.md` → Subagent delegation). Tarama işlemi `portals.yml` ile sınırlandırılmıştır; asla açık uçlu bir araştırma görevi değildir.
 

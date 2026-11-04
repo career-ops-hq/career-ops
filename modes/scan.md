@@ -8,7 +8,7 @@ Scans configured job portals, filters by title relevance, and adds new offers to
 
 ## Recommended Execution
 
-Execute as a worker/subagent per the delegation guide in `.agents/skills/career-ops/SKILL.md` → **Modes delegated to subagent**. This avoids consuming the main interactive context.
+Execute as a worker/subagent per the delegation guide in `.agents/skills/career-ops/SKILL.md` → **Modes delegated to subagent**. This avoids consuming the main interactive context. **Use background execution (`run_in_background: true`) wherever the CLI supports it**, so the scan runs concurrently with the main session.
 
 The spawned worker is a **single-pass worker**: it runs the scan with the parsers/APIs/Playwright/WebSearch named below, directly. It must **not** spawn further subagents or invoke other skills (see `modes/_shared.md` → Subagent delegation). Scanning is bounded by `portals.yml`; it is never an open-ended research task.
 

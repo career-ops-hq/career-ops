@@ -15,11 +15,18 @@ const delegated = skill.split('### Modes delegated to subagent')[1] ?? '';
 
 check('skill has CLI delegation table', /\| CLI \| Subagent Support \| How to Delegate/.test(delegated));
 check('skill documents OpenCode task→general', /OpenCode.*task.*general/.test(delegated));
-check('skill documents VS Code Copilot runSubagent', /VS Code Copilot.*runSubagent/.test(delegated));
+check('skill documents VS Code Copilot Chat runSubagent', /VS Code Copilot Chat.*runSubagent/.test(delegated));
+check('skill documents GitHub Copilot CLI task', /GitHub Copilot CLI.*task.*general/.test(delegated));
+check('skill documents Pi trust requirement', /Pi.*trust/.test(delegated));
 check('skill documents other CLIs direct execution', /All other CLIs.*Run mode directly/.test(delegated));
 check('skill has OpenCode task tool JSON example', /"tool": "task"/.test(delegated));
-check('skill has VS Code Copilot runSubagent JSON example', /"tool": "runSubagent"/.test(delegated));
+check('skill has OpenCode subagent_type argument', /"subagent_type": "general"/.test(delegated));
+check('skill has VS Code Copilot Chat runSubagent JSON example', /"tool": "runSubagent"/.test(delegated));
+check('skill has GitHub Copilot CLI task JSON example', /"toolName": "task"/.test(delegated));
 check('skill has OpenCode permission note', /permission\.task.*general.*allow/.test(delegated));
+check('skill has OpenCode subagent_type in example', /"subagent_type": "general"/.test(delegated));
+check('skill has VS Code Copilot Chat task agent_type', /"agent_type": "general-purpose"/.test(delegated));
+check('skill has GitHub Copilot CLI agent_type', /"agent_type": "general-purpose"/.test(delegated));
 
 // 2. Mode files reference skill file, no inline Agent() blocks
 const modeFiles = [
@@ -41,5 +48,6 @@ const shared = read('modes/_shared.md');
 const guardrail = shared.split('### Subagent delegation (cost guardrail)')[1]?.split('\n### ')[0] ?? '';
 check('modes/_shared.md guardrail references SKILL.md', guardrail.includes('.agents/skills/career-ops/SKILL.md'));
 check('modes/_shared.md guardrail mentions OpenCode task tool', /OpenCode.*task.*general/.test(guardrail));
-check('modes/_shared.md guardrail mentions VS Code Copilot', /VS Code Copilot.*runSubagent/.test(guardrail));
+check('modes/_shared.md guardrail mentions VS Code Copilot Chat', /VS Code Copilot Chat.*runSubagent/.test(guardrail));
+check('modes/_shared.md guardrail mentions GitHub Copilot CLI', /GitHub Copilot CLI.*task.*general-purpose/.test(guardrail));
 check('modes/_shared.md guardrail mentions other CLIs direct', /others: direct execution/.test(guardrail));
