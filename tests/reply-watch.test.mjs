@@ -181,7 +181,7 @@ test('reply-watch.mjs renders and applies one confirmed update per company-wide 
   rmSync(tmp, { recursive: true, force: true });
 });
 
-test('a reply-watch run killed by its timeout reports how far the child got', async () => {
+test('a reply-watch run killed while set-status waits on the tracker lock reports how far the child got', async () => {
   const { tmp, trackerFile } = setupWorkspace();
   const candFile = join(tmp, 'cands.json');
   writeFileSync(candFile, JSON.stringify([{
@@ -190,8 +190,9 @@ test('a reply-watch run killed by its timeout reports how far the child got', as
   }]));
 
   // Hold the tracker lock so reply-watch's set-status call blocks past the
-  // spawn timeout. The child dies ETIMEDOUT mid-update; the failure message
-  // must say how far it got from its captured stdout/stderr.
+  // spawn timeout. The child dies ETIMEDOUT mid-update waiting on set-status
+  // lock contention; the failure message must say how far it got from its
+  // captured stdout/stderr.
   const lock = await acquireTrackerLock(trackerLockDirFor(trackerFile));
   try {
     const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n', 5000);
