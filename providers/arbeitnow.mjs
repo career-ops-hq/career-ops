@@ -98,8 +98,10 @@ export function normalizeArbeitnowJob(j, fallbackCompany) {
   /** @type {{ title: string, url: string, company: string, location: string, description?: string, postedAt?: number }} */
   const job = { title, url, company, location };
   // `description` arrives as HTML in the same list payload (no per-job request),
-  // so it is free. Empty/garbage → omitted, which every description-reading
-  // filter treats as "no signal" and passes.
+  // so it is free. Empty/garbage → omitted. Each description-reading filter
+  // sets its own missing-description policy: `content_filter` (scan.mjs:855)
+  // and `country_eligibility_filter` (scan.mjs:936) pass an absent description,
+  // but `visa_filter` with `require_mention: true` rejects it (scan.mjs:1041).
   if (typeof j.description === 'string') {
     const description = htmlToText(j.description);
     if (description) job.description = description;
