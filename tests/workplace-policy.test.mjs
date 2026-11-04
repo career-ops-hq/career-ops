@@ -93,10 +93,21 @@ test('absent, null and empty onsite countries use the remote-country default', (
   assert.throws(() => buildWorkplacePolicy({ ...POLICY, onsite_countries: ['Neverland'] }), /onsite_countries must name a country/);
 });
 
+for (const code of ['PT', 'ES', 'US']) {
+  test(`explicit ${code} geography in prose remains eligible without reading arbitrary prose as ISO`, () => {
+    const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [code], remote_regions: [] });
+    assert.equal(policy(`Remote, ${code}`, 'Engineer', { description: `Candidates must be based in ${code}.` }).eligible, true);
+    assert.equal(policy('Remote', 'Engineer', { eligibleCountries: [code], description: `Candidates must be located in ${code}.` }).eligible, true);
+    assert.equal(policy('Remote', 'Engineer', { description: `Work remotely from ${code}.` }).eligible, true);
+    assert.equal(policy(`Remote, ${code}`, 'Engineer', { description: `Candidates must be based in ${code}, ${code} only.` }).eligible, true);
+    assert.equal(policy(`Remote, ${code}`, 'Engineer', { description: 'Candidates must be based in AU.' }).eligible, false);
+  });
+}
+
 for (const [code, name, ordinary, mandatory] of [
   ['US', 'United States', 'Join us and work remotely.', 'Applicants must live near us.'],
-  ['BY', 'Belarus', 'Work remotely by collaborating online.', 'Applicants must reside by our office.'],
-  ['ID', 'Indonesia', 'Work remotely with your ID ready.', 'Applicants must live at the location on their ID.'],
+  ['BY', 'Belarus', 'By design we work remotely.', 'Applicants must reside by our office.'],
+  ['ID', 'Indonesia', 'An ID is required to work remotely.', 'Applicants must live at the location on their ID.'],
 ]) {
   test(`description prose does not turn an ordinary ${code.toLowerCase()} token into a country`, () => {
     const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [code], remote_regions: ['Worldwide'] });

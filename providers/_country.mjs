@@ -176,6 +176,10 @@ export function buildWorkplacePolicy(policy) {
   // Description prose uses names/aliases only: ordinary "us", "by" or "id"
   // must not become eligibility evidence. Structured fields still accept ISO.
   const supportsHomeProse = (text) => [...countries(text)].some(c => homeCodes.has(c));
+  // ISO tokens count only after explicit geographic language, never arbitrary
+  // prose such as "join us", "by design" or an applicant's "id".
+  const supportsHomeGeography = text => supportsHomeProse(text)
+    || [...text.matchAll(/\b(?:based|located|reside|live|work remotely|work remote|remote work|remote role|work from home|work)\s+(?:in|from|within)\s+([a-z]{2,3})\b/g)].some(match => supportsHome(match[1]));
   const restricted = (text, codes = false) => {
     const found = countries(text, codes);
     return found.size > 0 && ![...found].some(c => homeCodes.has(c));
@@ -204,7 +208,8 @@ export function buildWorkplacePolicy(policy) {
       if (!/\bmust (?:be |currently )?(?:based|located|reside|live)\b/.test(sentence)) continue;
       for (const match of sentence.matchAll(/[,;]\s*([^,;]{1,60}?)\s+only\b/g)) {
         const narrower = match[1];
-        if (!supportsHomeProse(narrower) && !has(narrower, regions) && !has(narrower, onsite)) return fail('description_locality_restricted');
+        const explicitCode = /^[a-z]{2,3}$/.test(narrower.trim()) && supportsHome(narrower) && supportsHomeGeography(sentence);
+        if (!supportsHomeProse(narrower) && !explicitCode && !has(narrower, regions) && !has(narrower, onsite)) return fail('description_locality_restricted');
       }
     }
     // Narrow eligibility clauses, not arbitrary country mentions. A company
@@ -214,7 +219,7 @@ export function buildWorkplacePolicy(policy) {
       if (!/\b(?:only|must (?:be |currently )?(?:based|located|reside|live)|(?:candidates?|applicants?|residents?) (?:must|need to)|restricted to|eligible (?:countries|locations)|hiring (?:only )?in|open (?:only )?to)\b/.test(clause)) continue;
       if (restricted(clause)) return fail('description_country_restricted');
       if (/\bmust (?:be |currently )?(?:based|located|reside|live)(?: in| within)?\b/.test(clause)
-        && !supportsHomeProse(clause) && !has(clause, regions) && !has(clause, onsite)) return fail('description_location_restricted');
+        && !supportsHomeGeography(clause) && !has(clause, regions) && !has(clause, onsite)) return fail('description_location_restricted');
       // A mandatory commute elsewhere is also narrower than a remote tag.
       if (/\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based)\b/.test(clause) && !has(clause, onsite)) return fail('description_onsite_restricted');
     }
@@ -233,7 +238,7 @@ export function buildWorkplacePolicy(policy) {
     const geoLoc = loc.replace(timezonePhrase, ' ');
     const locationCountries = countries(geoLoc, true);
     if (locationCountries.size && ![...locationCountries].some(c => homeCodes.has(c))) return fail('remote_country_restricted');
-    const remoteDescription = description.split(/[.!?;\n]+/).some(clause => /\b(?:work remotely|work remote|remote work|remote role|work from home|work from)\b/.test(clause) && supportsHomeProse(clause));
+    const remoteDescription = description.split(/[.!?;\n]+/).some(clause => /\b(?:work remotely|work remote|remote work|remote role|work from home|work from)\b/.test(clause) && supportsHomeGeography(clause));
     if (supportsHome(geoLoc) || has(geoLoc, regions) || (meta && (supportsHome(meta) || has(meta, regions))) || remoteDescription) return { eligible: true, reason: 'remote_region_allowed' };
     return fail(loc ? 'remote_eligibility_unconfirmed' : 'location_unknown');
   };

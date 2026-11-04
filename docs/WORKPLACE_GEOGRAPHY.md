@@ -31,8 +31,9 @@ as its default; a supplied nonempty country list must name a recognized country.
   clauses can narrow a broad label such as `Europe` or `Worldwide`; an explicit
   excluded home country or `UK only` restriction wins.
 - Location and structured country fields accept ISO country codes. Description
-  prose uses country names and aliases, so ordinary words such as `us` or `by`
-  cannot establish remote-country eligibility.
+  prose uses country names, aliases or an ISO token after explicit geography
+  such as `must be based in PT` or `work remotely from PT`. Ordinary words such
+  as `us` or `by` cannot establish remote-country eligibility.
 
 Normal scans, full ATS scans and shared admission gates use the same check.
 Discover retains the saved policy in its temporary filters and carries provider
