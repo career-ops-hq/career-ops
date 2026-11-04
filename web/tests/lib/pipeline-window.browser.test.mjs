@@ -120,6 +120,18 @@ test("an off-screen save failure moves the window, and the error row does not se
   assert.equal(await page.getByRole("link", { name: "#1", exact: true }).count(), 0);
   assert.equal(fs.readFileSync(tracker, "utf8"), initial);
 
+  // The Inbox tab mounts no tracker rows, so every held failure counts as off
+  // screen there and the banner would sit over the inbox. Wait for the route,
+  // not just the pressed tab: while the switch is pending, the rows behind it
+  // are still the ALL rows. Back on ALL, row #1 still shows its error below.
+  await page.getByRole("button", { name: /^INBOX \d+$/ }).click();
+  await page.waitForURL((u) => !u.searchParams.has("tab"));
+  await page.evaluate(() => new Promise((resolve) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(resolve)), 300)));
+  assert.equal(await page.locator("tr[data-application-key]").count(), 0);
+  assert.equal(await page.getByText("Application #1 was not saved").count(), 0);
+  await page.getByRole("button", { name: /^ALL \d+$/ }).click();
+  await page.waitForURL((u) => u.searchParams.get("tab") === "ALL");
+
   await page.evaluate(() => window.scrollTo(0, 0));
   await row(1).getByRole("alert").waitFor();
   assert.equal(await page.getByText("Application #1 was not saved").count(), 0);

@@ -721,7 +721,7 @@ export function PipelineView({
         <p role="alert" className="mt-2 text-xs text-red-500">{bulkError}</p>
       )}
 
-      {offscreenFailures.length > 0 && (
+      {visibleTab !== "INBOX" && offscreenFailures.length > 0 && (
         <div className="mt-3 space-y-1">
           {offscreenFailures.map((failure) => (
             <p key={failure.key} role="alert" className="text-xs text-red-500">
