@@ -326,7 +326,7 @@ The primary agent invokes the built-in `general-purpose` subagent via the `task`
 Pi loads project skills (`.agents/skills/`) only after a trust decision. For a checkout the user has explicitly trusted:
 
 ```bash
-pi -a -p "Run career-ops scan mode"
+pi -a -p "Run career-ops scan mode. You are a delegated worker: run this mode inline and do not launch another Pi process."
 ```
 
 Without a trust decision, run the mode directly in the main session. For headless/batch workers, use the CLI's native headless invocation which provides isolation without subagent API.
