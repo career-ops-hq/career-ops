@@ -363,6 +363,101 @@ regulates a topic at all — "is that at or above the statutory minimum" and
 questions precisely because only a lawyer (or the current government
 source) can answer them.
 
+### Contract-stage jurisdiction passes (#3641)
+
+Three jurisdiction signals already exist at JD time (Block G in
+`modes/oferta.md`): agency licensing (Signal 10), employment classification
+(Signal 6) and benefits/employment terminology from the wrong country
+(Signal 8). A contract is where the vocabularies of those signals first
+appear side by side, so this subsection runs the same three checks once more
+on the contract's own text. It adds no table, no tag and no data: each pass
+reuses the existing signal definition and its existing table, unchanged.
+
+**Common rules (apply to all three passes):**
+
+- **When it runs:** inside the Step 2 walk, after the Step 1 jurisdiction is
+  fixed. A work location named in the contract wins over the profile, as in
+  Step 1.
+- **Output shape:** a finding is an ordinary clause-walk observation: the
+  contract's own words quoted verbatim, the clause location, the pattern's
+  name and its source (the signal and table it comes from). It carries only
+  the existing tags: `[ask your lawyer]`, `[differs from what you were
+  told]` or `[standard]`. No new tag, no new section that reads like a
+  verdict, no severity, no ordering.
+- **Existing tables only:** `templates/agency-licensing.yml` for the agency
+  pass, the Signal 6 term table for the classification pass, the Signal 8
+  term table for the terminology pass. A jurisdiction with no row in the
+  table a pass needs means that pass is skipped silently ("no row" means "no
+  verified data", never "no regime").
+- **No research:** nothing is fetched or searched. A registry link from a
+  table row is printed for the candidate to click, as Signal 10 does at JD
+  time.
+- **Wording:** never say "this is misclassification", "this licence is
+  missing", or "this contract is for the wrong country" (or any equivalent
+  verdict). Every finding ends in a question for the lawyer list.
+- **Silence:** an absent marker produces no output. Only text that is
+  actually in the contract can trip a pass.
+
+**Pass 1 — Agency licensing (Signal 10, `templates/agency-licensing.yml`).**
+Trips only when **both** hold: (a) the offer letter or contract is issued by,
+or signed through, an intermediary rather than the entity whose work the
+candidate would do (wording such as "on behalf of our client", "assignment",
+"placement", "client site", or a staffing or recruiting brand named as the
+employer with an end client named separately; or the candidate states, or the
+tracker `via=` field shows, that the offer came through an agency), and (b)
+the Step 1 jurisdiction has a row in the table. The finding states the entity
+named as employer, the end client if one is named, the regime facts from the
+row, and the registry link, and says plainly that licence status cannot be
+read from the contract. It never asserts that any agency is unlicensed.
+Lawyer-list entry: "Is {named entity} the employer of record, and who is
+liable for wages, deductions and termination notice, the agency or the
+client?" Not tripped: a direct employer's letter, even if a recruiter
+introduced the candidate.
+
+**Pass 2 — Employment classification (Signal 6 term table).** Two cases:
+
+- **Case A (same logic as the JD):** explicit contractor-status wording from
+  the Signal 6 table or its structural check appears in the contract
+  ("invoice", "independent contractor", "consultant", "T4A", "1099",
+  "labour contract") **and** at least one corroborating omission (no benefits,
+  no vacation, no defined end date, no mention of statutory deductions).
+- **Case B (new at the contract stage):** the same document contains both
+  contractor-style wording from the Signal 6 table and employee-style wording
+  (a reporting line, an ongoing role, set hours, "employee", "salary"). The
+  contradiction inside one document is the signal; no omission is required.
+  Case B is a change of **trigger**, not only of input: at JD time Signal 6
+  needs contractor wording plus an omission, and the contract stage is where
+  both vocabularies can finally be seen together.
+
+The finding quotes both phrase sets side by side with their clause locations
+and adds one neutral line: the document uses terms associated with both
+statuses. Lawyer-list entry: "Does this document create an employment or a
+services relationship under {jurisdiction} law, and what follows for tax
+withholding, benefits and termination?" When `notes.md` records that the
+candidate was told the role is employment and the contract text points the
+other way, the finding also carries `[differs from what you were told]`.
+Not tripped (near-misses, same rule as Signal 6): "contract position" or
+"fixed term" on its own, and a fixed-term employee contract that uses
+employee wording throughout.
+
+**Pass 3 — Benefits/employment terminology from the wrong country (Signal 8
+term table).** Trips when the contract's work location is in jurisdiction A
+and the contract uses a strong marker exclusive to jurisdiction B (for
+example "401(k)" or "W-2 employment" in a Canadian contract, "RRSP" or "T4"
+in a US one), or a corroborating-only marker that co-occurs with a strong
+marker from jurisdiction B. Bare "PTO" and bare "ESA" never trip it, exactly
+as at JD time. The finding quotes the term and where it appears, notes that
+this is often a template carried over from another country's contract, and
+states that it does not say which country's terms govern. Lawyer-list entry:
+"Which country's employment and benefits terms govern this contract?" If the
+evaluation report carried the JD-time version of this flag, the entry also
+says whether the contract repeats or corrects it (the working-terms re-check
+in the walk already asks for that).
+
+**Boundary:** this subsection adds no category-regulation flags table and
+states no live figure, so the #2280 boundary above is untouched. The two
+pre-hire signals and any new legal-fact table stay out of scope.
+
 ## Step 3 — Consistency check
 
 Compare contract terms against:
