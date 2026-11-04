@@ -1225,6 +1225,8 @@ search_queries:
 #   breezy          <tenant>.breezy.hr                  (or api: field)
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
+#   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
+#   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (the company id is required; a bare tenant host is not claimed)
 #   solidjobs       solid.jobs/public-api/offers/<division>
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
 #   personio        <slug>.jobs.personio.(de|com)
@@ -1266,6 +1268,8 @@ search_queries:
 #   join            join.com/companies/<slug>
 #   icims           careers-<tenant>.icims.com / *.icims.com
 #   jazzhr          <tenant>.applytojob.com or <tenant>.applytojob.com/apply
+#   applicantpro    <tenant>.applicantpro.com (ApplicantPro / isolved Talent Acquisition; also a
+#                   www.applicantpro.com/openings/<tenant>/… link. One entry per tenant subdomain)
 #   pythonorg       python.org/jobs
 #   generalist-world generalist.world/jobs/  (curated generalist / operator roles board; SSR HTML, one fetch; or provider: generalist-world)
 #   applitrack      www.applitrack.com/<district>/onlineapp/  (Frontline AppliTrack K-12 board; optional default_location: "City, ST" is appended to site names that name no place)
@@ -1283,6 +1287,7 @@ search_queries:
 #                   whichever host the tenant's own board URL uses is preserved, not normalized)
 #   adp-workforcenow  workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...
 #   zoho-recruit    <tenant>.zohorecruit.<com|ca|eu|in|com.au|jp|sa|com.cn>  (any path; the board is always read from /jobs/Careers)
+#   factorial       <tenant>.factorialhr.com, <tenant>.factorial.com or another Factorial domain (.factorialhr.pt, .factorial.es, ...)  (Factorial ATS careers site; any path, the board is always read from the tenant's home page)
 #   homerun         <slug>.homerun.co or feed.homerun.co/<slug>  (branded careers domain → api: https://feed.homerun.co/<slug>)
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
@@ -1346,6 +1351,15 @@ search_queries:
 #   max_pages: 40          # optional page cap (15 jobs/page, default 40, max 200)
 #   enabled: true
 #
+# - name: Example Keka Co
+#   careers_url: https://exampleco.keka.com/careers       # any <tenant>.keka.com host
+#   enabled: true
+#
+# - name: Example Darwinbox Co
+#   careers_url: https://exampleco.darwinbox.in/ms/candidatev2/main/careers/allJobs   # keep the id after /candidatev2/ as your link has it
+#   max_pages: 20          # optional page cap (50 jobs/page, default 20, max 200)
+#   enabled: true
+#
 # - name: Example Paylocity Co
 #   careers_url: https://recruiting.paylocity.com/Recruiting/Jobs/All/00000000-0000-4000-8000-000000000000
 #                          # the board link off the careers page; the GUID is the board id
@@ -1362,6 +1376,10 @@ search_queries:
 #
 # - name: Example Deel Board Co
 #   careers_url: https://jobs.deel.com/exampleco          # the tenant slug is the first path segment
+#   enabled: true
+#
+# - name: Example Factorial Co
+#   careers_url: https://exampleco.factorialhr.com        # or exampleco.factorial.com, exampleco.factorialhr.pt, ...; any path
 #   enabled: true
 #
 # - name: Example ClearCompany Co
@@ -1582,6 +1600,17 @@ search_queries:
 #   jazzhr:
 #     fetchDetails: false # optional: true fetches each posting's JSON-LD detail page (description, posted date)
 #     detailLimit: 25     # optional max detail calls when fetchDetails=true (max 100)
+#   enabled: true
+#
+# - name: Example ApplicantPro Co
+#   # ApplicantPro / isolved Talent Acquisition tenant. Auto-detects any
+#   # <tenant>.applicantpro.com host. A scan is two requests (the site id, cached
+#   # after the first scan, then one JSON list of every open posting).
+#   careers_url: https://exampleco.applicantpro.com/jobs/
+#   applicantpro:
+#     fetchDetails: false # optional: true fetches each posting's JSON-LD page for the description
+#     detailLimit: 25     # optional max detail calls when fetchDetails=true (max 100)
+#     # domainId: 12345   # optional: pin the site id instead of reading it from /jobs/
 #   enabled: true
 #
 # - name: Example PeopleSoft Co
@@ -2029,6 +2058,10 @@ search_queries:
 #   provider: larajobs
 #   enabled: true
 #
+# - name: GermanTechJobs                  # German IT jobs, salary on every posting (public RSS feed)
+#   provider: germantechjobs              # whole board in one request; rows carry no location
+#   enabled: true
+#
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
 #   provider: pythonorg
 #   careers_url: https://www.python.org/jobs/
@@ -2358,11 +2391,10 @@ tracked_companies:
   # -- Contact Center AI & CX --
 
   - name: Ada
-    careers_url: https://job-boards.greenhouse.io/ada
-    scan_method: websearch
-    scan_query: '"ada.cx" OR "ada" "AI" "Solutions" OR "Engineer" site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io'
-    notes: "Toronto + remote. AI customer service."
-    enabled: false
+    careers_url: https://job-boards.greenhouse.io/ada18
+    api: https://boards-api.greenhouse.io/v1/boards/ada18/jobs
+    notes: "Toronto + remote. AI customer service. The Greenhouse board is ada18 (its postings point to ada.cx); greenhouse.io/ada is gone."
+    enabled: true
 
   - name: LivePerson
     careers_url: https://liveperson.com/company/careers
@@ -2507,8 +2539,8 @@ tracked_companies:
   # -- Lever-based (Playwright direct) --
 
   - name: Mistral AI
-    careers_url: https://jobs.lever.co/mistral
-    notes: "Paris. European AI lab."
+    careers_url: https://jobs.ashbyhq.com/mistral.ai
+    notes: "Paris. European AI lab. Moved from Lever to Ashby (mistral.ai/careers links here)."
     enabled: true
 
   - name: Palantir
@@ -2567,9 +2599,7 @@ tracked_companies:
 
   - name: Factorial
     careers_url: https://careers.factorialhr.com
-    scan_method: websearch
-    scan_query: 'site:careers.factorialhr.com'
-    notes: "Barcelona. HR SaaS unicorn."
+    notes: "Barcelona. HR SaaS unicorn. Its own board on its own ATS (provider: factorial)."
     enabled: true
 
   - name: Attio
@@ -2694,8 +2724,8 @@ tracked_companies:
     enabled: true
 
   - name: Qonto
-    careers_url: https://jobs.lever.co/qonto
-    notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles."
+    careers_url: https://jobs.ashbyhq.com/qonto
+    notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles. Moved from Lever to Ashby (qonto.com/en/careers links here)."
     enabled: true
 
   # -- DACH logistics / mobility --
@@ -2847,8 +2877,10 @@ tracked_companies:
     enabled: true
 
   - name: Bolt
-    careers_url: https://jobs.ashbyhq.com/bolt
-    notes: "Tallinn. Ride-hailing/mobility."
+    careers_url: https://bolt.eu/en/careers/positions/
+    scan_method: websearch
+    scan_query: 'site:bolt.eu/en/careers/positions'
+    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which no provider reads; the Ashby board named Bolt has no postings."
     enabled: true
 
   - name: Bosch
@@ -2918,13 +2950,15 @@ tracked_companies:
     enabled: true
 
   - name: Toggl
-    careers_url: https://apply.workable.com/toggl
-    notes: "Remote EU. Time tracking. Workable board."
+    careers_url: https://jobs.ashbyhq.com/toggl
+    ashby:
+      embed: true        # the board is live but its public posting API answers 404
+    notes: "Remote EU. Time tracking. Moved from Workable to Ashby (toggl.com/jobs embeds this board)."
     enabled: true
 
   - name: Doist
-    careers_url: https://apply.workable.com/doist
-    notes: "Remote global. Productivity (Todoist). Workable board."
+    careers_url: https://jobs.ashbyhq.com/todoist-inc
+    notes: "Remote global. Productivity (Todoist). Moved from Workable to Ashby (todoist.com/careers links here)."
     enabled: true
 
   # -- Denmark AI / tech --
@@ -2944,10 +2978,9 @@ tracked_companies:
     enabled: true
 
   - name: Templafy
-    careers_url: https://job-boards.greenhouse.io/templafy
-    api: https://boards-api.greenhouse.io/v1/boards/templafy/jobs
-    notes: "Copenhagen DK. Document-generation / content-enablement platform."
-    enabled: false
+    careers_url: https://templafy.teamtailor.com
+    notes: "Copenhagen DK. Document-generation / content-enablement platform. Moved from Greenhouse to Teamtailor (templafy.com careers links here)."
+    enabled: true
 
   # -- Iberia AI --
 
