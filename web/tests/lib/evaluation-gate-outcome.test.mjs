@@ -80,6 +80,19 @@ test("an active legacy stop after a report is contradictory, while quoted and ea
   assert.match(runOutcome(`${report}\n${agency}`).message, /both a report and a confirmation stop/);
 });
 
+test("fenced dedicated examples do not hide an active stop or get stripped as its status", () => {
+  for (const marker of ["```", "````", "~~~~"]) {
+    const example = `${marker}text\n${structured()}\n${marker}`;
+    const legacy = `${example}\n${stop}`;
+    assert.equal(classifyEvaluationGate(legacy)?.reason, "dealbreaker");
+    assert.equal(stripEvaluationGate(legacy), legacy, "the quoted example is not an active status block");
+    assert.match(runOutcome(`${report}\n${legacy}`).message, /both a report and a confirmation stop/);
+    const actual = `${example}\n${structured()}`;
+    assert.equal(classifyEvaluationGate(actual)?.reason, "agency_confirmation");
+    assert.equal(stripEvaluationGate(actual), `${example}\n\nVERDICT: N/A/5 — Agency confirmation required.`);
+  }
+});
+
 test("a dedicated stop before a report cannot be erased by a later numeric verdict", () => {
   const result = runOutcome(`${structured()}\n${report}\nVERDICT: 4.2/5 — Strong match.`);
   assert.equal(result.ok, false);

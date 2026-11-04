@@ -95,8 +95,9 @@ export function classifyEvaluationGate(text) {
   if (typeof text !== "string" || !text.trim() || text.length > 2_000_000) return null;
   const normalized = text.replace(/\r\n/g, "\n").trim();
   if (/^<<\/?report-md>>[ \t]*$/m.test(normalized)) return null;
-  const opens = [...normalized.matchAll(/^<<evaluation-gate>>[ \t]*$/gm)];
-  const closes = [...normalized.matchAll(/^<<\/evaluation-gate>>[ \t]*$/gm)];
+  const visible = narration(normalized).text;
+  const opens = [...visible.matchAll(/^<<evaluation-gate>>[ \t]*$/gm)];
+  const closes = [...visible.matchAll(/^<<\/evaluation-gate>>[ \t]*$/gm)];
   if (opens.length || closes.length) {
     if (opens.length !== 1 || closes.length !== 1 || opens[0].index >= closes[0].index) return null;
     const blocks = dedicatedBlocks(normalized);
@@ -128,10 +129,10 @@ export function classifyEvaluationGate(text) {
  */
 export function stripEvaluationGate(text) {
   if (typeof text !== "string" || !classifyEvaluationGate(text)) return text;
-  const open = /^<<evaluation-gate>>[ \t]*\r?$/m.exec(text);
-  const close = /^<<\/evaluation-gate>>[ \t]*\r?$/m.exec(text);
-  if (!open || !close) return text; // legacy declarations remain unchanged
-  return (text.slice(0, open.index) + text.slice(close.index + close[0].length)).trim();
+  const normalized = text.replace(/\r\n/g, "\n");
+  const blocks = dedicatedBlocks(normalized);
+  if (blocks.length !== 1) return text; // legacy declarations remain unchanged
+  return (normalized.slice(0, blocks[0].start) + normalized.slice(blocks[0].end)).trim();
 }
 
 /** A real report plus a separate explicit stop is contradictory, not a save.
