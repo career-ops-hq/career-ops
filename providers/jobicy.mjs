@@ -71,7 +71,8 @@ export function parseJobicyResponse(json, defaultCompany = 'Jobicy') {
       }
       if (!url) return null;
 
-      const company = typeof j.companyName === 'string' && j.companyName.trim() ? decodeEntities(j.companyName).trim() : defaultCompany;
+      // Decided on the decoded name: "&nbsp;" is not blank until it is decoded.
+      const company = (typeof j.companyName === 'string' ? decodeEntities(j.companyName).trim() : '') || defaultCompany;
       const location = typeof j.jobGeo === 'string' ? decodeEntities(j.jobGeo).trim() : '';
       const postedAt = toEpochMs(j.pubDate);
 
