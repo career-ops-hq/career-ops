@@ -99,6 +99,13 @@ try {
     atsBoardUrlOf('https://acme.careers.hibob.com/jobs/0b1c2d3e-0000-4000-8000-000000000001/apply', 'hibob'),
     'https://acme.careers.hibob.com',
   );
+  for (const refused of [
+    'http://acme.careers.hibob.com/jobs/1',
+    'https://careers.hibob.com/jobs/1',
+    'https://a.b.careers.hibob.com/jobs/1',
+  ]) {
+    assert.equal(atsBoardUrlOf(refused, 'hibob'), null, refused);
+  }
   assert.equal(atsBoardUrlOf('http://acme.bamboohr.com/careers/1', 'bamboohr'), 'http://acme.bamboohr.com');
   pass('posting URLs collapse to provider-compatible board URLs without query or fragment data');
 
