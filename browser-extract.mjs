@@ -255,19 +255,23 @@ export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
 }
 
 /**
- * Read and drop the body of a response no fetcher will use, and return null.
- * Left unread, a body still arriving keeps its socket open, and with it the
- * process: fetch-jd.mjs exits once nothing is left to run. Fetchers await this
- * inside their try, so the read stays under their abort timer and a body that
- * never ends stops at the same timeout as the rest of the request. Reading,
- * not cancelling: these error bodies are small, while a cancel aborts the
- * request mid-body and undici then opens a new connection that the process
- * waits for (0.1 to 2.5 s on real Greenhouse and Workday misses, Node 24).
+ * Read the body of a response no fetcher will use, dropping each chunk as it
+ * arrives, and return null. Left unread, a body still arriving keeps its
+ * socket open, and with it the process: fetch-jd.mjs exits once nothing is
+ * left to run. Fetchers await this inside their try, so the read stays under
+ * their abort timer and a body that never ends stops at the same timeout as
+ * the rest of the request. Reading, not cancelling: these error bodies are
+ * small, while a cancel aborts the request mid-body and undici then opens a
+ * new connection that the process waits for (0.1 to 2.5 s on real Greenhouse
+ * and Workday misses, Node 24).
  *
  * @param {Response} res
  */
 async function discard(res) {
-  try { await res.arrayBuffer(); } catch { /* cut off by the abort timer, or unreadable */ }
+  try {
+    const reader = res.body?.getReader();
+    while (reader && !(await reader.read()).done) { /* drop the chunk */ }
+  } catch { /* cut off by the abort timer, or unreadable */ }
   return null;
 }
 
@@ -872,12 +876,15 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
     redirect: 'error',
     signal: controller.signal,
   };
+  // The share link's redirect, of which only the status and Location header
+  // are read. Its body is drained last: both requests share one timer, so a
+  // slow body read first would spend the posting request's budget.
+  let redirect;
   try {
     let apiUrl = resolved.apiUrl;
     if (resolved.followEmbed) {
-      const redirect = await fetch(apiUrl, { ...options, redirect: 'manual' });
+      redirect = await fetch(apiUrl, { ...options, redirect: 'manual' });
       apiUrl = await resolved.followEmbed(redirect, resolved.parts);
-      await discard(redirect); // only its status and Location header are read
       if (!apiUrl || rejectPrivateOrInvalid(apiUrl)) return null;
     }
     const res = await fetch(apiUrl, options);
@@ -886,6 +893,7 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
   } catch {
     return null;
   } finally {
+    if (redirect) await discard(redirect);
     clearTimeout(timer);
   }
 }

@@ -603,10 +603,10 @@ try {
   // A fetcher that gives up on a response is done with its body before it
   // returns. fetch-jd.mjs exits once nothing is left to run, and an unread body
   // that is still arriving keeps its socket open, and with it the process.
-  // Every request here gets a 404 whose body never ends, as a real one would
-  // until the fetcher's abort timer cuts it off; the timers are shortened so
-  // that takes milliseconds. The redirect hops (greenhouse-embedded, the
-  // Workable share link) give up on a 404 too.
+  // Every request here gets a 404 whose body starts arriving and never ends,
+  // as a real one would until the fetcher's abort timer cuts it off; the
+  // timers are shortened so that takes milliseconds. The redirect hops
+  // (greenhouse-embedded, the Workable share link) give up on a 404 too.
   const DISCARD_PROBES = [
     ...ATS_URL_SHAPES.map(([, url]) => url),
     'https://apply.workable.com/fictional-employer/j/FIXTURE123/',
@@ -623,6 +623,7 @@ try {
         seen.sent += 1;
         const body = new ReadableStream({
           start(stream) {
+            stream.enqueue(new TextEncoder().encode('<h1>Not Found</h1>'));
             init?.signal?.addEventListener('abort', () => { seen.ended += 1; stream.error(init.signal.reason); });
           },
           cancel() { seen.ended += 1; },
