@@ -52,13 +52,8 @@ const DATA_ROOT = getCareerOpsRoot();
 const trackerPath = resolveTrackerPath(DATA_ROOT);
 const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
-const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
-// Any double-brace token, not only UPPER_SNAKE. {{role_title}} and
-// {{ COMPANY }} are unfilled template tokens too (#6396). Matched against the
-// template before it is filled: the filled document also holds candidate text,
-// and a CV that quotes {{ .Values.x }} must still build.
-const TEMPLATE_TOKEN_RE = /\{\{[^{}]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
+const TITLE_BLOCK_RE = /\n([ \t]*)\{\{TITLE_BLOCK\}\}/g;
 
 const PROFILE_PATH = getProfilePath();
 const PHOTO_MIME_BY_EXT = new Map([
@@ -88,13 +83,9 @@ const DEFAULT_SECTION_TITLES = {
 // (e.g. "R&D", "scaled 10x < budget", 'the "north star" metric') render as
 // literal text instead of breaking the document or injecting tags.
 //
-// Braces too, because they change meaning in the TEMPLATE: it is filled by
-// successive {{KEY}} replacements over the whole document, so escaped text is
-// scanned by every replacement after its own. A company of "Acme {{BULLETS}}
-// Corp" got the bullet list spliced into it, a summary naming {{SKILLS}} got
-// the skills grid, and a bullet about "{{FIRST_NAME}} merge fields" failed the
-// build as an unresolved placeholder. As entities they render the same and can
-// never read as a placeholder.
+// Braces too, so candidate text in a filled section is distinct from template
+// syntax. A bullet quoting {{ .Values.x }} renders literally and cannot
+// become a substitution or an unresolved placeholder.
 function escapeHtml(text) {
   // Blank out only truly absent/structural values. A number or boolean scalar
   // (e.g. a payload with `year: 2024` instead of `"2024"`) must render its value,
@@ -235,6 +226,44 @@ function joinItems(items) {
   return typeof items === 'string' ? items : '';
 }
 
+// A token starts at {{ and ends at }} outside any balanced inner braces.
+// If inner braces are unbalanced, still report the token through the first
+// closing pair. Empty tokens also need to be reported (#6396).
+function* templateTokens(source) {
+  let start = source.indexOf('{{');
+  while (start !== -1) {
+    const firstClose = source.indexOf('}}', start + 2);
+    if (firstClose === -1) return;
+
+    let end = firstClose + 2;
+    let depth = 0;
+    for (let i = start + 2; i < source.length - 1; i++) {
+      if (source[i] === '{') depth++;
+      if (source[i] !== '}') continue;
+      if (depth > 0) {
+        depth--;
+      } else if (source[i + 1] === '}') {
+        end = i + 2;
+        break;
+      }
+    }
+
+    yield { start, end, key: source.slice(start + 2, end - 2) };
+    start = source.indexOf('{{', end);
+  }
+}
+
+function fillTemplateTokens(source, fields) {
+  let out = '';
+  let offset = 0;
+  for (const { start, end, key } of templateTokens(source)) {
+    if (!Object.hasOwn(fields, key)) continue;
+    out += source.slice(offset, start) + fields[key];
+    offset = end;
+  }
+  return out + source.slice(offset);
+}
+
 // ── Section partials (#2183) ────────────────────────────────────────────────
 //
 // Resolve the sections/ directory co-located with a given template file.
@@ -339,12 +368,6 @@ function parsePartial(source) {
 function fillEntry(entryTemplate, blocks, fields, blockValues) {
   let out = entryTemplate;
 
-  // Every replacement below passes a FUNCTION rather than the value directly.
-  // A string replacement argument is scanned by JS for $-patterns, so candidate
-  // text containing $&, $', $` or $$ (escaping leaves those sequences intact)
-  // would splice part of the template into the CV instead of being inserted
-  // literally. A replacer function's return value is never interpreted.
-
   // Resolve conditional blocks: replace {{BLOCK_NAME}} with the
   // present/absent markup depending on whether the field has a value.
   if (blockValues) {
@@ -352,19 +375,15 @@ function fillEntry(entryTemplate, blocks, fields, blockValues) {
       const block = blocks.get(name);
       if (!block) continue;
       const scalarKey = name.endsWith('_BLOCK') ? name.slice(0, -6) : name;
-      const markup = present 
-        ? block.present.replace(new RegExp(`\\{\\{(${name}|${scalarKey})\\}\\}`, 'g'), () => value) 
+      const markup = present
+        ? fillTemplateTokens(block.present, { [name]: value, [scalarKey]: value })
         : block.absent;
-      out = out.replace(new RegExp(`\\{\\{${name}\\}\\}`, 'g'), () => markup);
+      out = fillTemplateTokens(out, { [name]: markup });
     }
   }
 
   // Fill remaining scalar placeholders.
-  for (const [key, value] of Object.entries(fields)) {
-    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
-  }
-
-  return out;
+  return fillTemplateTokens(out, fields);
 }
 
 // Load section partials from the sections/ directory co-located with the
@@ -545,12 +564,11 @@ function buildProjects(entries, partial) {
       ? e.bullets.filter(Boolean) : [];
     const descBlock = blocks.get('DESC_BLOCK');
     if (multi.length > 1 && descBlock) {
-      // The expanded block is scanned again by fillEntry, so encode braces in
-      // the bullet text: a literal {{DESC}} must render as text, not be treated
-      // as a template reference.
-      const literalBraces = (t) => escapeHtml(t).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
       const present = multi
-        .map(b => descBlock.present.replace(/\{\{(DESC_BLOCK|DESC)\}\}/g, () => literalBraces(b)))
+        .map(b => {
+          const value = escapeHtml(b);
+          return fillTemplateTokens(descBlock.present, { DESC_BLOCK: value, DESC: value });
+        })
         .join('\n  ');
       entryBlocks = new Map(blocks);
       entryBlocks.set('DESC_BLOCK', { ...descBlock, present });
@@ -799,40 +817,34 @@ function renderReport(payload, partials) {
   return { substitutions, candidate };
 }
 
-// Tokens the filler clears as whole regions, before the {{KEY}} loop. The
-// contact row is rebuilt from the candidate, and PHOTO / TITLE_BLOCK are
-// replaced on their own. What remains in the template, and is not one of the
-// substitution keys, is an unfilled token.
-function unresolvedTemplateTokens(template, substitutions) {
-  let scan = template.replace(CONTACT_ROW_RE, '');
-  scan = scan.replace(/\{\{PHOTO\}\}/g, '');
-  scan = scan.replace(/\n([ \t]*)\{\{TITLE_BLOCK\}\}/g, '');
-  const resolved = new Set(Object.keys(substitutions).map((key) => `{{${key}}}`));
-  const found = scan.match(TEMPLATE_TOKEN_RE) || [];
-  return [...new Set(found.filter((token) => !resolved.has(token)))];
+function checkTemplateTokens(source, isResolved = () => false) {
+  const unresolved = new Set();
+  for (const token of templateTokens(source)) {
+    if (!isResolved(token)) unresolved.add(source.slice(token.start, token.end));
+  }
+  if (unresolved.size) {
+    throw new Error(`Unresolved placeholders: ${[...unresolved].join(', ')}`);
+  }
 }
 
 // Merge a payload into the template and return the final HTML (throws on any
 // unresolved placeholder so a malformed template fails loudly, not silently).
-// The any-shape check runs on the template before it is filled, so candidate
-// text that quotes {{ .Values.x }} is not mistaken for a token. A later
-// UPPER_SNAKE scan of the result still catches a token a partial left behind.
 function renderHtml(template, payload, templatePath) {
   // Load section partials from the sections/ directory co-located with the
   // template. Falls back to built-in builders when no partials directory exists.
   const partials = templatePath ? loadSectionPartials(templatePath) : new Map();
 
   const { substitutions, candidate } = renderReport(payload, partials);
+  substitutions.PHOTO = buildPhoto(candidate, candidate.name);
 
-  const unresolvedInTemplate = unresolvedTemplateTokens(template, substitutions);
-  if (unresolvedInTemplate.length) {
-    throw new Error(`Unresolved placeholders: ${unresolvedInTemplate.join(', ')}`);
-  }
+  // Check the outer template before removing optional sections. The contact
+  // row is replaced as a unit, and only a line-leading TITLE_BLOCK is filled.
+  const source = template.replace(CONTACT_ROW_RE, '');
+  const titleSlots = new Set(Array.from(source.matchAll(TITLE_BLOCK_RE), (match) => match.index + 1 + match[1].length));
+  checkTemplateTokens(source, ({ start, key }) => Object.hasOwn(substitutions, key) || titleSlots.has(start));
 
-  // The contact row and photo carry conditional markup (dropped separators /
-  // no <img>), so they are rebuilt as whole blocks before placeholder fill.
+  // The contact row is rebuilt before placeholder fill to drop separators.
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
-  html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
   // Captures the placeholder's own leading newline + indentation so an empty
   // title drops the whole line — matching just the token (as every other
   // {{PLACEHOLDER}} above does) would leave a blank line where the token sat,
@@ -840,20 +852,16 @@ function renderHtml(template, payload, templatePath) {
   // (CodeRabbit, #3763). With a title, the indentation is reused verbatim so
   // output is unchanged from the token-only replace this replaces.
   const titleBlock = buildTitle(candidate);
-  html = html.replace(/\n([ \t]*)\{\{TITLE_BLOCK\}\}/g, (_, indent) => (titleBlock ? `\n${indent}${titleBlock}` : ''));
+  html = html.replace(TITLE_BLOCK_RE, (_, indent) => (titleBlock ? `\n${indent}${titleBlock}` : ''));
 
   // Drop the optional sections (projects, education) that have no entries, so
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.
   html = stripEmptySections(html, payload, 'html');
 
-  for (const [key, value] of Object.entries(substitutions)) {
-    html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
-  }
-
-  const unresolved = html.match(PLACEHOLDER_RE);
-  if (unresolved) {
-    throw new Error(`Unresolved placeholders: ${[...new Set(unresolved)].join(', ')}`);
-  }
+  html = fillTemplateTokens(html, substitutions);
+  // Only emitted partial markup can leave a token here. Candidate text was
+  // escaped before insertion, and the outer fill never reuses an inserted token.
+  checkTemplateTokens(html);
   return html;
 }
 
