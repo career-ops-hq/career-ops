@@ -49,6 +49,7 @@ const DEFAULT_ATS_ALLOWLIST = [
   'teamtailor.com',
   'paylocity.com',
   'join.com',
+  'hirehive.com',
 ];
 
 /** @type {Record<string, number>} */

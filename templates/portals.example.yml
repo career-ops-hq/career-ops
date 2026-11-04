@@ -1293,6 +1293,7 @@ search_queries:
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
+#   hirehive        <tenant>.hirehive.com  (any path, including a posting link; the board is always read from /api/v2/jobs)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1362,6 +1363,11 @@ search_queries:
 # - name: Example Paylocity Co
 #   careers_url: https://recruiting.paylocity.com/Recruiting/Jobs/All/00000000-0000-4000-8000-000000000000
 #                          # the board link off the careers page; the GUID is the board id
+#   enabled: true
+#
+# - name: Example HireHive Co
+#   careers_url: https://exampleco.hirehive.com/   # any <tenant>.hirehive.com host
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 100)
 #   enabled: true
 #
 # - name: Example Collage HR Co
@@ -2625,6 +2631,11 @@ tracked_companies:
   - name: Shiji Group
     careers_url: https://shijigroup.zohorecruit.com/jobs/Careers
     notes: "Katowice / Barcelona. International hubs of a Beijing-based hospitality technology group."
+    enabled: true
+
+  - name: AMCS Group
+    careers_url: https://amcsgroup.hirehive.com/
+    notes: "Limerick / Dublin / Berlin. Software for the waste, recycling and utilities industry."
     enabled: true
 
   # -- DACH & European AI ecosystem --
