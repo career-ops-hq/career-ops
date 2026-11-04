@@ -28,7 +28,7 @@ const workspace = join(base, 'ext');   // where CAREER_OPS_TRACKER points
 mkdirSync(code, { recursive: true });
 const script = join(code, 'generate-pdf.mjs');
 for (const file of [
-  'generate-pdf.mjs', 'verify-cv-facts.mjs', 'theme-style.mjs', 'cv-experience-order.mjs',
+  'generate-pdf.mjs', 'verify-cv-facts.mjs', 'cv-voice.mjs', 'theme-style.mjs', 'cv-experience-order.mjs',
   'tracker-utils.mjs', 'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
   'cv-sections-core.mjs', 'path-resolver.mjs',
 ]) copyFileSync(join(ROOT, file), join(code, file));
