@@ -27,14 +27,17 @@ test("the pipeline table mounts a window of a long tracker", { skip: liveServerS
 
   await page.goto(`${origin.origin}/pipeline?tab=ALL&sort=tracker&dir=1`);
   await page.getByRole("link", { name: "#1", exact: true }).waitFor();
-  const mounted = () => page.locator("[data-application-key]").count();
+  // Count and match only what is on screen. On a slow runner the page can hold
+  // a second, hidden copy of the table for a moment (CI saw 2 matches for the
+  // "tracked" count and 13 rows for a one-row search).
+  const mounted = () => page.locator("[data-application-key]:visible").count();
   const firstPaint = await mounted();
   assert.ok(firstPaint < 40, `first paint mounted ${firstPaint} rows`);
   assert.ok(firstPaint > 5, `first paint mounted ${firstPaint} rows`);
-  await page.getByText("120 tracked").waitFor();
-  const heights = await page.locator("[data-application-key]").evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+  await page.getByText("120 tracked").filter({ visible: true }).waitFor();
+  const heights = await page.locator("[data-application-key]:visible").evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
   assert.ok(heights.every((h) => Math.abs(h - heights[1]) < 1), `mounted rows differ in height: ${heights.join(", ")}`);
-  const bodyHeight = await page.locator("tbody", { has: page.locator("[data-application-key]") }).evaluate((body) => body.getBoundingClientRect().height);
+  const bodyHeight = await page.locator("tbody", { has: page.locator("[data-application-key]:visible") }).evaluate((body) => body.getBoundingClientRect().height);
   assert.ok(Math.abs(bodyHeight - 120 * heights[1]) < heights[1], `table body is ${bodyHeight}px for 120 rows of ${heights[1]}px`);
   assert.equal(await page.locator("table[aria-rowcount]").getAttribute("aria-rowcount"), "121");
 
@@ -81,7 +84,7 @@ test("an off-screen save failure moves the window, and the error row does not se
   // Keep the scroll position when the banner is inserted above the table.
   // Anchoring on a row would hold the table still, so the window would not move.
   await page.addStyleTag({ content: "* { overflow-anchor: none !important; }" });
-  const row = (n) => page.locator("tr[data-application-key]").filter({ has: page.getByRole("link", { name: `#${n}`, exact: true }) });
+  const row = (n) => page.locator("tr[data-application-key]:visible").filter({ has: page.getByRole("link", { name: `#${n}`, exact: true }) });
   await row(1).getByRole("button", { name: /^Edit status/ }).click();
   await row(1).getByRole("combobox").selectOption("Applied");
   await row(1).getByText("saving…").waitFor();
@@ -92,20 +95,20 @@ test("an off-screen save failure moves the window, and the error row does not se
   // The saving row is taller than the spacers, so measure a normal row.
   await page.evaluate(() => {
     const row = [...document.querySelectorAll("tr[data-application-key]")]
-      .find((el) => !el.querySelector("[role='alert'], [aria-busy='true']"));
+      .find((el) => el.checkVisibility() && !el.querySelector("[role='alert'], [aria-busy='true']"));
     window.scrollTo(0, row.getBoundingClientRect().height * 50);
   });
-  await page.waitForFunction(() => ![...document.querySelectorAll("a")].some((a) => a.textContent.trim() === "#1"));
+  await page.waitForFunction(() => ![...document.querySelectorAll("a")].some((a) => a.checkVisibility() && a.textContent.trim() === "#1"));
   await page.evaluate(() => {
     const row = [...document.querySelectorAll("tr[data-application-key]")]
-      .find((el) => !el.querySelector("[role='alert'], [aria-busy='true']"));
+      .find((el) => el.checkVisibility() && !el.querySelector("[role='alert'], [aria-busy='true']"));
     const rowHeight = row.getBoundingClientRect().height;
     const startPx = Math.max(0, -row.closest("tbody").getBoundingClientRect().top);
     const frac = startPx % rowHeight;
     const delta = frac > 4 ? -(frac - 4) : -(rowHeight - (4 - frac));
     window.scrollBy(0, delta);
   });
-  await page.waitForFunction(() => ![...document.querySelectorAll("a")].some((a) => a.textContent.trim() === "#1"));
+  await page.waitForFunction(() => ![...document.querySelectorAll("a")].some((a) => a.checkVisibility() && a.textContent.trim() === "#1"));
   assert.equal(await page.getByRole("link", { name: "#1", exact: true }).count(), 0);
   const before = await mountedIndexes(page);
 
@@ -127,7 +130,7 @@ test("an off-screen save failure moves the window, and the error row does not se
   await page.getByRole("button", { name: /^INBOX \d+$/ }).click();
   await page.waitForURL((u) => !u.searchParams.has("tab"));
   await page.evaluate(() => new Promise((resolve) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(resolve)), 300)));
-  assert.equal(await page.locator("tr[data-application-key]").count(), 0);
+  assert.equal(await page.locator("tr[data-application-key]:visible").count(), 0);
   assert.equal(await page.getByText("Application #1 was not saved").count(), 0);
   await page.getByRole("button", { name: /^ALL \d+$/ }).click();
   await page.waitForURL((u) => u.searchParams.get("tab") === "ALL");
@@ -164,9 +167,9 @@ test("j/k and Shift-click reach rows outside the window", { skip: liveServerSkip
 
   await page.goto(`${origin.origin}/pipeline?tab=ALL&sort=tracker&dir=1`);
   await page.getByRole("link", { name: "#1", exact: true }).waitFor();
-  await page.getByText("120 tracked").waitFor();
+  await page.getByText("120 tracked").filter({ visible: true }).waitFor();
   const link = (n) => page.getByRole("link", { name: `#${n}`, exact: true });
-  const row = (n) => page.locator("tr[data-application-key]").filter({ has: link(n) });
+  const row = (n) => page.locator("tr[data-application-key]:visible").filter({ has: link(n) });
   const cursorRow = page.locator('tr[data-tracker-cursor="true"]');
   const inView = (locator) => locator.evaluate((el) => {
     const rect = el.getBoundingClientRect();
@@ -211,7 +214,7 @@ test("j/k and Shift-click reach rows outside the window", { skip: liveServerSkip
   await row(118).getByRole("checkbox").click({ modifiers: ["Shift"] });
   await page.getByText("116 selected", { exact: true }).waitFor();
   await page.evaluate(() => {
-    const body = document.querySelector("tbody [data-application-key]").closest("tbody");
+    const body = [...document.querySelectorAll("tbody [data-application-key]")].find((el) => el.checkVisibility()).closest("tbody");
     window.scrollTo(0, body.getBoundingClientRect().top + window.scrollY + body.getBoundingClientRect().height / 2);
   });
   await link(60).waitFor();
@@ -227,7 +230,7 @@ test("j/k and Shift-click reach rows outside the window", { skip: liveServerSkip
 
 async function mountedIndexes(page) {
   return page.evaluate(() => {
-    const body = document.querySelector("tbody [data-application-key]")?.closest("tbody");
+    const body = [...document.querySelectorAll("tbody [data-application-key]")].find((el) => el.checkVisibility())?.closest("tbody");
     const rows = [...body.querySelectorAll("tr[data-application-key]")];
     const sample = rows.find((row) => !row.querySelector("[role='alert'], [aria-busy='true']")) || rows[0];
     return {
