@@ -34,48 +34,60 @@
 // The professional summary (#5019) is optional too: some house styles leave it
 // out and open on the experience bullets. It is the one section held as text
 // rather than as a list of entries, so isEmptySection() treats blank and
-// whitespace-only text as empty. The LaTeX template has no summary, so it is
-// html-only. It is also the first section in every shipped HTML template, so
-// it uses the marker-only boundary described for Skills below. In a template
-// with no marker after the summary, an end-of-input fallback would take the
-// whole CV with it.
+// whitespace-only text as empty. It is the first section in every shipped HTML
+// template, so it uses the marker-only boundary described for the last section
+// below. In a template with no marker after the summary, an end-of-input
+// fallback would take the whole CV with it. The LaTeX template carries a
+// Summary banner too (the house layout puts Professional Summary first), so it
+// uses the same marker-only shape, anchored to the start of a line like the
+// LaTeX skills pattern.
 //
-// ── The Skills sentinel: part of the template contract ───────────────────────
+// ── The last-section sentinel: part of the template contract ────────────────
 //
-// Skills is the LAST section in every shipped template, which makes it the one
-// optional section that may have no following section marker to stop at. Given
-// the shared `…|$` boundary the others use, stripping an empty trailing Skills
-// section falls through to true end-of-file and takes the closing
+// The LAST section of a template is the one optional section that may have no
+// following section marker to stop at. In the shipped HTML templates and in
+// the CJK LaTeX template that section is Skills; in the base LaTeX template
+// (house order: Professional Summary → Technical Skills → Work Experience →
+// Personal Projects → Awards & Honors → Education) it is Education. Given
+// the shared `…|$` boundary the other sections use, stripping an empty
+// trailing section falls through to true end-of-file and takes the closing
 // `</div></body></html>` (`\end{document}` in LaTeX) with it — a truncated,
 // unopenable document, which is far worse than the bare header this module
 // exists to remove.
 //
-// So the Skills patterns below deliberately do NOT use the shared boundary.
-// They use the same marker shapes with the `|$` branch removed, so they stop at
-// the next marker and never at end-of-input. Because `END` is itself a marker,
-// that is the `<!-- END -->` (`%%%% END %%%%` in LaTeX) sentinel when Skills is
-// last, and the following section's marker when a custom template puts Skills
-// somewhere else. Matching the sentinel *only* would be wrong for that second
-// case: the lazy body would run past every section between Skills and the
-// sentinel and delete them along with the empty header, which is silent data
-// loss in a populated CV. Two consequences, both intentional:
+// So the last section's pattern below deliberately does NOT use the shared
+// boundary. It uses the same marker shapes with the `|$` branch removed, so it
+// stops at the next marker and never at end-of-input. Because `END` is itself
+// a marker, that is the `<!-- END -->` (`%%%% END %%%%` in LaTeX) sentinel when
+// the section is last, and the following section's marker when a custom
+// template puts that section somewhere else. Matching the sentinel *only*
+// would be wrong for that second case: the lazy body would run past every
+// section between the stripped one and the sentinel and delete them along with
+// the empty header, which is silent data loss in a populated CV. Two
+// consequences, both intentional:
 //
 //   1. **The sentinel is part of the template contract.** A template that ends
-//      on its Skills section must place `<!-- END -->` / `%%%% END %%%%`
-//      immediately after it. All four shipped templates do; do not remove it
+//      on an optional section must place `<!-- END -->` / `%%%% END %%%%`
+//      immediately after it. Every shipped template does; do not remove it
 //      when editing a template's tail. This is documented for custom-template
 //      authors in templates/README.md.
-//   2. **A template with no marker after Skills FAILS SAFE.** The pattern
-//      simply does not match, `String.replace` is a no-op, and the template
-//      comes out untouched — the Skills section renders as a bare header. That is
-//      the original cosmetic bug, and it is the deliberate choice: a bare
-//      header beats a truncated CV by a wide margin, and the person it lands
-//      on (a third-party template pack with no sentinel and no skills listed)
-//      did nothing wrong. cv-templates.mjs validates custom templates against
-//      `required: ['NAME', 'EXPERIENCE', 'EDUCATION']` and does not — and
-//      need not — require the sentinel, precisely because its absence is
-//      survivable. Never "fix" this by giving the Skills patterns an `|$`
-//      fallback; that trades a cosmetic bug for a destructive one.
+//   2. **A template with no marker after its last section FAILS SAFE.** The
+//      pattern simply does not match, `String.replace` is a no-op, and the
+//      template comes out untouched — the section renders as a bare header.
+//      That is the original cosmetic bug, and it is the deliberate choice: a
+//      bare header beats a truncated CV by a wide margin, and the person it
+//      lands on (a third-party template pack with no sentinel and no entries
+//      listed) did nothing wrong. cv-templates.mjs validates custom templates
+//      against `required: ['NAME', 'EXPERIENCE', 'EDUCATION']` and does not —
+//      and need not — require the sentinel, precisely because its absence is
+//      survivable. Never "fix" this by giving the last section's pattern an
+//      `|$` fallback; that trades a cosmetic bug for a destructive one.
+//
+// A section that is NOT last does not need the sentinel: the next section's
+// marker bounds its strip, and stripping it must still work when the sentinel
+// is missing. That is why the base LaTeX template's Technical Skills block
+// keeps disappearing on an empty payload while its Education block — the last
+// section there — is left alone instead of truncating the document.
 //
 // The section body is delimited by markers rather than parsed, so the boundary
 // pattern carries the whole correctness burden and is easy to get subtly wrong:
@@ -84,8 +96,8 @@
 //     comment inside a section body, truncating the strip and leaving markup
 //     behind. Markers are therefore matched as all-caps only.
 //   - Omitting the end-of-input branch would silently keep a section that
-//     happens to be last in the template. (Skills is the deliberate exception
-//     above — for it, keeping the section is the desired fail-safe.)
+//     happens to be last in the template. (The last section is the deliberate
+//     exception above — for it, keeping the section is the desired fail-safe.)
 //   - Naming the expected successor ("projects is followed by education")
 //     couples the two strips to each other and to template ordering: once an
 //     empty education block is removed, a named lookahead for it stops matching
@@ -99,12 +111,13 @@
 const HTML_BOUNDARY = String.raw`(?=<!--\s+[A-Z][A-Z ]*-->|$)`;
 const TEX_BOUNDARY = String.raw`(?=%{4,}\s|$)`;
 
-// Marker-only boundaries for Skills — the same marker shapes as the shared
-// boundaries above, but with NO end-of-input alternative, so a template lacking
-// any following marker is left untouched rather than truncated. `END` is itself
-// a marker, so these stop at the `<!-- END -->` / `%%%% END %%%%` sentinel when
-// Skills is last and at the next section's marker when it is not. See "The
-// Skills sentinel" above before changing these, and never add an `|$` branch.
+// Marker-only boundaries for the last section — the same marker shapes as the
+// shared boundaries above, but with NO end-of-input alternative, so a template
+// lacking any following marker is left untouched rather than truncated. `END`
+// is itself a marker, so these stop at the `<!-- END -->` / `%%%% END %%%%`
+// sentinel when that section is last and at the next section's marker when it
+// is not. See "The last-section sentinel" above before changing these, and
+// never add an `|$` branch.
 // The HTML summary uses the same marker-only shape for the same reason: it sits
 // first, so a template with no marker after it must keep its bare header. It
 // differs in one respect, HTML_SECTION_ONLY below, which does not stop at END.
@@ -139,9 +152,16 @@ const PATTERNS = {
   tex: {
     // The LaTeX banner is `%%%%  Experience  %%%%` — mixed case, and not the
     // "WORK EXPERIENCE" the HTML templates use.
+    summary: new RegExp(String.raw`%{4,}\s+Summary\s+%{4,}[\s\S]*?` + TEX_END_SENTINEL, 'm'),
     experience: new RegExp(String.raw`%{4,}\s+Experience\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     projects: new RegExp(String.raw`%{4,}\s+PROJECTS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
-    education: new RegExp(String.raw`%{4,}\s+Education\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
+    // Education is the LAST section in the base LaTeX template (the house
+    // order ends on Education), so it carries the marker-only boundary: the
+    // sentinel after it is what stops the strip, and without that sentinel the
+    // strip no-ops instead of running to end-of-input and taking
+    // `\end{document}` with it. In the CJK template Education is followed by
+    // other sections, so the same pattern stops at the next banner there.
+    education: new RegExp(String.raw`%{4,}\s+Education\s+%{4,}[\s\S]*?` + TEX_END_SENTINEL, 'm'),
     awards: new RegExp(String.raw`%{4,}\s+AWARDS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     skills: new RegExp(String.raw`%{4,}\s+Technical Skills\s+%{4,}[\s\S]*?` + TEX_END_SENTINEL, 'm'),
   },

@@ -39,6 +39,11 @@ const REQUIRED_COMMANDS = [
   '\\\\resumeSubheading',
   '\\\\resumeItem',
   '\\\\resumeProjectHeading',
+  // Awards render through their own pair: reusing \resumeProjectHeading drags
+  // the next section title into the last award line, and a plain
+  // \resumeSubHeadingListStart opens a paragraph gap between two one-line
+  // awards. A template that cannot do either is not renderable.
+  '\\\\resumeAwardHeading',
 ];
 
 // Proper Unicode script test (not a hand-picked codepoint range) so

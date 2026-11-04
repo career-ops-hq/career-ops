@@ -14897,6 +14897,7 @@ const baseTex = (sectionTitle) => `\\documentclass{article}
 \\resumeSubheading
 \\resumeItem
 \\resumeProjectHeading
+\\resumeAwardHeading
 \\end{document}
 `;
 
@@ -14963,7 +14964,7 @@ try {
   }
   // Same required commands/placeholders as the base template — it must stay
   // a drop-in variant, not a divergent structure.
-  const requiredTokens = ['\\resumeSubheading', '\\resumeItem', '\\resumeProjectHeading', '{{NAME}}', '{{EDUCATION}}', '{{EXPERIENCE}}', '{{PROJECTS}}', '{{AWARDS}}', '{{SKILLS}}'];
+  const requiredTokens = ['\\resumeSubheading', '\\resumeItem', '\\resumeProjectHeading', '\\resumeAwardHeading', '{{NAME}}', '{{EDUCATION}}', '{{EXPERIENCE}}', '{{PROJECTS}}', '{{AWARDS}}', '{{SKILLS}}'];
   const missingTokens = requiredTokens.filter((t) => !cjkTemplateSrc.includes(t));
   if (cjkTemplateSrc && missingTokens.length === 0) {
     pass('cv-template.cjk.tex keeps the same required commands/placeholders as the base template');

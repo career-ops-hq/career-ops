@@ -117,9 +117,11 @@ function buildProjects(entries) {
   return blocks.join('\n\n');
 }
 
-// Awards are one line each — no bullet list — so they reuse
-// \resumeProjectHeading (bold left column, year right) rather than
-// \resumeSubheading, which would leave an empty second row. The issuing body
+// Awards are one line each — no bullet list — so they use
+// \resumeAwardHeading (bold left column, year right): \resumeProjectHeading
+// would fit the row but its -7pt tail pulls whatever follows into the award
+// line, and a blank line between two awards would start a new paragraph and
+// widen the gap. One newline keeps them a single list. The issuing body
 // follows the title in the same $|$ style buildProjects() uses for context.
 function buildAwards(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
@@ -127,9 +129,9 @@ function buildAwards(entries) {
   for (const e of entries) {
     if (!hasRequiredFields(e, 'awards', 'tex')) continue;
     const org = e.org ? ` \\emph{$|$ ${escapeLatex(e.org)}}` : '';
-    blocks.push(`    \\resumeProjectHeading\n      {\\textbf{${escapeLatex(e.title)}}${org}}{${escapeLatex(e.year)}}`);
+    blocks.push(`    \\resumeAwardHeading\n      {\\textbf{${escapeLatex(e.title)}}${org}}{${escapeLatex(e.year)}}`);
   }
-  return blocks.join('\n\n');
+  return blocks.join('\n');
 }
 
 function buildSkills(categories) {
@@ -228,6 +230,8 @@ async function main() {
   const linkedinDisplay = payload.linkedin?.display || '';
   const githubUrl = sanitizeUrl(payload.github?.url || '');
   const githubDisplay = payload.github?.display || '';
+  const portfolioUrl = sanitizeUrl(payload.portfolio?.url || '');
+  const portfolioDisplay = payload.portfolio?.display || '';
 
   const substitutions = {
     NAME: escapeLatex(payload.name || ''),
@@ -248,6 +252,13 @@ async function main() {
     LINKEDIN_DISPLAY: escapeLatex(linkedinDisplay),
     GITHUB_URL: githubUrl,
     GITHUB_DISPLAY: escapeLatex(githubDisplay),
+    // The Professional Summary section and the portfolio link in the header.
+    // Both render empty when the payload omits them, so the template can carry
+    // the slots unconditionally (the LaTeX CV layout requires both).
+    SUMMARY: escapeLatex(payload.summary || ''),
+    PORTFOLIO_BLOCK: portfolioUrl
+      ? ` ~ \\href{${portfolioUrl}}{\\raisebox{-0.2\\height}\\faGlobe\\ \\underline{${escapeLatex(portfolioDisplay || portfolioUrl)}}}`
+      : '',
     EDUCATION: buildEducation(payload.education),
     EXPERIENCE: buildExperience(payload.experience),
     PROJECTS: buildProjects(payload.projects),
@@ -524,6 +535,8 @@ async function runSelfTest() {
   const linkedinDisplay = sample.linkedin?.display || '';
   const githubUrl = sanitizeUrl(sample.github?.url || '');
   const githubDisplay = sample.github?.display || '';
+  const portfolioUrl = sanitizeUrl(sample.portfolio?.url || '');
+  const portfolioDisplay = sample.portfolio?.display || '';
 
   const substitutions = {
     NAME: escapeLatex(sample.name),
@@ -534,6 +547,10 @@ async function runSelfTest() {
     LINKEDIN_DISPLAY: escapeLatex(linkedinDisplay),
     GITHUB_URL: githubUrl,
     GITHUB_DISPLAY: escapeLatex(githubDisplay),
+    SUMMARY: escapeLatex(sample.summary || ''),
+    PORTFOLIO_BLOCK: portfolioUrl
+      ? ` ~ \\href{${portfolioUrl}}{\\raisebox{-0.2\\height}\\faGlobe\\ \\underline{${escapeLatex(portfolioDisplay || portfolioUrl)}}}`
+      : '',
     EDUCATION: buildEducation(sample.education),
     EXPERIENCE: buildExperience(sample.experience),
     PROJECTS: buildProjects(sample.projects),

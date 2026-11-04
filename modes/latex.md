@@ -46,6 +46,8 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
   "email": { "url": "jane@example.com", "display": "jane@example.com" },
   "linkedin": { "url": "https://linkedin.com/in/janesmith", "display": "linkedin.com/in/janesmith" },
   "github": { "url": "https://github.com/janesmith", "display": "github.com/janesmith" },
+  "portfolio": { "url": "https://example.com", "display": "example.com" },
+  "summary": "Two or three sentences that open the document, tailored to the job.",
   "education": [
     {
       "institution": "University Name",
@@ -101,6 +103,9 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 | `linkedin.display` | string | Display text only (no scheme) |
 | `github.url` | string | Full URL with scheme for `\href{}` (sanitized via sanitizeUrl, not LaTeX-escaped) |
 | `github.display` | string | Display text only (no scheme) |
+| `portfolio.url` | string | Portfolio link for the header row (sanitized via sanitizeUrl, not LaTeX-escaped). Omitted or empty renders no link and no dangling separator |
+| `portfolio.display` | string | Display text only (no scheme); defaults to the URL |
+| `summary` | string | Professional Summary text, rendered as the first section. Omitted or blank drops the section, header included |
 | `education[].institution` | string | From cv.md Education |
 | `education[].location` | string | Institution location |
 | `education[].degree` | string | Degree name |
@@ -127,7 +132,7 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 - **Missing or blank required field → hard error, non-zero exit, no .tex written.** Required: `institution` + `degree` for education, `company` + `role` for experience, `name` for projects, `title` for awards, `items` for skills (a non-blank string or a non-empty array of them; `category` stays optional).
 - **A key no builder reads → warning on stderr and in the report's `warnings[]`;** the build proceeds and the key is ignored.
 - **A top-level section name the builder does not read → warning**, naming the nearest known key, so `educations` for `education` is visible instead of silently dropping the section.
-- **A section this template has no block for → warning.** The `.tex` template renders no `certifications`, `competencies`, `interests` or `summary` — all four exist on the HTML path only. Passing one drops it entirely, so the warning says what was lost. This is the message you get for those four; an unrecognised key gets the typo-style warning above instead, never both.
+- **A section this template has no block for → warning.** The `.tex` template renders no `certifications`, `competencies` or `interests` — all three exist on the HTML path only. Passing one drops it entirely, so the warning says what was lost. This is the message you get for those three; an unrecognised key gets the typo-style warning above instead, never both.
 
 **This schema is not the HTML one.** An education entry here is `{institution, degree, dates, coursework}`; in `modes/pdf.md` it is `{title, org, year, description}`, and projects use `context` here but `tech` there. The two payloads are not interchangeable — mixing them used to render an empty block while the report still said `"valid": true`. Each builder now rejects the other's vocabulary by name. The shared contract lives in `lib/cv-payload-schema.mjs`.
 
@@ -173,9 +178,10 @@ Emphasis is not a substitute for evidence — bold reorders attention, it does n
 ## ATS Rules (same as pdf mode)
 
 - Single-column layout (enforced by template)
-- Standard section headers: Education, Work Experience, Personal Projects, Awards & Honors, Technical Skills
-- Optional sections (Work Experience, Personal Projects, Education, Awards & Honors, Technical Skills) are dropped entirely — header included — when their array is empty or absent
+- Standard section headers, in the template's order: Professional Summary, Technical Skills, Work Experience, Personal Projects, Awards & Honors, Education
+- Optional sections (Professional Summary, Work Experience, Personal Projects, Education, Awards & Honors, Technical Skills) are dropped entirely — header included — when their array is empty or absent
 - UTF-8, machine-readable via `\pdfgentounicode=1`
+- The text layer keeps `_` and `~` as written (the template loads the T1 encoding and Latin Modern): an ATS parser reads the text layer, not the screen
 - Keywords distributed: first bullet of each role, skills section
 - No images, no graphics, no color in body text
 

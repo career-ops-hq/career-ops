@@ -23,14 +23,17 @@
 // — see the header comment in cv-sections-core.mjs for the failure modes
 // exercised here.
 //
-// Skills carries one extra burden the other six do not. It is the LAST
-// section in every shipped template, so it may have no following section marker
-// to stop at; with the shared `…|$` boundary, stripping it would run to
-// end-of-file and swallow the closing document skeleton. Its patterns therefore
-// use the same marker shapes with NO end-of-input alternative — stopping at the
-// `<!-- END -->` / `%%%% END %%%%` sentinel when Skills is last, and at the next
-// section's marker when a custom template puts Skills higher up. That produces
-// two behaviours this suite pins down:
+// The LAST section of a template carries one extra burden the others do not.
+// It may have no following section marker to stop at; with the shared `…|$`
+// boundary, stripping it would run to end-of-file and swallow the closing
+// document skeleton. Its pattern therefore uses the same marker shapes with
+// NO end-of-input alternative — stopping at the `<!-- END -->` /
+// `%%%% END %%%%` sentinel when it is last, and at the next section's marker
+// when it is not. The last section is Skills in the shipped HTML templates
+// and in the CJK LaTeX template, and Education in the base LaTeX template
+// (house order: Professional Summary → Technical Skills → Work Experience →
+// Personal Projects → Awards & Honors → Education). That produces two
+// behaviours this suite pins down:
 //
 //   - with the sentinel: the section is stripped and the closing skeleton
 //     survives ("keeps the closing document skeleton" checks);
@@ -39,6 +42,10 @@
 //     valid without the sentinel — cv-templates.mjs requires only
 //     NAME/EXPERIENCE/EDUCATION — so this case must degrade to the cosmetic
 //     bare-header bug, never to a truncated CV.
+//
+// A section that is NOT last does not need the sentinel: the next section's
+// marker bounds its strip, so an empty one must still disappear without a
+// sentinel anywhere in the template.
 //
 // The professional summary (#5019) is the one optional section held as text
 // rather than as a list of entries, so blank and whitespace-only text count as
@@ -78,16 +85,16 @@ function check(label, actual, expected) {
 // are empty — the `<!-- END -->` / `%%%% END %%%%` marker itself, never the
 // (now-strippable) SKILLS marker or its content.
 const TEMPLATES = [
-  { file: 'templates/cv-template.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true, hasInterests: true },
-  { file: 'templates/resume-template.html', format: 'html', after: '<!-- END -->', hasCertifications: false, hasCompetencies: true, hasInterests: false },
-  { file: 'templates/cv-template.zh-minimal.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true, hasInterests: false },
-  { file: 'templates/cv-template.compact.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true, hasInterests: false },
-  { file: 'templates/cv-template.executive.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true, hasInterests: false },
-  { file: 'templates/cv-template.jake.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true, hasInterests: false },
-  { file: 'templates/cv-template.leadership.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true, hasInterests: false },
-  { file: 'templates/cv-template.modern.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true, hasInterests: false },
-  { file: 'templates/cv-template.tex', format: 'tex', after: '%%%%  END  %%%%', hasCertifications: false, hasCompetencies: false, hasInterests: false },
-  { file: 'templates/cv-template.cjk.tex', format: 'tex', after: '%%%%  END  %%%%', hasCertifications: false, hasCompetencies: false, hasInterests: false },
+  { file: 'templates/cv-template.html', format: 'html', after: '<!-- END -->', lastSection: 'skills', hasCertifications: true, hasCompetencies: true, hasInterests: true },
+  { file: 'templates/resume-template.html', format: 'html', after: '<!-- END -->', lastSection: 'skills', hasCertifications: false, hasCompetencies: true, hasInterests: false },
+  { file: 'templates/cv-template.zh-minimal.html', format: 'html', after: '<!-- END -->', lastSection: 'skills', hasCertifications: true, hasCompetencies: true, hasInterests: false },
+  { file: 'templates/cv-template.compact.html', format: 'html', after: '<!-- END -->', lastSection: 'skills', hasCertifications: true, hasCompetencies: true, hasInterests: false },
+  { file: 'templates/cv-template.executive.html', format: 'html', after: '<!-- END -->', lastSection: 'skills', hasCertifications: true, hasCompetencies: true, hasInterests: false },
+  { file: 'templates/cv-template.jake.html', format: 'html', after: '<!-- END -->', lastSection: 'skills', hasCertifications: true, hasCompetencies: true, hasInterests: false },
+  { file: 'templates/cv-template.leadership.html', format: 'html', after: '<!-- END -->', lastSection: 'skills', hasCertifications: true, hasCompetencies: true, hasInterests: false },
+  { file: 'templates/cv-template.modern.html', format: 'html', after: '<!-- END -->', lastSection: 'skills', hasCertifications: true, hasCompetencies: true, hasInterests: false },
+  { file: 'templates/cv-template.tex', format: 'tex', after: '%%%%  END  %%%%', lastSection: 'education', hasCertifications: false, hasCompetencies: false, hasInterests: false },
+  { file: 'templates/cv-template.cjk.tex', format: 'tex', after: '%%%%  END  %%%%', lastSection: 'skills', hasCertifications: false, hasCompetencies: false, hasInterests: false },
 ];
 
 // --- Coverage guard: no shipped CV template may sit outside the matrix ------
@@ -120,7 +127,7 @@ else fail(`shipped CV templates missing from TEMPLATES — they run zero asserti
 if (phantom.length === 0) pass('every template in the matrix exists on disk');
 else fail(`TEMPLATES names templates that are not on disk: ${phantom.join(', ')}`);
 
-for (const { file, format, after, hasCertifications, hasCompetencies, hasInterests } of TEMPLATES) {
+for (const { file, format, after, lastSection, hasCertifications, hasCompetencies, hasInterests } of TEMPLATES) {
   const template = readFileSync(join(ROOT, file), 'utf-8');
   const name = file.split('/').pop();
   const closingSkeleton = format === 'html' ? '</body>\n</html>' : '\\end{document}';
@@ -362,21 +369,38 @@ for (const { file, format, after, hasCertifications, hasCompetencies, hasInteres
   check(`${name}: omitted skills key keeps the closing document skeleton`,
     omittedSkills.trimEnd().endsWith(closingSkeleton), true);
 
-  // FAIL-SAFE: a template pack whose Skills section carries no sentinel is
+  // FAIL-SAFE: a template pack whose LAST section carries no sentinel is
   // valid (cv-templates.mjs requires only NAME/EXPERIENCE/EDUCATION). Strip
-  // the sentinel from a real shipped template and the empty-skills strip must
-  // become a NO-OP — bare header, intact document — never a truncated tail.
+  // the sentinel from a real shipped template and the empty-last-section strip
+  // must become a NO-OP — bare header, intact document — never a truncated
+  // tail. The last section is Skills in the HTML templates and in the CJK
+  // LaTeX template, and Education in the base LaTeX template (house order
+  // ends on Education), so the fixture empties whichever section ends that
+  // template.
   // `after` IS the sentinel literal — reuse it rather than restating it here,
   // so the two can never drift into a weaker substring of each other.
   const noSentinel = template.replace(after, '');
   check(`${name}: fixture actually dropped the sentinel`, noSentinel.includes(after), false);
-  const strippedNoSentinel = stripEmptySections(noSentinel, { ...FULL, skills: [] }, format);
-  check(`${name}: no sentinel + empty skills leaves the template untouched (fail-safe)`,
+  const strippedNoSentinel = stripEmptySections(noSentinel, { ...FULL, [lastSection]: [] }, format);
+  check(`${name}: no sentinel + empty last section leaves the template untouched (fail-safe)`,
     strippedNoSentinel === noSentinel, true);
-  check(`${name}: no sentinel + empty skills keeps the closing document skeleton`,
+  check(`${name}: no sentinel + empty last section keeps the closing document skeleton`,
     strippedNoSentinel.trimEnd().endsWith(closingSkeleton), true);
-  check(`${name}: no sentinel + empty skills keeps {{EXPERIENCE}}`,
+  check(`${name}: no sentinel + empty last section keeps {{EXPERIENCE}}`,
     strippedNoSentinel.includes('{{EXPERIENCE}}'), true);
+
+  // A section that is NOT last does not need the sentinel: the next section's
+  // marker bounds its strip, so it must still disappear without one — and
+  // must not take the rest of the document with it.
+  if (lastSection !== 'skills') {
+    const noSentinelEmptySkills = stripEmptySections(noSentinel, { ...FULL, skills: [] }, format);
+    check(`${name}: no sentinel + empty skills still drops the skills block`,
+      noSentinelEmptySkills.includes(skillsMarker), false);
+    check(`${name}: no sentinel + empty skills keeps the closing document skeleton`,
+      noSentinelEmptySkills.trimEnd().endsWith(closingSkeleton), true);
+    check(`${name}: no sentinel + empty skills keeps {{EXPERIENCE}}`,
+      noSentinelEmptySkills.includes('{{EXPERIENCE}}'), true);
+  }
 }
 
 // --- Boundary edge cases ---------------------------------------------------
