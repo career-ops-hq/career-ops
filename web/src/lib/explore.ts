@@ -56,6 +56,8 @@ export type DiscoveredOffer = {
   location: string;
   /** YYYY-MM-DD, or "" when the engine reported n/a (AI offers always "") */
   postedAt: string;
+  /** Provider evidence carried through review for the conditional Inbox gate. */
+  geographyEvidence?: Record<string, unknown>;
   ats: string;
   source: string;
   /** which positive keyword matched the title (transparency, e.g. "ai" in "Nail") */

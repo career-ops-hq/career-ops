@@ -541,7 +541,7 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
 
     const skipped = { title, url, location: listLocation };
     if (!filters.titleFilter(title)) { titleSkipped.push(skipped); continue; }
-    if (!filters.locationFilter(listLocation, url, title)) { locationSkipped.push(skipped); continue; }
+    if (!filters.locationFilter(listLocation, url, title, { description: listDescription })) { locationSkipped.push(skipped); continue; }
     if (!filters.contentFilter(listDescription, filters.matchedTitleKeywords(title))) { contentSkipped.push(skipped); continue; }
     if (!filters.countryEligibilityFilter(listDescription)) { countryEligibilitySkipped.push(skipped); continue; }
     if (!filters.visaFilter(listDescription)) { visaSkipped.push(skipped); continue; }

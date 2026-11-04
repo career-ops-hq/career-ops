@@ -53,7 +53,8 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   const doneEval = job?.status === "done" && job.kind === "evaluate";
   const statusLabel = WORKER_LABEL[job?.kind ?? ""] ?? "Working…";
 
-  const isAdded = added.has(offer.url) || inPipeline || working || doneEval;
+  // Worker state is not evidence that the separate Inbox write succeeded.
+  const isAdded = added.has(offer.url) || inPipeline;
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
   const employer = CHINA_SOURCES.includes(offer.source);
@@ -137,7 +138,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
           <div className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-2 text-xs font-medium text-brand-text">
             <Loader2 className="size-3.5 animate-spin" />
             {statusLabel}
-            <span className="text-brand-text">· in pipeline</span>
+            {isAdded && <span className="text-brand-text">· in pipeline</span>}
           </div>
         ) : (
           <div className="flex items-center gap-2">

@@ -4,6 +4,9 @@
 // Jobicy provider — board-wide remote-jobs aggregator feed
 // (https://jobicy.com/api/v2/remote-jobs?count=50). Returns { jobs: [...] }.
 //
+// Official remote-only feed contract: https://jobicy.com/jobs-rss-feed
+// `jobGeo` is remote location eligibility; `jobDescription` is the full HTML JD.
+// Preserve those two independent signals: Worldwide is geography, not a mode.
 // Wire in via a `job_boards:` entry with `provider: jobicy`.
 
 const FEED_URL = 'https://jobicy.com/api/v2/remote-jobs?count=50';
@@ -77,6 +80,8 @@ export function parseJobicyResponse(json, defaultCompany = 'Jobicy') {
         url,
         company,
         location,
+        isRemote: true,
+        ...(typeof j.jobDescription === 'string' ? { description: j.jobDescription } : {}),
         postedAt,
       };
     })

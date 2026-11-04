@@ -74,3 +74,159 @@ export function countryNameFromIso(code) {
   if (/^[A-Z]{3}$/.test(c)) return Object.hasOwn(ALPHA3_TO_ALPHA2, c) ? countryName(ALPHA3_TO_ALPHA2[c]) : '';
   return countryName(c);
 }
+
+/** Opt-in conditional workplace geography. Missing evidence stays out of Inbox.
+ * This is a deterministic admission gate, not a claim that employment/visa or
+ * working-hours eligibility has been verified. Country restrictions in provider
+ * metadata and explicit eligibility clauses narrow broad remote-region labels.
+ */
+
+const fold = (v) => typeof v === 'string' ? v.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[–—−]/g, '-').replace(/\s+/g, ' ').trim() : '';
+const list = (v) => Array.isArray(v) ? v.filter(x => typeof x === 'string' && x.trim()).map(fold) : [];
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const word = (s) => new RegExp(`(?<![\\p{L}\\p{N}])${escape(s)}(?![\\p{L}\\p{N}])`, 'u');
+const has = (text, values) => values.some(v => word(v).test(text));
+const COUNTRY_NAMES = [];
+for (let a = 65; a <= 90; a++) for (let b = 65; b <= 90; b++) {
+  const code = String.fromCharCode(a, b), name = countryName(code);
+  if (name && name !== 'Unknown Region' && !['EU', 'EZ', 'UN'].includes(code)) COUNTRY_NAMES.push({ code, name: fold(name), match: word(fold(name)) });
+}
+const COUNTRY_ALIASES = [
+  ['US', 'usa'], ['US', 'u.s.'], ['US', 'u.s.a.'], ['US', 'united states of america'],
+  ['GB', 'uk'], ['GB', 'u.k.'], ['GB', 'great britain'], ['GB', 'england'],
+  ['ES', 'espana'], ['ES', 'esp'],
+].map(([code, name]) => ({ code, name, match: word(name) }));
+const PROSE_WORD_CODES = new Set(['in', 'as', 'at', 'be', 'is', 'it', 'no', 'so', 'to', 'do', 'me', 'my', 'am']);
+const countries = (text, codes = false) => {
+  const found = new Set([...COUNTRY_NAMES, ...COUNTRY_ALIASES].filter(c => c.match.test(text)).map(c => c.code));
+  if (codes) for (const token of text.split(/[,;/|()\s-]+/)) {
+    if (/^[a-z]{2,3}$/.test(token) && !PROSE_WORD_CODES.has(token)) {
+      const name = fold(countryNameFromIso(token));
+      const c = COUNTRY_NAMES.find(c => c.name === name);
+      if (c) found.add(c.code);
+    }
+  }
+  return found;
+};
+// Config country lists and structured applicant-country fields have an exact
+// country token, unlike prose where "in", "it" or "no" are ordinary words.
+// Resolve those tokens before applying the prose ambiguity guard.
+const countryValue = value => fold(countryNameFromIso(value)) || value;
+const REMOTE = /\b(?:remote|work from (?:home|anywhere)|distributed)\b/;
+// Mirror scan.mjs's titleSignalsRemote marker: "Remote Sensing" describes a
+// discipline, not a work arrangement. The policy must not convert an office
+// job outside onsite_locations into an eligible country-wide remote role.
+const REMOTE_TITLE = /(?<![a-z])remote(?=$|\s*[^a-z\s]|\s+in\b)/;
+const NOT_REMOTE = /\b(?:non|not|no)[^a-z]*remote\b/;
+const OFFICE = /\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based)\b/;
+const plain = (v) => fold(v).replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').replace(/\s+/g, ' ');
+
+function excludedHome(text, homes) {
+  return homes.some(h => [
+    `(?:excluding|except|excludes|not(?: available| eligible| supported| open)?(?: in| from)?|no candidates from)\\s+${escape(h)}(?![\\p{L}\\p{N}])`,
+    `(?<![\\p{L}\\p{N}])${escape(h)}(?:[ -]based)?(?:\\s+(?:candidates|applicants|residents))?\\s+(?:(?:is|are)\\s+)?(?:excluded|not (?:eligible|supported|available|included))`,
+  ].some(pattern => new RegExp(pattern, 'u').test(text)));
+}
+
+// Country-bearing structured eligibility is authoritative, unlike an office
+// address mentioned somewhere in a description. Only known fields are read.
+function requirementText(offer) {
+  const flatten = (v) => typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatMap(flatten) : v && typeof v === 'object' ? ['name', 'country', 'addressCountry'].flatMap(k => flatten(v[k])) : [];
+  return ['applicantLocationRequirements', 'eligibleCountries', 'allowedCountries', 'remoteCountries', 'hiringCountries', 'countriesAllowed'].flatMap(k => flatten(offer?.[k])).map(countryValue).join('; ');
+}
+
+/** Only provider geography evidence needed by the same gate after discovery. */
+export function captureWorkplaceEvidence(offer) {
+  const evidence = {};
+  for (const key of ['description', 'workplaceType', 'workplace_type', 'workArrangement', 'isRemote', 'applicantLocationRequirements', 'eligibleCountries', 'allowedCountries', 'remoteCountries', 'hiringCountries', 'countriesAllowed']) {
+    if (offer?.[key] !== undefined) evidence[key] = offer[key];
+  }
+  return evidence;
+}
+
+/** Existing malformed user config must not silently disable an admission gate.
+ * The web's synchronous config copier mirrors this shape check behind a parity
+ * test; scanner/policy execution always stays in the core.
+ */
+export function workplacePolicyFromConfig(config) {
+  const mapping = value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  };
+  if (!mapping(config)) throw new Error('portals.yml must contain a YAML mapping');
+  if (config.location_filter === undefined) return undefined;
+  if (!mapping(config.location_filter)) throw new Error('location_filter must be an object');
+  const policy = config.location_filter.workplace_policy;
+  if (policy !== undefined && !mapping(policy)) throw new Error('location_filter.workplace_policy must be an object');
+  return policy;
+}
+
+export function buildWorkplacePolicy(policy) {
+  if (policy === undefined) return () => ({ eligible: true, reason: 'policy_absent' });
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) throw new Error('location_filter.workplace_policy must be an object');
+  const onsite = list(policy.onsite_locations), home = list(policy.remote_countries), regions = list(policy.remote_regions);
+  if (!onsite.length || !home.length) throw new Error('workplace_policy requires onsite_locations and remote_countries lists');
+  const homeCodes = new Set(home.flatMap(v => [...countries(countryValue(v), true)]));
+  if (!homeCodes.size) throw new Error('workplace_policy.remote_countries must name a country or ISO country code');
+  const supportsHome = (text) => [...countries(text, true)].some(c => homeCodes.has(c));
+  const restricted = (text, codes = false) => {
+    const found = countries(text, codes);
+    return found.size > 0 && ![...found].some(c => homeCodes.has(c));
+  };
+  const localCountries = list(policy.onsite_countries ?? policy.remote_countries);
+  const localCodes = new Set(localCountries.flatMap(v => [...countries(countryValue(v), true)]));
+  const homeAliases = [...home.map(countryValue), ...COUNTRY_NAMES.filter(c => homeCodes.has(c.code)).flatMap(c => PROSE_WORD_CODES.has(c.code.toLowerCase()) ? [c.name] : [c.name, c.code.toLowerCase()]), ...COUNTRY_ALIASES.filter(c => homeCodes.has(c.code)).map(c => c.name)];
+  const foreignOnly = [...COUNTRY_NAMES, ...COUNTRY_ALIASES].filter(c => !homeCodes.has(c.code)).map(country => new RegExp(`(?<![\\p{L}\\p{N}])${escape(country.name)}(?:[ -]based)?(?:\\s+(?:candidates|applicants|residents))?\\s*[- ]?only\\b`, 'u'));
+  const timezoneNames = [...regions, ...COUNTRY_NAMES.map(c => c.name), ...COUNTRY_ALIASES.map(c => c.name), 'cet', 'cest', 'gmt', 'utc'].sort((a, b) => b.length - a.length);
+  const timezonePhrase = new RegExp(`(?<![\\p{L}\\p{N}])(?:${timezoneNames.map(escape).join('|')})(?:[- ]compatible)? (?:working hours|time[ -]?zones?|hours)\\b`, 'gu');
+  return (location, title = '', offer = {}) => {
+    if (offer.geographyEvidence && typeof offer.geographyEvidence === 'object' && !Array.isArray(offer.geographyEvidence)) offer = { ...offer, ...offer.geographyEvidence };
+    const loc = fold(location), heading = fold(title), description = plain(offer.description);
+    const meta = fold(requirementText(offer));
+    const workplace = fold(offer.workplaceType || offer.workplace_type || offer.workArrangement);
+    const all = `${loc}. ${heading}. ${meta}. ${description}`;
+    const fail = reason => ({ eligible: false, reason });
+    if (excludedHome(all, homeAliases)) return fail('candidate_country_excluded');
+    // An explicitly exclusive foreign country cannot be rescued by a mention
+    // of Spain elsewhere in the same field ("Spain / UK only").
+    if (foreignOnly.some(pattern => pattern.test(all))) return fail('exclusive_foreign_country');
+    if (meta && !supportsHome(meta) && (restricted(meta, true) || !has(meta, regions))) return fail('metadata_country_restricted');
+    for (const sentence of description.split(/[.!?\n]+/)) {
+      if (!/\bmust (?:be |currently )?(?:based|located|reside|live)\b/.test(sentence)) continue;
+      for (const match of sentence.matchAll(/[,;]\s*([^,;]{1,60}?)\s+only\b/g)) {
+        const narrower = match[1];
+        if (!supportsHome(narrower) && !has(narrower, regions) && !has(narrower, onsite)) return fail('description_locality_restricted');
+      }
+    }
+    // Narrow eligibility clauses, not arbitrary country mentions. A company
+    // describing its London office must not erase a worldwide-remote listing.
+    for (const clause of description.split(/[.!?;,\n]+|\s+(?:but|however)\s+/)) {
+      if (/\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based) (?:role|position)(?: is)? (?:based |located )?in\b/.test(clause) && !has(clause, onsite)) return fail('description_onsite_restricted');
+      if (!/\b(?:only|must (?:be |currently )?(?:based|located|reside|live)|(?:candidates?|applicants?|residents?) (?:must|need to)|restricted to|eligible (?:countries|locations)|hiring (?:only )?in|open (?:only )?to)\b/.test(clause)) continue;
+      if (restricted(clause)) return fail('description_country_restricted');
+      if (/\bmust (?:be |currently )?(?:based|located|reside|live)(?: in| within)?\b/.test(clause)
+        && !supportsHome(clause) && !has(clause, regions) && !has(clause, onsite)) return fail('description_location_restricted');
+      // A mandatory commute elsewhere is also narrower than a remote tag.
+      if (/\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based)\b/.test(clause) && !has(clause, onsite)) return fail('description_onsite_restricted');
+    }
+    const structuredOffice = OFFICE.test(loc) || OFFICE.test(workplace) || OFFICE.test(heading);
+    const remote = !structuredOffice && !NOT_REMOTE.test(loc) && !NOT_REMOTE.test(heading)
+      && (REMOTE.test(loc) || workplace === 'remote' || offer.isRemote === true || (!workplace && REMOTE_TITLE.test(heading)));
+    if (!remote) {
+      if (!has(loc, onsite)) return fail(loc ? 'onsite_outside_allowed_locations' : 'location_unknown');
+      const found = countries(loc, true);
+      if (found.size && ![...found].some(c => localCodes.has(c))) return fail('onsite_country_restricted');
+      return { eligible: true, reason: 'onsite_location_allowed' };
+    }
+    // Explicit structured countries narrow a covering region. Europe + UK-only
+    // never implies Spain. Multiple genuine eligible countries including Spain
+    // are allowed. No timezone token is an eligibility signal.
+    const geoLoc = loc.replace(timezonePhrase, ' ');
+    const locationCountries = countries(geoLoc, true);
+    if (locationCountries.size && ![...locationCountries].some(c => homeCodes.has(c))) return fail('remote_country_restricted');
+    const remoteDescription = description.split(/[.!?;\n]+/).some(clause => /\b(?:work remotely|work remote|remote work|remote role|work from home|work from)\b/.test(clause) && supportsHome(clause));
+    if (supportsHome(geoLoc) || has(geoLoc, regions) || (meta && (supportsHome(meta) || has(meta, regions))) || remoteDescription) return { eligible: true, reason: 'remote_region_allowed' };
+    return fail(loc ? 'remote_eligibility_unconfirmed' : 'location_unknown');
+  };
+}
