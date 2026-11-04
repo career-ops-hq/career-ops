@@ -25,6 +25,18 @@ test('hex, named and quote forms decode too', () => {
   }
 });
 
+// A CV written by hand or exported from an editor spells curly quotes as named
+// entities, and JD keywords often carry the curly forms.
+test('the named curly quote entities decode too', () => {
+  for (const [line, keyword] of [
+    ['Master&rsquo;s degree', 'Master’s degree'],
+    ['&lsquo;zero to one&rsquo; launches', '‘zero to one’'],
+    ['the &ldquo;north star&rdquo; metric', '“north star”'],
+  ]) {
+    assert.deepEqual(auditAts(cv(line), { keywords: keyword }).keywordCoverage.missing, [], line);
+  }
+});
+
 test('a keyword the CV does not have is still missing', () => {
   assert.deepEqual(auditAts(cv('Master&#39;s degree'), { keywords: 'Kubernetes' }).keywordCoverage.missing, ['Kubernetes']);
 });
