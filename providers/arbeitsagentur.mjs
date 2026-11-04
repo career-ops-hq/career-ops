@@ -47,9 +47,9 @@ const API_KEY = 'jobboerse-jobsuche'; // public client key the arbeitsagentur.de
 const DETAIL_BASE = 'https://www.arbeitsagentur.de/jobsuche/jobdetail/';
 // The detail page answers 404 to a once-encoded slash in its path, and a bare
 // slash would split the path. Its own search results encode the slash twice.
-export const DOUBLE_ENCODED_CHAR = '/';
-export const CHAR_ENCODED_ONCE = encodeURIComponent(DOUBLE_ENCODED_CHAR);
-const CHAR_ENCODED_TWICE = encodeURIComponent(CHAR_ENCODED_ONCE);
+export const PATH_BREAKING_CHAR = '/';
+export const PATH_BREAKING_CHAR_ENCODED_ONCE = encodeURIComponent(PATH_BREAKING_CHAR);
+const PATH_BREAKING_CHAR_ENCODED_TWICE = encodeURIComponent(PATH_BREAKING_CHAR_ENCODED_ONCE);
 const INTER_PAGE_DELAY_MS = 200; // between filter-mode page requests
 // 'filter' mode's server-side home-office query: every posting where home office
 // is possible. The value is a `;` list: `prozentual_{N}` selects postings that
@@ -182,7 +182,7 @@ export function normalizeJob(job) {
   if (inGermany && Number(job && job.homeofficeprozent) >= 100) location = withRemoteMarker(location);
   return {
     title,
-    url: DETAIL_BASE + encodedRefnr.replaceAll(CHAR_ENCODED_ONCE, CHAR_ENCODED_TWICE),
+    url: DETAIL_BASE + encodedRefnr.replaceAll(PATH_BREAKING_CHAR_ENCODED_ONCE, PATH_BREAKING_CHAR_ENCODED_TWICE),
     company: String((job && job.firma) || '').trim(),
     location,
     refnr: String(refnr),
