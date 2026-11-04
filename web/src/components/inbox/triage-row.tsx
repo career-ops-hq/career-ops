@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Loader2, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, Loader2, X, CirclePause } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
@@ -11,7 +11,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 import { inboxScoreTarget } from "@/lib/inbox-score-target.mjs";
 
-export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null };
+export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null; needsReview?: boolean };
 
 function agoLabel(age: number | null): string | null {
   if (age == null) return null;
@@ -102,7 +102,11 @@ export function TriageRow({
       </div>
 
       {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
-      {evaluated && target.href ? (
+      {scored?.needsReview ? (
+        <Link href={`/jobs/${scored.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs text-amber-800 dark:text-amber-400">
+          <CirclePause className="size-3.5" /> Needs review
+        </Link>
+      ) : evaluated && target.href ? (
         <Link href={target.href} className="flex shrink-0 items-center gap-1.5 text-xs">
           {scored!.running ? (
             <>
