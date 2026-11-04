@@ -316,7 +316,7 @@ The primary agent invokes the built-in `general-purpose` subagent via the `task`
     "prompt": "[output language directive]\n\nPROJECT_ROOT: [resolved absolute PROJECT_ROOT]\nDATA_ROOT: [resolved absolute DATA_ROOT]\nRun every script from PROJECT_ROOT. Resolve User Layer paths against DATA_ROOT and every other path against PROJECT_ROOT.\n\n[content of modes/_shared.md, or resolved shared context: every declared _shared.md once]\n\n[content of modes/_profile.md if exists]\n\n[content of modes/_custom.md if exists]\n\n[content of modes/{mode}.md, or resolved selected mode file; primary evaluation file for Blocks A-F]\n\n[invocation-specific data]",
     "description": "career-ops {mode}",
     "name": "career-ops {mode}",
-    "mode": "async"
+    "mode": "background"
   }
 }
 ```
