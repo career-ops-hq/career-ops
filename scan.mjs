@@ -123,6 +123,17 @@ const PROFILE_PATH = hasProfileOverride() ? getProfilePath() : getProfilePath(DA
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
 export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
 
+// The closing hint names the lane's inbox when CAREER_OPS_PIPELINE is set.
+// `/career-ops pipeline` alone reads data/pipeline.md unless the agent's own
+// environment carries the same variable, so a lane run that only says "run
+// pipeline" sends the user to the other lane's inbox (#6379).
+export function pipelineRunHint(lane = process.env.CAREER_OPS_PIPELINE) {
+  const file = lane?.trim();
+  return file
+    ? `→ Run /career-ops pipeline ${file} to evaluate new offers (this lane's inbox, not data/pipeline.md).`
+    : '→ Run /career-ops pipeline to evaluate new offers.';
+}
+
 export const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
@@ -5268,7 +5279,7 @@ async function main() {
   // The run completed (or was a dry run) — disarm the failure row.
   registerRunFailureSnapshot(null);
 
-  console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
+  console.log(`\n${pipelineRunHint()}`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
 
   if (jsonMode) {
