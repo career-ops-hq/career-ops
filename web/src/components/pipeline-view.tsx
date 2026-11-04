@@ -762,7 +762,7 @@ export function PipelineView({
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
+          <table aria-label="Tracked applications" aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
                 <th className="w-8 px-3 py-2.5">
