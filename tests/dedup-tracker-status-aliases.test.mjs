@@ -119,7 +119,7 @@ ok('a bold alias with a trailing date ("**Entrevista** 2026-06-01") is still rea
 // purpose: a new state in states.yml fails the first check below until someone
 // decides which side of the line it is on.
 const IN_MOTION = ['applied', 'responded', 'assessment', 'interview', 'offer', 'hired'];
-const NOT_IN_MOTION = ['evaluated', 'rejected', 'discarded', 'skip'];
+const NOT_IN_MOTION = ['evaluated', 'speculative', 'rejected', 'discarded', 'skip'];
 
 const { loadCanonicalStates } = await import(pathToFileURL(join(ROOT, 'tracker-utils.mjs')).href);
 const states = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));

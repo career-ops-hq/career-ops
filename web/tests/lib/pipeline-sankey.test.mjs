@@ -19,6 +19,14 @@ test("Assessment has its own engaged leaf and records a submitted application", 
     [{ num: 1, from: 'Assessment', to: 'Discarded' }]), 'discarded');
 });
 
+test("Speculative has its own leaf off Tracked and is not a submitted application", () => {
+  const graph = buildPipelineSankey([{ n: '1', status: 'Speculative' }]);
+  assert.equal(classifyLeaf({ n: '1', status: 'gambit' }, []), 'speculative');
+  assert.equal(graph.nodes.find(node => node.id === 'speculative')?.value, 1);
+  assert.ok(!graph.nodes.some(node => node.id === 'submitted'));
+  assert.ok(graph.links.some(link => link.source === 'tracked' && link.target === 'speculative' && link.value === 1));
+});
+
 test("statusToken uses canonStatus aliases (same map as Analytics)", () => {
   assert.equal(statusToken("Interview"), "INTERVIEW");
   assert.equal(statusToken("Interview 2026-08-20"), "INTERVIEW");

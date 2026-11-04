@@ -29,6 +29,7 @@ export const PIPELINE_TABS = /** @type {const} */ ([
   "INBOX",
   "ALL",
   "EVALUATED",
+  "SPECULATIVE",
   "APPLIED",
   "RESPONDED",
   "ASSESSMENT",
