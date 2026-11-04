@@ -8,13 +8,22 @@
 //   - name: Acme
 //     careers_url: https://acme.factorialhr.com
 //
-// A tenant lives at `<tenant>.factorialhr.com`, which 301s to
-// `<tenant>.factorial.com`; both are claimed, and the request goes straight to
-// the `.factorial.com` origin because redirects are refused. Factorial's own
-// board is the `careers` tenant (careers.factorialhr.com). Hosts that are
-// Factorial's product rather than a board (www, app, api, help, blog) are not
-// claimed. A tenant that does not exist answers 404, so a mistyped slug is a
-// loud error, not an empty board.
+// A tenant is one label under one of Factorial's domains (FACTORIAL_DOMAINS:
+// `.factorial.com`, `.factorialhr.com`, `.factorialhr.pt` and the rest). The
+// same tenant can answer on more than one of them, and its board links its
+// postings to its home domain: on 2026-11-04 `casafari.factorialhr.com` 302'd
+// to `casafari.factorialhr.pt`, and `casafari.factorial.com` served the same
+// board with every posting linked to `.factorialhr.pt`. So a card is kept when
+// it names the same tenant on any Factorial domain. The request goes to the
+// host the entry names, except `.factorialhr.com`, which redirects (301 to
+// `.factorial.com` for most tenants, 302 to the home domain for others) and is
+// read at `<tenant>.factorial.com`, which served every tenant read here
+// without a redirect. Factorial's own board is the `careers` tenant
+// (careers.factorialhr.com). Hosts that are Factorial's product rather than a
+// board (www, app, api, help, blog) are not claimed. A tenant that does not
+// exist serves no board (404 on `.factorialhr.com`; no DNS answer or a 526 on
+// `.factorial.com`, 2026-11-04), so a mistyped slug is a loud error, not an
+// empty board.
 //
 // The board's home page server-renders every posting, grouped by office:
 //
@@ -31,13 +40,45 @@
 
 import { decodeEntities } from './_html-entities.mjs';
 
-const TENANT_HOST_RE = /^([a-z0-9][a-z0-9-]*)\.(?:factorialhr|factorial)\.com$/;
+/**
+ * Factorial's own domains, from the `frame-ancestors` list in the
+ * Content-Security-Policy its tenant boards send (read 2026-11-04). An
+ * explicit list, so a host such as `acme.factorialhr.com.evil.example` is
+ * never taken for a tenant.
+ */
+const FACTORIAL_DOMAINS = [
+  'factorial.ae', 'factorial.be', 'factorial.ch', 'factorial.co', 'factorial.com',
+  'factorial.es', 'factorial.fr', 'factorial.it', 'factorial.ke', 'factorial.mx',
+  'factorial.pl', 'factorial.rs',
+  'factorialhr.ar', 'factorialhr.cl', 'factorialhr.co', 'factorialhr.co.uk',
+  'factorialhr.com', 'factorialhr.com.ar', 'factorialhr.com.br', 'factorialhr.com.de',
+  'factorialhr.de', 'factorialhr.pt',
+];
+const TENANT_LABEL_RE = /^[a-z0-9][a-z0-9-]*$/;
 /** Subdomains that are Factorial's product or marketing, not a careers board. */
 const NOT_A_BOARD = new Set(['www', 'app', 'api', 'help', 'blog']);
 
 /**
- * The tenant's board origin (`https://<tenant>.factorial.com`), or null when
- * the URL is not a Factorial tenant board.
+ * Splits a host into a Factorial tenant and domain, or null when it is not
+ * one label under a Factorial domain.
+ * @param {string} hostname
+ * @returns {{ tenant: string, domain: string } | null}
+ */
+function splitTenantHost(hostname) {
+  const host = hostname.toLowerCase();
+  for (const domain of FACTORIAL_DOMAINS) {
+    if (!host.endsWith(`.${domain}`)) continue;
+    const tenant = host.slice(0, -(domain.length + 1));
+    if (!TENANT_LABEL_RE.test(tenant) || NOT_A_BOARD.has(tenant)) return null;
+    return { tenant, domain };
+  }
+  return null;
+}
+
+/**
+ * The tenant's board origin, or null when the URL is not a Factorial tenant
+ * board. The host the entry names, except `.factorialhr.com`, which redirects
+ * and is read at `<tenant>.factorial.com` instead.
  * @param {unknown} raw
  * @returns {string | null}
  */
@@ -50,9 +91,10 @@ export function resolveFactorialOrigin(raw) {
     return null;
   }
   if (parsed.protocol !== 'https:') return null;
-  const m = TENANT_HOST_RE.exec(parsed.hostname.toLowerCase());
-  if (!m || NOT_A_BOARD.has(m[1])) return null;
-  return `https://${m[1]}.factorial.com`;
+  const split = splitTenantHost(parsed.hostname);
+  if (!split) return null;
+  const domain = split.domain === 'factorialhr.com' ? 'factorial.com' : split.domain;
+  return `https://${split.tenant}.${domain}`;
 }
 
 /** @param {string} html */
@@ -85,7 +127,7 @@ const POSTING_HREF_RE = /\/job_posting\/[a-z0-9-]+/i;
  */
 export function parseFactorialBoard(html, origin, company) {
   const page = String(html ?? '');
-  const host = new URL(origin).hostname;
+  const tenant = splitTenantHost(new URL(origin).hostname)?.tenant;
   // One entry per posting URL. Offices and the remote flag are kept apart and
   // the location is rendered once at the end, so a posting listed under a
   // second office cannot repeat a place already in its location.
@@ -108,7 +150,10 @@ export function parseFactorialBoard(html, origin, company) {
       } catch {
         continue;
       }
-      if (url.protocol !== 'https:' || url.hostname !== host || !POSTING_HREF_RE.test(url.pathname)) continue;
+      // The same tenant on any Factorial domain: a board can link its postings
+      // to the tenant's home domain rather than the host it was read from.
+      if (url.protocol !== 'https:' || !POSTING_HREF_RE.test(url.pathname)) continue;
+      if (!tenant || splitTenantHost(url.hostname)?.tenant !== tenant) continue;
       const titleMatch = /factorial__headingFontFamily[^>]*>([\s\S]*?)<\//.exec(card);
       const title = titleMatch ? text(titleMatch[1]) : '';
       if (!title) continue;
@@ -166,7 +211,7 @@ export default {
    */
   async fetch(entry, ctx) {
     const origin = resolveFactorialOrigin(entry?.api) || resolveFactorialOrigin(entry?.careers_url);
-    if (!origin) throw new Error(`factorial: ${entry?.name ?? 'entry'} is not a <tenant>.factorialhr.com or <tenant>.factorial.com board`);
+    if (!origin) throw new Error(`factorial: ${entry?.name ?? 'entry'} is not a Factorial tenant board (<tenant>.factorialhr.com, <tenant>.factorial.com or another Factorial domain)`);
     const html = await ctx.fetchText(`${origin}/`, { redirect: 'error' });
     return parseFactorialBoard(html, origin, String(entry?.name ?? ''));
   },

@@ -48,6 +48,12 @@ try {
     [{ careers_url: 'https://careers.factorialhr.com' }, 'https://careers.factorial.com/'],
     [{ careers_url: 'https://acme-group.factorialhr.com:8443/x?y=1' }, 'https://acme-group.factorial.com/'],
     [{ api: 'https://acme.factorial.com/' }, 'https://acme.factorial.com/'],
+    // Other Factorial domains are read where they are; only .factorialhr.com,
+    // which redirects, is read at .factorial.com.
+    [{ careers_url: 'https://acme.factorialhr.pt/' }, 'https://acme.factorialhr.pt/'],
+    [{ careers_url: 'https://acme.factorialhr.de/job_posting/x-1' }, 'https://acme.factorialhr.de/'],
+    [{ careers_url: 'https://acme.factorialhr.com.br' }, 'https://acme.factorialhr.com.br/'],
+    [{ careers_url: 'https://acme.factorial.es' }, 'https://acme.factorial.es/'],
   ];
   const claimBad = claims.filter(([e, want]) => provider.detect(e)?.url !== want);
   if (claimBad.length === 0) pass('detect() claims <tenant>.factorialhr.com and <tenant>.factorial.com, rebuilt as the .factorial.com origin with no path or port');
@@ -62,8 +68,10 @@ try {
     { careers_url: 'https://api.factorialhr.com' },
     { careers_url: 'https://blog.factorialhr.com' },
     { careers_url: 'https://a.b.factorialhr.com' },              // nested label
-    { careers_url: 'https://acme.factorialhr.de' },              // other TLD
+    { careers_url: 'https://acme.factorialhr.net' },             // not a Factorial domain
     { careers_url: 'https://acme.factorialhr.com.evil.example' },
+    { careers_url: 'https://acme.factorialhr.pt.evil.example' },
+    { careers_url: 'https://www.factorialhr.pt' },               // product, not a board
     { careers_url: 'https://evilfactorialhr.com' },
     { careers_url: 'https://-acme.factorialhr.com' },
     { careers_url: 'not a url' },
@@ -134,6 +142,21 @@ try {
   ), ORIGIN, 'Acme');
   if (twice.length === 1 && twice[0].location === 'Barcelona / Remote') pass('a remote posting under an office and the Remote group names Remote once');
   else fail(`remote posting under two groups = ${JSON.stringify(twice)}`);
+
+  // A board read at .factorial.com can link its postings to the tenant's home
+  // domain (casafari.factorial.com links to casafari.factorialhr.pt). Those are
+  // the tenant's own postings; another tenant's, or a lookalike host, are not.
+  const homeDomain = parseFactorialBoard(page(group('Lisboa', [
+    card({ url: 'https://acme.factorialhr.pt/job_posting/customer-success-317963', title: 'Customer Success' }),
+    card({ url: 'https://other.factorialhr.pt/job_posting/foreign-2', title: 'Other Tenant' }),
+    card({ url: 'https://acme.factorialhr.pt.evil.example/job_posting/x-3', title: 'Lookalike' }),
+  ])), ORIGIN, 'Acme');
+  if (homeDomain.length === 1 && homeDomain[0].title === 'Customer Success'
+      && homeDomain[0].url === 'https://acme.factorialhr.pt/job_posting/customer-success-317963') {
+    pass('parseFactorialBoard keeps the tenant\'s postings on its home domain and drops other tenants and lookalike hosts');
+  } else {
+    fail(`home-domain postings = ${JSON.stringify(homeDomain)}`);
+  }
 
   // Empty board vs changed markup.
   const empty = parseFactorialBoard(page('<p>No open positions right now.</p>'), ORIGIN, 'Acme');
