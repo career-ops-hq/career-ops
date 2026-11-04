@@ -195,7 +195,10 @@ test('a reply-watch run killed while set-status waits on the tracker lock report
   // captured stdout/stderr.
   const lock = await acquireTrackerLock(trackerLockDirFor(trackerFile));
   try {
+    const startedAt = Date.now();
     const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n', 5000);
+    const elapsedMs = Date.now() - startedAt;
+    assert.ok(elapsedMs < 20000, `runReplyWatch took ${elapsedMs}ms (expected < 20000ms); ${describeSpawn(res)}`);
     assert.equal(res.error?.code, 'ETIMEDOUT', describeSpawn(res));
     const message = describeSpawn(res);
     assert.match(message, /Suggested status updates to apply/);
