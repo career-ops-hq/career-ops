@@ -75,3 +75,35 @@ test('ordinary prose words that are also ISO codes do not invent country evidenc
   assert.equal(gate('Remote in Europe').eligible, true);
   assert.equal(gate('Remote', '', { description: 'Work in a remote team.' }).eligible, false);
 });
+
+test('policy list types are validated before scanner admission', () => {
+  for (const key of ['onsite_locations', 'onsite_countries', 'remote_countries', 'remote_regions']) {
+    for (const value of ['Spain', false, 42, {}]) {
+      assert.throws(() => buildWorkplacePolicy({ ...POLICY, [key]: value }), new RegExp(`workplace_policy\\.${key} must be a list`));
+    }
+  }
+});
+
+test('absent, null and empty onsite countries use the remote-country default', () => {
+  for (const onsite_countries of [undefined, null, []]) {
+    const policy = buildWorkplacePolicy({ ...POLICY, onsite_countries, remote_regions: null });
+    assert.equal(policy('Barcelona, Spain').eligible, true);
+    assert.equal(policy('Barcelona, Venezuela').eligible, false);
+  }
+  assert.throws(() => buildWorkplacePolicy({ ...POLICY, onsite_countries: ['Neverland'] }), /onsite_countries must name a country/);
+});
+
+for (const [code, name, ordinary, mandatory] of [
+  ['US', 'United States', 'Join us and work remotely.', 'Applicants must live near us.'],
+  ['BY', 'Belarus', 'Work remotely by collaborating online.', 'Applicants must reside by our office.'],
+  ['ID', 'Indonesia', 'Work remotely with your ID ready.', 'Applicants must live at the location on their ID.'],
+]) {
+  test(`description prose does not turn an ordinary ${code.toLowerCase()} token into a country`, () => {
+    const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [code], remote_regions: ['Worldwide'] });
+    assert.equal(policy('Remote', '', { description: ordinary }).eligible, false);
+    assert.equal(policy('Remote Worldwide', '', { description: mandatory }).eligible, false);
+    assert.equal(policy('Remote', '', { description: `You can work remotely from ${name}.` }).eligible, true);
+    assert.equal(policy(`Remote, ${code}`).eligible, true);
+    assert.equal(policy('Remote', '', { eligibleCountries: [code] }).eligible, true);
+  });
+}

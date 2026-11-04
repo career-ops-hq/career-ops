@@ -165,17 +165,25 @@ export function workplacePolicyFromConfig(config) {
 export function buildWorkplacePolicy(policy) {
   if (policy === undefined) return () => ({ eligible: true, reason: 'policy_absent' });
   if (!policy || typeof policy !== 'object' || Array.isArray(policy)) throw new Error('location_filter.workplace_policy must be an object');
+  for (const key of ['onsite_locations', 'onsite_countries', 'remote_countries', 'remote_regions']) {
+    if (policy[key] != null && !Array.isArray(policy[key])) throw new Error(`workplace_policy.${key} must be a list`);
+  }
   const onsite = list(policy.onsite_locations), home = list(policy.remote_countries), regions = list(policy.remote_regions);
   if (!onsite.length || !home.length) throw new Error('workplace_policy requires onsite_locations and remote_countries lists');
   const homeCodes = new Set(home.flatMap(v => [...countries(countryValue(v), true)]));
   if (!homeCodes.size) throw new Error('workplace_policy.remote_countries must name a country or ISO country code');
   const supportsHome = (text) => [...countries(text, true)].some(c => homeCodes.has(c));
+  // Description prose uses names/aliases only: ordinary "us", "by" or "id"
+  // must not become eligibility evidence. Structured fields still accept ISO.
+  const supportsHomeProse = (text) => [...countries(text)].some(c => homeCodes.has(c));
   const restricted = (text, codes = false) => {
     const found = countries(text, codes);
     return found.size > 0 && ![...found].some(c => homeCodes.has(c));
   };
-  const localCountries = list(policy.onsite_countries ?? policy.remote_countries);
+  const onsiteCountries = list(policy.onsite_countries);
+  const localCountries = onsiteCountries.length ? onsiteCountries : home;
   const localCodes = new Set(localCountries.flatMap(v => [...countries(countryValue(v), true)]));
+  if (!localCodes.size) throw new Error('workplace_policy.onsite_countries must name a country or ISO country code');
   const homeAliases = [...home.map(countryValue), ...COUNTRY_NAMES.filter(c => homeCodes.has(c.code)).flatMap(c => PROSE_WORD_CODES.has(c.code.toLowerCase()) ? [c.name] : [c.name, c.code.toLowerCase()]), ...COUNTRY_ALIASES.filter(c => homeCodes.has(c.code)).map(c => c.name)];
   const foreignOnly = [...COUNTRY_NAMES, ...COUNTRY_ALIASES].filter(c => !homeCodes.has(c.code)).map(country => new RegExp(`(?<![\\p{L}\\p{N}])${escape(country.name)}(?:[ -]based)?(?:\\s+(?:candidates|applicants|residents))?\\s*[- ]?only\\b`, 'u'));
   const timezoneNames = [...regions, ...COUNTRY_NAMES.map(c => c.name), ...COUNTRY_ALIASES.map(c => c.name), 'cet', 'cest', 'gmt', 'utc'].sort((a, b) => b.length - a.length);
@@ -196,7 +204,7 @@ export function buildWorkplacePolicy(policy) {
       if (!/\bmust (?:be |currently )?(?:based|located|reside|live)\b/.test(sentence)) continue;
       for (const match of sentence.matchAll(/[,;]\s*([^,;]{1,60}?)\s+only\b/g)) {
         const narrower = match[1];
-        if (!supportsHome(narrower) && !has(narrower, regions) && !has(narrower, onsite)) return fail('description_locality_restricted');
+        if (!supportsHomeProse(narrower) && !has(narrower, regions) && !has(narrower, onsite)) return fail('description_locality_restricted');
       }
     }
     // Narrow eligibility clauses, not arbitrary country mentions. A company
@@ -206,7 +214,7 @@ export function buildWorkplacePolicy(policy) {
       if (!/\b(?:only|must (?:be |currently )?(?:based|located|reside|live)|(?:candidates?|applicants?|residents?) (?:must|need to)|restricted to|eligible (?:countries|locations)|hiring (?:only )?in|open (?:only )?to)\b/.test(clause)) continue;
       if (restricted(clause)) return fail('description_country_restricted');
       if (/\bmust (?:be |currently )?(?:based|located|reside|live)(?: in| within)?\b/.test(clause)
-        && !supportsHome(clause) && !has(clause, regions) && !has(clause, onsite)) return fail('description_location_restricted');
+        && !supportsHomeProse(clause) && !has(clause, regions) && !has(clause, onsite)) return fail('description_location_restricted');
       // A mandatory commute elsewhere is also narrower than a remote tag.
       if (/\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based)\b/.test(clause) && !has(clause, onsite)) return fail('description_onsite_restricted');
     }
@@ -225,7 +233,7 @@ export function buildWorkplacePolicy(policy) {
     const geoLoc = loc.replace(timezonePhrase, ' ');
     const locationCountries = countries(geoLoc, true);
     if (locationCountries.size && ![...locationCountries].some(c => homeCodes.has(c))) return fail('remote_country_restricted');
-    const remoteDescription = description.split(/[.!?;\n]+/).some(clause => /\b(?:work remotely|work remote|remote work|remote role|work from home|work from)\b/.test(clause) && supportsHome(clause));
+    const remoteDescription = description.split(/[.!?;\n]+/).some(clause => /\b(?:work remotely|work remote|remote work|remote role|work from home|work from)\b/.test(clause) && supportsHomeProse(clause));
     if (supportsHome(geoLoc) || has(geoLoc, regions) || (meta && (supportsHome(meta) || has(meta, regions))) || remoteDescription) return { eligible: true, reason: 'remote_region_allowed' };
     return fail(loc ? 'remote_eligibility_unconfirmed' : 'location_unknown');
   };

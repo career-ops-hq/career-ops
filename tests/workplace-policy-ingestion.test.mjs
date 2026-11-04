@@ -24,6 +24,10 @@ test('portals validator accepts a complete policy and reports malformed user con
     const result = await validatePortalsConfig({ location_filter: { workplace_policy } });
     assert.ok(result.errors.some(error => error.path === 'location_filter.workplace_policy'));
   }
+  for (const key of ['onsite_locations', 'onsite_countries', 'remote_countries', 'remote_regions']) {
+    const result = await validatePortalsConfig({ ...CONFIG, location_filter: { workplace_policy: { ...POLICY, [key]: 'Spain' } } });
+    assert.ok(result.errors.some(error => error.path === 'location_filter.workplace_policy' && error.message.includes(`${key} must be a list`)), key);
+  }
 });
 test('all shared admission paths reject a remote Australia and narrower JD eligibility', () => {
   const filter = buildLocationFilter(CONFIG.location_filter);

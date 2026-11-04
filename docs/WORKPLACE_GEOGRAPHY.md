@@ -19,6 +19,10 @@ The policy is an additional gate before the normal location tiers. It never
 rescues a posting the existing `block_hard`, `block` or `allow` rules reject.
 Without `workplace_policy`, location matching is unchanged.
 
+Each policy field is a YAML list; bare strings are rejected. Optional fields may
+be omitted or null. An empty `onsite_countries` list also uses `remote_countries`
+as its default; a supplied nonempty country list must name a recognized country.
+
 - Office and hybrid roles must name an allowed onsite location. An explicit
   foreign country prevents a same-named city from matching.
 - Remote roles must show an allowed country or a configured covering region.
@@ -26,6 +30,9 @@ Without `workplace_policy`, location matching is unchanged.
 - Structured applicant-country restrictions and explicit English eligibility
   clauses can narrow a broad label such as `Europe` or `Worldwide`; an explicit
   excluded home country or `UK only` restriction wins.
+- Location and structured country fields accept ISO country codes. Description
+  prose uses country names and aliases, so ordinary words such as `us` or `by`
+  cannot establish remote-country eligibility.
 
 Normal scans, full ATS scans and shared admission gates use the same check.
 Discover retains the saved policy in its temporary filters and carries provider
