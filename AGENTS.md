@@ -105,8 +105,8 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 - **Project context:** `pi` reads `AGENTS.md` from the repo root automatically; there is no wrapper file to keep in sync.
 - **Skill:** Pi discovers the shared router at `.agents/skills/career-ops/SKILL.md`, exposed as `/skill:career-ops`. If a Pi build gates project resources behind a trust decision, run `/trust` once in the repo, then restart `pi` before `/skill:career-ops` (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
 - **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
-- **Headless:** `pi -p "prompt"` for one-shot workers; `pi --mode json -p "prompt"` when the caller parses events.
-- **Examples:** `pi -p "Run career-ops tracker mode"`, `pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
+- **Headless:** `pi -a -p "prompt"` for one-shot workers; `pi -a --mode json -p "prompt"` when the caller parses events. `-a` trusts project resources for that one run only, so a headless worker on a Pi build that gates them behind a trust decision still loads the skill (see `docs/SUPPORTED_CLIS.md`).
+- **Examples:** `pi -a -p "Run career-ops tracker mode"`, `pi -a -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
 
 
 ### Main Files
@@ -578,7 +578,7 @@ Headless worker command per CLI:
 |-----|---------|
 | Claude Code | `claude -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
-| Pi | `pi -p "prompt"` |
+| Pi | `pi -a -p "prompt"` |
 | Copilot CLI | `copilot -p "prompt"` |
 | Codex | `codex exec "prompt"` |
 | Qwen | `qwen -p "prompt"` |
