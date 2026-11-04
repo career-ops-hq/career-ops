@@ -114,6 +114,15 @@ test("an info string cannot close an example and falsely block a valid report", 
   assert.deepEqual(result.calls, ["reserve-report-num.mjs", "persist-evaluation-report.mjs", "merge-tracker.mjs", "reserve-report-num.mjs"]);
 });
 
+test("Unicode fence info cannot hide a terminal stop and authorize persistence", async () => {
+  for (const separator of ["\u2028", "\u2029"]) {
+    const result = await replay(`${report}\n\`\`\`text${separator}info\nExample data.\n\`\`\`\n${stopped}`);
+    assert.equal(result.completion.status, "error");
+    assert.match(result.completion.message, /both a report and a confirmation stop/);
+    assert.deepEqual(result.calls, []);
+  }
+});
+
 test("a valid scored report still reaches real persistence once and returns its report number", async () => {
   const result = await replay(report);
   assert.equal(result.terminalEvent, null, "only successful persistence may declare report success");

@@ -20,7 +20,7 @@ function gate(reason, message) { return { reason, message: message.trim(), confi
 function narration(text) {
   const lines = []; let fence = null;
   for (const line of text.split("\n")) {
-    const marker = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
+    const marker = line.match(/^[ \t]*(`{3,}|~{3,})([^\n]*)$/);
     if (marker) {
       if (!fence) fence = marker[1];
       else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && /^[ \t]*$/.test(marker[2])) fence = null;
@@ -72,7 +72,7 @@ function dedicatedGate(body) {
 function dedicatedBlocks(text) {
   const blocks = []; let fence = null; let open = null; let offset = 0;
   for (const line of text.split("\n")) {
-    const marker = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
+    const marker = line.match(/^[ \t]*(`{3,}|~{3,})([^\n]*)$/);
     if (marker) {
       if (!fence) fence = marker[1];
       else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && /^[ \t]*$/.test(marker[2])) fence = null;

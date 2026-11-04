@@ -103,6 +103,18 @@ test("a fence marker with an info string does not expose quoted stops", () => {
   }
 });
 
+test("non-LF separators in fence info cannot hide a real stop or expose quoted status", () => {
+  for (const separator of ["\u2028", "\u2029", "\r"]) {
+    for (const marker of ["```", "````", "~~~~"]) {
+      const opener = `${marker}text${separator}info`;
+      const example = `${opener}\nExample data.\n${marker}`;
+      assert.equal(classifyEvaluationGate(`${example}\n${stop}`)?.reason, "dealbreaker");
+      assert.match(runOutcome(`${report}\n${example}\n${stop}`).message, /both a report and a confirmation stop/);
+      assert.deepEqual(runOutcome(`${report}\n${opener}\n${structured()}\n${marker}`), { ok: true });
+    }
+  }
+});
+
 test("display stripping detects leading whitespace and preserves normalized surrounding output", () => {
   const prefix = " \n\t";
   const suffix = "\n \t";
