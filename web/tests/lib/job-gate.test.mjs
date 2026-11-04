@@ -1,11 +1,30 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { evaluationGateForJob, isLegacyMissingReportMessage, jobStateLabel, jobOutputForDisplay } from "../../src/lib/job-gate.mjs";
+import { classifyEvaluationGate, EVALUATION_GATE_REASONS } from "../../src/lib/evaluation-gate.mjs";
+import { readJobStream } from "../../src/lib/job-stream.mjs";
 
 const missing = "This evaluation didn't produce a report to save, so it isn't in your tracker — re-run it to verify. (The agent emitted no <<report-md>> envelope, so there is no report to save.)";
 const stopped = 'Stopped before Block A.\n\nneeds_confirmation: dealbreaker "location" - rerun with "evaluate anyway" to evaluate\n\nVERDICT: N/A/5 — The role requires residence outside the allowed location.';
 const agency = 'Stopped before Block A.\n\n```yaml\nstatus: needs_confirmation\nreason: agency_confirmation\nquestion: "Confirm the intermediary before proceeding."\n```\n\nVERDICT: N/A/5 — Agency confirmation required.';
 const job = (text = stopped) => ({ id: "fixture", kind: "evaluate", status: "error", steps: [{ kind: "status", label: missing }], text });
+
+test("every canonical gate reason survives backend, stream and job presentation", async () => {
+  assert.equal(Object.isFrozen(EVALUATION_GATE_REASONS), true);
+  for (const reason of EVALUATION_GATE_REASONS) {
+    const text = 'Stopped before scoring.\n<<evaluation-gate>>\n' + JSON.stringify({ status: "needs_confirmation", reason, message: "Review this condition." }) + '\n<</evaluation-gate>>\nVERDICT: N/A/5 — Review required.';
+    const gate = classifyEvaluationGate(text);
+    assert.equal(gate?.reason, reason);
+    const stream = new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: "gated", ...gate }) + "\n"));
+      controller.close();
+    } });
+    const completion = await readJobStream(stream, () => {});
+    assert.equal(completion.status, "gated");
+    assert.equal(completion.reason, reason);
+    assert.equal(evaluationGateForJob({ ...job(text), status: "gated", gate: completion })?.reason, reason);
+  }
+});
 
 test("old explicit stops gain review context without rewriting their error status or text", () => {
   for (const text of [stopped, agency]) {

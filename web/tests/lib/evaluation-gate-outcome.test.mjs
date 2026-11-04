@@ -140,3 +140,11 @@ test("the official evaluation prompt includes the distinct stop contract without
   assert.match(prompt, /This output contract changes no confirmation rule/);
   assert.match(prompt, /Do NOT save or edit any file/);
 });
+
+test("focused evaluations preserve the same explicit stop contract and N/A verdict allowance", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://example.invalid/role", memory: "", today: "2026-11-04", evaluationInstructions: "Selected canonical evaluation sections." });
+  assert.match(prompt, /USER-SELECTED/);
+  assert.ok(prompt.includes(EVALUATION_GATE_INSTRUCTION));
+  assert.match(prompt, /Use `N\/A\/5` rather than a numeric score/);
+  assert.match(prompt, /Do NOT save or edit any file/);
+});

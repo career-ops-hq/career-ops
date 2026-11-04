@@ -313,6 +313,8 @@ Use WebFetch to read the posting (you are headless — Playwright is unavailable
 ${mem}${unattendedAmbiguityStep}
 OUTPUT: Do NOT save or edit any file, run scripts, or allocate report numbers. Output exactly one complete selected report between a line containing only \`<<report-md>>\` and a line containing only \`<</report-md>>\`. The platform saves it. Include the canonical Machine Summary and full verbatim JD archive. Never submit an application, fill forms, or contact anyone.
 
+${EVALUATION_GATE_INSTRUCTION}
+
 After the envelope, end with EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
 

@@ -103,9 +103,20 @@ export function TriageRow({
 
       {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
       {scored?.needsReview ? (
-        <Link href={`/jobs/${scored.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs text-amber-800 dark:text-amber-400">
-          <CirclePause className="size-3.5" /> Needs review
-        </Link>
+        <div className="flex shrink-0 items-center gap-1">
+          <Link href={`/jobs/${scored.jobId}`} className="flex items-center gap-1.5 text-xs text-amber-800 dark:text-amber-400">
+            <CirclePause className="size-3.5" /> Needs review
+          </Link>
+          <button
+            type="button"
+            onClick={onSkip}
+            title="Skip — hide from the inbox"
+            aria-label={`Skip ${job.company} ${job.role}`}
+            className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
       ) : evaluated && target.href ? (
         <Link href={target.href} className="flex shrink-0 items-center gap-1.5 text-xs">
           {scored!.running ? (

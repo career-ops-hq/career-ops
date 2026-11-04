@@ -6,9 +6,10 @@ import { resolveCliId } from "@/lib/saved-cli";
 import { createWorkerFeedback } from "@/lib/worker-feedback.mjs";
 import { readJobStream } from "@/lib/job-stream.mjs";
 import { createJobsPersister } from "@/lib/jobs-persist.mjs";
+import type { EVALUATION_GATE_REASONS } from "@/lib/evaluation-gate.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
-export type JobGate = { reason: "dealbreaker" | "agency_confirmation" | "needs_confirmation"; message: string; confirmationRequired: boolean };
+export type JobGate = { reason: (typeof EVALUATION_GATE_REASONS)[number]; message: string; confirmationRequired: boolean };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
 
 export type Job = {

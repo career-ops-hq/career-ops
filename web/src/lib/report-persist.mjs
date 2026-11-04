@@ -54,6 +54,17 @@ export function evaluateRunOutcome({ envelope, noOutputMessage, sawError, cleanE
   return { ok: true };
 }
 
+/** Map an unpersisted terminal outcome to the route's event contract.
+ * Report success stays with the persistence coordinator, never this helper.
+ * @param {ReturnType<typeof evaluateRunOutcome>} outcome
+ * @param {{tokens?: number, costUsd?: number|null}} usage
+ */
+export function evaluationOutcomeEvent(outcome, { tokens, costUsd } = {}) {
+  if (outcome.ok) return null;
+  if (outcome.gated) return { type: "gated", reason: outcome.reason, message: outcome.message, confirmationRequired: outcome.confirmationRequired, tokens, costUsd };
+  return { type: "error", msg: outcome.message };
+}
+
 /**
  * Read a YAML scalar from a Machine Summary fence. Quoted or bare; `null` / `~`
  * / empty → null. Does not parse nested maps — company/role/score/via are

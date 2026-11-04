@@ -4,7 +4,8 @@
  */
 export const EVALUATION_GATE_OPEN = "<<evaluation-gate>>";
 export const EVALUATION_GATE_CLOSE = "<</evaluation-gate>>";
-const REASONS = new Set(["dealbreaker", "agency_confirmation", "needs_confirmation"]);
+export const EVALUATION_GATE_REASONS = Object.freeze(/** @type {const} */ (["dealbreaker", "agency_confirmation", "needs_confirmation"]));
+const REASONS = new Set(EVALUATION_GATE_REASONS);
 const NA_VERDICT = /^VERDICT:[ \t]*N\/A[ \t]*\/[ \t]*5(?:[ \t]*[—–-][ \t]*(.+))?[ \t]*$/i;
 
 export const EVALUATION_GATE_INSTRUCTION =

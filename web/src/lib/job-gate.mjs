@@ -1,6 +1,6 @@
-import { classifyEvaluationGate, stripEvaluationGate } from "./evaluation-gate.mjs";
+import { classifyEvaluationGate, EVALUATION_GATE_REASONS, stripEvaluationGate } from "./evaluation-gate.mjs";
 
-/** @typedef {{ reason: "dealbreaker" | "agency_confirmation" | "needs_confirmation", message: string, confirmationRequired: boolean, legacy?: boolean }} JobGate */
+/** @typedef {{ reason: (typeof EVALUATION_GATE_REASONS)[number], message: string, confirmationRequired: boolean, legacy?: boolean }} JobGate */
 
 const MISSING_REPORT = /^This evaluation didn't produce a report to save, so it isn't in your tracker — re-run it to verify\.\s*\(The agent emitted no <<report-md>> envelope, so there is no report to save\.\)$/;
 const OTHER_FAILURE = /connection (?:error|ended)|interrupted|timed? out|timeout|selected model is at capacity|no cli configured|(?:cli|worker|process) (?:failed|exited)|^codex:\s|^error:/i;
@@ -21,7 +21,7 @@ export function evaluationGateForJob(job) {
   if (!job || job.kind !== "evaluate" || job.reportN != null || job.result?.score != null) return null;
   if (job.status === "gated") {
     const gate = job.gate;
-    if (!gate || !["dealbreaker", "agency_confirmation", "needs_confirmation"].includes(gate.reason)
+    if (!gate || !EVALUATION_GATE_REASONS.includes(gate.reason)
         || typeof gate.message !== "string" || !gate.message.trim()
         || typeof gate.confirmationRequired !== "boolean") return null;
     return { reason: gate.reason, message: gate.message, confirmationRequired: gate.confirmationRequired };

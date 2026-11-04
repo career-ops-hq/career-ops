@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { basename } from "node:path";
 import { createReportEnvelopeFilter } from "../../src/lib/report-envelope.mjs";
-import { evaluateRunOutcome, persistEvaluation } from "../../src/lib/report-persist.mjs";
+import { evaluateRunOutcome, evaluationOutcomeEvent, persistEvaluation } from "../../src/lib/report-persist.mjs";
 import { readJobStream } from "../../src/lib/job-stream.mjs";
 
 const report = `<<report-md>>
@@ -54,15 +54,14 @@ async function replay(text, { cleanExit = true, sawError = false, noOutputMessag
   if (sawError) events.push({ type: "error", msg: "Provider unavailable" });
   const envelope = filter.result();
   const outcome = evaluateRunOutcome({ envelope, text, cleanExit, sawError, noOutputMessage });
+  const terminalEvent = evaluationOutcomeEvent(outcome, { tokens: 42, costUsd: 0.003 });
   if (outcome.ok) {
     const saved = await persistEvaluation({ spawnFn, execPath: process.execPath, root: "/synthetic-gated-evaluation", markdown: envelope.markdown, url: "https://example.invalid/fixture", today: "2026-11-04" });
     assert.equal(saved.ok, true);
     events.push({ type: "done", reportN: Number(saved.num) });
-  } else if (outcome.gated) {
-    events.push({ type: "gated", reason: outcome.reason, message: outcome.message, confirmationRequired: outcome.confirmationRequired });
-  } else events.push({ type: "error", msg: outcome.message });
+  } else events.push(terminalEvent);
   const stream = new ReadableStream({ start(controller) { for (const event of events) controller.enqueue(new TextEncoder().encode(JSON.stringify(event) + "\n")); controller.close(); } });
-  return { outcome, calls, completion: await readJobStream(stream, () => {}) };
+  return { outcome, calls, terminalEvent, completion: await readJobStream(stream, () => {}) };
 }
 
 test("a clean explicit stop reaches the client as gated and never touches artifact persistence", async () => {
@@ -71,6 +70,9 @@ test("a clean explicit stop reaches the client as gated and never touches artifa
     assert.equal(result.outcome.gated, true);
     assert.equal(result.completion.status, "gated");
     assert.equal(result.completion.reportN, undefined);
+    assert.deepEqual(result.terminalEvent, { type: "gated", reason: result.outcome.reason, message: result.outcome.message, confirmationRequired: true, tokens: 42, costUsd: 0.003 });
+    assert.equal(result.completion.tokens, 42);
+    assert.equal(result.completion.costUsd, 0.003);
     assert.deepEqual(result.calls, []);
   }
 });
@@ -80,6 +82,7 @@ test("process errors and absent output remain errors even after an explicit stop
     const result = await replay(dedicated, signals);
     assert.equal(result.outcome.gated, undefined);
     assert.equal(result.completion.status, "error");
+    assert.deepEqual(result.terminalEvent, { type: "error", msg: result.outcome.message });
     assert.deepEqual(result.calls, []);
   }
 });
@@ -93,6 +96,7 @@ test("a stop before a scored report cannot allocate a number or write/merge arti
 
 test("a valid scored report still reaches real persistence once and returns its report number", async () => {
   const result = await replay(report);
+  assert.equal(result.terminalEvent, null, "only successful persistence may declare report success");
   assert.deepEqual(result.completion, { status: "done", reportN: 1 });
   assert.deepEqual(result.calls, ["reserve-report-num.mjs", "persist-evaluation-report.mjs", "merge-tracker.mjs", "reserve-report-num.mjs"]);
 });

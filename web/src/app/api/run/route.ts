@@ -15,7 +15,7 @@ import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
-import { persistEvaluation, evaluateRunOutcome } from "@/lib/report-persist.mjs";
+import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
@@ -630,11 +630,8 @@ export async function POST(req: Request) {
             text: evaluationText,
           });
           if (!outcome.ok) {
-            if (outcome.gated) {
-              send({ type: "gated", reason: outcome.reason, message: outcome.message, confirmationRequired: outcome.confirmationRequired, tokens: lastTokens, costUsd: lastCostUsd });
-            } else {
-              send({ type: "error", msg: outcome.message });
-            }
+            const event = evaluationOutcomeEvent(outcome, { tokens: lastTokens, costUsd: lastCostUsd });
+            if (event) send(event);
           } else if (envelope?.ok !== true) {
             send({ type: "error", msg: "Internal error: the evaluate run passed its gate with no report to save — please report this." });
           } else {
