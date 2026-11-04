@@ -52,6 +52,7 @@ export function PipelineTableRowsSkeleton({ rows = 8, trackerColumn = false }: {
             </div>
           </td>
           <td className={`whitespace-nowrap px-4 py-3${trackerColumn ? " hidden lg:table-cell" : ""}`}><Skeleton className="h-4 w-20" /></td>
+          {trackerColumn && <td className="px-4 py-3"><Skeleton className="h-4 w-10" /></td>}
         </tr>
       ))}
     </>

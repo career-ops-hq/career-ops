@@ -231,6 +231,36 @@ try {
       : fail(`apple teams-only: ${JSON.stringify(calls.map((c) => c.url))}`);
   }
 
+  // Apple's `type` label: a PIPE row gets a tentative note, a REQ row and a row
+  // without the field get none. Every row is kept either way, and the note
+  // reaches the pipeline entry through scan.mjs's own formatter.
+  {
+    const NOTE = 'Apple labels this posting PIPE: it may be a talent pipeline, not a specific opening';
+    const { ctx } = recordingCtx(() => hydration([
+      { ...row('200682978-2114', 'International Commercial Lead'), type: 'PIPE' },
+      { ...row('200613455', 'Business Process Re-Engineering Manager'), type: 'REQ' },
+      row('200600001', 'Untyped Role'),
+    ], 3));
+    const jobs = await provider.fetch(ENTRY, ctx);
+    const byId = Object.fromEntries(jobs.map((j) => [j.externalId, j]));
+    const pipe = byId['200682978-2114'];
+    const req = byId['200613455'];
+    const untyped = byId['200600001'];
+    jobs.length === 3 && pipe?.note === NOTE
+      ? pass('apple.fetch() notes a posting Apple labels PIPE, and keeps it')
+      : fail(`apple PIPE note: ${JSON.stringify(jobs)}`);
+    req && untyped && !('note' in req) && !('note' in untyped)
+      ? pass('apple.fetch() sets no note on a REQ posting or one without a type')
+      : fail(`apple REQ/untyped note: ${JSON.stringify([req, untyped])}`);
+
+    const { formatPipelineOffer } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    const pipeLine = pipe ? formatPipelineOffer(pipe) : '';
+    const reqLine = req ? formatPipelineOffer(req) : '';
+    pipeLine.endsWith(`| posted: 2026-09-10 | note: ${NOTE}`) && reqLine.endsWith('| posted: 2026-09-10')
+      ? pass('apple PIPE note reaches the pipeline entry as `| note: …`; a REQ entry has no note segment')
+      : fail(`apple pipeline lines: ${JSON.stringify([pipeLine, reqLine])}`);
+  }
+
 } catch (e) {
   fail(`apple provider tests crashed: ${e.message}`);
 }

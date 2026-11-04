@@ -13,7 +13,7 @@ core runs exactly as it always has.
 ```bash
 node plugins.mjs list          # what's installed + its trust badge
 node plugins.mjs available     # bundled + community plugins we've approved
-node plugins.mjs add <name>    # install an approved community plugin
+node plugins.mjs add <name>    # install an approved community plugin (`install` does the same)
 node plugins.mjs enable <id>   # show the capability card (then add --confirm)
 node plugins.mjs skill <id>    # print a plugin's how-to (if it ships one)
 ```
@@ -21,6 +21,9 @@ node plugins.mjs skill <id>    # print a plugin's how-to (if it ships one)
 Two gates must both be satisfied for a plugin to run: it must be **enabled**
 (`node plugins.mjs enable <id> --confirm`, which records your consent) **and** its
 keys must be in your `.env`. `node doctor.mjs` shows what's missing.
+
+LinkedIn job alerts do not need a plugin. Paste the email on the dashboard, or
+run `node linkedin-import.mjs`. See [Add LinkedIn jobs](LINKEDIN_JOBS.md).
 
 ### Trust badges
 

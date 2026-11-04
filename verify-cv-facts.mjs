@@ -272,12 +272,15 @@ const COUNT_CLAIM_RE = new RegExp(
   // bullet that drops a word the source had inside the modifier window (so
   // the source yields no claim and the bullet does) fails the gate.
   //
+  // 1C is an ERP software name, not a count: "1C warehouse and order workflows"
+  // must not become the invented metric "1 workflows".
+  //
   // Modifiers are any letters (\p{L}), not ASCII only, so German, French and
   // Spanish modifiers with diacritics ("veröffentlichte") no longer end the
   // window. `(?:[\p{L}\p{N}]+-)*` lets the counted noun close a hyphenated
   // compound ("318 TryHackMe-Rooms"): German writes the modifier and the noun
   // as one hyphenated token, which a whitespace-only window never saw.
-  String.raw`(?<![A-Za-z]-)\b(\d[\d,.]*(?:[kKmMbB]\b|\s+(?:${SPELLED_MAGNITUDE_ALT})\b)?)\s*\+?\s*(?:\p{L}[\p{L}\p{M}-]*\s+){0,${MODIFIER_WINDOW}}?(?:[\p{L}\p{N}]+-)*(${METRIC_NOUNS.join('|')})(?![\p{L}\p{N}])`,
+  String.raw`(?<![A-Za-z]-)\b(?!1C\b)(\d[\d,.]*(?:[kKmMbB]\b|\s+(?:${SPELLED_MAGNITUDE_ALT})\b)?)\s*\+?\s*(?:\p{L}[\p{L}\p{M}-]*\s+){0,${MODIFIER_WINDOW}}?(?:[\p{L}\p{N}]+-)*(${METRIC_NOUNS.join('|')})(?![\p{L}\p{N}])`,
   'giu'
 );
 const NOUN_SYNONYMS = new Map([
@@ -958,6 +961,76 @@ function tidyToolName(name) {
   return Array.from(stem).length < 2 ? '' : stem;
 }
 
+// An employer is also named by where the work happened, with no "worked at":
+//
+//   "At Globex Corporation, I cut claim-form rendering 92%"
+//   "In my current role as a Data Scientist at Globex, I have shipped ..."
+//
+// The employer pattern in factClaims never read either, so a made-up employer in
+// the sentence a cover letter is built around was not compared with cv.md
+// (#6371). On 1,162 public letters that record each applicant's jobs, the pattern
+// read an employer in 54, and 574 hold this shape, only 24 of them with "At"
+// opening a sentence.
+//
+// A company named this way is often not an employer, because a letter also talks
+// about the company it is addressed to, which cv.md never names: "At Stripe, I
+// would ...", "the standards expected at Facebook, I have prepared ...". Blocking
+// those would stop a truthful letter, so a claim needs two things. The words
+// before the name state a job, or the name opens the clause. The verb after it
+// reports work, so intent ("I would", "I am eager", "I hope") claims nothing, and
+// neither does a clause that talks to the company ("I learned how your team ships").
+// A sentence that misses either stays unread, as all of these were before.
+// A dot only inside a word ("Booking.com"): "at Amazon. I have ..." ends a sentence.
+const AT_NAME_CHAR = "[\\p{L}\\p{N}_&'\\u2019-]";
+const AT_NAME_WORD = `\\p{Lu}${AT_NAME_CHAR}*(?:\\.${AT_NAME_CHAR}+)*`;
+const AT_NAME = `${AT_NAME_WORD}(?: (?:of |& )?${AT_NAME_WORD}){0,4}`;
+// "never" is not an adverb here and "did" is not a verb below, because each can deny
+// the job: "At Stripe, I have never worked there", "At Stripe, I did not work there".
+const WORK_ADVERBS = '(?:[a-z]+ly |also |then |further |first |later |once |often |since |still |even |not only )*';
+// Verbs a letter uses about a company it has only read about, and past intent. The
+// -eed words are here because the pattern below is reading "-ed" as the past tense.
+const NOT_WORK_VERBS = 'need|feed|proceed|succeed|exceed|speed|embed|shed|noticed|admired|appreciated|watched|visited|interviewed|attended|followed|wanted|hoped|wished';
+const PAST_VERB = `(?!(?:${NOT_WORK_VERBS})\\b)[a-z-]+ed`;
+// "was", "been" and "had" report nothing alone ("I was impressed by ...", "I have
+// been following ..."), so the words after them have to.
+const WORK_STATES = `(?:been|was|were) ${WORK_ADVERBS}(?:responsible|part|involved|instrumental|fortunate|privileged|entrusted|trained|tasked|promoted|hired|able|for|working|leading|managing|building|developing)|had the (?:distinct )?(?:privilege|pleasure|honou?r|opportunity)`;
+const WORK_VERBS = `(?:${PAST_VERB}|${WORK_STATES}|led|built|ran|run|grew|grown|wrote|written|made|won|drove|driven|took|taken|set|cut|taught|spent|oversaw|overseen|began|begun|became|become|kept|held|got|gotten|brought|sold|done|gave|given|manage|lead|oversee|own|handle|serve|work|design|build|develop|maintain|supervise|head|direct|spearhead)`;
+// "your" in the verb's own clause talks to the company. Past a comma it usually
+// doesn't: "I honed my skills, which I would bring to your team" still states a job.
+const NOT_ADDRESSED = '(?![^,;:.!?\\n]{0,200}\\byour?\\b)';
+// "At Globex, where I currently excel ..." states a job whatever the verb. Without
+// "where", the verb has to report work: "At Stripe, I currently see an opening".
+const AT_EMPLOYER_RE = new RegExp(`\\b[Aa]t (?:The )?(${AT_NAME}(?: and ${AT_NAME})?)(?:\\.?, | (?=(?:I|we)\\b))(?:where I currently|(?:where )?(?:I|we)(?:(?:['\u2019]ve| have)? ${WORK_ADVERBS}${WORK_VERBS}|['\u2019]d ${WORK_ADVERBS}${PAST_VERB}))\\b${NOT_ADDRESSED}`, 'gu');
+// The name opens the sentence, a list item, or a clause joined to the last one.
+const AT_OPENS_CLAUSE_RE = /(?:^|[;:]\s*|\b(?:and|but|then|later|while|whilst|previously|recently|currently),?\s*)[\s•‣◦⁃∙*+-]*$/iu;
+// Words that turn "as a ..." or "I am a ..." into something other than a job.
+const NOT_A_JOB = "(?:(?!\\b(?:candidate|applicant|user|customer|admirer|fan|follower|reader|visitor|believer|result|fit|interest|who|for|your)\\b)[^.;!?])*";
+const AT_JOB_LEAD_RE = new RegExp([
+  // The words between "my" and the job noun describe it ("my most recent role"). A
+  // function word means they lead somewhere else ("my interest in the role").
+  `\\b[Mm]y (?:(?!(?:in|for|of|the|to|at|with|on|an?) )[\\w-]+ ){0,3}?(?:roles?|positions?|job|tenures?|time|stint|years|experience|career)(?: as [^.;!?]*)?$`,
+  `(?<!such |well )\\b[Aa]s (?:(?:an?|the) |(?!I\\b)\\p{Lu})${NOT_A_JOB}$`,
+  `\\bI(?:['\u2019]m| am)(?: currently| presently| now)? (?:(?:an?|the) |employed\\b)${NOT_A_JOB}$`,
+  `\\bI (?:currently |presently |have )?(?:serve|served|hold|held|work|worked)\\b${NOT_A_JOB}$`,
+  '\\b(?:roles|tenures?|years|months)$',
+].join('|'), 'u');
+
+/** Employers named by "at <Name>, I ..." where the sentence states a job there. */
+function atEmployerClaims(text) {
+  const clean = stripMarkup(text, { keepLineBreaks: true });
+  const claims = [];
+  for (const match of clean.matchAll(AT_EMPLOYER_RE)) {
+    // A letter's job statement fits well inside this, and the cap keeps a page
+    // with no sentence break from being rescanned for every match.
+    const before = clean.slice(Math.max(0, match.index - 200), match.index);
+    const lead = before.slice(Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? '), before.lastIndexOf('\n')) + 1).trim();
+    if (!AT_OPENS_CLAUSE_RE.test(lead) && !AT_JOB_LEAD_RE.test(lead)) continue;
+    // Without its "'s", so "Macy’s" here matches a cv.md that says "Macy's".
+    for (const name of match[1].split(' and ')) claims.push({ kind: 'employer', value: normalizeFact(name.replace(POSSESSIVE_SUFFIX_RE, '')) });
+  }
+  return claims;
+}
+
 /**
  * Extract explicitly asserted employer, title, and tool claims from text.
  *
@@ -1077,6 +1150,9 @@ export function factClaims(text, sourceNormalized = null) {
       }
     }
   }
+  // Pushed one at a time, like the tool names: spread into push(), a page of
+  // 150,000 statements overflows the call stack.
+  for (const claim of atEmployerClaims(text)) claims.push(claim);
   // Report each claim once. Both tool patterns read most names, so without
   // this every tool would be listed twice. Repeated employer and title claims
   // collapse too, as they already did in verifyFacts.
@@ -2089,12 +2165,28 @@ export function diagnoseCoverage(targetText) {
  * instead of widening them. The union can only ever allow more, never less.
  */
 function allowedMetricSet(sourceText, allowMetrics) {
-  const allowed = new Set(metricClaims(sourceText));
+  const allowed = sourceMetricClaims(sourceText);
   for (const entry of allowMetrics || []) {
     allowed.add(normalizeClaim(entry));
-    for (const canonical of metricClaims(String(entry))) allowed.add(canonical);
+    for (const canonical of sourceMetricClaims(String(entry))) allowed.add(canonical);
   }
   return allowed;
+}
+
+// normalizeTextForATS in generate-pdf.mjs prints € and £ as currency codes, and
+// the gate reads the printed document. The metric patterns read "50 000 EUR" but
+// not "50 000 €", the way French, German and Spanish write it, so a source read
+// only as written could not back the amount it states (#6361). foldAtsGlyphs
+// does the same for titles.
+function spellAtsCurrency(text) {
+  return text.replace(/€/g, 'EUR ').replace(/£/g, 'GBP ');
+}
+
+/** Metric claims a source supports, read as written and as the text pass prints it. */
+function sourceMetricClaims(text, options) {
+  const claims = metricClaims(text, options);
+  for (const claim of metricClaims(spellAtsCurrency(text), options)) claims.add(claim);
+  return claims;
 }
 
 /** Compare generated metric claims against source text without reading files. */
@@ -2221,12 +2313,36 @@ function resolveInputPath(path, cwd = process.cwd()) {
 // blocks, instead of throwing.
 const MAX_SOURCE_LOOKUP_LENGTH = 500;
 
+// The glyphs normalizeTextForATS in generate-pdf.mjs rewrites. The gate reads the
+// rewritten document and cv.md keeps the original, so a title copied verbatim
+// with an arrow or a dash in it read as unsourced. A dash folded in the source
+// stays a marker and not a hyphen, so that "Acme\u2014Staff Engineer" still has a
+// token boundary before the title while "Staff Engineer - Platform" matches it.
+const FOLDED_DASH = '\uE000';
+function foldAtsGlyphs(text) {
+  return text
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/\s*\u2192\s*/g, ' to ')
+    .replace(/\s*\u2190\s*/g, ' from ')
+    .replace(/\s*[\u2191\u2193]\s*/g, ' ')
+    .replace(/(?<![lL])\s*\u00B7\s*|\s*\u00B7\s*(?![lL])|\s+\u00B7\s*|\s*\u00B7\s+/g, ' | ')
+    .replace(/\s*\u2022\s*/g, ' | ');
+}
+
 /** Check a normalized fact as a complete token or phrase, not a substring. */
 function sourceContainsFact(sourceText, value) {
+  if (sourceSpellsFact(sourceText, value)) return true;
+  const source = foldAtsGlyphs(sourceText).replace(/[\u2014\u2013]/g, FOLDED_DASH);
+  return sourceSpellsFact(source, foldAtsGlyphs(value).replace(/[\u2014\u2013]/g, '-'));
+}
+
+function sourceSpellsFact(sourceText, value) {
   if (value.length > MAX_SOURCE_LOOKUP_LENGTH) return false;
   const escaped = value
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\s+/g, '\\s+');
+    .replace(/\s+/g, '\\s+')
+    .replace(/-/g, `[-${FOLDED_DASH}]`);
   return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(sourceText);
 }
 
@@ -2379,7 +2495,7 @@ function plannedClaims(targetText, planTexts) {
   // keepPlanHorizons: answers often say "In my first 6 months I will…"; the
   // target-side horizon rule still drops those from invented claims, but the
   // plan evidence must retain the number so the letter can restate it.
-  const inPlans = metricClaims(planText, { keepPlanHorizons: true });
+  const inPlans = sourceMetricClaims(planText, { keepPlanHorizons: true });
   const clean = spellNumbers(stripMarkup(targetText, { keepLineBreaks: true }));
   const forward = new Set();
   const past = new Set();
@@ -3056,6 +3172,25 @@ export function printFactWarnings(result, print = console.warn) {
     print(`  - not checked: ${result.coverage.message}`);
     for (const span of result.coverage.spans.slice(0, 8)) print(`      ${span}`);
   }
+}
+
+/**
+ * What a second check of a document found that the first did not, ready for
+ * printFactWarnings(): a caller that checks twice has already reported the rest.
+ *
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} first
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} second
+ * @returns {{warnings: string[], advisoryFacts: object[], coverage: object|null}|null}
+ *   null when there is nothing new.
+ */
+export function newFactWarnings(first, second) {
+  const factKey = ({ kind, value }) => `${kind}\u0000${value}`;
+  const seenFacts = new Set((first.advisoryFacts ?? []).map(factKey));
+  const seenPhrases = new Set(first.warnings ?? []);
+  const warnings = (second.warnings ?? []).filter((phrase) => !seenPhrases.has(phrase));
+  const advisoryFacts = (second.advisoryFacts ?? []).filter((fact) => !seenFacts.has(factKey(fact)));
+  const coverage = first.coverage ? null : (second.coverage ?? null);
+  return warnings.length || advisoryFacts.length || coverage ? { warnings, advisoryFacts, coverage } : null;
 }
 
 /** Run the fact validator CLI and return its process exit code. */
