@@ -134,6 +134,85 @@ test("an off-screen save failure moves the window, and the error row does not se
   assert.deepEqual(errors, []);
 });
 
+test("j/k and Shift-click reach rows outside the window", { skip: liveServerSkip("PIPELINE_WINDOW_TEST_URL", "PIPELINE_WINDOW_TEST_ROOT"), timeout: 120_000 }, async (t) => {
+  const origin = new URL(url);
+  assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
+  const relative = path.relative(os.tmpdir(), fs.realpathSync(root));
+  assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  assert.equal(fs.readFileSync(path.join(root, ".tracker-window-fixture"), "utf8").trim(), "fictional-only");
+  const tracker = path.join(root, "data/applications.md");
+  const initial = fs.readFileSync(tracker, "utf8");
+
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  await page.goto(`${origin.origin}/pipeline?tab=ALL&sort=tracker&dir=1`);
+  await page.getByRole("link", { name: "#1", exact: true }).waitFor();
+  await page.getByText("120 tracked").waitFor();
+  const link = (n) => page.getByRole("link", { name: `#${n}`, exact: true });
+  const row = (n) => page.locator("tr[data-application-key]").filter({ has: link(n) });
+  const cursorRow = page.locator('tr[data-tracker-cursor="true"]');
+  const inView = (locator) => locator.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    // A row border can sit half a pixel past the edge.
+    return rect.top >= -1 && rect.bottom <= window.innerHeight + 1;
+  });
+
+  await page.getByRole("heading", { name: "Pipeline", exact: true }).click();
+  await page.keyboard.press("j");
+  await cursorRow.filter({ has: link(1) }).waitFor();
+  assert.equal(await cursorRow.getAttribute("aria-rowindex"), "2");
+
+  // Leave the cursor on #1 and scroll to the end, so #1 and #2 unmount.
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await link(120).waitFor();
+  await page.waitForFunction(() => ![...document.querySelectorAll("a")].some((a) => ["#1", "#2"].includes(a.textContent.trim())));
+  assert.equal(await cursorRow.count(), 0, "the cursor row is not mounted");
+
+  await page.keyboard.press("j");
+  await cursorRow.filter({ has: link(2) }).waitFor();
+  assert.equal(await cursorRow.getAttribute("aria-rowindex"), "3");
+  assert.equal(await cursorRow.count(), 1);
+  assert.ok(await inView(cursorRow), "j scrolls the next row into view");
+  assert.equal(await link(120).count(), 0);
+
+  // The same from the other side: k from a row far below the window.
+  for (let i = 0; i < 3; i++) await page.keyboard.press("j");
+  await cursorRow.filter({ has: link(5) }).waitFor();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForFunction(() => !document.querySelector('[data-tracker-cursor="true"]'));
+  await page.keyboard.press("k");
+  await cursorRow.filter({ has: link(4) }).waitFor();
+  assert.ok(await inView(cursorRow), "k scrolls back to the row above the cursor");
+
+  // Shift-click selects every row in between, mounted or not.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await row(3).getByRole("checkbox").click();
+  await page.getByText("1 selected", { exact: true }).waitFor();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await link(118).waitFor();
+  assert.equal(await link(3).count(), 0, "the anchor row is not mounted");
+  await row(118).getByRole("checkbox").click({ modifiers: ["Shift"] });
+  await page.getByText("116 selected", { exact: true }).waitFor();
+  await page.evaluate(() => {
+    const body = document.querySelector("tbody [data-application-key]").closest("tbody");
+    window.scrollTo(0, body.getBoundingClientRect().top + window.scrollY + body.getBoundingClientRect().height / 2);
+  });
+  await link(60).waitFor();
+  assert.equal(await row(60).getByRole("checkbox").isChecked(), true, "a row mounted after the Shift-click shows as selected");
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await link(2).waitFor();
+  assert.equal(await row(2).getByRole("checkbox").isChecked(), false);
+  assert.equal(await row(3).getByRole("checkbox").isChecked(), true);
+
+  assert.equal(fs.readFileSync(tracker, "utf8"), initial);
+  assert.deepEqual(errors, []);
+});
+
 async function mountedIndexes(page) {
   return page.evaluate(() => {
     const body = document.querySelector("tbody [data-application-key]")?.closest("tbody");

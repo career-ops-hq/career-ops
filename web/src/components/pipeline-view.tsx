@@ -316,9 +316,12 @@ export function PipelineView({
   const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
   // The checkbox, the sortable columns and the resume column.
   const columnCount = SORT_KEYS.length + 2;
+  // Same test as the selection bar's selectedRows.length > 0.
+  const hasSelection = filtered.some((r) => selected.has(applicationKey(r)));
 
-  // A failed save for a row that is off screen renders above the table and
-  // moves it. Remeasure then. Scroll and resize do not fire for that change.
+  // A failed save for a row that is off screen, the bulk-save error and the
+  // selection bar all render above the table and move it. Remeasure then.
+  // Scroll and resize do not fire for those changes.
   useLayoutEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
@@ -364,7 +367,7 @@ export function PipelineView({
       window.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
     };
-  }, [filterKey, filtered.length, rowPx, heldSaves]);
+  }, [filterKey, filtered.length, rowPx, heldSaves, bulkError, hasSelection]);
 
   const filteredKeys = filtered.map(applicationKey);
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
@@ -478,10 +481,35 @@ export function PipelineView({
   useEffect(() => {
     setCursor((index) => (rowCount === 0 ? -1 : index < 0 ? index : Math.min(index, rowCount - 1)));
   }, [rowCount]);
+  // Set when j/k moved to a row the window had not mounted. Once that row
+  // mounts it is scrolled into view by its real height, which can differ from
+  // the spacer's per-row guess.
+  const cursorScrollPending = useRef(false);
   useEffect(() => {
     if (cursor < 0 || visibleTab === "INBOX") return;
-    document.querySelector('[data-tracker-cursor="true"]')?.scrollIntoView({ block: "nearest" });
+    const row = document.querySelector('[data-tracker-cursor="true"]');
+    if (row) {
+      cursorScrollPending.current = false;
+      row.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    // The cursor row is outside the window, so it has no element yet. Scroll
+    // to where the spacer puts it. The scroll listener then mounts it.
+    const body = bodyRef.current;
+    if (!body || body.hidden) return;
+    cursorScrollPending.current = true;
+    const top = body.getBoundingClientRect().top + window.scrollY + cursor * rowPx;
+    if (top < window.scrollY) window.scrollTo({ top });
+    else window.scrollTo({ top: top + rowPx - window.innerHeight });
+    // Not keyed on rowPx: a new measurement must not move the page.
   }, [cursor, visibleTab]);
+  useLayoutEffect(() => {
+    if (!cursorScrollPending.current) return;
+    const row = document.querySelector('[data-tracker-cursor="true"]');
+    if (!row) return;
+    cursorScrollPending.current = false;
+    row.scrollIntoView({ block: "nearest" });
+  }, [span.start, span.end]);
 
   return (
     <PageFrame>
