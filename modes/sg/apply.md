@@ -57,6 +57,7 @@ the trailing Notes — and add the Singapore header line:
 ## Responses for [Company] — [Role]
 
 Based on: Report #NNN | Score: X.X/5 | Archetype: [type] | Market: Singapore | EP: required / not required / refused | SG status: [from profile]
+[On **Draft without saving**, drop the report number, score and archetype from the line above and open it with "No report: drafted for this posting, not saved"; keep the Singapore fields]
 
 ---
 
@@ -80,11 +81,13 @@ Notes:
 
 ## Application Answers
 
-Persist exactly as `modes/apply.md` specifies: after the final answers are
-filled into the form or handed to the candidate for copy-paste, update the
-matched report with an additive `## Application Answers` section (recovered
-through the strict reader, never re-read as prose); on confirmed submission,
-refresh it from `filled` to `submitted`.
+Persist exactly as `modes/apply.md` specifies, including its check that the
+form is still the report's posting (Step 8 →
+"Write only to the report of this posting"): after the final answers are filled into the form or handed to the
+candidate for copy-paste, update the matched report with an additive
+`## Application Answers` section (recovered through the strict reader, never
+re-read as prose); on confirmed submission, refresh it from `filled` to
+`submitted`.
 
 ## After applying (optional)
 
