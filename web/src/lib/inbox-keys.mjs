@@ -17,7 +17,8 @@ const NOT_TYPING_INPUTS = new Set(["checkbox", "radio", "button", "submit", "res
 
 /**
  * A text field, a select, or anything in a dialog takes the keys. A row
- * checkbox does not: it keeps focus after a click, and Shift+X comes next.
+ * checkbox does not: it keeps focus after a click, and Shift+X or a tracker
+ * status key comes next.
  * @param {{ tagName?: string, type?: string, isContentEditable?: boolean, closestDialog?: boolean } | null | undefined} target
  */
 export function typingFromTarget(target) {

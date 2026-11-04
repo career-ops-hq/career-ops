@@ -60,6 +60,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, pageFormatForCountry, resolvePageFormat } from './lib/page-format.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
@@ -214,6 +215,21 @@ function resolvePdfCliPath(p) {
 mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
 
 /**
+ * Say what normalizeTextForATS() rewrote, so a changed character in a document
+ * going to an employer is never a silent one.
+ *
+ * @param {Record<string, number>} replacements - Count per kind of rewrite.
+ * @param {(line: string) => void} [print] - Where the line goes.
+ * @returns {void}
+ */
+function reportAtsReplacements(replacements, print = console.log) {
+  const total = Object.values(replacements).reduce((a, b) => a + b, 0);
+  if (total === 0) return;
+  const breakdown = Object.entries(replacements).map(([k, v]) => `${k}=${v}`).join(', ');
+  print(`🧹 ATS normalization: ${total} replacements (${breakdown})`);
+}
+
+/**
  * Normalize text for ATS compatibility by converting problematic Unicode.
  *
  * ATS parsers and legacy systems often fail on em-dashes, smart quotes,
@@ -333,7 +349,11 @@ function normalizeTextForATS(html) {
     // snake_case, a_b and docs/_draft_/cv.md stay literal. Text-only elements
     // (<title>, <textarea>, ...) would show <em> as literal text, so skip them.
     if (!plainUntil) {
-      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (_, inner) => {
+      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (match, inner, at, whole) => {
+        // Underscores inside an email address are the address. Underscores
+        // around the whole address enclose its @, and are italics.
+        const word = /\S*$/.exec(whole.slice(0, at))[0] + /^\S*/.exec(whole.slice(at))[0];
+        if (word.includes('@') && !inner.includes('@')) return match;
         bump('markdown-italic', 1);
         return `<em>${inner}</em>`;
       });
@@ -1673,15 +1693,16 @@ async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
  * both paths, because the batch run is exactly that caller and for a while it
  * was the path with no gate at all.
  *
- * Callers pass the normalized HTML and skip the call when --skip-fact-check is
- * set or the workspace has no cv.md to check against.
+ * Callers pass the normalized HTML and the HTML from before ATS normalization.
+ * They skip the call when --skip-fact-check is set or the workspace has no cv.md.
  *
  * @param {string} html - Normalized HTML, as it will be printed.
  * @param {string} label - Document name for the error and warning lines.
+ * @param {string} [rawHtml] - HTML before ATS normalization, so an em dash is still visible.
  * @returns {Promise<void>} Resolves when the document passes or only warns.
- * @throws {Error} When a metric, fact or forbidden phrase blocks the document.
+ * @throws {Error} When the voice check or the fact gate rejects the document.
  */
-async function runFactGate(html, label) {
+async function runFactGate(html, label, rawHtml = html) {
   // Imported lazily, by the callers' guard. A static import is resolved at module
   // load whether or not the gate runs, and the page-budget/batch suites copy
   // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
@@ -1691,7 +1712,18 @@ async function runFactGate(html, label) {
   // module is genuinely missing in a real workspace this throws and the render
   // fails, which is the correct direction to fail for a fact gate.
   const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
-  const factCheck = assertFacts(html, { label, ...factGateInputs() });
+  const { voiceIssues, voiceTellMessage, voiceDashWarning, candidateOwnWords } = await import('./cv-voice.mjs');
+  const inputs = factGateInputs();
+  // The voice check allows wording the CV, voice-dna.md, and the cv-facts
+  // allow lists already have. article-digest.md backs facts, not phrasing.
+  const cvPath = resolve(workspaceRoot, 'cv.md');
+  const source = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
+  const found = voiceIssues(rawHtml, `${source}\n${candidateOwnWords(workspaceRoot)}`);
+  const voiceError = voiceTellMessage(found, label);
+  if (voiceError) throw new Error(voiceError);
+  const dashWarning = voiceDashWarning(found, label);
+  if (dashWarning) console.warn(`⚠️  ${dashWarning}`);
+  const factCheck = assertFacts(html, { label, ...inputs });
   // Ahead of the verdict, because it qualifies it: with no config the phrase
   // lists are empty, so a "passed" below covers metrics and facts only.
   if (factCheck.configMissing) {
@@ -1995,20 +2027,17 @@ async function generatePDF() {
   validateCvExperienceOrder(html, { allowNonChronological });
   validateLockedSections(html, cvMarkdown, readLockedSections(workspaceProfilePath(), sectionKey));
 
+  const rawHtml = html;
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
   html = normalized.html;
   // After normalization, so the length is that of the text that prints.
   warnLongPortalFields(html, outputPath);
-  const totalReplacements = Object.values(normalized.replacements).reduce((a, b) => a + b, 0);
-  if (totalReplacements > 0) {
-    const breakdown = Object.entries(normalized.replacements).map(([k, v]) => `${k}=${v}`).join(', ');
-    console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
-  }
+  reportAtsReplacements(normalized.replacements);
 
   // Fact gate, on the normalized HTML: the document that actually prints.
   if (!skipFactCheck) {
-    if (cvMarkdown) await runFactGate(html, basename(inputPath));
+    if (cvMarkdown) await runFactGate(html, basename(inputPath), rawHtml);
     else warnFactGateNotRun();
   }
 
@@ -2202,12 +2231,13 @@ async function runBatchFromManifest(manifestPath, globals) {
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
       validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
       validateLockedSections(html, cvMarkdown, lockedKeys);
+      const rawHtml = html;
       html = normalizeTextForATS(html).html;
       warnLongPortalFields(html, entryOutput);
       // Same gate, same guard and same place as the single render. A blocked
       // entry throws into the catch below: it is recorded as failed and never
       // reaches Chromium, and the rest of the batch still renders.
-      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput));
+      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput), rawHtml);
       const entryBudget = pageBudgetFor(resolveArtifactKind(entryKind, entryOutput).kind, globals.flagBudget, globals.profileBudget);
 
       entries.push({
@@ -2329,14 +2359,12 @@ export async function inlineLocalFonts(html) {
   return html.replace(FONT_REF, (match, _quote, name) => dataUrls.get(name) || match);
 }
 
-export async function launchChromium(options) {
+// Keep the PDF module's existing launch API while delegating the executable
+// choice to the same resolver every other browser-backed feature uses.
+export async function launchChromium(options = {}) {
   const { chromium } = await import('playwright');
-  const launchOptions = { ...options };
-  const envPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
-  if (!launchOptions.executablePath && envPath) {
-    launchOptions.executablePath = envPath;
-  }
-  return chromium.launch(launchOptions);
+  const { projectRoot, ...launchOptions } = options;
+  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot }));
 }
 
 /**
@@ -2382,6 +2410,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
         outputPath,
         { ...opts, workspaceRoot: opts.workspaceRoot || workspaceRoot },
         fileURLToPath(import.meta.url),
+        getCareerOpsRoot(),
       );
       console.log(`✅ PDF generated: ${result.outputPath}`);
       console.log(`📊 Pages: ${result.pageCount}`);
@@ -2395,7 +2424,10 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
       console.warn(`⚠️  Shared PDF browser unavailable, painting locally: ${err.message}`);
     }
   }
-  const launchBrowser = opts.launchBrowser || launchChromium;
+  const launchBrowser = opts.launchBrowser || ((options) => launchChromium({
+    ...options,
+    projectRoot: opts.workspaceRoot || getCareerOpsRoot(),
+  }));
   let browser = null;
   try {
     browser = await launchBrowser({ headless: true });
@@ -2684,7 +2716,10 @@ async function runPdfServer() {
   const { startPdfServer } = await import('./lib/pdf-server.mjs');
   const server = await startPdfServer({
     rootDir: __dirname,
-    launchBrowser: launchChromium,
+    launchBrowser: (options) => launchChromium({
+      ...options,
+      projectRoot: process.env.CAREER_OPS_PDF_BROWSER_ROOT || getCareerOpsRoot(),
+    }),
     render: (browser, html, outputPath, opts) => renderInPage(browser, html, outputPath, opts),
   });
   if (server.alreadyRunning) return;
@@ -2712,4 +2747,4 @@ if (isMain && process.argv[2] === '--pdf-server') {
   });
 }
 
-export { normalizeTextForATS, sectionKey };
+export { normalizeTextForATS, reportAtsReplacements, sectionKey };

@@ -13,6 +13,7 @@ import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import type { CardReason } from "@/lib/machine-summary.mjs";
 import { QuickEvaluate } from "@/components/quick-evaluate";
+import { LinkedInPaste } from "@/components/linkedin-paste";
 import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons";
 import { scoreNum } from "@/lib/format";
 import { undoStatus } from "@/lib/pipeline-status.mjs";
@@ -326,6 +327,8 @@ export function TodayDashboard({
           </p>
         </div>
       )}
+
+      <LinkedInPaste />
 
       {decisionUndo && (
         <div className="fixed inset-x-0 bottom-32 z-40 flex justify-center px-4 sm:bottom-6">

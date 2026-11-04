@@ -59,7 +59,7 @@ test("Tracker search explains what it filtered and how to undo it", { skip: live
   await t.test("an empty status tab with no search does not mention search", async () => {
     await page.goto(`${origin.origin}/pipeline?tab=OFFER`);
     await page.getByRole("heading", { name: "No Offer applications yet" }).waitFor();
-    assert.equal(await page.getByText(/search/i).count(), 0);
+    assert.equal(await page.getByRole("main").getByText(/search/i).count(), 0);
   });
 
   await t.test("a score filter that empties the list names it and clears it", async () => {

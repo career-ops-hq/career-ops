@@ -275,7 +275,15 @@ export default {
           // page one, truncate-with-warning on a later page.
           throw err instanceof Error ? err : new Error(cause);
         }
-        console.error(`⚠️  getro: ${entry.name || collectionId} truncated at page ${page} after retries (${out.length} jobs): ${cause}`);
+        // err.attempts is the real request count: a non-retryable error ends the
+        // retry loop after one attempt. A rejection that is not an object cannot
+        // carry the count, so the warning says it is unknown.
+        const attempts = err?.attempts;
+        const attemptsText = attempts === undefined
+          ? 'an unknown number of attempts'
+          : `${attempts} attempt${attempts === 1 ? '' : 's'}`;
+        const pagesToFetch = Math.min(maxPages, Math.ceil(total / HITS_PER_PAGE));
+        console.error(`⚠️  getro: ${entry.name || collectionId} truncated at page ${page + 1} of ${pagesToFetch} after ${attemptsText} (${out.length} jobs): ${cause}`);
         break;
       }
 
