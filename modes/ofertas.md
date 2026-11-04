@@ -1,6 +1,6 @@
 # Mode: ofertas — Multi-Job Comparison
 
-Scoring matrix with 10 weighted dimensions. Score every dimension against the user's own targeting, not a default candidate's: the North Star and level in `modes/_profile.md`, the comp range in `config/profile.yml` → `compensation`, the location policy in `modes/_profile.md` and `config/profile.yml` → `compensation.location_flexibility`, and the culture criteria in `config/profile.yml` → `culture_screen`. Where the user has set nothing for a dimension, score it against the market for the role.
+Scoring matrix with 10 weighted dimensions. Score every dimension against the user's own targeting, not a default candidate's: the North Star and level in `modes/_profile.md`, the comp range in `config/profile.yml` → `compensation`, the location policy in `modes/_profile.md` and `config/profile.yml` → `compensation.location_flexibility`, and the culture criteria in `config/profile.yml` → `culture_screen`. North Star always follows `modes/_shared.md` → Archetype Detection: with no target roles in `modes/_profile.md`, its default table is the target set, and an offer that matches no target scores 1. Where the user has set nothing for any other dimension, score it against the market for the role.
 
 | Dimension | Weight | Criteria 1-5 |
 |-----------|------|----------------|
