@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export async function GET(req: Request) {
     execFile(
       process.execPath,
       [script, "--company", company],
-      { cwd: careerOpsRoot(), timeout: 20_000, maxBuffer: 8 << 20, windowsHide: true },
+      { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 20_000, maxBuffer: 8 << 20, windowsHide: true },
       // stdout regardless of exit status: the script reports a missing source
       // inside its payload rather than by failing, and that payload is what the
       // card needs in order to say "not checked" instead of "nothing found".
