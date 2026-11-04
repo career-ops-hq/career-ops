@@ -72,6 +72,7 @@ const SUITES = {
   "pipeline-views": { url: "PIPELINE_VIEWS_TEST_URL", root: "PIPELINE_VIEWS_TEST_ROOT", fixture: "pipeline-status" },
   "report-print": { url: "REPORT_PRINT_TEST_URL", root: "REPORT_PRINT_TEST_ROOT", fixture: "report-print" },
   "skip-link": { url: "SKIP_LINK_TEST_URL", fixture: "blank" },
+  "tracker-keys": { url: "TRACKER_KEYS_TEST_URL", root: "TRACKER_KEYS_TEST_ROOT", fixture: "tracker-keys" },
   "tracker-search": { url: "TRACKER_SEARCH_TEST_URL", root: "TRACKER_SEARCH_TEST_ROOT", fixture: "pipeline-status" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },
 };
