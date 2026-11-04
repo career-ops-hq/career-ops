@@ -398,10 +398,14 @@ for (const file of ['modes/apply.md', 'modes/sg/apply.md', ...localized]) {
     const at = lines.findIndex(l => /#(NNN|\{###\})/.test(l));
     assert.ok(at !== -1, 'no report-number line in the output template');
     assert.ok(lines[at + 1]?.includes('**Draft without saving**'), `the line after "${lines[at].trim()}" does not cover the unsaved draft`);
-    // The replacement itself carries no report metadata: no report number,
-    // score or archetype placeholder, and it names its own text in quotes.
+    // The replacement itself carries no report metadata. The placeholders are
+    // read from this mode's own header line (#6030): a fixed list of archetype
+    // words missed the Arabic one, and would miss any new locale's.
     const replacement = lines[at + 1];
-    assert.ok(!/#(NNN|\{###\})|X[.,]X\/5|\[(type|tipo|Typ|typ|tipe|tür|тип|类型|類型|loại)\]/.test(replacement), `the unsaved-draft line still carries report metadata: ${replacement}`);
+    const placeholders = lines[at].match(/#NNN|\{[^}]+\}|\[[^\]]+\]|X[.,]X\/5/g) ?? [];
+    assert.ok(placeholders.length >= 2, `could not read the header's placeholders: ${lines[at].trim()}`);
+    const leaked = placeholders.filter(ph => replacement.includes(ph));
+    assert.deepStrictEqual(leaked, [], `the unsaved-draft line still carries report metadata: ${leaked.join(', ')}`);
     assert.match(replacement, /["“「][^"”」]+["”」]/, 'the unsaved-draft line does not give the text that replaces the header');
   });
 }

@@ -53,6 +53,7 @@ const SUITES = {
   "assistant-request-feedback": { url: "ASSISTANT_FEEDBACK_TEST_URL", fixture: "blank" },
   "assistant-status-recovery": { url: "ASSISTANT_STATUS_TEST_URL", fixture: "blank" },
   "back-link-scroll": { url: "BACK_SCROLL_TEST_URL", root: "BACK_SCROLL_TEST_ROOT", fixture: "pipeline-long" },
+  "command-palette": { url: "COMMAND_PALETTE_TEST_URL", root: "COMMAND_PALETTE_TEST_ROOT", fixture: "pipeline-status" },
   "cv-editor-keep": { url: "CV_EDITOR_KEEP_TEST_URL", root: "CV_EDITOR_KEEP_TEST_ROOT", fixture: "blank" },
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
   "cv-studio-keep": { url: "CV_STUDIO_KEEP_TEST_URL", root: "CV_STUDIO_KEEP_TEST_ROOT", fixture: "cv-studio" },
@@ -69,7 +70,9 @@ const SUITES = {
   "pipeline-report-states": { url: "PIPELINE_REPORT_STATES_TEST_URL", root: "PIPELINE_REPORT_STATES_TEST_ROOT", fixture: "pipeline-report-states" },
   "pipeline-return": { url: "PIPELINE_RETURN_TEST_URL", root: "PIPELINE_RETURN_TEST_ROOT", fixture: "pipeline-status" },
   "pipeline-views": { url: "PIPELINE_VIEWS_TEST_URL", root: "PIPELINE_VIEWS_TEST_ROOT", fixture: "pipeline-status" },
+  "report-print": { url: "REPORT_PRINT_TEST_URL", root: "REPORT_PRINT_TEST_ROOT", fixture: "report-print" },
   "skip-link": { url: "SKIP_LINK_TEST_URL", fixture: "blank" },
+  "tracker-keys": { url: "TRACKER_KEYS_TEST_URL", root: "TRACKER_KEYS_TEST_ROOT", fixture: "tracker-keys" },
   "tracker-search": { url: "TRACKER_SEARCH_TEST_URL", root: "TRACKER_SEARCH_TEST_ROOT", fixture: "pipeline-status" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },
 };
