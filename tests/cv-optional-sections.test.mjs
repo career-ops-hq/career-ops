@@ -166,9 +166,10 @@ for (const { file, format, after, lastSection, hasCertifications, hasCompetencie
   // *payload* key being empty, not about the template: cv-templates.mjs still
   // requires `{{EXPERIENCE}}` to exist in any custom template.
   check(`${name}: empty payload removes {{EXPERIENCE}} with its block`, stripped.includes('{{EXPERIENCE}}'), false);
-  const summaryMarker = '<!-- PROFESSIONAL SUMMARY -->'; // html-only; the LaTeX templates have no summary section
+  const summaryMarker = format === 'html' ? '<!-- PROFESSIONAL SUMMARY -->' : 'Summary  %';
+  check(`${name}: empty payload removes the summary block`, stripped.includes(summaryMarker), false);
+  check(`${name}: empty payload removes {{SUMMARY}} with its block`, stripped.includes('{{SUMMARY}}'), false);
   if (format === 'html') {
-    check(`${name}: empty payload removes the summary block`, stripped.includes(summaryMarker), false);
     check(`${name}: empty payload removes the summary heading with its block`, stripped.includes('{{SECTION_SUMMARY}}'), false);
     check(`${name}: empty payload removes {{SUMMARY_TEXT}} with its block`, stripped.includes('{{SUMMARY_TEXT}}'), false);
   }

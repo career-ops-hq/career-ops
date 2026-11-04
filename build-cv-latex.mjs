@@ -467,17 +467,20 @@ async function runSelfTest() {
     process.exit(1);
   }
 
-  // An unsupported section given a scalar value must warn too: the .tex
-  // template drops summary whatever shape it arrives in.
-  for (const scalar of [2026, 0, true, false, 'hi']) {
+  // A summary that is not text must warn: the .tex builder passes the value
+  // through `escapeLatex(payload.summary || '')`, so 0 and false vanish and a
+  // number or boolean prints its String() form — neither is what the author
+  // wrote. A STRING is not in this list: {{SUMMARY}} renders it, so warning
+  // would be a false positive on every valid payload.
+  for (const scalar of [2026, 0, true, false]) {
     if (!validatePayload({ ...sample, summary: scalar }, 'tex').warnings.some(w => w.startsWith('summary:'))) {
-      console.error(`Self-test failed: scalar unsupported section ${JSON.stringify(scalar)} was not reported`);
+      console.error(`Self-test failed: non-string summary ${JSON.stringify(scalar)} was not reported`);
       process.exit(1);
     }
   }
-  for (const empty of [null, undefined, '', '   ']) {
+  for (const empty of [null, undefined, '', '   ', 'hi']) {
     if (validatePayload({ ...sample, summary: empty }, 'tex').warnings.some(w => w.startsWith('summary:'))) {
-      console.error(`Self-test failed: empty unsupported section ${JSON.stringify(empty)} warned`);
+      console.error(`Self-test failed: empty or valid summary ${JSON.stringify(empty)} warned`);
       process.exit(1);
     }
   }
@@ -540,6 +543,13 @@ async function runSelfTest() {
 
   const substitutions = {
     NAME: escapeLatex(sample.name),
+    // Same expression as the render path: without it the self-test leaves
+    // {{PAPER}} unresolved in the template and fails before it can check
+    // anything else.
+    PAPER: resolvePageFormat(sample.page_format, {
+      profilePath: getProfilePath(),
+      country: sample.country,
+    }) === 'a4' ? 'a4paper' : 'letterpaper',
     CONTACT_LINE: escapeLatex(sample.contact_line),
     EMAIL_URL: emailUrl,
     EMAIL_DISPLAY: escapeLatex(emailDisplay),
