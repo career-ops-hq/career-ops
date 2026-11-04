@@ -21,17 +21,21 @@ check('skill documents VS Code Copilot Chat (Copilot) task→general-purpose', /
 check('skill documents GitHub Copilot CLI task→general-purpose', /GitHub Copilot CLI.*task.*general\-purpose/.test(delegated));
 check('skill documents other CLIs direct execution', /All other CLIs.*Run mode directly/.test(delegated));
 
-check('skill has OpenCode task tool JSON example', /"tool": "task"/.test(delegated));
-check('skill has OpenCode subagent_type argument', /"subagent_type": "general"/.test(delegated));
+const openCodeSection = delegated.split('#### OpenCode — `task` tool → `general` subagent')[1] ?? '';
+check('skill has OpenCode task tool JSON example', /"tool": "task"/.test(openCodeSection));
+check('skill has OpenCode subagent_type argument', /"subagent_type": "general"/.test(openCodeSection));
+
 check('skill has OpenCode permission note', /permission\.task.*general.*allow/.test(delegated));
 
 check('skill has VS Code Copilot Chat (Local) runSubagent JSON example', /"tool": "runSubagent"/.test(delegated));
 
-check('skill has VS Code Copilot Chat (Copilot) task JSON example', /"tool": "task"/.test(delegated));
-check('skill has VS Code Copilot Chat (Copilot) agent_type argument', /"agent_type": "general-purpose"/.test(delegated));
+const copilotSection = delegated.split('#### VS Code Copilot Chat - Session Type `Copilot` — `task` tool')[1] ?? '';
+check('skill has VS Code Copilot Chat (Copilot) task JSON example', /"tool": "task"/.test(copilotSection));
+check('skill has VS Code Copilot Chat (Copilot) agent_type argument', /"agent_type": "general-purpose"/.test(copilotSection));
 
-check('skill has GitHub Copilot CLI task JSON example', /"toolName": "task"/.test(delegated));
-check('skill has GitHub Copilot CLI agent_type argument', /"agent_type": "general-purpose"/.test(delegated));
+const githubSection = delegated.split('#### GitHub Copilot CLI — `task` tool → `general-purpose` subagent')[1] ?? '';
+check('skill has GitHub Copilot CLI task JSON example', /"toolName": "task"/.test(githubSection));
+check('skill has GitHub Copilot CLI agent_type argument', /"agent_type": "general-purpose"/.test(githubSection));
 
 
 // 2. Mode files reference skill file, no inline Agent() blocks
