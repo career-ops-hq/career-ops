@@ -11,6 +11,7 @@
  */
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 import { REPORT_ENVELOPE_INSTRUCTION } from "./report-envelope.mjs";
+import { EVALUATION_ACCESS_INSTRUCTION } from "./evaluation-access.mjs";
 import { COVER_TONES } from "./cover-brief.mjs";
 import { DEFAULT_PROFILE_REF, profileNote } from "./core/profile-path.mjs";
 
@@ -307,10 +308,14 @@ ${JSON.stringify({ url: input })}`;
 ${evaluationInstructions}
 
 POSTING INPUT
-Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)". If it returns a login/consent wall, a partial page shell, a 404, an expired ad, a paywall, a bot challenge, or a different job, stop before scoring and ask for the job text. Do not emit a report envelope for inaccessible postings.
+For an original Himalayas /companies/{company}/jobs/{slug} URL, use its documented https://himalayas.app/jobs/api/companies/{company}/jobs/{slug} GET instead of retrying protected HTML. Verify exact guid/companySlug, full description and publisher status, then apply the existing aggregator/employer confirmation rules and headless exceptions; publisher200 alone does not verify the employer. API404 is unknown, not closed; documented410 closes it. Preserve original source and retrieval/cache evidence. Never bypass login/challenges or substitute a similarly named role. A permitted read-only himalayas-posting.mjs --request - helper can accept bounded JSON on a safe stdin/data channel without request-file writes or URL interpolation; it grants no additional tool access.
+
+${EVALUATION_ACCESS_INSTRUCTION}
+
+Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)". If the posting/JD itself remains blocked by login/consent, a partial page shell, a 404, an expired ad, paywall, bot challenge or a different job, stop before scoring and ask for the job text. A separate application-access wall is only a note once the existing mode gates permit evaluation; contradictory same-posting404/410 still stops. Do not emit a report envelope for inaccessible postings.
 
 ${mem}${unattendedAmbiguityStep}
-OUTPUT: Do NOT save or edit any file, run scripts, or allocate report numbers. Output exactly one complete selected report between a line containing only \`<<report-md>>\` and a line containing only \`<</report-md>>\`. The platform saves it. Include the canonical Machine Summary and full verbatim JD archive. Never submit an application, fill forms, or contact anyone.
+OUTPUT: Do NOT save or edit any file, run output/build/workflow scripts, or allocate report numbers. Only the explicitly permitted read-only JD retrieval above is an exception; never write request files. Output exactly one complete selected report between a line containing only \`<<report-md>>\` and a line containing only \`<</report-md>>\`. The platform saves it. Include the canonical Machine Summary and full verbatim JD archive. Never submit an application, fill forms, or contact anyone.
 
 After the envelope, end with EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
@@ -321,9 +326,13 @@ ${postingInput}`;
 
 1. Read ${fromCheckout(resolvedLang.evalModeFile, codeRoot)} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, ${profile} and modes/_profile.md.
 
-   Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
+   For an original Himalayas /companies/{company}/jobs/{slug} URL, use its documented https://himalayas.app/jobs/api/companies/{company}/jobs/{slug} GET instead of retrying protected HTML. Verify exact guid/companySlug, full description and publisher status, then apply the existing aggregator/employer confirmation rules and headless exceptions; publisher200 alone does not verify the employer. API404 is unknown, not closed; documented410 closes it. Preserve original source and retrieval/cache evidence. Never bypass login/challenges or substitute a similarly named role. A permitted read-only himalayas-posting.mjs --request - helper can accept bounded JSON on a safe stdin/data channel without request-file writes or URL interpolation; it grants no additional tool access.
 
-   **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
+${EVALUATION_ACCESS_INSTRUCTION}
+
+Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
+
+   **If the permitted posting/API retrieval still cannot read this exact posting/JD — because the JD is a login/consent wall, partial shell, paywall, bot challenge, missing or mismatched — STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** Never score the wall itself. Confirmed same-posting HTTP404/410, explicit closure or a verified generic-listing redirect takes the mode file's "posting appears closed" path; an inconclusive transport failure is not proof of closure. Once the existing mode gates permit evaluation, a separate application login/consent/email/access-only403 is only an application_access note. Never override contradictory same-posting404/410, employer confirmation, agency/profile rules or the LinkedIn loading guard. Say which JD URL/method remains unresolved so the user can supply primary evidence.
 
 ${mem}${unattendedAmbiguityStep}2. ${REPORT_ENVELOPE_INSTRUCTION}
 
