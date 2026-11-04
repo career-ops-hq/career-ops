@@ -43,7 +43,9 @@ globalThis.fetch = async () => { throw new Error('Unexpected network request'); 
     const order = readFileSync(join(root, 'order'), 'utf8').trim().split('\n');
     assert.deepEqual(order, unscanned ? ['Portfolio'] : boardFirst ? ['Portfolio', 'Employer'] : ['Employer', 'Portfolio']);
     const read = name => existsSync(join(root, 'data', name)) ? readFileSync(join(root, 'data', name), 'utf8') : '';
-    return { receipt: JSON.parse(result.stdout), pipeline: read('pipeline.md'), history: read('scan-history.tsv') };
+    const pipeline = read('pipeline.md');
+    const pipelineUrls = [...pipeline.matchAll(/^- \[ \] (\S+) \|/gm)].map(match => match[1]);
+    return { receipt: JSON.parse(result.stdout), pipeline, pipelineUrls, history: read('scan-history.tsv') };
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -52,18 +54,18 @@ globalThis.fetch = async () => { throw new Error('Unexpected network request'); 
 for (const boardFirst of [false, true]) {
   test(`employer rejection blocks a board copy when ${boardFirst ? 'board' : 'employer'} finishes first`, () => {
     const result = scan({ boardFirst });
-    assert.ok(!result.pipeline.includes(POSTING_URL), result.pipeline);
+    assert.deepEqual(result.pipelineUrls, []);
     const skipped = result.history.trim().split('\n').slice(1);
     // History deduplicates the two copies by normalized URL and status.
     assert.equal(skipped.length, 1);
     assert.ok(skipped.every(row => row.split('\t')[5] === 'skipped_location'));
-    assert.ok(skipped[0].startsWith(POSTING_URL + '\t'));
+    assert.equal(skipped[0].split('\t')[0], POSTING_URL);
     assert.equal(result.receipt.filtered, 2);
     assert.equal(result.receipt.added, 0);
   });
   test(`employer accepted copy wins when ${boardFirst ? 'board' : 'employer'} finishes first`, () => {
     const result = scan({ boardFirst, ownLocation: 'United States' });
-    assert.ok(result.pipeline.includes(POSTING_URL));
+    assert.deepEqual(result.pipelineUrls, [POSTING_URL]);
     assert.match(result.history, /United States/);
     assert.doesNotMatch(result.history, /Berlin, MD, USA/);
     assert.equal(result.receipt.added, 1);
@@ -72,7 +74,7 @@ for (const boardFirst of [false, true]) {
 for (const control of ['ownFails', 'ownMissing']) {
   test(`a board copy keeps its own location if the employer ${control === 'ownFails' ? 'fetch fails' : 'does not publish its URL'}`, () => {
     const result = scan({ boardFirst: true, [control]: true });
-    assert.ok(result.pipeline.includes(POSTING_URL));
+    assert.deepEqual(result.pipelineUrls, [POSTING_URL + '?utm_source=portfolio']);
     assert.equal(result.receipt.added, 1);
   });
 }
@@ -86,12 +88,12 @@ test('dry run rejects the board copy without writing history or pipeline', () =>
 
 test('an unscanned employer leaves the board location decision unchanged', () => {
   const result = scan({ unscanned: true });
-  assert.ok(result.pipeline.includes(POSTING_URL));
+  assert.deepEqual(result.pipelineUrls, [POSTING_URL + '?utm_source=portfolio']);
   assert.equal(result.receipt.added, 1);
 });
 test('employer title rejection does not block the board copy', () => {
   const result = scan({ boardFirst: true, ownTitle: 'Accountant' });
-  assert.ok(result.pipeline.includes(POSTING_URL));
+  assert.deepEqual(result.pipelineUrls, [POSTING_URL + '?utm_source=portfolio']);
   assert.equal(result.receipt.added, 1);
 });
 
@@ -104,6 +106,6 @@ test('an accepted employer location wins over a rejected variant of its URL', ()
 });
 test('employer age rejection does not block the board copy', () => {
   const result = scan({ boardFirst: true, ownLocation: 'United States', ownOld: true });
-  assert.ok(result.pipeline.includes(POSTING_URL));
+  assert.deepEqual(result.pipelineUrls, [POSTING_URL + '?utm_source=portfolio']);
   assert.equal(result.receipt.added, 1);
 });
