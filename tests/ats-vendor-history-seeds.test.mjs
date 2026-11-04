@@ -44,6 +44,8 @@ try {
     ['https://acme.taleo.net/careersection/jobdetail.ftl', 'taleo'],
     ['https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd', 'hirehive'],
     ['https://acme.hirehive.com.evil.example/backend-engineer-Ab12Cd', 'acme.hirehive.com.evil.example'],
+    ['https://acme-641e1b39232b.careers.hibob.com/jobs/0b1c2d3e/apply', 'hibob'],
+    ['https://careers.hibob.com.evil.example/jobs/1', 'careers.hibob.com.evil.example'],
     ['https://careers.example.com/jobs/1', 'careers.example.com'],
     ['https://evil.example/https://jobs.lever.co/acme', 'evil.example'],
   ];
@@ -93,6 +95,10 @@ try {
   ]) {
     assert.equal(atsBoardUrlOf(refused, 'hirehive'), null, refused);
   }
+  assert.equal(
+    atsBoardUrlOf('https://acme.careers.hibob.com/jobs/0b1c2d3e-0000-4000-8000-000000000001/apply', 'hibob'),
+    'https://acme.careers.hibob.com',
+  );
   assert.equal(atsBoardUrlOf('http://acme.bamboohr.com/careers/1', 'bamboohr'), 'http://acme.bamboohr.com');
   pass('posting URLs collapse to provider-compatible board URLs without query or fragment data');
 

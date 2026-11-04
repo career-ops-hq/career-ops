@@ -41,7 +41,7 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
   } else if (vendor === 'successfactors') {
     const endpointAt = parts.findIndex((part) => /^(?:job|search|tile-search-results|services)$/i.test(part));
     u.pathname = endpointAt > 0 ? `/${parts.slice(0, endpointAt).join('/')}` : '/';
-  } else if (vendor === 'icims' || vendor === 'bamboohr') {
+  } else if (vendor === 'icims' || vendor === 'bamboohr' || vendor === 'hibob') {
     u.pathname = '/';
   } else if (vendor === 'hirehive') {
     // Seeds are sampled under --limit before detect() runs, so a host the

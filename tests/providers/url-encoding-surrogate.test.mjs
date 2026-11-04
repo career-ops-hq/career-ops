@@ -75,6 +75,17 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
   );
 
+  // hibob.parseHibobJobAds — for…of over jobAdDetails; id feeds the posting URL.
+  const { parseHibobJobAds } = await load('hibob.mjs');
+  check(
+    'hibob.parseHibobJobAds',
+    () => parseHibobJobAds(
+      { jobAdDetails: [{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 'a5', title: 'Good Id' }] },
+      'https://x.careers.hibob.com', 'X',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.careers.hibob.com/jobs/a5',
+  );
+
   // keka.parseKekaResponse — for…of over the top-level jobs array.
   const { parseKekaResponse } = await load('keka.mjs');
   check(
@@ -405,6 +416,7 @@ try {
     'dover.mjs',
     'feishu-jobs.mjs',
     'garena.mjs',
+    'hibob.mjs',
     'jibeapply.mjs',
     'kalibrr.mjs',
     'keka.mjs',

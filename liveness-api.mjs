@@ -43,6 +43,7 @@ import { ZOHO_HOST_RE, isZohoRecordClosed, parseZohoDetailPage } from './provide
 import { HOST_RE as ULTIPRO_HOST_RE, extractCandidateOpportunityDetail } from './providers/ultipro.mjs';
 import { VEJ_KEY_MONITOR } from './providers/vdab.mjs';
 import { PATH_BREAKING_CHAR, PATH_BREAKING_CHAR_ENCODED_ONCE } from './providers/arbeitsagentur.mjs';
+import { resolveHibobTenant } from './providers/hibob.mjs';
 import { atsVendorOf } from './ats-vendor.mjs';
 import { linkedInJobId, linkedInGuestUrl } from './lib/linkedin-url.mjs';
 
@@ -77,6 +78,8 @@ function isSafeValue(v) {
 //   `timeoutMs`  — override the default fetch timeout (slow/rate-limited APIs).
 //   `throttleMs` — minimum interval between our requests to this provider.
 //   `accept`     — override the Accept header (providers that answer in HTML).
+//   `headers`    — extra request headers, or a function of the extracted
+//                  params that returns them (see the `hibob` entry).
 //   `method`     — HTTP method of the API request; defaults to GET.
 //   `body`       — builds the request body from the extracted params, for an
 //                  endpoint that only answers a POST (see the `meituan` entry).
@@ -369,6 +372,23 @@ const ATS_PROVIDERS = [
       try { html = await res.text(); } catch { return null; }
       return classifyUltiproDetailPage(html, id);
     },
+  },
+  {
+    id: 'hibob',
+    // {tenant}.careers.hibob.com/jobs/{uuid}[/apply], the URL providers/hibob.mjs
+    // writes. The posting page reads only this per-posting endpoint and, when
+    // it answers 404, shows "No job openings match this URL" in place of the
+    // posting, so a 404 is the page's own verdict and a 200 is a live posting.
+    // The `companyidentifier` header names the tenant; without it, or for a
+    // label that is not a tenant, the answer is 401, which stays inconclusive.
+    match(u) {
+      const tenant = resolveHibobTenant(u.href);
+      if (!tenant) return null;
+      const m = u.pathname.match(/^\/jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/apply)?\/?$/i);
+      return m ? { tenant, jobId: m[1] } : null;
+    },
+    api: ({ tenant, jobId }) => `https://${tenant}.careers.hibob.com/api/job-ad/${jobId}/application-form`,
+    headers: ({ tenant }) => ({ companyidentifier: tenant }),
   },
   {
     id: 'arbeitsagentur',
@@ -1061,7 +1081,7 @@ export function resolveAtsApi(rawUrl) {
       timeoutMs: provider.timeoutMs,
       throttleMs: provider.throttleMs,
       accept: provider.accept,
-      headers: provider.headers,
+      headers: typeof provider.headers === 'function' ? provider.headers(parts) : provider.headers,
       followEmbed: provider.followEmbed,
       interpret: provider.interpret,
       interpretStatuses: provider.interpretStatuses,
@@ -1087,7 +1107,8 @@ export function isAtsPosting(url) {
 // Zoho Recruit has no JSON API; the posting page resolveAtsApi() points at
 // embeds the record with its HTML `Job_Description`. UltiPro is the same: its
 // detail page embeds the `CandidateOpportunityDetail` record with its HTML
-// `Description`.
+// `Description`. HiBob's per-posting endpoint carries the posting's HTML
+// description, responsibilities, requirements and benefits.
 // Workable canonical and share links expose description, requirements and benefits
 // on the per-posting v2 API, after the existing guarded account-resolution hop.
 // HireHive's per-posting API carries the description HTML.
@@ -1102,6 +1123,7 @@ export const JD_TEXT_API_ATS = new Set([
   'ashby',
   'greenhouse',
   'greenhouse-embedded',
+  'hibob',
   'hirehive',
   'lever',
   'smartrecruiters',
