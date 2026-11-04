@@ -116,6 +116,23 @@
 #   - was: "Datenanalyst"
 #   - was: "Systemadministrator"
 
+# -- SEEK NZ and LinkedIn keyword searches (optional) --
+# Read by scan-seek.mjs (`npm run scan:seek`) and scan-linkedin.mjs
+# (`npm run scan:linkedin`), which cover employers with no public ATS board.
+# One request per entry. title_filter, location_filter and data/blacklist.md
+# below apply to both. See docs/SUPPORTED_JOB_BOARDS.md for the robots.txt
+# notes on SEEK (no query string by default) and LinkedIn's guest endpoints.
+#
+# `keyword` / `keywords` is the search text; `location` is optional.
+#
+# seek_searches:
+#   - keyword: "data analyst"
+#     location: "Wellington"
+#
+# linkedin_searches:
+#   - keywords: "platform engineer"
+#     location: "Auckland, New Zealand"
+
 # -- Dayforce (Ceridian) Recruiting boards (optional) --
 # Read by scan-dayforce.mjs (`npm run scan:dayforce`), a separate Playwright
 # scanner for Dayforce career sites (jobs.dayforcehcm.com). Dayforce's job
