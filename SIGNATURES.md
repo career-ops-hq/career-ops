@@ -216,3 +216,4 @@ public commit with a stated reason.
 - @lkorchnoy | Ludmila Korchnoy | 2026-10-29 | "Quality job search. Agent on your side. Future looks promising with this tool." | id:55862411 | src:https://github.com/career-ops-hq/career-ops/discussions/6248 | n:168
 - @roberttk01 | Thomas Kyle Robertson | 2026-11-01 | id:6352722 | src:https://github.com/career-ops-hq/career-ops/discussions/6388 | n:169
 - @sayyidmibrahiim | Ibrahim | 2026-11-03 | "ai ops" | id:106948724 | src:https://github.com/career-ops-hq/career-ops/discussions/6422 | n:170
+- @taattieee | 2026-11-04 | "Make job applications less monotonous!" | id:100685678 | src:https://github.com/career-ops-hq/career-ops/discussions/6487 | n:171
