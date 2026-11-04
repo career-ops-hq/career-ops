@@ -523,8 +523,9 @@ export async function mergeTracker(options = {}) {
   // A row's posting URL for the URL guards: its URL cell, else the URL its
   // report names, the same key an addition gets from its own report. The
   // default nine-column tracker has no URL cell, so without the report the
-  // guards never see two same-titled postings as distinct. Read lazily: only
-  // rows that already match on company and title reach a guard. A placeholder
+  // guards never see two same-titled postings as distinct. Each report is read
+  // once per run: Pass 0 reads it for every row without a URL, the guards only
+  // for rows that already match on company and title. A placeholder
   // cell is no URL: returned as one, it hid the report, so a guard saw "unknown"
   // and another requisition with the same title folded into this row.
   const reportUrls = new Map();
@@ -1848,11 +1849,14 @@ export async function mergeTracker(options = {}) {
 
       // Pass 0 — the posting URL is the stable natural key. When it hits it is
       // authoritative and no heuristic runs. Tiers 1-3 below remain the fallback
-      // for rows with no URL yet.
+      // for rows with no URL yet. A row's key is read the way the guards below
+      // read it, from the report when the cell names no posting: the cell alone
+      // missed that row, and the title tiers then appended a second row for the
+      // same posting or updated a same-title row from another board.
       const addUrl = normalizeUrl(addition.url);
       let dupReason = null;
       if (addUrl) {
-        duplicate = existingApps.find(a => a.url && normalizeUrl(a.url) === addUrl);
+        duplicate = existingApps.find(a => normalizeUrl(postingUrl(a)) === addUrl);
         if (duplicate) dupReason = 'url';
       }
 
