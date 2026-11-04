@@ -40,6 +40,10 @@ const MODES = ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'marker'];
 const CLEARED_ENV = [
   'CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_PROFILE',
   'CAREER_OPS_BATCH_STATE', 'CAREER_OPS_MODEL', 'OPENROUTER_API_KEY',
+  // merge-tracker.mjs moves the TSVs it merges out of the additions directory,
+  // and reserve-report-num.mjs writes a sentinel into the reports directory.
+  'CAREER_OPS_ADDITIONS', 'CAREER_OPS_REPORTS_DIR', 'CAREER_OPS_FOLLOWUPS',
+  'CAREER_OPS_PDF_INDEX', 'CAREER_OPS_TRACKER_LOCK',
 ];
 
 /** Relative-import closure of `entry` (static and literal dynamic imports). */
