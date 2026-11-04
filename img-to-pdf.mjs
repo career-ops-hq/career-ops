@@ -28,6 +28,7 @@ import { resolve, dirname, extname } from 'path';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const MIME_TYPES = {
   '.png': 'image/png',
@@ -129,7 +130,7 @@ export async function convertImageToPdf(inputPath, outputPath, { force = false }
   // After argv checks. A static import made --help and a missing path wait
   // on playwright, and crash when the package was not installed.
   const { chromium } = await import('playwright');
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'load' });

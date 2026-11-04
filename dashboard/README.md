@@ -19,7 +19,7 @@ value.
 
 ## Prerequisites and running
 
-Requires Go 1.24+ (`go.mod`). From the repo root:
+Requires Go 1.26+ (`go.mod`). From the repo root:
 
 ```bash
 npm run serve:dashboard    # go run . --path .. (The script automatically resolves external data directories by falling back through CAREER_OPS_ROOT and CAREER_OPS_DATA_DIR enviornment variables,defaulting to repository root.)

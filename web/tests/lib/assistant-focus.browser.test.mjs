@@ -37,6 +37,9 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
       return route.abort();
     });
     await page.route("**/api/assistant/chats**", (route) => route.fulfill({ json: route.request().method() === "PUT" ? { revision: 1, title: "Fictional focus fixture" } : { chats: [], errors: [] } }));
+    // Onboarding offers the assistant only for an installed CLI, so the fixture
+    // id must be installed, and no CLI on the machine may stand in for it.
+    await page.route("**/api/clis", (route) => route.fulfill({ json: { clis: cli ? [{ id: "fixture-cli", installed: true }] : [] } }));
     await page.route("**/api/doctor", (route) => route.fulfill({ json: { available: true, onboardingNeeded: true, missing: ["config/profile.yml", "portals.yml"], warnings: [] } }));
     await page.route("**/api/assistant", (route) => route.continue({ url: `http://127.0.0.1:${fixture.address().port}/assistant` }));
     return page;
@@ -63,7 +66,7 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
     await target.waitFor();
     await tabTo(page, target);
     await page.keyboard.press("Enter");
-    await page.locator("textarea").waitFor();
+    await composer(page).waitFor();
     assert.equal(await panel(page).count(), 1);
   }
   const page = await pageFor();
@@ -113,7 +116,7 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
   assert.equal(await focused(composer(page)), true);
   assert.equal(requests[1].message, "Unsent draft");
   // Leave the modeless panel: replies and repeated open events cannot pull back.
-  const search = page.getByRole("textbox", { name: "Search company or role…", exact: true });
+  const search = page.getByRole("searchbox", { name: "Search applications", exact: true });
   await tabTo(page, search);
   await page.keyboard.press("Escape");
   assert.equal(await panel(page).count(), 1);
