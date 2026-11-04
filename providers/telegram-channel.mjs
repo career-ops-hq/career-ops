@@ -125,13 +125,14 @@ const GENERIC_ORG_RE = /(компани|команд|стартап|проект
 // A work format where the employer would be: Proglib's third line is
 // "Удаленно (Москва)" / "Офис/гибрид (Москва)". LOCATIONISH_RE cannot catch
 // these: its \b never fires next to a Cyrillic letter.
-const WORK_FORMAT_RE = /(?<![\p{L}])(удал[её]н\p{L}*|гибрид\p{L}*|офис\p{L}*|релокац\p{L}*|remote|hybrid|onsite|on-site|office)(?![\p{L}])/iu;
-// A line that is nothing but a work format or a reach ("Worldwide 🌏",
-// "remote", "Удалённо · Москва" is not: it names a city) — never a title.
+const WORK_FORMAT_RE = /(?<![\p{L}])(удал[её]н\p{L}*|гибрид\p{L}*|офис\p{L}*|релокац\p{L}*|relocation|remote|hybrid|onsite|on-site|office)(?![\p{L}])/iu;
+// A line that is nothing but a work format, a reach or an employment term
+// ("Worldwide 🌏", "remote", "Релокация", "Full-time"; "Удалённо · Москва"
+// is not: it names a city) — never a title.
 // Each word must end where its letters do: the separator may be empty, and
 // without that, "офисофис…1" can be split between the \p{L}* tails in
 // exponentially many ways before the match fails.
-const FORMAT_ONLY_RE = /^(?:(?:worldwide|anywhere|global|remote|hybrid|on-?site|office|удал[её]нн?\p{L}*|гибрид\p{L}*|офис\p{L}*)(?![\p{L}])[\s,/()·|-]*)+$/iu;
+const FORMAT_ONLY_RE = /^(?:(?:worldwide|anywhere|global|remote|hybrid|on-?site|office|relocation|full[- ]?time|part[- ]?time|удал[её]нн?\p{L}*|гибрид\p{L}*|офис\p{L}*|релокац\p{L}*|(?:полная|частичная)\s+занятость)(?![\p{L}])[\s,/()·|-]*)+$/iu;
 // A phrase, not a name: "в Чехии или Испании", "Автотестировщик на Java".
 const FUNCTION_WORD_RE = /(?<![\p{L}])(или|и|на|в|во|с|со|для|по|от|до|из|за|к|у|о|об|при|and|or|of|the|to|in|for|with)(?![\p{L}])/u;
 // What precedes `в` when the `в` phrase is a destination: "с переездом в
@@ -330,7 +331,10 @@ export function employerName(lines) {
     const hashtagEmployer = plausibleEmployer(second, false);
     // A line of business is not a name either: "#Develpment\nCustom Software
     // Development" (@remote_jobs_relocate, measured 2026-10-31).
-    if (hashtagEmployer && !ROLE_WORD_RE.test(hashtagEmployer) && !isDepartment(hashtagEmployer)) return hashtagEmployer;
+    // Nor is a work format with more words ("Релокация в Сербию"), which
+    // FORMAT_ONLY_RE in plausibleEmployer() lets through.
+    if (hashtagEmployer && !ROLE_WORD_RE.test(hashtagEmployer) && !isDepartment(hashtagEmployer)
+        && !WORK_FORMAT_RE.test(hashtagEmployer)) return hashtagEmployer;
   }
   // The six positional shapes below run only when every marked shape above
   // found nothing, so no post those attribute changes. Measured 2026-10-31 on

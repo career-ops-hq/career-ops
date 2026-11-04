@@ -167,6 +167,8 @@ try {
     [['#senior #удаленка', 'QA Engineer'], 'a hashtag-only first line whose next line is a role acronym'],
     [['#middle #гибрид', 'Тестировщик'], 'a hashtag-only first line whose next line is a one-word Russian role'],
     [['#lead', 'Руководитель отдела'], 'a hashtag-only first line whose next line names a head of department'],
+    [['#remote', 'Релокация', 'Senior Engineer'], 'a relocation term on the hashtag template'],
+    [['#remote', 'Relocation to Serbia', 'Senior Engineer'], 'a relocation phrase on the hashtag template'],
     // #4455: a title packing several pipe-delimited metadata tags is a
     // different shape from "Title | Employer" — the non-greedy `[^|]`
     // capture can only land on the LAST segment, which is whichever tag the
@@ -450,6 +452,11 @@ try {
   const reach = postToJob(parseChannelPage(page(post(12457, '2026-09-04T10:00:00+00:00', `#Analytics<br/>Plurio<br/>Worldwide 🌏<br/>Senior Marketing Analyst (Americas)<br/>remote<br/>${A('https://www.plurio.ai/careers/senior-marketing-analyst')}`)), 'devjobs').posts[0]);
   if (reach?.title === 'Senior Marketing Analyst (Americas)' && reach.company === 'Plurio') pass('the hashtag template skips a work-format line ("Worldwide 🌏") when choosing the title');
   else fail(`hashtag reach post = ${JSON.stringify(reach)}`);
+  for (const term of ['Full-time', 'Part-time', 'Релокация']) {
+    const job = postToJob(parseChannelPage(page(post(12455, '2026-09-04T10:00:00+00:00', `#Analytics<br/>Plurio<br/>${term}<br/>Senior Marketing Analyst<br/>${A('https://www.plurio.ai/careers/senior-marketing-analyst')}`)), 'devjobs').posts[0]);
+    if (job?.title === 'Senior Marketing Analyst') pass(`the hashtag template skips a "${term}" line when choosing the title`);
+    else fail(`hashtag "${term}" post = ${JSON.stringify(job)}`);
+  }
 
   // A run of adjacent work-format words ending in a digit used to backtrack
   // exponentially in FORMAT_ONLY_RE while choosing the hashtag-template
