@@ -53,7 +53,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 7. Detect role archetype → adapt framing
 8. Before tailoring, optionally compare the new JD with the latest tailored CV or JD. Resolve the application/report first with `node find.mjs {report-or-tracker-number}`. Use the resolved report/JD snapshot as `{new-jd.txt}` and the referenced prior CV or prior JD as `{previous-jd-or-cv.txt}`; if either source cannot be located, do not silently reuse a CV. Run `npm run jd:similarity -- {new-jd.txt} {previous-jd-or-cv.txt}` and display the `decision` and `score`. Reuse is allowed only when the recommendation is `reuse` or the user explicitly overrides it; `reuse-with-edits` still requires the listed edits, and `regenerate` requires the normal tailoring flow.
 9. Build an internal recruiter-side risk map from the JD using `modes/heuristics/recruiter-side.md`: likely doubts, matching evidence, and which document section should address each doubt
-10. Rewrite Professional Summary by injecting JD keywords + exit narrative bridge ("Built and sold a business. Now applying systems thinking to [JD domain].")
+10. Rewrite Professional Summary by injecting JD keywords + the candidate's exit narrative from config/profile.yml → narrative.exit_story and the "Your Exit Narrative" section in modes/_profile.md; use the populated user source(s), adapted to the target role domain, and never invent an exit or founder story
 11. Select top 3-4 most relevant projects for the job. If `cv.md` carries an Awards / Honors section, populate `awards[]` with the entries that support this role — for an early-career candidate a contest medal or dean's list often outranks a thin project. Omit the key when there is nothing to list and the section disappears entirely; never invent an award to fill it
 12. Reorder experience bullets by JD relevance and by the risk map: strongest matching evidence first
 13. Build competency grid from JD requirements (6-8 keyword phrases), prioritizing `existing` and `supportedByResume` skills from Step 4 — never a `gap` skill
@@ -95,8 +95,9 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
     The audit recommends; the user decides. If they take any rewrite, return to Step 17, rebuild the payload and the HTML, and re-run the fact gate before rendering. The audit is persisted only once that decision is known, and records which rewrites were applied — so the `## HM Audit` section never describes a CV the rendered PDF no longer matches. Do not re-run the audit against the rebuilt CV: a second dispatch doubles the cost for a verdict the user has already acted on.
 21. Execute: `node generate-pdf.mjs {html-path} {pdf-path} --format={letter|a4} --report={report number}`. When `page_format` is `auto`, drop `--format` and pass `--country={code}` with the same code the payload carries, since an explicit `--format` outranks `auto`. Here `{pdf-path}` is the active bundle's `cv/tailored/vNNN/cv.pdf` or `output/cv-{candidate}-{report}-{company}-{YYYY-MM-DD}.pdf` for a one-off CV. `{report number}` is the NNN from the report filename/link (e.g. `008` for `reports/008-acme-….md`), not the tracker `#` column. Pass it whenever the application has (or will have) a report; it records the PDF↔report linkage in `data/pdf-index.tsv` so the dashboard can open and regenerate the exact nested or flat HTML/PDF pair. Omit it only for one-off CVs with no tracker entry.
     - The rendered PDF has a two-page warning threshold by default. `--max-pages=N` accepts a positive integer; pass `--max-pages=1` when the user or market prefers a one-page CV.
-    - If the rendered PDF exceeds its threshold, generation warns loudly with the actual and allowed page counts plus trimming guidance, then reports and indexes the unchanged PDF so existing longer-CV flows keep working.
-    - Pass `--strict-pages` only when the user or market requires a hard limit. Strict overflow leaves the draft available for inspection but does not report or index it as successful; trim lower-priority content and rerun.
+    - With no flag, the budget comes from `config/profile.yml` → `cv.max_pages` and `cv.strict_pages` when set (#6325), and the `📐 Page budget` line ends with `from config/profile.yml`. Do not repeat those values as flags. A flag passed for one render still wins. A value that is set but unusable stops the CV render with `Invalid page budget in config/profile.yml: …`: tell the user which key to fix rather than retrying with a flag. When the user says they always want one page, set `cv.max_pages: 1` there, so every CV render path picks it up, batch workers and the web UI included. Cover letters (`--kind=cover`) keep their flag-or-default budget, since the `cv.*` keys do not apply to them.
+    - If the rendered PDF exceeds its threshold and the budget is warning-only (no `--strict-pages`, no `cv.strict_pages: true`), generation warns loudly with the actual and allowed page counts plus trimming guidance, then reports and indexes the unchanged PDF so existing longer-CV flows keep working.
+    - Pass `--strict-pages`, or rely on `cv.strict_pages: true`, only when the user or market requires a hard limit. A strict overflow writes the rejected render to a sibling `{pdf-path minus .pdf}.overflow.pdf` draft for inspection (`.overflow-2.pdf` and so on when that name is taken, so no existing file is replaced; the error names the path it used), leaves any PDF already at `{pdf-path}` unchanged, and does not report or index it as successful; trim lower-priority content and rerun.
     - Generation fails when Work Experience is not newest-first, quoting the dates of the role that starts later than the one above it. Return to Step 17 with the roles in reverse-chronological order, rebuild the HTML, and re-run the fact gate before rendering; tailor through the summary, competencies, and bullet selection, never by moving roles. Pass `--allow-nonchronological`, which turns the failure into a warning, only when the user explicitly asks for a non-chronological CV.
 21a. **ATS variant — off by default, opt-in only.** Run this step if and only if the invocation carried `--ats` (`/career-ops pdf --ats`, or the same flag on a natural-language request) or `modes/_custom.md` turns it on as a house rule; otherwise skip straight to Step 22 without prompting. It runs after Step 21 so the payload is final (any Step 20 rewrites are already in it) and the styled CV is done: the variant is an extra, and a failure here never touches the styled HTML/PDF.
     - **This is not a template swap.** The `ats` template owns the DOM, not the payload. `competencies[]` renders as tags separated only by CSS gap, under a header parsers don't recognise, so it gets dropped whole whatever the template looks like. Fold the payload first, and fold only this copy; the styled payload keeps its competency grid:
@@ -153,11 +154,10 @@ The `ats` mode also has an earlier, **payload**-level stage (`ats-payload.mjs`),
 
 ## PDF Design
 
-- **Fonts**: Space Grotesk (headings, 600-700) + DM Sans (body, 400-500)
-- **Fonts self-hosted**: `fonts/`
-- **Header**: name in Space Grotesk 24px bold + gradient line `linear-gradient(to right, hsl(187,74%,32%), hsl(270,70%,45%))` 2px + contact row
-- **Section headers**: Space Grotesk 13px, uppercase, letter-spacing 0.05em, color cyan primary
-- **Body**: DM Sans 11px, line-height 1.5
+- **Fonts**: ATS-safe system sans stack (`"Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif`) to ensure clean PDF text extraction without artificial word spacing; overridable via `config/profile.yml` `style:`
+- **Header**: name in 28px bold + gradient line `linear-gradient(to right, hsl(187,74%,32%), hsl(270,70%,45%))` 2px + contact row
+- **Section headers**: 12px, uppercase, letter-spacing 0.06em, color cyan primary (`hsl(187, 74%, 32%)`)
+- **Body**: 11px, line-height 1.5
 - **Company names**: accent purple color `hsl(270,70%,45%)`
 - **Margins**: 0.6in
 - **Background**: pure white
@@ -176,10 +176,9 @@ The `ats` mode also has an earlier, **payload**-level stage (`ats-payload.mjs`),
 
 Examples of legitimate reformulation:
 - JD says "RAG pipelines" and CV says "LLM workflows with retrieval" → change to "RAG pipeline design and LLM orchestration workflows"
-- JD says "MLOps" and CV says "observability, evals, error handling" → change to "MLOps and observability: evals, error handling, cost monitoring"
-- JD says "stakeholder management" and CV says "collaborated with team" → change to "stakeholder management across engineering, operations, and business"
+- JD says "reusable UI components" and CV says "reusable React components" → change to "reusable UI components with React"
 
-**NEVER add skills that the candidate does not have. Only reword real experience using the exact JD vocabulary.**
+**NEVER add skills that the candidate does not have. Only reword real experience using the exact JD vocabulary — a swapped or mapped term must mean the same thing and be backed by the same role, never broadening the candidate's actual scope.**
 
 ## Template HTML
 

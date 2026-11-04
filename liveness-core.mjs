@@ -52,6 +52,11 @@ const HARD_EXPIRED_PATTERNS = [
   // rejected by \b alone (d->o is word->word).
   /this (?:job|role|position)(?: listing)? is closed\b(?!-)/i,
   /job (listing )?not found/i,
+  // Built In keeps a removed posting's full JD and its APPLY control, and says
+  // it is gone only in a banner under the title: "Sorry, this job was removed
+  // at 08:47 p.m. (UTC) on Wednesday, Oct 14, 2026" (#6327). The "sorry"
+  // keeps a sibling listing's "Job removed" badge from matching.
+  /\bsorry,? this job was removed\b/i,
   // A closure page whose only content is the sentence itself (#5000 defect 3):
   // "You can't view this job because it's not available at this time". It sits
   // in the hard tier because the sentence is a statement about THIS posting,

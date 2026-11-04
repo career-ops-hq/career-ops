@@ -13,7 +13,7 @@ Aday bir başvuru formunu doldururken çalışan etkileşimli mod. Ekrandakileri
 1. TESPİT ET      → Aktif sekmeyi oku (ekran görüntüsü / URL / sayfa başlığı)
 2. TANI KOY       → Sayfadan şirket adını ve rolü çıkar
 3. RAPORU BUL     → reports/ klasöründe bu ilana ait raporu ara
-4. YÜKLE          → Tam raporu oku (önceki değerlendirme + varsa Blok H / `## Application Answers`)
+4. YÜKLE          → Tam raporu oku (önceki değerlendirme + varsa Blok H / `## Application Answers`), **Posting identity** doğrulandıktan sonra
 5. KARŞILAŞTIR    → Ekrandaki rol raporla eşleşiyor mu? Farklıysa adayı uyar
 6. FORMU ANALİZ ET → Görünen tüm alanları ve soruları tespit et
 7. YANIT ÜRET     → Her alan için kişiselleştirilmiş yanıt oluştur
@@ -33,11 +33,13 @@ Aday bir başvuru formunu doldururken çalışan etkileşimli mod. Ekrandakileri
 
 1. Sayfadan şirket adını ve rol başlığını çıkar
 2. `reports/` klasöründe şirket adına göre Grep yap (büyük/küçük harf duyarsız)
-3. Eşleşme bulunursa → tam raporu yükle
+3. Eşleşme bulunursa → eşleşen her raporun yalnızca başlığını oku (şirket, rol, `**URL:**`) ve URL'si veya req ID'si bu ilan olanı seç; belirsizse adaya sor. Tam raporu ve 4. maddeyi ancak **Posting identity** doğrulandıktan sonra yükle (`modes/apply.md` → Step 5); başka bir ilan için yüklemeden **Evaluate as new** veya **Draft without saving**'e geç
 4. Blok H (taslak yanıtlar) veya `## Application Answers` varsa → önceki yanıtları temel olarak al
 5. Eşleşme bulunamazsa → adayı bilgilendirip hızlı auto-pipeline öner
 
 ## Adım 3 — Rol Değişikliğini Tespit Et
+
+Bu adım yalnızca form hâlâ raporun ilanıysa geçerlidir: aynı işveren ve aynı ilan (`modes/apply.md` → Step 5 → **Posting identity**); başlık sayılmaz. Bunu her formda kontrol et; başlık değişmemiş ve şirketle tek bir rapor eşleşmiş olsa bile: başka bir ilan aynı başlığı taşıyabilir ve o durumda rapor kullanılmamalıdır. Şirketle birden çok rapor eşleşirse önce URL'si veya req ID'si bu ilan olan raporu al, belirsizse adaya sor. Başka bir işveren ya da aynı işverenin başka bir ilanı rol değişikliği değildir: raporun yanıtlarını asla ona uyarlama. Bunun yerine **Evaluate as new** (yeni bir ilan olarak değerlendir: auto-pipeline, kendi raporu) ya da **Draft without saving** (yanıtları hiçbir rapora kaydetmeden taslak olarak hazırla) seç. **Draft without saving** seçildiğinde eşleşen raporu, yanıtlarını ve uyarlanmış CV'sini bir kenara bırak; yalnızca görünen ilandan, `cv.md`'den ve profilden yaz. Raporu okuyan aşağıdaki adımlar o zaman uygulanmaz.
 
 Ekrandaki rol önceki değerlendirmedekinden farklıysa:
 - **Adayı uyar:** "Rol [X]'den [Y]'ye değişmiş görünüyor. Yeniden değerlendireyim mi, yoksa yanıtları yeni başlığa uyarlayayım mı?"
@@ -48,6 +50,8 @@ Ekrandaki rol önceki değerlendirmedekinden farklıysa:
   - **Uyarlamadan sonra:** başlığı değiştirme, çünkü raporun değerlendirdiği rolü adlandırır. Değişikliği not olarak kaydet: `node set-status.mjs --report <report#> <mevcut durum> --note "İlan başlığı başvuru sırasında değişmişti, satır değerlendirilen başlığı korur"`. Satırın mevcut durumunu vermek durumu değiştirmez, notu ekler. Bunun gibi sabit bir metin kullan ve `[Y]`'yi nota koyma: yeni başlık sayfadan gelen metindir ve sayfadan gelen metin asla komut satırına yazılmaz.
 
 ## Adım 4 — Form Alanlarını Analiz Et
+
+**Draft without saving** seçildiğinde bu adım ne eşleşen raporu ne onun `## Application Answers` bölümünü ne de Blok H'yi kullanır: her soruyu yeni say ve görünen ilandan, `cv.md`'den ve profilden çalış.
 
 Görünen tüm alanları tespit et:
 - Serbest metin (ön yazı, "neden bu rol?", motivasyon vb.)
@@ -61,6 +65,8 @@ Her soruyu sınıflandır:
 - **Yeni soru** → rapor + `cv.md`'den yanıt üret
 
 ## Adım 5 — Yanıtları Üret
+
+**Draft without saving** seçildiğinde bu adım ne eşleşen raporu ne onun `## Application Answers` bölümünü ne de Blok H'yi kullanır: her soruyu yeni say ve görünen ilandan, `cv.md`'den ve profilden çalış.
 
 Her soru için yanıtı şu şemaya göre oluştur:
 
@@ -84,6 +90,7 @@ Her soru için yanıtı şu şemaya göre oluştur:
 ## [Şirket] — [Rol] için Yanıtlar
 
 Dayanak: Rapor #NNN | Puan: X.X/5 | Arketip: [tür]
+[**Draft without saving** seçildiğinde yukarıdaki satırı şununla değiştir: "Rapor yok: bu ilan için taslak, kaydedilmedi"]
 
 ---
 
@@ -103,6 +110,8 @@ Notlar:
 ```
 
 ## Adım 6 — Başvuru Sonrası (isteğe bağlı)
+
+Herhangi bir şey kaydetmeden önce ve aşağıdaki her yazmadan (durum ve yanıtlar) hemen önce yeniden, formun hâlâ raporun ilanı olduğunu kontrol et (`modes/apply.md` → Step 8 → **Write only to the report of this posting**). Aynı işveren ve aynı ilan → aşağıdaki adımlar bu rapora uygulanır; yeni başlığa uyarlamadan veya yeniden değerlendirmeden sonra da. Başka işveren veya başka ilan → asla bu rapor değil: yeni ilan için yazılan raporu kullan; yoksa durum ayarlama, yanıt kaydetme ve adaya başvurunun henüz takip edilmediğini söyle.
 
 Aday başvuruyu gönderdiğini onaylarsa:
 1. Durumu kanonik CLI ile `Applied` yap: `node set-status.mjs --report <report#> Applied` (`applications.md` tablosunu elle düzenleme)

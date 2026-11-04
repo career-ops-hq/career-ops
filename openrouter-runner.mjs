@@ -33,7 +33,9 @@ import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils
 import { anonymizeContext } from './utils/privacy-filter.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
-import { appendToPipeline, appendToScanHistory, atomicWriteFile } from './scan.mjs';
+import {
+  appendToPipeline, appendToScanHistory, atomicWriteFile, BROWSER_PROCESS_ENV,
+} from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -42,6 +44,14 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
 import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
+
+// Ambient privacy guard over global fetch. Installed explicitly here (rather
+// than relying on NODE_OPTIONS) so the OpenRouter path is guarded in a plain
+// checkout. Idempotent — a second install is a no-op.
+installPiiInterceptor();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -412,6 +422,9 @@ async function callOpenRouter(systemPrompt, userMessage) {
     const timeoutMs = getModelTimeoutMs();
     const timerId = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
+      // Privacy gate: the complete serialized request is inspected after prompt
+      // construction and before the network call. Throws (nothing sent) on a hit.
+      assertLlmRequestAllowed(OPENROUTER_API_URL, body);
       const resp = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
         headers: {
@@ -477,6 +490,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const timerId = setTimeout(() => controller.abort(), timeoutMs);
       let data;
       try {
+        // Privacy gate (rotation path). Same rule as the pinned-model path above.
+        assertLlmRequestAllowed(OPENROUTER_API_URL, body);
         const resp = await fetch(OPENROUTER_API_URL, {
           method: 'POST',
           headers: {
@@ -515,6 +530,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       return { content, usage };
 
     } catch (e) {
+      if (e?.code === 'PRIVACY_GUARD_BLOCKED') throw e;
       if (e instanceof QuotaExhaustedError || e.name === 'QuotaExhaustedError') {
         console.log(`FAILED (${e.message})`);
         throw e;
@@ -725,7 +741,10 @@ async function fetchJobPage(url) {
     let browser;
     let unreadable = null;
     try {
-      browser = await chromium.launch({ headless: true });
+      browser = await chromium.launch(browserLaunchOptions(
+        { headless: true },
+        { projectRoot: DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+      ));
       const page = await browser.newPage();
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.waitForTimeout(2000); // wait for SPA render
