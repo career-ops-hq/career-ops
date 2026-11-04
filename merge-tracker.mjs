@@ -537,6 +537,53 @@ export async function mergeTracker(options = {}) {
     return reportUrls.get(app.report);
   }
 
+  // An explicitly declared employer posting in the report's top metadata is
+  // negative evidence only. An aggregator URL is not a verified alias for it,
+  // but a different requisition on that SAME ATS board must not overwrite it
+  // merely because the company and title match. Never scan JD prose for links.
+  const declaredEmployerUrls = new Map();
+  let resolvePostingApi = null;
+  function declaredEmployerUrl(app) {
+    if (declaredEmployerUrls.has(app.report)) return declaredEmployerUrls.get(app.report);
+    let url = '';
+    const reportPath = resolveReportPath(app.report);
+    if (reportPath) {
+      for (const line of readFileSync(reportPath, 'utf-8').replace(/\r\n?/g, '\n').split('\n')) {
+        // Body sections, examples, and machine-summary payloads are not metadata.
+        if (/^[ \t]*(?:#{2,}(?:\s|$)|`{3,}|~{3,}|<!--)/.test(line)) break;
+        const match = line.match(/^[ ]{0,3}\*\*Official employer posting:\*\*[ \t]*(\S+)/i);
+        if (!match) continue;
+        const raw = unwrapReportUrlToken(match[1]);
+        if (normalizeUrl(raw) && !isAggregatorUrl(raw)) url = raw;
+        break;
+      }
+    }
+    declaredEmployerUrls.set(app.report, url);
+    return url;
+  }
+
+  function atsPostingIdentity(url) {
+    const resolved = resolvePostingApi?.(url);
+    if (!resolved) return null;
+    const idField = ['jobId', 'id', 'shortcode'].find(key => resolved.parts[key]);
+    if (!idField) return null;
+    const scope = Object.entries(resolved.parts).filter(([key]) => key !== idField)
+      .sort(([a], [b]) => a.localeCompare(b));
+    const rawId = resolved.parts[idField];
+    // UUID hex is case-insensitive. Other ATS identifiers are opaque strings.
+    const id = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId)
+      ? rawId.toLowerCase() : rawId;
+    return { scope: JSON.stringify([resolved.ats, scope]), id };
+  }
+
+  function declaredEmployerConflict(a, b) {
+    const declaredA = declaredEmployerUrl(a);
+    const declaredB = declaredEmployerUrl(b);
+    if (!declaredA && !declaredB) return false;
+    const identities = app => [postingUrl(app), declaredEmployerUrl(app)].map(atsPostingIdentity).filter(Boolean);
+    return identities(a).some(left => identities(b).some(right => left.scope === right.scope && left.id !== right.id));
+  }
+
   /**
    * Company equality for duplicate detection.
    *
@@ -1840,6 +1887,14 @@ export async function mergeTracker(options = {}) {
         missingReports++;
       }
 
+      // The optional metadata guard alone needs the API URL parser. Load its
+      // provider graph only for a relevant declaration, not on every merge.
+      if (declaredEmployerUrl(addition) || existingApps.some(app =>
+        (companiesMatch(app.company, addition.company)
+          || companiesMatchIgnoringCorporateForm(app.company, addition.company)) && declaredEmployerUrl(app))) {
+        resolvePostingApi ??= (await import('./liveness-api.mjs')).resolveAtsApi;
+      }
+
       let duplicate = null;
       // True only for a tier-1 match (report number + company): the one heuristic
       // tier where the addition is provably the same evaluation as the existing
@@ -1931,6 +1986,7 @@ export async function mergeTracker(options = {}) {
       // text and an incoming evaluation of the English version share a title,
       // and folding them would bury the English one under the SKIP.
       const urlBlocksHeuristic = (cand) => {
+        if (declaredEmployerConflict(cand, addition)) return true;
         if (urlDiffers(cand)) return true;
         const candPostingUrl = postingUrl(cand);
         if (!isAggregatorUrl(candPostingUrl) && !isAggregatorUrl(addition.url)
