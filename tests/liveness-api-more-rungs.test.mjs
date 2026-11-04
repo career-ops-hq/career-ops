@@ -83,6 +83,8 @@ test('Arbeitsagentur sends the real reference number for every path spelling', a
   for (const [path, refnr] of [
     // The form the provider writes and the site's own search results use.
     ['13319-900588%252F1_6041CS-S', '13319-900588/1_6041CS-S'],
+    // Hexadecimal digits can be lower case.
+    ['13319-900588%252f1_6041CS-S', '13319-900588/1_6041CS-S'],
     // The detail page answers 404 to this form, but the API still finds the posting.
     ['13319-900588%2F1_6041CS-S', '13319-900588/1_6041CS-S'],
     // The form the provider writes.

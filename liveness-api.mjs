@@ -41,11 +41,13 @@ import { parseWwrFeed } from './providers/weworkremotely.mjs';
 import { ZOHO_HOST_RE, isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
 import { HOST_RE as ULTIPRO_HOST_RE, extractCandidateOpportunityDetail } from './providers/ultipro.mjs';
 import { VEJ_KEY_MONITOR } from './providers/vdab.mjs';
+import { DOUBLE_ENCODED_CHAR, CHAR_ENCODED_ONCE } from './providers/arbeitsagentur.mjs';
 import { atsVendorOf } from './ats-vendor.mjs';
 import { linkedInJobId, linkedInGuestUrl } from './lib/linkedin-url.mjs';
 
 const TIMEOUT_MS = 8_000;
-const ENCODED_SLASH = encodeURIComponent('/');
+// Arbeitsagentur: the hexadecimal digits of an encoded character can be in either case.
+const CHAR_ENCODED_ONCE_RE = new RegExp(CHAR_ENCODED_ONCE, 'gi');
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
 // rejected before it can reach the fixed-host API URL template. The one escape
 // allowed is %20, because some Ashby org slugs contain a space (#5018). A space
@@ -352,7 +354,7 @@ const ATS_PROVIDERS = [
       // The API takes the base64url of the real number. Only that form is passed
       // on: the real number can hold characters the safe-value check refuses.
       try {
-        const refnr = decodeURIComponent(m[1]).replaceAll(ENCODED_SLASH, '/');
+        const refnr = decodeURIComponent(m[1]).replace(CHAR_ENCODED_ONCE_RE, DOUBLE_ENCODED_CHAR);
         return { refnrBase64: Buffer.from(refnr).toString('base64url') };
       } catch {
         return null;

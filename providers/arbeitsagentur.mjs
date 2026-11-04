@@ -47,8 +47,8 @@ const API_KEY = 'jobboerse-jobsuche'; // public client key the arbeitsagentur.de
 const DETAIL_BASE = 'https://www.arbeitsagentur.de/jobsuche/jobdetail/';
 // The detail page answers 404 to a once-encoded slash in its path, and a bare
 // slash would split the path. Its own search results encode the slash twice.
-const DOUBLE_ENCODED_CHAR = '/';
-const CHAR_ENCODED_ONCE = encodeURIComponent(DOUBLE_ENCODED_CHAR);
+export const DOUBLE_ENCODED_CHAR = '/';
+export const CHAR_ENCODED_ONCE = encodeURIComponent(DOUBLE_ENCODED_CHAR);
 const CHAR_ENCODED_TWICE = encodeURIComponent(CHAR_ENCODED_ONCE);
 const INTER_PAGE_DELAY_MS = 200; // between filter-mode page requests
 // 'filter' mode's server-side home-office query: every posting where home office
