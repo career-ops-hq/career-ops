@@ -134,6 +134,9 @@ class TrackerExit extends Error {
 // variant of #3500: that one looked for this file under the data root, this one
 // looked for it under whatever directory the shell happened to be in.
 const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+// Debug-only timing output, gated behind CAREER_OPS_DEBUG=1 so normal runs are
+// unchanged and no new stderr appears for users.
+const DEBUG = process.env.CAREER_OPS_DEBUG === '1';
 const STATES_PATH = join(CODEBASE_ROOT, 'templates/states.yml');
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
 const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
@@ -702,9 +705,12 @@ function reportDiagnostics(diag, ctx) {
 }
 
 function syncIndex(db, states, ctx) {
+  const rebuildStarted = Date.now();
   const { apps, diag, layout } = parseTracker(states, ctx);
+  const parsedAt = Date.now();
   const ledger = readLedger(states, ctx);
   const timelines = foldObservations(ledger.observations);
+  const ledgeredAt = Date.now();
   const observationsByNum = new Map();
   for (const obs of ledger.observations) {
     if (!observationsByNum.has(obs.num)) observationsByNum.set(obs.num, []);
@@ -764,6 +770,11 @@ function syncIndex(db, states, ctx) {
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
+  }
+  const committedAt = Date.now();
+  if (DEBUG) {
+    ctx.error(`tracker.mjs sync: indexed ${apps.length} applications in ${committedAt - rebuildStarted}ms `
+      + `(parse ${parsedAt - rebuildStarted}ms, ledger ${ledgeredAt - parsedAt}ms, write ${committedAt - ledgeredAt}ms)`);
   }
   return { apps, diag, ledger };
 }

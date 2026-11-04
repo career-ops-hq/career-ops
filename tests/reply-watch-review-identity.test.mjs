@@ -19,6 +19,60 @@ const original = '| 1 | 2026-06-01 | Acme | Backend Engineer | 4/5 | Applied | -
 // next stall shows where it happens.
 const PHASE_BUDGET_MS = DEFAULT_SCRIPT_TIMEOUT_MS;
 
+// Pure: names the in-flight phase at a timeout from the captured stdout alone.
+// Extracted from `arm()` so it can be unit-tested without spawning reply-watch.
+// A stall after "Tracker review complete" but before "Synced database index"
+// is the tracker.mjs sync step itself; every other case keeps the original
+// phase message unchanged.
+function phaseNameAtTimeout(phase, stdout) {
+  if (
+    phase === 'applying the answer (set-status, then tracker sync)'
+    && stdout.includes('Tracker review complete')
+    && !stdout.includes('Synced database index')
+  ) {
+    return 'tracker sync';
+  }
+  return phase;
+}
+
+function check(label, actual, expected) {
+  try {
+    assert.equal(actual, expected);
+    pass(label);
+  } catch (error) {
+    fail(`${label}: ${error.message}`);
+  }
+}
+
+// Unit tests for the phase-naming logic — run in milliseconds, never spawn a
+// child, and fail if the logic is removed (each asserts a concrete output).
+const complete = '✅ Tracker review complete\n';
+const synced = 'Synced database index (applications.db).\n';
+
+check(
+  'phaseNameAtTimeout: complete but not synced -> tracker sync',
+  phaseNameAtTimeout('applying the answer (set-status, then tracker sync)', complete),
+  'tracker sync'
+);
+
+check(
+  'phaseNameAtTimeout: neither marker -> original message',
+  phaseNameAtTimeout('applying the answer (set-status, then tracker sync)', 'still waiting for the prompt'),
+  'applying the answer (set-status, then tracker sync)'
+);
+
+check(
+  'phaseNameAtTimeout: both markers -> original message',
+  phaseNameAtTimeout('applying the answer (set-status, then tracker sync)', complete + synced),
+  'applying the answer (set-status, then tracker sync)'
+);
+
+check(
+  'phaseNameAtTimeout: unrelated phase unaffected',
+  phaseNameAtTimeout('waiting for the review prompt', complete),
+  'waiting for the review prompt'
+);
+
 async function review(change, expectsConflict = true) {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-reply-identity-'));
   let child, timer;
@@ -43,7 +97,7 @@ async function review(change, expectsConflict = true) {
         clearTimeout(timer);
         timer = setTimeout(() => {
           child.kill();
-          reject(new Error(`review did not finish: still ${phase} after ${PHASE_BUDGET_MS}ms `
+          reject(new Error(`review did not finish: still ${phaseNameAtTimeout(phase, stdout)} after ${PHASE_BUDGET_MS}ms `
             + `(${Date.now() - startedAt}ms in all)\nstdout: ${stdout}\nstderr: ${stderr}`));
         }, PHASE_BUDGET_MS);
       };
@@ -55,15 +109,15 @@ async function review(change, expectsConflict = true) {
         if (changed || !stdout.includes('Apply recommended status updates')) return;
         changed = true;
         arm('changing the tracker as the second writer');
+        // A second authorized writer changes the row while the human prompt is open.
         try {
-          // A second authorized writer changes the row while the human prompt is open.
           const transaction = await openTrackerTransaction(tracker);
           try { transaction.replace(header + change(original)); }
           finally { transaction.close(); }
           answeredAt = Date.now();
-          arm('applying the answer (set-status, then tracker sync)');
-          child.stdin.end('y\n');
         } catch (error) { child.kill(); reject(error); }
+        arm('applying the answer (set-status, then tracker sync)');
+        child.stdin.end('y\n');
       });
       child.on('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
     });

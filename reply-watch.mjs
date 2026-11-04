@@ -35,6 +35,9 @@ export const DEFAULT_CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
 export const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 export const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+// Debug-only timing output, gated behind CAREER_OPS_DEBUG=1 so normal runs are
+// unchanged and no new stderr appears for users.
+const DEBUG = process.env.CAREER_OPS_DEBUG === '1';
 
 // Helper to ask a question in the CLI
 function askQuestion(query) {
@@ -412,12 +415,23 @@ async function main() {
       }
       console.log('\n✅ Tracker review complete');
 
-      // Sync tracker DB if tracker.mjs exists
+      // Sync tracker DB if tracker.mjs exists. Time the call so a stall shows
+      // where the time goes; written to stderr so it cannot alter stdout output.
+      const syncStartedAt = Date.now();
+      let syncDurationMs = 0;
       try {
+        const stdio = DEBUG ? ['ignore', 'ignore', 'inherit'] : 'ignore';
         execFileSync(process.execPath, [path.join(CODE_ROOT, 'tracker.mjs'), 'sync'], {
-          stdio: 'ignore',
+          stdio,
           env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT, CAREER_OPS_TRACKER: APPS_FILE },
         });
+        syncDurationMs = Date.now() - syncStartedAt;
+        // Surface a slow sync even when debug is off, but keep stdout untouched
+        // and the normal fast path silent. Debug builds forward tracker.mjs's
+        // own stderr timing line through as well.
+        if (DEBUG || syncDurationMs > 5000) {
+          console.error(`tracker.mjs sync took ${syncDurationMs}ms`);
+        }
         console.log('Synced database index (applications.db).');
       } catch (e) {
         // ignore
