@@ -278,7 +278,18 @@ test('a row merge refuses keeps its file and number and fails the import', () =>
       assert.equal(left.length, 1);
       assert.match(readFileSync(join(dir, left[0]), 'utf-8'), /Quillfeather Health/);
       assert.notDeepEqual(readdirSync(join(fx.root, 'reports')), [], 'the refused row keeps its reserved number');
-      assert.match(result.stderr, /CAREER_OPS_ADDITIONS=".+" node merge-tracker\.mjs/);
+      // The printed re-run works from another directory with none of the
+      // import's overrides set: it carries the root and the script's full path.
+      const retry = /then run:\n {2}(.+)\n/.exec(result.stderr)?.[1];
+      assert.ok(retry, describeSpawn(result));
+      assert.match(retry, /^CAREER_OPS_ROOT=\S+ CAREER_OPS_ADDITIONS=\S+ node \S+merge-tracker\.mjs$/);
+      writeFileSync(join(fx.root, 'batch', 'batch-state.tsv'),
+        'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n');
+      const env = { ...process.env };
+      for (const name of ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE', 'CAREER_OPS_ADDITIONS']) delete env[name];
+      const rerun = spawnSync('/bin/sh', ['-c', retry], { encoding: 'utf-8', env, cwd: tmpdir(), timeout: 60_000 });
+      assert.equal(rerun.status, 0, describeSpawn(rerun));
+      assert.ok(rowFor(readFileSync(fx.trackerPath, 'utf-8'), 'Quillfeather Health'), 'the re-run adds the row to the same tracker');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

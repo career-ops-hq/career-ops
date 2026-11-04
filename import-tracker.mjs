@@ -316,6 +316,19 @@ function createTracker(path, withUrl) {
   writeFileSync(path, `# Applications Tracker\n\n| ${cols.join(' | ')} |\n|${cols.map(() => '---').join('|')}|\n`, { flag: 'wx' });
 }
 
+// The re-run must reach the same tracker and batch state as this import, from any
+// working directory, so it carries the path overrides and the script's full path.
+const RETRY_ENV = ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE'];
+const shellQuote = (value) => (/^[A-Za-z0-9._@+/:=-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`);
+
+function retryCommand(additionsDir, env = process.env) {
+  const overrides = RETRY_ENV
+    .filter((name) => env[name]?.trim())
+    .map((name) => `${name}=${shellQuote(env[name].trim())} `)
+    .join('');
+  return `${overrides}CAREER_OPS_ADDITIONS=${shellQuote(additionsDir)} node ${shellQuote(join(CODE_ROOT, 'merge-tracker.mjs'))}`;
+}
+
 async function writeImport(entries, { colmap }) {
   // Private directory: --confirm must not merge or delete TSVs that were already waiting,
   // and CAREER_OPS_ADDITIONS must not point merge at a different directory than these files.
@@ -345,7 +358,7 @@ async function writeImport(entries, { colmap }) {
       leftNums = new Set(left.map((f) => Number(/^(\d+)-/.exec(f)?.[1])));
       console.error(`\nimport-tracker: ${left.length} row(s) were not added: ${left.join(', ')}.`);
       console.error(`Their files stay in ${additionsDir} with their numbers reserved. Fix each as the warning above says, then run:`);
-      console.error(`  CAREER_OPS_ADDITIONS="${additionsDir}" node merge-tracker.mjs`);
+      console.error(`  ${retryCommand(additionsDir)}`);
       return 1;
     }
     return merge.status ?? 1;
