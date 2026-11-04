@@ -20,10 +20,10 @@ function gate(reason, message) { return { reason, message: message.trim(), confi
 function narration(text) {
   const lines = []; let fence = null;
   for (const line of text.split("\n")) {
-    const marker = line.match(/^[ \t]*(`{3,}|~{3,})/);
+    const marker = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
     if (marker) {
       if (!fence) fence = marker[1];
-      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && /^[ \t]*$/.test(marker[2])) fence = null;
     } else if (!fence && !/^[ \t]*>/.test(line)) lines.push(line);
   }
   return { text: lines.join("\n"), inFence: fence !== null, fence };
@@ -72,10 +72,10 @@ function dedicatedGate(body) {
 function dedicatedBlocks(text) {
   const blocks = []; let fence = null; let open = null; let offset = 0;
   for (const line of text.split("\n")) {
-    const marker = line.match(/^[ \t]*(`{3,}|~{3,})/);
+    const marker = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
     if (marker) {
       if (!fence) fence = marker[1];
-      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && /^[ \t]*$/.test(marker[2])) fence = null;
       open = null;
     } else if (!fence) {
       if (/^<<evaluation-gate>>[ \t]*$/.test(line)) open = { start: offset, bodyStart: offset + line.length + 1 };
@@ -130,9 +130,10 @@ export function classifyEvaluationGate(text) {
 export function stripEvaluationGate(text) {
   if (typeof text !== "string" || !classifyEvaluationGate(text)) return text;
   const normalized = text.replace(/\r\n/g, "\n");
-  const blocks = dedicatedBlocks(normalized);
+  const leading = normalized.length - normalized.trimStart().length;
+  const blocks = dedicatedBlocks(normalized.slice(leading));
   if (blocks.length !== 1) return text; // legacy declarations remain unchanged
-  return (normalized.slice(0, blocks[0].start) + normalized.slice(blocks[0].end)).trim();
+  return normalized.slice(0, leading + blocks[0].start) + normalized.slice(leading + blocks[0].end);
 }
 
 /** A real report plus a separate explicit stop is contradictory, not a save.

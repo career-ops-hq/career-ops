@@ -93,6 +93,24 @@ test("fenced dedicated examples do not hide an active stop or get stripped as it
   }
 });
 
+test("a fence marker with an info string does not expose quoted stops", () => {
+  for (const marker of ["```", "````", "~~~~"]) {
+    const quoted = `${marker}text\n${structured()}\n${marker}yaml\n${stop}`;
+    assert.equal(classifyEvaluationGate(quoted), null);
+    assert.deepEqual(runOutcome(`${report}\n${quoted}`), { ok: true });
+    assert.equal(classifyEvaluationGate(`${marker}text\nExample\n${marker}yaml\n${structured()}`), null);
+    assert.equal(classifyEvaluationGate(`${quoted}\n${marker}\n${structured()}`)?.reason, "agency_confirmation");
+  }
+});
+
+test("display stripping detects leading whitespace and preserves normalized surrounding output", () => {
+  const prefix = " \n\t";
+  const suffix = "\n \t";
+  const text = `${prefix}${structured()}${suffix}`;
+  assert.equal(classifyEvaluationGate(text)?.reason, "agency_confirmation");
+  assert.equal(stripEvaluationGate(text), `${prefix}\nVERDICT: N/A/5 — Agency confirmation required.${suffix}`);
+});
+
 test("a dedicated stop before a report cannot be erased by a later numeric verdict", () => {
   const result = runOutcome(`${structured()}\n${report}\nVERDICT: 4.2/5 — Strong match.`);
   assert.equal(result.ok, false);

@@ -108,6 +108,12 @@ test("a fenced dedicated example cannot hide a later stop from persistence", asy
   assert.deepEqual(result.calls, []);
 });
 
+test("an info string cannot close an example and falsely block a valid report", async () => {
+  const result = await replay(`${report}\n\`\`\`text\n${dedicated}\n\`\`\`yaml\n${stopped}`);
+  assert.equal(result.completion.status, "done");
+  assert.deepEqual(result.calls, ["reserve-report-num.mjs", "persist-evaluation-report.mjs", "merge-tracker.mjs", "reserve-report-num.mjs"]);
+});
+
 test("a valid scored report still reaches real persistence once and returns its report number", async () => {
   const result = await replay(report);
   assert.equal(result.terminalEvent, null, "only successful persistence may declare report success");
