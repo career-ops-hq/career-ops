@@ -89,6 +89,9 @@ test('Arbeitsagentur sends the real reference number for every path spelling', a
     ['17296-0008297%3A01-S', '17296-0008297:01-S'],
     // A colon is also valid in a path without encoding.
     ['17296-0008297:01-S', '17296-0008297:01-S'],
+    // A literal percent sign stays in the number, and the text after it is not decoded.
+    ['100%25-remote', '100%-remote'],
+    ['A%2541', 'A%41'],
   ]) {
     assert.ok(resolveAtsApi(detail + path).apiUrl.endsWith(`/jobdetails/${b64(refnr)}`), path);
     const live = await withFetch(

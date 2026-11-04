@@ -45,6 +45,7 @@ import { atsVendorOf } from './ats-vendor.mjs';
 import { linkedInJobId, linkedInGuestUrl } from './lib/linkedin-url.mjs';
 
 const TIMEOUT_MS = 8_000;
+const ENCODED_SLASH = encodeURIComponent('/');
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
 // rejected before it can reach the fixed-host API URL template. The one escape
 // allowed is %20, because some Ashby org slugs contain a space (#5018). A space
@@ -345,12 +346,13 @@ const ATS_PROVIDERS = [
       if (u.hostname !== 'www.arbeitsagentur.de') return null;
       const m = u.pathname.match(/^\/jobsuche\/jobdetail\/([^/]+)\/?$/);
       if (!m) return null;
-      // The path holds the reference number encoded up to twice (a slash is
-      // %252F, a colon %3A or bare), and the API takes the base64url of the
-      // real number. Only that base64url form is passed on: the real number can
-      // hold characters the safe-value check refuses.
+      // The path holds the reference number encoded once, except a slash, which
+      // is encoded once or twice (%2F or %252F). Decoding once keeps a literal
+      // percent sign, and leaves only a twice-encoded slash still encoded.
+      // The API takes the base64url of the real number. Only that form is passed
+      // on: the real number can hold characters the safe-value check refuses.
       try {
-        const refnr = decodeURIComponent(decodeURIComponent(m[1]));
+        const refnr = decodeURIComponent(m[1]).replaceAll(ENCODED_SLASH, '/');
         return { refnrBase64: Buffer.from(refnr).toString('base64url') };
       } catch {
         return null;
