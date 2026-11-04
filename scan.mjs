@@ -4063,7 +4063,7 @@ async function main() {
   // --throttle=<ms> cannot join VALUE_FLAGS (see above), and validateFlags
   // refuses `=` on any flag outside that list, so the documented form is checked
   // here: a positive number passes as the bare flag, anything else stays refused.
-  const flagsToValidate = args.map((a) => (/^--throttle=[1-9]\d*$/.test(a) ? '--throttle' : a));
+  const flagsToValidate = args.map((a) => (/^--throttle=0*[1-9]\d*$/.test(a) ? '--throttle' : a));
   validateFlags(flagsToValidate, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
   const jsonMode = args.includes('--json');

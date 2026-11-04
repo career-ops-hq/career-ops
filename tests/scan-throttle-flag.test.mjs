@@ -36,7 +36,7 @@ function assertAccepted(r) {
 }
 
 test('the documented --throttle=<ms> gets past flag validation', () => {
-  assertAccepted(scan('--verify', '--throttle=8000', '--dry-run'));
+  for (const flag of ['--throttle=8000', '--throttle=08000']) assertAccepted(scan('--verify', flag, '--dry-run'));
 });
 
 test('the bare form still does', () => {
@@ -44,7 +44,7 @@ test('the bare form still does', () => {
 });
 
 test('a value that is not a positive number is still refused', () => {
-  for (const flag of ['--throttle=abc', '--throttle=0', '--throttle=-5', '--throttle=']) {
+  for (const flag of ['--throttle=abc', '--throttle=0', '--throttle=000', '--throttle=-5', '--throttle=']) {
     assert.match(scan('--verify', flag, '--dry-run').output, /unrecognized flag/i, flag);
   }
 });
