@@ -10,11 +10,12 @@
  *   nz.seek.com/robots.txt disallows `*?` (any query string), `/api/jobsearch/`
  *   and `/graphql` for `User-agent: *`. The SEO path form carries no query
  *   string, so it is allowed — and its inlined `window.SEEK_REDUX_DATA` holds
- *   the same job records the API returns. No pagination is possible without a
- *   query string, so depth comes from more, narrower queries instead. That is
- *   also the better trade: Seek's totalCount is fuzzy relevance matching, so
- *   deeper pages return progressively less relevant results, while page 1 of a
- *   narrow query is all signal.
+ *   the same job records the API returns. Recency comes from `seek.max_age_days`
+ *   applied to each record's `listingDate` in-process, never from a query string.
+ *   No pagination is possible without a query string either, so depth comes from
+ *   more, narrower queries instead. That is the better trade anyway: Seek's
+ *   totalCount is fuzzy relevance matching, so deeper pages return progressively
+ *   less relevant results, while page 1 of a narrow query is all signal.
  *
  * Usage:
  *   node scan-seek.mjs                  # scan, write pipeline + history
@@ -25,9 +26,10 @@
  */
 
 import path from 'path';
-import { readFileSync, writeFileSync, appendFileSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import { loadYaml } from './lib/yaml-document.mjs';
-// Paths and helpers imported from scan.mjs so they honor CAREER_OPS_ROOT (#3510).
+// Paths and writers imported from scan.mjs so they honor CAREER_OPS_ROOT (#3510)
+// and keep the shared file contracts (locking, escaping, column order).
 import {
   DATA_ROOT,
   PORTALS_PATH,
@@ -35,12 +37,14 @@ import {
   PIPELINE_PATH,
   APPLICATIONS_PATH,
   loadBlacklist,
+  findBlacklistEntry,
   appendToPipeline,
   appendToScanHistory,
   appendScanRunSummary,
 } from './scan.mjs';
-// Filters, role key and run-log writer shared with scan-linkedin.mjs.
-import { makeJobClassifier, loadRoleIndex, appendRunRow } from './scan-local-lib.mjs';
+import { normalizeCompany } from './tracker-utils.mjs';
+// Filters, role key and seen-role index shared with scan-linkedin.mjs.
+import { makeJobClassifier, loadRoleIndex } from './scan-local-lib.mjs';
 
 const SEEK_HOST = 'https://nz.seek.com';
 const PORTAL_TAG = 'seek-search';
@@ -51,7 +55,6 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 // full query list is covered across several small runs instead of one big one.
 const DELAY_MS = 4000;
 const JITTER_MS = 1500;
-const BACKOFF_MS = 60_000;
 // Cursor lives in the data root alongside scan-history.tsv
 const CURSOR_PATH = path.join(DATA_ROOT, 'data/scan-seek-cursor.json');
 
@@ -77,16 +80,19 @@ portals.yml \`seek:\` block:
   locations               List of Seek location slugs. Default: [in-All-Auckland].
   salary_floor            Advertised-base knock-out floor. Default: none.
   max_requests_per_run    Query x location pairs per run. Default: 30.
-  daterange               Recency window in days, appended to each search URL
-                          as \`daterange=N\` so page 1 is this week's ads.
-                          Default: 7.
+  max_age_days            Drop listings older than N days, judged on each
+                          record's own listingDate. Default: 7. Set 0 to keep
+                          every listing the page returns.
+
+  title_filter / location_filter at the top level of portals.yml apply here
+  exactly as they do in scan.mjs.
 
 Cursor (data/scan-seek-cursor.json):
   Rotates through the full query x location pair list across runs — each run
   takes the next \`max_requests_per_run\`-sized window starting at the saved
-  offset, then advances the cursor past it. A rate-limited run holds the
-  cursor at its starting offset so nothing is skipped. --limit does not
-  read past the cursor's own window sizing and never writes it.`);
+  offset, then advances the cursor past it, wrapping to 0 at the end of the
+  list. A rate-limited run holds the cursor at its starting offset so nothing
+  is skipped. --limit caps the window and never writes the cursor.`);
 }
 
 if (args.includes('--help') || args.includes('-h')) {
@@ -105,6 +111,9 @@ function readCursor() {
   }
 }
 function writeCursor(offset) {
+  // A fresh checkout has no data/ yet; the shared writers create their own
+  // parents, so the cursor is the one write that needs it here.
+  mkdirSync(path.dirname(CURSOR_PATH), { recursive: true });
   writeFileSync(CURSOR_PATH, JSON.stringify({ offset, updated: new Date().toISOString() }, null, 2));
 }
 
@@ -125,10 +134,17 @@ function loadConfig() {
       `No \`seek.queries\` in ${PORTALS_PATH}. Add a \`seek:\` block with a \`queries:\` list.`
     );
   }
-  const salaryFloor = typeof seek.salary_floor === 'number' ? seek.salary_floor : null;
-  const maxRequests = typeof seek.max_requests_per_run === 'number' ? seek.max_requests_per_run : 30;
-  const daterange = typeof seek.daterange === 'number' ? seek.daterange : 7;
-  return { queries, locations, salaryFloor, maxRequests, daterange };
+  return {
+    queries,
+    locations,
+    salaryFloor: typeof seek.salary_floor === 'number' ? seek.salary_floor : null,
+    maxRequests: typeof seek.max_requests_per_run === 'number' ? seek.max_requests_per_run : 30,
+    maxAgeDays: typeof seek.max_age_days === 'number' ? seek.max_age_days : 7,
+    // The user's shared filters, not seek.* — every scanner judges titles with
+    // the same compiled matcher so "a keyword" means one thing repo-wide.
+    titleFilter: cfg.title_filter || {},
+    locationFilter: cfg.location_filter || null,
+  };
 }
 
 // ---------------------------------------------------------------- HTML parsing
@@ -138,13 +154,47 @@ function slugifyQuery(q) {
   return q.toLowerCase().replace(RE_SLUG, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
+/**
+ * Slice the balanced JSON object that starts at `open`, honouring JSON strings
+ * and backslash escapes, so a `}` inside a job teaser or a later <script> block
+ * cannot end the slice early or drag trailing markup into the parse.
+ * Returns the slice, or null when the braces never balance.
+ */
+function sliceBalancedObject(text, open) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(open, i + 1);
+    }
+  }
+  return null;
+}
+
 function extractRedux(html) {
-  // Seek inlines a large JSON blob: window.SEEK_REDUX_DATA = { ... };
-  // Use a more precise regex that captures up to the final }; or just }
-  const m = html.match(/window\.SEEK_REDUX_DATA\s*=\s*(\{[\s\S]*\})\s*;?/);
-  if (!m) return null;
+  // Seek inlines its search state as `window.SEEK_REDUX_DATA = { ... };`.
+  // Anchor on the assignment, then brace-balance from the first `{`: a greedy
+  // regex would run to the last `}` in the document (later script blocks) and a
+  // lazy one would stop at the first `}` inside a teaser string.
+  const anchor = html.search(/window\.SEEK_REDUX_DATA\s*=\s*/);
+  if (anchor === -1) return null;
+  const open = html.indexOf('{', anchor);
+  if (open === -1) return null;
+  const slice = sliceBalancedObject(html, open);
+  if (!slice) return null;
   try {
-    return JSON.parse(m[1]);
+    return JSON.parse(slice);
   } catch {
     return null;
   }
@@ -168,6 +218,12 @@ function findJobArray(node, depth = 0) {
   return null;
 }
 
+/**
+ * Shape one Seek record for the shared filters and writers. `source`, `postedAt`
+ * and `salary` are not decoration: appendToScanHistory reads `source` for its
+ * portal column and `postedAt` (epoch ms) for posted_at, and formatPipelineOffer
+ * reads `salary` for the compensation column.
+ */
 function normalizeJob(j) {
   const locationParts = [
     j.location?.area,
@@ -176,25 +232,28 @@ function normalizeJob(j) {
     j.location?.region,
   ].filter(Boolean);
   const company = (j.advertiser?.description || j.company?.displayName || '').trim();
-  const workTypes = Array.isArray(j.workTypes) ? j.workTypes.join('/') : '';
+  const listedAt = String(j.listingDate || '').slice(0, 10);
+  const postedMs = Date.parse(j.listingDate || '');
   return {
     id: String(j.id),
     title: (j.title || '').trim(),
     company,
     location: locationParts.join(', '),
     url: `${SEEK_HOST}/job/${j.id}`,
-    listedAt: String(j.listingDate || '').slice(0, 10),
+    source: PORTAL_TAG,
+    listedAt,
+    postedAt: Number.isFinite(postedMs) ? postedMs : 0,
+    salary: String(j.salaryLabel || '').trim(),
     teaser: String(j.teaser || '').trim(),
-    workTypes,
+    workTypes: Array.isArray(j.workTypes) ? j.workTypes.join('/') : '',
   };
 }
 
-async function fetchQuery(query, location, daterange) {
+async function fetchQuery(query, location) {
+  // SEO path form only: no query string, because robots.txt disallows `*?` for
+  // every agent. Recency is filtered in-process from each record's listingDate.
   const slug = query.replace(/(-jobs)?$/, '-jobs');
-  // `daterange=N` is a query string, which robots.txt disallows for the SEO
-  // path form (see file header) — traded deliberately here so page 1 holds
-  // this week's ads instead of whatever the relevance ranker surfaces first.
-  const url = `${SEEK_HOST}/${slug}/${location}?daterange=${daterange}`;
+  const url = `${SEEK_HOST}/${slug}/${location}`;
   let res;
   try {
     res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html' } });
@@ -224,40 +283,19 @@ async function fetchQuery(query, location, daterange) {
   };
 }
 
-// ---------------------------------------------------------------- output helpers
-
-function tsvEscape(s) {
-  return String(s || '').replace(/\t/g, ' ').replace(/\n/g, ' ').replace(/\r/g, '');
-}
-
-function appendHistory(rows, today) {
-  if (!rows.length) return;
-  const lines = rows.map((j) =>
-    `${today}\t${PORTAL_TAG}\t${j.id}\t${tsvEscape(j.title)}\t${tsvEscape(j.company)}\t${tsvEscape(j.location)}\t${tsvEscape(j.url)}\tadded`
-  ).join('\n') + '\n';
-  appendFileSync(SCAN_HISTORY_PATH, lines, 'utf8');
-}
-
-const trackedHint = (j) => (j.related?.length ? `tracked: ${j.related.map((n) => `#${n}`).join(',')}` : '');
-
-function appendPipeline(rows) {
-  if (!rows.length) return;
-  const today = new Date().toISOString().slice(0, 10);
-  const lines = rows.map((j) =>
-    `- [ ] ${today} ${j.company} — ${j.title} (${j.location}) ${j.url} ${trackedHint(j)}`
-  ).join('\n') + '\n';
-  appendFileSync(PIPELINE_PATH, lines, 'utf8');
-}
-
-function appendRun(stats) {
-  // appendScanRunSummary uses its internal SCAN_RUNS_PATH default (data-root-aware)
-  appendScanRunSummary(stats);
+// Listings with no parseable date are kept: absence of a date is not evidence
+// of an old one, and a wrong drop silently costs a real job.
+function withinAge(jobs, maxAgeDays, now = Date.now()) {
+  if (!maxAgeDays) return { kept: jobs, tooOld: 0 };
+  const cutoff = now - maxAgeDays * 86_400_000;
+  const kept = jobs.filter((j) => !j.postedAt || j.postedAt >= cutoff);
+  return { kept, tooOld: jobs.length - kept.length };
 }
 
 // ---------------------------------------------------------------- main
 
 async function main() {
-  // loadBlacklist uses its internal BLACKLIST_PATH default (data-root-aware)
+  // Both use their internal data-root-aware path defaults.
   const blacklist = loadBlacklist();
   const index = loadRoleIndex({
     applicationsPath: APPLICATIONS_PATH,
@@ -265,11 +303,15 @@ async function main() {
     pipelinePath: PIPELINE_PATH,
   });
 
-  const { queries, locations, salaryFloor, maxRequests, daterange } = loadConfig();
+  const {
+    queries, locations, salaryFloor, maxRequests, maxAgeDays, titleFilter, locationFilter,
+  } = loadConfig();
   const classifier = makeJobClassifier({
-    cfg: { salary_floor: salaryFloor },
+    cfg: { title_filter: titleFilter, location_filter: locationFilter },
     index,
-    isBlacklisted: (company) => blacklist.has(company.toLowerCase()),
+    // findBlacklistEntry normalizes the label the same way the table was keyed
+    // and honours a `domain` scope row, so SEEK agrees with scan.mjs (#1742).
+    isBlacklisted: (company, url) => Boolean(findBlacklistEntry(blacklist, company, url)),
     salaryFloor,
     includeBlacklisted: INCLUDE_BLACKLISTED,
   });
@@ -283,70 +325,87 @@ async function main() {
     return;
   }
 
-  const cursor = readCursor();
-  const window = pairs.slice(cursor, cursor + maxRequests);
-  if (!window.length) {
-    console.log('Cursor at end of query list — full cycle complete.');
-    return;
-  }
+  // Wrap, so a full cycle resumes at the start instead of parking forever, and
+  // so a shrunk queries list never slices an empty window.
+  const cursor = readCursor() % pairs.length;
+  const size = Math.min(maxRequests, Number.isFinite(LIMIT) ? LIMIT : maxRequests);
+  const window = size >= pairs.length
+    ? pairs.slice(cursor).concat(pairs.slice(0, cursor))
+    : pairs.slice(cursor, cursor + size);
 
   console.log(`Running ${window.length} of ${pairs.length} pairs (cursor ${cursor}).`);
 
-  let totalFound = 0, totalFiltered = 0, totalAdded = 0, totalErrors = 0, rateLimited = false;
+  const counters = {
+    found: 0, dupes: 0, filteredTitle: 0, filteredLocation: 0,
+    filteredSalary: 0, filteredBlacklist: 0, filteredContent: 0,
+    newAdded: 0, errors: 0,
+  };
+  const companiesSeen = new Set();
+  let rateLimited = false;
 
   for (let i = 0; i < window.length; i++) {
     const { q, loc } = window[i];
-    console.log(`  [${cursor + i + 1}/${pairs.length}] ${q} @ ${loc}`);
-    const result = await fetchQuery(q, loc, daterange);
+    console.log(`  [${i + 1}/${window.length}] ${q} @ ${loc}`);
+    const result = await fetchQuery(q, loc);
     if (result.error) {
       console.log(`    error: ${result.error}`);
-      if (result.rateLimited) rateLimited = true;
-      totalErrors++;
-      if (rateLimited) break;
+      counters.errors++;
+      if (result.rateLimited) { rateLimited = true; break; }
       await pace();
       continue;
     }
-    const { passed, skipped, failed } = classifier(result.jobs);
-    totalFound += result.jobs.length;
-    totalFiltered += skipped.length + failed.length;
-    const toAdd = passed.filter((j) => j.score !== 'N/A');
+    const { kept, tooOld } = withinAge(result.jobs, maxAgeDays);
+    counters.found += result.jobs.length;
+    counters.filteredContent += tooOld;
+
+    const toAdd = [];
+    for (const j of kept) {
+      if (j.company) companiesSeen.add(normalizeCompany(j.company));
+      const v = classifier(j);
+      if (v.verdict === 'keep') toAdd.push({ ...j, related: v.related });
+      else if (v.verdict === 'repost') counters.dupes++;
+      else if (v.verdict === 'title') counters.filteredTitle++;
+      else if (v.verdict === 'location') counters.filteredLocation++;
+      else if (v.verdict === 'blacklist') counters.filteredBlacklist++;
+      else if (v.verdict === 'salary') counters.filteredSalary++;
+      else counters.filteredContent++;
+    }
+
     if (toAdd.length && !DRY_RUN) {
-      await appendHistory(toAdd, new Date().toISOString().slice(0, 10));
-      await appendPipeline(toAdd);
-      totalAdded += toAdd.length;
+      const today = new Date().toISOString().slice(0, 10);
+      await appendToScanHistory(toAdd, today);
+      await appendToPipeline(toAdd);
+      counters.newAdded += toAdd.length;
     }
-    const status = result.error ? 'error' : (toAdd.length ? 'added' : (skipped.length + failed.length ? 'filtered' : 'empty'));
-    // appendRunRow uses the scan-runs.tsv header in the data root
-    appendRunRow(path.join(DATA_ROOT, 'data/scan-runs.tsv'), [
-      new Date().toISOString(),
-      status,
-      result.total ?? '?',
-      result.jobs.length,
-      passed.length,
-      skipped.length,
-      failed.length,
-      toAdd.length,
-    ]);
-    if (DRY_RUN) {
-      console.log(`    would add ${toAdd.length} (found ${result.jobs.length})`);
-    } else if (toAdd.length) {
-      console.log(`    added ${toAdd.length} (found ${result.jobs.length})`);
-    } else {
-      console.log(`    no new (found ${result.jobs.length})`);
-    }
+    const label = DRY_RUN ? 'would add' : 'added';
+    console.log(`    ${toAdd.length ? label : 'no new'} ${toAdd.length} (found ${result.jobs.length})`);
     await pace();
   }
 
-  if (!DRY_RUN && !rateLimited) {
-    writeCursor(cursor + window.length);
+  // --limit is a smoke test: it must not consume the rotation it did not run.
+  if (!DRY_RUN && !rateLimited && !Number.isFinite(LIMIT)) {
+    writeCursor((cursor + window.length) % pairs.length);
   }
-  const summary = { timestamp: new Date().toISOString(), totalFound, totalFiltered, totalAdded, totalErrors, rateLimited };
-  appendRun(summary);
-  console.log(`\nDone. Found: ${totalFound}, filtered: ${totalFiltered}, added: ${totalAdded}, errors: ${totalErrors}${rateLimited ? ', rate-limited' : ''}`);
+  if (!DRY_RUN) {
+    appendScanRunSummary({
+      timestamp: new Date().toISOString(),
+      status: rateLimited ? 'rate-limited' : 'completed',
+      companies: companiesSeen.size,
+      boards: window.length,
+      ...counters,
+    });
+  }
+  console.log(
+    `\nDone. found ${counters.found}, added ${counters.newAdded}, dupes ${counters.dupes}, `
+    + `title ${counters.filteredTitle}, location ${counters.filteredLocation}, `
+    + `salary ${counters.filteredSalary}, blacklist ${counters.filteredBlacklist}, `
+    + `stale/content ${counters.filteredContent}, errors ${counters.errors}`
+    + `${rateLimited ? ' (rate-limited, cursor held)' : ''}`
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((e) => { console.error(e); process.exit(1); });
 }
 
-export { fetchQuery, normalizeJob, extractRedux, findJobArray, slugifyQuery };
+export { fetchQuery, normalizeJob, extractRedux, findJobArray, sliceBalancedObject, slugifyQuery };

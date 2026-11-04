@@ -8,7 +8,7 @@ console.log('\nParser — scan-seek (nz.seek.com SEO page extractor)');
 
 try {
   const seekModule = await import(pathToFileURL(join(ROOT, 'scan-seek.mjs')).href);
-  const { extractRedux, findJobArray, normalizeJob, slugifyQuery, fetchQuery } = seekModule;
+  const { extractRedux, findJobArray, normalizeJob, slugifyQuery, sliceBalancedObject, fetchQuery } = seekModule;
 
   const fixtureHtml = readFileSync(join(ROOT, 'tests/fixtures/seek-search-page.html'), 'utf8');
 
@@ -38,6 +38,12 @@ try {
   else fail('listedAt: ' + j1.listedAt);
   if (j1.workTypes === 'Full-time') pass('normalizeJob joins workTypes');
   else fail('workTypes: ' + j1.workTypes);
+  if (j1.source === 'seek-search') pass('normalizeJob sets source portal tag');
+  else fail('source: ' + j1.source);
+  if (j1.postedAt === Date.parse('2026-10-15')) pass('normalizeJob sets postedAt epoch ms');
+  else fail('postedAt: ' + j1.postedAt);
+  if (j1.salary === '') pass('normalizeJob salary defaults to empty string');
+  else fail('salary: ' + j1.salary);
 
   // normalizeJob — second job (remote flag)
   const j2 = normalizeJob(arr[1]);
@@ -52,8 +58,13 @@ try {
   if (slugifyQuery('DevOps Engineer-jobs') === 'devops-engineer-jobs') pass('slugifyQuery preserves existing -jobs');
   else fail('slugifyQuery -jobs: ' + slugifyQuery('DevOps Engineer-jobs'));
 
+  // sliceBalancedObject — balanced braces through nested string
+  const tricky = 'window.SEEK_REDUX_DATA = {"jobs":[{"teaser":"ends } here"}]};';
+  const slice = sliceBalancedObject(tricky, tricky.indexOf('{'));
+  if (slice && slice.endsWith(']}')) pass('sliceBalancedObject balances braces through string');
+  else fail('sliceBalancedObject broken: ' + JSON.stringify(slice));
+
   console.log('\n✅ All scan-seek parser tests passed');
 } catch (e) {
-  console.error('❌ scan-seek parser test crashed:', e);
-  process.exit(1);
+  fail('scan-seek parser test crashed: ' + (e?.stack || e));
 }
