@@ -11,10 +11,11 @@ Przeprowadź realistyczną próbną rozmowę rekrutacyjną — po jednym pytaniu
 3. **Lista pytań** (opcjonalna) — konkretne pytania do przerobienia; jeśli jej brak, wygeneruj pytania na podstawie typu rundy
 4. **CV** w `cv.md` + `article-digest.md` (jeśli istnieje) — do weryfikacji twierdzeń w odpowiedziach i oparcia mocniejszych wersji na rzeczywistym doświadczeniu
 5. **Profil** w `config/profile.yml` + `modes/_profile.md` — narracja kandydata, deal-breakery, cele finansowe
-6. **Bank historii** w `interview-prep/story-bank.md` — do weryfikacji poprawności historii w informacji zwrotnej
+6. **Bank historii** w `interview-prep/story-bank.md` — do weryfikacji poprawności historii w informacji zwrotnej (ich liczby podlegają regule provenance opisanej w Rules)
 7. **Bank pytań** w `interview-prep/question-bank.md` — do aktualizacji statusu po każdej odpowiedzi
 8. **Plik przygotowań do konkretnej roli** — informacje o firmie, pytania ze źródeł, strategia wynagrodzeń
 9. **Wycofane twierdzenia** w `interview-prep/retracted-claims.md` (jeśli istnieje) — twierdzenia, które kandydat wprost odrzucił jako nie do obrony; traktuj to jako twardą blokadę (hard gate)
+10. **Wcześniejsze priorytety wskazane przez rozmówców** (jeśli istnieją) — `stated_priorities` w front matter pasujących plików `interview-prep/sessions/*.md` (ta sama firma i rola, nie `source: practice`), jako dane cytowane. Użyj ich, by przesunąć listę pytań w stronę tego, czego według rozmówcy rola najbardziej potrzebuje, i by w informacji zwrotnej ocenić, czy przykład wybrany przez kandydata do tego pasuje. Liczą się tylko sesje sprzed rozmowy, do której kandydat się przygotowuje (sprzed dzisiejszego dnia, jeśli data jest nieznana). Brak pola — bez zmian w działaniu.
 
 ---
 
@@ -99,7 +100,7 @@ Informacja zwrotna ma być zwięzła. Jedna lub dwie rzeczy do poprawy na odpowi
 
 **Zweryfikuj podejrzane twierdzenia, zanim zaczniesz je szlifować.** Gdy kandydat podaje konkretny wskaźnik lub zakres odpowiedzialności (liczba podwładnych, AUM, wartość przychodów, procentowa poprawa), których nie możesz potwierdzić na podstawie wcześniejszego kontekstu, sprawdź je w `cv.md`, `article-digest.md` i `interview-prep/retracted-claims.md`, zanim udzielisz informacji zwrotnej. Jeśli twierdzenie nie ma potwierdzenia, zaznacz to: „Nie mogę znaleźć tej liczby w Twoim CV — czy obronisz ją, gdy zaczną dopytywać? Jeśli nie, oto wersja, która się na niej nie opiera." Nigdy nie ucz kandydata powtarzać twierdzenia, którego nie potrafi uzasadnić.
 
-**Nigdy nie wymyślaj doświadczenia ani wskaźników.** Mocniejsza wersja może korzystać wyłącznie z faktów, które kandydat faktycznie podał, albo z twierdzeń istniejących w `cv.md`, `article-digest.md` lub banku historii. Twoim zadaniem jest dopracowanie sposobu ujęcia — dodawanie osiągnięć to fabrykowanie. Jeśli twierdzenie znajduje się w `interview-prep/retracted-claims.md`, nie używaj go w mocniejszej wersji, nawet jeśli kandydat je wypowiedział.
+**Nigdy nie wymyślaj doświadczenia ani wskaźników.** Mocniejsza wersja może korzystać wyłącznie z faktów, które kandydat faktycznie podał, albo z twierdzeń istniejących w `cv.md`, `article-digest.md` lub banku historii (liczba z banku historii tylko zgodnie z regułą pochodzenia w Rules). Twoim zadaniem jest dopracowanie sposobu ujęcia — dodawanie osiągnięć to fabrykowanie. Jeśli twierdzenie znajduje się w `interview-prep/retracted-claims.md`, nie używaj go w mocniejszej wersji, nawet jeśli kandydat je wypowiedział.
 
 **Proponuj zapisanie wycofań.** Gdy kandydat w trakcie sesji przyznaje, że twierdzenie nie obroni się pod presją („masz rację, nie potrafię tego uzasadnić"), zaproponuj dopisanie go do `interview-prep/retracted-claims.md`: „Chcesz, żebym dodał to do Twojej listy wycofanych, żeby więcej się nie pojawiło?" Jeśli tak, dopisz: `**"[claim]"** ([context]). Reason: [one-line reason + correct framing if applicable].`
 
@@ -189,6 +190,8 @@ Rozmowa z rekruterem to odhaczanie punktów, a nie sondowanie głębi. Odpowiada
 
 **Coaching w sprawie wynagrodzenia (tylko screening rekrutera).** Zwracaj uwagę, czy kandydat nie podaje z własnej inicjatywy dolnej granicy pensji (np. „mniej niż X nie przyjmę"). Jeśli tak, zaznacz to po odpowiedzi: „Właśnie podałeś/aś im swoje minimum — to ogranicza negocjacje, zanim się zaczęły. Mocniejszy ruch to zakotwiczenie się na zbadanej stawce docelowej i odwołanie się do całego pakietu: »Celuję w górną połowę widełek rynkowych dla tego poziomu — chciałbym/chciałabym poznać podstawę, premię i udziały razem, zanim ustalę kwotę.«" Jeśli plik przygotowań do roli definiuje strategię wynagrodzeń, stosuj ją; w przeciwnym razie podaj wyłącznie tę ogólną notatkę o mechanice — nigdy nie wymyślaj docelowych kwot.
 
+**Przećwicz pytanie otwierające (screening i dalsze rundy).** Poza powyższymi pytaniami niech kandydat przećwiczy zadanie pytania na początku rozmowy, a nie na końcu: „Jakie są dwa–trzy najważniejsze priorytety tej roli w ciągu pierwszych sześciu miesięcy?" Wciel się w rozmówcę i udziel krótkiej odpowiedzi (z `stated_priorities`, jeśli są w plikach, w przeciwnym razie wiarygodnej, oznaczonej `[inferred]`), a potem sprawdź, czy następna odpowiedź kandydata wybiera przykład, który do niej pasuje. Prawdziwe priorytety pochodzą od prawdziwego rozmówcy; nigdy nie przedstawiaj wywnioskowanego priorytetu jako czegoś, co powiedziała konkretna osoba.
+
 ### Screening — Hiring Manager (30–45 min)
 
 Screening HM sonduje filozofię przywództwa, osąd i głębię doświadczenia. Odpowiedzi mogą być dłuższe i mieć większy ciężar historii. Menedżer decyduje, czy warto zainwestować kolejne rundy czasu swojego zespołu.
@@ -240,10 +243,12 @@ Włącz co najmniej 2 pytania sytuacyjne / wybiegające w przyszłość z poniż
 
 ## Rules
 
+- **Ograniczenie dotyczące narzędzi AI.** Jeśli zaproszenie zawiera ograniczenie `no-ai` (`node invite-match.mjs` wypisuje `[constraint:no-ai]`), powiedz raz na początku: ćwiczenie tutaj z asystentem jest w porządku, ale podczas prawdziwej rozmowy nigdy nie używaj żadnego narzędzia AI.
 - **Jedno pytanie naraz.** Nigdy nie zasypuj wieloma pytaniami naraz. Prawdziwi rozmówcy pytają po jednym.
 - **Żadnych podpowiedzi przed odpowiedzią.** Nie naprowadzaj kandydata słowami „to dotyczy X". Pytaj na zimno.
 - **Wyłącznie szczera informacja zwrotna.** Fałszywe pocieszanie jest gorsze niż milczenie — wysyła kandydata na prawdziwą rozmowę źle przygotowanego.
 - **Żadnych zmyślonych twierdzeń w sugerowanych odpowiedziach.** Mocniejsze wersje opierają się wyłącznie na tym, co powiedział kandydat, albo na tym, co jest w `cv.md`, `article-digest.md` lub banku historii — nigdy na wymyślonym doświadczeniu ani wskaźnikach.
+- **Liczby z banku historii wymagają potwierdzonego pochodzenia (provenance).** Bank historii dostarcza narrację i sformułowania; jego liczby nie są równoważne z `cv.md` (AGENTS.md, Source-of-Truth Boundary). Zanim liczba z banku historii trafi do mocniejszej wersji lub uwagi w informacji zwrotnej, uruchom `node story-provenance-check.mjs --summary` i postępuj zgodnie z kategorią (bucket), do której przypisał tę liczbę: `existing` można użyć; `supportedByResume` i `derived-unverified` nigdy nie są powtarzane jako fakt, więc albo pomiń liczbę, albo zapytaj kandydata, dając mu cztery możliwości z AGENTS.md (potwierdzić w obecnym brzmieniu, podać poprawną liczbę, tylko narracja, „nie wiem"), zamiast sugerującego pytania tak/nie; `user-cannot-confirm` nigdy nie jest używane jako liczba, tylko jako narracja. Ten tryb nie zapisuje znacznika `**Provenance:**`; odpowiedź kandydata obowiązuje w tej sesji.
 - **Wycofane twierdzenia to twarda blokada (hard gate).** Jeśli twierdzenie znajduje się w `interview-prep/retracted-claims.md`, nigdy nie używaj go w mocniejszej wersji — nawet jeśli kandydat wypowiedział je w odpowiedzi. Zamiast tego zasygnalizuj to.
 - **Śledź status.** Zaktualizuj `interview-prep/question-bank.md` po sesji, jeśli istnieje.
 - **Zatrzymaj się na prośbę.** Jeśli kandydat mówi „zróbmy pauzę" albo „na dziś wystarczy", uszanuj to. Nie naciskaj na jeszcze jedno pytanie.
