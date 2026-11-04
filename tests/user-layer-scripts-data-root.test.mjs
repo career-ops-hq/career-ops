@@ -236,6 +236,7 @@ test('openrouter-runner.mjs reserves and releases report numbers under DATA_ROOT
 
 const BATCH_STATE_HEADER = 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n';
 const failedRow = (num) => `1\thttps://example.com/job\tfailed\t-\t-\t${num}\t-\tworker exited 1\t1\n`;
+const completedRow = (num) => `2\thttps://example.com/other\tcompleted\t-\t-\t${num}\t4.1\t-\t0\n`;
 
 function mergeFixture(t, stateRoot) {
   const f = fixture(t, 'merge-tracker.mjs', { nodeModules: true, assets: ['templates/states.yml', 'tracker-aliases.json'] });
@@ -277,3 +278,22 @@ for (const mode of MODES) {
     assert.equal(result.stdout.trim(), '002', `001 is recorded as failed and must not be handed out:\n${result.output}`);
   });
 }
+
+// A data root can keep a batch-state.tsv of its own. The runner never copies
+// its rows into the code root's file, so once the code root had one, the
+// numbers the data root's file recorded as failed were no longer read.
+
+test('merge-tracker.mjs still refuses a number the data root batch-state.tsv recorded as failed', (t) => {
+  const f = mergeFixture(t, 'data');
+  write(join(f.code, 'batch', 'batch-state.tsv'), BATCH_STATE_HEADER + completedRow('003'));
+  assertRefused(f, run(f, 'merge-tracker.mjs', [], envFor('CAREER_OPS_ROOT', f)));
+});
+
+test('reserve-report-num.mjs skips a number the data root batch-state.tsv recorded as failed', (t) => {
+  const f = fixture(t, 'reserve-report-num.mjs', { nodeModules: true, assets: ['tracker-aliases.json'] });
+  write(join(f.data, 'batch', 'batch-state.tsv'), BATCH_STATE_HEADER + failedRow('001'));
+  write(join(f.code, 'batch', 'batch-state.tsv'), BATCH_STATE_HEADER + completedRow('-'));
+  const result = run(f, 'reserve-report-num.mjs', [], envFor('CAREER_OPS_ROOT', f));
+  assert.equal(result.status, 0, describeSpawn(result));
+  assert.equal(result.stdout.trim(), '002', `001 is recorded as failed in the data root and must not be handed out:\n${result.output}`);
+});
