@@ -55,6 +55,23 @@ try {
   if (parseArticles('<div>no articles</div>', origin).length === 0) pass('parseArticles returns [] when no articles present');
   else fail('parseArticles should return [] for markup with no articles');
 
+  // Protocol-relative (//host/...) hrefs must resolve like a browser does —
+  // string concatenation would produce "https://acme.avature.net//other/...".
+  // A href new URL cannot resolve is dropped instead of emitted broken.
+  const protocolRel = `
+    <article class="article article--result" id="article--1">
+      <h3 class="title"><a class="link" href="//jobs.acme-cdn.example/JobDetail?jobId=4242">Rel Host Engineer</a></h3>
+    </article>
+    <article class="article article--result" id="article--2">
+      <h3 class="title"><a class="link" href="//[bad/JobDetail?jobId=1">Broken Link</a></h3>
+    </article>`;
+  const pArts = parseArticles(protocolRel, origin);
+  const pOk = pArts.find((a) => a.id === '4242');
+  if (pOk && pOk.url === 'https://jobs.acme-cdn.example/JobDetail?jobId=4242') pass('parseArticles resolves a protocol-relative href against the page scheme');
+  else fail(`parseArticles protocol-relative url wrong: ${JSON.stringify(pOk && pOk.url)}`);
+  if (pArts.length === 1) pass('parseArticles drops an unresolvable href instead of emitting a broken URL');
+  else fail(`parseArticles returned ${pArts.length}, expected 1 (unresolvable href dropped)`);
+
   // Tenant markup variants: Siemens appends a position index to the result
   // class ("article--result 1"); Rohde & Schwarz renders the title anchor with
   // no class="link". Both must still parse. (Regressions found on live tenants.)

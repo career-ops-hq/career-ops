@@ -169,7 +169,17 @@ export function parseArticles(htmlText, origin) {
     const title = clean(urlM[2]);
     if (!title) continue;
     let url = decodeEntities(urlM[1]);
-    if (!/^https?:\/\//i.test(url)) url = origin + (url.startsWith('/') ? url : '/' + url);
+    if (!/^https?:\/\//i.test(url)) {
+      // new URL resolves root-relative, path-relative and protocol-relative
+      // (//host/...) hrefs the way a browser would; string concatenation would
+      // turn the protocol-relative form into origin + "//host/...". A href it
+      // cannot resolve is dropped rather than emitted as a broken URL.
+      try {
+        url = new URL(url, origin).href;
+      } catch {
+        continue;
+      }
+    }
     const idM = url.match(/\/JobDetail\/[^/]*\/(\d+)/) || url.match(/\/JobDetail\?(?:[^#]*&)?jobId=(\d+)/i);
     out.push({
       id: idM ? idM[1] : url,
