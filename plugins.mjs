@@ -44,7 +44,12 @@ const DATA_ROOT = getCareerOpsRoot();
 // The same read resolution as set-status.mjs and every other tracker reader:
 // CAREER_OPS_TRACKER, then data/applications.md, then the legacy root copy.
 const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
-const PIPELINE_PATH = path.join(DATA_ROOT, 'data', 'pipeline.md');
+// The same resolution as scan.mjs's PIPELINE_PATH, so the CAREER_OPS_PIPELINE
+// lane is honored by the de-dup read, the export snapshot, the write and the
+// log line alike (#6353). Passed to appendToPipeline() explicitly rather than
+// left to its default, so all four always agree on one file.
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data', 'pipeline.md');
+const PIPELINE_LABEL = process.env.CAREER_OPS_PIPELINE ? PIPELINE_PATH : 'data/pipeline.md';
 
 // A misbehaving plugin's stray rejection should be attributed and not silently
 // crash the host (the engine's per-hook try/catch handles the common case; this
@@ -104,7 +109,7 @@ function trackerSnapshotRows(md) {
   return rows;
 }
 
-/** URLs already present in data/pipeline.md, for additive de-duplication. */
+/** URLs already present in the pipeline (data/pipeline.md or the CAREER_OPS_PIPELINE lane), for additive de-duplication. */
 function existingPipelineUrls() {
   const urls = new Set();
   if (!existsSync(PIPELINE_PATH)) return urls;
@@ -272,12 +277,12 @@ async function cmdRun(args) {
     console.log(`${id} ${hook}: ${found.length} found, ${jobs.length} new${skipped ? ` (skipped: ${skipped})` : ''}.`);
     if (dryRun) { jobs.slice(0, 20).forEach(j => console.log(`  • ${j.title} — ${j.url}`)); console.log('(--dry-run: pipeline not written)'); return; }
     if (jobs.length) {
-      await appendToPipeline(jobs);
+      await appendToPipeline(jobs, { pipelinePath: PIPELINE_PATH });
       // Recorded so the next ingest, and every scanner, sees these as known.
       // Only postings: an interview event in scan-history would read as a
       // scanned job everywhere scan-history is counted.
       if (manifest.jobPostings) await appendToScanHistory(jobs, localToday(), 'added');
-      console.log(`→ Appended ${jobs.length} to data/pipeline.md. Run /career-ops pipeline to evaluate.`);
+      console.log(`→ Appended ${jobs.length} to ${PIPELINE_LABEL}. Run /career-ops pipeline to evaluate.`);
     }
     return;
   }
@@ -686,7 +691,7 @@ async function main() {
 
 // Named exports for the test suite — not part of the CLI API.
 export const _testPaths = Object.freeze({ APPLICATIONS_PATH, PIPELINE_PATH });
-export { buildSnapshot as _testBuildSnapshot };
+export { buildSnapshot as _testBuildSnapshot, existingPipelineUrls as _testExistingPipelineUrls };
 
 if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });
