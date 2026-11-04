@@ -7,7 +7,7 @@ Scoring matrix with 10 weighted dimensions. Score every dimension against the us
 | North Star alignment | 25% | 5=exact target role, 1=unrelated |
 | CV match | 15% | 5=90%+ match, 1=<40% match |
 | Level fit | 15% | 5=the level the user targets, 3=one step from it, 1=far from it in either direction |
-| Estimated compensation | 10% | 5=top quartile, 1=below market |
+| Estimated compensation | 10% | 5=at or above the top of `target_range`, 3=inside it, 1=below `minimum` (neither set: 5=top quartile for the role, 1=below market) |
 | Growth trajectory | 10% | 5=clear path to next level, 1=dead end |
 | Location fit | 5% | 5=matches the user's location policy, 1=conflicts with it |
 | Company reputation | 5% | 5=top employer, 1=red flags |
