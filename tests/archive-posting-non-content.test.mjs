@@ -32,13 +32,17 @@ process.env.CAREER_OPS_ROOT = tmp;
 
 const { archiveUrl } = await import('../archive-posting.mjs');
 
-function makeFakeBrowser({ bodyText, title = 'Backend Engineer | Acme', h1 = 'Backend Engineer', httpStatus = 200, evaluateRejects = false }) {
+function makeFakeBrowser({ bodyText, title = 'Backend Engineer | Acme', h1 = 'Backend Engineer', httpStatus = 200, evaluateRejects = false, hydrateUrl = null, hydrateNavigation = false, pdfUrl = null }) {
   let pdfCalled = false;
+  let onNavigate;
+  const frame = {};
   const page = {
+    on(event, handler) { if (event === 'framenavigated') onNavigate = handler; },
+    mainFrame() { return frame; },
     _landedUrl: null,
     async goto(url) { page._landedUrl = url; return { status: () => httpStatus }; },
     url() { return page._landedUrl; },
-    async waitForTimeout() {},
+    async waitForTimeout() { if (hydrateUrl) page._landedUrl = hydrateUrl; if (hydrateNavigation) onNavigate?.(frame); },
     async title() { return title; },
     async $eval(selector) {
       if (selector !== 'h1') throw new Error(`fake page has no selector ${selector}`);
@@ -56,7 +60,7 @@ function makeFakeBrowser({ bodyText, title = 'Backend Engineer | Acme', h1 = 'Ba
       if (evaluateRejects) throw new Error('fake: page.evaluate() failed (simulated extraction failure)');
       return bodyText;
     },
-    async pdf() { pdfCalled = true; return Buffer.from('%PDF-fake'); },
+    async pdf() { pdfCalled = true; if (pdfUrl) page._landedUrl = pdfUrl; return Buffer.from('%PDF-fake'); },
   };
   const context = {
     async newPage() { return page; },
@@ -202,3 +206,43 @@ test('a real posting that ALSO carries an incidental "sign in" prompt is still a
 });
 
 process.on('exit', () => rmSync(tmp, { recursive: true, force: true, maxRetries: 5 }));
+
+test('trusted capture identity guard receives settled status and rejects before PDF', async () => {
+  const { browser, pdfCalled } = makeFakeBrowser({ bodyText: 'A long generic company page. '.repeat(50), httpStatus: 403 });
+  let observed;
+  await assert.rejects(() => archiveUrl(browser, 'https://boards.greenhouse.io/acme/jobs/101', {
+    company: 'Expected company', role: 'Expected role', report: '061', directory: join(tmp, 'private-061'), log() {},
+    requirePosting(evidence) { observed = evidence; return evidence.httpStatus === 200; },
+  }), /not the exact substantive posting/);
+  assert.equal(observed.httpStatus, 403);
+  assert.equal(observed.settledUrl, 'https://boards.greenhouse.io/acme/jobs/101');
+  assert.equal(pdfCalled(), false);
+  assert.equal(existsSync(join(tmp, 'private-061')), false);
+});
+
+test('per-call reserved number/private capture directory and typed receipt stay local', async () => {
+  const { browser } = makeFakeBrowser({ bodyText: 'Backend Engineer owns service reliability and delivery. '.repeat(30) });
+  const dir = join(tmp, 'private-062');
+  const result = await archiveUrl(browser, 'https://boards.greenhouse.io/acme/jobs/102', {
+    company: 'Acme', role: 'Backend Engineer', report: '062', directory: dir, log() {},
+    requirePosting: evidence => evidence.httpStatus === 200 && evidence.title.includes('Backend Engineer'),
+  });
+  assert.match(result.filename, /^062-/);
+  assert.equal(existsSync(join(dir, result.filename)), true);
+  assert.equal(result.httpStatus, 200);
+  assert.equal(result.settledUrl, 'https://boards.greenhouse.io/acme/jobs/102');
+});
+
+
+for (const [name, changes] of [
+  ['hydration redirect', { hydrateUrl: 'https://boards.greenhouse.io/acme/' }],
+  ['same-URL replacement document', { hydrateNavigation: true }],
+  ['navigation during PDF creation', { pdfUrl: 'https://boards.greenhouse.io/acme/' }],
+]) test(`trusted exact capture refuses ${name} instead of attesting the original HTTP status`, async () => {
+  const dir = join(tmp, `private-navigation-${name.replace(/[^a-z]/g, '-')}`);
+  const { browser } = makeFakeBrowser({ bodyText: 'Backend Engineer owns reliable service delivery and requirements. '.repeat(20), ...changes });
+  await assert.rejects(() => archiveUrl(browser, 'https://boards.greenhouse.io/acme/jobs/103', {
+    report: '063', directory: dir, log() {}, requirePosting: e => e.httpStatus === 200,
+  }), /document navigated/);
+  assert.equal(existsSync(dir), false, 'a different document must not create a capture');
+});

@@ -1,6 +1,7 @@
 // persist-evaluation-report.mjs writes the report and the headed addition.
 // It does not reserve a number and it does not merge the tracker.
 import { test } from "node:test";
+import * as fs from "node:fs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -28,24 +29,18 @@ const ROW = {
 
 function payload(overrides = {}) {
   return {
-    markdown: "# Evaluation: Globex -- Manager\n\nA role.\n",
+    markdown: "# Evaluation: Globex -- Manager\n\nA role.\n\n## Job Description (archived verbatim)\nThe manager owns service delivery, works with product stakeholders, documents requirements, and improves quality with the engineering team.\n",
     ...ROW,
     ...overrides,
   };
 }
 
-function tsvWriteFails(real = { mkdirSync, existsSync, unlinkSync, writeFileSync }) {
+function tsvWriteFails(real = fs) {
   return {
-    mkdirSync: real.mkdirSync,
-    existsSync: real.existsSync,
-    unlinkSync: real.unlinkSync,
-    writeFileSync(file, data, enc) {
-      if (String(file).endsWith(".tsv")) {
-        const err = new Error("tracker additions dir is not writable");
-        err.code = "EACCES";
-        throw err;
-      }
-      real.writeFileSync(file, data, enc);
+    ...real,
+    openSync(file, flags, mode) {
+      if (String(file).endsWith('.tsv')) throw new Error('tracker additions dir is not writable');
+      return real.openSync(file, flags, mode);
     },
   };
 }
@@ -149,7 +144,7 @@ test("a failed addition write removes only the new report", () => {
   }
 });
 
-test("a failed addition write leaves a report that already existed", () => {
+test("an existing report collision is refused and the original bytes remain", () => {
   const root = mkdtempSync(join(tmpdir(), "co-persist-report-"));
   const reportPath = join(root, "reports", ROW.reportFile);
   try {
@@ -158,7 +153,7 @@ test("a failed addition write leaves a report that already existed", () => {
     const result = writeEvaluationArtifacts(root, payload(), tsvWriteFails());
     assert.equal(result.ok, false);
     assert.equal(existsSync(reportPath), true);
-    assert.equal(readFileSync(reportPath, "utf8"), payload().markdown);
+    assert.equal(readFileSync(reportPath, "utf8"), "already here\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -168,13 +163,12 @@ test("cleanup ignores ENOENT when the new report is already gone", () => {
   const result = writeEvaluationArtifacts("/tmp/co-persist-enoent", payload(), {
     mkdirSync() {},
     existsSync() { return false; },
-    writeFileSync(file) {
-      if (String(file).endsWith(".tsv")) {
-        const err = new Error("tracker additions dir is not writable");
-        err.code = "EACCES";
-        throw err;
-      }
+    openSync(file) {
+      if (String(file).endsWith('.tsv')) throw new Error('tracker additions dir is not writable');
+      return 1;
     },
+    closeSync() {},
+    writeFileSync() {},
     unlinkSync() {
       const err = new Error("gone");
       err.code = "ENOENT";

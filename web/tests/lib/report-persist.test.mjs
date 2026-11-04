@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import * as fs from "node:fs";
 import { mkdtempSync, readFileSync, rmSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -107,7 +108,10 @@ via: null
 \`\`\`
 
 ## A) Role Summary
-A role.`;
+A role.
+
+## Job Description (archived verbatim)
+The engineer owns reliable service delivery, works with product stakeholders, documents requirements, and improves quality with the engineering team.`;
 
 test("evaluateRunOutcome: missing envelope fails closed", () => {
   const outcome = evaluateRunOutcome({
@@ -501,16 +505,10 @@ test("persistEvaluation: a failed addition write removes the new report and rele
   const root = mkdtempSync(join(tmpdir(), "co-evalpersist-"));
   const reportPath = join(root, "reports", "035-acme-ai-2026-08-04.md");
   const fsImpl = {
-    mkdirSync,
-    existsSync,
-    unlinkSync,
-    writeFileSync(file, data, enc) {
-      if (String(file).endsWith(".tsv")) {
-        const err = new Error("tracker additions dir is not writable");
-        err.code = "EACCES";
-        throw err;
-      }
-      writeFileSync(file, data, enc);
+    ...fs,
+    openSync(file, flags, mode) {
+      if (String(file).endsWith('.tsv')) throw new Error('tracker additions dir is not writable');
+      return fs.openSync(file, flags, mode);
     },
   };
   const { spawnFn, calls } = makeRouterSpawn({
