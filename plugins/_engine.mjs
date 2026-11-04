@@ -79,22 +79,25 @@ function bodyTooLarge(maxBytes, declared) {
  * @param {number} maxBytes
  * @returns {Response}
  */
-function capResponseBody(res, maxBytes) {
+function capResponseBody(res, maxBytes, release = () => {}) {
   // No body (HEAD, 204, 304): nothing to cap, and a HEAD's content-length describes
   // the resource a GET would send, not bytes we would read.
-  if (!res.body) return res;
+  if (!res.body) { release(); return res; }
   const declared = Number(res.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
     res.body.cancel?.().catch(() => {});
+    release();
     throw bodyTooLarge(maxBytes, declared);
   }
   let total = 0;
   const limiter = new TransformStream({
     transform(chunk, controller) {
       total += chunk.byteLength;
-      if (total > maxBytes) controller.error(bodyTooLarge(maxBytes, null));
+      if (total > maxBytes) { release(); controller.error(bodyTooLarge(maxBytes, null)); }
       else controller.enqueue(chunk);
     },
+    flush: release,   // body fully read: the request timeout has done its job
+    cancel: release,  // reader gave up early
   });
   const capped = new Response(res.body.pipeThrough(limiter), { status: res.status, statusText: res.statusText, headers: res.headers });
   // A new Response has no url: keep the original's, so a plugin resolving relative
@@ -497,16 +500,23 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
     let reqHeaders = { ...headers };
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const controller = new AbortController();
+      // The timeout covers the whole exchange, body included: a host that sends
+      // headers and then drips (or stalls) is cut off like one that never answers.
+      // It is released once the body is read, cancelled or refused.
       const timer = setTimeout(() => controller.abort(), timeoutMs);
+      timer.unref?.();
+      const release = () => clearTimeout(timer);
       let res;
       try {
         res = await fetch(current.href, {
           method, headers: reqHeaders, body, redirect: 'manual', signal: controller.signal,
         });
-      } finally {
-        clearTimeout(timer);
+      } catch (err) {
+        release();
+        throw err;
       }
       if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+        release();
         res.body?.cancel?.().catch(() => {});
         const next = new URL(res.headers.get('location'), current);
         hostOk(next); // re-validate the redirect target before following it
@@ -523,14 +533,14 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
         // Capped like any other body: an error page is a diagnostic snippet, and a
         // refused (over-cap) one just loses the snippet, never the status.
         let errText = '';
-        try { errText = await capResponseBody(res, MAX_PLUGIN_ERROR_BODY_BYTES).text(); } catch { /* over the cap: the status is the answer */ }
+        try { errText = await capResponseBody(res, MAX_PLUGIN_ERROR_BODY_BYTES, release).text(); } catch { /* over the cap or timed out: the status is the answer */ } finally { release(); }
         const snippet = errText.replace(/\s+/g, ' ').trim().slice(0, 300);
         const err = new Error(snippet ? `HTTP ${res.status}: ${snippet}` : `HTTP ${res.status}`);
         // @ts-ignore
         err.status = res.status;
         throw err;
       }
-      return capResponseBody(res, bodyCap);
+      return capResponseBody(res, bodyCap, release);
     }
     throw new Error(`too many redirects (>${MAX_REDIRECTS}) for ${url}`);
   };
