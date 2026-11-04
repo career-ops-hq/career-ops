@@ -20,7 +20,7 @@
  *   node import-tracker.mjs <export.csv> --day-first  # read 03/04/2026 as 3 April
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'fs';
 import { basename, dirname, isAbsolute, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -272,7 +272,7 @@ function readTracker(trackerPath) {
   return { exists: true, colmap, rows: lines.map((l) => parseTrackerRow(l, colmap)).filter(Boolean) };
 }
 
-function printPreview(plan, { source, confirm, urlColumn, trackerExists }) {
+function printPreview(plan, { source, confirm, urlColumn, trackerExists, blocked = false }) {
   const count = (o) => plan.entries.filter((e) => e.outcome === o);
   const toImport = count('import');
   console.log(confirm && toImport.length ? `Importing ${source}` : `Import preview for ${source} (nothing written)`);
@@ -305,7 +305,7 @@ function printPreview(plan, { source, confirm, urlColumn, trackerExists }) {
     console.log(`\n${links} row(s) carry a posting link, and the tracker has no URL column, so the links will not be kept. Run "node merge-tracker.mjs --backfill-urls" once to add the column, then import.`);
   }
   if (!trackerExists && toImport.length) console.log('\nNo tracker yet: --confirm creates data/applications.md.');
-  if (!confirm && toImport.length) console.log(`\nRun again with --confirm to add ${toImport.length} row(s).`);
+  if (!confirm && !blocked && toImport.length) console.log(`\nRun again with --confirm to add ${toImport.length} row(s).`);
 }
 
 const TRACKER_HEADER = ['#', 'Date', 'Company', 'Role', 'Score', 'Status', 'PDF', 'Report', 'Notes'];
@@ -322,6 +322,7 @@ async function writeImport(entries, { colmap }) {
   const additionsDir = mkdtempSync(join(tmpdir(), 'import-tracker-'));
   const shape = { locationColumn: colmap?.location != null, urlColumn: colmap?.url != null };
   const reservations = [];
+  let leftNums = null;
   try {
     for (let i = 0; i < entries.length; i += RESERVE_CHUNK) {
       const chunk = entries.slice(i, i + RESERVE_CHUNK);
@@ -336,10 +337,24 @@ async function writeImport(entries, { colmap }) {
       stdio: 'inherit',
       env: { ...process.env, CAREER_OPS_ADDITIONS: additionsDir },
     });
+    // merge-tracker leaves a TSV it refused (or could not apply) where it was,
+    // and a refusal alone still exits 0. Those rows are not in the tracker, so
+    // their files and numbers stay for a re-run instead of being deleted here.
+    const left = readdirSync(additionsDir).filter((f) => f.endsWith('.tsv'));
+    if (left.length) {
+      leftNums = new Set(left.map((f) => Number(/^(\d+)-/.exec(f)?.[1])));
+      console.error(`\nimport-tracker: ${left.length} row(s) were not added: ${left.join(', ')}.`);
+      console.error(`Their files stay in ${additionsDir} with their numbers reserved. Fix each as the warning above says, then run:`);
+      console.error(`  CAREER_OPS_ADDITIONS="${additionsDir}" node merge-tracker.mjs`);
+      return 1;
+    }
     return merge.status ?? 1;
   } finally {
-    rmSync(additionsDir, { recursive: true, force: true });
-    for (const nums of reservations) await releaseReportNumbers(nums);
+    if (!leftNums) rmSync(additionsDir, { recursive: true, force: true });
+    for (const nums of reservations) {
+      if (leftNums && nums.some((n) => leftNums.has(n))) continue;
+      await releaseReportNumbers(nums);
+    }
   }
 }
 
@@ -373,7 +388,12 @@ if (isMainModule(import.meta.url)) {
   const toImport = plan.entries.filter((e) => e.outcome === 'import');
   const withUrl = toImport.some((e) => e.url);
   const urlColumn = tracker.exists ? tracker.colmap?.url != null : withUrl;
-  printPreview(plan, { source: basename(file), confirm, urlColumn, trackerExists: tracker.exists });
+  // Without a URL column, two postings for the same company and role differ
+  // only by the link the TSV cannot carry, and merge's company-and-role tier
+  // would fold the second into the first. Refuse instead of losing a row.
+  const blocked = confirm && withUrl && !urlColumn;
+  printPreview(plan, { source: basename(file), confirm: confirm && !blocked, urlColumn, trackerExists: tracker.exists, blocked });
+  if (blocked) fail('the tracker has no URL column, so --confirm would drop the posting links. Run "node merge-tracker.mjs --backfill-urls" once to add it, then import.');
   if (!confirm || !toImport.length) process.exit(0);
 
   if (!tracker.exists) {

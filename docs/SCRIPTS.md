@@ -814,7 +814,7 @@ Columns are matched by header name, so their order does not matter. The file nee
 
 Dates are read as `YYYY-MM-DD` (a time part is dropped), `Jul 3, 2026`, `3 Jul 2026`, or a slash date. Slash dates are read month first unless a date in the file has a first part above 12, which proves day first; `--day-first` forces it. A file that proves both orders is refused. A row with no readable date gets today's date and `no date in source` in Notes. Notes also carry `imported from <file>` and the source stage when it differs from the tracker state.
 
-`--confirm` reserves numbers with `reserve-report-num.mjs`, writes one headed tracker-addition TSV per row, runs `merge-tracker.mjs` and releases the numbers. A missing tracker is created first, with a `URL` column when the file has posting links. On a tracker with no `URL` column the links are not kept; the preview says so, and `node merge-tracker.mjs --backfill-urls` adds the column. Re-running the same file adds nothing.
+`--confirm` reserves numbers with `reserve-report-num.mjs`, writes one headed tracker-addition TSV per row, runs `merge-tracker.mjs` and releases the numbers. A missing tracker is created first, with a `URL` column when the file has posting links. On a tracker with no `URL` column the preview says the links cannot be kept, and `--confirm` refuses the import until `node merge-tracker.mjs --backfill-urls` adds the column. A row merge refuses (for example a report link to a number `batch-state.tsv` marks failed) is not lost: its TSV stays in the printed temp directory with its number reserved, the import exits `1`, and the message gives the `merge-tracker.mjs` command to re-run after the fix. Re-running the same file adds nothing.
 
 ```bash
 node import-tracker.mjs teal-export.csv              # preview
@@ -824,7 +824,7 @@ node import-tracker.mjs sheet.csv --day-first        # 03/04/2026 is 3 April
 
 Paths follow `CAREER_OPS_ROOT` / `CAREER_OPS_DATA_DIR` / `CAREER_OPS_TRACKER`.
 
-**Exit codes:** `0` on a preview or a completed import, `1` for a usage error, an unreadable file, a file with no company or role column, or a date column that mixes both orders. Under `--confirm` the exit code is `merge-tracker.mjs`'s.
+**Exit codes:** `0` on a preview or a completed import, `1` for a usage error, an unreadable file, a file with no company or role column, or a date column that mixes both orders. Under `--confirm` the exit code is `merge-tracker.mjs`'s, or `1` when the tracker has no `URL` column and the file has links, or when merge left a row unapplied.
 
 ---
 

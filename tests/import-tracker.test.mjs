@@ -230,3 +230,57 @@ test('a file with no role column is refused with the headers it has', () => {
     assert.match(r.stderr, /"Employer", "Salary"/);
   });
 });
+
+test('--confirm refuses links a tracker with no URL column cannot keep', () => {
+  const noUrl = ['# Applications Tracker', '', '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |', '|---|---|---|---|---|---|---|---|---|', ''].join('\n');
+  const csv = [
+    'Company,Job Position,Status,Date Applied,Job URL',
+    'Larkspur Analytics,Analytics Engineer,Applied,7/3/2026,https://jobs.example.com/larkspur/1',
+    'Larkspur Analytics,Analytics Engineer,Applied,7/9/2026,https://jobs.example.com/larkspur/2',
+  ].join('\n');
+  withRoot({ tracker: noUrl, csv }, (fx) => {
+    const result = run(fx, ['--confirm']);
+    assert.equal(result.status, 1, describeSpawn(result));
+    assert.match(result.stderr, /no URL column/);
+    assert.match(result.stderr, /--backfill-urls/);
+    assert.doesNotMatch(result.stdout, /Run again with --confirm/);
+    assert.equal(readFileSync(fx.trackerPath, 'utf-8'), noUrl, 'nothing is written');
+  });
+  const linkless = 'Company,Job Position,Status,Date Applied\nLarkspur Analytics,Analytics Engineer,Applied,7/3/2026\n';
+  withRoot({ tracker: noUrl, csv: linkless }, (fx) => {
+    const result = run(fx, ['--confirm']);
+    assert.equal(result.status, 0, describeSpawn(result));
+    assert.ok(rowFor(readFileSync(fx.trackerPath, 'utf-8'), 'Larkspur Analytics'));
+  });
+});
+
+test('a row merge refuses keeps its file and number and fails the import', () => {
+  const csv = [
+    'Company,Job Position,Status,Date Applied,Notes',
+    'Larkspur Analytics,Analytics Engineer,Applied,7/3/2026,',
+    'Quillfeather Health,Data Analyst II,Applied,7/14/2026,see [7](reports/007-quillfeather-health-2026-07-14.md)',
+  ].join('\n');
+  withRoot({ csv }, (fx) => {
+    mkdirSync(join(fx.root, 'batch'), { recursive: true });
+    writeFileSync(join(fx.root, 'batch', 'batch-state.tsv'),
+      'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n'
+      + '1\thttps://jobs.example.com/quillfeather/2\tfailed\t-\t-\t7\t-\tno JD\t0\n');
+    const result = run(fx, ['--confirm']);
+    assert.equal(result.status, 1, describeSpawn(result));
+    const tracker = readFileSync(fx.trackerPath, 'utf-8');
+    assert.ok(rowFor(tracker, 'Larkspur Analytics'), 'the other row is still added');
+    assert.equal(rowFor(tracker, 'Quillfeather Health'), undefined);
+    assert.match(result.stderr, /1 row\(s\) were not added: \d+-quillfeather-health\.tsv/);
+    const dir = /stay in (\S+) with their numbers reserved/.exec(result.stderr)?.[1];
+    assert.ok(dir, describeSpawn(result));
+    try {
+      const left = readdirSync(dir).filter((f) => f.endsWith('.tsv'));
+      assert.equal(left.length, 1);
+      assert.match(readFileSync(join(dir, left[0]), 'utf-8'), /Quillfeather Health/);
+      assert.notDeepEqual(readdirSync(join(fx.root, 'reports')), [], 'the refused row keeps its reserved number');
+      assert.match(result.stderr, /CAREER_OPS_ADDITIONS=".+" node merge-tracker\.mjs/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
