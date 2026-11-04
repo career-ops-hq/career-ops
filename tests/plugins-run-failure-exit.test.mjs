@@ -121,6 +121,8 @@ test('a plugin run that rejects its settings exits 1 and does not claim zero job
   assert.equal(failed.status, 1, failed.stdout + failed.stderr);
   assert.match(failed.stderr, /settings\.mode must be list/);
   assert.match(failed.stderr, /config\/plugins\.yml/);
+  assert.match(failed.stderr, /^fixture-run ingest failed: .*settings\.mode must be list/m,
+    'plugins.mjs names the plugin and hook on the same line as the error');
   assert.doesNotMatch(failed.stdout, /0 found/);
 
   const good = dataRoot();
