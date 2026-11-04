@@ -585,7 +585,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 
     const resEnabledProvidersActive = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
-      env: isolatedEnv,
+      env: { ...isolatedEnv, CLAUDE_CONFIG_DIR: '' },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }));
@@ -598,6 +598,18 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
     }
 
     // 4v. doctor ignores inactive .omp/config.yaml in project settings
+    rmSync(join(dir, 'mcp.json'), { force: true });
+    rmSync(join(dir, '.claude'), { recursive: true, force: true });
+    rmSync(join(isolatedAgentDir, 'mcp.json'), { force: true });
+    rmSync(join(isolatedAgentDir, '.mcp.json'), { force: true });
+    mkdirSync(join(isolatedHome, '.claude'), { recursive: true });
+    writeFileSync(join(isolatedHome, '.claude', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        playwright: { command: 'mcp-server-playwright' },
+      },
+    }));
+    writeFileSync(join(isolatedAgentDir, 'config.yml'), 'browser:\n  enabled: false\n');
+    mkdirSync(join(dir, '.omp'), { recursive: true });
     writeFileSync(join(dir, '.omp', 'config.yaml'), 'disabledProviders: []\n');
     writeFileSync(join(dir, '.omp', 'settings.json'), JSON.stringify({
       disabledProviders: ['claude'],
@@ -606,7 +618,7 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 
     const resIgnoreProjectConfigYaml = JSON.parse(execFileSync(NODE, [DOCTOR, '--json', '--target', dir, '--cli', 'omp'], {
       cwd: dir,
-      env: isolatedEnv,
+      env: { ...isolatedEnv, CLAUDE_CONFIG_DIR: '' },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }));
