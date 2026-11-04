@@ -245,7 +245,6 @@ For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as a wor
 | **VS Code Copilot Chat - Session Type `Local`** | ✅ `runSubagent` tool | `runSubagent` tool without field `agentName` and appropriate prompt |
 | **VS Code Copilot Chat - Session Type `Copilot`** | ✅ `task` tool | `task` tool with `agent_type`: `"general-purpose"` and appropriate prompt |
 | **GitHub Copilot CLI** | ✅ `task` tool | `task` tool with `agent_type`: `"general-purpose"` and appropriate prompt |
-| **Pi** | ⚠️ Project skills require trust | `pi -a -p` for trusted checkouts; otherwise run mode directly |
 | **All other CLIs** | ❌ No ad-hoc subagent API | **Run mode directly** in main context |
 
 #### Claude Code — `Agent()` Primitive
@@ -321,19 +320,9 @@ The primary agent invokes the built-in `general-purpose` subagent via the `task`
 }
 ```
 
-#### Pi — Project trust required
-
-Pi loads project skills (`.agents/skills/`) only after a trust decision. For a checkout the user has explicitly trusted:
-
-```bash
-pi -a -p "Run career-ops {mode} mode. You are a delegated worker: run this mode inline and do not launch another Pi process."
-```
-
-Without a trust decision, run the mode directly in the main session. For headless/batch workers, use the CLI's native headless invocation which provides isolation without subagent API.
-
 #### All Other CLIs — Direct Execution
 
-**Do not attempt subagent delegation.** Run the mode directly in the current session. For headless/batch workers, use the CLI's native headless invocation (`codex exec`, `opencode run`, etc.) which provides isolation without subagent API.
+**Do not attempt subagent delegation.** Run the mode directly in the current session. For headless/batch workers, use the CLI's native headless invocation (`codex exec`, `pi -a -p`, etc.) which provides isolation without subagent API.
 
 For `apply` (with Playwright), ask the worker to return the role title and employer it found (and any agency the posting came through) alongside its result. The interactive parent then applies **Session Title** from those values, after any agency confirmation has resolved. The worker never renames anything itself.
 
