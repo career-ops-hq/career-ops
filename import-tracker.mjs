@@ -21,7 +21,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'fs';
-import { basename, dirname, isAbsolute, join } from 'path';
+import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
@@ -318,13 +318,20 @@ function createTracker(path, withUrl) {
 
 // The re-run must reach the same tracker and batch state as this import, from any
 // working directory, so it carries the path overrides and the script's full path.
+// The root overrides already resolve against the code root, but the tracker and
+// batch-state overrides resolve against the working directory, so those two are
+// made absolute here.
 const RETRY_ENV = ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE'];
+const RETRY_CWD_PATHS = new Set(['CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE']);
 const shellQuote = (value) => (/^[A-Za-z0-9._@+/:=-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`);
 
 function retryCommand(additionsDir, env = process.env) {
   const overrides = RETRY_ENV
     .filter((name) => env[name]?.trim())
-    .map((name) => `${name}=${shellQuote(env[name].trim())} `)
+    .map((name) => {
+      const value = env[name].trim();
+      return `${name}=${shellQuote(RETRY_CWD_PATHS.has(name) ? resolve(value) : value)} `;
+    })
     .join('');
   return `${overrides}CAREER_OPS_ADDITIONS=${shellQuote(additionsDir)} node ${shellQuote(join(CODE_ROOT, 'merge-tracker.mjs'))}`;
 }

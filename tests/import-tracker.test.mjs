@@ -11,6 +11,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { getBash } from './helpers.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'import-tracker.mjs');
@@ -254,6 +255,27 @@ test('--confirm refuses links a tracker with no URL column cannot keep', () => {
   });
 });
 
+// One shell word as shellQuote prints it: bare, or single-quoted (a Windows or
+// spaced path).
+const ARG = "(?:[^\\s']+|'[^']*')";
+const QUILLFEATHER_REFUSED = [
+  'Company,Job Position,Status,Date Applied,Notes',
+  'Larkspur Analytics,Analytics Engineer,Applied,7/3/2026,',
+  'Quillfeather Health,Data Analyst II,Applied,7/14/2026,see [7](reports/007-quillfeather-health-2026-07-14.md)',
+].join('\n');
+const BATCH_HEADER = 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n';
+
+// Clear the failed batch entry, then run the printed re-run from another
+// directory with none of the import's overrides set.
+function rerunFromElsewhere(fx, retry) {
+  writeFileSync(join(fx.root, 'batch', 'batch-state.tsv'), BATCH_HEADER);
+  const env = { ...process.env };
+  for (const name of ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE', 'CAREER_OPS_ADDITIONS']) delete env[name];
+  const rerun = spawnSync(getBash(), ['-c', retry], { encoding: 'utf-8', env, cwd: tmpdir(), timeout: 60_000 });
+  assert.equal(rerun.status, 0, describeSpawn(rerun));
+  assert.ok(rowFor(readFileSync(fx.trackerPath, 'utf-8'), 'Quillfeather Health'), 'the re-run adds the row to the same tracker');
+}
+
 test('a row merge refuses keeps its file and number and fails the import', () => {
   const csv = [
     'Company,Job Position,Status,Date Applied,Notes',
@@ -282,14 +304,33 @@ test('a row merge refuses keeps its file and number and fails the import', () =>
       // import's overrides set: it carries the root and the script's full path.
       const retry = /then run:\n {2}(.+)\n/.exec(result.stderr)?.[1];
       assert.ok(retry, describeSpawn(result));
-      assert.match(retry, /^CAREER_OPS_ROOT=\S+ CAREER_OPS_ADDITIONS=\S+ node \S+merge-tracker\.mjs$/);
-      writeFileSync(join(fx.root, 'batch', 'batch-state.tsv'),
-        'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n');
-      const env = { ...process.env };
-      for (const name of ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE', 'CAREER_OPS_ADDITIONS']) delete env[name];
-      const rerun = spawnSync('/bin/sh', ['-c', retry], { encoding: 'utf-8', env, cwd: tmpdir(), timeout: 60_000 });
-      assert.equal(rerun.status, 0, describeSpawn(rerun));
-      assert.ok(rowFor(readFileSync(fx.trackerPath, 'utf-8'), 'Quillfeather Health'), 'the re-run adds the row to the same tracker');
+      assert.match(retry, new RegExp(`^CAREER_OPS_ROOT=${ARG} CAREER_OPS_ADDITIONS=${ARG} node ${ARG}$`));
+      assert.match(retry, /merge-tracker\.mjs'?$/);
+      rerunFromElsewhere(fx, retry);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('the printed re-run makes relative tracker and batch-state overrides absolute', () => {
+  withRoot({ csv: QUILLFEATHER_REFUSED }, (fx) => {
+    mkdirSync(join(fx.root, 'batch'), { recursive: true });
+    writeFileSync(join(fx.root, 'batch', 'batch-state.tsv'),
+      BATCH_HEADER + '1\thttps://jobs.example.com/quillfeather/2\tfailed\t-\t-\t7\t-\tno JD\t0\n');
+    const result = run(fx, ['--confirm'], {
+      cwd: fx.root,
+      env: { CAREER_OPS_TRACKER: join('data', 'applications.md'), CAREER_OPS_BATCH_STATE: join('batch', 'batch-state.tsv') },
+    });
+    assert.equal(result.status, 1, describeSpawn(result));
+    assert.equal(rowFor(readFileSync(fx.trackerPath, 'utf-8'), 'Quillfeather Health'), undefined);
+    const dir = /stay in (\S+) with their numbers reserved/.exec(result.stderr)?.[1];
+    assert.ok(dir, describeSpawn(result));
+    try {
+      const retry = /then run:\n {2}(.+)\n/.exec(result.stderr)?.[1];
+      assert.ok(retry, describeSpawn(result));
+      assert.doesNotMatch(retry, /CAREER_OPS_(TRACKER|BATCH_STATE)='?(data|batch)\b/);
+      rerunFromElsewhere(fx, retry);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
