@@ -33,12 +33,12 @@ Work authorization: the role is US-remote and the candidate is US-based, so spon
 
 | Requirement | Importance | Match | JD signal | Evidence / gap |
 |---|---|---|---|---|
-| Production ML platform ownership | critical (stated) | ✅ Strong | "own the platform our ML and LLM teams ship on" | "Led ML platform team (3 engineers), built internal MLOps tooling: model registry, A/B testing framework, feature store" |
-| LLM serving and inference optimization | high (stated) | ⚠️ Partial | "serving LLMs in production (vLLM, TGI or similar)" | Real-time inference at "99.7% precision at 50ms p99" proves serving under latency budgets; no LLM serving stack on the CV |
-| Evaluation and regression testing for models | high (stated) | ✅ Strong | "Build the evaluation harness that gates every model release" | LLM Eval Toolkit: "Evaluation framework for LLM applications. Supports custom metrics, regression testing, CI integration" |
-| Kubernetes and cloud infrastructure | high (stated) | ✅ Strong | "Kubernetes, AWS" | Skills: "Kubernetes, Kafka, Redis, PostgreSQL, AWS" |
-| Model monitoring and observability | meaningful (stated) | ✅ Strong | "monitoring, drift detection and alerting" | "Established model monitoring: drift detection, performance dashboards (Grafana), automated retraining triggers" |
-| Mentoring other engineers | meaningful (structural) | ✅ Strong | Responsibilities section: mentor two mid-level engineers | "Led ML platform team (3 engineers)" |
+| Production ML platform ownership | critical (structural) | ✅ Strong | Opening paragraph, the first duty named | "Led ML platform team (3 engineers), built internal MLOps tooling: model registry, A/B testing framework, feature store" |
+| LLM serving and inference optimization | high (structural) | ⚠️ Partial | What you'll do section, first item | Real-time inference at "99.7% precision at 50ms p99" proves serving under latency budgets; no LLM serving stack on the CV |
+| Evaluation and regression testing for models | high (structural) | ✅ Strong | What you'll do section, second item, repeated in the deliverable and success lines | LLM Eval Toolkit: "Evaluation framework for LLM applications. Supports custom metrics, regression testing, CI integration" |
+| Kubernetes and cloud infrastructure | high (stated) | ✅ Strong | "Kubernetes and AWS experience is required" | Skills: "Kubernetes, Kafka, Redis, PostgreSQL, AWS" |
+| Model monitoring and observability | meaningful (structural) | ✅ Strong | What you'll do section, third item | "Established model monitoring: drift detection, performance dashboards (Grafana), automated retraining triggers" |
+| Mentoring other engineers | meaningful (structural) | ✅ Strong | Opening paragraph, after the team size | "Led ML platform team (3 engineers)" |
 
 ### Gaps
 
@@ -60,9 +60,9 @@ Work authorization: the role is US-remote and the candidate is US-based, so spon
 
 ## D) Comp and Demand
 
-**Company type:** Growth-stage startup / VC-backed startup, medium confidence: equity in the offer and a 6-engineer platform team.
+**Company type:** Growth-stage startup / VC-backed startup, high confidence: the JD says "Acme AI is a Series B startup".
 
-**Compensation reliability:** High. The JD states the figure as base salary.
+**Compensation reliability:** High. This company type is usually Medium, but the JD states the figure as base salary.
 
 | Data Point | Value | Source |
 |------------|-------|--------|
@@ -213,7 +213,7 @@ Posted: 6 days ago
 
 Senior AI Platform Engineer — Acme AI (Remote, US)
 
-You'll report to the Head of ML Platform. You'll own the platform our ML and LLM teams ship on. The ML Platform team is 6 engineers, and you'll mentor two mid-level engineers. You'll work closely with the product and data teams.
+Acme AI is a Series B startup. You'll report to the Head of ML Platform. You'll own the platform our ML and LLM teams ship on. The ML Platform team is 6 engineers, and you'll mentor two mid-level engineers. You'll work closely with the product and data teams.
 
 What you'll do:
 - Keep serving LLMs in production (vLLM, TGI or similar) inside latency and cost budgets
@@ -224,7 +224,7 @@ What you'll do:
 
 What you bring:
 - 5+ years building production ML systems in Python
-- Kubernetes, AWS
+- Kubernetes and AWS experience is required
 - Experience running a model registry or feature store
 
 Compensation: $190,000 - $230,000 USD base salary, plus equity.
@@ -261,7 +261,7 @@ score_evidence:
   red_flags: "supported"
 confidence_gaps:
   - "Equity terms and vesting are not in the JD"
-  - "On-call expectations for the platform team are not stated"
+  - "On-call expectations after the first 90 days are not stated"
 next_action: "Tailor the CV summary toward LLM platform work and apply"
 work_auth: "not_needed"
 discard_reasons: []
@@ -272,32 +272,32 @@ reports_to: "Head of ML Platform"
 posting_location: null
 requirement_importance:
   - requirement: "Production ML platform ownership"
-    jd_signal: "own the platform our ML and LLM teams ship on"
-    evidence: "stated"
+    jd_signal: "Opening paragraph, the first duty named"
+    evidence: "structural"
     importance: "critical"
     match: "strong"
   - requirement: "LLM serving and inference optimization"
-    jd_signal: "serving LLMs in production (vLLM, TGI or similar)"
-    evidence: "stated"
+    jd_signal: "What you'll do section, first item"
+    evidence: "structural"
     importance: "high"
     match: "partial"
   - requirement: "Evaluation and regression testing for models"
-    jd_signal: "Build the evaluation harness that gates every model release"
-    evidence: "stated"
+    jd_signal: "What you'll do section, second item, repeated in the deliverable and success lines"
+    evidence: "structural"
     importance: "high"
     match: "strong"
   - requirement: "Kubernetes and cloud infrastructure"
-    jd_signal: "Kubernetes, AWS"
+    jd_signal: "Kubernetes and AWS experience is required"
     evidence: "stated"
     importance: "high"
     match: "strong"
   - requirement: "Model monitoring and observability"
-    jd_signal: "monitoring, drift detection and alerting"
-    evidence: "stated"
+    jd_signal: "What you'll do section, third item"
+    evidence: "structural"
     importance: "meaningful"
     match: "strong"
   - requirement: "Mentoring other engineers"
-    jd_signal: "Responsibilities section: mentor two mid-level engineers"
+    jd_signal: "Opening paragraph, after the team size"
     evidence: "structural"
     importance: "meaningful"
     match: "strong"
