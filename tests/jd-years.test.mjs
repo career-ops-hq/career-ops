@@ -157,6 +157,14 @@ const NEVER_OUT = [
   '<p>Requirements:</p><ul><li>2+ years of experience with SQL</li></ul><p>Preferred qualifications</p><ul><li>Strong analytical skills</li><li>8+ years of experience in fintech</li></ul>',
   // The same two lines with no list markers, as a pasted JD arrives.
   'Requirements:\n2+ years of experience with SQL\nPreferred qualifications\nExperience in fintech\n8+ years of experience in payments',
+  // An item whose text starts the line after its marker, as `<li>\n<p>text`
+  // converts, is still an item.
+  '<p>Requirements:</p><ul><li>2+ years of experience with SQL</li></ul><p>Preferred qualifications</p><ul><li>\n<p>Strong analytical skills</p></li><li><p>8+ years of experience in fintech</p></li></ul>',
+  'Requirements:\n- 2+ years of experience with SQL\nPreferred qualifications\n-\nStrong analytical skills\n- 8+ years of experience in fintech',
+  'Requirements:\n- 2+ years of experience with SQL\nPreferred qualifications\n-\n\nExcellent communication skills\n- 8+ years of experience in fintech',
+  // "Experience in fintech:" introduces the items after it, not a section.
+  'Requirements:\n- 2+ years of experience with SQL\nPreferred qualifications\nExperience in fintech:\n- 8+ years of experience in payments',
+  'Requirements:\n- 2+ years of experience with SQL\nNice to have\n- Experience with:\n- 8+ years of Kafka',
 ];
 
 await ok(`review regressions: ${NEVER_OUT.length} ceilings, third parties and unknown headings never read as out`, () => {
@@ -179,6 +187,7 @@ await ok('a bar under an unknown heading still gates when the sentence speaks to
 await ok('a real required heading still gates, as a bare word, in a list or after a preferred section', () => {
   const out = (jd) => classifyYears(parseYearsRequirement(jd), { years: 3, stretchYears: 1 });
   assert.strictEqual(out('Experience\n- 8+ years of Python'), 'out');
+  assert.strictEqual(out('Experience:\n- 8+ years of Python'), 'out');
   assert.strictEqual(out('Skills & Experience\n- 8+ years of Python'), 'out');
   assert.strictEqual(out('- Requirements:\n- 8+ years of Python'), 'out');
   assert.strictEqual(out('Nice to have\n- Kubernetes\nRequirements\n- 8+ years of experience in Python'), 'out');
