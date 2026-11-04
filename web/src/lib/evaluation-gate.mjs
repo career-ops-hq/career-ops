@@ -26,7 +26,7 @@ function narration(text) {
       else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
     } else if (!fence && !/^[ \t]*>/.test(line)) lines.push(line);
   }
-  return { text: lines.join("\n"), inFence: fence !== null };
+  return { text: lines.join("\n"), inFence: fence !== null, fence };
 }
 
 // Only the flat-string YAML subset used by legacy handoffs is accepted.
@@ -145,5 +145,15 @@ export function evaluationGateConflictsWithReport(text) {
   const close = [...normalized.matchAll(/^<<\/report-md>>[ \t]*$/gm)];
   if (open.length !== 1 || close.length !== 1 || open[0].index >= close[0].index) return false;
   const visible = normalized.slice(0, open[0].index) + "\n" + normalized.slice(close[0].index + close[0][0].length);
-  return dedicatedBlocks(visible).length > 0;
+  if (dedicatedBlocks(visible).length > 0) return true;
+  let trailing = normalized.slice(close[0].index + close[0][0].length);
+  // The report body is opaque (its archived JD may contain arbitrary fences).
+  // Resume any example begun before it until that example actually closes.
+  const fence = narration(normalized.slice(0, open[0].index)).fence;
+  if (fence) {
+    const closing = new RegExp("^[ \\t]*" + fence[0] + "{" + fence.length + ",}[ \\t]*$", "m").exec(trailing);
+    if (!closing) return false;
+    trailing = trailing.slice(closing.index + closing[0].length);
+  }
+  return classifyEvaluationGate(trailing) !== null;
 }

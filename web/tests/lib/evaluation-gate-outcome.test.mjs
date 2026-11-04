@@ -63,6 +63,23 @@ test("a report and a separate explicit stop are refused as contradictory", () =>
   assert.match(result.message, /both a report and a confirmation stop/);
 });
 
+test("an active legacy stop after a report is contradictory, while quoted and earlier legacy context is not", () => {
+  const result = runOutcome(`${report}\n${stop}`);
+  assert.equal(result.ok, false);
+  assert.equal(result.gated, undefined);
+  assert.match(result.message, /both a report and a confirmation stop/);
+  assert.deepEqual(runOutcome(`${stop}\n${report}`), { ok: true });
+  assert.deepEqual(runOutcome(`${report}\n${stop.split("\n").map(line => "> " + line).join("\n")}`), { ok: true });
+  assert.deepEqual(runOutcome(`${report}\n\`\`\`text\n${stop}\n\`\`\``), { ok: true });
+  assert.deepEqual(runOutcome(`${report}\n\`\`\`text\n${stop.split("\n").slice(0, -1).join("\n")}\n\`\`\`\nVERDICT: N/A/5 — Quoted example.`), { ok: true });
+  assert.deepEqual(runOutcome(`\`\`\`text\n${report}\n${stop}`), { ok: true }, "a code example begun before the report does not declare an active stop");
+  for (const marker of ["```", "````", "~~~~"]) {
+    assert.match(runOutcome(`${marker}markdown\n${report}\n${marker}\n${stop}`).message, /both a report and a confirmation stop/, "a closed outer example does not hide an actual later stop");
+  }
+  const agency = 'Stopped before Block A.\n```yaml\nstatus: needs_confirmation\nreason: agency_confirmation\nquestion: "Confirm the intermediary."\n```\nVERDICT: N/A/5 — Agency confirmation required.';
+  assert.match(runOutcome(`${report}\n${agency}`).message, /both a report and a confirmation stop/);
+});
+
 test("a dedicated stop before a report cannot be erased by a later numeric verdict", () => {
   const result = runOutcome(`${structured()}\n${report}\nVERDICT: 4.2/5 — Strong match.`);
   assert.equal(result.ok, false);

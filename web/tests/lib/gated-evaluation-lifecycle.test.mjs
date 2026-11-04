@@ -94,6 +94,13 @@ test("a stop before a scored report cannot allocate a number or write/merge arti
   assert.deepEqual(result.calls, []);
 });
 
+test("a legacy stop after a report cannot allocate or persist artifacts", async () => {
+  const result = await replay(`${report}\n${stopped}`);
+  assert.equal(result.completion.status, "error");
+  assert.match(result.completion.message, /both a report and a confirmation stop/);
+  assert.deepEqual(result.calls, []);
+});
+
 test("a valid scored report still reaches real persistence once and returns its report number", async () => {
   const result = await replay(report);
   assert.equal(result.terminalEvent, null, "only successful persistence may declare report success");
