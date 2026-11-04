@@ -1,0 +1,23 @@
+{
+  "name": "career-ops-plugin-bowmark",
+  "id": "bowmark",
+  "repo": "https://github.com/bowmark-ai/career-ops-plugin-bowmark",
+  "author": "bowmark-ai",
+  "hooks": [
+    "provider",
+    "search"
+  ],
+  "description": "Every open job at one company, read live from that company's own job board (Greenhouse, Lever, Ashby, Workday and 8 more), given its site, careers page or name.",
+  "requiredEnv": [
+    "BOWMARK_API_KEY"
+  ],
+  "allowedHosts": [
+    "api.bowmark.ai"
+  ],
+  "skill": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "sha": "a200a2bf488e2de221f0b57e80b490f2aede8a07",
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/6475",
+  "addedAt": "2026-11-04"
+}
