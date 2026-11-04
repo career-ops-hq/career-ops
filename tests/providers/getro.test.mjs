@@ -289,6 +289,30 @@ try {
   if (getroAged.length === 0 && getroAgePages === 1) pass('getro.fetch() stops pagination once postings cross getro_max_age_days');
   else fail(`getro.fetch() age-cutoff handling: ${getroAgePages} pages, ${getroAged.length} jobs kept`);
 
+  // A board can pin `featured` postings above the newest-first order. An old pin
+  // is dropped, but it must not stop the walk: the pages after it are still new.
+  const freshCreatedAt = Math.floor((Date.now() - 2 * 86_400_000) / 1000);
+  const row = (id, createdAt, featured = false) => ({ title: id, url: `https://jobs.examplevc.example/${id}`, organization: { name: 'Acme' }, created_at: createdAt, featured });
+  const pinnedPages = [
+    [row('pin-fresh', freshCreatedAt, true), row('pin-old', staleCreatedAt, true), row('a', freshCreatedAt)],
+    [row('b', freshCreatedAt)],
+    [row('c', staleCreatedAt), row('d', freshCreatedAt)],
+    [row('never-read', freshCreatedAt)],
+  ];
+  let pinnedCalls = 0;
+  const pinned = await getro.fetch({ ...okEntry, getro_max_age_days: 90 }, {
+    fetchJson: async () => {
+      const jobs = pinnedPages[pinnedCalls++] || [];
+      return { results: { count: 80, jobs } };
+    },
+  });
+  const pinnedTitles = pinned.map((j) => j.title).join(',');
+  if (pinnedCalls === 3 && pinnedTitles === 'pin-fresh,a,b,d') {
+    pass('getro.fetch() drops an old featured pin without stopping the walk, and still stops at an old posting in order');
+  } else {
+    fail(`getro.fetch() featured pin: ${pinnedCalls} pages, kept ${pinnedTitles}`);
+  }
+
   // A transient failure (timeout/abort — no .status set, matching a real AbortError)
   // is retried and recovers transparently instead of truncating the board (#2506).
   let getroRetryAttempts = 0;
@@ -331,6 +355,37 @@ try {
   } else {
     fail(`getro.fetch() later-page failure handling: ${JSON.stringify(getroLaterPageFail)}`);
   }
+
+  // The truncation warning names the failed page in 1-based numbering, the pages
+  // the walk planned to read, and the requests really made for that page.
+  const truncationWarning = async (rejection) => {
+    const warnings = [];
+    const realConsoleError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    try {
+      await getro.fetch(okEntry, {
+        sleep: async () => {},
+        fetchJson: async (_url, opts) => {
+          const { page } = JSON.parse(opts.body);
+          if (page === 0) return { results: { count: 100, jobs: [{ title: 'First', url: 'https://jobs.examplevc.example/f', organization: { name: 'Acme' } }] } };
+          throw rejection;
+        },
+      });
+    } finally {
+      console.error = realConsoleError;
+    }
+    return warnings.join('\n');
+  };
+  const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+  const retriedWarning = await truncationWarning(httpError(429));
+  if (retriedWarning.includes('ExampleVC truncated at page 2 of 5 after 3 attempts (1 jobs): HTTP 429')) pass('getro.fetch() warning names the failed page, the planned pages and the attempts after a retried 429');
+  else fail(`getro.fetch() retried truncation warning: ${retriedWarning}`);
+  const notRetriedWarning = await truncationWarning(httpError(403));
+  if (notRetriedWarning.includes('truncated at page 2 of 5 after 1 attempt (1 jobs): HTTP 403')) pass('getro.fetch() warning counts one attempt for a non-retryable failure');
+  else fail(`getro.fetch() non-retried truncation warning: ${notRetriedWarning}`);
+  const stringWarning = await truncationWarning('plain string rejection');
+  if (stringWarning.includes('truncated at page 2 of 5 after an unknown number of attempts (1 jobs): plain string rejection')) pass('getro.fetch() warning says the attempts are unknown when a later page rejects with a non-object');
+  else fail(`getro.fetch() string rejection truncation warning: ${stringWarning}`);
 
   // Malformed / empty payload → empty array, no crash, no infinite pagination.
   const getroEmpty = await getro.fetch(okEntry, { fetchJson: async () => ({}) });

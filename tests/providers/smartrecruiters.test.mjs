@@ -514,6 +514,54 @@ try {
     }
   }
 
+  // releasedDate becomes postedAt, so max_posting_age_days and --since can
+  // act on SmartRecruiters boards. Before, every row came back undated and
+  // buildPostingAgeFilter passes an undated row, so a 2022 requisition
+  // survived a 45-day limit.
+  {
+    const rows = parseSmartRecruitersResponse({
+      content: [
+        { id: '1', name: 'Dated', company: { name: 'DateCo' }, releasedDate: '2022-07-05T08:50:05.000Z' },
+        { id: '2', name: 'Undated', company: { name: 'DateCo' } },
+        { id: '3', name: 'Garbled', company: { name: 'DateCo' }, releasedDate: 'not a date' },
+        { id: '4', name: 'Object', company: { name: 'DateCo' }, releasedDate: { toString: 1 } },
+      ],
+    }, 'DateCo', 'dateco');
+    const [dated, undated, garbled, objectDate] = rows;
+    if (rows.length === 4 && objectDate && !('postedAt' in objectDate)) {
+      pass('a releasedDate that is not a string is ignored, not thrown on');
+    } else {
+      fail(`object-date row = ${JSON.stringify(objectDate)}, rows = ${rows.length}`);
+    }
+    if (dated?.postedAt === Date.parse('2022-07-05T08:50:05.000Z')) {
+      pass('parseSmartRecruitersResponse maps releasedDate to postedAt (epoch ms)');
+    } else {
+      fail(`dated row = ${JSON.stringify(dated)}`);
+    }
+    if (undated && !('postedAt' in undated) && garbled && !('postedAt' in garbled)) {
+      pass('a missing or unparseable releasedDate leaves postedAt unset');
+    } else {
+      fail(`undated/garbled = ${JSON.stringify([undated, garbled])}`);
+    }
+    const { buildPostingAgeFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    const keep = buildPostingAgeFilter(45, Date.parse('2026-10-30T00:00:00Z'));
+    if (keep(dated?.postedAt) === false && keep(undated?.postedAt) === true) {
+      pass('a 2022 SmartRecruiters posting is dropped by a 45-day max_posting_age_days');
+    } else {
+      fail(`age filter kept dated=${keep(dated?.postedAt)} undated=${keep(undated?.postedAt)}`);
+    }
+
+    const fetched = await sr.fetch(
+      { name: 'DateCo', careers_url: 'https://careers.smartrecruiters.com/dateco' },
+      { fetchJson: async () => ({ content: [{ id: '9', name: 'Role', releasedDate: '2026-10-29T10:00:00.000Z' }] }) },
+    );
+    if (fetched[0]?.postedAt === Date.parse('2026-10-29T10:00:00.000Z')) {
+      pass('fetch() keeps postedAt on the rows it returns');
+    } else {
+      fail(`fetch row = ${JSON.stringify(fetched[0])}`);
+    }
+  }
+
 } catch (e) {
   fail(`smartrecruiters provider tests crashed: ${e.message}`);
 }
