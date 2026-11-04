@@ -82,7 +82,18 @@ check('no row means skipped silently ("no verified data")', secHas(/no row in th
 check('no research or fetching; registry link printed only', secHas(/nothing is fetched or searched/) && secHas(/registry link .* printed for the candidate to click/), 'no-research rule missing');
 check('quotes the contract verbatim and names pattern and source', secHas(/quoted verbatim/) && secHas(/pattern's name and its source/), 'quote/source rule missing');
 check('every finding ends in a lawyer question', secHas(/Every finding ends in a question for the lawyer list/), 'lawyer-question rule missing');
-check('absent marker produces no output', secHas(/absent marker produces no output/) && secHas(/Only text that is actually in the contract can trip a pass/), 'silence rule missing');
+check(
+  'absent marker produces no output; agency pass keeps its candidate-statement and via= evidence',
+  secHas(/absent marker produces no output/)
+    && secHas(/classification and\s+terminology passes are tripped only by text actually in the contract/)
+    && secHas(/agency pass may also be tripped by the candidate's own statement or the\s+tracker `via=` field/),
+  'silence rule missing or conflicts with the agency pass evidence',
+);
+check(
+  'agency pass states no regime facts (hard guard: sole statutory-facts source) and keeps the registry link',
+  secHas(/the finding states no regime facts/) && secHas(/templates\/restrictive-covenants\.yml/) && secHas(/registry link/),
+  'agency pass still conflicts with the statutory-facts guard',
+);
 
 // ---- Forbidden verdict phrases appear only inside the single "never say" instruction
 const verdicts = ['this is misclassification', 'this licence is missing', 'this contract is for the wrong country'];
@@ -111,9 +122,15 @@ check(
 );
 check(
   'Pass 2 employment classification: case A and case B',
-  all(sec, ['Pass 2', 'Signal 6', '**Case A', '**Case B', '"invoice"', '"independent contractor"', '"consultant"', '"T4A"', '"1099"', '"labour contract"', '"employee"', '"salary"'])
+  all(sec, ['Pass 2', 'Signal 6', '**Case A', '**Case B', '"invoice for services"', '"independent contractor"', '"consultant"', '"T4A"', '"1099"', '"labour contract"', '"employee"', '"salary"'])
     && secHas(/corroborating omission/) && secHas(/no omission is required/) && secHas(/contradiction inside one document is the signal/),
   'classification pass incomplete',
+);
+check(
+  'case A uses the full Signal 6 omission set and requires a service-invoice context',
+  secHas(/no standard\s+employment-standards phrasing/) && secHas(/statutory deductions or\s+withholding/)
+    && secHas(/instruction for the candidate to invoice/) && secHas(/bare "invoice" in an expense-reimbursement or billing clause\s+is not contractor-status wording/),
+  'case A omission set or invoice context incomplete',
 );
 check(
   'case B is called out as a change of trigger, not only of input',
@@ -185,7 +202,7 @@ check(
 );
 
 // Marker lists, each verified to be covered by the mode text they come from.
-const CONTRACTOR_TERMS = ['invoice', 'independent contractor', 'T4A', '1099'];
+const CONTRACTOR_TERMS = ['invoice for services', 'independent contractor', 'T4A', '1099'];
 const TERMINOLOGY_STRONG = ['401(k)', 'W-2 employment', 'RRSP', 'T4'];
 const AGENCY_WORDING = ['on behalf of our client', 'assignment', 'placement', 'client site'];
 check(

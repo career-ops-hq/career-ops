@@ -395,8 +395,11 @@ reuses the existing signal definition and its existing table, unchanged.
 - **Wording:** never say "this is misclassification", "this licence is
   missing", or "this contract is for the wrong country" (or any equivalent
   verdict). Every finding ends in a question for the lawyer list.
-- **Silence:** an absent marker produces no output. Only text that is
-  actually in the contract can trip a pass.
+- **Silence:** an absent marker produces no output. The classification and
+  terminology passes are tripped only by text actually in the contract. The
+  agency pass may also be tripped by the candidate's own statement or the
+  tracker `via=` field (see Pass 1), since an agency can sit behind a
+  contract that never names one; nothing is ever inferred beyond that.
 
 **Pass 1 — Agency licensing (Signal 10, `templates/agency-licensing.yml`).**
 Trips only when **both** hold: (a) the offer letter or contract is issued by,
@@ -405,22 +408,29 @@ candidate would do (wording such as "on behalf of our client", "assignment",
 "placement", "client site", or a staffing or recruiting brand named as the
 employer with an end client named separately; or the candidate states, or the
 tracker `via=` field shows, that the offer came through an agency), and (b)
-the Step 1 jurisdiction has a row in the table. The finding states the entity
-named as employer, the end client if one is named, the regime facts from the
-row, and the registry link, and says plainly that licence status cannot be
-read from the contract. It never asserts that any agency is unlicensed.
-Lawyer-list entry: "Is {named entity} the employer of record, and who is
-liable for wages, deductions and termination notice, the agency or the
-client?" Not tripped: a direct employer's letter, even if a recruiter
-introduced the candidate.
+the Step 1 jurisdiction has a row in the table. The row is the gate and the
+source of the registry link; the finding states no regime facts, because the
+hard guard names `templates/restrictive-covenants.yml` as the sole source of
+statutory facts. The finding states the entity named as employer, the end
+client if one is named, and the registry link, and says plainly that licence
+status cannot be read from the contract. It never asserts that any agency is
+unlicensed. Lawyer-list entries: "Is {named entity} the employer of record,
+and who is liable for wages, deductions and termination notice, the agency or
+the client?" and "Which agency-licensing rules apply to {named entity} in
+{jurisdiction}, and is it listed on the official registry?" Not tripped: a
+direct employer's letter, even if a recruiter introduced the candidate.
 
 **Pass 2 — Employment classification (Signal 6 term table).** Two cases:
 
 - **Case A (same logic as the JD):** explicit contractor-status wording from
   the Signal 6 table or its structural check appears in the contract
-  ("invoice", "independent contractor", "consultant", "T4A", "1099",
-  "labour contract") **and** at least one corroborating omission (no benefits,
-  no vacation, no defined end date, no mention of statutory deductions).
+  ("invoice for services" or an instruction for the candidate to invoice,
+  "independent contractor", "consultant", "T4A", "1099", "labour contract")
+  **and** at least one corroborating omission from the Signal 6 set (no
+  benefits, no vacation or PTO, no defined end date, no standard
+  employment-standards phrasing, no mention of statutory deductions or
+  withholding). A bare "invoice" in an expense-reimbursement or billing clause
+  is not contractor-status wording.
 - **Case B (new at the contract stage):** the same document contains both
   contractor-style wording from the Signal 6 table and employee-style wording
   (a reporting line, an ongoing role, set hours, "employee", "salary"). The
