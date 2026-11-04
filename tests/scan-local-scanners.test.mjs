@@ -116,6 +116,27 @@ test('politeFetch retries network-level errors with back-off', async () => {
   assert.strictEqual(waits.length, 2);
 });
 
+test('politeFetch retries stalled body reads (res.text() inside try)', async () => {
+  const waits = [];
+  let attempt = 0;
+  const stalledErr = new DOMException('The operation was aborted', 'AbortError');
+  const body = await politeFetch('https://x.test', {
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      text: async () => {
+        if (attempt++ < 2) throw stalledErr;
+        return 'body arrived';
+      },
+    }),
+    sleepImpl: async (ms) => waits.push(ms),
+    backoffMs: 100,
+    timeoutMs: 5000,
+  });
+  assert.strictEqual(body, 'body arrived');
+  assert.strictEqual(waits.length, 2);
+});
+
 test('local gate: title, seen URL, same-role dedup within and across runs', () => {
   const gate = createLocalGate({
     gateOptions: {

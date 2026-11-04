@@ -77,13 +77,14 @@ export async function politeFetch(url, {
         headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'en', ...headers },
         signal: AbortSignal.timeout(timeoutMs),
       });
+      // Read body inside the try so a stalled body read uses the same retry budget.
+      if (res.ok) return await res.text();
     } catch (networkErr) {
-      // Network-level failure (DNS, reset, timeout): retry with back-off.
+      // Network-level failure (DNS, reset, timeout, stalled body): retry with back-off.
       if (attempt === retries) throw networkErr;
       await sleepImpl(Math.min(maxWaitMs, backoffMs * 2 ** attempt));
       continue;
     }
-    if (res.ok) return res.text();
     lastStatus = res.status;
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable || attempt === retries) break;
