@@ -1,7 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchResponseWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchResponseWithRetry, sleep } from './_http.mjs';
 
 // Consider provider — multi-employer board adapter for `job_boards:`.
 // VC "talent network" portfolio boards built on Consider (consider.com) and
@@ -32,12 +32,13 @@ import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchResponseWithRetry } f
 // id would save no request. `consider_board: <id>` on the entry wins over the
 // page; it is needed only when the page stops carrying the id.
 //
-// `consider_size` (default 500, maximum 1000) caps how many jobs the single
-// request pulls. A board with more jobs than that is truncated, with a warning.
-// The API orders jobs by its own score, so the newest jobs come first only
-// roughly.
+// `consider_size` (default 500, maximum 1000) is how many jobs one request pulls.
+// A full page carries `meta.sequence`, a cursor sent back in the next request's
+// `meta`, so the walk reads the whole board up to `max_pages` (default 10, hard
+// cap 100). The API orders jobs by its own score, so the newest jobs come first
+// only roughly, and the walk has no age cutoff.
 //
-// Both requests are retried on a transient failure, through the shared helpers
+// All requests are retried on a transient failure, through the shared helpers
 // in _http.mjs. A verify-portals probe (ctx.maxPages set) gets no retries, so it
 // receives a failure at once.
 
@@ -60,6 +61,11 @@ const ENDPOINT_PATH = '/api-boards/search-jobs';
 const DEFAULT_SIZE = 500;
 // The API answers HTTP 500 to a larger size, so an entry's value is clamped to it.
 const MAX_SIZE = 1000;
+// Page ceiling, independent of what `total` and `meta.sequence` report. 10 pages
+// of the default size is 5,000 postings.
+const DEFAULT_MAX_PAGES = 10;
+const MAX_PAGES_CAP = 100;
+const INTER_PAGE_DELAY_MS = 250;
 // Budget for the anonymous GET that seeds the session cookie and csrfToken.
 // Shorter than the POST budget so a slow board page can't eat the full timeout.
 const HANDSHAKE_TIMEOUT_MS = 8_000;
@@ -225,6 +231,33 @@ function locationString(job) {
   return job.remote ? 'Remote' : '';
 }
 
+/** A job row from the search response, or null when it has no usable URL. */
+function toRow(job, origin, entry) {
+  const rawUrl = job.url || job.applyUrl || '';
+  if (!rawUrl) return null;
+  // Normalize to an absolute URL so the dedup key matches what the
+  // ashby/greenhouse providers emit (Consider returns absolute ATS links,
+  // but resolve defensively in case a relative path ever appears).
+  let url;
+  try {
+    url = new URL(rawUrl, origin).toString();
+  } catch {
+    return null;
+  }
+  return {
+    title: job.title || '',
+    url,
+    company: job.companyName || entry.name,
+    location: locationString(job),
+    postedAt: toEpochMs(job.timeStamp),
+  };
+}
+
+function resolveMaxPages(entry) {
+  const value = entry?.max_pages;
+  return Number.isInteger(value) && value > 0 ? Math.min(value, MAX_PAGES_CAP) : DEFAULT_MAX_PAGES;
+}
+
 /** @type {Provider} */
 export default {
   id: 'consider',
@@ -262,54 +295,72 @@ export default {
     if (cookie) csrfHeaders.cookie = cookie;
     if (csrfToken) csrfHeaders['x-csrf-token'] = csrfToken;
 
-    const json = await fetchJsonWithRetry(ctx, origin + ENDPOINT_PATH, {
-      method: 'POST',
-      // redirect:'error' so a 3xx from the (config-driven) board host can't be
-      // followed to a private/metadata IP — the host guard above pins the first hop.
-      redirect: 'error',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        referer: origin + '/jobs',
-        ...csrfHeaders,
-      },
-      body: JSON.stringify({
-        meta: { size },
-        board: { id: board.id, isParent: board.isParent },
-        query: { promoteFeatured: true },
-      }),
-    }, retryPolicy(ctx));
+    const maxPages = resolveMaxPages(entry);
+    const probing = isProbe(ctx);
+    const pagesToFetch = probing ? Math.min(maxPages, Number(ctx.maxPages)) : maxPages;
 
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
-    if (!isProbe(ctx) && jobs.length >= size && Number.isInteger(json?.total) && json.total > jobs.length) {
-      // At the maximum a higher consider_size is clamped back to it, so raising
-      // the entry's value would read nothing more.
-      const advice = size >= MAX_SIZE
-        ? `${MAX_SIZE} is the most one request can return`
-        : 'raise consider_size on this entry for more';
-      console.error(`⚠️  consider: ${entry.name} truncated at consider_size=${size} (${jobs.length} of ${json.total} jobs) — ${advice}`);
+    const rows = [];
+    let total = null;
+    let sequence = null;
+    let page = 0;
+    for (; page < pagesToFetch; page++) {
+      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+
+      let json;
+      try {
+        json = await fetchJsonWithRetry(ctx, origin + ENDPOINT_PATH, {
+          method: 'POST',
+          // redirect:'error' so a 3xx from the (config-driven) board host can't be
+          // followed to a private/metadata IP — the host guard above pins the first hop.
+          redirect: 'error',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json',
+            referer: origin + '/jobs',
+            ...csrfHeaders,
+          },
+          body: JSON.stringify({
+            meta: sequence ? { size, sequence } : { size },
+            board: { id: board.id, isParent: board.isParent },
+            query: { promoteFeatured: true },
+          }),
+        }, retryPolicy(ctx));
+      } catch (err) {
+        // The first page failing means the board is unreachable, and a probe
+        // must see the rejection as it is. A later page keeps what was read.
+        if (probing || page === 0) throw err;
+        const attempts = err?.attempts;
+        const attemptsText = attempts === undefined
+          ? 'an unknown number of attempts'
+          : `${attempts} attempt${attempts === 1 ? '' : 's'}`;
+        const cause = err instanceof Error ? err.message : String(err);
+        console.error(`⚠️  consider: ${entry.name} truncated at page ${page + 1} of ${pagesToFetch} after ${attemptsText} (${rows.length} jobs): ${cause}`);
+        return rows;
+      }
+
+      const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+      if (Number.isInteger(json?.total)) total = json.total;
+      for (const job of jobs) {
+        const row = toRow(job, origin, entry);
+        if (row) rows.push(row);
+      }
+
+      // The board ended: a short page, no cursor, or a cursor that does not move.
+      // Leaves `page` below the ceiling, so the check after the loop stays silent.
+      const next = json?.meta?.sequence;
+      if (jobs.length < size || !next || next === sequence) break;
+      sequence = next;
     }
-    return jobs
-      .map(j => {
-        const rawUrl = j.url || j.applyUrl || '';
-        if (!rawUrl) return null;
-        // Normalize to an absolute URL so the dedup key matches what the
-        // ashby/greenhouse providers emit (Consider returns absolute ATS links,
-        // but resolve defensively in case a relative path ever appears).
-        let url;
-        try {
-          url = new URL(rawUrl, origin).toString();
-        } catch {
-          return null;
-        }
-        return {
-          title: j.title || '',
-          url,
-          company: j.companyName || entry.name,
-          location: locationString(j),
-          postedAt: toEpochMs(j.timeStamp),
-        };
-      })
-      .filter(Boolean);
+
+    if (!probing && page >= maxPages) {
+      const of = total !== null ? ` of ${total}` : '';
+      // At the hard ceiling a higher max_pages is clamped back to it, so raising
+      // the entry's value would read nothing more.
+      const advice = maxPages >= MAX_PAGES_CAP
+        ? `the ${MAX_PAGES_CAP}-page hard cap, so raising max_pages reads no more`
+        : 'raise max_pages on this entry for more';
+      console.error(`⚠️  consider: ${entry.name} truncated at max_pages=${maxPages} (${rows.length}${of} jobs) — ${advice}`);
+    }
+    return rows;
   },
 };

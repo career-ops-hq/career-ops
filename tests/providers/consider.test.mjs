@@ -524,32 +524,101 @@ try {
     fail(`consider.fetch() size: clamped ${clamped.requested}, at maximum ${atMaximum.requested}, default ${byDefault.requested}`);
   }
 
-  const belowMaximum = await sizeRun(100, { rows: 100, total: 300 });
-  if (belowMaximum.warnings.length === 1
-      && belowMaximum.warnings[0].includes('Acme Ventures truncated at consider_size=100 (100 of 300 jobs) — raise consider_size on this entry for more')) {
-    pass('consider.fetch() warns and advises a higher consider_size below the maximum');
+  // ── Pagination ─────────────────────────────────────────────────────────────
+  // Walks a board of `pages` full pages of two rows, each answering the cursor
+  // `s{page}`. `shape(page)` overrides a page's response; a thrown value fails it.
+  const walkRun = async (entryExtra, { pages = 3, total = 6, maxPages, shape } = {}) => {
+    const warnings = [];
+    const realConsoleError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    const metas = [];
+    const delays = [];
+    let jobs = null;
+    let thrown = null;
+    try {
+      jobs = await consider.fetch({ ...okEntry, consider_size: 2, ...entryExtra }, {
+        _acquireHandshake: noHandshake,
+        ...(maxPages ? { maxPages } : {}),
+        sleep: async (ms) => { delays.push(ms); },
+        fetchJson: async (_url, opts) => {
+          const { meta } = JSON.parse(opts.body);
+          const page = meta.sequence ? Number(meta.sequence.slice(1)) : 0;
+          metas.push(meta);
+          const row = (i) => ({ title: `T${page}-${i}`, url: `https://jobs.acmevc.example/j${page}-${i}`, companyName: 'Acme' });
+          const response = { jobs: [row(0), row(1)], total, meta: page + 1 < pages ? { sequence: `s${page + 1}` } : {} };
+          return shape ? shape(page, response, row) : response;
+        },
+      });
+    } catch (e) {
+      thrown = e;
+    } finally {
+      console.error = realConsoleError;
+    }
+    return { jobs, thrown, metas, delays, warnings };
+  };
+
+  const fullWalk = await walkRun({});
+  if (fullWalk.jobs?.length === 6 && fullWalk.warnings.length === 0
+      && JSON.stringify(fullWalk.metas) === JSON.stringify([{ size: 2 }, { size: 2, sequence: 's1' }, { size: 2, sequence: 's2' }])) {
+    pass('consider.fetch() follows meta.sequence to the end of the board without a warning');
   } else {
-    fail(`consider.fetch() warning below the maximum: ${JSON.stringify(belowMaximum.warnings)}`);
+    fail(`consider.fetch() walk: ${JSON.stringify({ rows: fullWalk.jobs?.length, metas: fullWalk.metas, warnings: fullWalk.warnings })}`);
+  }
+  if (JSON.stringify(fullWalk.delays) === JSON.stringify([250, 250])) pass('consider.fetch() waits 250 ms between pages and not before the first one');
+  else fail(`consider.fetch() page delays: ${JSON.stringify(fullWalk.delays)}`);
+
+  const shortPage = await walkRun({}, { shape: (page, response, row) => ({ ...response, jobs: [row(0)], meta: { sequence: `s${page + 1}` } }) });
+  if (shortPage.metas.length === 1 && shortPage.warnings.length === 0) pass('consider.fetch() stops at a short page even when it carries a cursor');
+  else fail(`consider.fetch() short page: ${shortPage.metas.length} requests, ${JSON.stringify(shortPage.warnings)}`);
+
+  const stuckCursor = await walkRun({}, { shape: (_page, response) => ({ ...response, meta: { sequence: 's1' } }) });
+  if (stuckCursor.metas.length === 2 && stuckCursor.warnings.length === 0) pass('consider.fetch() stops when the cursor does not move');
+  else fail(`consider.fetch() stuck cursor: ${stuckCursor.metas.length} requests, ${JSON.stringify(stuckCursor.warnings)}`);
+
+  const capped = await walkRun({ max_pages: 2 }, { pages: 5, total: 10 });
+  if (capped.metas.length === 2 && capped.jobs?.length === 4 && capped.warnings.length === 1
+      && capped.warnings[0].includes('Acme Ventures truncated at max_pages=2 (4 of 10 jobs) — raise max_pages on this entry for more')) {
+    pass('consider.fetch() warns when max_pages ends the walk with a cursor left');
+  } else {
+    fail(`consider.fetch() max_pages: ${JSON.stringify({ requests: capped.metas.length, warnings: capped.warnings })}`);
   }
 
-  const maximumHit = await sizeRun(1000, { rows: 1000, total: 4719 });
-  if (maximumHit.warnings.length === 1
-      && maximumHit.warnings[0].includes('truncated at consider_size=1000 (1000 of 4719 jobs) — 1000 is the most one request can return')
-      && !maximumHit.warnings[0].includes('raise consider_size')) {
-    pass('consider.fetch() does not advise a higher consider_size at the maximum');
+  const endsAtCap = await walkRun({ max_pages: 2 }, { pages: 2, total: 4 });
+  if (endsAtCap.metas.length === 2 && endsAtCap.warnings.length === 0) pass('consider.fetch() does not warn when the board ends exactly at max_pages');
+  else fail(`consider.fetch() board ending at max_pages: ${JSON.stringify(endsAtCap.warnings)}`);
+
+  const hardCap = await walkRun({ max_pages: 5000 }, { pages: 200, total: 400 });
+  if (hardCap.metas.length === 100 && hardCap.warnings.length === 1
+      && hardCap.warnings[0].includes('truncated at max_pages=100 (200 of 400 jobs) — the 100-page hard cap')
+      && !hardCap.warnings[0].includes('raise max_pages')) {
+    pass('consider.fetch() clamps max_pages to the hard cap and does not advise raising it there');
   } else {
-    fail(`consider.fetch() warning at the maximum: ${JSON.stringify(maximumHit.warnings)}`);
+    fail(`consider.fetch() hard cap: ${JSON.stringify({ requests: hardCap.metas.length, warnings: hardCap.warnings })}`);
   }
 
-  const wholeBoard = await sizeRun(1000, { rows: 840, total: 840 });
-  const exactFit = await sizeRun(100, { rows: 100, total: 100 });
-  const noTotal = await sizeRun(100, { rows: 100 });
-  const underProbe = await sizeRun(100, { rows: 100, total: 300, maxPages: 1 });
-  if ([wholeBoard, exactFit, noTotal, underProbe].every((run) => run.warnings.length === 0)) {
-    pass('consider.fetch() does not warn on a complete board, a missing total or a probe');
+  const failing = (rejection) => (page, response) => { if (page === 1) throw rejection; return response; };
+  const laterFailure = await walkRun({}, { shape: failing(httpError(429)) });
+  if (laterFailure.jobs?.length === 2 && laterFailure.metas.length === 4 && laterFailure.warnings.length === 1
+      && laterFailure.warnings[0].includes('Acme Ventures truncated at page 2 of 10 after 3 attempts (2 jobs): HTTP 429')) {
+    pass('consider.fetch() keeps the rows read and warns when a later page fails after its retries');
   } else {
-    fail(`consider.fetch() false warning: ${JSON.stringify([wholeBoard, exactFit, noTotal, underProbe].map((run) => run.warnings))}`);
+    fail(`consider.fetch() later page failure: ${JSON.stringify({ rows: laterFailure.jobs?.length, requests: laterFailure.metas.length, warnings: laterFailure.warnings })}`);
   }
+
+  const notObject = await walkRun({}, { shape: failing('plain string rejection') });
+  if (notObject.warnings[0]?.includes('truncated at page 2 of 10 after an unknown number of attempts (2 jobs): plain string rejection')) {
+    pass('consider.fetch() says the attempts are unknown when a later page rejects with a non-object');
+  } else {
+    fail(`consider.fetch() non-object rejection: ${JSON.stringify(notObject.warnings)}`);
+  }
+
+  const probeWalk = await walkRun({}, { maxPages: 1 });
+  if (probeWalk.metas.length === 1 && probeWalk.warnings.length === 0) pass('consider.fetch() sends one list request under a ctx.maxPages probe, without a warning');
+  else fail(`consider.fetch() probe walk: ${probeWalk.metas.length} requests, ${JSON.stringify(probeWalk.warnings)}`);
+
+  const probeLaterFailure = await walkRun({}, { maxPages: 2, shape: failing(httpError(500)) });
+  if (probeLaterFailure.thrown?.status === 500 && probeLaterFailure.metas.length === 2) pass('consider.fetch() passes a later page rejection to a probe unchanged');
+  else fail(`consider.fetch() probe later failure: ${JSON.stringify({ thrown: probeLaterFailure.thrown?.message, requests: probeLaterFailure.metas.length })}`);
 } catch (e) {
   fail(`consider provider tests crashed: ${e.message}`);
 }
