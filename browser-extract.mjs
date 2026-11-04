@@ -255,6 +255,23 @@ export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
 }
 
 /**
+ * Read and drop the body of a response no fetcher will use, and return null.
+ * Left unread, a body still arriving keeps its socket open, and with it the
+ * process: fetch-jd.mjs exits once nothing is left to run. Fetchers await this
+ * inside their try, so the read stays under their abort timer and a body that
+ * never ends stops at the same timeout as the rest of the request. Reading,
+ * not cancelling: these error bodies are small, while a cancel aborts the
+ * request mid-body and undici then opens a new connection that the process
+ * waits for (0.1 to 2.5 s on real Greenhouse and Workday misses, Node 24).
+ *
+ * @param {Response} res
+ */
+async function discard(res) {
+  try { await res.arrayBuffer(); } catch { /* cut off by the abort timer, or unreadable */ }
+  return null;
+}
+
+/**
  * Fetch + shape one Workday posting from its CXS endpoint. Returns null for
  * ANY inconclusive outcome (blocked host, redirect, non-200, unparseable or
  * unexpected body, timeout) so the caller falls through to the browser path —
@@ -279,7 +296,7 @@ async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error', // a redirect off the derived host is not one to follow
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeWorkdayJob(await res.json(), postingUrl, textCap);
   } catch {
     return null;
@@ -368,7 +385,7 @@ async function fetchAshbyJd(apiUrl, jobId, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeAshbyJob(json, jobId, postingUrl, textCap);
   } catch {
@@ -453,7 +470,7 @@ async function fetchGreenhouseJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeGreenhouseJob(json, postingUrl, textCap);
   } catch {
@@ -544,7 +561,7 @@ async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeLeverJob(json, postingUrl, textCap);
   } catch {
@@ -572,6 +589,7 @@ async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutM
       signal: controller.signal,
     });
     jobApiUrl = await resolved.followEmbed(res, resolved.parts);
+    await discard(res); // only its status and Location header are read
   } catch {
     return null;
   } finally {
@@ -628,7 +646,7 @@ async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeSmartRecruitersJob(json, postingUrl, textCap);
   } catch {
@@ -683,7 +701,7 @@ async function fetchZohoJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeZohoJob(await res.text(), id, postingUrl, textCap);
   } catch {
     return null;
@@ -814,7 +832,7 @@ async function fetchUltiproJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeUltiproJob(await res.text(), id, postingUrl, textCap);
   } catch {
     return null;
@@ -859,10 +877,11 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
     if (resolved.followEmbed) {
       const redirect = await fetch(apiUrl, { ...options, redirect: 'manual' });
       apiUrl = await resolved.followEmbed(redirect, resolved.parts);
+      await discard(redirect); // only its status and Location header are read
       if (!apiUrl || rejectPrivateOrInvalid(apiUrl)) return null;
     }
     const res = await fetch(apiUrl, options);
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeWorkableJob(await res.json(), resolved.parts.shortcode, postingUrl, textCap);
   } catch {
     return null;

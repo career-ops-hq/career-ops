@@ -600,6 +600,49 @@ try {
     fail(`JD_TEXT_API_ATS routing drift => ${JSON.stringify(routed)}`);
   }
 
+  // A fetcher that gives up on a response is done with its body before it
+  // returns. fetch-jd.mjs exits once nothing is left to run, and an unread body
+  // that is still arriving keeps its socket open, and with it the process.
+  // Every request here gets a 404 whose body never ends, as a real one would
+  // until the fetcher's abort timer cuts it off; the timers are shortened so
+  // that takes milliseconds. The redirect hops (greenhouse-embedded, the
+  // Workable share link) give up on a 404 too.
+  const DISCARD_PROBES = [
+    ...ATS_URL_SHAPES.map(([, url]) => url),
+    'https://apply.workable.com/fictional-employer/j/FIXTURE123/',
+    'https://apply.workable.com/j/FIXTURE123',
+  ];
+  /** @type {Record<string, {result: any, sent: number, ended: number}>} */
+  const discards = {};
+  try {
+    globalThis.setTimeout = (/** @type {any} */ fn, /** @type {any} */ ms, /** @type {any[]} */ ...rest) =>
+      realSetTimeout(fn, Math.min(ms, 20), ...rest);
+    for (const url of DISCARD_PROBES) {
+      const seen = { result: undefined, sent: 0, ended: 0 };
+      globalThis.fetch = async (/** @type {any} */ _url, /** @type {any} */ init) => {
+        seen.sent += 1;
+        const body = new ReadableStream({
+          start(stream) {
+            init?.signal?.addEventListener('abort', () => { seen.ended += 1; stream.error(init.signal.reason); });
+          },
+          cancel() { seen.ended += 1; },
+        });
+        return new Response(body, { status: 404 });
+      };
+      seen.result = await fetchJdViaKnownApi(url);
+      discards[resolveAtsApi(url)?.ats] = seen;
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    globalThis.setTimeout = realSetTimeout;
+  }
+  if (Object.keys(discards).sort().join(',') === fetcherIds
+      && Object.values(discards).every((d) => d.result === null && d.sent > 0 && d.ended === d.sent)) {
+    pass('every JD fetcher ends the body of a response it gives up on before returning');
+  } else {
+    fail(`JD fetchers left a body open => ${JSON.stringify(discards)}`);
+  }
+
   // fetchAshbyJd is the one fetcher that needs a field off resolveAtsApi beyond
   // apiUrl: Ashby's API is org-level, so the posting is picked out of the board
   // by parts.jobId. If that field is ever renamed or stops being populated the
