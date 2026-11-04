@@ -9,6 +9,7 @@ import * as yaml from 'js-yaml';
 import { formatLiveOfferLine } from '../../../scan-ats-full.mjs';
 import { buildWorkplacePolicy, captureWorkplaceEvidence, workplacePolicyFromConfig } from '../../../providers/_country.mjs';
 import { workplacePolicyConfig, loadWorkplacePolicy } from '../../src/lib/core/workplace-policy.mjs';
+import { exitedNonZero, describeSpawn } from '../../../tests/helpers/describe-spawn.mjs';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const policy = { onsite_locations: ['Barcelona'], remote_countries: ['Spain'], remote_regions: ['Europe', 'EU', 'EMEA', 'Worldwide'] };
 test('web config shape mirror agrees with the core and only a missing file is absent', async () => {
@@ -55,14 +56,14 @@ test('actual Add-to-Inbox adapter rejects a mixed selection before either writer
     Object.assign(env, { CAREER_OPS_ROOT: temp, CAREER_OPS_CODE_ROOT: ROOT });
     const run = offers => spawnSync(process.execPath, ['--experimental-strip-types', '--import', loader, '--input-type=module', '-e', code], { cwd: temp, input: JSON.stringify(offers), env, encoding: 'utf8', timeout: 15_000 });
     const result = run(input);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result, 'Add to Inbox rejects a mixed selection'));
     const outcome = JSON.parse(result.stdout);
     assert.equal(outcome.added, 0, result.stdout);
     assert.match(outcome.error, /Nothing was added.*allowed location separately/);
     assert.equal(fs.existsSync(path.join(temp, 'data/pipeline.md')), false, 'mixed selection writes nothing');
     assert.equal(fs.existsSync(path.join(temp, 'data/scan-history.tsv')), false, 'mixed selection records no success');
     const valid = run([input[0]]);
-    assert.equal(valid.status, 0, valid.stderr);
+    assert.equal(valid.status, 0, describeSpawn(valid, 'Add to Inbox accepts eligible evidence'));
     assert.equal(JSON.parse(valid.stdout).added, 1, valid.stdout);
     const pipeline = fs.readFileSync(path.join(temp, 'data/pipeline.md'), 'utf8');
     assert.match(pipeline, /jobs.example\/spain/);
@@ -72,7 +73,7 @@ test('actual Add-to-Inbox adapter rejects a mixed selection before either writer
     for (let i = 0; i < malformed.length; i++) {
       fs.writeFileSync(path.join(temp, 'portals.yml'), malformed[i]);
       const rejected = run([offer(`invalid-${i}`, 'Remote Spain')]);
-      assert.equal(rejected.status, 0, rejected.stderr);
+      assert.equal(rejected.status, 0, describeSpawn(rejected, 'Add to Inbox reports invalid configuration'));
       const outcome = JSON.parse(rejected.stdout);
       assert.equal(outcome.added, 0);
       assert.ok(outcome.error);
@@ -117,7 +118,7 @@ test('Discover retains saved policy and geography evidence with a separate data 
       console.log(JSON.stringify({ offers, events }));
     `;
     const result = spawnSync(process.execPath, ['--experimental-strip-types', '--import', loader, '--input-type=module', '-e', code], { cwd: engine, env, encoding: 'utf8', timeout: 15_000 });
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result, 'Discover preserves policy and evidence'));
     const outcome = JSON.parse(result.stdout);
     assert.equal(outcome.events.some(e => e.kind === 'error'), false, result.stdout);
     assert.equal(outcome.offers.length, 1);
@@ -127,7 +128,7 @@ test('Discover retains saved policy and geography evidence with a separate data 
     for (const text of ['- location_filter: {}\n', 'location_filter: { workplace_policy: null }\n']) {
       fs.writeFileSync(path.join(data, 'portals.yml'), text);
       const rejected = spawnSync(process.execPath, ['--experimental-strip-types', '--import', loader, '--input-type=module', '-e', code], { cwd: engine, env, encoding: 'utf8', timeout: 15_000 });
-      assert.notEqual(rejected.status, 0, rejected.stdout);
+      assert.ok(exitedNonZero(rejected), describeSpawn(rejected, 'Discover must reject malformed saved geography config'));
       assert.match(rejected.stderr, /mapping|must be an object/);
       assert.equal(fs.readFileSync(path.join(data, 'portals.yml'), 'utf8'), text);
     }
