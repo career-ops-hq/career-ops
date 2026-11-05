@@ -256,6 +256,14 @@ export function buildWorkplacePolicy(policy) {
         if (!required.codes.size && !required.region && !required.local) return fail('description_location_restricted');
         for (const code of required.codes) targetCountries.add(code);
       }
+      // Each explicit eligibility list is another restriction, not a union
+      // with earlier worker-location alternatives in the same clause.
+      for (const match of workerClause.matchAll(/\beligible (?:countries|locations) are\s+/g)) {
+        const required = geographyTarget(workerClause.slice(match.index + match[0].length)).codes;
+        if (!required.size) continue;
+        if (![...required].some(c => homeCodes.has(c))) return fail('description_country_restricted');
+        for (const code of required) targetCountries.add(code);
+      }
       // An actual home-compatible target may mix ISO and country names. Only
       // those parsed alternatives qualify; foreign evidence elsewhere keeps
       // the existing generic veto, and every separate mandatory target is read.
