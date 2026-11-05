@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { citySlug } from './_city-slug.mjs';
 
 // ITviec provider — Vietnam's largest IT job board (https://itviec.com), the
 // project's first Vietnamese source. Wire in via a `job_boards:` entry with
@@ -103,16 +104,7 @@ const CITY_SLUGS = /** @type {const} */ ({
  * @returns {string | null}
  */
 export function cityPath(location) {
-  const key = String(location ?? '').trim().toLowerCase();
-  if (!key) return null;
-  // Own-property check: a user string like "constructor" or "toString" must
-  // resolve to null, not to an inherited Object.prototype member whose source
-  // text would then be interpolated into the request URL.
-  if (Object.hasOwn(CITY_SLUGS, key)) return CITY_SLUGS[key];
-  for (const [candidate, slug] of Object.entries(CITY_SLUGS)) {
-    if (key.includes(candidate)) return slug;
-  }
-  return null;
+  return citySlug(location, CITY_SLUGS);
 }
 
 /**
