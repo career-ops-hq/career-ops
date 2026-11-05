@@ -35,7 +35,7 @@ import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolve
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, resolveCanonicalStateId, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken } from './tracker-utils.mjs';
 // Canonical posting-URL key and URL comparison, shared with the other tracker
 // scripts and scan.mjs so the definitions cannot drift apart.
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
@@ -2008,16 +2008,26 @@ export async function mergeTracker(options = {}) {
       // it, but it is not proof of one either: a bare row SKIPped for its German
       // text and an incoming evaluation of the English version share a title,
       // and folding them would bury the English one under the SKIP.
+      const additionReqNum = extractReqNumber(addition.notes);
       const urlBlocksHeuristic = (cand) => {
         if (declaredEmployerConflict(cand, addition)) return true;
         if (urlDiffers(cand)) return true;
         const candPostingUrl = postingUrl(cand);
+        // An old stop with no posting, req, or report identity cannot identify
+        // a newly keyed opening merely by row number or a similar title. Keep
+        // its decision intact; the exact URL/report tiers remain authoritative.
+        if ((addUrl || additionReqNum) && !normalizeUrl(candPostingUrl)
+          && !extractReqNumber(cand.notes)
+          && extractReportNum(cand.report, cand.notes) === null
+          && !resolveReportTarget(cand.report)) {
+          const state = resolveCanonicalStateId(cand.status, _canonicalStates);
+          if (state === 'skip' || state === 'discarded') return true;
+        }
         if (!isAggregatorUrl(candPostingUrl) && !isAggregatorUrl(addition.url)
           && postingUrlRelation(candPostingUrl, addition.url) === 'one-sided-language') return true;
         return Boolean(normalizeUrl(candPostingUrl)) && !addUrl;
       };
 
-      const additionReqNum = extractReqNumber(addition.notes);
       // Req IDs are evidence against a heuristic match only when both sides carry
       // one and they disagree. Missing on either side stays unknown, matching the
       // existing tier-3 guard and the URL guard above.
