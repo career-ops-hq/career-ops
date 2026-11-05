@@ -1,4 +1,4 @@
-import { readApplications, readLinkedReport, readScanHistoryLines } from "@/lib/career-ops";
+import { careerOpsRoot, readApplications, readLinkedReport, readScanHistoryLines } from "@/lib/career-ops";
 import { getNormalizeTextKey } from "@/lib/core/text-key";
 import { getAggregatorRule } from "@/lib/core/aggregator-id";
 import { evaluatedKeys, isEvaluated } from "@/lib/whats-new-suppression.mjs";
