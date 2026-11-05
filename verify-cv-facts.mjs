@@ -1185,6 +1185,7 @@ const STRUCTURED_HTML_FIELDS = [
   ['cert-title', 'certification', true],
   // Standards/authorship credits are rendered in awards too (#1411).
   ['award-title', 'award', true],
+  ['job-period', 'dates', true],
   ['job-role', 'title', false],
 ];
 // One level of nested braces, enough for `\textbf{...}` inside an argument.
@@ -3076,11 +3077,13 @@ function sourceContainsFact(sourceText, value) {
 
 function sourceSpellsFact(sourceText, value) {
   if (value.length > MAX_SOURCE_LOOKUP_LENGTH) return false;
-  const escaped = value
+  const normVal = value.replace(/\s*--\s*/g, ' - ');
+  const normSrc = sourceText.replace(/\s*--\s*/g, ' - ');
+  const escaped = normVal
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     .replace(/\s+/g, '\\s+')
     .replace(/-/g, `[-${FOLDED_DASH}]`);
-  return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(sourceText);
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(normSrc);
 }
 
 /**

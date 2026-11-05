@@ -99,6 +99,32 @@ test('a swapped employer, degree, institution and certification in built HTML bl
   ]);
 });
 
+test('a swapped or fabricated job-period in built HTML blocks (#6255)', () => {
+  const html = build('build-cv-html.mjs', {
+    ...htmlPayload(TRUE),
+    experience: [{ company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2015 – 2018', bullets: ['Led a team of 4 engineers.'] }],
+  }, 'html');
+  const result = verifyFacts(html, options());
+  assert.equal(result.verdict, 'block');
+  assert.deepEqual(kinds(result.unsupportedFacts), ['dates=2015 – 2018']);
+});
+
+test('job-period matches regardless of dash style (hyphen, en-dash, em-dash, double-hyphen) (#6255)', () => {
+  // Source has "2019 – 2024" (en-dash). Generated HTML with ASCII hyphen "2019 - 2024" must pass.
+  const htmlHyphen = build('build-cv-html.mjs', {
+    ...htmlPayload(TRUE),
+    experience: [{ company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2019 - 2024', bullets: ['Led a team of 4 engineers.'] }],
+  }, 'html');
+  assert.equal(verifyFacts(htmlHyphen, options()).verdict, 'pass');
+
+  // Double hyphen "2019 -- 2024" must also pass.
+  const htmlDoubleHyphen = build('build-cv-html.mjs', {
+    ...htmlPayload(TRUE),
+    experience: [{ company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2019 -- 2024', bullets: ['Led a team of 4 engineers.'] }],
+  }, 'html');
+  assert.equal(verifyFacts(htmlDoubleHyphen, options()).verdict, 'pass');
+});
+
 test('an unsourced job title in built HTML warns and does not block', () => {
   const html = build('build-cv-html.mjs', htmlPayload({ ...TRUE, role: 'Principal Engineer' }), 'html');
   const result = verifyFacts(html, options());
