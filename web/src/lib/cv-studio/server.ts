@@ -134,7 +134,7 @@ export async function loadStudio(n: string): Promise<StudioLoad> {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   const { edits, stale } = parseEdits(raw, sourceHash) ?? { edits: emptyEdits(sourceHash), stale: false };
-  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.basename(file), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
+  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.relative(path.join(careerOpsRoot(), "output"), file).split(path.sep).join("/"), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
 }
 
 export function saveEdits(reportNum: string, edits: StudioEdits) {

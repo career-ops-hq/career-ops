@@ -141,6 +141,29 @@ test("an indexed ATS HTML is the studio source when it is the recorded CV", asyn
   }
 });
 
+test("an indexed HTML in a folder under output/ keeps its folder", async () => {
+  const { root, cleanup } = workspace();
+  try {
+    const pdf = "output/client/cv-northwind-traders-2026-03-01.pdf";
+    fs.mkdirSync(path.join(root, "output", "client"));
+    fs.writeFileSync(path.join(root, pdf), "%PDF");
+    fs.writeFileSync(path.join(root, "output", "client", "cv-northwind-traders.html"), HTML);
+    fs.writeFileSync(path.join(root, "output", "client", "cv-northwind-traders-edited.html"), HTML);
+    fs.writeFileSync(path.join(root, "output", "cv-northwind-traders.html"), HTML);
+    fs.writeFileSync(
+      path.join(root, "data", "pdf-index.tsv"),
+      HEADER + `42\t${pdf}\toutput/client/cv-northwind-traders-edited.html\tletter\t2026-03-01\tcv\n`,
+    );
+
+    const load = await loadStudio("42");
+
+    assert.equal(load.ok, true);
+    if (load.ok) assert.equal(load.file, "client/cv-northwind-traders.html");
+  } finally {
+    cleanup();
+  }
+});
+
 test("an indexed HTML path outside output/ is not the studio source", async () => {
   const { root, cleanup } = workspace();
   try {
