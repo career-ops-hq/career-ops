@@ -1,9 +1,9 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download, FileText } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -23,6 +23,11 @@ import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
+import { clearHeldSaves, excludeInFlightStatusRows, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
+import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
+import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
+import { LinkedInPaste } from "@/components/linkedin-paste";
 import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
@@ -41,12 +46,16 @@ export function PipelineView({
   inbox,
   inboxCount,
   trackerShape = "rows",
+  cvRows = [],
 }: {
   applications: Application[];
   inbox: InboxJob[] | null;
   inboxCount: number;
   trackerShape?: "missing" | "empty" | "malformed" | "rows";
+  /** Tracker row numbers that have a tailored CV PDF on disk. */
+  cvRows?: string[];
 }) {
+  const hasCv = useMemo(() => new Set(cvRows), [cvRows]);
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -56,10 +65,15 @@ export function PipelineView({
   // intervening snapshots and discards it when the refresh transition settles.
   const [visibleApplications, showSavedStatus] = useOptimistic(applications, applySavedStatus<Application>);
   const [announcement, setAnnouncement] = useState("");
+  // Status saves outlive the virtual row. Pending keeps the chosen status if
+  // the row remounts mid-request. Failed is shown on the row, or above the
+  // table when that row is off screen.
+  const [heldSaves, setHeldSaves] = useState<ReturnType<typeof reduceHeldSave>>(() => new Map());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState("");
+  const [cursor, setCursor] = useState(-1);
   const [views, setViews] = useState<SavedView[]>([]);
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -69,6 +83,8 @@ export function PipelineView({
   const omittedWhileRejected = useRef(new Set<string>());
   const pendingWhileRejected = useRef(new Set<string>());
   const activeTab = useRef<HTMLButtonElement>(null);
+  const anchor = useRef<string | null>(null);
+  const busyRef = useRef(false);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
@@ -289,12 +305,94 @@ export function PipelineView({
     });
   const filterStatus = isPending || !filtering ? "" : empty ? empty.heading : `${filtered.length} of ${tabRows.length} shown`;
 
+  const filterKey = `${visibleTab}|${deferredQ}|${sort.key}|${sort.dir}|${minFilter ?? ""}|${filtered.length}`;
+  const [windowState, setWindowState] = useState<{ key: string; span: { start: number; end: number } } | null>(null);
+  // Until the next measurement after a filter change, keep the last measured
+  // rows (fitted to the new count) so a row on screen keeps its editor state.
+  // The first-screen guess is only for the paint before any measurement.
+  const span = !windowState
+    ? initialTrackerWindow(filtered.length)
+    : windowState.key === filterKey
+      ? windowState.span
+      : clampTrackerWindow(windowState.span, filtered.length);
+  const bodyRef = useRef<HTMLTableSectionElement>(null);
+  // TRACKER_ROW_PX is the first-paint guess. The status cell wraps to two
+  // lines at some widths, so the spacers use the height a mounted row has.
+  const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
+  const mountedRows = filtered.slice(span.start, span.end);
+  const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
+  // The checkbox, the sortable columns and the resume column.
+  const columnCount = SORT_KEYS.length + 2;
+  // Same test as the selection bar's selectedRows.length > 0.
+  const hasSelection = filtered.some((r) => selected.has(applicationKey(r)));
+
+  // A failed save for a row that is off screen, the bulk-save error and the
+  // selection bar all render above the table and move it. Remeasure then.
+  // Scroll and resize do not fire for those changes.
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => {
+      if (el.hidden) return;
+      const rect = el.getBoundingClientRect();
+      // A failed save adds a line. A save in flight can wrap the status
+      // controls. Spacers stand in for a normal row, so neither sets the
+      // shared height.
+      let rowHeight = rowPx;
+      for (const row of el.querySelectorAll("tr[data-application-key]")) {
+        if (row.querySelector("[role='alert'], [aria-busy='true']")) continue;
+        rowHeight = row.getBoundingClientRect().height || rowPx;
+        break;
+      }
+      if (rowHeight !== rowPx) setRowPx(rowHeight);
+      const next = trackerWindow({
+        count: filtered.length,
+        rowHeight,
+        overscan: TRACKER_OVERSCAN,
+        tableTop: rect.top,
+        viewportHeight: window.innerHeight,
+      });
+      setWindowState((prev) => {
+        if (prev?.key === filterKey && prev.span.start === next.start && prev.span.end === next.end) return prev;
+        return { key: filterKey, span: next };
+      });
+    };
+    window.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    // Back restores the list's scroll position after this commit, and that
+    // move does not always emit a scroll event. Keep measuring until it lands.
+    let frames = 0;
+    let raf = 0;
+    const followScrollRestore = () => {
+      measure();
+      frames += 1;
+      if (frames < 30) raf = requestAnimationFrame(followScrollRestore);
+    };
+    raf = requestAnimationFrame(followScrollRestore);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
+  }, [filterKey, filtered.length, rowPx, heldSaves, bulkError, hasSelection]);
+
   const filteredKeys = filtered.map(applicationKey);
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
   const allSelected = filteredKeys.length > 0 && filteredKeys.every((k) => selected.has(k));
 
-  function toggleRow(key: string) {
+  function toggleRow(key: string, shift: boolean) {
+    // Read the anchor now. The updater runs later, after it moves to this row.
+    const from = anchor.current;
+    anchor.current = key;
     setSelected((prev) => {
+      if (shift && from) {
+        const range = rangeKeys(filteredKeys, from, key);
+        if (range) {
+          const next = new Set(prev);
+          for (const item of range) next.add(item);
+          return next;
+        }
+      }
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -311,19 +409,124 @@ export function PipelineView({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  async function applyBulkStatus() {
-    if (!bulkStatus || selectedRows.length === 0 || bulkBusy) return;
+  async function commitStatus(rows: Application[], status: string) {
+    if (!status || rows.length === 0 || busyRef.current) return;
+    const { write, inFlight } = excludeInFlightStatusRows(rows, heldSaves, applicationKey);
+    busyRef.current = true;
     setBulkBusy(true);
     setBulkError("");
-    const { saved, failed } = await saveStatuses(selectedRows, bulkStatus);
-    setBulkBusy(false);
-    setSelected(new Set(selectedRows.filter((r) => failed.some((f) => f.n === r.n)).map(applicationKey)));
-    if (failed.length > 0) {
-      setBulkError(`${failed.length} not saved: ${failed.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
+    try {
+      const { saved, failed } = await saveStatuses(write, status);
+      const notSaved = [
+        ...failed,
+        ...inFlight.map((row) => ({ n: row.n, error: "a status save is already in progress" })),
+      ];
+      const failedNums = new Set(notSaved.map((f) => f.n));
+      const savedNums = new Set(saved);
+      setSelected((current) => new Set(selectionAfterFailedSave([...current], rows, failedNums, applicationKey)));
+      if (notSaved.length > 0) {
+        setBulkError(`${notSaved.length} not saved: ${notSaved.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
+      }
+      if (saved.length > 0 || failed.length > 0) {
+        setAnnouncement(`${saved.length} application${saved.length === 1 ? "" : "s"} set to ${status}.`);
+      }
+      // A row saved here no longer has an older failure to show.
+      const savedKeys = write.filter((row) => savedNums.has(row.n)).map((row) => applicationKey(row));
+      setHeldSaves((prev) => clearHeldSaves(prev, savedKeys));
+      startTransition(() => {
+        for (const row of write) {
+          if (savedNums.has(row.n)) showSavedStatus({ key: applicationKey(row), status });
+        }
+        router.refresh();
+      });
+    } finally {
+      busyRef.current = false;
+      setBulkBusy(false);
     }
-    setAnnouncement(`${saved.length} application${saved.length === 1 ? "" : "s"} set to ${bulkStatus}.`);
-    startTransition(() => router.refresh());
   }
+
+  const keyState = useRef({ visibleTab, filtered, cursor, selectedRows, isPending });
+  const commitRef = useRef(commitStatus);
+  useLayoutEffect(() => {
+    keyState.current = { visibleTab, filtered, cursor, selectedRows, isPending };
+    commitRef.current = commitStatus;
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const state = keyState.current;
+      if (state.visibleTab === "INBOX") return;
+      const target = event.target;
+      const typing = typingFromTarget(target instanceof Element ? {
+        tagName: target.tagName,
+        type: target instanceof HTMLInputElement ? target.type : undefined,
+        isContentEditable: target instanceof HTMLElement && target.isContentEditable,
+        closestDialog: Boolean(target.closest("dialog, [role='dialog']")),
+      } : null);
+      const command = trackerCommand({
+        key: event.key,
+        typing,
+        composing: event.isComposing || event.key === "Process",
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        pending: state.isPending,
+        repeat: event.repeat,
+      });
+      if (!command) return;
+      if (command.name === "next" || command.name === "prev") {
+        event.preventDefault();
+        const delta = command.name === "next" ? 1 : -1;
+        setCursor((index) => moveCursor(index, state.filtered.length, delta));
+        return;
+      }
+      const rows = state.selectedRows.length > 0
+        ? state.selectedRows
+        : state.cursor >= 0 && state.filtered[state.cursor]
+          ? [state.filtered[state.cursor]]
+          : [];
+      if (rows.length === 0) return;
+      event.preventDefault();
+      void commitRef.current(rows, command.status);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // Keyed on the count, not the array. filtered is rebuilt whenever sort or the
+  // optimistic rows change identity, and a state update after each rebuild kept
+  // the deferred search render from finishing.
+  const rowCount = filtered.length;
+  useEffect(() => {
+    setCursor((index) => (rowCount === 0 ? -1 : index < 0 ? index : Math.min(index, rowCount - 1)));
+  }, [rowCount]);
+  // Set when j/k moved to a row the window had not mounted. Once that row
+  // mounts it is scrolled into view by its real height, which can differ from
+  // the spacer's per-row guess.
+  const cursorScrollPending = useRef(false);
+  useEffect(() => {
+    if (cursor < 0 || visibleTab === "INBOX") return;
+    const row = document.querySelector('[data-tracker-cursor="true"]');
+    if (row) {
+      cursorScrollPending.current = false;
+      row.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    // The cursor row is outside the window, so it has no element yet. Scroll
+    // to where the spacer puts it. The scroll listener then mounts it.
+    const body = bodyRef.current;
+    if (!body || body.hidden) return;
+    cursorScrollPending.current = true;
+    const top = body.getBoundingClientRect().top + window.scrollY + cursor * rowPx;
+    if (top < window.scrollY) window.scrollTo({ top });
+    else window.scrollTo({ top: top + rowPx - window.innerHeight });
+    // Not keyed on rowPx: a new measurement must not move the page.
+  }, [cursor, visibleTab]);
+  useLayoutEffect(() => {
+    if (!cursorScrollPending.current) return;
+    const row = document.querySelector('[data-tracker-cursor="true"]');
+    if (!row) return;
+    cursorScrollPending.current = false;
+    row.scrollIntoView({ block: "nearest" });
+  }, [span.start, span.end]);
 
   return (
     <PageFrame>
@@ -510,7 +713,7 @@ export function PipelineView({
           </select>
           <button
             type="button"
-            onClick={applyBulkStatus}
+            onClick={() => void commitStatus(selectedRows, bulkStatus)}
             disabled={!bulkStatus || bulkBusy}
             className="rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text disabled:opacity-50"
           >
@@ -528,8 +731,25 @@ export function PipelineView({
           <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground">
             Clear
           </button>
-          {bulkError && <span role="alert" className="text-xs text-red-500">{bulkError}</span>}
         </div>
+      )}
+
+      {visibleTab !== "INBOX" && bulkError && (
+        <p role="alert" className="mt-2 text-xs text-red-500">{bulkError}</p>
+      )}
+
+      {visibleTab !== "INBOX" && offscreenFailures.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {offscreenFailures.map((failure) => (
+            <p key={failure.key} role="alert" className="text-xs text-red-500">
+              Application #{failure.n} was not saved. {failure.error}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {visibleTab !== "INBOX" && (
+        <p className="mt-2 text-xs text-faint">j and k move. 1 Evaluated, 2 Applied, 3 Responded, 4 Interview, 5 Offer, 6 Rejected, 7 Discarded, 8 SKIP. Shift-click selects the rows in between.</p>
       )}
 
       {visibleTab === "INBOX" ? (
@@ -546,6 +766,7 @@ export function PipelineView({
             </div>
           ) : (
             <>
+              <LinkedInPaste />
               <InboxTriage inbox={inbox} />
               {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
             </>
@@ -558,9 +779,9 @@ export function PipelineView({
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[44rem] text-sm">
+          <table aria-label="Tracked applications" aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
-              <tr>
+              <tr aria-rowindex={1}>
                 <th className="w-8 px-3 py-2.5">
                   <input
                     type="checkbox"
@@ -588,24 +809,35 @@ export function PipelineView({
                     </button>
                   </th>
                 ))}
+                <th className="whitespace-nowrap px-4 py-2.5 font-medium">resume</th>
               </tr>
             </thead>
             {/* Keep editors mounted while query navigation is pending: sorting
                 must not discard an open editor or an in-flight status save. */}
-            <tbody className="divide-y divide-border" hidden={isPending} aria-busy={false}>
-              {filtered.map((r) => {
+            <tbody ref={bodyRef} className="divide-y divide-border" hidden={isPending} aria-busy={false}>
+              {span.start > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: span.start * rowPx, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {mountedRows.map((r, i) => {
+                // The cursor is an index into filtered, not into the window.
+                const index = span.start + i;
                 const company = companyPresentation(r);
                 const key = applicationKey(r);
                 const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
                 const posting = postingHref(r.url);
                 return (
-                  <tr key={key} data-application-key={key} className="group transition-colors hover:bg-surface/40">
+                  <tr key={key} data-application-key={key} aria-rowindex={index + 2} data-tracker-cursor={cursor === index ? "true" : undefined} className={cn("group transition-colors hover:bg-surface/40", cursor === index && "bg-brand-soft/60")}>
                     <td className="w-8 px-3 py-3">
                       <input
                         type="checkbox"
                         aria-label={`Select ${company.label}, ${r.role} (#${r.n})`}
                         checked={selected.has(key)}
-                        onChange={() => toggleRow(key)}
+                        onChange={(event) => {
+                          const native = event.nativeEvent;
+                          toggleRow(key, "shiftKey" in native && native.shiftKey === true);
+                        }}
                       />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
@@ -616,12 +848,12 @@ export function PipelineView({
                     <td className="px-4 py-3 font-medium">
                       <Link href={detailHref} onClick={syncTypedSearch} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
                         <CompanyLogo name={company.logoName} size={20} />
-                        {company.label}
+                        <span className="block max-w-64 truncate" title={company.label}>{company.label}</span>
                       </Link>
                     </td>
                   <td className="px-4 py-3 text-muted">
                     <div className="flex items-center gap-2">
-                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch}>{r.role}</Link>
+                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch} className="block max-w-72 truncate" title={r.role}>{r.role}</Link>
                       {posting && (
                         <a
                           href={posting}
@@ -645,6 +877,15 @@ export function PipelineView({
                       current={r.status}
                       inline
                       applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
+                      heldSave={heldSaves.get(key)}
+                      onHeldSave={(event) => {
+                        // A clear event has no application number. Adding one
+                        // makes the object fail the event union.
+                        const update = event.type === "clear"
+                          ? { type: "clear" as const, key }
+                          : { ...event, key, n: r.n };
+                        setHeldSaves((prev) => reduceHeldSave(prev, update));
+                      }}
                       onSaved={(status, restoreFocus) => {
                         // If this focused row leaves its tab, preserve a useful
                         // focus target. Do not interrupt someone using search.
@@ -661,9 +902,29 @@ export function PipelineView({
                     />
                   </td>
                   <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {hasCv.has(r.n) ? (
+                      <a
+                        href={`/api/cv-pdf?application=${encodeURIComponent(r.n)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open the tailored CV PDF"
+                        className="inline-flex items-center gap-1.5 text-brand-text hover:underline"
+                      >
+                        <FileText aria-hidden="true" className="size-3.5" /> PDF
+                      </a>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
                   </tr>
                 );
               })}
+              {span.end < filtered.length && (
+                <tr aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: (filtered.length - span.end) * rowPx, padding: 0, border: 0 }} />
+                </tr>
+              )}
             </tbody>
             {isPending && (
               <tbody className="divide-y divide-border" aria-busy="true">

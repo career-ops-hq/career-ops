@@ -99,10 +99,11 @@ DISCARD_LOG="$LOGS_DIR/discard.log"
 TRACKER_DIR="$DATA_ROOT/batch/tracker-additions"
 REPORTS_DIR="$DATA_ROOT/reports"
 # The runner's own bookkeeping (input, state, logs, locks) stays beside the
-# script. reserve-report-num.mjs and merge-tracker.mjs default batch-state.tsv
-# to the data root, where this runner never writes it, so name the real file
-# for them: both skip report numbers this run recorded as failed. Built from
-# PROJECT_DIR, which is the form node can open under Git Bash (see above).
+# script. reserve-report-num.mjs and merge-tracker.mjs read batch-state.tsv
+# there too, and a data root's own copy beside it (resolveBatchStatePaths), and
+# both skip report numbers recorded as failed. The variable still names the file for every worker, and
+# learn.mjs reads it to tell a batch worker. Built from PROJECT_DIR, which is
+# the form node can open under Git Bash (see above).
 export CAREER_OPS_BATCH_STATE="$PROJECT_DIR/batch/batch-state.tsv"
 # Workers run unattended, so nobody can confirm a change to the user's standing
 # rules. modes/_shared.md tells an agent that sees this flag not to write them.
@@ -715,12 +716,18 @@ resolve_worker_model() {
 # Append a one-line, auditable record of a pre-screen-gate discard to
 # batch/logs/discard.log (see modes/batch.md — Pre-screen gate). Format:
 # {ISO8601 timestamp}\t{job id}\t{url}\t{reason}
+#
+# Callers write the "skipped" state first and call this only when that state
+# (or its recovery record) was written, so the same id, url and reason are on
+# disk. A failed append is therefore reported, not fatal: the record can be
+# rebuilt from state instead of aborting the run.
 log_discard() {
   local id="$1" url="$2" reason="$3"
-  mkdir -p "$LOGS_DIR"
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"
+  if ! { mkdir -p "$LOGS_DIR" && printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"; } 2>/dev/null; then
+    echo "    ⚠️  Could not append to $DISCARD_LOG for #$id; its skipped state record keeps the reason" >&2
+  fi
 }
 
 
@@ -1844,7 +1851,13 @@ process_offer() {
         # Keep the reservation. The SKIP row uses this number and no report
         # file holds it, so releasing now would hand it to the next job before
         # the merge. merge_tracker releases it once the row is in the tracker.
-        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "-" "dealbreaker: \"$skip_rule\"" "$retries" || true
+        # rc 2: nothing was recorded and the job runs again as pending, so it
+        # is not a discard yet.
+        local skip_state_rc=0
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "-" "dealbreaker: \"$skip_rule\"" "$retries" || skip_state_rc=$?
+        if (( skip_state_rc != 2 )); then
+          log_discard "$id" "$url" "dealbreaker: \"$skip_rule\""
+        fi
         echo "    ⏭️  Skipped (dealbreaker): $url — \"$skip_rule\""
         return 0
       fi
@@ -1901,7 +1914,11 @@ process_offer() {
       # LC_ALL=C: under a non-English locale awk parses "4.5" as 4, so the
       # MIN_SCORE comparison would silently run on truncated integers.
       if LC_ALL=C awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
-        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
+        local score_state_rc=0
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || score_state_rc=$?
+        if (( score_state_rc != 2 )); then
+          log_discard "$id" "$url" "below-min-score"
+        fi
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0

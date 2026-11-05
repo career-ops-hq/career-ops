@@ -81,3 +81,14 @@ test("unmount cancels pending work and ignores late worker events", () => {
   assert.deepEqual(f.notices, [""]);
   assert.equal(f.timers.size, 0);
 });
+
+
+test("an explicit gate is announced as needing review, never completed or failed", () => {
+  const f = fixture();
+  f.feedback.push(job("gate", "gated"));
+  f.flush();
+  assert.equal(workerState("gated"), "Needs review");
+  assert.equal(workerDetailsLabel(job("gate", "gated")), "Open worker: Evaluate · FixtureCo · Engineer — Needs review");
+  assert.equal(f.notices.at(-1), "Evaluate · FixtureCo · Engineer: needs review.");
+  assert.equal(workerBatchSummary([job("done"), job("gate", "gated"), job("bad", "error")]), "1 completed, 1 needs review, 1 failed");
+});

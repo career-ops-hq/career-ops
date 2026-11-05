@@ -13,12 +13,14 @@ import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import type { CardReason } from "@/lib/machine-summary.mjs";
 import { QuickEvaluate } from "@/components/quick-evaluate";
+import { LinkedInPaste } from "@/components/linkedin-paste";
 import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons";
 import { scoreNum } from "@/lib/format";
 import { undoStatus } from "@/lib/pipeline-status.mjs";
 import { pickAwaitingDecision, groupAwaiting } from "@/lib/home/awaiting.mjs";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { resolveHeroState, mayClaimAllClear, showsQueue, missingSourceLabel, displayCounts } from "@/lib/home/hero-state.mjs";
+import { homeFollowupRemainder } from "@/lib/home/followups-shown.mjs";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -162,6 +164,7 @@ export function TodayDashboard({
   // place when a source fails, so `overdue` can still hold a number from before
   // the outage. See displayCounts().
   const shown = displayCounts({ followupsError, freshError, overdue, newThisWeek });
+  const followupRest = homeFollowupRemainder(followups.length, overdue);
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
   return (
@@ -248,6 +251,11 @@ export function TodayDashboard({
               <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={refetch} />
             ))}
           </div>
+          {followupRest.hidden > 0 && (
+            <Link href="/followups" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand-text max-sm:min-h-[44px]">
+              See all {followupRest.total} {followupRest.total === 1 ? "follow-up" : "follow-ups"}
+            </Link>
+          )}
         </Section>
       ) : null}
 
@@ -326,6 +334,8 @@ export function TodayDashboard({
           </p>
         </div>
       )}
+
+      <LinkedInPaste />
 
       {decisionUndo && (
         <div className="fixed inset-x-0 bottom-32 z-40 flex justify-center px-4 sm:bottom-6">

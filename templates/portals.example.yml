@@ -218,6 +218,10 @@
 #     - "Brazil"
 #     - "Australia"
 
+# Conditional office/hybrid-city + remote-country rules are also opt-in:
+# location_filter.workplace_policy (see docs/WORKPLACE_GEOGRAPHY.md). Unlike
+# an allow entry of "Remote", this checks where remote applicants may work.
+
 # -- Country-eligibility filter (optional, opt-in, #2093) --
 # location_filter only reads the ATS provider's STRUCTURED location field
 # (e.g. "Remote"). Many US companies tag every remote requisition "Remote"
@@ -1286,12 +1290,15 @@ search_queries:
 #                   whichever host the tenant's own board URL uses is preserved, not normalized)
 #   adp-workforcenow  workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...
 #   zoho-recruit    <tenant>.zohorecruit.<com|ca|eu|in|com.au|jp|sa|com.cn>  (any path; the board is always read from /jobs/Careers)
+#   factorial       <tenant>.factorialhr.com, <tenant>.factorial.com or another Factorial domain (.factorialhr.pt, .factorial.es, ...)  (Factorial ATS careers site; any path, the board is always read from the tenant's home page)
 #   homerun         <slug>.homerun.co or feed.homerun.co/<slug>  (branded careers domain → api: https://feed.homerun.co/<slug>)
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
+#   trakstar        <client>.hire.trakstar.com or <client>.recruiterbox.com
+#                   (or api: https://jsapi.recruiterbox.com/v1/openings?client_name=<client>)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1376,6 +1383,10 @@ search_queries:
 #   careers_url: https://jobs.deel.com/exampleco          # the tenant slug is the first path segment
 #   enabled: true
 #
+# - name: Example Factorial Co
+#   careers_url: https://exampleco.factorialhr.com        # or exampleco.factorial.com, exampleco.factorialhr.pt, ...; any path
+#   enabled: true
+#
 # - name: Example ClearCompany Co
 #   careers_url: https://careers-api.clearcompany.com/v1/00000000-0000-4000-8000-000000000000
 #                          # the siteId GUID from the careers page's embed script
@@ -1415,6 +1426,11 @@ search_queries:
 #   max_pages: 50          # optional page cap (10 jobs/page, default 50, max 500) —
 #                          # raise it for a tenant with 500+ open postings (a warning
 #                          # is logged if the cap truncates real results)
+#   enabled: true
+#
+# - name: Example Trakstar Hire Co
+#   careers_url: https://exampleco.hire.trakstar.com   # any <client>.hire.trakstar.com board
+#   max_pages: 20          # optional page cap (100 openings/page, default 20, max 50)
 #   enabled: true
 #
 # - name: Example Jobvite Co
@@ -2047,6 +2063,10 @@ search_queries:
 #   provider: larajobs
 #   enabled: true
 #
+# - name: GermanTechJobs                  # German IT jobs, salary on every posting (public RSS feed)
+#   provider: germantechjobs              # whole board in one request; rows carry no location
+#   enabled: true
+#
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
 #   provider: pythonorg
 #   careers_url: https://www.python.org/jobs/
@@ -2579,9 +2599,7 @@ tracked_companies:
 
   - name: Factorial
     careers_url: https://careers.factorialhr.com
-    scan_method: websearch
-    scan_query: 'site:careers.factorialhr.com'
-    notes: "Barcelona. HR SaaS unicorn."
+    notes: "Barcelona. HR SaaS unicorn. Its own board on its own ATS (provider: factorial)."
     enabled: true
 
   - name: Attio
@@ -2964,6 +2982,11 @@ tracked_companies:
     notes: "Copenhagen DK. Document-generation / content-enablement platform. Moved from Greenhouse to Teamtailor (templafy.com careers links here)."
     enabled: true
 
+  # Trakstar Hire's public demo client. Disabled so copying this file does not scan the demo board.
+  - name: Trakstar demo board
+    careers_url: https://demoaccount.hire.trakstar.com
+    enabled: false
+
   # -- Iberia AI --
 
   - name: Amplemarket
@@ -2996,10 +3019,9 @@ tracked_companies:
     enabled: true
 
   - name: Runway
-    careers_url: https://job-boards.greenhouse.io/runwayml
-    api: https://boards-api.greenhouse.io/v1/boards/runwayml/jobs
-    notes: "Generative AI video and creative tooling platform."
-    enabled: false
+    careers_url: https://jobs.ashbyhq.com/runway-ml
+    notes: "Generative AI video and creative tooling platform. Moved from Greenhouse to Ashby (runway.com/careers links here); greenhouse.io/runwayml is gone."
+    enabled: true
 
   - name: Hightouch
     careers_url: https://job-boards.greenhouse.io/hightouch

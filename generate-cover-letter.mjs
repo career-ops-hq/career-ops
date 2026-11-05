@@ -18,7 +18,7 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
-import { assertFacts, printFactWarnings } from "./verify-cv-facts.mjs";
+import { assertFacts, newFactWarnings, printFactWarnings } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { PAGE_FORMATS, normalizePageFormat, pageFormatForCountry } from "./lib/page-format.mjs";
@@ -79,10 +79,20 @@ function containedInOutput(absPath) {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-/** Assert that a payload object contains the required keys. */
+/** Assert that a payload object contains the required keys and that their values are non-empty strings. */
 function _require(obj, keys, context) {
   for (const key of keys) {
-    if (!obj || typeof obj !== "object" || !(key in obj)) {
+    const value = obj && typeof obj === "object" ? obj[key] : undefined;
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(`Missing required field: ${context}.${key}`);
+    }
+  }
+}
+
+/** Assert that a payload contains the required object-shaped fields. */
+function _requireObject(obj, keys, context) {
+  for (const key of keys) {
+    if (!obj || typeof obj !== "object" || !(key in obj) || typeof obj[key] !== "object" || obj[key] === null) {
       throw new Error(`Missing required field: ${context}.${key}`);
     }
   }
@@ -144,9 +154,10 @@ function buildDateline(letter, hasRecipientBlock = false) {
   // one; either way, dropping company and city would lose them with nothing
   // taking their place. The shipped base template is the second case, so it
   // keeps the full join exactly as before.
+  const company = typeof letter.company === "string" ? letter.company : "";
   const parts = hasRecipientBlock
     ? [letter.date]
-    : [letter.company, letter.city, letter.date];
+    : [company, letter.city, letter.date];
   return parts.filter(Boolean).map(escapeHtml).join(" &nbsp;&nbsp; ");
 }
 
@@ -378,7 +389,7 @@ export function replaceBalancedTokens(text, replaceToken) {
 }
 
 export function buildHtml(payload, templatePath) {
-  _require(payload, ["candidate", "letter"], "payload");
+  _requireObject(payload, ["candidate", "letter"], "payload");
   const candidate = payload.candidate;
   const letter = payload.letter;
   _require(candidate, ["name"], "candidate");
@@ -545,8 +556,13 @@ Usage:
   }
 
   if (!payload.output_path) {
-    const company = (payload.letter?.company || "company").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
+    const company = (typeof payload.letter?.company === "string" ? payload.letter.company : "company")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-");
+    const role = (typeof payload.letter?.role_title === "string" ? payload.letter.role_title : "role")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 30);
     payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
   } else {
     try {
@@ -564,10 +580,11 @@ Usage:
     // Cover letters are candidate-facing documents too. Reuse the CV fact
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
-    const factCheck = assertFacts(html, {
+    const factOptions = {
       label: "cover letter",
       planTexts: letterInputTexts(payload),
-    });
+    };
+    const factCheck = assertFacts(html, factOptions);
     // Ahead of the verdict, because it qualifies it: with no config the phrase
     // lists are empty, so a silent gate here covers metrics and facts only.
     if (factCheck.configMissing) {
@@ -579,9 +596,22 @@ Usage:
     }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.
-    const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
+    const { normalizeTextForATS, reportAtsReplacements, renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
-    await renderHtmlToPdf(html, outputPath, {
+    // The pass a CV gets before it prints. Without it a letter kept its em
+    // dashes and curly quotes, and printed a draft's **bold** with the asterisks.
+    const { html: printed, replacements } = normalizeTextForATS(html);
+    reportAtsReplacements(replacements, console.error);
+    // As for a CV, the gate also reads the document that prints: the pass can
+    // spell out a phrase the draft hid, as `self–starter` prints as
+    // `self-starter`. A forbidden one stops here. Anything advisory is reported,
+    // unless the check above already named it.
+    const printedWarnings = newFactWarnings(factCheck, assertFacts(printed, factOptions));
+    if (printedWarnings) {
+      console.error(`CV fact check warning: cover letter`);
+      printFactWarnings(printedWarnings, console.error);
+    }
+    await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.

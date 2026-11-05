@@ -92,7 +92,7 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## What is career-ops
 
-AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
+AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Oh My Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
 
 ### Codex invocation
 
@@ -107,6 +107,14 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 - **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
 - **Headless:** `pi -p "prompt"` for one-shot workers; `pi --mode json -p "prompt"` when the caller parses events.
 - **Examples:** `pi -p "Run career-ops tracker mode"`, `pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
+
+### Oh My Pi (omp) invocation
+
+- **Project context:** `.omp/AGENTS.md` imports `AGENTS.md` (`@../AGENTS.md`) so OMP's `native` provider loads the root contract without being shadowed by `.github/copilot-instructions.md`.
+- **Skill:** OMP discovers the shared router at `.agents/skills/career-ops/SKILL.md` automatically via its `agents` discovery provider, exposed as `/skill:career-ops`.
+- **Interactive:** run `omp` in the repo root, then `/skill:career-ops <mode>`.
+- **Headless:** `omp -p "prompt"` for one-shot workers.
+- **Examples:** `omp -p "Run career-ops tracker mode"`, `omp -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
 
 
 ### Main Files
@@ -665,7 +673,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 
 **Row order (#3515):** `merge-tracker.mjs` writes the table sorted by `#` **ascending** — matching how rows are referred to ("row 42") and how `reports/` is numbered on disk. The sort runs over the whole table on every write, so a tracker left in merge-batch order by an older version is repaired in place on the next merge; no migration flag is needed. Rows whose `#` is a backfill sentinel (`N/A` / `—` / `-`) sort to the end of the table in their existing relative order.
 
-**Req/posting ID in notes disambiguates same-title postings (#1524, #2009):** when a company posts two genuinely different requisitions whose titles fuzzy-match (e.g. a leveled variant and its bare title, or two sibling team roles), put the req/job/posting ID in the **notes** column on both rows. `merge-tracker.mjs` reads it (`REQ_NUMBER_RE`) and treats rows carrying *different* recognizable IDs as distinct openings, overriding fuzzy title matching. Recognized forms are a `job id` / `posting id` / `requisition` / `req` / `jr` / `job` / `posting` / `ref` / `r_` label followed by an alphanumeric ID containing at least one digit — e.g. `req JR-10423`, `job id 88214`, `ref R_2291`. Prefer this whenever the JD exposes an ID; it is the only signal that survives near-identical titles.
+**Req/posting ID in notes disambiguates same-title postings (#1524, #2009):** when a company posts two genuinely different requisitions whose titles fuzzy-match (e.g. a leveled variant and its bare title, or two sibling team roles), put the req/job/posting ID in the **notes** column on both rows. `merge-tracker.mjs`, `dedup-tracker.mjs` and `verify-pipeline.mjs` read it (`REQ_NUMBER_RE` in `tracker-parse.mjs`) and treat rows carrying *different* recognizable IDs as distinct openings, blocking the title-based duplicate decision each one would otherwise make. Recognized forms are a `job id` / `posting id` / `requisition` / `req` / `jr` / `job` / `posting` / `ref` / `r_` label followed by an alphanumeric ID containing at least one digit — e.g. `req JR-10423`, `job id 88214`, `ref R_2291`. Prefer this whenever the JD exposes an ID; it is the only signal that survives near-identical titles.
 
 ### Pipeline Integrity
 

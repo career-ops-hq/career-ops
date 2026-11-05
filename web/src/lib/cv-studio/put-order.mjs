@@ -12,18 +12,88 @@ const MAX_TABS = 500;
  * Whether this payload should be sent.
  *
  * A payload the server already has is not sent again, except on the way out
- * of the page while a different payload is still in flight. That in-flight
- * save can land after the tab is gone, and the page can no longer correct it.
+ * of the page while another save is still in flight, or when an earlier
+ * response may have been lost after writing. The browser can cancel the open
+ * request as the page closes, so the exit flush sends that payload again.
  *
  * @param {string} saved - JSON already stored.
  * @param {string} current - JSON on screen.
  * @param {string | null} inflight - JSON of the save that has not finished.
  * @param {boolean} keepalive - True for the page-exit flush.
+ * @param {boolean} [uncertain] - A previous response may have been lost after writing.
  */
-export function shouldSendEdits(saved, current, inflight, keepalive) {
-  if (current === saved) return keepalive === true && typeof inflight === "string" && inflight !== current;
+export function shouldSendEdits(saved, current, inflight, keepalive, uncertain = false) {
+  if (current === saved) {
+    if (uncertain) return typeof inflight !== "string" || keepalive === true;
+    return keepalive === true && typeof inflight === "string" && inflight !== current;
+  }
   if (current === inflight && keepalive !== true) return false;
   return true;
+}
+
+/**
+ * The in-flight payload a page-exit flush can still lose a race to.
+ * One that differs from the screen wins, so an undo is sent instead of
+ * the autosave or Save for apply that is already on the wire.
+ *
+ * @param {string | null} saving - Autosave JSON that has not finished.
+ * @param {string | null} posting - Save-for-apply JSON that has not finished.
+ * @param {string} current - JSON on screen.
+ * @returns {string | null}
+ */
+export function inflightEdits(saving, posting, current) {
+  if (typeof posting === "string" && posting !== current) return posting;
+  if (typeof saving === "string" && saving !== current) return saving;
+  if (typeof saving === "string") return saving;
+  if (typeof posting === "string") return posting;
+  return null;
+}
+
+/**
+ * True when Save for apply stored the edits before it answered.
+ * A PDF render failure is 422 after that write, so it still counts.
+ * unreadable-layout is the same status and returns before the write.
+ * A superseded response, or a stale or busy 409, means it did not.
+ *
+ * @param {number} status
+ * @param {boolean} superseded
+ * @param {string} [error]
+ */
+export function postWroteEdits(status, superseded, error) {
+  if (superseded === true) return false;
+  if (status === 200) return true;
+  if (status !== 422) return false;
+  return error !== "unreadable-layout";
+}
+
+/**
+ * Whether to PUT the screen after Save for apply answers.
+ * A stored payload that still matches the screen needs nothing. A response
+ * that stored nothing still needs the screen, because the autosave timer
+ * already elapsed while that request was open.
+ *
+ * @param {boolean} wrote
+ * @param {string} sent
+ * @param {string} current
+ */
+export function shouldPutAfterPost(wrote, sent, current) {
+  if (wrote === true) return current !== sent;
+  return true;
+}
+
+/**
+ * @param {string} saved
+ * @param {string} current
+ * @param {string | null} saving
+ * @param {string | null} posting
+ * @param {boolean} [uncertain] - A previous response may have been lost after writing.
+ * @returns {"Saving" | "Unsaved" | "Saved"}
+ */
+export function editSaveStatus(saved, current, saving, posting, uncertain = false) {
+  const inflight = inflightEdits(saving, posting, current);
+  if (inflight === current || (current === saved && inflight !== null)) return "Saving";
+  if (current !== saved || uncertain) return "Unsaved";
+  return "Saved";
 }
 
 export function createPutOrder() {

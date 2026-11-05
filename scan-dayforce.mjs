@@ -69,6 +69,9 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import {
   appendToPipeline,
   appendToScanHistory,
+  appendUnrecordedToScanHistory,
+  BROWSER_PROCESS_ENV,
+  DATA_ROOT as SCAN_DATA_ROOT,
   loadSeenUrls,
   normalizeUrlForDedup,
   buildTitleFilter,
@@ -89,6 +92,7 @@ import { htmlToText } from './providers/_html-to-text.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { BOT_CHALLENGE_PATTERNS } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -537,7 +541,7 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
 
     const skipped = { title, url, location: listLocation };
     if (!filters.titleFilter(title)) { titleSkipped.push(skipped); continue; }
-    if (!filters.locationFilter(listLocation, url, title)) { locationSkipped.push(skipped); continue; }
+    if (!filters.locationFilter(listLocation, url, title, { description: listDescription })) { locationSkipped.push(skipped); continue; }
     if (!filters.contentFilter(listDescription, filters.matchedTitleKeywords(title))) { contentSkipped.push(skipped); continue; }
     if (!filters.countryEligibilityFilter(listDescription)) { countryEligibilitySkipped.push(skipped); continue; }
     if (!filters.visaFilter(listDescription)) { visaSkipped.push(skipped); continue; }
@@ -552,12 +556,18 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
 
     const description = buildJobDescriptionText(detail.jobPostingContent) || item.listDescription;
     const location = joinLocations(detail.postingLocations) || item.listLocation;
+    const title = decodeEntities(String(detail.jobTitle || item.title));
+    const detailPolicy = filters.locationFilter.workplacePolicyOnly;
+    if (typeof detailPolicy === 'function' && !detailPolicy(location, item.url, title, { description })) {
+      locationSkipped.push({ title, url: item.url, location });
+      continue;
+    }
     const postedAt = detail.postingStartTimestampUTC ? Date.parse(detail.postingStartTimestampUTC) : undefined;
 
     found.push({
       url: item.url,
       company: boardCfg.name,
-      title: decodeEntities(String(detail.jobTitle || item.title)),
+      title,
       location,
       source: 'dayforce',
       description,
@@ -592,7 +602,10 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
  */
 export async function scanBoardWithRetry(boardCfg, filters, {
   debug = false,
-  launch = () => chromium.launch({ headless: true }),
+  launch = () => chromium.launch(browserLaunchOptions(
+    { headless: true },
+    { projectRoot: SCAN_DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+  )),
   retryDelayMs = RETRY_DELAY_MS,
 } = {}) {
   let lastError = null;
@@ -681,12 +694,14 @@ async function main() {
   if (!dryRun) {
     if (newOffers.length > 0) await appendToPipeline(newOffers);
     if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
-    if (titleSkipped.length > 0) await appendToScanHistory(titleSkipped, date, 'skipped_title');
-    if (locationSkipped.length > 0) await appendToScanHistory(locationSkipped, date, 'skipped_location');
-    if (contentSkipped.length > 0) await appendToScanHistory(contentSkipped, date, 'skipped_content');
-    if (countryEligibilitySkipped.length > 0) await appendToScanHistory(countryEligibilitySkipped, date, 'skipped_country_eligibility');
-    if (visaSkipped.length > 0) await appendToScanHistory(visaSkipped, date, 'skipped_visa');
-    if (dupeSkipped.length > 0) await appendToScanHistory(dupeSkipped, date, 'skipped_dup');
+    // Every run hands the same skipped postings back, so each is recorded
+    // once per status, not once per run (#2695, as scan.mjs records its own).
+    await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
+    await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
+    await appendUnrecordedToScanHistory(contentSkipped, date, 'skipped_content');
+    await appendUnrecordedToScanHistory(countryEligibilitySkipped, date, 'skipped_country_eligibility');
+    await appendUnrecordedToScanHistory(visaSkipped, date, 'skipped_visa');
+    await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
   console.log(`\n${'━'.repeat(45)}`);

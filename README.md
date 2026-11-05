@@ -198,6 +198,7 @@ It reformulates your CV; it must never fabricate it. A check in code stops a PDF
 | **Offer Stage**          | Contract reading companion -- clause walk plus a lawyer question list ([`offer-prep`](modes/offer-prep.md)) -- and a desired/advertised/actual salary-gap analyzer (`salary-gap.mjs`) |
 | **Follow-ups & Replies** | Follow-up cadence calculator and seeded reminders (`followup-cadence.mjs`, `followup-seed.mjs`); turn them off with `follow_ups.enabled: false` in `config/profile.yml`; employer reply classification into tracker updates ([`reply-watch`](modes/reply-watch.md)) |
 | **Plugin System**        | Opt-in integrations (Gmail, Notion, Apify + a community registry), disabled by default -- see [docs/PLUGINS.md](docs/PLUGINS.md)        |
+| **LinkedIn job alerts**  | Paste a LinkedIn alert email on the dashboard or with `node linkedin-import.mjs`. No Google account. See [docs/LINKEDIN_JOBS.md](docs/LINKEDIN_JOBS.md) |
 
 </details>
 
@@ -252,6 +253,8 @@ claude   # or codex / opencode / qwen / agy / grok
 # Paste a job URL or JD text to trigger auto-pipeline.
 # Every other mode, and how to ask for it in your CLI: see Usage below.
 ```
+
+LinkedIn job alerts: paste the email. No Google account. See [docs/LINKEDIN_JOBS.md](docs/LINKEDIN_JOBS.md).
 
 </details>
 
@@ -529,6 +532,7 @@ The Go dashboard TUI, Node.js scripts, and AI agent modes all automatically resp
   <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
   <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
   <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
+  <img src="https://img.shields.io/badge/Oh_My_Pi-4B3F72?style=flat" alt="Oh My Pi">
   <br>
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">

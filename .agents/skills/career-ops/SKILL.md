@@ -23,9 +23,9 @@ Resolve every path in this router against one of these two roots, never against 
 A skills catalog, or the career-ops plugin from a plugin directory (Claude or OpenAI), installs only this `SKILL.md`. The modes, scripts and `AGENTS.md` it routes to live in the career-ops repository, so no mode can run until career-ops is installed. Never improvise a mode from this file alone: an evaluation without the repo's modes and the user's CV is not a career-ops evaluation.
 
 1. Look for an existing install before offering a new one: the directory in `CAREER_OPS_ROOT` if it is set, then `./career-ops`, then `~/career-ops`. The first one that contains both `AGENTS.md` and `modes/` is `PROJECT_ROOT`; tell the user which one you are using, read `PROJECT_ROOT/AGENTS.md` in full, and continue with their request.
-2. If there is none, tell the user in a few lines that career-ops runs from its own folder, and offer to set it up with `npx @santifer/career-ops@1.38.0 init`. It needs Node.js, downloads the latest release from https://github.com/career-ops-hq/career-ops into `./career-ops` and installs its dependencies. Ask before running it: it downloads and installs software. <!-- x-release-please-version -->
+2. If there is none, tell the user in a few lines that career-ops runs from its own folder, and offer to set it up with `npx @santifer/career-ops@1.39.0 init`. It needs Node.js, downloads the latest release from https://github.com/career-ops-hq/career-ops into `./career-ops` and installs its dependencies. Ask before running it: it downloads and installs software. <!-- x-release-please-version -->
 3. With a yes, run it from the current directory (or the folder the user picks). Then treat the new `career-ops` folder as `PROJECT_ROOT`: read its `AGENTS.md` in full, run every script from it, and pick up the user's original request (a pasted job URL or JD included). If their CV and profile are not there yet, the first-run setup in `AGENTS.md` comes first: it walks them through it by chatting. Tell them that next time they can open their AI CLI inside that folder.
-4. If they prefer to install it themselves, give the one command (`npx @santifer/career-ops@1.38.0 init`, then `cd career-ops` and open the AI CLI there) and, for Claude Code, the plugin alternative: `/plugin marketplace add career-ops-hq/career-ops` then `/plugin install career-ops@career-ops`. Then stop. <!-- x-release-please-version -->
+4. If they prefer to install it themselves, give the one command (`npx @santifer/career-ops@1.39.0 init`, then `cd career-ops` and open the AI CLI there) and, for Claude Code, the plugin alternative: `/plugin marketplace add career-ops-hq/career-ops` then `/plugin install career-ops@career-ops`. Then stop. <!-- x-release-please-version -->
 
 ### Claude Code plugin install
 
@@ -36,6 +36,7 @@ When `PROJECT_ROOT` is a plugin install copy, the session's working folder is no
 - CLIs with slash-command registration can expose this router as `/career-ops`.
 - In Cursor, this skill lives at `.agents/skills/career-ops/` and is auto-discovered; ask for a mode by name, or paste a JD/URL to trigger auto-pipeline.
 - In Pi, this skill is auto-discovered from `.agents/skills/career-ops/` and exposed as `/skill:career-ops`; `AGENTS.md` loads from the repo root as project context, so there is no wrapper file. Headless Pi workers use `pi -p "prompt"`. Project skill discovery follows Pi's per-folder trust decision: `/trust` applies to future Pi processes, so restart `pi` before invoking `/skill:career-ops` (`-a` trusts a single run and needs no restart).
+- In Oh My Pi (omp), this skill is auto-discovered from `.agents/skills/career-ops/` and exposed as `/skill:career-ops`; `.omp/AGENTS.md` imports `AGENTS.md` so the root contract loads. Headless OMP workers use `omp -p "prompt"`.
 - Interactive Codex sessions use `codex` in the repo root. Slash commands are not guaranteed in Codex, so ask Codex to run the same mode by name if `/career-ops` is unavailable.
 - Headless Codex workers use `codex exec "prompt"`.
 - The routing semantics below stay the same regardless of whether the entrypoint is a slash command or a natural-language prompt.
@@ -160,7 +161,7 @@ career-ops -- AI Job Search Agent
 Available commands:
   /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
   /career-ops pipeline  → Process pending URLs from inbox (data/pipeline.md)
-  /career-ops oferta    → Evaluation only A-H (no auto PDF)
+  /career-ops oferta    → Evaluation only: blocks A-G always, Block H at or above 4.5 (no auto PDF)
   /career-ops ofertas   → Compare and rank multiple offers
   /career-ops contacto  → LinkedIn power move: find contacts + draft message
   /career-ops deep      → Deep research prompt about company
@@ -168,7 +169,7 @@ Available commands:
   /career-ops interview    → Interactive profile/CV onboarding interview
   /career-ops master-profile → Import, review, and validate your Master Career Profile
   /career-ops intake    → Build or enrich your profile from documents/ (master CV, LinkedIn export; nothing written without confirm)
-  /career-ops retro     → Review this session and keep what you taught it as rules (writes only the ids you accept)
+  /career-ops retro     → Save the proposals, then apply only accepted ids to the rule files
   /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
