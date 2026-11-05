@@ -53,6 +53,7 @@ const SUITES = {
   "assistant-request-feedback": { url: "ASSISTANT_FEEDBACK_TEST_URL", fixture: "blank" },
   "assistant-status-recovery": { url: "ASSISTANT_STATUS_TEST_URL", fixture: "blank" },
   "back-link-scroll": { url: "BACK_SCROLL_TEST_URL", root: "BACK_SCROLL_TEST_ROOT", fixture: "pipeline-long" },
+  "chrome-overlap": { url: "CHROME_OVERLAP_TEST_URL", fixture: "pipeline-status" },
   "command-palette": { url: "COMMAND_PALETTE_TEST_URL", root: "COMMAND_PALETTE_TEST_ROOT", fixture: "pipeline-status" },
   "cv-editor-keep": { url: "CV_EDITOR_KEEP_TEST_URL", root: "CV_EDITOR_KEEP_TEST_ROOT", fixture: "blank" },
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
