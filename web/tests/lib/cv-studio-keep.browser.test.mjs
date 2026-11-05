@@ -32,10 +32,45 @@ test("hiding a bullet and leaving the studio keeps the hide, and the status does
   const status = () => page.getByRole("status").filter({ hasText: /^(?:Unsaved|Saving|Saved)$/ });
   await status().filter({ hasText: /^Saved$/ }).waitFor();
 
+  // Hold the autosave through the click and the navigation. The exit flush
+  // is a second PUT, and that is the one that must land while the first is held.
+  let releaseAutosave;
+  const autosaveHeld = new Promise((resolve) => { releaseAutosave = resolve; });
+  let markAutosave;
+  const autosaveSeen = new Promise((resolve) => { markAutosave = resolve; });
+  let autosaveSettled;
+  const autosaveDone = new Promise((resolve) => { autosaveSettled = resolve; });
+  let markExit;
+  const exitSeen = new Promise((resolve) => { markExit = resolve; });
+  let puts = 0;
+  await page.route("**/api/cv-studio/**", async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    puts += 1;
+    if (puts === 1) {
+      markAutosave();
+      await autosaveHeld;
+      try {
+        await route.continue();
+      } catch (error) {
+        // Navigation aborts the held autosave. Playwright then refuses a second continue.
+        if (!(error instanceof Error) || !error.message.includes("already handled")) throw error;
+      } finally {
+        autosaveSettled();
+      }
+      return;
+    }
+    await route.continue();
+    markExit();
+  });
+
   await page.getByRole("button", { name: "Hide bullet", exact: true }).click();
-  assert.equal((await status().innerText()).trim(), "Unsaved");
+  const dirty = (await status().innerText()).trim();
+  assert.notEqual(dirty, "Saved");
+  assert.match(dirty, /^(?:Unsaved|Saving)$/);
+  await autosaveSeen;
+  const left = page.waitForURL((next) => new URL(next).pathname === "/");
   await page.getByRole("complementary").getByRole("link", { name: "Today", exact: true }).click();
-  await page.waitForURL((next) => new URL(next).pathname === "/");
+  await Promise.all([left, exitSeen]);
 
   const editsPath = path.join(root, ".career-ops-web", "cv-studio", "011.json");
   const deadline = Date.now() + 8_000;
@@ -48,6 +83,9 @@ test("hiding a bullet and leaving the studio keeps the hide, and the status does
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(hidden, [section0Item0Bullet0]);
+  releaseAutosave();
+  await autosaveDone;
+  await page.unroute("**/api/cv-studio/**");
 
   await page.goto(`${origin.origin}/pipeline/11/cv-studio`);
   await page.getByRole("button", { name: "Show bullet", exact: true }).waitFor();
