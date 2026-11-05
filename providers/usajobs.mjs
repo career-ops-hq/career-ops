@@ -40,7 +40,8 @@ export function mapItem(item) {
   const d = item?.MatchedObjectDescriptor;
   if (!d) return null;
   const title = str(d.PositionTitle);
-  const url = str(d.PositionURI);
+  // The API returns e.g. https://www.usajobs.gov:443/job/123 — normalize the default port away.
+  const url = str(d.PositionURI).replace(/^(https:\/\/(?:www\.)?usajobs\.gov):443\//i, '$1/');
   if (!title || !/^https:\/\/(www\.)?usajobs\.gov\//i.test(url)) return null;
 
   const locs = Array.isArray(d.PositionLocation) ? d.PositionLocation : [];

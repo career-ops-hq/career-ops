@@ -39,6 +39,11 @@ if (job?.title === 'Data Science Intern' && job.url === 'https://www.usajobs.gov
   fail(`mapItem produced ${JSON.stringify(job)}`);
 }
 
+
+// The live API returns the default port in PositionURI; it must still map.
+const withPort = mapItem({ MatchedObjectDescriptor: { PositionTitle: 'Software Engineer', PositionURI: 'https://www.usajobs.gov:443/job/883691200' } });
+if (withPort?.url === 'https://www.usajobs.gov/job/883691200') pass('mapItem accepts the :443 port the live API returns and strips it');
+else fail(`mapItem with :443 produced ${JSON.stringify(withPort)}`);
 if (mapItem({ MatchedObjectDescriptor: { PositionTitle: 'X', PositionURI: 'http://evil.example/job/1' } }) === null) {
   pass('mapItem drops items whose URL is not a usajobs.gov https link');
 } else {
