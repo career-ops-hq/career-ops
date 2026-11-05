@@ -126,6 +126,27 @@ const pagedCtx = (total, extra = {}) => ({
   ...extra,
 });
 
+test('lever shrinks the page limit when a page exceeds the body cap and advances skip by accepted postings', async () => {
+  const calls = [];
+  const total = 130;
+  const ctx = {
+    sleep: async () => {},
+    fetchJson: async (url, opts) => {
+      assert.equal(opts?.redirect, 'error');
+      const u = new URL(url);
+      if (!u.searchParams.has('limit')) throw tooLarge();
+      const limit = Number(u.searchParams.get('limit')), skip = Number(u.searchParams.get('skip'));
+      calls.push([skip, limit]);
+      if (limit > 50) throw tooLarge();
+      return Array.from({ length: Math.max(0, Math.min(limit, total - skip)) }, (_, k) => posting(skip + k));
+    },
+  };
+  const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
+  assert.equal(out.length, total);
+  assert.deepEqual(calls.slice(0, 3), [[0, 100], [0, 50], [50, 50]]);
+  assert.equal(new Set(out.map(j => j.url)).size, total);
+});
+
 test('lever marks the result truncated at the ceiling, not for short pages or probes', async () => {
   const entry = { name: 'X', careers_url: 'https://jobs.lever.co/x' };
   const warn = console.warn; console.warn = () => {};

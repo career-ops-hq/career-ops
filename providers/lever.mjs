@@ -134,41 +134,57 @@ export default {
       /** @type {any[]} */
       const all = [];
       const PAGE = 100;
-      // Bounded: at most 30 pages (3,000 postings), each capped at 4 MiB, so the
-      // fallback cannot buffer more than ~120 MiB however the server behaves.
+      const MIN_PAGE = 10;
+      const probing = ctx.maxPages === 1;
+      // Bounded: at most 30 pages' worth (3,000 postings), each response capped at
+      // 4 MiB, so the fallback cannot buffer more than ~120 MiB however the server
+      // behaves. A page over the 4 MiB cap is retried with a smaller limit, so
+      // `requests` also bounds those shrink retries.
       const maxPages = Math.min(30, ctx.maxPages ?? 30);
+      const maxPostings = maxPages * PAGE;
+      const maxRequests = maxPages * 4;
+      let pageSize = PAGE;
+      let requests = 0;
       let lastPageFull = false;
       let truncated = false;
-      for (let n = 0; n < maxPages; n++) {
-        const probing = ctx.maxPages === 1;
-        if (n > 0) await sleep(250, ctx);
+      while (all.length < maxPostings && requests < maxRequests) {
+        if (requests > 0) await sleep(250, ctx);
+        requests++;
+        const skip = all.length;
+        const limit = Math.min(pageSize, maxPostings - skip);
         const pageUrl = new URL(apiUrl);
-        pageUrl.searchParams.set('limit', String(PAGE));
-        pageUrl.searchParams.set('skip', String(n * PAGE));
+        pageUrl.searchParams.set('limit', String(limit));
+        pageUrl.searchParams.set('skip', String(skip));
         let page;
         try {
           page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: 4 * 1024 * 1024 });
         } catch (err) {
+          // A page over the body cap: retry the same offset with a smaller limit.
+          if (/** @type {any} */ (err)?.code === 'response_too_large' && pageSize > MIN_PAGE) {
+            pageSize = Math.max(MIN_PAGE, Math.floor(pageSize / 2));
+            continue;
+          }
           // First page, or a probe: propagate, so a dead board still reads as broken.
-          // A later page that fails after retries (or is over the page cap) keeps
-          // the postings already read, flagged as truncated.
-          if (n === 0 || probing) throw err;
-          console.warn(`[lever] ${entry.name}: page ${n + 1} failed (${/** @type {any} */ (err)?.message || err}); keeping the ${all.length} posting(s) already read.`);
+          // A later page that fails after retries keeps the postings already read,
+          // flagged as truncated.
+          if (skip === 0 || probing) throw err;
+          console.warn(`[lever] ${entry.name}: page at skip=${skip} failed (${/** @type {any} */ (err)?.message || err}); keeping the ${all.length} posting(s) already read.`);
           truncated = true;
           lastPageFull = false;
           break;
         }
-        if (!Array.isArray(page)) throw new Error(`lever: ${entry.name} returned a non-array page (${typeof page}) for skip=${n * PAGE}`);
+        if (!Array.isArray(page)) throw new Error(`lever: ${entry.name} returned a non-array page (${typeof page}) for skip=${skip}`);
         if (page.length === 0) { lastPageFull = false; break; }
         // A server that ignores `limit` must not amplify the total: refuse the page.
-        if (page.length > PAGE) throw new Error(`lever: ${entry.name} returned ${page.length} postings for limit=${PAGE}`);
+        if (page.length > limit) throw new Error(`lever: ${entry.name} returned ${page.length} postings for limit=${limit}`);
         for (const posting of page) all.push(posting);
-        lastPageFull = page.length === PAGE;
-        if (!lastPageFull) break;
+        lastPageFull = page.length === limit;
+        if (!lastPageFull || probing) break;
       }
+      if (requests >= maxRequests && all.length < maxPostings && lastPageFull) truncated = true;
       // Cap stop, not completion: a full last page at the ceiling may mean more
       // postings exist. A probe (maxPages === 1) asks for one page by design.
-      if (lastPageFull && ctx.maxPages !== 1) {
+      if (lastPageFull && !probing && all.length >= maxPostings) {
         console.warn(`[lever] ${entry.name}: stopped at the ${maxPages}-page ceiling (${all.length} postings); the board may have more.`);
         truncated = true;
       }
