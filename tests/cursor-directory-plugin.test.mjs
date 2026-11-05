@@ -133,7 +133,7 @@ test('the Cursor plugin contains exactly the expected skill with valid frontmatt
 
     assert.ok(
       /^description:[ \t]*[^\s|>]/.test(lines[descIdx]) &&
-      !/[\r?\n]/.test(parsed.description) &&
+      !/[\r\n]/.test(parsed.description) &&
       !(nextNonEmptyLine !== undefined && /^[ \t]/.test(nextNonEmptyLine)),
       `${rel}: frontmatter description must be a single line`
     );
