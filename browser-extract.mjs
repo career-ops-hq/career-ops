@@ -754,7 +754,7 @@ async function fetchHireHiveJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeHireHiveJob(await res.json(), id, postingUrl, textCap);
   } catch {
     return null;
