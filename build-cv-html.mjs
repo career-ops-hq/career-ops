@@ -46,13 +46,13 @@ import { hasRequiredFields, templateSlotWarnings, validatePayload } from './lib/
 import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
 import { PARTIAL_SECTIONS, declaredSections, parseMeta } from './lib/template-manifest.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const trackerPath = resolveTrackerPath(DATA_ROOT);
 const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
-const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
 const PROFILE_PATH = getProfilePath();
@@ -794,9 +794,64 @@ function renderReport(payload, partials) {
   return { substitutions, candidate };
 }
 
+/**
+ * Replace every balanced `{{ … }}` token in `text` in a single pass.
+ *
+ * Depth-aware: `{{` opens a level and `}}` closes one, and a token is the span
+ * from an opening `{{` to the `}}` that brings the depth back to zero. So
+ * `{{ outer {{ inner }} }}` is ONE token, not `{{ outer {{ inner }}` followed by
+ * a stray ` }}`. Single braces (`({})`) do not count.
+ *
+ * An opening `{{` that is never closed is left as literal text and the scan
+ * continues just after it. Giving up there instead would leave every later
+ * token in the template unfilled and unreported.
+ *
+ * Each token is replaced by `replaceToken(token)`, and the result is never
+ * re-scanned, so a substituted value that contains `{{…}}` stays literal.
+ *
+ * @param {string} text
+ * @param {(token: string) => string} replaceToken
+ * @returns {string}
+ */
+export function replaceBalancedTokens(text, replaceToken) {
+  let out = '';
+  let emitted = 0;
+  let searchFrom = 0;
+  while (true) {
+    const start = text.indexOf('{{', searchFrom);
+    if (start === -1) break;
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < text.length - 1; ) {
+      if (text[i] === '{' && text[i + 1] === '{') {
+        depth++;
+        i += 2;
+      } else if (text[i] === '}' && text[i + 1] === '}') {
+        depth--;
+        i += 2;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      } else {
+        i++;
+      }
+    }
+    if (end === -1) {
+      // Unterminated: keep this `{{` literal and look for the next one.
+      searchFrom = start + 2;
+      continue;
+    }
+    out += text.slice(emitted, start) + replaceToken(text.slice(start, end));
+    emitted = end;
+    searchFrom = end;
+  }
+  return out + text.slice(emitted);
+}
+
 // Merge a payload into the template and return the final HTML (throws on any
 // unresolved {{PLACEHOLDER}} so a malformed payload fails loudly, not silently).
-function renderHtml(template, payload, templatePath) {
+export function renderHtml(template, payload, templatePath) {
   // Load section partials from the sections/ directory co-located with the
   // template. Falls back to built-in builders when no partials directory exists.
   const partials = templatePath ? loadSectionPartials(templatePath) : new Map();
@@ -820,15 +875,27 @@ function renderHtml(template, payload, templatePath) {
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.
   html = stripEmptySections(html, payload, 'html');
 
-  for (const [key, value] of Object.entries(substitutions)) {
-    html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
-  }
+  const replacements = {
+    ...substitutions,
+    PHOTO: buildPhoto(candidate, candidate.name),
+    TITLE_BLOCK: titleBlock || '',
+    CONTACT_ROW: buildContactRow(candidate),
+  };
 
-  const unresolved = html.match(PLACEHOLDER_RE);
-  if (unresolved) {
-    throw new Error(`Unresolved placeholders: ${[...new Set(unresolved)].join(', ')}`);
+  const unresolved = new Set();
+  const rendered = replaceBalancedTokens(html, (token) => {
+    const key = token.slice(2, -2);
+    if (Object.prototype.hasOwnProperty.call(replacements, key)) {
+      return replacements[key];
+    }
+    unresolved.add(token);
+    return token;
+  });
+
+  if (unresolved.size > 0) {
+    throw new Error(`Unresolved placeholders: ${[...unresolved].join(', ')}`);
   }
-  return html;
+  return rendered;
 }
 
 // Payload validation lives in lib/cv-payload-schema.mjs, shared with
@@ -1594,4 +1661,5 @@ async function runSelfTest() {
   process.exit(0);
 }
 
-main();
+const isMain = isMainModule(import.meta.url);
+if (isMain) main();
