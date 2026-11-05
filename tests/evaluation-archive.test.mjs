@@ -16,11 +16,10 @@ const fixture = fn => async () => { const root = fs.mkdtempSync(path.join(tmpdir
 // Simulate Docker's process/bind-mount UIDs without Docker, chown or privilege.
 // All content, containment, exclusive writes and receipts still use real files.
 async function withOwners(root, uid, ownerFor, fn) {
-  const getuid = process.getuid, lstat = fs.lstatSync;
+  const getuid = process.getuid, lstat = fs.lstatSync, open = fs.openSync, fstat = fs.fstatSync, close = fs.closeSync;
   const aliases = [path.resolve(root), fs.realpathSync(root)];
-  process.getuid = () => uid;
-  fs.lstatSync = (file, ...args) => {
-    const st = lstat(file, ...args);
+  const files = new Map();
+  const withOwner = (st, file) => {
     if (typeof file === 'string') {
       for (const base of aliases) {
         const rel = path.relative(base, path.resolve(file));
@@ -32,8 +31,16 @@ async function withOwners(root, uid, ownerFor, fn) {
     }
     return st;
   };
+  process.getuid = () => uid;
+  fs.lstatSync = (file, ...args) => withOwner(lstat(file, ...args), file);
+  fs.openSync = (file, ...args) => { const fd = open(file, ...args); files.set(fd, file); return fd; };
+  fs.fstatSync = (fd, ...args) => withOwner(fstat(fd, ...args), files.get(fd));
+  fs.closeSync = fd => { try { return close(fd); } finally { files.delete(fd); } };
   try { return await fn(); }
-  finally { fs.lstatSync = lstat; if (getuid === undefined) delete process.getuid; else process.getuid = getuid; }
+  finally {
+    fs.lstatSync = lstat; fs.openSync = open; fs.fstatSync = fstat; fs.closeSync = close;
+    if (getuid === undefined) delete process.getuid; else process.getuid = getuid;
+  }
 }
 
 // A real JD's ordinary copyright/archive duties are not an omission disclosure.
@@ -386,4 +393,158 @@ test('container root ownership exception does not permit symlinked output direct
     });
     assert.deepEqual(fs.readdirSync(other), []);
   } finally { fs.rmSync(other, { recursive: true, force: true }); }
+}));
+
+
+const IO_CAPTURE_LIMIT = 2 * 1024 * 1024 + 8192;
+const ioFixture = fn => fixture(async root => {
+  const p = payload();
+  const prepared = await prepareEvaluationArchive(root, p, { captureFn: async id => source(id) });
+  assert.equal(prepared.ok, true, prepared.error);
+  const file = path.join(fs.realpathSync(root), 'jds', prepared.archive.filename);
+  await fn({ root, p: { ...p, markdown: prepared.markdown }, file, bytes: fs.readFileSync(file) });
+});
+
+// Real isolated files plus deterministic syscall-boundary changes. No chown,
+// concurrent process, external service or real secret is needed for these races.
+function withCaptureIo(file, hooks, fn) {
+  const methods = ['lstatSync', 'openSync', 'fstatSync', 'readSync', 'readFileSync', 'closeSync'];
+  const original = Object.fromEntries(methods.map(name => [name, fs[name]]));
+  const files = new Map();
+  const state = { opened: 0, closed: 0, bytesRead: 0, pathReads: 0, requests: [], fstats: new Set(), readBeforeFstat: false };
+  const selected = value => typeof value === 'string' && path.resolve(value) === file;
+  fs.lstatSync = (value, ...args) => {
+    const st = original.lstatSync(value, ...args);
+    return selected(value) ? hooks.afterStat?.(st, original, state) ?? st : st;
+  };
+  fs.openSync = (value, flags, ...args) => {
+    const fd = original.openSync(value, selected(value) && hooks.flags ? hooks.flags(flags) : flags, ...args);
+    if (typeof value === 'string' && path.dirname(path.resolve(value)) === path.dirname(file)) {
+      files.set(fd, path.resolve(value)); state.opened++;
+    }
+    return fd;
+  };
+  fs.fstatSync = (fd, ...args) => {
+    const st = original.fstatSync(fd, ...args);
+    if (files.has(fd)) state.fstats.add(fd);
+    return st;
+  };
+  fs.readSync = (fd, buffer, offset, length, position) => {
+    if (files.get(fd) === file) {
+      if (!state.fstats.has(fd)) state.readBeforeFstat = true;
+      state.requests.push(length); hooks.beforeRead?.(original, state);
+    }
+    const count = original.readSync(fd, buffer, offset, length, position);
+    if (files.get(fd) === file) { state.bytesRead += count; hooks.afterRead?.(original, state); }
+    return count;
+  };
+  fs.readFileSync = (value, ...args) => {
+    if (selected(value)) { state.pathReads++; hooks.beforePathRead?.(original, state); }
+    const bytes = original.readFileSync(value, ...args);
+    if (selected(value)) { state.bytesRead += Buffer.byteLength(bytes); hooks.afterPathRead?.(original, state); }
+    return bytes;
+  };
+  fs.closeSync = fd => {
+    try { return original.closeSync(fd); }
+    finally { if (files.delete(fd)) state.closed++; }
+  };
+  try { return fn(state, original); }
+  finally { for (const name of methods) fs[name] = original[name]; }
+}
+
+test('archive IO: same-byte inode replacement after lstat is rejected before reading', ioFixture(({ p, root, file, bytes }) => {
+  let swapped = false;
+  withCaptureIo(file, { afterStat(st) {
+    if (!swapped) { swapped = true; fs.renameSync(file, file + '.previous'); fs.writeFileSync(file, bytes, { mode: 0o600 }); }
+    return st;
+  } }, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, false);
+    assert.equal(state.bytesRead, 0); assert.equal(swapped, true);
+    assert.equal(state.opened, state.closed);
+  });
+}));
+
+for (const portable of [false, true]) test(`archive IO: leaf symlink swap is rejected before reading (portable=${portable})`, ioFixture(({ p, root, file, bytes }) => {
+  const other = path.join(fs.realpathSync(root), 'unrelated-source.md'); fs.writeFileSync(other, bytes);
+  let swapped = false;
+  withCaptureIo(file, { flags: flags => portable ? flags & ~(fs.constants.O_NOFOLLOW ?? 0) : flags, afterStat(st) {
+    if (!swapped) { swapped = true; fs.renameSync(file, file + '.previous'); fs.symlinkSync(other, file, 'file'); }
+    return st;
+  } }, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, false);
+    assert.equal(state.bytesRead, 0); assert.equal(swapped, true);
+    assert.equal(state.opened, state.closed);
+  });
+}));
+
+test('archive IO: oversized in-place replacement after lstat is not read', ioFixture(({ p, root, file }) => {
+  let changed = false;
+  withCaptureIo(file, { afterStat(st) {
+    if (!changed) { changed = true; fs.writeFileSync(file, Buffer.alloc(IO_CAPTURE_LIMIT + 64, 120)); }
+    return st;
+  } }, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, false);
+    assert.ok(state.bytesRead <= IO_CAPTURE_LIMIT + 1, 'the checked size cannot be bypassed by an unbounded pathname read');
+    assert.equal(state.opened, state.closed);
+  });
+}));
+
+test('archive IO: growth during reading stays bounded to max plus one byte', ioFixture(({ p, root, file }) => {
+  let grown = false;
+  const grow = () => { if (!grown) { grown = true; fs.appendFileSync(file, Buffer.alloc(IO_CAPTURE_LIMIT + 64, 120)); } };
+  withCaptureIo(file, { beforePathRead: grow, afterRead: grow }, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, false);
+    assert.equal(grown, true); assert.ok(state.bytesRead <= IO_CAPTURE_LIMIT + 1);
+    assert.ok(state.requests.every(length => length <= IO_CAPTURE_LIMIT + 1));
+    assert.equal(state.opened, state.closed);
+  });
+}));
+
+test('archive IO: parent replacement is rejected even when the capture inode survives', ioFixture(({ p, root, file }) => {
+  const dir = path.dirname(file); let changed = false;
+  withCaptureIo(file, { afterStat(st, original) {
+    if (!changed) {
+      changed = true; fs.renameSync(dir, dir + '-previous'); fs.mkdirSync(dir, { mode: 0o700 });
+      for (const name of fs.readdirSync(dir + '-previous')) fs.renameSync(path.join(dir + '-previous', name), path.join(dir, name));
+      return original.lstatSync(file);
+    }
+    return st;
+  } }, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, false);
+    assert.equal(state.bytesRead, 0); assert.equal(changed, true);
+    assert.equal(state.opened, state.closed);
+  });
+}));
+
+test('archive IO: successful capture and receipt reads use closed validated descriptors', ioFixture(({ p, root, file }) => {
+  withCaptureIo(file, {}, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, true);
+    assert.equal(state.pathReads, 0); assert.equal(state.readBeforeFstat, false); assert.equal(state.opened, 2); assert.equal(state.closed, 2);
+    assert.ok(state.bytesRead > 0); assert.ok(state.bytesRead <= IO_CAPTURE_LIMIT);
+  });
+}));
+
+test('archive IO: read error closes the descriptor before reporting failure', ioFixture(({ p, root, file }) => {
+  const readError = () => { throw new Error('fictional descriptor read failure'); };
+  withCaptureIo(file, { beforeRead: readError, beforePathRead: readError }, state => {
+    const result = validateEvaluationArchive(root, p);
+    assert.equal(result.ok, false); assert.match(result.error, /fictional descriptor read failure/);
+    assert.equal(state.opened, 1); assert.equal(state.closed, 1);
+  });
+}));
+
+
+test('archive IO: post-read same-size mutation cannot retain the old receipt validation', ioFixture(({ p, root, file, bytes }) => {
+  let changed = false;
+  const change = () => {
+    if (!changed) {
+      changed = true; fs.writeFileSync(file, Buffer.alloc(bytes.length, 120));
+      fs.utimesSync(file, new Date(), new Date(Date.now() + 5000));
+    }
+  };
+  withCaptureIo(file, { afterRead: change, afterPathRead: change }, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, false);
+    assert.equal(changed, true); assert.ok(state.bytesRead <= IO_CAPTURE_LIMIT + 1);
+    assert.equal(state.opened, state.closed);
+  });
 }));
