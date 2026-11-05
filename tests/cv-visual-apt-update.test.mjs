@@ -32,7 +32,8 @@ function aptProblems(dockerfile) {
     if (command === 'update' && !/\bapt-get update\b[^;&|]*--error-on=any\b/.test(loop.body)) {
       problems.push('apt-get update lacks --error-on=any');
     }
-    if (!new RegExp(`\\bapt-get ${command}\\b[^;]*&&\\s*break\\b`).test(loop.body)) {
+    // Stop at `|` too: `apt-get install x || echo failed && break` breaks after a failure.
+    if (!new RegExp(`\\bapt-get ${command}\\b[^;|]*&&\\s*break\\b`).test(loop.body)) {
       problems.push(`the apt-get ${command} loop does not break on success`);
     }
     const last = loop.attempts.at(-1);
@@ -70,6 +71,8 @@ for (const [label, text, want] of [
   ['a bare install', `RUN a \\\n${UPDATE_LOOP}    && apt-get install -y x\n`, 1],
   ['an install loop that never fails', `RUN a \\\n${UPDATE_LOOP}${INSTALL_LOOP.replace('|| exit 1', '|| true')}`, 1],
   ['an install loop that never breaks', GOOD.replace('x && break', 'x'), 1],
+  ['an install loop that breaks after a failure', GOOD.replace('x && break', 'x || echo failed && break'), 1],
+  ['an update loop that breaks after a failure', GOOD.replace('--error-on=any && break', '--error-on=any || echo failed && break'), 1],
   ['an update loop whose exit misses the last attempt', `RUN a \\\n${UPDATE_LOOP.replace('-lt 3', '-lt 6')}${INSTALL_LOOP}`, 1],
   ['an install loop whose exit misses the last attempt', `RUN a \\\n${UPDATE_LOOP}${INSTALL_LOOP.replace('-lt 3', '-lt 6')}`, 1],
 ]) {
