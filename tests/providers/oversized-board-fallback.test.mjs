@@ -190,3 +190,28 @@ test('lever keeps postings already read when a later page fails, flagged truncat
     await assert.rejects(() => lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, pagedCtx(500, { failAtSkip: 0 })), /HTTP 400/);
   } finally { console.warn = warn; }
 });
+
+test('lever probe over an unreadably large first page throws instead of reading as empty', async () => {
+  const ctx = {
+    maxPages: 1,
+    sleep: async () => {},
+    fetchJson: async () => { throw tooLarge(); },
+  };
+  await assert.rejects(() => lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx), /exceeded maxBytes/);
+});
+
+test('lever scales the per-response byte cap with the page limit', async () => {
+  const caps = [];
+  const ctx = {
+    sleep: async () => {},
+    fetchJson: async (url, opts) => {
+      const u = new URL(url);
+      if (!u.searchParams.has('limit')) throw tooLarge();
+      caps.push([Number(u.searchParams.get('limit')), opts.maxBytes]);
+      if (Number(u.searchParams.get('limit')) > 25) throw tooLarge();
+      return [];
+    },
+  };
+  await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
+  assert.deepEqual(caps, [[100, 4194304], [50, 2097152], [25, 1048576]]);
+});

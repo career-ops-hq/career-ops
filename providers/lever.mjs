@@ -136,8 +136,8 @@ export default {
       const PAGE = 100;
       const MIN_PAGE = 10;
       const probing = ctx.maxPages === 1;
-      // Bounded: at most 30 pages' worth (3,000 postings), each response capped at
-      // 4 MiB, so the fallback cannot buffer more than ~120 MiB however the server
+      // Bounded: at most 30 pages' worth (3,000 postings), each 100-posting
+      // response capped at 4 MiB (the cap scales down with the limit), so the fallback cannot buffer more than ~120 MiB however the server
       // behaves. A page over the 4 MiB cap is retried with a smaller limit, so
       // `requests` also bounds those shrink retries.
       const maxPages = Math.min(30, ctx.maxPages ?? 30);
@@ -147,6 +147,8 @@ export default {
       let requests = 0;
       let lastPageFull = false;
       let truncated = false;
+      /** @type {unknown} */
+      let lastTooLarge = null;
       while (all.length < maxPostings && requests < maxRequests) {
         if (requests > 0) await sleep(250, ctx);
         requests++;
@@ -157,10 +159,11 @@ export default {
         pageUrl.searchParams.set('skip', String(skip));
         let page;
         try {
-          page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: 4 * 1024 * 1024 });
+          page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: Math.ceil((4 * 1024 * 1024 * limit) / PAGE) });
         } catch (err) {
           // A page over the body cap: retry the same offset with a smaller limit.
           if (/** @type {any} */ (err)?.code === 'response_too_large' && pageSize > MIN_PAGE) {
+            lastTooLarge = err;
             pageSize = Math.max(MIN_PAGE, Math.floor(pageSize / 2));
             continue;
           }
@@ -174,6 +177,7 @@ export default {
           break;
         }
         if (!Array.isArray(page)) throw new Error(`lever: ${entry.name} returned a non-array page (${typeof page}) for skip=${skip}`);
+        lastTooLarge = null;
         if (page.length === 0) { lastPageFull = false; break; }
         // A server that ignores `limit` must not amplify the total: refuse the page.
         if (page.length > limit) throw new Error(`lever: ${entry.name} returned ${page.length} postings for limit=${limit}`);
@@ -181,6 +185,8 @@ export default {
         lastPageFull = page.length === limit;
         if (!lastPageFull || probing) break;
       }
+      // Out of requests with nothing accepted: the board is unreadable, not empty.
+      if (all.length === 0 && lastTooLarge) throw lastTooLarge;
       if (requests >= maxRequests && all.length < maxPostings && lastPageFull) truncated = true;
       // Cap stop, not completion: a full last page at the ceiling may mean more
       // postings exist. A probe (maxPages === 1) asks for one page by design.
