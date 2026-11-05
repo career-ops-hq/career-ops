@@ -81,7 +81,7 @@ Cap at Tier B and flag recency doubt when the profile looks stale (the person ma
 
 Dispatch a single subagent per the delegation guide in `.agents/skills/career-ops/SKILL.md` → **Modes delegated to subagent**. **Never nest subagents.**
 
-If the CLI exposes no Agent primitive (or otherwise lacks subagent support), run the audit inline in the main session. It adds web research cost but avoids the delegation gap. **State in the output that the audit ran inline** (the value of this pass is that it is not self-auditing; degrading silently would misrepresent the result).
+If the delegation guide lists no subagent tool for the CLI (the "All other CLIs" row), run the audit inline in the main session. It adds web research cost but avoids the delegation gap. **State in the output that the audit ran inline** (the value of this pass is that it is not self-auditing; degrading silently would misrepresent the result).
 
 The brief contains:
 
@@ -94,7 +94,7 @@ The brief contains:
 - The persona and its tier.
 - The candidate's real scope from `cv.md` and `article-digest.md`, with this instruction verbatim: *"You may recommend cutting or reframing any bullet. You may never recommend a claim the source files do not support. If a requirement is unmet, say it is unmet — do not invent coverage for it."*
 
-If the CLI exposes no Agent primitive (or otherwise lacks subagent support), run the persona inline **and say so in the output**. This applies to **any CLI lacking subagent support**. The value of this pass is that it is not self-auditing; degrading silently would misrepresent the result.
+If the delegation guide lists no subagent tool for the CLI (the "All other CLIs" row), run the persona inline **and say so in the output**. This applies to **any CLI lacking subagent support**. The value of this pass is that it is not self-auditing; degrading silently would misrepresent the result.
 
 ## Step 4 — Collect the verdict
 
