@@ -543,6 +543,7 @@ export async function mergeTracker(options = {}) {
   // merely because the company and title match. Never scan JD prose for links.
   const declaredEmployerUrls = new Map();
   let resolvePostingApi = null;
+  let workdayPostingKey = null;
   function declaredEmployerUrl(app) {
     if (declaredEmployerUrls.has(app.report)) return declaredEmployerUrls.get(app.report);
     let url = '';
@@ -565,11 +566,16 @@ export async function mergeTracker(options = {}) {
   function atsPostingIdentity(url) {
     const resolved = resolvePostingApi?.(url);
     if (!resolved) return null;
-    const idField = ['jobId', 'id', 'shortcode'].find(key => resolved.parts[key]);
+    const idField = resolved.ats === 'workday' ? 'jobPath'
+      : ['jobId', 'id', 'shortcode'].find(key => resolved.parts[key]);
     if (!idField) return null;
     const scope = Object.entries(resolved.parts).filter(([key]) => key !== idField)
       .sort(([a], [b]) => a.localeCompare(b));
-    const rawId = resolved.parts[idField];
+    // Reuse Workday's validated trailing requisition token, not its title or
+    // location slug. Keep the resolver's tenant/shard/site as comparison scope.
+    const rawId = resolved.ats === 'workday'
+      ? workdayPostingKey?.({ url })?.split(':').pop() : resolved.parts[idField];
+    if (!rawId) return null;
     // UUID hex is case-insensitive. Other ATS identifiers are opaque strings.
     const id = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId)
       ? rawId.toLowerCase() : rawId;
@@ -1892,7 +1898,23 @@ export async function mergeTracker(options = {}) {
       if (declaredEmployerUrl(addition) || existingApps.some(app =>
         (companiesMatch(app.company, addition.company)
           || companiesMatchIgnoringCorporateForm(app.company, addition.company)) && declaredEmployerUrl(app))) {
-        resolvePostingApi ??= (await import('./liveness-api.mjs')).resolveAtsApi;
+        if (!resolvePostingApi) {
+          resolvePostingApi = (await import('./liveness-api.mjs')).resolveAtsApi;
+          workdayPostingKey = (await import('./providers/workday.mjs')).workdayDedupKey;
+        }
+      }
+
+      // A report number is also a PDF/index key. If two DIFFERENT files
+      // claim that number for distinct employer requisitions, appending a row
+      // would preserve the wrong shared key. Keep both artifacts and the TSV
+      // pending instead; never rename a report or overwrite the prior row.
+      if (reportNum && existingApps.some(app =>
+        extractReportNum(app.report, app.notes) === reportNum
+        && resolveReportPath(app.report) !== resolveReportPath(addition.report)
+        && declaredEmployerConflict(app, addition))) {
+        console.error(`❌ ${file}: report #${reportNum} names conflicting employer postings in different files; nothing merged for this addition. Keep the reports and correct the report-number collision before re-running.`);
+        failedAdditions.push(file);
+        continue;
       }
 
       let duplicate = null;
@@ -1911,7 +1933,8 @@ export async function mergeTracker(options = {}) {
       const addUrl = normalizeUrl(addition.url);
       let dupReason = null;
       if (addUrl) {
-        duplicate = existingApps.find(a => a.url && normalizeUrl(a.url) === addUrl);
+        duplicate = existingApps.find(a => a.url && normalizeUrl(a.url) === addUrl
+          && !declaredEmployerConflict(a, addition));
         if (duplicate) dupReason = 'url';
       }
 
@@ -2039,7 +2062,8 @@ export async function mergeTracker(options = {}) {
         duplicate = existingApps.find(app => {
           const existingReportNum = extractReportNum(app.report, app.notes);
           // Provable tier: only a CONFLICT disqualifies, never a missing key.
-          return existingReportNum === reportNum && companiesMatch(app.company, addition.company) && !urlDiffers(app);
+          return existingReportNum === reportNum && companiesMatch(app.company, addition.company)
+            && !urlDiffers(app) && !declaredEmployerConflict(app, addition);
         });
         if (duplicate) reportNumMatched = true;
       }
