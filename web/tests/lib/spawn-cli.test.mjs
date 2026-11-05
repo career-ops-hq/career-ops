@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import { spawnHeadlessCli } from "../../src/lib/spawn-cli.mjs";
+import { spawnHeadlessCli, assertWindowsCommandLineLength } from "../../src/lib/spawn-cli.mjs";
 import { CAPS } from "../../src/lib/worker-capabilities.mjs";
 
 // Fencing is required at every call site (#2507). These cases are about stdin,
@@ -148,5 +148,63 @@ test("spawnHeadlessCli never lets a child inherit the server's console (windowsH
     assert.equal(options.windowsHide, true);
     assert.equal(options.cwd, process.cwd());
     assert.equal(options.env, process.env);
+  }
+});
+
+test("Windows command-line preflight includes argv0, spaces, and the terminating NUL", () => {
+  // Five chars in x.exe + one space + 32760 chars + one NUL = 32767.
+  assert.doesNotThrow(() => assertWindowsCommandLineLength("x.exe", ["a".repeat(32760)], {}, "win32"));
+  assert.throws(() => assertWindowsCommandLineLength("x.exe", ["a".repeat(32761)], {}, "win32"),
+    error => error.code === "E2BIG" && /32768 UTF-16/.test(error.message));
+  // An explicit argv0 replaces the command in Node's Windows argv.
+  assert.doesNotThrow(() => assertWindowsCommandLineLength("long-command.exe", ["a".repeat(32764)], { argv0: "x" }, "win32"));
+  assert.throws(() => assertWindowsCommandLineLength("x", ["a".repeat(32764)], { argv0: "xx" }, "win32"), /limit is 32767/);
+  assert.doesNotThrow(() => assertWindowsCommandLineLength("x.exe", ["a".repeat(50000)], {}, "linux"));
+});
+
+test("Windows command-line preflight counts UTF-16 and libuv quoting expansion", () => {
+  // Non-BMP codepoints occupy two UTF-16 units, not one Unicode codepoint.
+  assert.doesNotThrow(() => assertWindowsCommandLineLength("x.exe", ["😀".repeat(16380)], {}, "win32"));
+  assert.throws(() => assertWindowsCommandLineLength("x.exe", ["😀".repeat(16380) + "a"], {}, "win32"), /32768 UTF-16/);
+  const cases = [
+    ["", 2], ["a b", 5], ["a\tb", 5], ['a"b', 6],
+    ["a\\b", 3], ["a b\\", 7], ['a\\"b', 8], ["a b\\\\", 9],
+  ];
+  for (const [arg, quotedLength] of cases) {
+    // x.exe + two separators + NUL = 8 units, plus each encoded arg.
+    const padding = "x".repeat(32767 - 8 - quotedLength);
+    assert.doesNotThrow(() => assertWindowsCommandLineLength("x.exe", [padding, arg], {}, "win32"), JSON.stringify(arg));
+    assert.throws(() => assertWindowsCommandLineLength("x.exe", [padding + "x", arg], {}, "win32"), /32768 UTF-16/, JSON.stringify(arg));
+  }
+  const quotedPrompt = '"'.repeat(20000);
+  assert.throws(() => assertWindowsCommandLineLength("x.exe", [quotedPrompt], {}, "win32"), /limit is 32767/);
+  assert.doesNotThrow(() => assertWindowsCommandLineLength("x.exe", [quotedPrompt], { windowsVerbatimArguments: true }, "win32"));
+});
+
+test("spawnHeadlessCli refuses an oversized Windows request before spawning or exposing its prompt", () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const realSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (...args) => { calls.push(args); return { stdin: { end() {} } }; };
+  syncBuiltinESMExports();
+  Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+  try {
+    const secretPrompt = "FICTIONAL_PRIVATE_NOTES_" + "a".repeat(32767);
+    assert.throws(() => spawnHeadlessCli("fixture.exe", [secretPrompt], {}, PASSTHROUGH), error => {
+      assert.equal(error.code, "E2BIG");
+      assert.match(error.message, /Shorten the evaluation input or notes/);
+      assert.doesNotMatch(error.message, /FICTIONAL_PRIVATE_NOTES/);
+      return true;
+    });
+    assert.equal(calls.length, 0);
+    spawnHeadlessCli("fixture.exe", ["short prompt"], { cwd: "fictional" }, PASSTHROUGH);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0][1], ["short prompt"]);
+    assert.equal(calls[0][2].windowsHide, true);
+    assert.equal(calls[0][2].cwd, "fictional");
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    childProcess.spawn = realSpawn;
+    syncBuiltinESMExports();
   }
 });

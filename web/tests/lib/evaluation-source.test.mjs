@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 import { readEvaluationSource, evaluationSourceEvidence } from '../../src/lib/evaluation-source.mjs';
 
 const ORIGINAL = 'https://jobs.ashbyhq.com/fictional/11111111-1111-4111-8111-111111111111';
@@ -67,10 +68,10 @@ test('backend runs one fixed Node argv and sends URL only as JSON stdin', async 
   const f = childFactory(child => { child.stdout.emit('data', JSON.stringify(packet())); child.emit('close', 0); });
   const result = await readEvaluationSource({ kind: 'evaluate', input: ORIGINAL, root: '/fixture/root', execPath: '/fixture/node', spawnFn: f.spawnFn });
   assert.equal(result.outcome, 'available'); assert.equal(f.calls.length, 1);
-  assert.deepEqual(f.calls[0].args, ['/fixture/root/read-known-jd.mjs', '--request', '-']);
+  assert.deepEqual(f.calls[0].args, [path.join('/fixture/root', 'read-known-jd.mjs'), '--request', '-']);
   assert.equal(f.calls[0].options.shell, false); assert.equal(f.calls[0].options.cwd, '/fixture/root');
   assert.deepEqual(JSON.parse(f.calls[0].input), { url: ORIGINAL });
-  assert.equal(f.calls[0].args.includes(ORIGINAL), false);
+  assert.equal(f.calls[0].args.some(arg => arg === ORIGINAL), false);
   assert.equal(f.children[0].listenerCount('close'), 0);
 });
 
