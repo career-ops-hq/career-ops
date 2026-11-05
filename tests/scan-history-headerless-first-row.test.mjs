@@ -5,15 +5,15 @@
 // The reader used to skip line 0 unconditionally, so on such a file the oldest
 // row was read as a header and dropped, and that URL was never pinned.
 import { pass, fail } from './helpers.mjs';
-import { collectSeenUrls, normalizeUrlForDedup } from '../scan.mjs';
+import { collectSeenUrls, seenJobKey } from '../scan.mjs';
 
 console.log('\nscan.mjs — collectSeenUrls keeps the first row of a headerless scan-history.tsv');
 
 const URL1 = 'https://boards.greenhouse.io/acme/jobs/1';
 const URL2 = 'https://boards.greenhouse.io/acme/jobs/2';
 // The pin is the same-job key. These two board URLs are greenhouse:1 and greenhouse:2.
-const KEY1 = normalizeUrlForDedup(URL1);
-const KEY2 = normalizeUrlForDedup(URL2);
+const KEY1 = seenJobKey(URL1);
+const KEY2 = seenJobKey(URL2);
 const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation';
 const row = (url) => `${url}\t2026-09-01\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote`;
 

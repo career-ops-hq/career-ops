@@ -81,7 +81,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { canonicalJobKey, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
+import { canonicalJobKey, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
@@ -1606,10 +1606,10 @@ export function unrecordedOffers(offers, status, scanHistoryText = '') {
   const recorded = new Set();
   for (const line of scanHistoryDataLines(scanHistoryText)) {
     const [url, , , , , rowStatus] = line.split('\t');
-    if (url && rowStatus === status) recorded.add(normalizeUrlForDedup(url));
+    if (url && rowStatus === status) recorded.add(seenJobKey(url));
   }
   return offers.filter((offer) => {
-    const key = normalizeUrlForDedup(offer.url);
+    const key = seenJobKey(offer.url);
     if (recorded.has(key)) return false;
     recorded.add(key);
     return true;
@@ -1759,9 +1759,59 @@ export function orderByPreferredLanguage(jobs, rank) {
     .map(({ job }) => job);
 }
 
+// Query params that carry no identity information for a job posting. Safe to
+// strip when computing the URL-shaped dedup key. An allowlist on purpose:
+// several ATSes key the posting off a query param (Greenhouse's gh_jid), so a
+// blanket strip would collapse distinct roles.
+const DEDUP_STRIP_PARAMS = new Set([
+  // The language a page renders in: the language versions of one posting
+  // share a key, and languageFormsFromUrl reads the param back to tell them apart.
+  ...LANGUAGE_PARAMS,
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+  'ref', 'src', 'source', 'gh_src', 'lever-origin', 'lever-source',
+  'rltr', // StepStone: regenerated per request, so one posting returns as new every scan
+]);
+
+/**
+ * Normalize a job posting URL into a stable, URL-shaped comparison key.
+ *
+ * Strips cosmetic query params (locale/tracking), promotes recognized
+ * hash-route job IDs before dropping other fragments, drops a trailing slash,
+ * and lowercases scheme, host, and path. Callers keep writing the original URL.
+ *
+ * Query values keep their original casing. Those can be identity-bearing
+ * (Greenhouse's gh_jid), which is why DEDUP_STRIP_PARAMS is an allowlist.
+ * This function does not turn a Greenhouse URL into `greenhouse:{id}`. That
+ * question is {@link seenJobKey}.
+ *
+ * Falls back to the raw string when the URL is malformed.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
 export function normalizeUrlForDedup(url) {
   if (typeof url !== 'string' || !url) return url;
-  return canonicalJobKey(url) || url;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  for (const param of Array.from(parsed.searchParams.keys())) {
+    if (DEDUP_STRIP_PARAMS.has(param.toLowerCase())) {
+      parsed.searchParams.delete(param);
+    }
+  }
+  promoteKnownFragmentIdentity(parsed);
+  parsed.hash = '';
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
+  return parsed.toString();
+}
+
+/** Same-job key for a seen-set. Short ATS ids win; otherwise the URL-shaped key. */
+export function seenJobKey(url) {
+  if (typeof url !== 'string' || !url) return url;
+  return canonicalJobKey(url) || normalizeUrlForDedup(url);
 }
 
 /**
@@ -2079,7 +2129,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     // overstate what the TTL released. See OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
-      const urlToken = normalizeUrlForDedup(url);
+      const urlToken = seenJobKey(url);
       seen.add(urlToken);
       const recorded = languageFormsForDedup(language);
       recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
@@ -2096,7 +2146,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
         }
       }
     } else {
-      const urlToken = normalizeUrlForDedup(url);
+      const urlToken = seenJobKey(url);
       recheckCandidates.add(urlToken);
       if (status === 'added' && listingKey) recheckListingTokens.set(urlToken, `listing:${listingKey}`);
     }
@@ -2144,7 +2194,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     }
     const url = extractPipelineUrl(line);
     if (!url) continue;
-    const key = normalizeUrlForDedup(url);
+    const key = seenJobKey(url);
     const done = /^\s*- \[x\]/i.test(line);
     if ((done || inProcessed) && recheckCandidates.has(key)) continue;
     seen.add(key);
@@ -2161,7 +2211,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
 
   // applications.md — extract URLs from report links and any inline URLs
   for (const match of applicationsText.matchAll(/https?:\/\/[^\s|)]+/g)) {
-    const key = normalizeUrlForDedup(match[0]);
+    const key = seenJobKey(match[0]);
     seen.add(key);
     recordUrlVariant(variants, key, languageFormsFromUrl(match[0]));
   }
@@ -2853,7 +2903,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   const seen = new Set();
   const postingAttributes = collectPostingAttributes(scanHistoryText, historyRows);
   const attributesFor = (url) => (typeof url === 'string' && url
-    ? postingAttributes.get(normalizeUrlForDedup(url.trim())) ?? {}
+    ? postingAttributes.get(seenJobKey(url.trim())) ?? {}
     : {});
   const add = (company, role, location, requisition = null, language = null) => {
     const c = String(company ?? '').trim();
@@ -2944,7 +2994,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
 /**
  * Requisition id and language per posting URL, from every scan-history row that
  * recorded them (whatever its status: these describe the posting, not whether it
- * was surfaced). Keyed by {@link normalizeUrlForDedup}, the same form the URL
+ * was surfaced). Keyed by {@link seenJobKey}, the same form the URL
  * dedup uses, so a tracker or pipeline row spelling the URL differently still
  * finds its posting. One URL can have several rows (a re-add, a verify
  * outcome); they merge field by field, a later non-empty value replacing an
@@ -2961,7 +3011,7 @@ export function collectPostingAttributes(scanHistoryText, historyRows = null) {
     const requisitionId = row.requisition_id.trim();
     const language = row.language.trim();
     if (!row.url || (!requisitionId && !language)) continue;
-    const key = normalizeUrlForDedup(row.url.trim());
+    const key = seenJobKey(row.url.trim());
     attributes.set(key, {
       ...attributes.get(key),
       ...(requisitionId ? { requisitionId } : {}),
@@ -3203,7 +3253,7 @@ export function refreshListingKey(offer) {
 }
 
 export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
-  const urlToken = normalizeUrlForDedup(offer?.url);
+  const urlToken = seenJobKey(offer?.url);
   const identityToken = listingIdentityToken(offer);
   if (seenUrls.has(urlToken)) {
     const historicalKeys = identityPromotableUrls?.get(urlToken);
@@ -3216,7 +3266,7 @@ export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
 }
 
 export function markOfferSeen(offer, seenUrls, { includeIdentity = true } = {}) {
-  const urlToken = normalizeUrlForDedup(offer?.url);
+  const urlToken = seenJobKey(offer?.url);
   const identityToken = listingIdentityToken(offer);
   seenUrls.add(urlToken);
   if (identityToken && includeIdentity) {
@@ -4618,7 +4668,7 @@ async function main() {
         for (const job of jobs) {
           const languages = languageFormsForDedup(job?.language);
           if (!languages.length) continue;
-          const key = normalizeUrlForDedup(job.url);
+          const key = seenJobKey(job.url);
           if (!siblingsByUrl.has(key)) siblingsByUrl.set(key, []);
           siblingsByUrl.get(key).push({ languages, title: job.title });
         }
@@ -4729,7 +4779,7 @@ async function main() {
           totalFilteredVisa++;
           continue;
         }
-        const dedupUrl = normalizeUrlForDedup(job.url);
+        const dedupUrl = seenJobKey(job.url);
         const language = languageFormsForDedup(job.language);
         // A seen URL key passes only as a language version of that posting no
         // seen row was in; a match on the provider's listing identity stays a

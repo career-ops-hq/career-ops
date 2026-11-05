@@ -1,8 +1,28 @@
 // One posting, one key. Variants of the same job compare equal. Two jobs do not.
+// The web copy is loaded with import(), and only when web/src exists. A static
+// import crashes a checkout that has no web/ (#3269).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { canonicalJobKey } from '../url-key.mjs';
-import { canonicalJobKey as webKey } from '../web/src/lib/core/url-key.mjs';
+import { ROOT } from './helpers.mjs';
+
+const WEB_MIRROR = join(ROOT, 'web', 'src', 'lib', 'core', 'url-key.mjs');
+let webKey = null;
+if (!existsSync(join(ROOT, 'web', 'src'))) {
+  // Core-only install. The CLI key is still tested.
+} else if (!existsSync(WEB_MIRROR)) {
+  throw new Error('web/ exists but web/src/lib/core/url-key.mjs is missing');
+} else {
+  ({ canonicalJobKey: webKey } = await import(pathToFileURL(WEB_MIRROR).href));
+}
+
+function assertWeb(url, expected, label) {
+  if (!webKey) return;
+  assert.equal(webKey(url), expected, label);
+}
 
 const SAME = [
   [
@@ -65,7 +85,7 @@ test('variants of one posting share one key, on the CLI and the web copy', () =>
   for (const [label, urls, expected] of SAME) {
     for (const url of urls) {
       assert.equal(canonicalJobKey(url), expected, label);
-      assert.equal(webKey(url), expected, `web ${label}`);
+      assertWeb(url, expected, `web ${label}`);
     }
   }
 });
@@ -73,17 +93,17 @@ test('variants of one posting share one key, on the CLI and the web copy', () =>
 test('two postings do not share a key', () => {
   for (const [a, b] of DIFFERENT) {
     assert.notEqual(canonicalJobKey(a), canonicalJobKey(b), `${a} vs ${b}`);
-    assert.equal(webKey(a), canonicalJobKey(a));
-    assert.equal(webKey(b), canonicalJobKey(b));
+    assertWeb(a, canonicalJobKey(a), a);
+    assertWeb(b, canonicalJobKey(b), b);
   }
 });
 
 test('a missing posting is not a key, and a repeated call on a URL is stable', () => {
   for (const bad of ['', '   ', 'N/A', 'local:jds/acme.md', 'not a url', null, undefined]) {
     assert.equal(canonicalJobKey(bad), '');
-    assert.equal(webKey(bad), '');
+    assertWeb(bad, '', String(bad));
   }
   const once = canonicalJobKey('https://Jobs.Example.com/Role/9?utm_source=y');
   assert.equal(canonicalJobKey(once), once);
-  assert.equal(webKey(once), once);
+  assertWeb(once, once, 'stable');
 });

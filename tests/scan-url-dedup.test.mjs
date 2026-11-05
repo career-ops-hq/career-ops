@@ -33,7 +33,7 @@ import { collectSeenUrls } from '../scan.mjs';
 
 console.log('\nscan.mjs — normalizeUrlForDedup() ignores tracking params, preserves identity');
 try {
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeUrlForDedup, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   // The reported bug: one StepStone posting, two scans, two `rltr` values.
   const SS = 'https://www.stepstone.de/stellenangebote--AI-Engineer-Berlin-Acme--12345-inline.html';
@@ -79,9 +79,14 @@ try {
   // A company-site gh_jid is the Greenhouse posting, so tracking params drop
   // and the board URL for that id is the same key. A different id stays apart
   // (asserted above).
-  const mixed = normalizeUrlForDedup('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
-  const board = normalizeUrlForDedup('https://boards.greenhouse.io/acme/jobs/9');
-  if (mixed === 'greenhouse:9' && mixed === board) pass('gh_jid and the Greenhouse board URL share one key');
+  const mixedUrl = normalizeUrlForDedup('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
+  const boardUrl = normalizeUrlForDedup('https://boards.greenhouse.io/acme/jobs/9');
+  if (mixedUrl.includes('gh_jid=9') && boardUrl.includes('gh_jid') === false && boardUrl.includes('boards.greenhouse.io')) {
+    pass('normalizeUrlForDedup stays a URL and keeps gh_jid');
+  } else fail(`URL shape = ${JSON.stringify({ mixedUrl, boardUrl })}`);
+  const mixed = seenJobKey('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
+  const board = seenJobKey('https://boards.greenhouse.io/acme/jobs/9');
+  if (mixed === 'greenhouse:9' && mixed === board) pass('gh_jid and the Greenhouse board URL share one same-job key');
   else fail(`mixed query = ${JSON.stringify({ mixed, board })}`);
 
   // Untracked URLs must keep matching what is already in scan-history.
@@ -114,7 +119,7 @@ try {
 
 console.log('\nscan.mjs — collectSeenUrls() finds the URL in every documented pipeline.md shape');
 try {
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeUrlForDedup, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   // Transcribed from the docs that specify each shape, so these fail if the
   // documented format changes. Only the first leads with the URL.
@@ -149,7 +154,7 @@ try {
 
   for (const [, url, label] of SHAPES) {
     if (!url) continue;
-    if (seen.has(normalizeUrlForDedup(url))) pass(`pipeline.md: ${label} reaches the URL gate`);
+    if (seen.has(seenJobKey(url))) pass(`pipeline.md: ${label} reaches the URL gate`);
     else fail(`pipeline.md: ${label} did not reach the URL gate — ${url} is missing`);
   }
 
@@ -170,7 +175,7 @@ try {
   else fail(`prose line seeded a URL: [${[...seenUrlsFor(prose + '\n')].join(', ')}]`);
 
   const indented = '  - [ ] https://jobs.example.com/posting/10 | Acme Corp | Staff Engineer';
-  if (seenUrlsFor(indented + '\n').has(normalizeUrlForDedup('https://jobs.example.com/posting/10'))) {
+  if (seenUrlsFor(indented + '\n').has(seenJobKey('https://jobs.example.com/posting/10'))) {
     pass('pipeline.md: an indented entry still reaches the URL gate');
   } else {
     fail('indented entry did not reach the URL gate');
@@ -188,8 +193,8 @@ try {
     ['https://jobs.example.com/jobs/12(eu)', 'a parenthesised suffix survives intact'],
   ]) {
     const got = seenUrlsFor(`- [ ] ${url} | Acme Corp | Staff Engineer\n`);
-    if (got.size === 1 && got.has(normalizeUrlForDedup(url))) pass(`pipeline.md: ${label}`);
-    else fail(`${label} — expected [${normalizeUrlForDedup(url)}], got [${[...got].join(', ')}]`);
+    if (got.size === 1 && got.has(seenJobKey(url))) pass(`pipeline.md: ${label}`);
+    else fail(`${label} — expected [${seenJobKey(url)}], got [${[...got].join(', ')}]`);
   }
 } catch (err) {
   fail(`scan.mjs collectSeenUrls tests crashed: ${err && err.message}`);

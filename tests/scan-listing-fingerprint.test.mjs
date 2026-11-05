@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
 import { computeListingFingerprint } from '../listing-fingerprint.mjs';
-import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities, migrateOfferToUrl, refreshListingKey, normalizeUrlForDedup } from '../scan.mjs';
+import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities, migrateOfferToUrl, refreshListingKey, seenJobKey } from '../scan.mjs';
 
 console.log('\nscan.mjs — listing fingerprint participates in scan dedup');
 
@@ -99,7 +99,7 @@ try {
     const blocked = collectSeenUrls({
       scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key\n${acceptedUrl}\t2026-10-03\tgreenhouse\tStaff Engineer\tAcme\tskipped_blocked_host\tRemote\t\t\t\t\tacme\t\t\t${expectedKey}\n`,
     }, {}, { extraTokensFor: (_url, _portal, key) => key ? `listing:${key}` : null });
-    if (blocked.seen.has(normalizeUrlForDedup(acceptedUrl)) && !blocked.seen.has(`listing:${expectedKey}`)
+    if (blocked.seen.has(seenJobKey(acceptedUrl)) && !blocked.seen.has(`listing:${expectedKey}`)
         && !isOfferSeen(identityOnly, blocked.seen, blocked.identityPromotableUrls)) {
       pass('URL-specific history failures do not promote listing identity to aliases');
   } else fail('a URL-specific history failure promoted its listing identity');

@@ -19,9 +19,9 @@
 // URL has no scan-history row to have released it, so it stays pinned whatever
 // its checkbox says.
 import { pass, fail } from './helpers.mjs';
-import { collectSeenUrls, normalizeUrlForDedup } from '../scan.mjs';
+import { collectSeenUrls, seenJobKey } from '../scan.mjs';
 
-const pin = (url) => normalizeUrlForDedup(url);
+const pin = (url) => seenJobKey(url);
 
 console.log('\nscan.mjs — recheck_after_days survives the pipeline.md pass');
 
