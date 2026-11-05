@@ -3,17 +3,19 @@
 // without a Report column; the second merge must read that same reference.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { mergeTracker } from '../merge-tracker.mjs';
 import { writeEvaluationArtifacts } from '../persist-evaluation-report.mjs';
 import { trackerTsvLine } from '../lib/tracker-addition.mjs';
+import { listTree } from '../lib/walk-tree.mjs';
 
 const PRIMARY = 'https://himalayas.app/companies/exampleco/jobs/product-lead-123456';
 const FIRST = 'https://jobs.ashbyhq.com/exampleco/11111111-1111-4111-8111-111111111111';
 const SECOND = 'https://jobs.ashbyhq.com/exampleco/22222222-2222-4222-8222-222222222222';
 const fileFor = num => `${num}-exampleco-2026-01-01.md`;
+const flatFiles = dir => listTree(dir).filter(file => dirname(file) === dir).map(file => basename(file)).sort();
 
 function report(url, official, { score = '3.7/5', preamble = '', body = '' } = {}) {
   return `# Evaluation: ExampleCo\n\n${preamble}**Score:** ${score} | **URL:** ${url} | **PDF:** not generated\n`
@@ -38,7 +40,7 @@ function fixture(t, { reportColumn = false } = {}) {
     return file;
   };
   const merge = () => mergeTracker({ appsFile: tracker, dataRoot: root, logger: { log() {}, warn() {}, error() {} } });
-  const reportImages = () => Object.fromEntries(readdirSync(join(root, 'reports')).sort().map(name => [name, readFileSync(join(root, 'reports', name), 'utf8')]));
+  const reportImages = () => Object.fromEntries(flatFiles(join(root, 'reports')).map(name => [name, readFileSync(join(root, 'reports', name), 'utf8')]));
   return { root, tracker, additions, rows, cell, add, merge, reportImages };
 }
 
@@ -67,12 +69,12 @@ for (const earlierMarkedReference of [false, true]) {
     const before = readFileSync(f.tracker, 'utf8');
     f.add({ num: '101', file: '101-exampleco-other-2026-01-01.md', official: SECOND, score: '4.0/5' });
     const images = f.reportImages();
-    const pending = readdirSync(f.additions).filter(name => name.endsWith('.tsv'));
+    const pending = flatFiles(f.additions).filter(name => name.endsWith('.tsv'));
     assert.equal(pending.length, 1);
     const contribution = readFileSync(join(f.additions, pending[0]), 'utf8');
     assert.equal(await f.merge(), 1);
     assert.equal(readFileSync(f.tracker, 'utf8'), before);
-    assert.deepEqual(readdirSync(f.additions).filter(name => name.endsWith('.tsv')), pending);
+    assert.deepEqual(flatFiles(f.additions).filter(name => name.endsWith('.tsv')), pending);
     assert.equal(readFileSync(join(f.additions, pending[0]), 'utf8'), contribution);
     assert.deepEqual(f.reportImages(), images);
   });
