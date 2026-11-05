@@ -215,3 +215,32 @@ test('lever scales the per-response byte cap with the page limit', async () => {
   await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
   assert.deepEqual(caps, [[100, 4194304], [50, 2097152], [25, 1048576]]);
 });
+
+test('lever warns and marks truncated when shrink retries spend the request budget', async () => {
+  const warns = [];
+  const warn = console.warn; console.warn = (m) => warns.push(String(m));
+  try {
+    // Every page of 100 or 50 is too large, so the budget is mostly burnt on shrinks;
+    // pages of 25 or less succeed full, so the board never ends on its own.
+    const ctx = {
+      maxPages: 2,
+      sleep: async () => {},
+      fetchJson: async (url) => {
+        const u = new URL(url);
+        if (!u.searchParams.has('limit')) throw tooLarge();
+        const limit = Number(u.searchParams.get('limit')), skip = Number(u.searchParams.get('skip'));
+        if (limit > 25) throw tooLarge();
+        return Array.from({ length: limit }, (_, k) => posting(skip + k));
+      },
+    };
+    const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
+    assert.ok(out.length > 0 && out.length < 200);
+    assert.equal(out.leverTruncated, true);
+    assert.equal(warns.filter((m) => m.includes('request budget')).length, 1);
+  } finally { console.warn = warn; }
+});
+
+test('lever probe that exhausts shrink retries with nothing read throws, quietly otherwise', async () => {
+  const ctx = { maxPages: 1, sleep: async () => {}, fetchJson: async () => { throw tooLarge(); } };
+  await assert.rejects(() => lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx), /exceeded maxBytes/);
+});

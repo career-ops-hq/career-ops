@@ -147,6 +147,9 @@ export default {
       let requests = 0;
       let lastPageFull = false;
       let truncated = false;
+      // The board ended on its own (an empty or short page), as opposed to a stop
+      // forced by the posting ceiling, the request budget or a failed page.
+      let ended = false;
       /** @type {unknown} */
       let lastTooLarge = null;
       while (all.length < maxPostings && requests < maxRequests) {
@@ -162,7 +165,7 @@ export default {
           page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: Math.ceil((4 * 1024 * 1024 * limit) / PAGE) });
         } catch (err) {
           // A page over the body cap: retry the same offset with a smaller limit.
-          if (/** @type {any} */ (err)?.code === 'response_too_large' && pageSize > MIN_PAGE) {
+          if (/** @type {any} */ (err)?.code === 'response_too_large' && pageSize > MIN_PAGE && requests < maxRequests) {
             lastTooLarge = err;
             pageSize = Math.max(MIN_PAGE, Math.floor(pageSize / 2));
             continue;
@@ -178,16 +181,22 @@ export default {
         }
         if (!Array.isArray(page)) throw new Error(`lever: ${entry.name} returned a non-array page (${typeof page}) for skip=${skip}`);
         lastTooLarge = null;
-        if (page.length === 0) { lastPageFull = false; break; }
+        if (page.length === 0) { lastPageFull = false; ended = true; break; }
         // A server that ignores `limit` must not amplify the total: refuse the page.
         if (page.length > limit) throw new Error(`lever: ${entry.name} returned ${page.length} postings for limit=${limit}`);
         for (const posting of page) all.push(posting);
         lastPageFull = page.length === limit;
-        if (!lastPageFull || probing) break;
+        if (!lastPageFull) { ended = true; break; }
+        if (probing) break;
       }
       // Out of requests with nothing accepted: the board is unreadable, not empty.
       if (all.length === 0 && lastTooLarge) throw lastTooLarge;
-      if (requests >= maxRequests && all.length < maxPostings && lastPageFull) truncated = true;
+      // Request budget spent (shrink retries included) before the board ended: a cap
+      // stop, so warn and mark it. A probe asks for one page by design.
+      if (!ended && !truncated && !probing && all.length < maxPostings && requests >= maxRequests) {
+        console.warn(`[lever] ${entry.name}: stopped at the ${maxRequests}-request budget (${all.length} postings); the board may have more.`);
+        truncated = true;
+      }
       // Cap stop, not completion: a full last page at the ceiling may mean more
       // postings exist. A probe (maxPages === 1) asks for one page by design.
       if (lastPageFull && !probing && all.length >= maxPostings) {
