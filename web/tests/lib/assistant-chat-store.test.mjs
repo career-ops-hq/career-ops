@@ -51,6 +51,14 @@ test('a save whose response was lost does not lock its own page out (#6381)', t 
   assert.throws(() => saveChat(root, id, { revision: 2, messages, writer: '../x' }), /Invalid writer/);
   assert.equal(readChat(root, id).messages.length, 2);
 });
+test('a later save repeating the stored messages still outranks a delayed earlier save', t => {
+  const root = fixture(t), id = randomUUID();
+  saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 });
+  const next = [...messages, { role: 'assistant', content: 'Reply' }];
+  assert.equal(saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 3 }).seq, 3);
+  assert.throws(() => saveChat(root, id, { revision: 0, messages: next, writer: 'page-a', seq: 2 }), /another tab/);
+  assert.equal(readChat(root, id).messages.length, 1);
+});
 test('migration retries do not duplicate a conversation or increment its revision', t => {
   const root = fixture(t), id = randomUUID();
   const first = saveChat(root, id, { revision: 0, messages });

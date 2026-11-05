@@ -74,12 +74,13 @@ export function saveChat(root, id, input) {
   if (input.seq !== undefined && (!Number.isSafeInteger(input.seq) || input.seq < 1)) throw new ChatError('Invalid save sequence');
   return withLock(root, id, file => {
     const prior = readChat(root, id);
-    if (input.revision === 0 && prior && JSON.stringify(prior.messages) === JSON.stringify(messages) && (!input.title || input.title.trim() === prior.title)) return prior;
     // A page saves one request at a time, so a newer revision stamped with its
     // own writer id is a save whose response it never got (sleep, dropped
     // connection), not another tab: its current messages supersede it (#6381).
     // Only a later save does: a delayed earlier request must not undo its retry.
     const ownLostSave = input.writer && prior?.writer === input.writer && input.seq > (prior.seq ?? 0);
+    // Not a no-op when it is: its seq must be stored, or a delayed earlier save would still pass.
+    if (input.revision === 0 && prior && !ownLostSave && JSON.stringify(prior.messages) === JSON.stringify(messages) && (!input.title || input.title.trim() === prior.title)) return prior;
     if ((prior?.revision ?? 0) !== input.revision && !ownLostSave) throw new ChatError('Conversation changed in another tab. Reload before editing; your unsaved text is still visible.', 409);
     const chat = { version: 1, id, revision: (prior?.revision ?? 0) + 1, title: input.title?.trim() || prior?.title || conversationTitle(messages), updatedAt: new Date().toISOString(), ...(input.writer ? { writer: input.writer, seq: input.seq } : {}), messages };
     const temp = `${file}.${randomUUID()}.tmp`;
