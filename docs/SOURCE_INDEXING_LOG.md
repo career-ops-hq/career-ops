@@ -161,3 +161,21 @@ A general job board for Colombia. Measured: one GET of `https://www.magneto365.c
 **Rule 5 (aggregation stays in core).** Verified in code: the provider reads one search URL per entry, on `www.magneto365.com` / `magneto365.com` only.
 
 **Rule 6 (`robots.txt`).** Checked on 2026-10-23: one GET of `https://www.magneto365.com/robots.txt` with career-ops' default User-Agent, HTTP 200. Under `User-agent: *` it allows `/`, disallows `/*?` and `/manager/*`, and allows `/*paginator[page]`. Every URL the provider fetches carries `paginator[page]=N`, which the longer `Allow` covers; a configured search URL with other query parameters still carries it. No group names career-ops.
+
+## USAJobs (US federal, `providers/usajobs.mjs`)
+
+Added 2026-11-05. Explicit-only provider over the documented public Search API.
+
+**Rule 1 (real listings, identifiable employer, free for candidates).** Verified: each `SearchResultItem` names the hiring agency (`OrganizationName`) and links to a federal job posting; applying is free and the listing is not paywalled.
+
+**Rule 2 (canonical URL is the employer's).** Verified in code: `url` is `MatchedObjectDescriptor.PositionURI`, a `usajobs.gov` job page. The API does not expose a direct agency application URL; the posting page is the employer's own official listing, and the provider rejects any URL outside `https://usajobs.gov` or `https://www.usajobs.gov`.
+
+**Rule 3 (complete inventory, no paid placement).** Partly verified. No paid placement in the API response. Inventory is not complete: each search term is capped at 4 pages of 500 (2,000 results), and only postings published in the last 30 days are requested. Broader coverage comes from the terms in `search_terms:`.
+
+**Rule 4 (operator declared).** Operator: the US federal government (USAJOBS is run by the Office of Personnel Management). Declared in the PR; the maintainer's out-of-band domain-control check on `usajobs.gov` is pending.
+
+**Rule 5 (aggregation stays in core).** Verified in code: the provider reads one API on `data.usajobs.gov` and performs no cross-source aggregation.
+
+**Rule 6 (`robots.txt`).** Checked on 2026-11-05 with a GET of `https://www.usajobs.gov/robots.txt` using the career-ops User-Agent: HTTP 200. Under `User-agent: *` it disallows only `/Content/`, `/Scripts/`, `/foresee/` and `/Service References/`. None of these are the API path (`data.usajobs.gov/api/search`) or a listing path, so no stop applies. A plain curl request without the career-ops User-Agent got an HTTP 403 from the edge; that is not a robots rule.
+
+**Credentials.** The key and contact email are read from the data-root `.env` at runtime, never from source or from this PR.
