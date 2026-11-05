@@ -251,8 +251,8 @@ report that clobber. A canary that comes back green means the harness detected
 the planted damage; a red canary means the gate is incapable of failing and its
 green runs are worthless.
 
-Both modes run on every PR, as the `upgrade-gate` job in
-`.github/workflows/test.yml`.
+Both modes run on every PR that changes more than docs, as the `upgrade-gate`
+job in `.github/workflows/test.yml`.
 
 ---
 
