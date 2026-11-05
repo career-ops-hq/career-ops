@@ -15,24 +15,29 @@ import { pass, fail, ROOT } from './helpers.mjs';
 console.log('\n🔁 cv-visual apt update and install (fail loudly on a bad fetch, retry)');
 
 // Reasons the apt-get update and install steps are not safe, or [] when they
-// are. Each step is a `for ... done` loop that contains the apt-get call.
+// are. Each step is a `for ... done` loop that contains the apt-get call, and
+// its exit guard has to fire on the loop's last attempt: with a higher bound the
+// loop ends on `sleep`'s status and a failed fetch passes.
 function aptProblems(dockerfile) {
   const text = dockerfile.replace(/\\\r?\n/g, ' ');
-  const loops = [...text.matchAll(/\bfor\s+\w+\s+in\s+[^;]+;\s*do\b(.*?)\bdone\b/gs)].map((m) => m[1]);
+  const loops = [...text.matchAll(/\bfor\s+(\w+)\s+in\s+([^;]+);\s*do\b(.*?)\bdone\b/gs)]
+    .map((m) => ({ variable: m[1], attempts: m[2].trim().split(/\s+/), body: m[3] }));
   const problems = [];
   for (const command of ['update', 'install']) {
-    const loop = loops.find((body) => new RegExp(`\\bapt-get ${command}\\b`).test(body));
+    const loop = loops.find(({ body }) => new RegExp(`\\bapt-get ${command}\\b`).test(body));
     if (!loop) {
       problems.push(`apt-get ${command} is not inside a retry loop`);
       continue;
     }
-    if (command === 'update' && !/\bapt-get update\b[^;&|]*--error-on=any\b/.test(loop)) {
+    if (command === 'update' && !/\bapt-get update\b[^;&|]*--error-on=any\b/.test(loop.body)) {
       problems.push('apt-get update lacks --error-on=any');
     }
-    if (!new RegExp(`\\bapt-get ${command}\\b[^;]*&&\\s*break\\b`).test(loop)) {
+    if (!new RegExp(`\\bapt-get ${command}\\b[^;]*&&\\s*break\\b`).test(loop.body)) {
       problems.push(`the apt-get ${command} loop does not break on success`);
     }
-    if (!/\bexit\s+1\b/.test(loop)) {
+    const last = loop.attempts.at(-1);
+    const guard = new RegExp(`\\[\\s*"?\\$${loop.variable}"?\\s+-lt\\s+${last}\\s*\\]\\s*\\|\\|\\s*exit\\s+1\\b`);
+    if (!/^\d+$/.test(last) || !guard.test(loop.body)) {
       problems.push(`the apt-get ${command} loop does not exit non-zero after the last attempt`);
     }
   }
@@ -65,6 +70,8 @@ for (const [label, text, want] of [
   ['a bare install', `RUN a \\\n${UPDATE_LOOP}    && apt-get install -y x\n`, 1],
   ['an install loop that never fails', `RUN a \\\n${UPDATE_LOOP}${INSTALL_LOOP.replace('|| exit 1', '|| true')}`, 1],
   ['an install loop that never breaks', GOOD.replace('x && break', 'x'), 1],
+  ['an update loop whose exit misses the last attempt', `RUN a \\\n${UPDATE_LOOP.replace('-lt 3', '-lt 6')}${INSTALL_LOOP}`, 1],
+  ['an install loop whose exit misses the last attempt', `RUN a \\\n${UPDATE_LOOP}${INSTALL_LOOP.replace('-lt 3', '-lt 6')}`, 1],
 ]) {
   const got = aptProblems(text).length > 0 ? 1 : 0;
   if (got === want) pass(`${label} is ${want ? 'rejected' : 'accepted'}`);
