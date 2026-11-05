@@ -431,7 +431,7 @@ function withCaptureIo(file, hooks, fn) {
   fs.fstatSync = (fd, ...args) => {
     const st = original.fstatSync(fd, ...args);
     if (files.has(fd)) state.fstats.add(fd);
-    return st;
+    return files.get(fd) === file ? hooks.afterFstat?.(st, original, state) ?? st : st;
   };
   fs.readSync = (fd, buffer, offset, length, position) => {
     if (files.get(fd) === file) {
@@ -681,3 +681,181 @@ test('fixed real reader composition is validated when installed; standalone abse
   assert.equal(markdown.split(JD).length-1,1);assert.equal(hasEmbeddedJdArchive(markdown),true);
   assert.equal(validateEvaluationArchive(root,{...p,markdown}).ok,true);assert.equal(fs.existsSync(path.join(root,'jds')),false);
 }));
+
+
+// These transports never resolve DNS or create sockets. The paired fetch uses
+// the very lookup passed to its Agent, so a late private answer cannot send.
+function fictionalArchiveTransport(addresses, { all = true, fail = false } = {}) {
+  const state = { loads: 0, lookups: 0, fetches: 0, sent: 0, destroyed: 0, urls: [] };
+  class Agent {
+    constructor(options) { this.lookup = options.connect.lookup; }
+    async destroy() { state.destroyed++; }
+  }
+  const html = `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', url: payload().url, title: 'Product Manager', description: JD })}</script>`;
+  return { state, options: {
+    guardFn: async () => {},
+    lookupFn: (hostname, options, callback) => {
+      state.lookups++; assert.equal(hostname, 'careers.example.org');
+      const values = addresses.map(address => ({ address, family: typeof address === 'string' && address.includes(':') ? 6 : 4 }));
+      queueMicrotask(() => all ? callback(null, values) : callback(null, values[0]?.address, values[0]?.family));
+    },
+    httpTransportLoader: async () => {
+      state.loads++;
+      return { Agent, fetch: async (url, init) => {
+        state.fetches++; state.urls.push(url);
+        assert.equal(url, payload().url, 'the original hostname stays in the request/TLS identity');
+        assert.equal(init.redirect, 'manual'); assert.ok(init.signal instanceof AbortSignal);
+        assert.ok(init.dispatcher instanceof Agent);
+        await new Promise((resolve, reject) => init.dispatcher.lookup(new URL(url).hostname, { all }, error => error ? reject(error) : resolve()));
+        state.sent++;
+        if (fail) throw new Error('fictional transport failure');
+        return new Response(html, { status: 200 });
+      } };
+    },
+  } };
+}
+async function fictionalNativeCapture(options) {
+  const previous = globalThis.fetch;
+  globalThis.fetch = () => { throw new Error('unexpected global transport in offline archive fixture'); };
+  try { return await capturePostingSource({ url: payload().url, num: '061', slug: 'exampleco', role: 'Product Manager', privateDir: '/unused' }, options); }
+  finally { globalThis.fetch = previous; }
+}
+for (const addresses of [['127.0.0.1'], ['169.254.169.254'], ['::1'], ['::ffff:127.0.0.1'], ['93.184.216.34', '10.0.0.1'], ['not:an:ip'], [null], []]) {
+  test(`archive connection: late private DNS answer cannot send (${JSON.stringify(addresses)})`, async () => {
+    const { state, options } = fictionalArchiveTransport(addresses);
+    await assert.rejects(() => fictionalNativeCapture(options), /non-public address/);
+    assert.equal(state.lookups, 1); assert.equal(state.sent, 0); assert.equal(state.destroyed, 1);
+  });
+}
+for (const all of [false, true]) test(`archive connection: public lookup preserves its callback shape (all=${all})`, async () => {
+  const { state, options } = fictionalArchiveTransport(['93.184.216.34'], { all });
+  const result = await fictionalNativeCapture(options);
+  assert.equal(result.complete, true); assert.equal(state.sent, 1); assert.equal(state.destroyed, 1);
+  assert.deepEqual(state.urls, [payload().url]);
+});
+test('archive connection: a transport failure releases the private Agent', async () => {
+  const { state, options } = fictionalArchiveTransport(['93.184.216.34'], { fail: true });
+  await assert.rejects(() => fictionalNativeCapture(options), /fictional transport failure/);
+  assert.equal(state.destroyed, 1);
+});
+test('archive connection: explicit injected fetch remains unchanged', async () => {
+  let calls = 0;
+  const { options } = fictionalArchiveTransport(['127.0.0.1']);
+  options.httpTransportLoader = async () => { throw new Error('explicit fetch must not load an Agent'); };
+  options.fetchFn = async (url, init) => {
+    calls++; assert.equal(url, payload().url); assert.equal(Object.hasOwn(init, 'dispatcher'), false);
+    return new Response(`<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', url, title: 'Product Manager', description: JD })}</script>`, { status: 200 });
+  };
+  assert.equal((await fictionalNativeCapture(options)).complete, true); assert.equal(calls, 1);
+});
+test('archive connection: LinkedIn refuses before loading any transport', async () => {
+  const { state, options } = fictionalArchiveTransport(['93.184.216.34']);
+  await assert.rejects(() => capturePostingSource({ url: 'https://www.linkedin.com/jobs/view/2468' }, options), /LinkedIn.*unavailable/);
+  assert.equal(state.loads, 0); assert.equal(state.lookups, 0); assert.equal(state.fetches, 0);
+});
+
+const exactStatValue = (st, value) => typeof st.ino === 'bigint' ? value : Number(value);
+for (const changed of [false, true]) test(`archive IO: parent identities retain all 64 bits (changed=${changed})`, ioFixture(({ p, root, file }) => {
+  const original = fs.lstatSync; let parentReads = 0;
+  fs.lstatSync = (value, ...args) => {
+    const st = original(value, ...args);
+    if (typeof value === 'string' && path.resolve(value) === path.dirname(file)) {
+      parentReads++; st.ino = exactStatValue(st, changed && parentReads > 2 ? 9007199254740993n : 9007199254740992n);
+    }
+    return st;
+  };
+  try { assert.equal(validateEvaluationArchive(root, p).ok, !changed); }
+  finally { fs.lstatSync = original; }
+}));
+for (const changed of [false, true]) test(`archive IO: leaf identities retain all 64 bits (changed=${changed})`, ioFixture(({ p, root, file }) => {
+  withCaptureIo(file, {
+    afterStat(st) { assert.equal(typeof st.ino, 'bigint'); st.ino = exactStatValue(st, 9007199254740992n); return st; },
+    afterFstat(st) { assert.equal(typeof st.ino, 'bigint'); st.ino = exactStatValue(st, changed ? 9007199254740993n : 9007199254740992n); return st; },
+  }, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, !changed);
+    if (changed) assert.equal(state.bytesRead, 0);
+    assert.equal(state.opened, state.closed);
+  });
+}));
+for (const changed of [false, true]) test(`archive IO: sub-millisecond changes retain nanosecond precision (changed=${changed})`, ioFixture(({ p, root, file }) => {
+  let read = false;
+  const time = st => {
+    assert.equal(typeof st.ino, 'bigint');
+    const ns = 1700000000000000000n + (changed && read ? 1n : 0n);
+    if (typeof st.ino === 'bigint') st.mtimeNs = ns;
+    else st.mtimeMs = Number(ns) / 1e6;
+    return st;
+  };
+  withCaptureIo(file, { afterStat: time, afterFstat: time, afterRead() { read = true; } }, state => {
+    assert.equal(validateEvaluationArchive(root, p).ok, !changed);
+    assert.equal(state.opened, state.closed);
+  });
+}));
+
+
+// Exercise the REAL archiveUrl and persistence path over a fake Playwright
+// transport. No real browser, DNS, HTTP or model is started by this fixture.
+async function withFictionalRenderedPage({ body = JD, pdfBytes = 2097153, status = 200, role = 'Product Manager', reload = false }, fn) {
+  const { chromium } = await import('playwright');
+  const launch = chromium.launch;
+  const state = { launches: 0, gotos: 0, evaluations: 0, pdfs: 0, contextCloses: 0, browserCloses: 0, http: 0 };
+  const handlers = new Map(), frame = {}; let currentUrl;
+  const request = () => handlers.get('request')?.({ isNavigationRequest: () => true, frame: () => frame });
+  const page = {
+    on(event, handler) { handlers.set(event, handler); }, mainFrame: () => frame,
+    async goto(url) { state.gotos++; currentUrl = url; request(); return { status: () => status }; },
+    url: () => currentUrl, async waitForTimeout() {}, async title() { return `${role} | ExampleCo`; },
+    async $eval() { return role; }, async evaluate() { state.evaluations++; return body; },
+    async pdf() {
+      state.pdfs++; if (reload) request();
+      const bytes = Buffer.alloc(pdfBytes, 32); bytes.write('%PDF-1.4\n'); bytes.write('%%EOF', bytes.length - 5); return bytes;
+    },
+  };
+  const context = { async route() {}, async newPage() { return page; }, async close() { state.contextCloses++; } };
+  chromium.launch = async () => { state.launches++; return { async newContext() { return context; }, async close() { state.browserCloses++; } }; };
+  const options = { guardFn: async () => {}, fetchFn: async () => { state.http++; return new Response('<html>No exact structured source</html>', { status: 200 }); } };
+  try { return await fn(options, state); }
+  finally { chromium.launch = launch; }
+}
+test('oversized rendered PDF reuses the entire verified body without another request', fixture(async root => {
+  const body = JD + '\nNative source includes ``` literal fence text.\n';
+  await withFictionalRenderedPage({ body }, async (options, state) => {
+    const p = payload();
+    const result = await persistEvaluationArtifacts(root, p, { captureFn: id => capturePostingSource(id, options) });
+    assert.equal(result.ok, true, result.error);
+    const files = fs.readdirSync(path.join(root, 'jds'));
+    const archive = files.find(name => name.endsWith('.md'));
+    assert.ok(archive); assert.equal(files.some(name => name.endsWith('.pdf') || name.startsWith('.evaluation-')), false);
+    assert.equal(fs.readFileSync(path.join(root, 'jds', archive), 'utf8').split(body).length - 1, 1, 'the complete native body is retained once, without truncation');
+    const receipt = JSON.parse(fs.readFileSync(path.join(root, 'jds', `.${archive}.receipt.json`)));
+    assert.equal(receipt.httpStatus, 200); assert.equal(receipt.sourceKind, 'exact-rendered-posting-text');
+    assert.equal(receipt.format, 'text/markdown'); assert.equal(receipt.sourceUrl, p.url); assert.equal(receipt.settledUrl, p.url);
+    assert.equal(validateEvaluationArchive(root, { ...p, markdown: fs.readFileSync(path.join(root, 'reports', p.reportFile), 'utf8') }).ok, true);
+    assert.equal(state.http, 1); assert.equal(state.gotos, 1); assert.equal(state.evaluations, 1); assert.equal(state.pdfs, 1);
+    assert.equal(state.contextCloses, 1); assert.equal(state.browserCloses, 1);
+  });
+}));
+test('a bounded rendered PDF retains the existing PDF capture path', fixture(async root => {
+  await withFictionalRenderedPage({ pdfBytes: 1024 }, async (options, state) => {
+    const result = await prepareEvaluationArchive(root, payload(), { captureFn: id => capturePostingSource(id, options) });
+    assert.equal(result.ok, true, result.error);
+    const files = fs.readdirSync(path.join(root, 'jds')); assert.equal(files.some(name => name.endsWith('.pdf')), true);
+    assert.equal(files.some(name => name.endsWith('.md')), false); assert.equal(state.http, 1); assert.equal(state.gotos, 1);
+  });
+}));
+test('oversized PDF does not truncate an oversized rendered body to fit', fixture(async root => {
+  await withFictionalRenderedPage({ body: JD + 'x'.repeat(2097153) }, async options => {
+    const result = await prepareEvaluationArchive(root, payload(), { captureFn: id => capturePostingSource(id, options) });
+    assert.equal(result.ok, false); assert.match(result.error, /no complete bounded exact rendered text/);
+    assert.deepEqual(fs.readdirSync(path.join(root, 'jds')), []);
+  });
+}));
+for (const change of [{ status: 403 }, { role: 'Unrelated Accountant' }, { reload: true }]) {
+  test(`oversized PDF cannot waive the original source guard (${JSON.stringify(change)})`, fixture(async root => {
+    await withFictionalRenderedPage(change, async (options, state) => {
+      const result = await prepareEvaluationArchive(root, payload(), { captureFn: id => capturePostingSource(id, options) });
+      assert.equal(result.ok, false); assert.deepEqual(fs.readdirSync(path.join(root, 'jds')), []);
+      assert.equal(state.browserCloses, 1); assert.equal(state.contextCloses, 1);
+    });
+  }));
+}
