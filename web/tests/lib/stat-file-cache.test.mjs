@@ -297,6 +297,33 @@ test("a caller cannot poison the cached tracker rows by mutating the returned li
     assert.notEqual(first, readApplications());
     assert.equal(readApplications().length, 1);
     assert.equal(readApplications()[0].company, "Lumenfold");
+
+    // Editing a field on a returned row must not reach the cache either.
+    readApplications()[0].status = "Rejected";
+    assert.equal(readApplications()[0].status, "Applied");
+  });
+});
+
+test("a caller cannot poison the cached inbox by editing a returned job", () => {
+  withRoot((root) => {
+    writeFileSync(join(root, "data", "applications.md"), [
+      "| # | Date | Company | Role | Score | Status | PDF | Report | Notes |",
+      "|---|---|---|---|---|---|---|---|---|",
+    ].join("\n"));
+    writeFileSync(join(root, "data", "pipeline.md"), [
+      "## Pending",
+      "- [ ] https://jobs.example.com/inbox/7 | Lumenfold | Platform Engineer",
+      "",
+      "## Processed",
+    ].join("\n"));
+  }, () => {
+    const first = readInbox([]);
+    assert.equal(first[0].done, false);
+    first[0].done = true;
+    first[0].company = "Poisoned Co";
+    const again = readInbox([]);
+    assert.equal(again[0].done, false);
+    assert.equal(again[0].company, "Lumenfold");
   });
 });
 

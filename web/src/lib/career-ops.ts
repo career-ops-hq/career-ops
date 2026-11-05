@@ -110,9 +110,9 @@ export function readInbox(applications: Pick<Application, "url">[] = readApplica
   // unreadable inbox does not show up as an empty one (web/AGENTS.md).
   const jobs = cachedFileValue(file, "inbox", (text) => parseInbox(text));
   if (!jobs) return [];
-  // Copy the cached list before reconcile. reconcileInbox maps to new objects,
-  // but a future change that mutates in place must not poison the slot.
-  return reconcileInbox(jobs.slice(), applications);
+  // Copy each cached row before reconcile. reconcileInbox passes unmatched
+  // jobs through as-is, so a caller editing one would edit the cache.
+  return reconcileInbox(jobs.map((job) => ({ ...job })), applications);
 }
 
 /**
@@ -196,10 +196,11 @@ export function readApplications(): Application[] {
     parseApplications(md, root, codeRoot) as Application[],
     aliasFiles,
   );
-  // A new array each call. The cache keeps the parsed rows; callers that push
-  // or splice cannot poison the next read, and each request gets its own list
-  // identity for React.
-  return rows ? rows.slice() : [];
+  // A new array of new row objects each call. The cache keeps the parsed rows;
+  // a caller that pushes, splices or edits a field cannot poison the next read,
+  // and each request gets its own list identity for React. Row fields are
+  // strings, so a shallow copy is enough.
+  return rows ? rows.map((row) => ({ ...row })) : [];
 }
 
 export type TrackerShape = "missing" | "empty" | "malformed" | "rows";
