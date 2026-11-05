@@ -13,7 +13,8 @@ const ALLOWED_LEVER_HOSTS = new Set(['api.lever.co', 'api.eu.lever.co']);
 // description inlined, so a large board outgrows _http.mjs's 10s default:
 // jobgether is 42.8 MB and aborted at 10s on its own (#4177). Same value and
 // reasoning as ASHBY_TIMEOUT_MS, the other one-response board-wide ATS feed.
-const LEVER_TIMEOUT_MS = 30_000;
+// verify-portals.mjs probes Lever boards with it too, so both read the same board.
+export const LEVER_TIMEOUT_MS = 30_000;
 
 /** @param {string} url */
 function assertLeverUrl(url) {
