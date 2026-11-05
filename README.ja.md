@@ -60,6 +60,7 @@
 </p>
 
 <p align="center"><a href="#あなたの番">求人ひとつで試す&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">ス&#8288;ト&#8288;ー&#8288;リ&#8288;ー&#8288;の&#8288;全&#8288;文&#8288;を&#8288;読&#8288;む&nbsp;→</a></p>
+<p align="center"><sub>ターミナルは使いたくないですか？ <a href="https://career-ops.org/waitlist?ref=readme-ja">Web版のウェイトリストに登録する&nbsp;→</a></sub></p>
 
 <br>
 
@@ -324,7 +325,7 @@ Codex ではスラッシュコマンドは保証されません。代わりに�
 
 ## 仕組み
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), the tailored CV in the format set by cv.output_format — a PDF by default — and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI 連携
 
