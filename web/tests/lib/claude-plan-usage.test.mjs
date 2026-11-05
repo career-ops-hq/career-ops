@@ -75,7 +75,7 @@ test("resolves a bare name on PATH, with PATHEXT on Windows, and skips an unreso
     writeFileSync(join(dir, "claude"), "");
     writeFileSync(join(dir, "other.cmd"), "");
     assert.equal(await resolveOnPath("claude", { env: { PATH: dir }, platform: "linux" }), join(dir, "claude"));
-    assert.equal(await resolveOnPath("other", { env: { PATH: dir, PATHEXT: ".EXE;.CMD" }, platform: "win32" }), join(dir, "other.cmd"));
+    assert.equal(await resolveOnPath("other", { env: { PATH: dir, PATHEXT: ".exe;.cmd" }, platform: "win32" }), join(dir, "other.cmd"));
     assert.equal(await resolveOnPath("missing", { env: { PATH: dir }, platform: "linux" }), null);
     let ran = false;
     const got = await readPlanUsage({ candidates: ["missing"], resolve: () => null, exec: () => { ran = true; } });
