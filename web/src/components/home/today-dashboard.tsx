@@ -18,6 +18,8 @@ import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons
 import { scoreNum } from "@/lib/format";
 import { undoStatus } from "@/lib/pipeline-status.mjs";
 import { pickAwaitingDecision, groupAwaiting } from "@/lib/home/awaiting.mjs";
+import { orderTodayQueue } from "@/lib/home/today-queue.mjs";
+import { selectDueFollowups } from "@/lib/core/followup-view.mjs";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { resolveHeroState, mayClaimAllClear, showsQueue, missingSourceLabel, displayCounts } from "@/lib/home/hero-state.mjs";
 
@@ -164,6 +166,16 @@ export function TodayDashboard({
   // the outage. See displayCounts().
   const shown = displayCounts({ followupsError, freshError, overdue, newThisWeek });
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
+  // Due rows lead even if a refresh hands back a mixed list. Upcoming stays
+  // in its own section, below the work that is due now.
+  const dueFollowups = useMemo(
+    () => selectDueFollowups(followups, Math.max(followups.length, 1)),
+    [followups],
+  );
+  const queueLead = orderTodayQueue([
+    { kind: "follow-up", due: true, count: shown.overdue },
+    { kind: "match", due: false, count: shown.newThisWeek },
+  ]).filter((item) => item.count > 0);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
@@ -184,21 +196,24 @@ export function TodayDashboard({
               <>You&apos;re all caught up.</>
             ) : showsQueue(heroState) ? (
               <>
-                {shown.newThisWeek > 0 && (
-                  <>
-                    <span className="text-brand-text tabular-nums">{shown.newThisWeek}</span> new match{shown.newThisWeek === 1 ? "" : "es"} this week
-                  </>
-                )}
-                {shown.newThisWeek > 0 && shown.overdue > 0 && <span className="text-faint"> · </span>}
-                {shown.overdue > 0 && (
-                  <>
-                    <span className="text-brand-text tabular-nums">{shown.overdue}</span> follow-up{shown.overdue === 1 ? "" : "s"} due
-                  </>
-                )}
+                {queueLead.map((item, index) => (
+                  <span key={item.kind}>
+                    {index > 0 && <span className="text-faint"> · </span>}
+                    {item.kind === "follow-up" ? (
+                      <>
+                        <span className="text-brand-text tabular-nums">{item.count}</span> follow-up{item.count === 1 ? "" : "s"} due
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-brand-text tabular-nums">{item.count}</span> new match{item.count === 1 ? "" : "es"} this week
+                      </>
+                    )}
+                  </span>
+                ))}
                 {/* queue-partial with work known only from the server snapshot:
                     both loops are down but the pipeline still has decisions
                     waiting, so the queue is real while neither count is. */}
-                {shown.newThisWeek === 0 && shown.overdue === 0 && <>Your queue is waiting.</>}
+                {queueLead.length === 0 && <>Your queue is waiting.</>}
               </>
             ) : (
               <>Your queue is waiting.</>
@@ -239,10 +254,10 @@ export function TodayDashboard({
         <FollowupsDueSectionSkeleton />
       ) : followupsError ? (
         null
-      ) : followups.length > 0 ? (
+      ) : dueFollowups.length > 0 ? (
         <Section icon={Bell} title="Follow-ups due" hint="Keep your applications alive — a nudge beats silence">
           <div className="grid gap-2.5">
-            {followups.map((f) => (
+            {dueFollowups.map((f) => (
               // Refetch (not a local decrement) so the parent's followups/upcoming
               // stay in sync with the server. Logging the LAST due item must flip this
               // section over to "Upcoming" instead of leaving it empty.
