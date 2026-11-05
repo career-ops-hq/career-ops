@@ -15,8 +15,8 @@
 1. DETECT      → このプロジェクトの Playwright ブラウザで求人を開く
 2. IDENTIFY    → Extract company + role from the page
 3. SEARCH      → Match against existing reports in reports/
-4. LOAD        → Read full report + Section H / `## Application Answers` (if they exist)
-5. PREFLIGHT   → Confirm posting liveness + company/role match before drafting
+4. LOAD        → Read full report + Section H / `## Application Answers` (if they exist) — **Posting identity** が成り立ってから
+5. PREFLIGHT   → Confirm posting liveness + that the form is the report's posting (**Posting identity**) before drafting
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
 8. PRESENT     → Show formatted responses for copy-paste
@@ -35,13 +35,19 @@ Application answers を生成する前に、form が意図した active job を�
 2. URL がある場合、Playwright で liveness を確認する：
    - active posting evidence: title/role + job description または form fields + submit/apply path
    - closed posting evidence: expired/closed/no longer accepting applications、JD がなく nav/footer だけ、generic careers/search への hard redirect、404/410
-3. Visible company and role を matched report と比較する。
-4. Company または title が materially changed している場合、drafting 前に stop して聞く：
-   "The form appears to be for [visible company] -- [visible role], but the matched report is [report company] -- [report role]. Do you want me to re-evaluate, adapt with this mismatch, or stop?"
-5. Posting が closed に見える場合、candidate が known reason で明示的に override しない限り、final copy の生成を拒否する。
-6. Candidate が questions だけ、または screenshot だけを貼ったため liveness を確認できない場合、その limitation を明示し、drafting 前に company、role、active posting の確認を求める。
+3. Visible company と posting を matched report と比較する（下の **Posting identity** を参照）。
+4. Identity が成り立たない場合、matched report は別の application のもの。drafting 前に stop して聞く：
+   "The form appears to be for [visible company] -- [visible role], which is not the posting in the matched report, [report company] -- [report role]. Do you want me to evaluate this posting as a new one, draft answers without saving them to a report, or stop?"
+   - **Evaluate as new**：visible posting に auto-pipeline を実行する。専用の report と tracker row が書かれるので、その report で続ける。
+   - **Draft without saving**：matched report とその tailored CV は使わず、visible posting、`cv.md`、candidate の profile だけから draft する。Step 8 で `## Application Answers` は書かず、Step 9 で status も設定しない。この application に属する report がないため。
+   - matched report の回答をこの posting に adapt しない：別の posting 向けに draft されたもので、そこに保存するとその report の application の記録を上書きする。
+5. Identity が成り立ち title だけが変わった場合は、Step 3 で決める（新しい title に adapt するか re-evaluate するか）。
+6. Posting が closed に見える場合、candidate が known reason で明示的に override しない限り、final copy の生成を拒否する。
+7. Candidate が questions だけ、または screenshot だけを貼ったため liveness を確認できない場合、その limitation を明示し、drafting 前に company、role、active posting の確認を求める。
 
 この preflight が解決するまで Step 6 に進まない。
+
+**Posting identity (#5854).** 定義は `modes/apply.md` → Step 5 → **Posting identity** に従う：同じ employer（候補者が subsidiary、brand、rename、その client 向けの agency posting だと確認した場合も含む）かつ同じ posting（URL または req ID）。Application form の host が report の `**URL:**` と違うだけでは match は崩れない。別の req ID、または同じ employer の別 posting なら崩れる。Title は identity に含めない。Posting が evaluation 後に retitle されても同じ application で、回答はその report に属する。
 
 **Applying to several roles in one sitting?** この preflight は目の前の単一 form を確認する。Multi-role session の前、特に `--verify` なしの scan で追加された未確認の entries がある場合は、`pipeline` mode の **Liveness sweep** を先に実行する（`node check-liveness.mjs --file <urls>`）。これにより `data/pipeline.md` から dead postings がまとめて落ち、expired role の tab を開かずに済む。
 
@@ -58,11 +64,13 @@ Application answers を生成する前に、form が意図した active job を�
 
 1. Page から company name と role title を抽出
 2. `reports/` を company name で検索（case-insensitive grep）
-3. Match があれば full report を load
+3. Match があれば、各 matching report の header（company、role、`**URL:**`）だけを読み、URL か req ID がこの posting と一致する report を選ぶ。はっきりしなければ候補者に確認する。Full report と 4 は Step 5 で **Posting identity** が成り立ってから load する。別の posting なら load せずに **Evaluate as new** か **Draft without saving** に進む
 4. Section H（draft answers）か `## Application Answers` があれば、それを base として load
 5. Match がなければ notify し、quick auto-pipeline の実行を提案
 
 ## Step 3 -- Detect changes in the role
+
+この step は、form がまだ report の posting である間だけ適用する：同じ employer かつ同じ posting（`modes/apply.md` → Step 5 → **Posting identity**）。title は判定に含めない。title が変わっておらず、company に一致する report が 1 つだけでも、すべての form でこれを確認する：別の posting が同じ title を持つことがあり、その場合 report は使わない。company に一致する report が複数ある場合は、まず URL か req ID がこの posting と一致する report を選び、はっきりしなければ候補者に確認する。別の employer、または同じ employer の別 posting は role の変更ではない：report の回答をそれに adapt しない。代わりに **Evaluate as new**（新しい posting として evaluate する：auto-pipeline、専用の report）か **Draft without saving**（どの report にも保存せずに回答を draft する）を選ぶ。どちらも Step 5 の同名の選択肢と同じで、**Draft without saving** では matched report、その回答、tailored CV を使わない。
 
 画面上の role が evaluation 済みの role と異なる場合：
 - **Notify the candidate:** "The role has changed from [X] to [Y]. Do you want me to re-evaluate or adapt the responses to the new title?"
@@ -81,6 +89,8 @@ Visible questions をすべて特定する：
 - Salary fields（range、expectation）
 - Upload fields（resume、cover letter PDF）
 
+**Draft without saving**（Step 5）の場合、この posting に属する report はない：すべての question を new として扱い、matched report、その Section H、`## Application Answers`、tailored CV を回答に使わない。
+
 各 question を分類する：
 - **Already answered in Section H or `## Application Answers`** → 既存 response を adapt
 - **New question** → report + `cv.md` から response を generate
@@ -95,6 +105,8 @@ Visible questions をすべて特定する：
 Legal、demographic、work-authorization、visa/sponsorship、salary、disability、veteran、background-check、relocation、self-identification fields の回答を捏造してはならない。回答が `config/profile.yml` または visible context に明示されていない場合は、`needs_candidate_confirmation` として mark し、候補者に確認するための最も安全な質問を出す。
 
 ## Step 7 -- Generate responses
+
+**Draft without saving**（Step 5）の場合、下の 1 と 2、および tailored CV は使わない：どれも別の posting の matched report から来ている。Visible posting、`cv.md`、candidate の profile から generate する。
 
 各 question について、以下に従って response を生成する：
 
@@ -120,6 +132,7 @@ Legal、demographic、work-authorization、visa/sponsorship、salary、disabilit
 ## Responses for [Company] -- [Role]
 
 Based on: Report #NNN | Score: X.X/5 | Archetype: [type]
+[**Draft without saving** の場合は上の行を次に置き換える："No report: drafted for this posting, not saved"]
 
 ---
 
@@ -139,6 +152,8 @@ Notes:
 ```
 
 ## Step 8 -- Post-apply (optional)
+
+何かを保存する前に、そして下の各書き込み（status と回答）の直前にもう一度、form がまだ report の posting であることを確認する（`modes/apply.md` → Step 8 → **Write only to the report of this posting**）。同じ employer かつ同じ posting → 以下の step はこの report に対して行う。新しい title への adapt や re-evaluation の後も同じ。別の employer または別 posting → この report には決して書かない：新しい posting 用に書かれた report を使う。なければ status を設定せず、回答も保存せず、application がまだ tracking されていないことを候補者に伝える。
 
 候補者が application を submitted したと確認した場合：
 1. 正規 CLI で status を "Applied" に update: `node set-status.mjs --report <report#> Applied`（`applications.md` のテーブルを手動編集しない）

@@ -1,4 +1,5 @@
 ---
+name: career-ops-interview-intel
 description: Show the saved interview prep report for a company
 ---
 

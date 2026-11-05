@@ -72,6 +72,7 @@ import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-res
 import { resolveColumns, parseTrackerRow, extractTrackerReportLinks, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { parseAmount, compensationPeriod } from './providers/_salary-text.mjs';
 
@@ -191,7 +192,7 @@ export function getStatedObservations(observations, num) {
 // while yamlStr below only extracts `key: value` lines — a json fence would "match"
 // and silently yield null company/role/advertised_comp. Rejecting it outright means
 // the report falls back to the legacy no-Machine-Summary path instead.
-const FENCE_RE = /##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
+const FENCE_RE = /^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
 const yamlStr = (body, key) => {
   const m = body.match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
   if (!m) return null;
@@ -203,7 +204,7 @@ const yamlStr = (body, key) => {
 // Extracts advertised_comp + company + role from one report's Machine Summary.
 // num/date come from the filename ({###}-{slug}-{YYYY-MM-DD}.md).
 export function reportToObservation(content, num, date) {
-  const fence = String(content || '').match(FENCE_RE);
+  const fence = machineSummarySection(content).match(FENCE_RE);
   if (!fence) return null;
   const body = fence[1];
   const company = yamlStr(body, 'company');

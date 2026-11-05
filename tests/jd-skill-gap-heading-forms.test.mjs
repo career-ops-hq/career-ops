@@ -79,3 +79,69 @@ test('an asterisk bullet whose text starts with a keyword is still a bullet, not
 test('a bolded skill inside a bullet still extracts correctly', () => {
   assertExtracts('## Requirements\n- **Python** and **Kubernetes**\n- **Terraform**\n', 'bold-skill-in-bullet');
 });
+
+// #6255: the ^ anchor made the keyword the heading's first word, so a
+// qualified noun heading scanned zero skills and reported
+// no-requirements-section. Basic/Minimum Qualifications are the Amazon and
+// Google templates, so this was not an edge case.
+for (const heading of [
+  'Basic Qualifications', 'Minimum Qualifications', 'Role Qualifications',
+  'Key Requirements', 'Job Requirements', '## Minimum Qualifications:', '**Basic Qualifications**',
+  'Knowledge, Skills, and Abilities', 'Experience, Skills, and Abilities', 'Knowledge, Skills & Abilities',
+  'Knowledge/Experience, Skills, and Abilities', 'Knowledge / Experience, Skills and Abilities',
+]) {
+  test(`a qualified requirements heading is recognized: "${heading}"`, () => {
+    assertExtracts(`${heading}${BULLETS}`, heading);
+  });
+}
+
+// The qualifier list is closed on purpose: a prose line that merely ends in
+// "requirements" must not open a block in the middle of the duties.
+test('a prose line ending in "requirements" does not open a requirements block', () => {
+  const jd = 'Responsibilities\nGather and document requirements\n- Kafka and Redis\n';
+  assert.deepEqual(extractJdSkills(jd), []);
+});
+
+// A qualified keyword only opens a block when it ENDS the heading (or is
+// followed by ":" / "("). Otherwise a bare requirement line that happens to
+// start with one — "Technical requirements include …" — read as a heading
+// and its own skills were dropped.
+test('a bare line starting with a qualified keyword is a requirement, not a heading', () => {
+  const jd = '## Requirements\n- Experience with Terraform\nTechnical requirements include Python and Kubernetes\n';
+  const found = extractJdSkills(jd).sort();
+  assert.deepEqual(found, EXPECTED, `got ${found.join(', ') || '(none)'}`);
+});
+
+test('a qualified heading followed by "(" or an inline list still opens the block', () => {
+  assertExtracts(`Minimum Qualifications (all required)${BULLETS}`, 'paren');
+  assert.deepEqual(extractJdSkills('Key Requirements: Python, Kubernetes, Terraform\n').sort(), EXPECTED);
+});
+
+// Closing heading markers still end the heading.
+for (const heading of ['## Basic Qualifications ##', '【Basic Qualifications】', '## Knowledge, Skills, and Abilities ##']) {
+  test(`a qualified heading with closing markers is recognized: "${heading}"`, () => {
+    assertExtracts(`${heading}${BULLETS}`, heading);
+  });
+}
+
+// A colon line with no list separator now matches as a heading; its known
+// skills must survive, and prose after the colon must not become a "skill".
+test('a colon requirement line without separators keeps its known skills', () => {
+  const jd = '## Requirements\n- Experience with Terraform\nTechnical requirements: Python and Kubernetes\n';
+  assert.deepEqual(extractJdSkills(jd).sort(), EXPECTED);
+});
+
+test('prose after a requirement-heading colon is not read as skills', () => {
+  assert.deepEqual(extractJdSkills('About you: Curious and kind\n- Go\n'), ['Go']);
+});
+
+// A qualified heading may carry its list in parentheses, ASCII or full-width.
+test('skills in parentheses after a qualified heading are kept', () => {
+  assert.deepEqual(extractJdSkills('Basic Qualifications (Python, Kubernetes and Terraform)\n').sort(), EXPECTED);
+  assert.deepEqual(extractJdSkills('Basic Qualifications（Python、Kubernetes、Terraform）\n').sort(), EXPECTED);
+  assert.deepEqual(extractJdSkills('## Requirements\n- Experience with Terraform\nBasic Qualifications (Python and Kubernetes)\n').sort(), EXPECTED);
+});
+
+test('a parenthesised note after a qualified heading adds no skills', () => {
+  assert.deepEqual(extractJdSkills('Minimum Qualifications (all required)\n- Go\n'), ['Go']);
+});
