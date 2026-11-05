@@ -164,6 +164,8 @@ export const VERIFY_CONCURRENCY = 10;
 
 export function companyFetchHost(company) {
   try {
+    const declared = company?._provider?.fetchHost?.(company);
+    if (typeof declared === 'string' && declared.trim()) return declared.trim().toLowerCase();
     const detected = company?._provider?.detect?.(company);
     const raw = (detected && typeof detected.url === 'string' && detected.url)
       || (typeof company?.api === 'string' && company.api)

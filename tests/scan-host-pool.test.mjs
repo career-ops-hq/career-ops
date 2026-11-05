@@ -104,3 +104,41 @@ test('host is the detect URL hostname, and a missing URL is empty', () => {
   assert.equal(companyFetchHost({ careers_url: 'not a url' }), '');
   assert.equal(companyFetchHost({ _provider: { detect() { throw new Error('bad'); } } }), '');
 });
+
+test('fetchHost names the host the provider calls, ahead of detect', async () => {
+  const mixed = {
+    api: 'https://api.example/other',
+    careers_url: 'https://boards.example/careers',
+    _provider: {
+      fetchHost: () => 'API.Shared.example',
+      detect: () => ({ url: 'https://boards-api.greenhouse.io/v1/boards/acme/jobs' }),
+    },
+  };
+  assert.equal(companyFetchHost(mixed), 'api.shared.example');
+  assert.equal(companyFetchHost({
+    _provider: {
+      fetchHost: () => '   ',
+      detect: () => ({ url: 'https://api.lever.co/v0/postings/acme' }),
+    },
+  }), 'api.lever.co');
+
+  const schoolspring = (await import(pathToFileURL(join(ROOT, 'providers/schoolspring.mjs')).href)).default;
+  const getro = (await import(pathToFileURL(join(ROOT, 'providers/getro.mjs')).href)).default;
+  const gupy = (await import(pathToFileURL(join(ROOT, 'providers/gupy.mjs')).href)).default;
+  const district = (host) => ({
+    name: host,
+    careers_url: `https://${host}/`,
+    _provider: schoolspring,
+  });
+  assert.equal(companyFetchHost(district('alpha.schoolspring.com')), 'api.schoolspring.com');
+  assert.equal(companyFetchHost(district('beta.schoolspring.com')), 'api.schoolspring.com');
+  const board = (url) => ({ name: url, careers_url: url, _provider: getro });
+  assert.equal(companyFetchHost(board('https://jobs.one.vc/jobs')), 'api.getro.com');
+  assert.equal(companyFetchHost(board('https://talent.two.example/jobs')), 'api.getro.com');
+  assert.equal(companyFetchHost({
+    name: 'Gupy',
+    careers_url: 'https://employability-portal.gupy.io/job-search',
+    _provider: gupy,
+  }), 'portal.gupy.io');
+  assert.equal(companyFetchHost({ name: 'Gupy', provider: 'gupy', _provider: gupy }), 'portal.gupy.io');
+});
