@@ -317,6 +317,37 @@ try {
     }
   }
 
+  // workplaceType is a top-level flag. categories.location is the city only,
+  // so a remote London posting looks onsite to a location filter that allows
+  // "Remote". Hybrid and onsite stay city-only. A location that already says
+  // remote is not doubled.
+  const remoteRows = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    { fetchJson: async () => [
+      { text: 'Ops Lead', hostedUrl: 'https://jobs.lever.co/acme/r1', id: 'r1', categories: { location: 'Oslo' }, workplaceType: 'remote' },
+      { text: 'Ops Lead', hostedUrl: 'https://jobs.lever.co/acme/r2', id: 'r2', categories: { location: 'Oslo' }, workplaceType: 'hybrid' },
+      { text: 'Ops Lead', hostedUrl: 'https://jobs.lever.co/acme/r3', id: 'r3', categories: { location: 'Remote — Europe' }, workplaceType: 'remote' },
+      { text: 'Ops Lead', hostedUrl: 'https://jobs.lever.co/acme/r4', id: 'r4', categories: { location: 'Bend, OR', allLocations: ['Bend, OR', 'Oslo'] }, workplaceType: 'Remote' },
+      { text: 'Ops Lead', hostedUrl: 'https://jobs.lever.co/acme/r5', id: 'r5', categories: { location: 'Oslo' }, workplaceType: 'onsite' },
+      { text: 'Ops Lead', hostedUrl: 'https://jobs.lever.co/acme/r6', id: 'r6', categories: { location: 'Oslo' }, workplaceType: '  remote  ' },
+      { text: 'Ops Lead', hostedUrl: 'https://jobs.lever.co/acme/r7', id: 'r7', categories: {}, workplaceType: 'remote' },
+      { text: 'Ops Lead', hostedUrl: 'https://jobs.lever.co/acme/r8', id: 'r8', categories: { location: 'Remotely in Europe' }, workplaceType: 'remote' },
+    ] },
+  );
+  const workplaceLocs = remoteRows.map(r => r.location);
+  if (workplaceLocs[0] === 'Oslo; Remote'
+      && workplaceLocs[1] === 'Oslo'
+      && workplaceLocs[2] === 'Remote — Europe'
+      && workplaceLocs[3] === 'Bend, OR; Oslo; Remote'
+      && workplaceLocs[4] === 'Oslo'
+      && workplaceLocs[5] === 'Oslo; Remote'
+      && workplaceLocs[6] === 'Remote'
+      && workplaceLocs[7] === 'Remotely in Europe; Remote') {
+    pass('lever.fetch() appends Remote when workplaceType is remote and the location does not already say so');
+  } else {
+    fail(`lever.fetch() workplaceType locations = ${JSON.stringify(workplaceLocs)}`);
+  }
+
 } catch (e) {
   fail(`lever provider tests crashed: ${e.message}`);
 }

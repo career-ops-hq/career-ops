@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const { computeClosingSoon, computeClashes, resolveStatusFilter } =
@@ -192,7 +192,7 @@ test('CLI: flag validation', () => {
   try {
     for (const args of [['--clash-min', '2'], ['--interviews', 'x.md'], ['--clashes', '--clash-min', '0'], ['--clashes', '--clash-min', 'abc'], ['--clashes', '--clash-min', '-1']]) {
       const r = run(['--today', '2026-10-17', ...args], box);
-      assert.notEqual(r.status, 0, args.join(' '));
+      assert.ok(exitedNonZero(r), describeSpawn(r, args.join(' ')));
     }
   } finally {
     cleanup(box);
