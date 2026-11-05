@@ -77,6 +77,7 @@ const SUITES = {
   "tracker-keys": { url: "TRACKER_KEYS_TEST_URL", root: "TRACKER_KEYS_TEST_ROOT", fixture: "tracker-keys" },
   "tracker-search": { url: "TRACKER_SEARCH_TEST_URL", root: "TRACKER_SEARCH_TEST_ROOT", fixture: "pipeline-status" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },
+  "worker-gates": { url: "WORKER_GATE_TEST_URL", fixture: "blank" },
 };
 
 // Every var any suite reads, so a value from the caller's shell cannot point a
