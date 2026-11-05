@@ -28,7 +28,7 @@ import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveBatchStatePaths } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
 import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
@@ -70,27 +70,29 @@ const CAREER_OPS_CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 // there is fabricated evidence, not just cosmetically ambiguous like the
 // score/status column-swap check below -- it must never merge, however
 // well-formed the TSV itself looks in isolation.
-function reportNumbersWithStatus(path, wanted) {
+function reportNumbersWithStatus(paths, wanted) {
   const nums = new Set();
-  if (!existsSync(path)) return nums;
-  for (const line of readFileSync(path, 'utf-8').split(/\r?\n/)) {
-    if (!line.trim() || line.startsWith('id\t')) continue;
-    const cols = line.split('\t');
-    if (cols.length < 6) continue;
-    const status = cols[2];
-    const reportNum = cols[5];
-    if (status === wanted && reportNum && reportNum !== '-') {
-      // Digits only, positive, safe: parseInt would accept "12abc" and
-      // 9007199254740992, and an unsafe number in the occupied set makes
-      // reserveReportNumbers throw "No safe report-number range remains".
-      const n = /^\d+$/.test(reportNum) ? Number(reportNum) : NaN;
-      if (Number.isSafeInteger(n) && n > 0) nums.add(n);
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    for (const line of readFileSync(path, 'utf-8').split(/\r?\n/)) {
+      if (!line.trim() || line.startsWith('id\t')) continue;
+      const cols = line.split('\t');
+      if (cols.length < 6) continue;
+      const status = cols[2];
+      const reportNum = cols[5];
+      if (status === wanted && reportNum && reportNum !== '-') {
+        // Digits only, positive, safe: parseInt would accept "12abc" and
+        // 9007199254740992, and an unsafe number in the occupied set makes
+        // reserveReportNumbers throw "No safe report-number range remains".
+        const n = /^\d+$/.test(reportNum) ? Number(reportNum) : NaN;
+        if (Number.isSafeInteger(n) && n > 0) nums.add(n);
+      }
     }
   }
   return nums;
 }
-function loadFailedReportNumbers(path) {
-  return reportNumbersWithStatus(path, 'failed');
+function loadFailedReportNumbers(paths) {
+  return reportNumbersWithStatus(paths, 'failed');
 }
 
 /**
@@ -313,7 +315,8 @@ function formatUrlCell(raw, previousCell = '') {
  *   The CLI passes trackerLinkDirsFor(), which adds a symlinked tracker's own
  *   folder (#5374).
  * @param {string} [options.additionsDir] - Pending TSVs; defaults to `<dataRoot>/batch/tracker-additions`.
- * @param {string} [options.batchStateFile] - batch-state.tsv; defaults to `<dataRoot>/batch/batch-state.tsv`.
+ * @param {string} [options.batchStateFile] - The one batch-state.tsv to read; defaults to every file
+ *   resolveBatchStatePaths(dataRoot) names: the checkout's, where batch-runner.sh writes it, and the data root's.
  * @param {string} [options.pdfIndexFile] - PDF manifest; defaults to `<workspace>/data/pdf-index.tsv`.
  * @param {string} [options.lockDir] - Tracker lock directory; defaults to trackerLockDirFor(appsFile).
  * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options.lock] - Lock timing.
@@ -339,14 +342,14 @@ export async function mergeTracker(options = {}) {
   const TRACKER_LINK_DIRS = options.trackerLinkDirs ?? [TRACKER_DIR];
   const ADDITIONS_DIR = options.additionsDir ?? join(DATA_ROOT, 'batch/tracker-additions');
   const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
-  const BATCH_STATE_FILE = options.batchStateFile ?? join(DATA_ROOT, 'batch/batch-state.tsv');
-  const FAILED_REPORT_NUMBERS = loadFailedReportNumbers(BATCH_STATE_FILE);
+  const BATCH_STATE_FILES = options.batchStateFile ? [options.batchStateFile] : resolveBatchStatePaths(DATA_ROOT);
+  const FAILED_REPORT_NUMBERS = loadFailedReportNumbers(BATCH_STATE_FILES);
   // Read only to explain a skip, never to lift one. Before #4391, a failed
   // worker's released number could be handed to the next offer, so one number
   // carries both a "failed" and a "completed" row. The guard still has to hold
   // there (the failed worker may have written a TSV under that number too), but
   // the warning can say what the user is most likely looking at (#4505).
-  const COMPLETED_REPORT_NUMBERS = reportNumbersWithStatus(BATCH_STATE_FILE, 'completed');
+  const COMPLETED_REPORT_NUMBERS = reportNumbersWithStatus(BATCH_STATE_FILES, 'completed');
   const DRY_RUN = Boolean(flags.dryRun);
   const VERIFY = Boolean(flags.verify);
   const MIGRATE = Boolean(flags.migrate);
@@ -2417,8 +2420,12 @@ if (isMainModule(import.meta.url)) {
     trackerLinkDirs: trackerLinkDirsFor(DATA_ROOT),
     // CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
     additionsDir: process.env.CAREER_OPS_ADDITIONS || join(DATA_ROOT, 'batch/tracker-additions'),
-    // CAREER_OPS_BATCH_STATE overrides the batch-state.tsv path (used by tests).
-    batchStateFile: process.env.CAREER_OPS_BATCH_STATE || join(DATA_ROOT, 'batch/batch-state.tsv'),
+    // CAREER_OPS_BATCH_STATE names the one batch-state.tsv to read (batch-runner.sh
+    // exports it to its workers; tests set it too). Without it mergeTracker reads
+    // the checkout's copy, where the runner writes it, and the data root's: a
+    // merge run by hand after a batch, with the data root elsewhere, read only a
+    // file that never exists and merged rows the runner had refused.
+    batchStateFile: process.env.CAREER_OPS_BATCH_STATE || undefined,
     pdfIndexFile: resolvePdfIndexPath(appsFile),
     lockDir: trackerLockDirFor(appsFile),
     lock: {
