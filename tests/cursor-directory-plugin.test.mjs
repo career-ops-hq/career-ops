@@ -22,6 +22,7 @@ import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listTree } from '../lib/walk-tree.mjs';
+import {load as loadYaml } from 'js-yaml';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const DIR = join(ROOT, 'cursor-directory');
@@ -112,14 +113,17 @@ test('the Cursor plugin contains exactly the expected skill with valid frontmatt
 
   for (const { path, rel } of skillFiles) {
     const front = readFileSync(path, 'utf8').match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '';
+    const parsed = loadYaml(front) ?? {};
 
     assert.equal(
-      front.match(/^name:\s*(.+)$/m)?.[1]?.trim(),
+      typeof parsed.name === 'string' ? parsed.name.trim() : parsed.name,
       rel.split('/')[1],
       `${rel}: frontmatter name must match its folder`
     );
 
-    assert.match(front, /^description:[ \t]*\S/m, `${rel}: frontmatter needs a description`);
+    assert.ok(
+      typeof parsed.description === 'string' && parsed.description.trim().length > 0,
+      `${rel}: frontmatter needs a description`);
   }
 });
 
