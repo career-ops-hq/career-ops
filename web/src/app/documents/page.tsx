@@ -5,11 +5,14 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, FileText, File, Calendar, Loader2 } from "lucide-react";
+import { documentDisplayTitle } from "@/lib/document-title.mjs";
 
 type DocumentItem = {
   id: string;
   filename: string;
   kind: "cv" | "cover" | "unknown";
+  company?: string;
+  role?: string;
   date: string | null;
   reportId: string | null;
   format: string | null;
@@ -112,22 +115,25 @@ export default function DocumentsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {documents.map((doc) => (
+        {documents.map((doc) => {
+          const display = documentDisplayTitle(doc);
+          return (
           <Card key={doc.id} className="flex flex-col justify-between p-4">
             <div>
               <div className="flex items-start justify-between">
-                <div className="flex items-center space-x-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded bg-brand/10 text-brand-text">
+                <div className="flex min-w-0 items-center space-x-2">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-brand/10 text-brand-text">
                     {doc.kind === "cv" ? (
                       <FileText className="h-4 w-4" />
                     ) : (
                       <File className="h-4 w-4" />
                     )}
                   </div>
-                  <div>
-                    <h3 className="font-medium text-foreground line-clamp-1" title={doc.filename}>
-                      {doc.filename}
+                  <div className="min-w-0">
+                    <h3 className="font-medium text-foreground line-clamp-2" title={display.title}>
+                      {display.title}
                     </h3>
+                    <p className="truncate text-xs text-muted" title={display.filename}>{display.filename}</p>
                   </div>
                 </div>
               </div>
@@ -161,7 +167,8 @@ export default function DocumentsPage() {
               </Button>
             </div>
           </Card>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
