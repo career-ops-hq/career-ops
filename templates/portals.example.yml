@@ -379,6 +379,42 @@
 #         - "gpt"
 #         - "llm"
 #         - "claude"
+#
+# min_match (optional): require that many DISTINCT positive entries instead of
+# any one. One generic word ("demo", "customers") is a weak signal; two or
+# three together describe the role. Only in a block that sets min_match:
+#   - " | " (with spaces) separates spellings of ONE trait, so
+#     "pre-sales | presales" counts once however many spellings appear
+#   - duplicate entries ("Demo", "demo") count once
+#   - accents, case and typographic hyphens are folded (customer‑facing with a
+#     non-breaking hyphen matches "customer-facing")
+#   - any `negative` entry still rejects, whatever the count
+# min_match must be an integer from 1 to the number of distinct positive
+# entries; scan.mjs refuses to start otherwise. A by_title_keyword rule can set
+# its own min_match; it does not inherit the global one.
+#
+# rescue_title_misses (optional, default false): a posting whose title matches
+# no title_filter.positive keyword normally never reaches this filter. With
+# true, it still gets one chance on its description: it is kept only when its
+# description is non-empty and passes the global positive/negative pair (with
+# min_match). A title_filter.negative hit is never rescued, by_title_keyword
+# rules never apply to a title miss, and a non-empty `positive` list is
+# required. A title miss that this check does not keep is counted under
+# "Filtered by title" and recorded as skipped_title, as before. The summary
+# adds a "Title misses kept by content" line. Providers without a list
+# description (see above) give a title miss nothing to be rescued on.
+#
+# Example: select customer-facing technical roles whatever they are called
+# content_filter:
+#   positive:
+#     - "customer-facing"
+#     - "pre-sales | presales"
+#     - "proof of concept | poc"
+#     - "word:demo | demos"
+#   negative:
+#     - "no customer interaction"
+#   min_match: 2
+#   rescue_title_misses: true
 
 # -- Visa / work-authorization filter (optional) --
 # Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1), Singapore
