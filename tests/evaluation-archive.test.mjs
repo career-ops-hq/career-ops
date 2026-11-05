@@ -148,36 +148,38 @@ test('exact JSON-LD retrieval archives the full source, not a 20K truncation', f
   assert.equal(result.complete, true); assert.equal(result.truncated, false); assert.equal(JSON.parse(result.text).description, full); assert.ok(result.text.length > 20_000);
 }));
 
-test('missing optional Himalayas adapter fails explicitly without requesting a fake alternative source', fixture(async root => {
-  let requests = 0;
-  await assert.rejects(() => capturePostingSource({ url: 'https://himalayas.app/companies/exampleco/jobs/product-manager', num: '061', slug: 'exampleco', role: 'Product Manager', privateDir: root }, {
-    guardFn: async () => {}, fetchFn: async () => { requests++; throw new Error('must not fetch'); },
-    himalayasAdapterLoader: async () => { const e = new Error("Cannot find module himalayas-posting.mjs"); e.code = 'ERR_MODULE_NOT_FOUND'; throw e; },
-  }), /exact publisher archive adapter is unavailable/);
-  assert.equal(requests, 0);
-}));
-
-test('present exact publisher adapter supplies complete source without employer/evaluation permission', fixture(async root => {
-  const url = 'https://himalayas.app/companies/exampleco/jobs/product-manager';
+test('a Himalayas-shaped posting uses the generic exact JSON-LD source without an optional helper', fixture(async root => {
+  const url = 'https://himalayas.app/companies/exampleco/jobs/product-manager'; let requests = 0;
+  const html = `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', url, title: 'Product Manager', description: JD })}</script>`;
   const result = await capturePostingSource({ url, num: '061', slug: 'exampleco', role: 'Product Manager', privateDir: root }, {
-    guardFn: async () => {}, himalayasAdapterLoader: async () => ({ resolveHimalayasPosting: u => u === url && { guid: url },
-      retrieveHimalayasPosting: async () => ({ publisherStatus: 'open', httpStatus: 200, guid: url, employerVerified: false, evaluationAllowed: false, job: { description: JD } }) }),
-    fetchFn: async () => { throw new Error('adapter fixture only'); },
+    guardFn: async () => {}, fetchFn: async target => { requests++; assert.equal(target, url); return new Response(html, { status: 200 }); },
+    browserCaptureFn: async () => { throw Error('readable exact JSON-LD needs no browser fallback'); },
   });
-  assert.equal(result.text, JD); assert.equal(result.kind, 'himalayas-publisher-api');
-  const p = payload({ url }); const saved = await prepareEvaluationArchive(root, p, { captureFn: async () => result });
+  assert.equal(requests, 1); assert.equal(result.complete, true); assert.equal(JSON.parse(result.text).description, JD);
+  assert.equal(result.kind, 'exact-jobposting-jsonld');
+  const saved = await prepareEvaluationArchive(root, payload({ url }), { captureFn: async () => result });
   assert.equal(saved.ok, true, saved.error); assert.equal(saved.archive.receipt.evaluationAllowed, false);
   assert.equal(saved.archive.receipt.evidenceScope, 'source-archive-only');
 }));
 
-test('generic JSON-LD works when the optional adapter does not exist and never loads it', fixture(async root => {
-  const url = payload().url; let imports = 0;
+test('a blocked Himalayas-shaped posting reaches the guarded generic browser fallback without a module dependency', fixture(async root => {
+  const url = 'https://himalayas.app/companies/exampleco/jobs/product-manager'; let requests = 0, fallback = 0, guards = 0;
+  await assert.rejects(() => capturePostingSource({ url, num: '061', slug: 'exampleco', role: 'Product Manager', privateDir: root }, {
+    guardFn: async target => { guards++; assert.equal(target, url); },
+    fetchFn: async target => { requests++; assert.equal(target, url); return new Response('Unavailable posting', { status: 403 }); },
+    browserCaptureFn: async identity => { fallback++; assert.equal(identity.url, url); throw Error('rendered exact posting remains unavailable'); },
+  }), /rendered exact posting remains unavailable/);
+  assert.equal(requests, 1); assert.equal(fallback, 1); assert.equal(guards, 2, 'entry and exact HTTP request are both guarded');
+  assert.equal(fs.existsSync(path.join(root, 'jds')), false);
+}));
+
+test('generic exact JSON-LD remains sufficient without provider-specific extensions', fixture(async root => {
+  const url = payload().url;
   const html = `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', url, title: 'Product Manager', description: JD })}</script>`;
   const result = await capturePostingSource({ url, num: '061', slug: 'exampleco', role: 'Product Manager', privateDir: root }, {
     guardFn: async () => {}, fetchFn: async () => new Response(html, { status: 200 }),
-    himalayasAdapterLoader: async () => { imports++; throw new Error('absent'); },
   });
-  assert.equal(result.complete, true); assert.equal(imports, 0);
+  assert.equal(result.complete, true); assert.equal(JSON.parse(result.text).description, JD);
 }));
 
 test('oversized raw source fails rather than marking truncated text complete', fixture(async root => {
