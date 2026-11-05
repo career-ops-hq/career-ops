@@ -151,6 +151,17 @@ ok('an invalid min_match is refused when the filter is built', () => {
     'a prefix makes a different trait');
 });
 
+ok('a bare word: or stem: is not a trait, so it cannot make min_match unreachable', () => {
+  assert.deepStrictEqual(compileContentTraits(['demo', 'word:', ' stem: ', 'WORD:']).map(t => t.original), ['demo']);
+  assert.deepStrictEqual(compileContentTraits(['word: | presales']).map(t => t.original), ['word: | presales']);
+  assert.strictEqual(matchContentTraits('presales', traits(['word: | presales'])).matched, true);
+  assert.throws(() => buildContentFilter({ positive: ['demo', 'word:'], min_match: 2 }), /from 1 to 1/);
+  assert.throws(() => buildContentFilter({ positive: ['word:'], rescue_title_misses: true }),
+    /rescue_title_misses needs a non-empty content_filter\.positive/);
+  // Without min_match or rescue, a bare prefix keeps its any-one meaning: it matches nothing.
+  assert.doesNotThrow(() => buildContentFilter({ positive: ['word:'] }));
+});
+
 // ── 3. Absent new keys: the default is unchanged ────────────────────────
 ok('without min_match, " | " is a literal substring, as before', () => {
   const filter = buildContentFilter({ positive: ['a | b'] });
@@ -511,7 +522,9 @@ await okAsync('validate-portals: min_match and rescue_title_misses errors match 
     ['content_filter.by_title_keyword.Engineer.min_match: must be an integer from 1 to 1 (the number of distinct content_filter.by_title_keyword.Engineer.positive entries)']);
   // Every shape validate-portals rejects, buildContentFilter rejects too.
   for (const shape of [{ positive: ['demo', 'DEMO'], min_match: 2 }, { min_match: 1 },
-    { positive: ['x'], rescue_title_misses: 'yes' }, { negative: ['php'], rescue_title_misses: true }]) {
+    { positive: ['x'], rescue_title_misses: 'yes' }, { negative: ['php'], rescue_title_misses: true },
+    { positive: ['demo', 'word:'], min_match: 2 }, { positive: ['word:'], rescue_title_misses: true }]) {
+    assert.notDeepStrictEqual(await errorsFor(shape), [], JSON.stringify(shape));
     assert.throws(() => buildContentFilter(shape), JSON.stringify(shape));
   }
 });

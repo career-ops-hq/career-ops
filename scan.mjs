@@ -967,7 +967,9 @@ export function buildContentFilter(contentFilter) {
   if (rescue !== undefined && typeof rescue !== 'boolean') {
     throw new Error('content_filter.rescue_title_misses must be true or false');
   }
-  if (rescue === true && globalRule.positive.length === 0) {
+  // Counted as traits, as validate-portals.mjs counts them, so a list holding
+  // only a bare `word:` or `stem:` is refused here too, not silently kept.
+  if (rescue === true && compileContentTraits(contentFilter.positive).length === 0) {
     throw new Error('content_filter.rescue_title_misses needs a non-empty content_filter.positive list');
   }
 

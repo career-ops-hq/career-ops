@@ -179,10 +179,18 @@ export function compileContentKeyword(kw) {
 // which foldTitle leaves in place. The en dash (U+2013) is left alone: in JD
 // prose it separates ranges and clauses, not compound words.
 export function foldContentText(text) {
-  return foldTitle(String(text ?? '').replace(/[‐-‒]/g, '-').replace(/­/g, ''));
+  return foldTitle(String(text ?? '').replace(/[\u2010-\u2012]/g, '-').replace(/\u00AD/g, ''));
 }
 
 const TRAIT_ALTERNATIVE_SEPARATOR = /\s+\|\s+/;
+
+// A bare `word:` or `stem:` compiles to a matcher that never matches (see
+// compilePrefixedKeyword). In an any-one list that is a harmless no-op, but a
+// trait counts toward min_match, so an unmatchable one would make every
+// posting fail. Such an alternative is dropped instead, and a trait left with
+// none is not counted, so the min_match range check reports the typo.
+const isBarePrefix = (folded) => [WORD_PREFIX, STEM_PREFIX]
+  .some(prefix => folded.startsWith(prefix) && !folded.slice(prefix.length).trim());
 
 // Compile a trait list: trimmed, case-insensitively deduplicated (first
 // spelling kept), each entry split into its " | " alternatives. Returns
@@ -201,7 +209,7 @@ export function compileContentTraits(value) {
     seen.add(key);
     const alternatives = original.split(TRAIT_ALTERNATIVE_SEPARATOR)
       .map(part => foldContentText(part).trim())
-      .filter(Boolean)
+      .filter(part => part && !isBarePrefix(part))
       .map(compileContentKeyword);
     if (alternatives.length === 0) continue;
     traits.push({ original, match: (folded) => alternatives.some(m => m(folded)) });
