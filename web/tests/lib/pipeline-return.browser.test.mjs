@@ -30,6 +30,7 @@ test("Pipeline detail links preserve the list context", { skip: liveServerSkip("
   const search = page.getByPlaceholder("Search company or role…");
   await search.fill("Fixture"); // detail links include this immediately; the list URL catches up after a short pause
   const row = page.locator("tbody tr").filter({ has: page.getByRole("link", { name: "#11", exact: true }) });
+  await row.locator('a[href*="q=Fixture"]').first().waitFor();
   for (const name of ["#11", "Fixture Alpha", "Engineer"]) {
     const href = await row.getByRole("link", { name, exact: true }).getAttribute("href");
     assert.equal(href, `/pipeline/11?${query}`);
