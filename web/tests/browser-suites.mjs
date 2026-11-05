@@ -70,6 +70,7 @@ const SUITES = {
   "pipeline-report-states": { url: "PIPELINE_REPORT_STATES_TEST_URL", root: "PIPELINE_REPORT_STATES_TEST_ROOT", fixture: "pipeline-report-states" },
   "pipeline-return": { url: "PIPELINE_RETURN_TEST_URL", root: "PIPELINE_RETURN_TEST_ROOT", fixture: "pipeline-status" },
   "pipeline-views": { url: "PIPELINE_VIEWS_TEST_URL", root: "PIPELINE_VIEWS_TEST_ROOT", fixture: "pipeline-status" },
+  "pipeline-window": { url: "PIPELINE_WINDOW_TEST_URL", root: "PIPELINE_WINDOW_TEST_ROOT", fixture: "tracker-window" },
   "report-print": { url: "REPORT_PRINT_TEST_URL", root: "REPORT_PRINT_TEST_ROOT", fixture: "report-print" },
   "skip-link": { url: "SKIP_LINK_TEST_URL", fixture: "blank" },
   "tracker-keys": { url: "TRACKER_KEYS_TEST_URL", root: "TRACKER_KEYS_TEST_ROOT", fixture: "tracker-keys" },
