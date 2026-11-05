@@ -73,7 +73,7 @@ test("both tailored-CV lookups derive their key through this module", () => {
   // build the slug inline, and a call site that rebuilds it would pass every
   // assertion above while still matching every file in output/.
   const read = (p) => readFileSync(join(HERE, "..", "..", "src", p), "utf8");
-  for (const site of ["lib/apply/cv.ts", "app/api/cv-pdf/route.ts"]) {
+  for (const site of ["lib/apply/cv.ts", "lib/cv-pdf-file.ts"]) {
     const src = read(site);
     assert.match(src, /from "@\/lib\/company-slug\.mjs"/, `${site} must import the key derivation`);
     assert.match(src, /companySlug\(/, `${site} must call companySlug`);
@@ -82,10 +82,16 @@ test("both tailored-CV lookups derive their key through this module", () => {
       `${site} must not rebuild the slug inline`,
     );
   }
+  const route = read("app/api/cv-pdf/route.ts");
+  assert.match(route, /locateTailoredPdf\(/);
+  assert.ok(
+    !/\.toLowerCase\(\)\.match\(\/\[a-z0-9\]\+\/g\)/.test(route),
+    "cv-pdf route must not rebuild the slug inline",
+  );
 });
 
 test("cv-pdf refuses cover downloads that lack a report number before the CV fallbacks", () => {
-  const src = readFileSync(join(HERE, "..", "..", "src", "app/api/cv-pdf/route.ts"), "utf8");
+  const src = readFileSync(join(HERE, "..", "..", "src", "lib", "cv-pdf-file.ts"), "utf8");
   const guard = src.search(/kind === "cover" && !n/);
   assert.ok(guard >= 0, "cover without n must 404");
   const applicationBranch = src.search(/\bif \(application\)/);

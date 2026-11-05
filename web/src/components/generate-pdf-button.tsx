@@ -6,8 +6,12 @@ import { useSearchParams } from "next/navigation";
 import { FileDown, Loader2, FileText, RotateCcw, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
+import { CvPdfFileActions } from "@/components/cv-pdf-file-actions";
 import { pdfButtonState, type PdfFailure } from "@/lib/pdf-button-state.mjs";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
+
+const quietPill =
+  "inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]";
 
 // Fires the real career-ops `pdf` mode (worker kind "pdf") to generate an
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
@@ -18,6 +22,7 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
   const listQuery = pipelineQuery(useSearchParams().toString());
   const jobQuery = listQuery ? `?${listQuery}` : "";
   const studioHref = `/pipeline/${encodeURIComponent(n)}/cv-studio${jobQuery}`;
+  const viewHref = `/api/cv-pdf?n=${encodeURIComponent(n)}&company=${encodeURIComponent(company)}`;
   const job = useMemo(
     () => jobs.filter((j) => j.kind === "pdf" && j.input === n).sort((a, b) => b.startedAt - a.startedAt)[0],
     [jobs, n],
@@ -38,13 +43,14 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
     return (
       <span className="inline-flex flex-wrap items-center gap-1">
         <a
-          href={`/api/cv-pdf?n=${encodeURIComponent(n)}&company=${encodeURIComponent(company)}`}
+          href={viewHref}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-800 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
         >
           <FileText className="size-3.5" /> View tailored CV
         </a>
+        <CvPdfFileActions viewHref={viewHref} className={quietPill} />
         <Link
           href={studioHref}
           className="inline-flex items-center justify-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-xs font-medium text-brand-text transition-colors hover:bg-brand-soft/70 max-sm:min-h-[44px]"
