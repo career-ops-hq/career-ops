@@ -46,7 +46,8 @@ test('a save whose response was lost does not lock its own page out (#6381)', t 
   // A delayed earlier request from the same page cannot undo its retry.
   assert.throws(() => saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 }), /another tab/);
   assert.throws(() => saveChat(root, id, { revision: 2, messages: next, writer: 'page-a', seq: 0 }), /Invalid save sequence/);
-  assert.throws(() => saveChat(root, id, { revision: 1, messages, writer: 'page-b' }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 1, messages, writer: 'page-b', seq: 1 }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 2, messages: next, writer: 'page-a' }), /Save sequence required/);
   assert.throws(() => saveChat(root, id, { revision: 1, messages }), /another tab/);
   assert.throws(() => saveChat(root, id, { revision: 2, messages, writer: '../x' }), /Invalid writer/);
   assert.equal(readChat(root, id).messages.length, 2);

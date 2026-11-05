@@ -72,6 +72,7 @@ export function saveChat(root, id, input) {
   if (Buffer.byteLength(JSON.stringify(messages)) > MAX_CHAT_BYTES) throw new ChatError('Conversation is too large to save', 413);
   if (input.writer !== undefined && (typeof input.writer !== 'string' || !/^[\w-]{1,64}$/.test(input.writer))) throw new ChatError('Invalid writer');
   if (input.seq !== undefined && (!Number.isSafeInteger(input.seq) || input.seq < 1)) throw new ChatError('Invalid save sequence');
+  if (input.writer !== undefined && input.seq === undefined) throw new ChatError('Save sequence required with writer');
   return withLock(root, id, file => {
     const prior = readChat(root, id);
     // A page saves one request at a time, so a newer revision stamped with its
