@@ -12,6 +12,7 @@ import { resolveCli } from "../clis";
 import { fencingReport } from "../cli-fencing.mjs";
 import { CAPS } from "../worker-capabilities.mjs";
 import { assertSafeApplyUrl, installApplyEgressGuard, isUnsafeApplyUrlError, isBlockedNavigation, UnsafeApplyUrlError } from "./url-guard.mjs";
+import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 
 type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
 
@@ -187,7 +188,13 @@ async function nudgeScroll(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 }
 
-export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+type OpenedApplySession = { id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean };
+type UnsupportedApplySession = { unsupported: { vendor: string; label: string; postingUrl: string }; message: string };
+
+export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<OpenedApplySession | UnsupportedApplySession> {
+  // Workday, iCIMS, and UKG have no in-app fill. Refuse before Chrome starts.
+  const blockedAts = await unsupportedInAppAts(url);
+  if (blockedAts) return { unsupported: blockedAts, message: unsupportedAtsMessage(blockedAts.label) };
   // Refuse before launching any navigation, so an obviously-internal target
   // never reaches Playwright at all.
   await assertSafeApplyUrl(url);
@@ -223,6 +230,14 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
     throw e;
+  }
+  // A career page can redirect onto a blocked portal. Close before scroll,
+  // screenshots, or the Apply click that opens a second window.
+  const landedAts = await unsupportedInAppAts(page.url());
+  if (landedAts) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts.label) };
   }
   await snap(); // first paint
   const sBlock = statusBlock(resp?.status(), resp ? resp.headers() : {});

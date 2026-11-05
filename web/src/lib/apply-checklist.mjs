@@ -18,6 +18,10 @@ export const PORTAL_TIPS = [
     tip: "Create an account first. The form does not keep a draft without one.",
   },
   {
+    portal: "UKG",
+    tip: "Create an account first. The session expires, so keep the tab open while you paste.",
+  },
+  {
     portal: "Greenhouse",
     tip: "No account. Upload the PDF, then paste the fields below.",
   },

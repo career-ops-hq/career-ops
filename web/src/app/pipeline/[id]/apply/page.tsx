@@ -8,6 +8,7 @@ import { parseReport } from "@/lib/format";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { resolvePostingUrl } from "@/lib/posting-url.mjs";
 import { answerCopyItems, cvCopyFields, indexedPdf, PORTAL_TIPS, reportNumberFor } from "@/lib/apply-checklist.mjs";
+import { unsupportedAtsMessage, unsupportedInAppAts } from "@/lib/apply/unsupported-ats.mjs";
 import { ApplyChecklist } from "@/components/apply-checklist";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,11 @@ export default async function ApplyPage({
 
   const suffix = query ? `?${query}` : "";
   const company = app?.company || parseReport(report?.content ?? "").title || `Report #${id}`;
+  const blockedAts = await unsupportedInAppAts(postingUrl);
+  const blockedTip = blockedAts ? PORTAL_TIPS.find((tip) => tip.portal === blockedAts.label)?.tip ?? "" : "";
+  const blocked = blockedAts
+    ? { label: blockedAts.label, message: unsupportedAtsMessage(blockedAts.label), tip: blockedTip }
+    : null;
   return (
     <ApplyChecklist
       company={company}
@@ -79,6 +85,7 @@ export default async function ApplyPage({
       backHref={`/pipeline${suffix}`}
       reportHref={`/pipeline/${encodeURIComponent(id)}${suffix}`}
       postingUrl={postingUrl}
+      blocked={blocked}
       resume={resume}
       cover={cover}
       answers={answers}

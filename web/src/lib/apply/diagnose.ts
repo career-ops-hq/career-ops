@@ -1,6 +1,7 @@
 import type { Page, Frame } from "playwright-core";
 import type { ApplyField } from "./extract";
 import type { ApplyIssue } from "./issue";
+import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 
 export type { ApplyIssue };
 
@@ -85,9 +86,22 @@ export async function dropNewTabs(page: Page): Promise<void> {
   }
 }
 
+/** Resolved http(s) href that the in-app filler must not open. */
+async function blockedTriggerHref(page: Page, href: string | null): Promise<boolean> {
+  if (!href) return false;
+  let abs = href;
+  try {
+    abs = new URL(href, page.url()).href;
+  } catch {
+    return false;
+  }
+  return (await unsupportedInAppAts(abs)) != null;
+}
+
 /** SPA / apply-behind-a-button: if no form yet, click the first visible Apply CTA
  *  (NEVER a submit) to reveal the form. If it's an <a> with an application href,
- *  NAVIGATE there directly (robust vs popups). Returns true if it acted. */
+ *  NAVIGATE there directly (robust vs popups). Returns true if it acted.
+ *  A Workday, iCIMS, or UKG href is not followed: that click is the second window. */
 export async function tryApplyTrigger(page: Page): Promise<boolean> {
   try {
     // 1) Most reliable: an <a> linking straight to a known ATS application (e.g.
@@ -96,6 +110,7 @@ export async function tryApplyTrigger(page: Page): Promise<boolean> {
     if (await atsLink.count().catch(() => 0)) {
       const href = await atsLink.getAttribute("href").catch(() => null);
       if (href && /^https?:\/\//i.test(href) && !/submit/i.test(href)) {
+        if (await blockedTriggerHref(page, href)) return false;
         await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
         return true;
       }
@@ -109,6 +124,8 @@ export async function tryApplyTrigger(page: Page): Promise<boolean> {
     if ((await t.count().catch(() => 0)) && (await t.isVisible().catch(() => false))) {
       const label = (await t.innerText().catch(() => "")).toLowerCase();
       if (/submit|applied|withdraw/.test(label)) return false;
+      const href = await t.getAttribute("href").catch(() => null);
+      if (await blockedTriggerHref(page, href)) return false;
       await t.click({ timeout: 3000 }).catch(() => {});
       return true;
     }
@@ -121,13 +138,6 @@ export async function tryApplyTrigger(page: Page): Promise<boolean> {
 /** When extraction yields 0 fields, classify WHY so we abort with the RIGHT
  *  message (bot-challenge vs login wall vs closed posting vs unsupported). */
 export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue> {
-  const host = (() => {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return "";
-    }
-  })();
   const sig = await page
     .evaluate(() => {
       const t = (document.title || "").toLowerCase();
@@ -153,8 +163,15 @@ export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue
   if (/no longer accepting|position has been filled|posting is closed|no longer available|this (job|position|posting) (is |has )?(closed|expired|been filled)/.test(sig.body) || /not found|no longer|removed|closed/.test(sig.t)) {
     return { level: "block", code: "expired", message: "This job posting is closed or expired — it's no longer accepting applications." };
   }
-  if (/myworkdayjobs\.com$/i.test(host)) {
-    return { level: "block", code: "workday", message: "Workday forms aren't supported for in-app fill yet (multi-step, account-gated). Open the posting and apply there directly." };
+  let landedUrl = "";
+  try {
+    landedUrl = page.url();
+  } catch {
+    landedUrl = "";
+  }
+  const blockedAts = (await unsupportedInAppAts(landedUrl)) || (await unsupportedInAppAts(url));
+  if (blockedAts) {
+    return { level: "block", code: blockedAts.vendor, message: unsupportedAtsMessage(blockedAts.label) };
   }
   if (/^(jobs|careers|empleos|empregos|all jobs|open (positions|roles)|search jobs|current openings)/i.test(sig.t) || /\/(jobs|careers|search|positions)\/?(\?|$)/.test(u)) {
     return { level: "block", code: "listing-page", message: "This looks like the careers listing, not a single application — the posting may have moved or closed. Open the specific job and paste its “Apply” URL." };

@@ -36,6 +36,8 @@ const { setHostResolver } = await import(pathToFileURL(join(root, "liveness-brow
 const { openSession } = await import("../../src/lib/apply/session.ts");
 const { classifyEmpty, tryApplyTrigger } = await import("../../src/lib/apply/diagnose.ts");
 const { PORTAL_TIPS } = await import("../../src/lib/apply-checklist.mjs");
+const { unsupportedInAppAts, checklistHrefFor } = await import("../../src/lib/apply/unsupported-ats.mjs");
+const { sessionFollowUp } = await import("../../src/lib/apply/session-result.mjs");
 
 const MESSAGE = {
   Workday: "This posting is on Workday. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app, so no browser was opened.",
@@ -134,6 +136,31 @@ test("POST /api/apply/session returns the checklist link and does not launch Chr
   }
 });
 
+test("POST /api/apply/session omits the checklist link when no application number is sent", async () => {
+  globalThis.__applyLaunchAttempts = 0;
+  const restore = setHostResolver(async () => ["93.184.216.34"]);
+  try {
+    const { POST } = await import("../../src/app/api/apply/session/route.ts");
+    const res = await POST(
+      new Request("http://fixture.invalid/api/apply/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "https://careers-acme.icims.com/jobs/1" }),
+      }),
+    );
+    const body = await res.json();
+    assert.equal(res.status, 200, body.error || JSON.stringify(body));
+    assert.equal(body.unsupported, true);
+    assert.equal(body.vendor, "icims");
+    assert.equal(body.label, "iCIMS");
+    assert.equal(body.message, MESSAGE.iCIMS);
+    assert.equal(Object.hasOwn(body, "checklistHref"), false);
+    assert.equal(globalThis.__applyLaunchAttempts, 0);
+  } finally {
+    restore?.();
+  }
+});
+
 describe("classifyEmpty uses the same refusal when no form is present", () => {
   for (const [url, vendor, label] of BLOCKED) {
     test(`${vendor} is a block with the shared message`, async () => {
@@ -147,6 +174,18 @@ describe("classifyEmpty uses the same refusal when no form is present", () => {
   test("notmyworkdayjobs.com is not Workday", async () => {
     const issue = await classifyEmpty(quietPage(), "https://notmyworkdayjobs.com/role");
     assert.equal(["workday", "icims", "ultipro"].includes(issue.code), false);
+  });
+
+  test("a redirect onto Workday is the ATS block", async () => {
+    const issue = await classifyEmpty(quietPage("https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role"), "https://careers.acme.test/role");
+    assert.equal(issue.code, "workday");
+    assert.equal(issue.message, MESSAGE.Workday);
+  });
+
+  test("a Workday jobs index is the ATS block, not a listing page", async () => {
+    const issue = await classifyEmpty(quietPage(), "https://acme.wd1.myworkdayjobs.com/jobs");
+    assert.equal(issue.code, "workday");
+    assert.equal(issue.message, MESSAGE.Workday);
   });
 
   for (const url of ["https://boards.greenhouse.io/acme/jobs/123", "https://jobs.lever.co/acme/role", "https://jobs.ashbyhq.com/acme/role"]) {
@@ -190,4 +229,42 @@ test("portal tips include UKG next to Workday and iCIMS", () => {
   const ukg = PORTAL_TIPS.find((tip) => tip.portal === "UKG");
   assert.match(ukg.tip, /account/i);
   assert.match(ukg.tip, /session expires/i);
+});
+
+test("greenhouse, Lever, Ashby, and a lookalike host are not blocked", async () => {
+  assert.equal(await unsupportedInAppAts("https://boards.greenhouse.io/acme/jobs/123"), null);
+  assert.equal(await unsupportedInAppAts("https://jobs.lever.co/acme/role"), null);
+  assert.equal(await unsupportedInAppAts("https://jobs.ashbyhq.com/acme/role"), null);
+  assert.equal(await unsupportedInAppAts("https://notmyworkdayjobs.com/role"), null);
+  assert.equal(await unsupportedInAppAts("https://acme.successfactors.com/job"), null);
+  assert.equal(await unsupportedInAppAts("https://acme.taleo.net/career"), null);
+});
+
+test("ultipro.ca uses the UKG label from the shared vendor table", async () => {
+  const hit = await unsupportedInAppAts("https://acme.ultipro.ca/jobs/1");
+  assert.equal(hit.vendor, "ultipro");
+  assert.equal(hit.label, "UKG");
+  assert.equal(hit.postingUrl, "https://acme.ultipro.ca/jobs/1");
+});
+
+test("checklist links accept only a numeric application id", () => {
+  assert.equal(checklistHrefFor("12"), "/pipeline/12/apply");
+  assert.equal(checklistHrefFor(" 12 "), "/pipeline/12/apply");
+  assert.equal(checklistHrefFor("12/../etc"), null);
+  assert.equal(checklistHrefFor(""), null);
+  assert.equal(checklistHrefFor(undefined), null);
+});
+
+test("sessionFollowUp stops drive and prefill for an unsupported body", () => {
+  const plan = sessionFollowUp({
+    unsupported: true,
+    message: MESSAGE.Workday,
+    postingUrl: "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role",
+    checklistHref: "/pipeline/12/apply",
+  });
+  assert.equal(plan.kind, "unsupported");
+  assert.equal(plan.message, MESSAGE.Workday);
+  assert.equal(plan.checklistHref, "/pipeline/12/apply");
+  assert.equal(sessionFollowUp({ id: "apply-1", fields: [] }).kind, "continue");
+  assert.equal(sessionFollowUp(null).kind, "continue");
 });

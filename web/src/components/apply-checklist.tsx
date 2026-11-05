@@ -29,6 +29,7 @@ export function ApplyChecklist({
   education,
   cvMissing,
   tips,
+  blocked = null,
   trackerNum,
   reportNum,
   status,
@@ -46,6 +47,7 @@ export function ApplyChecklist({
   education: string;
   cvMissing: boolean;
   tips: Tip[];
+  blocked?: { label: string; message: string; tip: string } | null;
   trackerNum: string | null;
   reportNum: number | null;
   status: string;
@@ -64,6 +66,23 @@ export function ApplyChecklist({
           Back to the report
         </Link>
       </header>
+
+      {blocked ? (
+        <Section title={blocked.label}>
+          <table className="w-full text-sm">
+            <caption className="sr-only">Why this portal is filled outside the app</caption>
+            <tbody>
+              <tr className="border-t border-border">
+                <td className="py-2 pr-4 align-top font-medium">{blocked.label}</td>
+                <td className="py-2 text-muted">
+                  <p>{blocked.message}</p>
+                  {blocked.tip ? <p className="mt-2">{blocked.tip}</p> : null}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </Section>
+      ) : null}
 
       <Section title="Posting">
         {postingUrl ? (
