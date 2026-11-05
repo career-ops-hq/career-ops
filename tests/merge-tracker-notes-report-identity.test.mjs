@@ -47,10 +47,16 @@ function fixture(t, { reportColumn = false } = {}) {
     assert.deepEqual(writeEvaluationArtifacts(root, { markdown, num, today: '2026-01-01', company: 'ExampleCo', role: 'Product Lead', score, url, notes, reportFile: file }), { ok: true });
     return file;
   };
+  // Replaying an already-written artifact is a TSV operation, not permission
+  // to overwrite its immutable report file (the archive writer uses wx).
+  const replay = ({ num = '101', url = FIRST, score = '3.7/5', file = fileFor(num) } = {}) => {
+    mkdirSync(additions, { recursive: true });
+    writeFileSync(join(additions, `${num}-exampleco-replay.tsv`), trackerTsvLine({ num, today: '2026-01-01', company: 'ExampleCo', role: 'Product Lead', score, url, notes: 'same-file replay', reportFile: file }));
+  };
   const merge = () => mergeTracker({ appsFile: tracker, dataRoot: root, logger: { log() {}, warn() {}, error() {} } });
   const reportImages = () => Object.fromEntries(flatFiles(join(root, 'reports')).map(name => [name, readFileSync(join(root, 'reports', name), 'utf8')]));
   const reportLinks = () => rows().flatMap(row => extractTrackerReportLinks(reportColumn ? cell(row, 'Report') : '', cell(row, 'Notes')));
-  return { root, tracker, additions, rows, cell, setCell, add, merge, reportImages, reportLinks };
+  return { root, tracker, additions, rows, cell, setCell, add, replay, merge, reportImages, reportLinks };
 }
 
 async function existing(t, options = {}, layout = {}) {
@@ -138,12 +144,12 @@ test('a local numbered Portfolio target remains report ownership regardless of i
 
 test('a canonical Notes reference permits same-file re-evaluation of the same employer posting', async t => {
   const f = await existing(t, { url: FIRST });
-  f.add({ num: '101', url: FIRST, official: FIRST, score: '4.0/5' });
   const images = f.reportImages();
+  f.replay({ url: FIRST });
   assert.equal(await f.merge(), 0);
   assert.equal(f.rows().length, 1);
   assert.ok(f.rows()[0].includes(fileFor('101')));
-  assert.equal(f.cell(f.rows()[0], 'Score'), '4.0/5');
+  assert.equal(f.cell(f.rows()[0], 'Score'), '3.7/5', 'the replay score still matches the immutable report');
   assert.deepEqual(f.reportLinks().map(link => link.target), [101], 'the native parser finds one authoritative reference');
   assert.deepEqual(flatFiles(f.additions).filter(name => name.endsWith('.tsv')), []);
   assert.deepEqual(f.reportImages(), images);
@@ -153,10 +159,10 @@ for (const reportColumn of [false, true]) {
   test(`conflicting employer identities in the same file stay pending with ${reportColumn ? 'a Report column' : 'a Notes reference'}`, async t => {
     const f = await existing(t, { url: FIRST }, { reportColumn });
     const before = readFileSync(f.tracker, 'utf8');
-    // A contradictory incoming artifact cannot make an existing reference
-    // belong to a second opening, even if it reuses that exact filename.
-    f.add({ num: '101', url: SECOND, official: SECOND, score: '4.0/5' });
     const images = f.reportImages();
+    // A contradictory contribution cannot make this existing report belong
+    // to a second opening. The native report itself is never rewritten.
+    f.replay({ url: SECOND });
     const pending = flatFiles(f.additions).filter(name => name.endsWith('.tsv'));
     assert.equal(pending.length, 1);
     const contribution = readFileSync(join(f.additions, pending[0]), 'utf8');
