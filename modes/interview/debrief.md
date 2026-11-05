@@ -254,7 +254,7 @@ Rules for the transcript:
 
 After the debrief is saved, record confirmed facts on the application. Match a new fact to a dealbreaker the user already wrote in `modes/_profile.md` or `config/profile.yml`. Show the fact and the profile sentence. Ask `Record this dealbreaker on the report and the tracker? [y/N]`. On yes, pass that sentence as `--dealbreaker`. On no, omit it.
 
-For each named person, ask `Save this contact to data/contacts.tsv? [y/N]`. On yes, pass the name, the email if one was given, and the type if the user named one.
+For each named person, ask `Save this contact to data/contacts.tsv? [y/N]`. On yes, pass the name, the email if one was given, and the type if the user named one. `--contact-type` takes only `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` or `other`, in lowercase. Map the user's word to the value it means, in any language (a "talent partner" is `recruiter`, "my future boss" is `hiring-manager`). If the word doesn't clearly match one value, leave `--contact-type` out and still save the contact. `debrief-sync.mjs` rejects any other value, and that stops the whole call, dealbreaker and `--next` included.
 
 If the next step names one clear calendar day, pass `--next YYYY-MM-DD` with no second question. Resolve a weekday from the local calendar day, and today counts. If the phrase has no day, omit `--next`. If it is ambiguous (`next week`, two days), ask for one date and then pass it.
 
