@@ -174,3 +174,48 @@ test('conditional hiring-presence regions need independent home-country eligibil
   assert.equal(gate('Remote EMEA', '', { description: description + ' You can work remotely from Spain.' }).eligible, true);
   assert.equal(buildWorkplacePolicy(undefined)('Remote EMEA', '', { description }).eligible, true);
 });
+
+test('local and-around qualifiers do not become the alpha-3 country AND', () => {
+  for (const target of ['and around Barcelona', 'around Barcelona']) {
+    assert.equal(gate('Remote Europe', '', { description: `Candidates must be based in ${target}.` }).eligible, true, target);
+  }
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in and around London.' }).eligible, false);
+});
+
+test('ordinary AND continuations cannot establish Andorra eligibility', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const description of [
+    'We work remotely and work in and around Barcelona.',
+    'We work remotely and work in and across different teams.',
+  ]) assert.equal(andorra('Remote', '', { description }).eligible, false, description);
+});
+
+test('explicit AND tokens and geographic separators still identify Andorra', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const target of ['AND', 'AND only', 'AND or Spain', 'AND / Spain', 'AND and France']) {
+    assert.equal(andorra('Remote Europe', '', { description: `Candidates must be based in ${target}.` }).eligible, true, target);
+  }
+  assert.equal(andorra('Remote AND').eligible, true);
+  assert.equal(andorra('Remote', '', { eligibleCountries: ['AND'] }).eligible, true);
+  assert.equal(andorra('Remote', '', { description: 'You can work remotely from AND.' }).eligible, true);
+});
+
+test('AND stays a foreign mandatory country even with unrelated home-country evidence', () => {
+  for (const description of [
+    'Candidates must be based in AND.',
+    'Candidates must be based in AND only.',
+    'Candidates must be based in AND and collaborate with colleagues who work remotely from Spain.',
+  ]) assert.equal(gate('Remote Europe', '', { description }).eligible, false, description);
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in AND or Spain.' }).eligible, true);
+  assert.equal(gate('Remote AND').eligible, false);
+});
+
+test('parsed home ISO alternatives do not rescue another foreign requirement', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const description of [
+    'Candidates must be based in AU and collaborate with our Andorra office.',
+    'Candidates must be based in AND or Spain and must be located in AU.',
+    'Candidates must be based in AND or Spain and eligible countries are France.',
+  ]) assert.equal(andorra('Remote Europe', '', { description }).eligible, false, description);
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in Spain and collaborate with our France office.' }).eligible, true, 'an already-accepted office mention is unchanged');
+});

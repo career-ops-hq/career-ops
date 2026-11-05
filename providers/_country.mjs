@@ -186,12 +186,15 @@ export function buildWorkplacePolicy(policy) {
   // Read the geography immediately attached to a worker-location phrase, plus
   // genuine country alternatives. Stop before unrelated duties/office mentions.
   const geographyTarget = (text, { allowAmbiguousCodes = true } = {}) => {
-    let rest = geographyText(text).trim().replace(/^(?:(?:a|an|any) (?:eligible )?country (?:in|within) |(?:a|an|any) )/, ''), region = false, local = false;
+    let rest = geographyText(text).trim().replace(/^(?:(?:a|an|any) (?:eligible )?country (?:in|within) |(?:a|an|any) )/, '')
+      .replace(/^(?:and )?around /, ''), region = false, local = false;
     const codes = new Set();
     while (rest) {
       const match = rest.match(geographyAtom);
       if (!match) break;
       const token = match[1], tail = rest.slice(match[0].length);
+      // Standalone AND can name Andorra; "and across ..." is ordinary prose.
+      if (token === 'and' && !/^\s*(?:$|[,/]|(?:and|or|only)\b)/.test(tail)) break;
       const found = countries(countryValue(token), true);
       if (!found.size && !has(token, regions) && !has(token, onsite)) break;
       // "IT systems" is not Italy. A bounded geographic token such as
@@ -244,12 +247,17 @@ export function buildWorkplacePolicy(policy) {
     for (const clause of description.split(/[.!?;,\n]+|\s+(?:but|however)\s+/)) {
       if (/\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based) (?:role|position)(?: is)? (?:based |located )?in\b/.test(clause) && !has(clause, onsite)) return fail('description_onsite_restricted');
       if (!/\b(?:only|must (?:be |currently )?(?:based|located|reside|live)|(?:candidates?|applicants?|residents?) (?:must|need to)|restricted to|eligible (?:countries|locations)|hiring (?:only )?in|open (?:only )?to)\b/.test(clause)) continue;
-      for (const match of geographyText(clause).matchAll(/\bmust (?:be |currently )?(?:based|located|reside|live) (?:in|within)\s+(.+)/g)) {
-        const required = geographyTarget(match[1]);
+      const targetCountries = new Set(), workerClause = geographyText(clause);
+      for (const match of workerClause.matchAll(/\bmust (?:be |currently )?(?:based|located|reside|live) (?:in|within)\s+/g)) {
+        const required = geographyTarget(workerClause.slice(match.index + match[0].length));
         if (required.codes.size && ![...required.codes].some(c => homeCodes.has(c))) return fail('description_country_restricted');
         if (!required.codes.size && !required.region && !required.local) return fail('description_location_restricted');
+        for (const code of required.codes) targetCountries.add(code);
       }
-      if (restricted(clause)) return fail('description_country_restricted');
+      // An actual home-compatible target may mix ISO and country names. Only
+      // those parsed alternatives qualify; foreign evidence elsewhere keeps
+      // the existing generic veto, and every separate mandatory target is read.
+      if (restricted(clause) && ![...countries(clause)].every(c => targetCountries.has(c))) return fail('description_country_restricted');
       if (/\bmust (?:be |currently )?(?:based|located|reside|live)(?: in| within)?\b/.test(clause)
         && !supportsHomeGeography(clause) && !has(clause, regions) && !has(clause, onsite)) return fail('description_location_restricted');
       // A mandatory commute elsewhere is also narrower than a remote tag.
