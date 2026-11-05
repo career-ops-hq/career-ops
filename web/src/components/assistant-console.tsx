@@ -154,6 +154,9 @@ export function AssistantConsole() {
   messagesRef.current = messages;
   const savedSnapshot = useRef("");
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  // Identifies this page's saves, so the server can tell its own lost save from another tab's.
+  const writerId = useRef("");
+  const saveSeq = useRef(0);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [requestFeedback, setRequestFeedback] = useState<RequestFeedback | null>(null);
@@ -320,7 +323,7 @@ export function AssistantConsole() {
       try {
         const chat = await chatRequest("/api/assistant/chats", {
           method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...current, ...(title ? { title } : {}), messages: snapshot }),
+          body: JSON.stringify({ ...current, writer: writerId.current ||= crypto.randomUUID(), seq: ++saveSeq.current, ...(title ? { title } : {}), messages: snapshot }),
         });
         current.revision = chat.revision;
         current.title = chat.title;
