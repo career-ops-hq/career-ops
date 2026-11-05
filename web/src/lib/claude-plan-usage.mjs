@@ -85,6 +85,12 @@ export async function resolveOnPath(name, { env = process.env, platform = proces
   return null;
 }
 
+// This spawns directly rather than through spawnHeadlessCli, like
+// cli-fencing-probe.mjs (see the note in spawn-cli.mjs): `/usage` is answered
+// locally by the CLI and runs no prompt, no model and no tools, so there is
+// nothing to fence. Routing it through the fenced spawn path would add
+// permission flags to a command that has no permissions to restrict.
+//
 // On Windows an npm-installed CLI is a script shim execFile cannot run without
 // a shell, so launch the .js/.exe it wraps (a no-op elsewhere; cli-launch.mjs).
 async function run(bin, { exec = execFile } = {}) {
