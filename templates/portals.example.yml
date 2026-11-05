@@ -403,6 +403,9 @@
 # "Filtered by title" and recorded as skipped_title, as before. The summary
 # adds a "Title misses kept by content" line. Providers without a list
 # description (see above) give a title miss nothing to be rescued on.
+# scan.mjs and scan-dayforce.mjs apply it. scan-ats-full.mjs does not: it skips
+# a board by title before downloading descriptions, so it warns and drops
+# title misses as without the key.
 #
 # Example: select customer-facing technical roles whatever they are called
 # content_filter:
