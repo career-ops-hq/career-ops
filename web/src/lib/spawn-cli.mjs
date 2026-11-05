@@ -2,6 +2,50 @@ import { spawn } from "node:child_process";
 import { fenceArgs } from "./cli-fencing.mjs";
 import { prepareCliLaunch } from "./cli-launch.mjs";
 
+// CreateProcessW allows 32,767 UTF-16 code units including the terminating NUL.
+// Match libuv's quote_cmd_arg rather than counting the unquoted prompt: quotes,
+// backslashes before a quote, and trailing backslashes in quoted args expand.
+function windowsQuotedLength(arg) {
+  if (arg.length === 0) return 2;
+  if (!/[ \t"]/.test(arg)) return arg.length;
+  let length = arg.length + 2;
+  let backslashes = 0;
+  for (let i = 0; i < arg.length; i++) {
+    if (arg[i] === "\\") backslashes++;
+    else {
+      if (arg[i] === '"') length += backslashes + 1;
+      backslashes = 0;
+    }
+  }
+  return length + backslashes;
+}
+
+/**
+ * Refuse an oversized Windows launch before starting a child. Uses the final
+ * fenced/resolved argv and Node's argv0/verbatim options; JS length is UTF-16.
+ * No prompt content is included in the error.
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import("node:child_process").SpawnOptionsWithoutStdio} [options]
+ * @param {string} [platform]
+ */
+export function assertWindowsCommandLineLength(command, args, options = {}, platform = process.platform) {
+  if (platform !== "win32") return;
+  const argv = [typeof options.argv0 === "string" ? options.argv0 : command, ...args];
+  // One terminating NUL, one space between each pair of arguments.
+  const length = 1 + (argv.length - 1) + argv.reduce((total, arg) =>
+    total + (options.windowsVerbatimArguments ? arg.length : windowsQuotedLength(arg)), 0);
+  if (length > 32_767) {
+    const error = new Error(
+      `Cannot start the AI CLI: the Windows command line needs ${length} UTF-16 code units ` +
+      "including quoting and the terminating NUL; the limit is 32767. " +
+      "Shorten the evaluation input or notes and try again.",
+    );
+    error.code = "E2BIG";
+    throw error;
+  }
+}
+
 // Plain .mjs (same pattern as tracker-table.mjs/clean-chips.mjs) so
 // tests/lib/spawn-cli.test.mjs can import it directly under Node. Import it with the
 // .mjs extension included (e.g. "@/lib/spawn-cli.mjs") — unlike .ts files,
@@ -62,6 +106,7 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   // shell, so launch the .js/.exe it wraps (a no-op elsewhere; cli-launch.mjs).
   // After fencing, so the fencers see the CLI's own argv rather than node's.
   const launch = prepareCliLaunch(binPath, fencedArgs);
+  assertWindowsCommandLineLength(launch.command, launch.args, options);
   // windowsHide: on Windows a child attaches to the parent's console. A
   // long-lived dev server whose console has gone stale then kills EVERY child
   // at DLL init with 0xC0000142 (STATUS_DLL_INIT_FAILED), in ~20 ms and with no
