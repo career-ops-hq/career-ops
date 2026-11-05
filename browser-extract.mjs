@@ -248,10 +248,24 @@ export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
   if (str(info.jobReqId)) meta.push(`Req ID: ${str(info.jobReqId)}`);
   if (info.canApply === false) meta.push('Applications closed (canApply: false)');
 
+  // Retain bounded facts from this SAME parsed response. Missing or malformed
+  // canApply is unknown, never true; no canonical path is made from the input.
+  const hasCanApply = Object.hasOwn(info, 'canApply');
+  const jobPostingInfo = {};
+  for (const [field, limit] of [['title', 1000], ['jobReqId', 300], ['externalPath', 2048]]) {
+    const value = info[field];
+    if (Object.hasOwn(info, field) && typeof value === 'string' && value.trim()
+        && value.length <= limit && !/[\u0000-\u001f\u007f-\u009f]/u.test(value)) jobPostingInfo[field] = value;
+  }
+  if (hasCanApply && typeof info.canApply === 'boolean') jobPostingInfo.canApply = info.canApply;
+  const sourceFacts = { type: 'workday-cxs', canApplyState: !hasCanApply ? 'absent'
+    : typeof info.canApply === 'boolean' ? 'boolean' : 'invalid', jobPostingInfo };
+
   return {
     url: postingUrl,
     title: compactText(str(info.title), 300),
     text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    sourceFacts,
   };
 }
 

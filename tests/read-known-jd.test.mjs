@@ -41,16 +41,18 @@ test('URL boundary preserves the literal URL but rejects userinfo, control chara
   for (const url of ['https://linkedin.com/jobs/1', 'https://uk.linkedin.com/jobs/1', 'https://LINKEDIN.COM./jobs/1']) assert.equal(knownJdInput(url).linkedIn, true);
 });
 
-function fixture(t, { status = 200, description = JD, isListed = true, url = ORIGINAL } = {}) {
+function fixture(t, { status = 200, description = JD, isListed = true, url = ORIGINAL, payload } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'known-jd-cli-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const calls = path.join(root, 'fetch-calls.jsonl');
   const preload = path.join(root, 'fetch-preload.mjs');
-  const json = { jobs: [{ id: ORIGINAL.split('/').at(-1), title: 'Fictional Product Manager', descriptionPlain: description, location: 'Fictional location', workplaceType: 'Remote', employmentType: 'FullTime', isListed }] };
-  fs.writeFileSync(preload, `import fs from 'node:fs'; globalThis.fetch=async(url,options)=>{fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({url,headers:Object.fromEntries(new Headers(options?.headers))})+'\\n');return {status:${status},ok:${status >= 200 && status < 300},url:String(url),redirected:false,json:async()=>(${JSON.stringify(json)})};};`);
+  const parses = path.join(root, 'body-parses.jsonl');
+  const json = payload ?? { jobs: [{ id: ORIGINAL.split('/').at(-1), title: 'Fictional Product Manager', descriptionPlain: description, location: 'Fictional location', workplaceType: 'Remote', employmentType: 'FullTime', isListed }] };
+  fs.writeFileSync(preload, `import fs from 'node:fs'; globalThis.fetch=async(url,options)=>{fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({url,headers:Object.fromEntries(new Headers(options?.headers))})+'\\n');return {status:${status},ok:${status >= 200 && status < 300},url:String(url),redirected:false,clone:()=>{throw Error('must not clone')},json:async()=>{fs.appendFileSync(${JSON.stringify(parses)},'parsed\\n');return (${JSON.stringify(json)});}};};`);
   const run = (args = ['--request', '-'], input = JSON.stringify({ url }), script = path.join(ROOT, 'read-known-jd.mjs')) => spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, script, ...args], { cwd: root, input, encoding: 'utf8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: root } });
   const requests = () => fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
-  return { root, run, requests };
+  const bodyParses = () => fs.existsSync(parses) ? fs.readFileSync(parses, 'utf8').trim().split('\n').filter(Boolean).length : 0;
+  return { root, run, requests, bodyParses };
 }
 
 test('actual isolated CLI delegates native Ashby normalization once and records actual transport separately', t => {
@@ -107,4 +109,23 @@ test('CLI invocation through a linked checkout still reads the request', t => {
   try { fs.symlinkSync(ROOT, link, 'junction'); } catch (error) { if (['EPERM','EACCES','ENOSYS'].includes(error.code)) { t.skip('directory links unavailable'); return; } throw error; }
   const result = f.run(['--request', '-'], JSON.stringify({ url: ORIGINAL }), path.join(link, 'read-known-jd.mjs'));
   assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).result.ats, 'ashby');
+});
+
+
+test('actual isolated Workday CLI carries same-response facts with exactly one fetch and body parse', t => {
+  const url = 'https://fictional.wd1.myworkdayjobs.com/External/job/Remote/Fictional-Manager_R123456?source=fixture';
+  const externalPath = '/job/Remote/Renamed-Fictional-Manager_R123456';
+  for (const [state, value] of [['boolean', true], ['boolean', false], ['absent', undefined], ['invalid', null]]) {
+    const info = { title: 'Fictional Manager', jobDescription: `<p>${JD}</p>`, jobReqId: 'R123456', externalPath,
+      ...(state !== 'absent' ? { canApply: value } : {}) };
+    const f = fixture(t, { url, payload: { jobPostingInfo: info } }), run = f.run();
+    assert.equal(run.status, 0, run.stderr); const packet = JSON.parse(run.stdout);
+    assert.equal(packet.originalURL, url); assert.equal(packet.result.url, url); assert.equal(packet.result.ats, 'workday');
+    assert.equal(packet.result.sourceFacts.canApplyState, state);
+    assert.deepEqual(packet.result.sourceFacts.jobPostingInfo, { title: info.title, jobReqId: 'R123456', externalPath,
+      ...(state === 'boolean' ? { canApply: value } : {}) });
+    assert.equal(packet.transport.fetchCallCount, 1); assert.equal(f.requests().length, 1); assert.equal(f.bodyParses(), 1);
+    assert.equal(packet.transport.requests[0].httpStatus, 200); assert.equal('open' in packet, false);
+    assert.ok(packet.result.text.includes(JD.trim()));
+  }
 });

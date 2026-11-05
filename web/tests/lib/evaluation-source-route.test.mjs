@@ -53,7 +53,7 @@ A fictional full evaluation.
 ${JD}`;
 const GATE = `Stopped at a policy gate.\n<<evaluation-gate>>\n{"status":"needs_confirmation","reason":"dealbreaker","message":"Review the fictional location rule."}\n<</evaluation-gate>>\nVERDICT: N/A/5 — Policy confirmation is required.`;
 
-function fixture(t, { sourceFailure = false, gate = false, fatal = false, abortDuring = false, selected = false } = {}) {
+function fixture(t, { sourceFailure = false, gate = false, fatal = false, abortDuring = false, sourcePacket = SOURCE, selected = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'known-source-route-'));
   const codeRoot=path.join(root,'code'), dataRoot=path.join(root,'data');
   fs.mkdirSync(path.join(codeRoot,'modes'),{recursive:true}); fs.mkdirSync(dataRoot);
@@ -73,7 +73,7 @@ function fixture(t, { sourceFailure = false, gate = false, fatal = false, abortD
         state.sourceCalls.push({ bin, argv, options, input });
         queueMicrotask(() => {
           if (abortDuring) { controller.abort(); return; }
-          if (!sourceFailure) child.stdout.emit('data', JSON.stringify(SOURCE));
+          if (!sourceFailure) child.stdout.emit('data', JSON.stringify(sourcePacket));
           child.emit('close', sourceFailure ? 1 : 0);
         });
       };
@@ -101,7 +101,7 @@ function fixture(t, { sourceFailure = false, gate = false, fatal = false, abortD
   state.persist = async args => { state.persisted.push(args); return { ok: true, num: '101', warnings: [] }; };
   globalThis.__knownSourceRoute = state;
   t.after(() => { delete globalThis.__knownSourceRoute; fs.rmSync(root, { recursive: true, force: true }); });
-  state.request = () => new Request('http://fixture.invalid/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'evaluate', input: ORIGINAL, cliId: 'codex', ...(selected?{evaluationSections:['summary']}:{}) }), signal: controller.signal });
+  state.request = () => new Request('http://fixture.invalid/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'evaluate', input: sourcePacket.originalURL, cliId: 'codex', ...(selected?{evaluationSections:['summary']}:{}) }), signal: controller.signal });
   state.controller = controller;
   return state;
 }
@@ -158,4 +158,39 @@ test('actual selected POST retains its canonical selected scope and source bindi
   assert.match(f.prompts[0],/UNTRUSTED SOURCE DATA/); assert.doesNotMatch(f.prompts[0],/EVERY section its report template specifies/);
   assert.equal(f.persisted[0].url,ORIGINAL); assert.deepEqual(f.persisted[0].evaluationSections,['summary']);
   assert.equal(f.sourceCalls[0].options.cwd,f.codeRoot); assert.equal(f.tokens,0);
+});
+
+
+const WORKDAY_ORIGINAL = 'https://fictional.wd1.myworkdayjobs.com/External/job/Remote/Fictional-Manager_R123456';
+function workdaySourcePacket(state, value) {
+  const packet = JSON.parse(JSON.stringify(SOURCE)); packet.originalURL = packet.result.url = WORKDAY_ORIGINAL;
+  packet.result.ats = 'workday'; packet.result.sourceFacts = { type: 'workday-cxs', canApplyState: state,
+    jobPostingInfo: { title: packet.result.title, jobReqId: 'R123456', externalPath: '/job/Remote/Renamed-Fictional-Manager_R123456',
+      ...(state === 'boolean' ? { canApply: value } : {}) } };
+  const api = 'https://fictional.wd1.myworkdayjobs.com/wday/cxs/fictional/External/job/Remote/Fictional-Manager_R123456';
+  packet.transport.requests[0].requestURL = packet.transport.requests[0].finalURL = api;
+  return packet;
+}
+
+test('actual POST carries Workday parsed facts as data while retaining original input and remaining gates', async t => {
+  for (const selected of [false, true]) {
+    const sourcePacket = workdaySourcePacket('boolean', true);
+    const f = fixture(t, { sourcePacket, selected }); const response = await POST(f.request()); await response.text();
+    assert.equal(response.status, 200); assert.deepEqual(f.calls, ['source-start', 'source-close', 'model']);
+    assert.equal(f.sourceCalls.length, 1); assert.deepEqual(JSON.parse(f.sourceCalls[0].input), { url: WORKDAY_ORIGINAL });
+    const observed = f.prompts[0].split('\n').find(line => line.startsWith('{"originalURL":'));
+    assert.ok(observed, 'actual prompt contains the source packet');
+    assert.deepEqual(JSON.parse(observed).jobData.sourceFacts, sourcePacket.result.sourceFacts);
+    assert.match(f.prompts[0], /UNTRUSTED SOURCE DATA/); assert.match(f.prompts[0], /HTTP 200 alone is not open status/);
+    assert.ok(f.prompts[0].endsWith(JSON.stringify({ url: WORKDAY_ORIGINAL })));
+    assert.equal(f.persisted[0].url, WORKDAY_ORIGINAL); assert.equal(f.tokens, 0);
+  }
+  for (const [state, value] of [['boolean', false], ['absent', undefined], ['invalid', undefined]]) {
+    const sourcePacket = workdaySourcePacket(state, value), f = fixture(t, { sourcePacket, gate: true });
+    const response = await POST(f.request()); const events = (await response.text()).trim().split('\n').map(JSON.parse);
+    const observed = f.prompts[0].split('\n').find(line => line.startsWith('{"originalURL":'));
+    assert.ok(observed, 'actual prompt contains the source packet');
+    assert.deepEqual(JSON.parse(observed).jobData.sourceFacts, sourcePacket.result.sourceFacts);
+    assert.equal(f.persisted.length, 0); assert.equal(events.some(e => e.type === 'done'), false); assert.equal(f.tokens, 0);
+  }
 });

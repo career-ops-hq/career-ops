@@ -22,6 +22,26 @@ function substantiveBody(text) {
   return blocks.join('\n\n').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Only known, bounded fields from Workday's parsed jobPostingInfo survive.
+// They remain untrusted source data; this is not an open/eligible verdict.
+function workdaySourceFacts(value) {
+  if (!value || value.type !== 'workday-cxs' || !['boolean', 'absent', 'invalid'].includes(value.canApplyState)
+      || !value.jobPostingInfo || typeof value.jobPostingInfo !== 'object' || Array.isArray(value.jobPostingInfo)) return null;
+  const info = value.jobPostingInfo, jobPostingInfo = {};
+  const hasCanApply = Object.hasOwn(info, 'canApply');
+  if (value.canApplyState === 'boolean') {
+    if (!hasCanApply || typeof info.canApply !== 'boolean') return null;
+    jobPostingInfo.canApply = info.canApply;
+  } else if (hasCanApply) return null;
+  for (const [field, limit] of [['title', 1000], ['jobReqId', 300], ['externalPath', 2048]]) {
+    if (!Object.hasOwn(info, field)) continue;
+    const item = info[field];
+    if (typeof item !== 'string' || !item.trim() || item.length > limit || /[\u0000-\u001f\u007f-\u009f]/u.test(item)) return null;
+    jobPostingInfo[field] = item;
+  }
+  return { type: 'workday-cxs', canApplyState: value.canApplyState, jobPostingInfo };
+}
+
 /** Validate backend-child facts before any packet reaches a prompt. */
 export function evaluationSourceEvidence(packet, originalURL) {
   if (!packet || packet.version !== 1 || packet.originalURL !== originalURL || packet.textCap !== TEXT_CAP
@@ -48,10 +68,11 @@ export function evaluationSourceEvidence(packet, originalURL) {
       || typeof source.text !== 'string' || source.text.length >= TEXT_CAP || source.text.trimEnd().endsWith('…')
       || substantiveBody(source.text).length < 200 || /^(?:you need to enable javascript|enable javascript to|access denied|just a moment)[.!\s]*$/i.test(substantiveBody(source.text))
       || requests.at(-1)?.httpStatus !== 200 || !requests.at(-1)?.finalURL) return evidence;
+  const facts = source.ats === 'workday' ? workdaySourceFacts(source.sourceFacts) : null;
   return { ...evidence, outcome: 'available', ats: source.ats,
-    // All job text remains untrusted. Transport 200 and an exact normalizer
-    // match do not assert isListed/canApply, eligibility or browser verification.
-    jobData: { title: source.title, text: source.text }, observedTextLength: source.text.length };
+    // Source facts remain untrusted, including an observed canApply boolean.
+    // Transport 200 alone never asserts open status, eligibility or verification.
+    jobData: { title: source.title, text: source.text, ...(facts ? { sourceFacts: facts } : {}) }, observedTextLength: source.text.length };
 }
 
 /** One anonymous native read, in an isolated process, before the model starts.

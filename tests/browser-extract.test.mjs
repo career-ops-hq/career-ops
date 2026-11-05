@@ -210,6 +210,37 @@ try {
     fail(`normalizeWorkdayJob canApply => ${JSON.stringify(closed)}`);
   }
 
+
+  // Actual CXS fields must survive normalization, without inventing openness.
+  const factsUrl = 'https://fictional.wd1.myworkdayjobs.com/External/job/Remote/Fictional-Manager_R123456';
+  for (const [label, supplied, value, state] of [
+    ['true', true, true, 'boolean'], ['false', true, false, 'boolean'],
+    ['absent', false, undefined, 'absent'], ['null', true, null, 'invalid'],
+    ['string', true, 'true', 'invalid'],
+  ]) {
+    const info = { title: '  Fictional Manager  ', jobDescription: '<p>Own a fictional product.</p>',
+      jobReqId: 'R123456', externalPath: '/job/Remote/Renamed-Fictional-Manager_R123456',
+      privateField: 'fictional-not-forwarded', ...(supplied ? { canApply: value } : {}) };
+    const normalized = normalizeWorkdayJob({ jobPostingInfo: info }, factsUrl);
+    const facts = normalized?.sourceFacts;
+    if (normalized?.url === factsUrl && facts?.type === 'workday-cxs' && facts.canApplyState === state
+        && facts.jobPostingInfo.title === info.title && facts.jobPostingInfo.jobReqId === 'R123456'
+        && facts.jobPostingInfo.externalPath === info.externalPath
+        && (state === 'boolean' ? facts.jobPostingInfo.canApply === value : !Object.hasOwn(facts.jobPostingInfo, 'canApply'))
+        && !JSON.stringify(facts).includes('fictional-not-forwarded') && !Object.hasOwn(facts, 'open')
+        && normalized.text.includes('Applications closed') === (value === false)) {
+      pass(`Workday parsed ${label} canApply and actual identity fields survive without inferred open status`);
+    } else fail(`Workday ${label} source facts => ${JSON.stringify(normalized)}`);
+  }
+  const boundedFacts = normalizeWorkdayJob({ jobPostingInfo: { title: 'x'.repeat(1001), jobReqId: 'r'.repeat(301),
+    externalPath: '/' + 'p'.repeat(2048), jobDescription: '<p>Fictional description.</p>' } }, factsUrl)?.sourceFacts;
+  const controlFacts = normalizeWorkdayJob({ jobPostingInfo: { title: 'Fictional\nManager', jobReqId: 'R\u0000123',
+    externalPath: '/job/\u007f', jobDescription: '<p>Fictional description.</p>' } }, factsUrl)?.sourceFacts;
+  if (boundedFacts?.canApplyState === 'absent' && Object.keys(boundedFacts.jobPostingInfo).length === 0
+      && controlFacts?.canApplyState === 'absent' && Object.keys(controlFacts.jobPostingInfo).length === 0) {
+    pass('Workday metadata is bounded and absent canonical paths are never synthesized');
+  } else fail(`Workday malformed metadata => ${JSON.stringify({ boundedFacts, controlFacts })}`);
+
   // Anything that isn't a job payload, or carries no description, returns null
   // so the caller falls through to the browser instead of emitting an empty JD.
   const nulls = [

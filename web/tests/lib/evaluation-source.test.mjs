@@ -160,3 +160,43 @@ test('setup/stdin exceptions stop an already-started reader and wait for its clo
   const result = await readEvaluationSource({ kind: 'evaluate', input: ORIGINAL, root: '/fixture', spawnFn: () => { throw Error('no child spawned'); } });
   assert.equal(result.reason, 'helper_failed');
 });
+
+
+const WORKDAY = 'https://fictional.wd1.myworkdayjobs.com/External/job/Remote/Fictional-Manager_R123456';
+const WORKDAY_API = 'https://fictional.wd1.myworkdayjobs.com/wday/cxs/fictional/External/job/Remote/Fictional-Manager_R123456';
+const WORKDAY_INFO = { title: 'Fictional Manager', jobReqId: 'R123456', externalPath: '/job/Remote/Renamed-Fictional-Manager_R123456' };
+function workdayPacket(facts) {
+  const p = packet(); p.originalURL = p.result.url = WORKDAY; p.result.ats = 'workday';
+  p.transport.requests[0].requestURL = p.transport.requests[0].finalURL = WORKDAY_API;
+  if (facts !== undefined) p.result.sourceFacts = facts;
+  return p;
+}
+test('Workday source facts retain actual booleans and distinguish missing/invalid without an open verdict', () => {
+  for (const [state, value] of [['boolean', true], ['boolean', false], ['absent', undefined], ['invalid', undefined]]) {
+    const info = { ...WORKDAY_INFO, ...(state === 'boolean' ? { canApply: value } : {}) };
+    const facts = { type: 'workday-cxs', canApplyState: state, jobPostingInfo: info };
+    const result = evaluationSourceEvidence(workdayPacket(facts), WORKDAY);
+    assert.deepEqual(result.jobData.sourceFacts, facts); assert.equal(result.outcome, 'available');
+    assert.equal(result.originalURL, WORKDAY); assert.equal('open' in result, false);
+    assert.equal('canApply' in result, false); assert.equal('eligible' in result, false);
+  }
+  assert.equal('sourceFacts' in evaluationSourceEvidence(workdayPacket(), WORKDAY).jobData, false, 'old packets remain compatible');
+});
+test('source facts reject malformed states/fields and whitelist away unrelated vendor data', () => {
+  const base = { type: 'workday-cxs', canApplyState: 'boolean', jobPostingInfo: { ...WORKDAY_INFO, canApply: true } };
+  const invalid = [null, [], { ...base, type: 'other' }, { ...base, canApplyState: 'true' },
+    { ...base, canApplyState: 'absent' }, { ...base, canApplyState: 'invalid' },
+    { ...base, jobPostingInfo: { ...WORKDAY_INFO, canApply: 'true' } },
+    { ...base, jobPostingInfo: { ...WORKDAY_INFO, title: 'x'.repeat(1001), canApply: true } },
+    { ...base, jobPostingInfo: { ...WORKDAY_INFO, externalPath: '/job/\nunsafe', canApply: true } },
+    { ...base, jobPostingInfo: [] }];
+  for (const facts of invalid) {
+    const result = evaluationSourceEvidence(workdayPacket(facts), WORKDAY);
+    assert.equal(result.outcome, 'available', 'malformed optional facts do not erase a substantive JD');
+    assert.equal('sourceFacts' in result.jobData, false);
+  }
+  const extra = { ...base, privateExtra: 'fictional-not-forwarded', jobPostingInfo: { ...base.jobPostingInfo, extra: 'fictional-not-forwarded' } };
+  assert.deepEqual(evaluationSourceEvidence(workdayPacket(extra), WORKDAY).jobData.sourceFacts, base);
+  const otherVendor = packet(); otherVendor.result.sourceFacts = base;
+  assert.equal('sourceFacts' in evaluationSourceEvidence(otherVendor, ORIGINAL).jobData, false);
+});
