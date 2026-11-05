@@ -122,3 +122,27 @@ test("confirmed success does not wait on or fail with the transport after done",
   assert.deepEqual(result, { status: "done", tokens: 42 });
   assert.equal(cancelled, 1);
 });
+
+
+test("an explicit evaluation gate settles without claiming a report or successful score", async () => {
+  const gate = { type: "gated", reason: "dealbreaker", message: "The role requires residence outside your allowed location.", confirmationRequired: true, tokens: 42 };
+  const { result } = await read([record(gate)]);
+  assert.deepEqual(result, { status: "gated", reason: gate.reason, message: gate.message, confirmationRequired: true, tokens: 42 });
+  assert.equal("reportN" in result, false);
+});
+
+test("a gate cannot conceal an earlier terminal error", async () => {
+  const { result } = await read([record({ type: "error", msg: "Worker failed" }) + record({ type: "gated", reason: "dealbreaker", message: "Location conflict", confirmationRequired: true })]);
+  assert.deepEqual(result, { status: "error", message: "Worker failed" });
+});
+
+test("malformed gated events do not confirm a legitimate evaluation stop", async () => {
+  for (const event of [
+    { type: "gated", reason: "dealbreaker", message: "" },
+    { type: "gated", reason: "unknown", message: "Location conflict", confirmationRequired: true },
+    { type: "gated", reason: "dealbreaker", message: "Location conflict", confirmationRequired: "yes" },
+  ]) {
+    const { result } = await read([record(event)]);
+    assert.equal(result.status, "error");
+  }
+});

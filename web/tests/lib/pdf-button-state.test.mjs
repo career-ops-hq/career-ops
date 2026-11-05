@@ -39,3 +39,8 @@ test("a running job links to its log", () => {
 test("no job and no tracker CV is the plain Generate button", () => {
   assert.deepEqual(pdfButtonState(undefined, false), { kind: "idle", failure: null });
 });
+
+
+test("an evaluation stop cannot make a PDF ready", () => {
+  assert.deepEqual(pdfButtonState({ id: "gated", status: "gated", steps: [] }, false), { kind: "idle", failure: null });
+});

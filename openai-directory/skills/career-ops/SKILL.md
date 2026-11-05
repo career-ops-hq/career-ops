@@ -36,6 +36,7 @@ When `PROJECT_ROOT` is a plugin install copy, the session's working folder is no
 - CLIs with slash-command registration can expose this router as `/career-ops`.
 - In Cursor, this skill lives at `.agents/skills/career-ops/` and is auto-discovered; ask for a mode by name, or paste a JD/URL to trigger auto-pipeline.
 - In Pi, this skill is auto-discovered from `.agents/skills/career-ops/` and exposed as `/skill:career-ops`; `AGENTS.md` loads from the repo root as project context, so there is no wrapper file. Headless Pi workers use `pi -p "prompt"`. Project skill discovery follows Pi's per-folder trust decision: `/trust` applies to future Pi processes, so restart `pi` before invoking `/skill:career-ops` (`-a` trusts a single run and needs no restart).
+- In Oh My Pi (omp), this skill is auto-discovered from `.agents/skills/career-ops/` and exposed as `/skill:career-ops`; `.omp/AGENTS.md` imports `AGENTS.md` so the root contract loads. Headless OMP workers use `omp -p "prompt"`.
 - Interactive Codex sessions use `codex` in the repo root. Slash commands are not guaranteed in Codex, so ask Codex to run the same mode by name if `/career-ops` is unavailable.
 - Headless Codex workers use `codex exec "prompt"`.
 - The routing semantics below stay the same regardless of whether the entrypoint is a slash command or a natural-language prompt.
@@ -160,7 +161,7 @@ career-ops -- AI Job Search Agent
 Available commands:
   /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
   /career-ops pipeline  → Process pending URLs from inbox (data/pipeline.md)
-  /career-ops oferta    → Evaluation only A-H (no auto PDF)
+  /career-ops oferta    → Evaluation only: blocks A-G always, Block H at or above 4.5 (no auto PDF)
   /career-ops ofertas   → Compare and rank multiple offers
   /career-ops contacto  → LinkedIn power move: find contacts + draft message
   /career-ops deep      → Deep research prompt about company
@@ -168,7 +169,7 @@ Available commands:
   /career-ops interview    → Interactive profile/CV onboarding interview
   /career-ops master-profile → Import, review, and validate your Master Career Profile
   /career-ops intake    → Build or enrich your profile from documents/ (master CV, LinkedIn export; nothing written without confirm)
-  /career-ops retro     → Review this session and keep what you taught it as rules (writes only the ids you accept)
+  /career-ops retro     → Save the proposals, then apply only accepted ids to the rule files
   /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
