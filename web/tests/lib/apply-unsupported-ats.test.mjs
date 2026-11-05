@@ -200,7 +200,7 @@ test("tryApplyTrigger does not follow a Workday href", async () => {
   const workday = "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role";
   const { page, gotos, clicks } = pageForTrigger({ atsHref: workday, applyHref: workday });
   const acted = await tryApplyTrigger(page);
-  assert.equal(acted, false);
+  assert.deepEqual(acted, { blocked: workday });
   assert.deepEqual(gotos, []);
   assert.deepEqual(clicks, []);
 });
@@ -209,7 +209,7 @@ test("tryApplyTrigger does not click an Apply link whose href is UKG", async () 
   const ultipro = "https://acme.ultipro.com/jobs/1";
   const { page, gotos, clicks } = pageForTrigger({ applyHref: ultipro });
   const acted = await tryApplyTrigger(page);
-  assert.equal(acted, false);
+  assert.deepEqual(acted, { blocked: ultipro });
   assert.deepEqual(gotos, []);
   assert.deepEqual(clicks, []);
 });

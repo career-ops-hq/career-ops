@@ -86,31 +86,33 @@ export async function dropNewTabs(page: Page): Promise<void> {
   }
 }
 
-/** Resolved http(s) href that the in-app filler must not open. */
-async function blockedTriggerHref(page: Page, href: string | null): Promise<boolean> {
-  if (!href) return false;
+/** Absolute posting URL when this href is Workday, iCIMS, or UKG. */
+async function blockedTriggerHref(page: Page, href: string | null): Promise<string | null> {
+  if (!href) return null;
   let abs = href;
   try {
     abs = new URL(href, page.url()).href;
   } catch {
-    return false;
+    return null;
   }
-  return (await unsupportedInAppAts(abs)) != null;
+  const hit = await unsupportedInAppAts(abs);
+  return hit ? hit.postingUrl : null;
 }
 
 /** SPA / apply-behind-a-button: if no form yet, click the first visible Apply CTA
  *  (NEVER a submit) to reveal the form. If it's an <a> with an application href,
  *  NAVIGATE there directly (robust vs popups). Returns true if it acted.
- *  A Workday, iCIMS, or UKG href is not followed: that click is the second window. */
-export async function tryApplyTrigger(page: Page): Promise<boolean> {
+ *  A Workday, iCIMS, or UKG href is returned as `{ blocked }` and is not opened. */
+export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: string }> {
   try {
     // 1) Most reliable: an <a> linking straight to a known ATS application (e.g.
     //    openai.com → jobs.ashbyhq.com/…/application). Navigate there in-tab.
-    const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="/apply"], a[href*="/application"]').first();
+    const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]').first();
     if (await atsLink.count().catch(() => 0)) {
       const href = await atsLink.getAttribute("href").catch(() => null);
       if (href && /^https?:\/\//i.test(href) && !/submit/i.test(href)) {
-        if (await blockedTriggerHref(page, href)) return false;
+        const blocked = await blockedTriggerHref(page, href);
+        if (blocked) return { blocked };
         await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
         return true;
       }
@@ -125,7 +127,8 @@ export async function tryApplyTrigger(page: Page): Promise<boolean> {
       const label = (await t.innerText().catch(() => "")).toLowerCase();
       if (/submit|applied|withdraw/.test(label)) return false;
       const href = await t.getAttribute("href").catch(() => null);
-      if (await blockedTriggerHref(page, href)) return false;
+      const blocked = await blockedTriggerHref(page, href);
+      if (blocked) return { blocked };
       await t.click({ timeout: 3000 }).catch(() => {});
       return true;
     }

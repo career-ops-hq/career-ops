@@ -265,12 +265,22 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     await page.waitForTimeout(400);
     ({ frame, form } = await pickFormFrame(page));
   }
-  if (!noApplyBtn && !looksLikeApplicationForm(form) && (await tryApplyTrigger(page))) {
-    await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
-    await page.waitForTimeout(800);
-    await dropNewTabs(page);
-    ({ frame, form } = await pickFormFrame(page));
-    await snap();
+  if (!noApplyBtn && !looksLikeApplicationForm(form)) {
+    const trigger = await tryApplyTrigger(page);
+    // The Apply control points at Workday, iCIMS, or UKG. Close this window
+    // instead of following it or handing the page to the drive agent.
+    if (trigger && typeof trigger === "object") {
+      const hit = await unsupportedInAppAts(trigger.blocked);
+      await context.close().catch(() => {});
+      if (SESSIONS.size === 0) scheduleIdleClose();
+      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit.label) };
+    } else if (trigger) {
+      await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
+      await page.waitForTimeout(800);
+      await dropNewTabs(page);
+      ({ frame, form } = await pickFormFrame(page));
+      await snap();
+    }
   }
   await enrichFromAts(url, form.fields); // clean labels + real options for known ATS (Greenhouse)
   await snap();
