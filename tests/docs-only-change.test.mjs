@@ -65,9 +65,10 @@ function tempDir() {
 after(() => { for (const dir of sandboxes) rmSync(dir, { recursive: true, force: true }); });
 
 // A hook or an outer git process exports these, and they would aim every
-// command below at the real repository.
+// command below at the real repository. Removed from process.env itself because
+// classifyCheckout runs in this process and its git calls inherit it.
+for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX']) delete process.env[name];
 const GIT_ENV = { ...process.env };
-for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX']) delete GIT_ENV[name];
 
 function git(cwd, ...args) {
   return execFileSync('git', [
