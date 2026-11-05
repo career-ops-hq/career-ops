@@ -46,6 +46,11 @@ function isPositiveTracking(value) {
   return Number.isFinite(amount) && amount > 0;
 }
 
+function markup(html) {
+  const close = html.lastIndexOf("</style>");
+  return close === -1 ? html : html.slice(close);
+}
+
 function assertReadable(name, html) {
   const rules = cssRules(html);
   for (const wanted of MATCHABLE) {
@@ -76,15 +81,17 @@ test("Compact and Executive keep matchable strings in reading order", () => {
   assert.doesNotMatch(section.body, /display\s*:\s*flex/i);
   assert.doesNotMatch(section.body, /column-count/i);
 
-  for (const [title, body] of [
-    ["{{SECTION_SUMMARY}}", "summary-text"],
-    ["{{SECTION_EXPERIENCE}}", "experience-body"],
-    ["{{SECTION_SKILLS}}", "skills"],
+  for (const [file, title, body] of [
+    [compact, "{{SECTION_SUMMARY}}", "summary-text"],
+    [compact, "{{SECTION_EXPERIENCE}}", "experience-body"],
+    [compact, "{{SECTION_SKILLS}}", "skills-body"],
+    [executive, "{{SECTION_SUMMARY}}", "{{SUMMARY_TEXT}}"],
+    [executive, "{{SECTION_EXPERIENCE}}", "{{EXPERIENCE}}"],
+    [executive, "{{SECTION_SKILLS}}", "{{SKILLS}}"],
   ]) {
-    for (const html of [compact, executive]) {
-      const titleAt = html.indexOf(title);
-      const bodyAt = html.indexOf(body);
-      assert.ok(titleAt !== -1 && bodyAt !== -1 && titleAt < bodyAt, `${title} precedes ${body}`);
-    }
+    const html = markup(file);
+    const titleAt = html.indexOf(title);
+    const bodyAt = html.indexOf(body);
+    assert.ok(titleAt !== -1 && bodyAt !== -1 && titleAt < bodyAt, `${title} precedes ${body}`);
   }
 });

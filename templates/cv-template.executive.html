@@ -11,7 +11,7 @@ version: 1.0.0
   /* ── Executive ────────────────────────────────────────────────────────────
      A conservative, serif, print-first CV for senior/executive applications
      (banks, funds, traditional enterprises). No colour fills, no tags, no
-     gradients — hierarchy comes from a centred header, ruled small-caps section
+     gradients. Hierarchy comes from a centred header and ruled uppercase section
      headings, and generous leading.
 
      ATS discipline is identical to templates/cv-template.html and is NOT
@@ -90,7 +90,7 @@ version: 1.0.0
   .header h1 {
     font-size: 25px;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     text-transform: uppercase;
     color: var(--accent-color);
     line-height: 1.15;
@@ -99,7 +99,7 @@ version: 1.0.0
   .header-title {
     font-size: 13px;
     font-weight: 600;
-    letter-spacing: 0.14em;
+    letter-spacing: 0;
     text-transform: uppercase;
     color: #555;
     margin-top: 3px;
@@ -140,8 +140,8 @@ version: 1.0.0
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    /* Wide tracking splits section names in the PDF text layer. */
-    letter-spacing: 0.04em;
+    /* Tracking above zero splits these words in the PDF text layer. */
+    letter-spacing: 0;
     color: var(--accent-color);
     border-bottom: 0.75px solid #c4ccd6;
     padding-bottom: 2px;

@@ -20,10 +20,10 @@ version: 1.0.0
      and ligatures disabled (headless Chromium otherwise emits U+FB01/FB02 and a
      literal keyword search for "verification" misses "veriﬁcation").
 
-     Single-column by design. The label rail is a flex row inside each section,
-     not a page-level column, so PDF text extraction still reads strictly
-     top-to-bottom — multi-column page layouts are the classic ATS parse
-     failure and are deliberately avoided. */
+     Single-column by design. Each section stacks its label above the body.
+     A flex row put the label and the body on one visual line, and pdftotext
+     read that line as one string. Multi-column page layouts are the classic
+     ATS parse failure and are deliberately avoided. */
 
   :root {
     --accent-color: hsl(222 47% 34%);
@@ -32,7 +32,6 @@ version: 1.0.0
     /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
        appended later by injectPrintPageCss reading this same variable. */
     --page-margin: 0.6in;
-    --rail-width: 96px;
     /* #3242: unchanged default — see templates/cv-template.html. */
     --job-break-inside: auto;
     /* Whether a Projects entry may split across a page break. Unchanged
@@ -104,7 +103,7 @@ version: 1.0.0
     font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0;
     color: var(--accent-color);
     margin-top: 2px;
     line-height: 1.2;
@@ -134,9 +133,8 @@ version: 1.0.0
   }
 
   /* === SECTIONS ===
-     Each section is a two-part flex row: a fixed label rail on the left and the
-     content on the right. This removes a full line of vertical space per
-     section versus a stacked heading. */
+     The label sits on its own line above the body. A side rail shared the
+     body's first line, and text extractors glued the two together. */
   /* Tight section spacing (6px) and .job spacing (5px) below are what make this
      template worth using; they are not enough on their own to force a one-pager.
      Measured with the full 22-bullet master payload: this renders 2 pages, and
@@ -148,28 +146,21 @@ version: 1.0.0
      fewer lines and understates the height, which is how the 2-page result gets
      missed. */
   .section {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
+    display: block;
     margin-bottom: 6px;
   }
 
   .section-title {
-    flex: 0 0 var(--rail-width);
-    width: var(--rail-width);
+    display: block;
     font-size: 8.5px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.09em;
+    letter-spacing: 0;
     color: var(--accent-color);
-    padding-top: 1.5px;
-    border-right: 1px solid #d8dde5;
-    padding-right: 8px;
-    text-align: right;
+    border-bottom: 1px solid #d8dde5;
+    padding-bottom: 1px;
+    margin-bottom: 3px;
   }
-
-  /* Every direct sibling of the rail is the content column. */
-  .section > *:not(.section-title) { flex: 1 1 auto; min-width: 0; }
 
   .summary-text { text-align: justify; }
 
@@ -380,11 +371,7 @@ version: 1.0.0
     font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
   }
   html[lang="ar"] .section-title {
-    border-right: none;
-    border-left: 1px solid #d8dde5;
-    padding-right: 0;
-    padding-left: 8px;
-    text-align: left;
+    text-align: right;
   }
   html[lang="ar"] .job ul { padding-right: 13px; padding-left: 0; }
   html[lang="ar"] .cv-photo { float: left; margin: 0 10px 6px 0; }
