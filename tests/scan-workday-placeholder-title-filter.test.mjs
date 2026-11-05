@@ -99,3 +99,14 @@ test('a company whose filter_on leaves out the title still resolves every placeh
   assert.equal(details.length, 3, out);
   assert.match(out, /resolved 3 of 3 multi-location placeholder\(s\)/);
 });
+
+test('with rescue_title_misses, a title miss that content may keep still resolves its placeholder (#6020)', () => {
+  const { out, details } = runScan(`title_filter:\n  positive:\n    - "Engineer"\n  negative:\n    - "Payroll"\ncontent_filter:\n  positive: ["ledger"]\n  rescue_title_misses: true\n${company}`);
+  // Staff Accountant misses the title but is not vetoed, so its real locations
+  // are fetched before location_filter and the content check see it. Payroll
+  // Specialist hits title_filter.negative and is still skipped.
+  assert.deepEqual(details, [
+    `GET ${CXS}/job/USA---Austin-TX/Platform-Engineer_R1`,
+    `GET ${CXS}/job/USA---Austin-TX/Staff-Accountant_R2`,
+  ], out);
+});

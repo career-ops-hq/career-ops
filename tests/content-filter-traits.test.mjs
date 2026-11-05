@@ -274,7 +274,9 @@ function scan(contentFilterYaml, jobs, { titleFilterYaml = ['title_filter:', '  
     ].join('\n'));
     const r = spawnSync(NODE, ['--import', pathToFileURL(preload).href, join(ROOT, 'scan.mjs'), ...args], {
       cwd: dir, encoding: 'utf-8', timeout: 30000,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals, CAREER_OPS_PROFILE: profile },
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals, CAREER_OPS_PROFILE: profile,
+        // Empty, so a caller's own pipeline lane or history file is never written to.
+        CAREER_OPS_PIPELINE: '', CAREER_OPS_SCAN_HISTORY: '' },
     });
     const read = (name) => (existsSync(join(dir, 'data', name)) ? readFileSync(join(dir, 'data', name), 'utf-8') : '');
     const urls = read('pipeline.md').split('\n').map(l => l.match(/^- \[[ x]\]\s+(https?:\/\/\S+)/)?.[1]).filter(Boolean);
