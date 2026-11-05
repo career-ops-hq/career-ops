@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// docs-only-change: does this CI run's change touch nothing but documentation? (#6402)
+// docs-only-change: does this CI run's change touch nothing but documentation? (#6402, #5723)
 //
 // .github/workflows/test.yml reads the answer to skip the jobs a prose edit
 // cannot affect. Every doubt answers "no", because "no" only costs runner time
@@ -9,6 +9,7 @@
 // could not read, and it reports a failure to decide as docs_only=false.
 //
 // Env: GITHUB_OUTPUT (the step's output file; absent when run by hand)
+//      MERGE_GROUP_BASE_SHA (github.event.merge_group.base_sha; empty on a pull_request)
 
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
@@ -52,25 +53,37 @@ export function changedFiles(base, head, cwd) {
 }
 
 /**
- * The answer for a pull_request checkout, which is GitHub's test merge of the PR
- * into its base (needs fetch-depth: 2 for the parents to be on disk). Comparing
+ * The answer for the checkout CI has (fetch-depth: 2, so a commit's parents are
+ * on disk).
+ *
+ * pull_request: HEAD is GitHub's test merge of the PR into its base. Comparing
  * with the first parent gives exactly what the PR would change. Comparing with
  * event.pull_request.base.sha would also list whatever landed on the base since
  * that event was built.
+ *
+ * merge_group: HEAD is the entry's commit and the base is the commit it was built
+ * on, which is the head of the entry ahead of it, not main. So the diff is this
+ * entry's own change, even behind a code entry. That is safe to skip on: the code
+ * entry runs all three OSes on its own head, and this entry merges only if that
+ * passes (grouping_strategy: ALLGREEN). A base that is not on disk (a group of
+ * several commits, under a merge method other than squash) fails the diff, which
+ * answers false.
  *
  * Never throws: failing to decide is reported as not docs-only.
  *
  * @returns {{ docsOnly: boolean, reason: string }}
  */
-export function classifyCheckout(cwd = process.cwd()) {
-  try {
-    git(['rev-parse', '--verify', '--quiet', 'HEAD^2'], cwd);
-  } catch {
-    // With a single parent, HEAD^1 is one commit of the PR, not its base.
-    return { docsOnly: false, reason: 'HEAD is not a merge commit, so its base is unknown' };
+export function classifyCheckout(cwd = process.cwd(), mergeGroupBase = process.env.MERGE_GROUP_BASE_SHA) {
+  if (!mergeGroupBase) {
+    try {
+      git(['rev-parse', '--verify', '--quiet', 'HEAD^2'], cwd);
+    } catch {
+      // With a single parent, HEAD^1 is one commit of the PR, not its base.
+      return { docsOnly: false, reason: 'HEAD is not a merge commit, so its base is unknown' };
+    }
   }
   try {
-    const files = changedFiles('HEAD^1', 'HEAD', cwd);
+    const files = changedFiles(mergeGroupBase || 'HEAD^1', 'HEAD', cwd);
     if (isDocsOnly(files)) return { docsOnly: true, reason: `${files.length} docs file(s) changed` };
     const other = files.find((file) => !isDocsPath(file));
     // The name comes from the PR, so it is quoted: a raw name could start a
@@ -84,7 +97,7 @@ export function classifyCheckout(cwd = process.cwd()) {
 function main() {
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log('Usage: node .github/scripts/docs-only-change.mjs\n\n'
-      + 'Run from a pull_request merge checkout. Prints why, and writes docs_only=true|false to $GITHUB_OUTPUT.');
+      + 'Run from a CI checkout of a pull_request or merge_group event. Prints why, and writes docs_only=true|false to $GITHUB_OUTPUT.');
     return;
   }
   const { docsOnly, reason } = classifyCheckout();
