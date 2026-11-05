@@ -1038,6 +1038,8 @@ npm run liveness -- --no-record https://a.com/job/1     # check without writing 
 
 Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
 
+The headed retry on an anti-bot wall runs only when the site's `robots.txt` permits the path (`robots-check.mjs`, #5776). It is read once per host per run, as `career-ops`, and it fails closed: only a policy that allows the path, a 404/410 or an empty file lets the retry run, while a 401/403, 5xx, timeout, unresolvable or private host, or a 200 that is not a robots.txt skips it. A skipped retry keeps the headless `uncertain` verdict, with `(headed retry skipped: robots.txt …)` added to its reason, so it never turns a posting into `expired`. The first, headless request is not gated. `scan --verify --headed-fallback` applies the same gate.
+
 An `expired` verdict is also written to `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead stops resurfacing in the web "new matches this week" feed. Only URLs the history already knows get a row, and each gets one until it is relisted. An `uncertain` verdict writes nothing. That includes a short page with no closure notice, no 404/410 and no apply control (`insufficient_content`): it is usually a posting that has not rendered yet, so it reads `uncertain`, not `expired`. `--no-record` makes the run leave no trace.
 
 **Exit codes:** `0` all URLs active, `1` any expired or uncertain.

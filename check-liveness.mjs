@@ -29,6 +29,7 @@ import {
   sleep,
 } from './liveness-browser.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
+import { robotsAllows } from './robots-check.mjs';
 import { planExpiredHistoryRows, trackerLivenessTargets, DEFAULT_TRACKER_STATUSES, planExpiredDiscards, postingClosedNote, DEFAULT_DISCARD_STATUSES, discardableExpiredUrls } from './liveness-core.mjs';
 import { appendToScanHistory, normalizeUrlForDedup, SCAN_HISTORY_PATH } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -364,7 +365,7 @@ async function main() {
         if (wait) await sleep(wait);
         const getHeadedPage = headed ? () => headed.get() : undefined;
         try {
-          ({ result, reason, code } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage }));
+          ({ result, reason, code } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage, robotsGate: robotsAllows }));
         } finally {
           // A failed visit counts too: that is when a WAF is most likely involved.
           spacer.visited(url);

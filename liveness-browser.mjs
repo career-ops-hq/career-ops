@@ -870,10 +870,30 @@ export function createHeadedPageProvider(chromium, browserContext = {}) {
 // blocked by an anti-bot wall. The headed result wins when it actually sees the
 // page; if the retry is still blocked (or no headed page is available) the
 // original uncertain result is kept — we never upgrade a block to expired.
-export async function checkUrlLivenessWithFallback(page, url, { getHeadedPage } = {}) {
+//
+// `robotsGate(url) -> { allowed, reason }` (robots-check.mjs robotsAllows in
+// both real callers) is consulted only once the headless result is a
+// challenge, and before a headed page is asked for, so a site whose robots.txt
+// does not permit the path never gets the headed retry, which exists only to
+// get past its bot wall (#5776). A skip keeps the headless verdict, result and
+// code unchanged, with the reason extended: it can drop an escalation, never a
+// posting, because `uncertain` is never recorded as expired. A gate that throws
+// counts as a skip. With no gate passed, the retry runs as it always did.
+export async function checkUrlLivenessWithFallback(page, url, { getHeadedPage, robotsGate } = {}) {
   const first = await checkUrlLiveness(page, url);
   if (!getHeadedPage || !isChallengeResult(first)) {
     return first;
+  }
+  if (robotsGate) {
+    let gate;
+    try {
+      gate = await robotsGate(url);
+    } catch (err) {
+      gate = { allowed: false, reason: `check failed (${String(err?.message ?? err).split('\n')[0]})` };
+    }
+    if (gate?.allowed !== true) {
+      return { ...first, reason: `${first.reason} (headed retry skipped: robots.txt ${gate?.reason ?? 'gave no verdict'})` };
+    }
   }
   const headedPage = await getHeadedPage();
   if (!headedPage) {

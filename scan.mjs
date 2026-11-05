@@ -85,6 +85,7 @@ import { sectionKind } from './lib/pipeline-sections.mjs';
 import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
+import { robotsAllows } from './robots-check.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -4019,6 +4020,8 @@ export function progressTicker(total, { every = PROGRESS_EVERY, write = (line) =
 export async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0, rediscover = false } = {}, {
   checkApi = checkLivenessViaApi,
   loadPlaywright = () => import('playwright'),
+  // Consulted before each headed retry (#5776); see robots-check.mjs.
+  robotsGate = robotsAllows,
 } = {}) {
   // These helpers do not import Playwright. In particular, apply the same URL
   // guard before the API rung: an embedded ATS id must not bless a private URL.
@@ -4087,7 +4090,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
     return page;
   }
   const checkPage = (page, url) => headed
-    ? checkUrlLivenessWithFallback(page, url, { getHeadedPage: () => headed.get() })
+    ? checkUrlLivenessWithFallback(page, url, { getHeadedPage: () => headed.get(), robotsGate })
     : checkUrlLiveness(page, url);
 
   // Two permanent buckets, one observational, one transient passthrough:

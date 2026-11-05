@@ -238,11 +238,35 @@ await test('headed fallback stays lazy and cleans up both browsers after a chall
   const result = await verifyOffers([item], { headedFallback: true }, {
     checkApi: async () => null,
     loadPlaywright: harness.loadPlaywright,
+    // The robots.txt gate (#5776) is on by default; answer it here so the test
+    // never reaches the network.
+    robotsGate: async () => ({ allowed: true, code: 'robots_allowed', reason: 'permits /jobs/challenge for career-ops' }),
   });
   assert.deepEqual(result.verified, [item]);
   assert.deepEqual(harness.state.launches, [true, false]);
   assert.deepEqual(harness.state.navigations.map(({ headless }) => headless), [true, false]);
   assert.equal(harness.state.closes, 2);
+});
+
+await test('a robots.txt that does not permit the path skips the headed retry and keeps the offer', async () => {
+  const item = offer('https://example.com/jobs/challenge');
+  const harness = browserHarness({ [item.url]: (headless) => headless ? { status: 403 } : {} });
+  const gated = [];
+  const result = await verifyOffers([item], { headedFallback: true }, {
+    checkApi: async () => null,
+    loadPlaywright: harness.loadPlaywright,
+    robotsGate: async (url) => {
+      gated.push(url);
+      return { allowed: false, code: 'robots_disallowed', reason: 'disallows /jobs/challenge for career-ops' };
+    },
+  });
+  assert.deepEqual(gated, [item.url], 'the gate is asked once, for the challenged URL');
+  assert.deepEqual(harness.state.launches, [true], 'the headed browser never launches');
+  assert.deepEqual(harness.state.navigations.map(({ headless }) => headless), [true]);
+  assert.deepEqual(result.verified, [item], 'a skipped retry keeps the offer, it never expires it');
+  assert.deepEqual(result.expired, []);
+  assert.equal(result.verificationStatusByOffer.get(item), 'uncertain');
+  assert.equal(harness.state.closes, 1);
 });
 
 await test('API HTTP-gone rediscovery verifies the new URL and still throttles the next browser offer', async () => {
