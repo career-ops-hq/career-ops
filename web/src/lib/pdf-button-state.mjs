@@ -1,3 +1,5 @@
+import { cvDiskState } from "./cv-disk-state.mjs";
+
 /**
  * @typedef {{ id: string, status: "running" | "done" | "error", steps: { kind: string, label: string }[] }} PdfJob
  * @typedef {{ jobId: string, reason: string } | null} PdfFailure
@@ -5,14 +7,15 @@
  */
 
 /**
- * @param {PdfJob | undefined} job the latest pdf job for this application
- * @param {boolean} pdfReady the tracker already lists a tailored CV
+ * @param {PdfJob | undefined} job
+ * @param {boolean} onDisk
  * @returns {PdfButtonState}
  */
-export function pdfButtonState(job, pdfReady) {
+export function pdfButtonState(job, onDisk) {
   if (job?.status === "running") return { kind: "running", jobId: job.id };
   const failure = job?.status === "error" ? { jobId: job.id, reason: failureReason(job) } : null;
-  return { kind: pdfReady || job?.status === "done" ? "ready" : "idle", failure };
+  const disk = cvDiskState({ onDisk, jobFinished: job?.status === "done" });
+  return { kind: disk.exists ? "ready" : "idle", failure };
 }
 
 /** @param {PdfJob} job */

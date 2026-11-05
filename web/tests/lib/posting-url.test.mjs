@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { firstMarkdownLinkTarget, postingHref, postingLabel, readTrackerUrl, resolvePostingUrl, soleMarkdownLinkTarget } from "../../src/lib/posting-url.mjs";
+import { applyPostingUrl, firstMarkdownLinkTarget, postingHref, postingLabel, readTrackerUrl, resolvePostingUrl, soleMarkdownLinkTarget } from "../../src/lib/posting-url.mjs";
 import { extractCellUrl, firstLinkTarget, soleMarkdownLink } from "../../../tracker-parse.mjs";
 
 test("readTrackerUrl returns the href and leaves a non-link cell unchanged", () => {
@@ -32,6 +32,15 @@ test("resolvePostingUrl prefers the tracker cell", () => {
   );
   assert.equal(resolvePostingUrl("—", "https://jobs.example.com/report"), "https://jobs.example.com/report");
   assert.equal(resolvePostingUrl("", ""), "");
+});
+
+test("applyPostingUrl prefers the report field, then the tracker", () => {
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://jobs.example.com/tracker"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(applyPostingUrl("", "https://jobs.example.com/tracker"), "https://jobs.example.com/tracker");
+  assert.equal(applyPostingUrl("not a link", ""), "");
 });
 
 test("readTrackerUrl keeps a value that is already a URL", () => {

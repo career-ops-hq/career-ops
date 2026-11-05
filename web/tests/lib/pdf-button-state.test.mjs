@@ -28,8 +28,12 @@ test("a failed run with no status step still names a failure", () => {
   });
 });
 
-test("a finished run is ready with no failure", () => {
-  assert.deepEqual(pdfButtonState({ id: "job-9", status: "done", steps: [] }, false), { kind: "ready", failure: null });
+test("a finished run with no file on disk is not View tailored CV", () => {
+  assert.deepEqual(pdfButtonState({ id: "job-9", status: "done", steps: [] }, false), { kind: "idle", failure: null });
+});
+
+test("a finished run whose file is on disk is View tailored CV", () => {
+  assert.deepEqual(pdfButtonState({ id: "job-9", status: "done", steps: [] }, true), { kind: "ready", failure: null });
 });
 
 test("a running job links to its log", () => {
