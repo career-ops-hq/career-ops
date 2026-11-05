@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
@@ -37,7 +38,13 @@ if (help.status === 0 && (help.stdout || '').includes('Usage: node img-to-pdf.mj
   fail(`img-to-pdf --help without playwright exited ${help.status}: ${JSON.stringify(`${help.stdout || ''}\n${help.stderr || ''}`.slice(0, 400))}`);
 }
 
-const missing = run([join(tmpdir(), 'no-such-image.png'), join(tmpdir(), 'no-such-output.pdf')]);
+const missingDir = mkdtempSync(join(tmpdir(), 'img-to-pdf-missing-'));
+let missing;
+try {
+  missing = run([join(missingDir, 'no-such-image.png'), join(missingDir, 'no-such-output.pdf')]);
+} finally {
+  rmSync(missingDir, { recursive: true, force: true });
+}
 const missingText = `${missing.stdout || ''}\n${missing.stderr || ''}`;
 if (missing.status === 1 && /Image not found/.test(missingText) && !crashedAtImport(missing)) {
   pass('img-to-pdf reports a missing image without loading playwright');
