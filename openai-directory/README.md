@@ -8,7 +8,7 @@ This is the career-ops plugin for the OpenAI plugin directory, for ChatGPT and C
 
 The plugin adds one skill, `career-ops`. The skill is a router: the modes, scripts and rules it follows live in a career-ops folder on your machine.
 
-On first use the skill looks for an existing career-ops folder: the one named in `CAREER_OPS_ROOT`, then `./career-ops`, then `~/career-ops`. If there is none, it asks you before installing one with `npx @santifer/career-ops@1.38.0 init`. After that, paste a job URL or ask for a mode, for example a portal scan or a tailored CV. <!-- x-release-please-version -->
+On first use the skill looks for an existing career-ops folder: the one named in `CAREER_OPS_ROOT`, then `./career-ops`, then `~/career-ops`. If there is none, it asks you before installing one with `npx @santifer/career-ops@1.39.0 init`. After that, paste a job URL or ask for a mode, for example a portal scan or a tailored CV. <!-- x-release-please-version -->
 
 career-ops needs a local executor: it runs in Codex (the CLI, the IDE extension and the app) and in local threads of the ChatGPT desktop app, which is why the listing says Desktop only. In a chat without local execution the skill can explain career-ops, but it cannot run it.
 
