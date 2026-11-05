@@ -4923,7 +4923,7 @@ if (!existsSync(openrouterRunnerPath)) {
   const openrouterRunner = readFile('openrouter-runner.mjs');
   if (
     openrouterRunner.includes('// Job page content fetcher (Playwright-first, plain fetch fallback)') &&
-    openrouterRunner.includes('browser = await chromium.launch({ headless: true })') &&
+    /browser\s*=\s*await\s+chromium\.launch\(browserLaunchOptions\(\s*\{\s*headless:\s*true\s*\},\s*\{\s*projectRoot:\s*DATA_ROOT,\s*processEnv:\s*BROWSER_PROCESS_ENV\s*\},\s*\)\)/.test(openrouterRunner) &&
     openrouterRunner.includes('falling back to plain fetch.') &&
     openrouterRunner.includes('if (browser) await browser.close().catch(() => {})')
   ) {
@@ -14654,6 +14654,22 @@ try {
       pass('log_discard appends a one-line, auditable {timestamp, id, url, reason} record to batch/logs/discard.log');
     } else {
       fail(`log_discard output malformed: ${JSON.stringify(out)}`);
+    }
+
+    // The helper test above passes even when nothing calls the helper (#6440).
+    // Every filter discard (a literal "skipped" state write) must also log it.
+    const lines = runnerSrc.split('\n');
+    const skipWrites = lines
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => /^\s*update_state_retrying\b.*"skipped"/.test(l));
+    const unlogged = skipWrites.filter(({ i }) =>
+      !lines.slice(i + 1, i + 4).some((l) => /^\s*log_discard\s/.test(l)));
+    if (skipWrites.length === 0) {
+      fail('batch-runner.sh has no "skipped" state write to check for a log_discard call');
+    } else if (unlogged.length) {
+      fail(`batch-runner.sh writes a "skipped" state without calling log_discard at line(s) ${unlogged.map(({ i }) => i + 1).join(', ')}`);
+    } else {
+      pass(`every "skipped" state write in batch-runner.sh calls log_discard (${skipWrites.length} call sites)`);
     }
   }
 

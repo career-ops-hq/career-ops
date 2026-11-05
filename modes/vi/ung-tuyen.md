@@ -17,9 +17,9 @@ Mode tương tác dành cho lúc ứng viên đang điền form ứng tuyển tr
 1. DETECT      → Mở tin trong trình duyệt Playwright của dự án này
 2. IDENTIFY    → Trích công ty + vai trò từ trang
 3. SEARCH      → Đối chiếu với các báo cáo hiện có trong reports/
-4. LOAD        → Đọc báo cáo đầy đủ + Block H / Application Answers (nếu có)
+4. LOAD        → Đọc báo cáo đầy đủ + Block H / Application Answers (nếu có), sau khi **Posting identity** được xác nhận
 4b. TAILORED   → Xác định CV đã điều chỉnh cho báo cáo đó; nó, không phải cv.md, là nguồn cho các trường kinh nghiệm
-5. PREFLIGHT   → Xác nhận tin còn mở + công ty/vai trò khớp trước khi soạn
+5. PREFLIGHT   → Xác nhận tin còn mở + form là tin của báo cáo (**Posting identity**: cùng nhà tuyển dụng, cùng tin; chức danh đổi thì sang Bước 3) trước khi soạn
 5b. PRE-SCAN   → Quét trang tìm câu hỏi loại trực tiếp (bằng cấp, kinh nghiệm, quyền làm việc/visa, bảo lãnh, mức lương sàn)
 6. ANALYZE     → Xác định MỌI câu hỏi đang hiển thị trong form
 7. GENERATE    → Với mỗi câu hỏi, tạo câu trả lời cá nhân hóa
@@ -51,13 +51,23 @@ Trước khi tạo bất kỳ câu trả lời nào, xác minh form vẫn trỏ 
 2. Nếu có URL, xác minh liveness bằng Playwright:
    - bằng chứng còn mở: tiêu đề/vai trò + mô tả hoặc ô form + đường dẫn nộp
    - bằng chứng đã đóng: hết hạn/đã đóng/không còn nhận hồ sơ, không có JD và chỉ còn menu/footer, chuyển hướng cứng về trang tuyển dụng/tìm kiếm chung, hoặc 404/410
-3. So công ty và vai trò hiển thị với báo cáo khớp.
-4. Nếu công ty hay chức danh thay đổi đáng kể, dừng trước khi soạn và hỏi:
-   "Form có vẻ dành cho [công ty hiển thị] — [vai trò hiển thị], nhưng báo cáo khớp là [công ty báo cáo] — [vai trò báo cáo]. Bạn muốn đánh giá lại, điều chỉnh với sự lệch này, hay dừng?"
-5. Nếu tin có vẻ đã đóng, từ chối tạo bản cuối trừ khi ứng viên bỏ qua tường minh với lý do đã biết.
-6. Nếu không xác minh được liveness vì ứng viên chỉ dán câu hỏi hoặc ảnh chụp, nêu giới hạn này và yêu cầu ứng viên xác nhận công ty, vai trò và tin còn mở trước khi soạn.
+3. So công ty và tin tuyển dụng hiển thị với báo cáo khớp (xem **Posting identity** bên dưới).
+4. Nếu danh tính không khớp, báo cáo khớp thuộc về một đơn ứng tuyển khác. Dừng trước khi soạn và hỏi:
+   "Form có vẻ dành cho [công ty hiển thị] — [vai trò hiển thị], không phải tin trong báo cáo khớp, [công ty báo cáo] — [vai trò báo cáo]. Bạn muốn tôi đánh giá tin này như một tin mới, soạn câu trả lời mà không lưu vào báo cáo nào, hay dừng?"
+   - **Evaluate as new** (đánh giá như tin mới): chạy auto-pipeline cho tin hiển thị. Nó ghi báo cáo và dòng tracker riêng; tiếp tục với báo cáo đó.
+   - **Draft without saving** (soạn mà không lưu): gác báo cáo khớp và CV đã điều chỉnh của nó sang một bên trước khi soạn, và chỉ soạn từ tin hiển thị, `cv.md` và hồ sơ của ứng viên. Các block, Block H và CV đã điều chỉnh của báo cáo đó được viết cho tin khác. Bước 8 không ghi `## Application Answers` và Bước 9 không đặt trạng thái nào, vì không có báo cáo nào thuộc về đơn này.
+   - Không bao giờ điều chỉnh câu trả lời của báo cáo khớp cho tin này: chúng được soạn cho tin khác, và lưu vào đó sẽ ghi đè hồ sơ của đơn mà báo cáo đó thuộc về.
+5. Nếu danh tính khớp nhưng chức danh đổi, Bước 3 quyết định: điều chỉnh câu trả lời theo chức danh mới hay đánh giá lại.
+6. Nếu tin có vẻ đã đóng, từ chối tạo bản cuối trừ khi ứng viên bỏ qua tường minh với lý do đã biết.
+7. Nếu không xác minh được liveness vì ứng viên chỉ dán câu hỏi hoặc ảnh chụp, nêu giới hạn này và yêu cầu ứng viên xác nhận công ty, vai trò và tin còn mở trước khi soạn.
 
 Không sang Bước 6 cho đến khi preflight được giải quyết.
+
+**Posting identity (#5854).** Báo cáo khớp và form là cùng một đơn ứng tuyển khi cả hai điều sau đúng:
+- **Cùng nhà tuyển dụng**: công ty hiển thị là công ty của báo cáo, bỏ qua hoa thường và dấu câu, hoặc ứng viên xác nhận đó là cùng nhà tuyển dụng dưới tên khác (công ty con, thương hiệu, tên mới, hoặc agency đăng tuyển cho khách hàng đó).
+- **Cùng tin tuyển dụng**: URL hoặc req ID hiển thị là tin của báo cáo, hoặc ứng viên xác nhận như vậy. Form nộp đơn thường nằm trên host khác với `**URL:**` của báo cáo, nên chỉ đổi host không làm mất khớp. Một req ID khác, hoặc một tin khác ở cùng nhà tuyển dụng, thì có.
+
+Chức danh không thuộc danh tính. Tin được đổi tên sau khi đánh giá vẫn là cùng đơn ứng tuyển, và câu trả lời của nó vẫn thuộc về báo cáo của nó.
 
 ## Bước 5b — Quét sơ bộ câu hỏi loại trực tiếp
 
@@ -91,7 +101,7 @@ Không sang Bước 6 cho đến khi preflight được giải quyết.
 
 1. Trích tên công ty và chức danh từ trang
 2. Tìm trong `reports/` theo tên công ty (grep không phân biệt hoa thường)
-3. Nếu khớp → nạp báo cáo đầy đủ
+3. Nếu khớp → chỉ đọc phần đầu của từng báo cáo khớp (công ty, vai trò, `**URL:**`). Nếu nhiều báo cáo khớp công ty, trước hết so URL hoặc req ID của tin với `**URL:**` của từng báo cáo. Báo cáo có tin khớp là báo cáo đúng, kể cả khi vai trò đã lưu khác: tin có thể đã được đổi tên, và Bước 3 xử lý việc đó. Chỉ dùng vai trò để thu hẹp các báo cáo mà URL hoặc req ID không phân định được. Nếu vẫn còn nhiều hơn một, hỏi ứng viên báo cáo nào thuộc về form này trước khi nạp: Bước 8 ghi vào báo cáo được nạp ở đây. Chỉ nạp báo cáo đầy đủ, câu trả lời (mục 4), Block H và CV đã điều chỉnh (Bước 4b) khi Bước 5 đã xác nhận **Posting identity**: Bước 5 chỉ cần phần đầu để so sánh. Với tin khác, Bước 5 đưa ra **Evaluate as new** hoặc **Draft without saving**, và không nạp gì ngoài phần đầu.
 4. Nếu có mục `## Application Answers` → khôi phục bằng bộ đọc nghiêm ngặt, không bao giờ bằng cách đọc lại markdown đã render như văn xuôi:
 
    ```bash
@@ -111,6 +121,8 @@ Không sang Bước 6 cho đến khi preflight được giải quyết.
 5. Nếu KHÔNG khớp → thông báo và đề nghị chạy nhanh auto-pipeline
 
 ## Bước 3 — Phát hiện thay đổi vai trò
+
+Bước này chỉ áp dụng khi form vẫn là tin của báo cáo (Bước 5 → **Posting identity**: cùng nhà tuyển dụng, cùng tin) nhưng vai trò trên màn hình khác với vai trò đã đánh giá. Một nhà tuyển dụng khác, hoặc một tin khác ở cùng nhà tuyển dụng, không phải là đổi vai trò: Bước 5 xử lý trường hợp đó, và không nhánh nào dưới đây áp dụng.
 
 Nếu vai trò trên màn hình khác với vai trò đã đánh giá:
 - **Thông báo cho ứng viên**: "Vai trò đã đổi từ [X] sang [Y]. Bạn muốn tôi đánh giá lại hay điều chỉnh câu trả lời theo chức danh mới?"
@@ -134,6 +146,8 @@ Xác định MỌI câu hỏi đang hiển thị:
 - Có/Không (chuyển nơi ở, visa, làm việc ngoài giờ...)
 - Ô lương (khoảng, kỳ vọng)
 - Ô tải lên (CV, PDF cover letter)
+
+Ở nhánh **Draft without saving** (Bước 5), không có báo cáo nào thuộc về tin này: coi mọi câu hỏi là câu hỏi mới, và không dùng báo cáo khớp, Block H, `## Application Answers` hay CV đã điều chỉnh của nó trong câu trả lời.
 
 Phân loại từng câu hỏi:
 - **Đã có trong Block H hoặc `## Application Answers`** → điều chỉnh câu trả lời có sẵn
@@ -163,6 +177,8 @@ Với mọi ô văn bản tự do, kiểm tra **ô điều khiển đã render**
 
 ## Bước 7 — Tạo câu trả lời
 
+Ở nhánh **Draft without saving** (Bước 5), bỏ qua mục 1 và 2 bên dưới cùng CV đã điều chỉnh: chúng đến từ báo cáo khớp, vốn thuộc về tin khác. Tạo câu trả lời từ tin hiển thị, `cv.md` và hồ sơ của ứng viên.
+
 Với mỗi câu hỏi, tạo câu trả lời theo:
 
 1. **Ngữ cảnh báo cáo**: dùng proof point từ block B, câu chuyện STAR từ block F
@@ -181,6 +197,7 @@ Trước khi đánh dấu một câu trả lời tự do là sẵn sàng sao ch�
 ## Responses for [Công ty] — [Vai trò]
 
 Based on: Report #NNN | Score: X.X/5 | Archetype: [loại]
+[Ở nhánh **Draft without saving**, thay dòng trên bằng: "Không có báo cáo: bản nháp cho tin này, không lưu"]
 
 ---
 
@@ -220,6 +237,8 @@ Nếu một ô bắt buộc không thể điền từ nguồn của chính ứng
 
 Sau khi câu trả lời cuối được điền vào form hoặc bàn giao cho ứng viên sao chép, cập nhật báo cáo khớp bằng mục `## Application Answers` thêm vào. Nếu ứng viên sau đó xác nhận đã nộp, cập nhật cùng mục đó từ `filled` sang `submitted`.
 
+**Chỉ ghi vào báo cáo của tin này (Write only to the report of this posting, #5854).** Trước mỗi lần ghi, ở đây và ở Bước 9, kiểm tra form vẫn là tin mà Bước 5 đã xác nhận (**Posting identity**); nếu không còn khớp, dừng và hỏi trước khi ghi. Cùng nhà tuyển dụng và cùng tin → ghi vào báo cáo khớp, kể cả khi chức danh đổi và ứng viên chọn điều chỉnh (metadata báo cáo và dòng tracker giữ chức danh đã đánh giá) hoặc sau khi Bước 3 đánh giá lại (báo cáo được cập nhật tại chỗ). Nhà tuyển dụng khác hoặc tin khác → không bao giờ ghi vào báo cáo khớp: ghi vào báo cáo mà auto-pipeline đã viết cho tin hiển thị ở Bước 5, hoặc không ghi gì khi ứng viên chọn soạn mà không lưu, và nói rõ điều đó.
+
 Mục phải gồm:
 - `**Date:** YYYY-MM-DD`
 - `**State:** filled` hoặc `**State:** submitted`
@@ -238,7 +257,7 @@ node application-answers.mjs --report reports/NNN-company-role-date.md --input a
 
 ## Bước 9 — Sau khi nộp (tùy chọn)
 
-Nếu ứng viên xác nhận đã nộp đơn:
+Nếu ứng viên xác nhận đã nộp đơn, mọi bước dưới đây áp dụng cho báo cáo mà Bước 8 đã ghi vào, chọn theo cùng kiểm tra ở Bước 8 (**Write only to the report of this posting**). Khi Bước 8 không ghi vào báo cáo nào (ứng viên soạn cho tin khác mà không lưu), không đặt trạng thái cho dòng của báo cáo khớp: dòng đó là đơn khác. Báo cho ứng viên rằng đơn này chưa được theo dõi, và đề xuất mode `tracker` để thêm nó.
 1. Cập nhật trạng thái sang Applied bằng CLI chuẩn: `node set-status.mjs --report <report#> Applied` (không bao giờ sửa tay bảng). Nếu ứng viên nộp vào ngày khác hôm nay, thêm `--on YYYY-MM-DD` với ngày nộp thực tế.
 2. Gieo lịch follow-up: chạy `node followup-seed.mjs {num} --json` (`{num}` là số dòng tracker). Nếu ứng viên nộp vào ngày khác hôm nay, truyền `--date YYYY-MM-DD` với ngày nộp thực tế. Lệnh idempotent, chạy lại an toàn.
 3. Làm mới mục `## Application Answers` của báo cáo với giá trị trường cuối cùng và `**State:** submitted`
