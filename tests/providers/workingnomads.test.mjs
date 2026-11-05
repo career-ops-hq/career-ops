@@ -24,12 +24,14 @@ try {
       url: 'https://www.workingnomads.com/jobs/acme-senior-ai-engineer',
       company_name: '  Acme Corp  ',                 // surrounding space → trimmed
       location: '  Remote (Worldwide)  ',            // surrounding space → trimmed
+      pub_date: '2026-10-29T09:50:51-04:00',
     },
     {
       title: '  Platform Engineer  ',              // leading/trailing space → trimmed
       url: '  https://www.workingnomads.com/jobs/beta-platform-engineer  ',
       company_name: '',                            // empty → falls back to entry.name
       // location omitted → ''
+      pub_date: 'not a date',                      // unparseable → no postedAt
     },
     {
       title: '',                                    // dropped: empty title
@@ -62,10 +64,16 @@ try {
     pass('workingnomads.fetch() keeps 2 valid jobs (drops empty-title + non-absolute-url rows)');
   else fail(`workingnomads.fetch() returned ${fetched.length} jobs (expected 2)`);
 
-  // Normalized shape: exactly { title, url, company, location }.
-  if (fetched[0] && Object.keys(fetched[0]).sort().join(',') === 'company,location,title,url')
-    pass('workingnomads.fetch() returns the normalized { title, url, company, location } shape');
-  else fail(`workingnomads.fetch() row 0 keys = ${JSON.stringify(fetched[0] && Object.keys(fetched[0]))}`);
+  // Normalized shape: { title, url, company, location }, plus postedAt when the
+  // row carries a parseable `pub_date` (row 0 does, row 1's is junk).
+  if (fetched[0] && Object.keys(fetched[0]).sort().join(',') === 'company,location,postedAt,title,url'
+      && fetched[1] && Object.keys(fetched[1]).sort().join(',') === 'company,location,title,url')
+    pass('workingnomads.fetch() returns { title, url, company, location } and postedAt only when dated');
+  else fail(`workingnomads.fetch() keys = ${JSON.stringify(fetched.map((j) => Object.keys(j)))}`);
+
+  if (fetched[0]?.postedAt === Date.UTC(2026, 9, 29, 13, 50, 51))
+    pass('workingnomads.fetch() reads `pub_date` into postedAt (epoch ms)');
+  else fail(`workingnomads.fetch() row 0 postedAt = ${JSON.stringify(fetched[0]?.postedAt)}`);
 
   if (fetched[0]?.title === 'Senior AI Engineer'
       && fetched[0]?.url === 'https://www.workingnomads.com/jobs/acme-senior-ai-engineer'
