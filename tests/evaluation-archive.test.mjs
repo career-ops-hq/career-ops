@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { prepareEvaluationArchive, validateEvaluationArchive, sameArchivePosting, extractExactJsonLd, capturePostingSource } from '../lib/evaluation-archive.mjs';
+import { isEvaluationArtifactOwner, prepareEvaluationArchive, validateEvaluationArchive, sameArchivePosting, extractExactJsonLd, capturePostingSource } from '../lib/evaluation-archive.mjs';
 import { persistEvaluationArtifacts, writeEvaluationArtifacts } from '../persist-evaluation-report.mjs';
 
 const JD = 'The Product Manager owns the product roadmap, collects customer requirements, works with engineering and design, and measures reliable delivery. This role includes maintaining copyright notices and archive retention duties for customer documentation. '.repeat(6);
@@ -12,6 +12,29 @@ const report = x => `# Evaluation: ExampleCo — Product Manager\n\n## Job Descr
 const payload = (overrides = {}) => ({ markdown: report('See jds/061-exampleco-missing.md for the full archive (archive-posting.mjs --report=061).'), num: '061', today: '2026-11-04', company: 'ExampleCo', role: 'Product Manager', score: '2.9/5', notes: '', via: null, url: 'https://careers.example.org/jobs/2468', reportFile: '061-exampleco-2026-11-04.md', ...overrides });
 const source = (id, overrides = {}) => ({ text: JD, sourceUrl: id.url, settledUrl: id.url, complete: true, truncated: false, httpStatus: 200, ...overrides });
 const fixture = fn => async () => { const root = fs.mkdtempSync(path.join(tmpdir(), 'career-archive-')); try { await fn(root); } finally { fs.rmSync(root, { recursive: true, force: true }); } };
+
+// Simulate Docker's process/bind-mount UIDs without Docker, chown or privilege.
+// All content, containment, exclusive writes and receipts still use real files.
+async function withOwners(root, uid, ownerFor, fn) {
+  const getuid = process.getuid, lstat = fs.lstatSync;
+  const aliases = [path.resolve(root), fs.realpathSync(root)];
+  process.getuid = () => uid;
+  fs.lstatSync = (file, ...args) => {
+    const st = lstat(file, ...args);
+    if (typeof file === 'string') {
+      for (const base of aliases) {
+        const rel = path.relative(base, path.resolve(file));
+        if (rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel))) {
+          st.uid = ownerFor(rel.split(path.sep).join('/'));
+          break;
+        }
+      }
+    }
+    return st;
+  };
+  try { return await fn(); }
+  finally { fs.lstatSync = lstat; if (getuid === undefined) delete process.getuid; else process.getuid = getuid; }
+}
 
 // A real JD's ordinary copyright/archive duties are not an omission disclosure.
 test('complete inline source is accepted without any machine capture', fixture(async root => {
@@ -246,4 +269,121 @@ test('an existing verified LinkedIn capture is reused without network or replace
   const result = await prepareEvaluationArchive(root, p, { captureFn: async () => { captures++; throw new Error('must reuse existing capture'); } });
   assert.equal(result.ok, true, result.error); assert.equal(captures, 0);
   assert.match(result.markdown, /See jds\/061-exampleco-/); assert.deepEqual(fs.readdirSync(dir), files);
+}));
+
+test('root ownership exception is limited to the selected bind-mount owner', fixture(async root => {
+  await withOwners(root, 0, () => 12001, async () => {
+    assert.equal(isEvaluationArtifactOwner({ uid: 0 }, 12001), true);
+    assert.equal(isEvaluationArtifactOwner({ uid: 12001 }, 12001), true);
+    assert.equal(isEvaluationArtifactOwner({ uid: 12002 }, 12001), false);
+    assert.equal(isEvaluationArtifactOwner({ uid: 12001 }, undefined), false);
+  });
+  await withOwners(root, 12001, () => 12001, async () => {
+    assert.equal(isEvaluationArtifactOwner({ uid: 12001 }, 12001), true);
+    assert.equal(isEvaluationArtifactOwner({ uid: 0 }, 12001), false);
+    assert.equal(isEvaluationArtifactOwner({ uid: 12002 }, 12002), false);
+  });
+}));
+
+test('container root saves complete inline source into a host-owned bind root', fixture(async root => {
+  fs.mkdirSync(path.join(root, 'reports'));
+  await withOwners(root, 0, () => 12001, async () => {
+    const p = payload({ markdown: report(JD) });
+    const result = writeEvaluationArtifacts(root, p);
+    assert.equal(result.ok, true, result.error);
+    assert.equal(fs.readFileSync(path.join(root, 'reports', p.reportFile), 'utf8'), p.markdown);
+    assert.equal(fs.existsSync(path.join(root, 'batch', 'tracker-additions', '061-exampleco.tsv')), true);
+  });
+}));
+
+test('container root captures into its new root-owned directories beneath a host-owned bind root', fixture(async root => {
+  await withOwners(root, 0, rel => rel === '' ? 12001 : 0, async () => {
+    let captures = 0;
+    const result = await persistEvaluationArtifacts(root, payload({ markdown: report(stub) }), { captureFn: async id => { captures++; return source(id); } });
+    assert.equal(result.ok, true, result.error); assert.equal(captures, 1);
+    const markdown = fs.readFileSync(path.join(root, 'reports', payload().reportFile), 'utf8');
+    assert.equal(validateEvaluationArchive(root, { ...payload(), markdown }).ok, true);
+  });
+}));
+
+test('container root reuses host-owned capture and receipt without recapture or replacement', fixture(async root => {
+  let first;
+  await withOwners(root, 12001, () => 12001, async () => {
+    first = await prepareEvaluationArchive(root, payload(), { captureFn: async id => source(id) });
+    assert.equal(first.ok, true, first.error);
+  });
+  const before = fs.readdirSync(path.join(root, 'jds')).map(name => [name, fs.readFileSync(path.join(root, 'jds', name))]);
+  await withOwners(root, 0, () => 12001, async () => {
+    const reused = await prepareEvaluationArchive(root, payload(), { captureFn: async () => { throw new Error('must reuse the verified host capture'); } });
+    assert.equal(reused.ok, true, reused.error); assert.equal(reused.markdown, first.markdown);
+    assert.equal(validateEvaluationArchive(root, { ...payload(), markdown: reused.markdown }).ok, true);
+  });
+  for (const [name, bytes] of before) assert.deepEqual(fs.readFileSync(path.join(root, 'jds', name)), bytes);
+}));
+
+test('non-root caller cannot save or capture into a foreign-owned data root', fixture(async root => {
+  await withOwners(root, 12001, () => 12002, async () => {
+    assert.equal(writeEvaluationArtifacts(root, payload({ markdown: report(JD) })).ok, false);
+    let captures = 0;
+    const result = await prepareEvaluationArchive(root, payload(), { captureFn: async id => { captures++; return source(id); } });
+    assert.equal(result.ok, false); assert.equal(captures, 0);
+    assert.deepEqual(fs.readdirSync(root), []);
+  });
+}));
+
+for (const foreignUid of [0, 12002]) test(`non-root caller still refuses artifact directories owned by UID ${foreignUid}`, fixture(async root => {
+  fs.mkdirSync(path.join(root, 'reports')); fs.mkdirSync(path.join(root, 'jds'));
+  await withOwners(root, 12001, rel => rel === '' ? 12001 : foreignUid, async () => {
+    assert.equal(writeEvaluationArtifacts(root, payload({ markdown: report(JD) })).ok, false);
+    let captures = 0;
+    const result = await prepareEvaluationArchive(root, payload(), { captureFn: async id => { captures++; return source(id); } });
+    assert.equal(result.ok, false); assert.equal(captures, 0);
+    assert.deepEqual(fs.readdirSync(path.join(root, 'reports')), []);
+    assert.deepEqual(fs.readdirSync(path.join(root, 'jds')), []);
+  });
+}));
+
+test('container root refuses directories owned by a third UID', fixture(async root => {
+  fs.mkdirSync(path.join(root, 'reports')); fs.mkdirSync(path.join(root, 'jds'));
+  await withOwners(root, 0, rel => rel === '' ? 12001 : 12002, async () => {
+    assert.equal(writeEvaluationArtifacts(root, payload({ markdown: report(JD) })).ok, false);
+    let captures = 0;
+    const result = await prepareEvaluationArchive(root, payload(), { captureFn: async id => { captures++; return source(id); } });
+    assert.equal(result.ok, false); assert.equal(captures, 0);
+    assert.deepEqual(fs.readdirSync(path.join(root, 'jds')), []);
+  });
+}));
+
+test('container root refuses third-UID capture bytes or receipts without overwriting', fixture(async root => {
+  let first;
+  await withOwners(root, 12001, () => 12001, async () => {
+    first = await prepareEvaluationArchive(root, payload(), { captureFn: async id => source(id) });
+    assert.equal(first.ok, true, first.error);
+  });
+  const name = first.archive.filename;
+  for (const foreign of [`jds/${name}`, `jds/.${name}.receipt.json`]) {
+    const before = fs.readFileSync(path.join(root, foreign));
+    await withOwners(root, 0, rel => rel === foreign ? 12002 : 12001, async () => {
+      assert.equal(validateEvaluationArchive(root, { ...payload(), markdown: first.markdown }).ok, false);
+      let captures = 0;
+      const result = await prepareEvaluationArchive(root, payload(), { captureFn: async id => { captures++; return source(id); } });
+      assert.equal(result.ok, false); assert.equal(captures, 0);
+    });
+    assert.deepEqual(fs.readFileSync(path.join(root, foreign)), before);
+  }
+}));
+
+test('container root ownership exception does not permit symlinked output directories', fixture(async root => {
+  const other = fs.mkdtempSync(path.join(tmpdir(), 'career-container-unrelated-'));
+  try {
+    fs.symlinkSync(other, path.join(root, 'reports'), 'junction');
+    fs.symlinkSync(other, path.join(root, 'jds'), 'junction');
+    await withOwners(root, 0, () => 12001, async () => {
+      assert.equal(writeEvaluationArtifacts(root, payload({ markdown: report(JD) })).ok, false);
+      let captures = 0;
+      const result = await prepareEvaluationArchive(root, payload(), { captureFn: async id => { captures++; return source(id); } });
+      assert.equal(result.ok, false); assert.equal(captures, 0);
+    });
+    assert.deepEqual(fs.readdirSync(other), []);
+  } finally { fs.rmSync(other, { recursive: true, force: true }); }
 }));

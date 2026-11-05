@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { isPostingUrl, trackerTsvLine } from "./lib/tracker-addition.mjs";
-import { prepareEvaluationArchive, validateEvaluationArchive } from "./lib/evaluation-archive.mjs";
+import { isEvaluationArtifactOwner, prepareEvaluationArchive, validateEvaluationArchive } from "./lib/evaluation-archive.mjs";
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 const NUM_RE = /^\d{3,}$/;
@@ -103,10 +103,12 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
   const { reportPath, tsvPath, reportsDir, additionsDir, markdown, tsv } = plan;
   const attempted = [];
   try {
+    let dataRootUid;
     for (const dir of [root, reportsDir, path.join(root, 'batch'), additionsDir]) {
       if (fsImpl.existsSync(dir)) {
         const st = fsImpl.lstatSync(dir);
-        if (!st.isDirectory() || st.isSymbolicLink() || (typeof process.getuid === 'function' && st.uid !== process.getuid())) {
+        if (dir === root) dataRootUid = st.uid;
+        if (!st.isDirectory() || st.isSymbolicLink() || !isEvaluationArtifactOwner(st, dataRootUid)) {
           throw new Error('artifact directory is not a contained own-user directory');
         }
       }
