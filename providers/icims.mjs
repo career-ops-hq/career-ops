@@ -5,8 +5,8 @@
 // Auto-detects from careers_url on any `*.icims.com` https host
 // (canonical form: `https://careers-<tenant>.icims.com/jobs/search?ss=1`).
 //
-// iCIMS list pages carry title/location/URL but NO posted date; dates live
-// only on the job detail page's JSON-LD (schema.org JobPosting `datePosted`).
+// iCIMS list pages carry title/location/URL but no dates. Posted and close
+// dates live on the job detail page's JSON-LD (`datePosted`, `validThrough`).
 // The provider therefore returns undated jobs plus an `enrichDate(job, ctx)`
 // hook — scan-ats-full.mjs calls it only for jobs that already passed the
 // cheap title/location filters, so a 10k-tenant sweep pays detail-page
@@ -14,6 +14,7 @@
 
 import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { closesAtIso } from '../lib/posting-close.mjs';
 
 // ~20 postings/page → 30 pages covers 600 postings; tenants bigger than that
 // are rare on iCIMS and a reverse scan only needs the fresh slice anyway.
@@ -183,8 +184,9 @@ export default {
 
   /**
    * Fill in job.postedAt from the posting's detail page (JSON-LD JobPosting
-   * `datePosted`) — the list pages carry no date at all. Any failure leaves
-   * the job undated; the caller's undated policy then applies as usual.
+   * `datePosted`) — the list pages carry no date at all. A real `validThrough`
+   * on that same node becomes job.closesAt. Any failure leaves the job
+   * undated; the caller's undated policy then applies as usual.
    *
    * The same detail page also carries `jobLocation.address`, so an empty
    * list-page location is filled here too. Several tenants render the search
@@ -213,6 +215,8 @@ export default {
     }
     const ts = Date.parse(pickDatePosted(nodes) || '');
     if (!Number.isNaN(ts)) job.postedAt = ts;
+    const closesAt = pickClosesAt(nodes);
+    if (closesAt) job.closesAt = closesAt;
     if (!String(job.location || '').trim() || /^n\/?a$/i.test(String(job.location).trim())) {
       const loc = pickLocation(nodes);
       if (loc) job.location = loc;
@@ -268,4 +272,24 @@ function pickDatePosted(nodes) {
     if (fallback == null) fallback = node.datePosted;
   }
   return fallback;
+}
+
+// A typed JobPosting wins. A page that has one does not borrow a close day
+// from a sibling. A page with no typed JobPosting keeps the first real day.
+function pickClosesAt(nodes) {
+  let fallback = '';
+  let sawTyped = false;
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue;
+    const day = closesAtIso(node);
+    const type = node['@type'];
+    const typed = type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'));
+    if (typed) {
+      sawTyped = true;
+      if (day) return day;
+      continue;
+    }
+    if (!fallback && day) fallback = day;
+  }
+  return sawTyped ? '' : fallback;
 }
