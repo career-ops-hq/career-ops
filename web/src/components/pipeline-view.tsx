@@ -30,6 +30,7 @@ import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omiss
 import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 import { listEntrySync } from "@/lib/history-back.mjs";
+import { pipelineFindRolesHref } from "@/lib/scan-on-load.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
 type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
@@ -892,10 +893,10 @@ function InboxEmpty({ tracked }: { tracked: number }) {
         )}
         <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
         <Link
-          href="/explore?run=1"
+          href={pipelineFindRolesHref()}
           className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
         >
-          <Compass className="size-4" /> {tracked > 0 ? "Run a free scan" : "Run your first free scan"} <ArrowRight className="size-4" />
+          <Compass className="size-4" /> Find roles <ArrowRight className="size-4" />
         </Link>
         <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
           Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
