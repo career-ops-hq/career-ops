@@ -3,9 +3,11 @@ import { ArrowLeft } from "lucide-react";
 import { findApplication, readReport } from "@/lib/career-ops";
 import { legitimacyTone, parseReport, scoreTone } from "@/lib/format";
 import { compareIds, summaryFields } from "@/lib/pipeline-compare.mjs";
+import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { PageFrame } from "@/components/page-frame";
+import { BackLink } from "@/components/back-link";
 
 export const dynamic = "force-dynamic";
 
@@ -39,16 +41,19 @@ function column(n: string): Column | null {
   };
 }
 
-export default async function ComparePage({ searchParams }: { searchParams: Promise<{ n?: string | string[] }> }) {
-  const { n } = await searchParams;
+export default async function ComparePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = await searchParams;
+  const { n } = params;
+  const backQuery = pipelineQuery(params);
+  const reportQuery = backQuery ? `?${backQuery}` : "";
   const columns = compareIds(n).map(column).filter((c): c is Column => c !== null);
   const labels = [...new Set(columns.flatMap((c) => [...c.fields.keys()]))];
 
   return (
     <PageFrame>
-      <Link href="/pipeline?tab=all" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text">
+      <BackLink href={`/pipeline?${backQuery || "tab=ALL"}`} className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text">
         <ArrowLeft className="size-4" /> Pipeline
-      </Link>
+      </BackLink>
       <h1 className="mt-5 font-display text-2xl tracking-tight text-landing">Compare</h1>
       {columns.length < 2 ? (
         <p className="mt-4 text-sm text-muted">Select two or three applications in the Pipeline to compare them.</p>
@@ -60,7 +65,7 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
                 <th className="w-32 px-4 py-3" />
                 {columns.map((c) => (
                   <th key={c.n} scope="col" className="px-4 py-3 font-normal">
-                    <Link href={`/pipeline/${c.n}`} className="flex items-center gap-2 hover:text-brand-text">
+                    <Link href={`/pipeline/${c.n}${reportQuery}`} className="flex items-center gap-2 hover:text-brand-text">
                       <CompanyLogo name={c.company} size={24} />
                       <span className="font-medium">{c.company}</span>
                     </Link>

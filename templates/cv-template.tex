@@ -5,7 +5,17 @@
 %------------------------
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%  Random Stuff %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\documentclass[letterpaper,11pt]{article}
+\documentclass[{{PAPER}},11pt]{article}
+% T1 encoding: without it pdflatex's default OT1 has no glyph for "_" and
+% "~", so a CV carrying "snake_case" or "~12" loses those characters in the
+% PDF text layer (ATS parsers read that layer, not the screen).
+% lmodern is not optional here. fontenc alone switches to the EC fonts,
+% whose Type 1 files are not installed everywhere; pdflatex then falls back
+% to Type 3 bitmaps with no ToUnicode map, which breaks text extraction for
+% the whole document. Latin Modern ships matching Type 1 fonts, so every
+% glyph keeps an encoding.
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage{latexsym}
 \usepackage[empty]{fullpage}
 \usepackage{titlesec}

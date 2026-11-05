@@ -16,8 +16,10 @@ import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { barePrefixDomainKeywords } from './title-keywords.mjs';
+import { nearestKey } from './validate-profile.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -187,6 +189,52 @@ const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
 // whitelist this validation exists to catch.
 const FIELD_FILTER_FIELDS = ['positive', 'negative'];
 
+// Settings a scan actually reads. A key outside this list is left alone: people
+// keep private notes in the same file, and those must not fail a scan. A key
+// one or two edits from a real setting is different. `tracked_companys` is not
+// `tracked_companies`, so the company list is read as missing, the scan reports
+// zero companies, and the process exits 0.
+export const PORTAL_TOP_LEVEL_KEYS = [
+  'title_filter',
+  'title_filter_full',
+  'title_filter_overrides',
+  'search_queries',
+  'tracked_companies',
+  'job_boards',
+  'scan_history',
+  'preferred_languages',
+  'interamt_searches',
+  'dayforce_boards',
+  'location_filter',
+  'country_eligibility_filter',
+  'salary_filter',
+  'experience_filter',
+  'portal_prune_quiet_days',
+  'max_posting_age_days',
+  'trust_filter',
+  'content_filter',
+  'visa_filter',
+  'skip_tiers',
+  'domain_filter',
+  'field_filters',
+  'company_aliases',
+  'portal_health_threshold',
+  'portal_health_stale_days',
+];
+
+export function portalTopLevelTypos(config) {
+  if (!isObject(config)) return [];
+  const known = new Set(PORTAL_TOP_LEVEL_KEYS);
+  const found = [];
+  for (const key of Object.keys(config)) {
+    if (known.has(key)) continue;
+    const suggestion = nearestKey(key, PORTAL_TOP_LEVEL_KEYS, 2);
+    if (!suggestion) continue;
+    found.push({ key, suggestion });
+  }
+  return found;
+}
+
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
   const warnings = [];
@@ -194,6 +242,14 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
   if (!isObject(config)) {
     add(errors, '<root>', 'portals config must be a YAML object');
     return { errors, warnings };
+  }
+
+  for (const typo of portalTopLevelTypos(config)) {
+    add(
+      errors,
+      typo.key,
+      `unknown top-level key "${typo.key}" — did you mean "${typo.suggestion}"? The misspelled key is ignored, so the setting never applies`,
+    );
   }
 
   if (config.title_filter !== undefined) {
@@ -548,6 +604,14 @@ tracked_companies:
       throw new Error(`expected 2 errors, got ${result.errors.length}`);
     }
     console.log('validate-portals self-test OK');
+
+    const typoFile = join(tmp, 'typo.yml');
+    writeFileSync(typoFile, 'tracked_companys:\n  - name: "Example Co"\n    careers_url: "https://boards.example.com/example"\n', 'utf-8');
+    const typo = await validateFile(typoFile);
+    const typoPaths = typo.errors.map((e) => e.path);
+    if (!typoPaths.includes('tracked_companys')) {
+      throw new Error(`expected tracked_companys to be rejected, got ${JSON.stringify(typo.errors)}`);
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -608,7 +672,9 @@ async function main() {
   if (result.errors.length > 0) process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(`validate-portals failed: ${err.message}`);
-  process.exit(1);
-});
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`validate-portals failed: ${err.message}`);
+    process.exit(1);
+  });
+}
