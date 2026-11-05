@@ -51,17 +51,9 @@ it is how the app finds the user's files, and it keeps your real pipeline out of
 welcome, design and feature proposals are routed to Discussion #156 so the surface
 stays coherent. That is a routing decision, not a judgement on the work.
 
-<!-- The block below is written and re-added by `next dev`. It is committed
-     deliberately: keeping it in the file means Next updates only the marked
-     region and never scaffolds a separate CLAUDE.md, so an agent's instructions
-     here stay reviewable in a diff instead of appearing untracked. -->
+## Next.js version
 
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+This app runs a recent Next.js whose APIs and conventions may differ from your
+training data: read the relevant guide in `node_modules/next/dist/docs/` before
+writing code. `agentRules: false` in `next.config.mjs` stops `next dev` from
+rewriting this file.

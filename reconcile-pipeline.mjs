@@ -30,6 +30,7 @@ import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { withPipelineLock, LockTimeoutError } from './pipeline-lock.mjs';
 import { writeFileAtomic } from './tracker-utils.mjs';
 import { sectionKind, processedHeadingFor } from './lib/pipeline-sections.mjs';
+import { normalizeUrl } from './url-key.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -98,7 +99,12 @@ if (!existsSync(PIPELINE_FILE)) {
 
 // ---- parse batch-state.tsv ----
 // columns: id  url  status  started_at  completed_at  report_num  score  error  retries
-const DONE = new Map(); // url -> { reportNum, score }
+const DONE = new Map(); // url key -> { reportNum, score }
+// sync-batch-input.mjs records new URL(raw).href, which lowercases the host and
+// adds a bare origin's trailing slash, so the state file need not spell a URL the
+// way pipeline.md does. Compare keys, or the offer stays Pending for good. A
+// local:jds/ row has no key, so it compares as written.
+const urlKey = (url) => normalizeUrl(url) || url;
 for (const line of readFileSync(STATE_FILE, 'utf-8').split(/\r?\n/)) {
   if (!line.trim() || line.startsWith('id\t')) continue;
   const c = line.split('\t');
@@ -110,7 +116,7 @@ for (const line of readFileSync(STATE_FILE, 'utf-8').split(/\r?\n/)) {
   if (status !== 'completed' && status !== 'skipped') continue;
   if (!url || !url.trim()) continue;
   const dealbreaker = status === 'skipped' && (error || '').startsWith('dealbreaker:');
-  DONE.set(url.trim(), { reportNum: (reportNum || '').trim(), score: (score || '').trim(), dealbreaker });
+  DONE.set(urlKey(url.trim()), { reportNum: (reportNum || '').trim(), score: (score || '').trim(), dealbreaker });
 }
 
 if (DONE.size === 0) {
@@ -226,7 +232,7 @@ function reconcile() {
       if (!m) continue;
       // "[num](path) | url | company | role | score | PDF x" — url is field 2
       const parts = m[1].split('|').map(s => s.trim());
-      if (parts[1]) procUrls.add(parts[1]);
+      if (parts[1]) procUrls.add(urlKey(parts[1]));
     }
   }
 
@@ -240,10 +246,11 @@ function reconcile() {
     if (!PENDING_ITEM_RE.test(lines[i])) continue; // blank lines, "- [!]" errors → keep
     const body = lines[i].replace(PENDING_ITEM_RE, '');
     const url = lineUrl(body);
-    const done = DONE.get(url);
+    const key = urlKey(url);
+    const done = DONE.get(key);
     if (!done) continue; // not processed → keep in Pendientes
 
-    if (procUrls.has(url)) {
+    if (procUrls.has(key)) {
       // Already recorded in Procesadas — just drop the stale Pendientes copy.
       removeIdx.add(i);
       moved.push({ url, role: '(already in Procesadas)', dup: true });
@@ -254,7 +261,7 @@ function reconcile() {
       const [, company = '', role = ''] = body.split('|').map(s => s.trim());
       movedProcLines.push(`- [x] SKIP | ${url} | ${company} | ${role} | N/A | PDF ❌`);
       moved.push({ url, company, role, num: '-', score: 'SKIP, dealbreaker' });
-      procUrls.add(url);
+      procUrls.add(key);
       removeIdx.add(i);
       continue;
     }
@@ -276,7 +283,7 @@ function reconcile() {
     const reportLink = normalizeReportLink(`[${num}](reports/${reportFile})`, dirname(PIPELINE_FILE), CAREER_OPS);
     movedProcLines.push(`- [x] ${reportLink} | ${url} | ${company} | ${role} | ${score} | PDF ${pdf}`);
     moved.push({ url, company, role, num, score });
-    procUrls.add(url);
+    procUrls.add(key);
     removeIdx.add(i);
   }
 

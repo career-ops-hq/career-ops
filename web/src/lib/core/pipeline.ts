@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import type { DiscoveredOffer } from "./scan";
 import { pipelineWriterResult } from "./pipeline-writer-result.mjs";
 
@@ -44,6 +45,7 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
       company: o.company || "",
       title: o.title || "",
       location: o.location || "",
+      ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
       postedAt: toCorePostedAt(o.postedAt),
       source: o.source || o.ats || "explorer",
       // Preserve the optional per-offer signal so it survives to pipeline.md.
@@ -59,16 +61,30 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
   }
 
   const scanUrl = pathToFileURL(rootScript("scan")).href;
-  const localTodayUrl = pathToFileURL(path.join(careerOpsRoot(), "lib", "local-today.mjs")).href;
+  const localTodayUrl = pathToFileURL(path.join(resolveCodeRoot(process.cwd(), process.env), "lib", "local-today.mjs")).href;
   const code = `
 import { appendToPipeline, appendToScanHistory } from ${JSON.stringify(scanUrl)};
 import { localToday } from ${JSON.stringify(localTodayUrl)};
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { getCareerOpsRoot } from ${JSON.stringify(new URL("path-resolver.mjs", scanUrl).href)};
+import { loadYaml } from ${JSON.stringify(new URL("lib/yaml-document.mjs", scanUrl).href)};
+import { buildWorkplacePolicy, workplacePolicyFromConfig } from ${JSON.stringify(new URL("providers/_country.mjs", scanUrl).href)};
 let input = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => { input += d; });
 process.stdin.on("end", async () => {
   try {
-    const offers = JSON.parse(input);
+    const requested = JSON.parse(input);
+    let config = {};
+    try { config = loadYaml(readFileSync(path.join(getCareerOpsRoot(), "portals.yml"), "utf8")); }
+    catch (e) { if (e.code !== "ENOENT") throw e; }
+    const policy = buildWorkplacePolicy(workplacePolicyFromConfig(config));
+    const offers = requested.filter(o => policy(o.location, o.title, o).eligible);
+    if (offers.length !== requested.length) {
+      process.stdout.write(JSON.stringify({ added: 0, error: "Nothing was added: some selected roles do not meet your workplace geography policy. Add a role with an allowed location separately, after checking its hiring eligibility." }));
+      return;
+    }
     // LOCAL calendar day, not the UTC one — west of Greenwich, an evening
     // add would otherwise stamp scan-history.tsv's first_seen a day ahead,
     // opening scan.mjs's recheck/cooldown gate a day late for this row (#3070).
@@ -84,7 +100,7 @@ process.stdin.on("end", async () => {
 
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
-      cwd: careerOpsRoot(),
+      cwd: resolveCodeRoot(process.cwd(), process.env),
       env: process.env,
       // windowsHide: see api/doctor/route.ts — a stale inherited console kills
       // every child with 0xC0000142 on Windows; never inherit one.

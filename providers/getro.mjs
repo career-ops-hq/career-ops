@@ -31,7 +31,8 @@
 //
 // These boards are large (1000-2000+ jobs) but the API returns them
 // created_at-DESCENDING (newest first), so we paginate newest-first and STOP
-// once postings fall older than `getro_max_age_days`. This is a PAGINATION
+// once postings fall older than `getro_max_age_days` (a pinned `featured`
+// posting sits above that order and does not count). This is a PAGINATION
 // BOUND for efficiency (don't page through thousands of stale jobs); each job
 // still carries `postedAt` (epoch ms) for any downstream freshness handling.
 // The bound default (90d) is deliberately wide. `getro_max_pages` (default
@@ -207,6 +208,10 @@ function locationString(job) {
 export default {
   id: 'getro',
 
+  fetchHost() {
+    return new URL(API_BASE).hostname;
+  },
+
   // Getro tenants live on arbitrary vanity domains (careers.atomico.com,
   // talent.cherry.vc, ...) with no common suffix to auto-detect against.
   // Still reports a hit when `getro_collection` is set explicitly, so
@@ -274,7 +279,15 @@ export default {
           // page one, truncate-with-warning on a later page.
           throw err instanceof Error ? err : new Error(cause);
         }
-        console.error(`⚠️  getro: ${entry.name || collectionId} truncated at page ${page} after retries (${out.length} jobs): ${cause}`);
+        // err.attempts is the real request count: a non-retryable error ends the
+        // retry loop after one attempt. A rejection that is not an object cannot
+        // carry the count, so the warning says it is unknown.
+        const attempts = err?.attempts;
+        const attemptsText = attempts === undefined
+          ? 'an unknown number of attempts'
+          : `${attempts} attempt${attempts === 1 ? '' : 's'}`;
+        const pagesToFetch = Math.min(maxPages, Math.ceil(total / HITS_PER_PAGE));
+        console.error(`⚠️  getro: ${entry.name || collectionId} truncated at page ${page + 1} of ${pagesToFetch} after ${attemptsText} (${out.length} jobs): ${cause}`);
         break;
       }
 
@@ -289,9 +302,14 @@ export default {
         if (!url) continue;
         // Jobs are newest-first; a dated posting older than the cutoff (and
         // everything after it) is stale. Keep undated jobs (missing = pass).
+        // A board can pin `featured` postings above that order: Earlybird's
+        // first page opened with pins 10, 91 and 152 days old over postings
+        // two days old (2026-11-02). An old pin is dropped like any old posting,
+        // but it says nothing about the pages after it, so it does not stop
+        // the walk.
         const createdMs = toEpochMs(j.created_at);
         if (cutoffMs > 0 && createdMs != null && createdMs < cutoffMs) {
-          reachedOld = true;
+          if (j.featured !== true) reachedOld = true;
           continue;
         }
         const row = {

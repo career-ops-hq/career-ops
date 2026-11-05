@@ -1,9 +1,14 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { decodeEntities } from './_html-entities.mjs';
+
 // Jobicy provider — board-wide remote-jobs aggregator feed
 // (https://jobicy.com/api/v2/remote-jobs?count=50). Returns { jobs: [...] }.
 //
+// Official remote-only feed contract: https://jobicy.com/jobs-rss-feed
+// `jobGeo` is remote location eligibility; `jobDescription` is the full HTML JD.
+// Preserve those two independent signals: Worldwide is geography, not a mode.
 // Wire in via a `job_boards:` entry with `provider: jobicy`.
 
 const FEED_URL = 'https://jobicy.com/api/v2/remote-jobs?count=50';
@@ -53,7 +58,8 @@ export function parseJobicyResponse(json, defaultCompany = 'Jobicy') {
     .map(j => {
       if (!j || typeof j !== 'object') return null;
 
-      const title = typeof j.jobTitle === 'string' ? j.jobTitle.trim() : '';
+      // The feed's text fields arrive HTML-encoded ("Zone &#038; Co").
+      const title = typeof j.jobTitle === 'string' ? decodeEntities(j.jobTitle).trim() : '';
       if (!title) return null;
 
       const rawUrl = typeof j.url === 'string' ? j.url.trim() : '';
@@ -68,8 +74,9 @@ export function parseJobicyResponse(json, defaultCompany = 'Jobicy') {
       }
       if (!url) return null;
 
-      const company = typeof j.companyName === 'string' && j.companyName.trim() ? j.companyName.trim() : defaultCompany;
-      const location = typeof j.jobGeo === 'string' ? j.jobGeo.trim() : '';
+      // Decided on the decoded name: "&nbsp;" is not blank until it is decoded.
+      const company = (typeof j.companyName === 'string' ? decodeEntities(j.companyName).trim() : '') || defaultCompany;
+      const location = typeof j.jobGeo === 'string' ? decodeEntities(j.jobGeo).trim() : '';
       const postedAt = toEpochMs(j.pubDate);
 
       return {
@@ -77,6 +84,8 @@ export function parseJobicyResponse(json, defaultCompany = 'Jobicy') {
         url,
         company,
         location,
+        isRemote: true,
+        ...(typeof j.jobDescription === 'string' ? { description: j.jobDescription } : {}),
         postedAt,
       };
     })

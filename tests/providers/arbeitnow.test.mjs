@@ -61,6 +61,37 @@ try {
   if (noDate && !('postedAt' in noDate)) pass('normalizeArbeitnowJob omits postedAt when created_at is absent');
   else fail(`normalizeArbeitnowJob postedAt presence = ${JSON.stringify(noDate)}`);
 
+  // description: the list payload carries HTML markup, and content_filter /
+  // country_eligibility_filter / visa_filter / the JD fingerprint all read the
+  // plain text. Dropping it made every arbeitnow posting invisible to them.
+  const withDesc = normalizeArbeitnowJob({
+    title: 'T',
+    url: 'https://www.arbeitnow.com/jobs/d1',
+    description: '<p>You will write <strong>Python</strong> and FastAPI.</p>',
+  });
+  if (withDesc?.description === 'You will write Python and FastAPI.') {
+    pass('normalizeArbeitnowJob strips HTML from description (so content_filter can match stack keywords)');
+  } else {
+    fail(`normalizeArbeitnowJob description = ${JSON.stringify(withDesc?.description)}`);
+  }
+
+  // Missing / empty / non-string description → key absent, so the filters read
+  // "no signal" and pass the posting instead of rejecting it for a body they
+  // never had.
+  const descAbsent = [
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d2' }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d3', description: '' }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d4', description: '   ' }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d5', description: null }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d6', description: 42 }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d7', description: '<p></p>' }),
+  ];
+  if (descAbsent.every((r) => r && !('description' in r))) {
+    pass('normalizeArbeitnowJob omits description when it is absent / empty / whitespace / non-string / markup-only');
+  } else {
+    fail(`normalizeArbeitnowJob description presence = ${JSON.stringify(descAbsent.map((r) => r?.description))}`);
+  }
+
   // fetch(): pagination by self-built ?page=N, stop on a short page.
   const mk = (i) => ({ title: `Role ${i}`, url: `https://www.arbeitnow.com/jobs/x${i}`, company_name: `Co ${i}`, location: 'Berlin', remote: false, created_at: 1782693032 + i });
   const page1 = Array.from({ length: 100 }, (_, i) => mk(i));            // full page → continue

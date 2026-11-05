@@ -29,6 +29,7 @@ const SUPPORTED_CLIS = [
   { name: "GitHub Copilot CLI", cmd: "copilot" },
   { name: "Antigravity CLI", cmd: "agy" },
   { name: "Grok Build CLI", cmd: "grok" },
+  { name: "Oh My Pi", cmd: "omp" },
 ];
 
 const USAGE = `career-ops — set up an AI job search workspace.
