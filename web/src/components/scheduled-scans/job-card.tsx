@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock, Edit3, Globe, Loader2, MoreVertical, Pause, Play, Trash2, Zap } from "lucide-react";
 import type { ScheduledJob } from "@/lib/scheduled-jobs";
+import { scanEngineLabel, scheduleCadenceLabel } from "@/lib/schedule-label.mjs";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 
@@ -80,7 +81,7 @@ export function JobCard({
             </h2>
             <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-muted">
               <Clock className="size-3.5 text-faint" />
-              Every {job.every} {job.unit} · {job.timezone}
+              {scheduleCadenceLabel(job.every, job.unit)} · {job.timezone}
             </p>
           </div>
 
@@ -136,7 +137,7 @@ export function JobCard({
             )}
           >
             {isFull ? <Globe className="size-3" /> : <Zap className="size-3" />}
-            {isFull ? "Full ATS Sweep" : "Zero-Token Portals"}
+            {scanEngineLabel(job.engine)}
           </span>
 
           <span
