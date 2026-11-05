@@ -10,6 +10,7 @@ import { mergeTracker } from '../merge-tracker.mjs';
 import { writeEvaluationArtifacts } from '../persist-evaluation-report.mjs';
 import { trackerTsvLine } from '../lib/tracker-addition.mjs';
 import { listTree } from '../lib/walk-tree.mjs';
+import { extractTrackerReportLinks } from '../tracker-parse.mjs';
 
 const PRIMARY = 'https://himalayas.app/companies/exampleco/jobs/product-lead-123456';
 const FIRST = 'https://jobs.ashbyhq.com/exampleco/11111111-1111-4111-8111-111111111111';
@@ -48,7 +49,8 @@ function fixture(t, { reportColumn = false } = {}) {
   };
   const merge = () => mergeTracker({ appsFile: tracker, dataRoot: root, logger: { log() {}, warn() {}, error() {} } });
   const reportImages = () => Object.fromEntries(flatFiles(join(root, 'reports')).map(name => [name, readFileSync(join(root, 'reports', name), 'utf8')]));
-  return { root, tracker, additions, rows, cell, setCell, add, merge, reportImages };
+  const reportLinks = () => rows().flatMap(row => extractTrackerReportLinks(reportColumn ? cell(row, 'Report') : '', cell(row, 'Notes')));
+  return { root, tracker, additions, rows, cell, setCell, add, merge, reportImages, reportLinks };
 }
 
 async function existing(t, options = {}, layout = {}) {
@@ -84,6 +86,87 @@ for (const earlierMarkedReference of [false, true]) {
     assert.deepEqual(flatFiles(f.additions).filter(name => name.endsWith('.tsv')), pending);
     assert.equal(readFileSync(join(f.additions, pending[0]), 'utf8'), contribution);
     assert.deepEqual(f.reportImages(), images);
+  });
+}
+
+for (const [kind, target] of [
+  ['external', 'https://portfolio.example/reports/case-study.pdf'],
+  ['local nonnumeric', '../reports/portfolio-case.md'],
+]) {
+  test(`an arbitrary ${kind} Portfolio label cannot claim report-number ownership`, async t => {
+    const f = fixture(t);
+    f.add({ num: '900', url: FIRST, official: '' });
+    assert.equal(await f.merge(), 0);
+    if (kind === 'local nonnumeric') writeFileSync(join(f.root, 'reports', 'portfolio-case.md'), 'A fictional portfolio case study.');
+    f.setCell('Notes', `Portfolio [101](${target}).`);
+    const prior = f.rows()[0];
+    assert.deepEqual(f.reportLinks(), [], 'the native parser finds no report-number owner in that prose link');
+    assert.ok(!Object.keys(f.reportImages()).some(name => name.startsWith('101-')), 'no report 101 artifact exists before the new evaluation');
+    f.add({ num: '101', url: SECOND, official: SECOND, score: '4.0/5' });
+    const images = f.reportImages();
+    assert.equal(flatFiles(f.additions).filter(name => name.endsWith('.tsv')).length, 1);
+    assert.equal(await f.merge(), 0);
+    assert.equal(f.rows().length, 2);
+    assert.ok(f.rows().includes(prior), 'the row with unowned prose stays byte-exact');
+    assert.ok(f.rows().some(row => row.includes(fileFor('101')) && f.cell(row, 'Score') === '4.0/5'));
+    assert.deepEqual(f.reportLinks().map(link => link.target), [101], 'the new report has exactly one native owner');
+    assert.deepEqual(flatFiles(f.additions).filter(name => name.endsWith('.tsv')), [], 'the distinct opening is consumed');
+    assert.deepEqual(f.reportImages(), images, 'the merger edits no artifact');
+  });
+}
+
+test('a local numbered Portfolio target remains report ownership regardless of its prose label', async t => {
+  const f = fixture(t);
+  f.add({ num: '900', url: FIRST, official: '' });
+  assert.equal(await f.merge(), 0);
+  writeFileSync(join(f.root, 'reports', '101-portfolio.md'), report(FIRST, FIRST));
+  f.setCell('Notes', 'Portfolio [900](../reports/101-portfolio.md).');
+  assert.deepEqual(f.reportLinks().map(link => link.target), [101], 'ownership follows the actual target, not the label');
+  const before = readFileSync(f.tracker, 'utf8');
+  f.add({ num: '101', url: SECOND, official: SECOND, score: '4.0/5' });
+  const images = f.reportImages();
+  const pending = flatFiles(f.additions).filter(name => name.endsWith('.tsv'));
+  assert.equal(pending.length, 1);
+  const contribution = readFileSync(join(f.additions, pending[0]), 'utf8');
+  assert.equal(await f.merge(), 1);
+  assert.equal(readFileSync(f.tracker, 'utf8'), before);
+  assert.deepEqual(f.reportLinks().map(link => link.target), [101], 'no second owner is added');
+  assert.deepEqual(flatFiles(f.additions).filter(name => name.endsWith('.tsv')), pending);
+  assert.equal(readFileSync(join(f.additions, pending[0]), 'utf8'), contribution);
+  assert.deepEqual(f.reportImages(), images);
+});
+
+test('a canonical Notes reference permits same-file re-evaluation of the same employer posting', async t => {
+  const f = await existing(t, { url: FIRST });
+  f.add({ num: '101', url: FIRST, official: FIRST, score: '4.0/5' });
+  const images = f.reportImages();
+  assert.equal(await f.merge(), 0);
+  assert.equal(f.rows().length, 1);
+  assert.ok(f.rows()[0].includes(fileFor('101')));
+  assert.equal(f.cell(f.rows()[0], 'Score'), '4.0/5');
+  assert.deepEqual(f.reportLinks().map(link => link.target), [101], 'the native parser finds one authoritative reference');
+  assert.deepEqual(flatFiles(f.additions).filter(name => name.endsWith('.tsv')), []);
+  assert.deepEqual(f.reportImages(), images);
+});
+
+for (const reportColumn of [false, true]) {
+  test(`conflicting employer identities in the same file stay pending with ${reportColumn ? 'a Report column' : 'a Notes reference'}`, async t => {
+    const f = await existing(t, { url: FIRST }, { reportColumn });
+    const before = readFileSync(f.tracker, 'utf8');
+    // A contradictory incoming artifact cannot make an existing reference
+    // belong to a second opening, even if it reuses that exact filename.
+    f.add({ num: '101', url: SECOND, official: SECOND, score: '4.0/5' });
+    const images = f.reportImages();
+    const pending = flatFiles(f.additions).filter(name => name.endsWith('.tsv'));
+    assert.equal(pending.length, 1);
+    const contribution = readFileSync(join(f.additions, pending[0]), 'utf8');
+    assert.equal(await f.merge(), 1);
+    assert.equal(readFileSync(f.tracker, 'utf8'), before);
+    assert.equal(f.rows().length, 1);
+    assert.deepEqual(f.reportLinks().map(link => link.target), [101], 'no duplicate report owner is added');
+    assert.deepEqual(flatFiles(f.additions).filter(name => name.endsWith('.tsv')), pending);
+    assert.equal(readFileSync(join(f.additions, pending[0]), 'utf8'), contribution);
+    assert.deepEqual(f.reportImages(), images, 'the merger does not rewrite the artifact already on disk');
   });
 }
 

@@ -31,7 +31,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot, resolveBatchStatePaths } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
-import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks, soleMarkdownLink, unwrapReportUrlToken } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks, soleMarkdownLink, unwrapReportUrlToken, extractTrackerReportLinks } from './tracker-parse.mjs';
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
@@ -1925,15 +1925,14 @@ export async function mergeTracker(options = {}) {
         }
       }
 
-      // A report number is also a PDF/index key. If two DIFFERENT files
-      // claim that number for distinct employer requisitions, appending a row
-      // would preserve the wrong shared key. Keep both artifacts and the TSV
+      // A report number is also a PDF/index key. If it names conflicting
+      // employer requisitions, even through the same file, appending a row
+      // would preserve the wrong shared key. Keep the artifacts and the TSV
       // pending instead; never rename a report or overwrite the prior row.
       if (reportNum && existingApps.some(app =>
-        extractReportNum(reportFieldForMetadata(app), app.notes) === reportNum
-        && resolveReportPath(app.report) !== resolveReportPath(addition.report)
+        extractTrackerReportLinks(app.report, app.notes).some(link => link.target === reportNum)
         && declaredEmployerConflict(app, addition))) {
-        console.error(`❌ ${file}: report #${reportNum} names conflicting employer postings in different files; nothing merged for this addition. Keep the reports and correct the report-number collision before re-running.`);
+        console.error(`❌ ${file}: report #${reportNum} names conflicting employer postings; nothing merged for this addition. Keep the reports and correct the report-number collision before re-running.`);
         failedAdditions.push(file);
         continue;
       }
