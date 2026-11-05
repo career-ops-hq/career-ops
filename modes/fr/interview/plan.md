@@ -12,7 +12,7 @@
 4. **Type de round** (si connu) — sélection (screening), technique/spécifique au domaine, conception/étude de cas, panel comportemental
 5. **CV** dans `cv.md` + `article-digest.md` (si présent) — lire pour l'expérience, les compétences, les points de preuve
 6. **Profil** dans `config/profile.yml` + `modes/_profile.md` — lire pour la narration, les archétypes et les cibles
-7. **Banque d'histoires** dans `interview-prep/story-bank.md` — histoires STAR+R existantes
+7. **Banque d'histoires** dans `interview-prep/story-bank.md` — histoires STAR+R existantes (leurs chiffres suivent la règle de provenance dans Rules)
 8. **Banque de questions** dans `interview-prep/question-bank.md` — lacunes existantes (si le fichier existe)
 
 ---
@@ -154,4 +154,5 @@ Sauvegardez le plan dans `interview-prep/{company-slug}-{role-slug}.md` si un fi
 - **Un sujet par bloc.** Mélanger les sujets dans un seul bloc réduit la rétention.
 - **Prévoyez toujours du temps de repos.** Un candidat reposé est plus performant qu'un candidat qui a bachoté.
 - **Ne générez jamais de fausses informations sur l'entreprise.** Si vous n'avez pas fait de recherches, dites-le — n'inventez pas d'affirmations sur la culture ou de détails techniques sur l'entreprise.
-- **N'inventez jamais d'affirmations pour le candidat.** La phrase d'ancrage et les points de discussion pré-entretien dans la référence rapide (Step 4) doivent être fondés sur ce que le candidat a réellement — `cv.md`, `article-digest.md` ou la banque d'histoires. Ne rédigez pas d'affirmations qui dépendent d'une expérience ou de mesures que le candidat n'a pas. Si une affirmation apparaît dans `interview-prep/retracted-claims.md`, ne l'incluez jamais.
+- **N'inventez jamais d'affirmations pour le candidat.** La phrase d'ancrage et les points de discussion pré-entretien dans la référence rapide (Step 4) doivent être fondés sur ce que le candidat a réellement — `cv.md`, `article-digest.md` ou la banque d'histoires selon la règle de provenance ci-dessous. Ne rédigez pas d'affirmations qui dépendent d'une expérience ou de mesures que le candidat n'a pas. Si une affirmation apparaît dans `interview-prep/retracted-claims.md`, ne l'incluez jamais.
+- **Les chiffres de la banque d'histoires exigent une provenance.** La banque d'histoires fournit le récit et la formulation ; ses chiffres n'ont pas la valeur de `cv.md` (AGENTS.md, Source-of-Truth Boundary). Avant qu'un chiffre de la banque d'histoires n'entre dans la phrase d'ancrage, un point de discussion ou un bloc d'étude, exécutez `node story-provenance-check.mjs --summary` et suivez sa catégorie pour ce chiffre : `existing` peut être utilisé ; `supportedByResume` et `derived-unverified` ne sont jamais présentés comme des faits, donc omettez le chiffre ou posez la question au candidat avec les quatre issues d'AGENTS.md (confirmer tel quel, donner le chiffre correct, récit uniquement, "je ne sais pas") plutôt qu'avec un oui/non orienté ; `user-cannot-confirm` n'est jamais utilisé comme chiffre, seulement comme récit. Ce mode n'écrit pas le marqueur `**Provenance:**` ; la réponse du candidat vaut pour cette session.

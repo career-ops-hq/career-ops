@@ -160,7 +160,7 @@ career-ops -- AI Job Search Agent
 Available commands:
   /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
   /career-ops pipeline  → Process pending URLs from inbox (data/pipeline.md)
-  /career-ops oferta    → Evaluation only A-F (no auto PDF)
+  /career-ops oferta    → Evaluation only A-H (no auto PDF)
   /career-ops ofertas   → Compare and rank multiple offers
   /career-ops contacto  → LinkedIn power move: find contacts + draft message
   /career-ops deep      → Deep research prompt about company
@@ -173,6 +173,7 @@ Available commands:
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
   /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round
+  /career-ops interview-redflag → Analyze employer warning signs before joining a company
   /career-ops pdf       → PDF only, ATS-optimized CV
   /career-ops ats       → ATS-friendliness check of a generated CV (score + fixable issues)
   /career-ops text      → Tailored markdown CV (mirrors cv.md, no PDF)
@@ -197,6 +198,7 @@ Available commands:
   /career-ops titles    → Suggest adjacent job titles from your CV to broaden the search
   /career-ops upskill   → Aggregate skill-gap analysis from your evaluated reports
   /career-ops followup  → Follow-up cadence tracker: flag overdue, generate drafts
+  /career-ops reply-watch → Classify employer replies and suggest tracker updates
   /career-ops outcome   → Record application outcome & archive artifacts
   /career-ops update    → Update career-ops system files with diff preview + compat check
 
@@ -212,7 +214,7 @@ After determining the mode, load the necessary files before executing:
 
 If `modes/_custom.md` exists, read it after `modes/_profile.md` and before the selected mode file. It contains user house rules and procedural preferences. It may override workflow/style defaults, but it never adds factual claims about the candidate.
 
-Resolve `language.modes_dir` before applying the path shorthand below. With no setting, use `modes`. With a scalar directory, preserve the existing behavior: use that directory's `_shared.md` and localized mode file when it provides one. With a list, load every declared directory's `_shared.md` exactly once (including the baseline `modes/_shared.md` when `modes` appears), but use only the FIRST entry's evaluation-mode file for Blocks A-F; later entries contribute context, never a competing evaluation file. User-layer `_profile.md` and `_custom.md` remain under `modes/` in `DATA_ROOT`.
+Resolve `language.modes_dir` before applying the path shorthand below. With no setting, use `modes`. With a scalar directory, preserve the existing behavior: use that directory's `_shared.md` and localized mode file when it provides one. When it provides no file for the selected mode (most market sets ship no `cover.md`, `email.md` or `contacto.md`), load the English `modes/{mode}.md`: it is the canonical file and carries that mode's guardrails, including the draft-only, never-send rule. Never run a mode from the localized `_shared.md` alone or improvise its steps. With a list, load every declared directory's `_shared.md` exactly once (including the baseline `modes/_shared.md` when `modes` appears), but use only the FIRST entry's evaluation-mode file for Blocks A-F; later entries contribute context, never a competing evaluation file. User-layer `_profile.md` and `_custom.md` remain under `modes/` in `DATA_ROOT`.
 
 ### Modes that require `_shared.md` + their mode file
 
