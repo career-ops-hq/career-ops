@@ -24,7 +24,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { parseOutputLanguage } from './profile-language.mjs';
 import {
   normalizedTrackerScore, slugifyCompany, tsvSafe,
@@ -147,16 +147,78 @@ function spendTierToModel(tier) {
   }
 }
 
-function setupEnvironment() {
+const USAGE = `Usage: node batch-evaluate-gemini.mjs [--limit N] [--concurrency N] [--model NAME] [--mode full|match]
+
+Evaluates the pending "- [ ]" offers in data/pipeline.md with Gemini, writes a
+report and a tracker addition for each, then runs merge-tracker.mjs.
+Needs GEMINI_API_KEY in .env. Every evaluation spends Gemini quota.
+
+  --limit N        Evaluate only the first N pending offers (default: all)
+  --concurrency N  Offers evaluated at the same time (default: 2)
+  --model NAME     Gemini model (default: from spend_tier in config/profile.yml)
+  --mode MODE      full (default) or match, the single-pass CV-match evaluation
+  --single-pass    Same as --mode match
+  --help, -h       Print this help and exit`;
+
+const VALUE_FLAGS = ['--limit', '--concurrency', '--model', '--mode'];
+
+/**
+ * Read the CLI flags. `--flag N` and `--flag=N` mean the same; an unknown flag
+ * or a count that is not a whole number above 0 exits with a usage error.
+ *
+ * @param {string[]} args - argv after the script path.
+ * @returns {{limit: number, concurrency: number, model: string | undefined}}
+ *   limit 0 means every pending offer.
+ */
+export function parseBatchArgs(args) {
+  validateFlags(args, [...VALUE_FLAGS, '--single-pass', '--help', '-h'], USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  for (const flag of VALUE_FLAGS) {
+    if (args.filter((a) => a === flag || a.startsWith(`${flag}=`)).length > 1) {
+      console.error(`Error: ${flag} can be given only once`);
+      process.exit(1);
+    }
+  }
+  const count = (flag, fallback) => {
+    const raw = flagValue(args, flag);
+    if (raw === undefined) return fallback;
+    const value = Number(raw);
+    if (!/^\d+$/.test(raw) || !Number.isFinite(value) || value < 1) {
+      console.error(`Error: ${flag} needs a whole number above 0, got "${raw}"`);
+      process.exit(1);
+    }
+    return value;
+  };
+  return {
+    limit: count('--limit', 0),
+    concurrency: count('--concurrency', 2),
+    model: flagValue(args, '--model'),
+  };
+}
+
+/**
+ * Line numbers of the pending `- [ ]` offers, the first `limit` of them when
+ * limit is above 0.
+ *
+ * @param {string[]} pipelineLines - data/pipeline.md split into lines.
+ * @param {number} limit - From parseBatchArgs; 0 means every pending offer.
+ * @returns {number[]}
+ */
+export function pendingOfferIndices(pipelineLines, limit) {
+  const indices = pipelineLines
+    .map((l, i) => l.trim().startsWith('- [ ]') ? i : -1)
+    .filter(i => i !== -1);
+  return limit > 0 ? indices.slice(0, limit) : indices;
+}
+
+function setupEnvironment(modelArg) {
   apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("❌ GEMINI_API_KEY not found in .env");
     process.exit(1);
   }
 
-  const modelArg = process.argv.find(a => a.startsWith('--model='));
   const resolvedSpendTier = readSpendTier();
-  modelName = modelArg ? modelArg.split('=')[1] : spendTierToModel(resolvedSpendTier);
+  modelName = modelArg || spendTierToModel(resolvedSpendTier);
   const genAI = new GoogleGenerativeAI(apiKey);
   model = genAI.getGenerativeModel({
     model: modelName,
@@ -531,6 +593,7 @@ export async function finishPipelineBatch(pipelinePath, originals, results) {
 }
 
 async function main() {
+  const { limit: limitCount, concurrency: CONCURRENCY, model } = parseBatchArgs(process.argv.slice(2));
   let evalMode;
   try {
     evalMode = parseCliMode();
@@ -538,15 +601,8 @@ async function main() {
     console.error(`❌ ${err.message}`);
     process.exit(1);
   }
-  setupEnvironment();
+  setupEnvironment(model);
   loadContext(evalMode);
-
-  const limitArg = process.argv.find(a => a.startsWith("--limit="));
-  const limitCount = limitArg ? parseInt(limitArg.split("=")[1], 10) : 0;
-  
-  const concArg = process.argv.find(a => a.startsWith("--concurrency="));
-  let CONCURRENCY = concArg ? parseInt(concArg.split("=")[1], 10) : 2;
-  if (isNaN(CONCURRENCY) || CONCURRENCY < 1) CONCURRENCY = 2;
 
   if (!existsSync(PATHS.pipeline)) {
     console.log("No pipeline.md found.");
@@ -554,13 +610,7 @@ async function main() {
   }
 
   const pipelineLines = readFileSync(PATHS.pipeline, 'utf-8').split('\n');
-  const pendingIndices = pipelineLines
-    .map((l, i) => l.trim().startsWith('- [ ]') ? i : -1)
-    .filter(i => i !== -1);
-
-  if (limitCount > 0) {
-    pendingIndices.splice(limitCount);
-  }
+  const pendingIndices = pendingOfferIndices(pipelineLines, limitCount);
   if (pendingIndices.length === 0) {
     console.log("No pending [-] offers found in pipeline.md.");
     return;

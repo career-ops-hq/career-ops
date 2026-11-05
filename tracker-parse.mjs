@@ -579,6 +579,24 @@ export function extractCellUrl(cellValue) {
   return value;
 }
 
+// URL cells that say "no URL" in words: the tracker's em-dash and hyphen
+// empty-cell markers and N/A.
+const URL_PLACEHOLDER_RE = /^(?:—|-|n\/a)$/i;
+
+/**
+ * Whether a URL cell names no posting: empty, or a placeholder. A reader that
+ * falls back to the row's report has to ask this rather than test the cell for
+ * truth: `—` is a truthy string, so it hides the report, and then nothing can
+ * tell the row from another with the same title.
+ *
+ * @param {string} [cell] - A URL cell, raw or through extractCellUrl().
+ * @returns {boolean}
+ */
+export function isUnsetUrlCell(cell) {
+  const value = String(cell ?? '').trim();
+  return value === '' || URL_PLACEHOLDER_RE.test(value);
+}
+
 function reportNumberFromTarget(rawTarget) {
   const target = String(rawTarget).trim().replace(/^<|>$/g, '');
   if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
