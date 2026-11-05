@@ -244,3 +244,90 @@ test('actual Ashby bool and unknown status survive as untrusted data, never JD-w
     assert.equal('open' in evidence,false);assert.equal('listed' in evidence,false);
   }
 });
+
+// Compare the real core archive validator with the web evidence validator.
+// These have different jobs: core rejects closed/malformed archive evidence;
+// web retains a readable JD and sanitizes optional facts for the model to review.
+function parityPacket(ats, facts, text = TEXT) {
+  const p = ats === 'workday' ? workdayPacket(facts) : packet();
+  p.version = 2; p.sourcePostingURL = p.originalURL; p.result.text = text;
+  p.chain = { kind: 'direct-known-ats', apiRequestIndex: 0 };
+  p.transport.requests[0].location = null;
+  if (facts !== undefined) p.result.sourceFacts = facts;
+  return p;
+}
+
+test('core/web parity: shared Workday and Ashby fact states and field bounds', async () => {
+  const { validateArchiveSourcePacket } = await import('../../../read-known-jd.mjs');
+  const workday = info => ({ type: 'workday-cxs', canApplyState: 'boolean', jobPostingInfo: { canApply: true, ...info } });
+  const cases = [
+    ['workday', workday(WORKDAY_INFO), true],
+    ...['absent', 'invalid'].map(state => ['workday', { type: 'workday-cxs', canApplyState: state, jobPostingInfo: {} }, true]),
+    ['ashby', { type: 'ashby-listing', isListedState: 'boolean', isListed: true }, true],
+    ...['absent', 'invalid'].map(state => ['ashby', { type: 'ashby-listing', isListedState: state }, true]),
+    ['workday', { type: 'workday-cxs', canApplyState: 'boolean', jobPostingInfo: { canApply: 'true' } }, false],
+    ['ashby', { type: 'ashby-listing', isListedState: 'boolean', isListed: 'true' }, false],
+    ['ashby', { type: 'ashby-listing', isListedState: 'absent', isListed: true }, false],
+  ];
+  for (const [field, max] of [['title', 1000], ['jobReqId', 300], ['externalPath', 2048]]) {
+    for (const [value, accepted] of [['x'.repeat(max), true], ['x'.repeat(max + 1), false], ['', false], ['x\nunsafe', false]]) {
+      cases.push(['workday', workday({ [field]: value }), accepted]);
+    }
+  }
+  for (const [ats, facts, accepted] of cases) {
+    const p = parityPacket(ats, facts);
+    const core = validateArchiveSourcePacket(p, p.originalURL);
+    const web = evaluationSourceEvidence(p, p.originalURL);
+    assert.equal(core.ok, accepted, `${ats}: core fact acceptance`);
+    assert.equal(web.outcome, 'available', 'invalid optional facts do not erase the readable JD');
+    assert.equal(Object.hasOwn(web.jobData, 'sourceFacts'), accepted, `${ats}: web fact acceptance`);
+    if (accepted) assert.deepEqual(web.jobData.sourceFacts, core.binding.sourceFacts);
+  }
+});
+
+test('core/web parity: substantive JD and text-cap boundaries exclude metadata-only content', async () => {
+  const { validateArchiveSourcePacket } = await import('../../../read-known-jd.mjs');
+  for (const [text, accepted] of [
+    ['x'.repeat(199), false], ['x'.repeat(200), true],
+    ['Location: Fictional\nWork model: Remote\n\n' + 'x'.repeat(199), false],
+    ['Location: Fictional\nWork model: Remote\n\n' + 'x'.repeat(200), true],
+    ['Location: ' + 'Fictional '.repeat(40), false],
+    ['x'.repeat(19_999), true], ['x'.repeat(20_000), false], [TEXT + '…', false],
+  ]) {
+    const p = parityPacket('ashby', undefined, text);
+    const core = validateArchiveSourcePacket(p, p.originalURL);
+    const web = evaluationSourceEvidence(p, p.originalURL);
+    assert.equal(core.ok, accepted, `core text length ${text.length}`);
+    assert.equal(web.outcome, accepted ? 'available' : 'inconclusive', `web text length ${text.length}`);
+  }
+});
+
+test('core/web intentional differences: closed facts remain data; extra fields are sanitized', async () => {
+  const { validateArchiveSourcePacket } = await import('../../../read-known-jd.mjs');
+  for (const [ats, facts] of [
+    ['workday', { type: 'workday-cxs', canApplyState: 'boolean', jobPostingInfo: { canApply: false } }],
+    ['ashby', { type: 'ashby-listing', isListedState: 'boolean', isListed: false }],
+  ]) {
+    const p = parityPacket(ats, facts);
+    assert.equal(validateArchiveSourcePacket(p, p.originalURL).ok, false, 'closed evidence cannot authorize an archive');
+    const web = evaluationSourceEvidence(p, p.originalURL);
+    assert.equal(web.outcome, 'available'); assert.deepEqual(web.jobData.sourceFacts, facts);
+    assert.equal('open' in web, false); assert.equal('eligible' in web, false);
+  }
+  for (const [ats, clean] of [
+    ['workday', { type: 'workday-cxs', canApplyState: 'boolean', jobPostingInfo: { canApply: true } }],
+    ['ashby', { type: 'ashby-listing', isListedState: 'boolean', isListed: true }],
+  ]) {
+    const extra = { ...clean, unrelated: 'fictional-not-forwarded', ...(ats === 'workday' ? { jobPostingInfo: { ...clean.jobPostingInfo, unrelated: 'fictional-not-forwarded' } } : {}) };
+    const p = parityPacket(ats, extra);
+    assert.equal(validateArchiveSourcePacket(p, p.originalURL).ok, false, 'core packets have an exact field schema');
+    assert.deepEqual(evaluationSourceEvidence(p, p.originalURL).jobData.sourceFacts, clean, 'web emits only whitelisted facts');
+  }
+  // The actual native status heading is evidence, not substantive JD content.
+  // Its isListed colon also matches core metadata, so both measure only the JD.
+  for (const [bodyLength, accepted] of [[199, false], [200, true]]) {
+    const p = parityPacket('ashby', undefined, 'Not currently listed (isListed: false)\nLocation: Fictional\n\n' + 'x'.repeat(bodyLength));
+    assert.equal(validateArchiveSourcePacket(p, p.originalURL).ok, accepted);
+    assert.equal(evaluationSourceEvidence(p, p.originalURL).outcome, accepted ? 'available' : 'inconclusive');
+  }
+});
