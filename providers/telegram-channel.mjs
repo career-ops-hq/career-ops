@@ -21,7 +21,12 @@
 // RU/CIS corpus, none of the EN one, whose channels mirror boards career-ops
 // already scans or link through
 // shorteners); every rejection is a post the policy could not attribute, not
-// a parser failure.
+// a parser failure. Re-measured 2026-10-31 over 2,973 posts from 51 public
+// RU/CIS channels, after the positional employer shapes and the Habr Career
+// fix: 284 → 621 pass. Of the 284 the earlier rules emitted, 271 come out
+// identical and 13 are refused: 12 named no employer ("Worldwide 🌏", "NDA",
+// "Custom Software Development") and one linked a mirror whose operator is
+// not declared (see UNDECLARED_HOSTS).
 //
 // A private channel, one with the preview switched off, or a page whose
 // markup no longer parses is reported as an error — never as an empty board.
@@ -50,7 +55,20 @@ const FORM_HOSTS = /(^|\.)(forms\.gle|docs\.google\.com|forms\.yandex\.ru|typefo
 // shortest path the post exposes and is accepted; the board's own company or
 // category pages are not a listing. When the post also carries the
 // employer's own link, that one wins.
-const BOARD_HOSTS = /(^|\.)(getmatch\.ru|finder\.work|geekjob\.ru|geeklink\.io|linkedin\.com|hh\.ru|career\.habr\.com|djinni\.co|indeed\.com|glassdoor\.com|weworkremotely\.com|remoteok\.com|arbeitnow\.com|cryptojobslist\.com|relocate\.me|lemon\.io)$/i;
+// Checked before NON_APPLY_HOSTS: career.habr.com is a board, but it is also a
+// subdomain of habr.com, which is a long-read host — tested the other way
+// round, every Habr Career vacancy link (all the Proglib channels link there)
+// was dropped as a blog link.
+const BOARD_HOSTS = /(^|\.)(getmatch\.ru|finder\.work|geekjob\.ru|geeklink\.io|linkedin\.com|hh\.ru|career\.habr\.com|djinni\.co|indeed\.com|glassdoor\.com|weworkremotely\.com|remoteok\.com|arbeitnow\.com|cryptojobslist\.com|relocate\.me|lemon\.io|ingamejob\.com)$/i;
+// Hosts channels link instead of the employer that career-ops does not read:
+// mirrors whose operator is not declared under the source policy yet
+// (remocate.app, offerclaw.app), a vacancy aggregator whose page the posts
+// carry in place of the employer's link (vseti.app; source rules 2 and 5),
+// and a shared ATS for freelance recruiters, where the employer is often left
+// blank (hellowehire.com). Refused outright: left off BOARD_HOSTS alone,
+// their vacancy pages would pass as the employer's own site. A mirror moves
+// to BOARD_HOSTS once its operator is declared in docs/SOURCE_INDEXING_LOG.md.
+const UNDECLARED_HOSTS = /(^|\.)(remocate\.app|offerclaw\.app|vseti\.app|hellowehire\.com)$/i;
 // What makes a link a vacancy page rather than "somewhere on the employer's
 // site": a vacancy/job/career word in the path, a numeric id (`…-4554989/`,
 // `/vacancy/6743104…`), an ATS-shaped key (`/j/EDB9E5C27E/`, a UUID), or an
@@ -70,6 +88,17 @@ const LOCALE_ROOT_RE = /^(\/[a-z]{2}(-[a-z]{2})?)?$/i;
 const EMPLOYER_LABEL_RE = /^[^\p{L}\p{N}]{0,3}\s*(?:компания|компанія|company|работодатель|employer|hiring company)\s*[:：]\s*(.{2,80})$/iu;
 // Employer hidden on purpose. The post is real but rule 1 cannot be met.
 const ANONYMOUS_RE = /(?:название скрыто|компания скрыта|name hidden|undisclosed|confidential|\bour client\b|наш(?:его|им|ему)? клиент|для клиента)/i;
+// The same, said further down the post: "Подбор ведёт агентство Top
+// Selection, название компании-заказчика не раскрыто" follows a first line
+// "Top Selection ищет …", which names the agency, not the employer. Matched
+// over the whole post: unlike "наш клиент", none of these phrases appears in
+// an employer's own description of itself. Each one names the employer as
+// what is withheld: "Зарплата не раскрыта" and "Оценка компании не
+// раскрывается" (both measured) withhold something else. "компании
+// заказчика" with a space and "наименование" say the same; "не указано" is
+// left out: it is the salary's phrase, and "название заказчика проекта не
+// указано" (measured) follows an employer that is named.
+const DISCLOSED_HIDDEN_RE = /((?:назван|наименован)\p{L}*\s+(?:компании|работодателя|заказчика|клиента)(?:[-\s]+заказчика)?\s+не\s+(?:раскры|называ)|компани[яию]-заказчик|неназванн\p{L}*\s+(?:\p{L}+\s+){0,2}(?:компани|организаци|фирм|финтех|клиент|заказчик|работодател))/iu;
 const LOCATIONISH_RE = /\b(remote|удал[её]нк\w*|hybrid|onsite|office|офис|full[- ]?time|part[- ]?time|москва|спб|berlin|london|germany|europe|usa)\b/i;
 const DATE_LIKE_RE = /\b(19|20)\d{2}\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\b/i;
 const ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/g;
@@ -87,6 +116,76 @@ const HASHTAG_LINE_RE = /^#\S+(?:\s+#\S+)*$/u;
 // on 2026-09-07 against the saved 809-post corpus: the same 152 company/URL
 // attributions as before the extension.
 const ROLE_WORD_RE = /(?<![\p{L}\p{N}])(senior|middle|junior|lead|principal|staff|head|chief|intern|trainee|engineer|developer|manager|analyst|designer|architect|specialist|consultant|director|recruiter|scientist|product\s+owner|qa|tester|devops|sre|инженер|разработчик|менеджер|специалист|аналитик|директор|архитектор|рекрутер|стажер|стажёр|тестировщик|тимлид|владелец|руководитель|маркетолог|программист)(?![\p{L}\p{N}])/iu;
+// The positional shapes added on 2026-10-31 (see employerName()) capture a
+// phrase whose position, not a label,
+// says "employer", so they also refuse what that position holds when it is
+// not one. A sector or a unit rather than a company ("в FinTech", "в команду
+// CDP", "Крупная ИТ-компания ищет"); Cyrillic stems are matched as
+// substrings, Latin words whole.
+const GENERIC_ORG_RE = /(компани|команд|стартап|проект|продукт|отдел|направлени|подразделени|агентств|заказчик|работодател|финтех|геймдев|ритейл|индустри|отрасл|маркетплейс|поиск)|(?<![\p{L}\p{N}])(team|company|startup|client|agency|fintech|edtech|gamedev|igaming|e-?commerce|it|ит)(?![\p{L}\p{N}])/iu;
+// A work format where the employer would be: Proglib's third line is
+// "Удаленно (Москва)" / "Офис/гибрид (Москва)". LOCATIONISH_RE cannot catch
+// these: its \b never fires next to a Cyrillic letter.
+const WORK_FORMAT_RE = /(?<![\p{L}])(удал[её]н\p{L}*|гибрид\p{L}*|офис\p{L}*|релокац\p{L}*|remote|hybrid|onsite|on-site|office)(?![\p{L}])/iu;
+// A line that is nothing but a work format, a reach or an employment term
+// ("Worldwide 🌏", "remote", "Релокация", "Full-time"; "Удалённо · Москва"
+// is not: it names a city) — never a title.
+// Each word must end where its letters do: the separator may be empty, and
+// without that, "офисофис…1" can be split between the \p{L}* tails in
+// exponentially many ways before the match fails.
+const FORMAT_ONLY_RE = /^(?:(?:worldwide|anywhere|global|remote|hybrid|on-?site|office|relocation|full[- ]?time|part[- ]?time|удал[её]нн?\p{L}*|гибрид\p{L}*|офис\p{L}*|релокац\p{L}*|(?:полная|частичная)\s+занятость)(?![\p{L}])[\s,/()·|-]*)+$/iu;
+// A phrase, not a name: "в Чехии или Испании", "Автотестировщик на Java".
+const FUNCTION_WORD_RE = /(?<![\p{L}])(или|и|на|в|во|с|со|для|по|от|до|из|за|к|у|о|об|при|and|or|of|the|to|in|for|with)(?![\p{L}])/u;
+// What precedes `в` when the `в` phrase is a destination: "с переездом в
+// Дубай", "работа в офисе в …".
+const DESTINATION_LEAD_RE = /(?<![\p{L}])(переезд\p{L}*|релокац\p{L}*|офис\p{L}*|работ\p{L}*|проживани\p{L}*|relocation|relocate|based|office)$/iu;
+// A department, not a company: "Senior Director, Product Design – Ecosystem"
+// (Slack, measured), "… – Payments Platform".
+const DEPARTMENT_RE = /(?<![\p{L}])(development|design|engineering|platform|infrastructure|ecosystem|marketing|analytics|operations|payments|growth|security|core|research)$/iu;
+
+/**
+ * A department rather than a company: ends in a DEPARTMENT_RE word and is
+ * made only of ordinary capitalised words. A brand token (`YLAB
+ * Development`, `X5 Platform`) keeps it a name.
+ *
+ * @param {string} name
+ */
+function isDepartment(name) {
+  return DEPARTMENT_RE.test(name) && name.split(/\s+/).every((w) => /^\p{Lu}\p{Ll}+$/u.test(w));
+}
+// What opens "… is a …" when it is not the employer: "This is a full-time
+// role", "The role is a …", "This role is a …", "Our mission is a …". A
+// determiner and one word: "The Trade Desk is a …" is three and stays.
+const PRONOUN_RE = /^(this|it|we|our|you|your|he|she|they|that|there|here|(?:the|this|that|these|those|our|your|my|its|their)\s+\p{L}+|candidate|salary|position|role|job)$/iu;
+// A stack word opening the right-hand side of "Title / X" names the
+// technology, not the employer ("Android-разработчик / Kotlin Multiplatform").
+const STACK_WORD_RE = /^(kotlin|swift|java|javascript|typescript|react|vue|angular|node(?:\.js)?|python|go|golang|php|ruby|rust|scala|flutter|unity|unreal|c\+\+|c#|\.net|ios|android|backend|frontend|fullstack|full-stack|mobile|web|devops|qa|ml|data|sql|graphql|kmp|1с|1c)(?![\p{L}\p{N}])/iu;
+// A contract or employment term where the employer would be ("Title / B2B").
+const CONTRACT_RE = /(?<![\p{L}\p{N}])(b2b|гпх|тк\s+рф|contract|contractor|freelance|фриланс|gross|net|usdt)(?![\p{L}\p{N}])/iu;
+// A person, not a company: a Russian patronymic ("Мария Петровна" — finder.work
+// shows the individual who posted) or a sole trader ("ИП Иванов").
+const PERSON_RE = /(?:ович|евич|овна|евна|ична|инична)(?![\p{L}])|^ИП(?![\p{L}])/u;
+// "в Москве", "в Сербии": one declined Cyrillic word after `в` is a place far
+// more often than a company. Declined company names ("в Яндексе") are lost
+// with it; a missing row beats a wrong employer.
+const LOCATIVE_RE = /^[\p{Script=Cyrillic}-]+[еиу]$/u;
+const YEAR_RE = /(?<!\d)(19|20)\d{2}(?!\d)/;
+// A place alone where the employer would be: "Python Developer / Москва",
+// "Go Developer в Алматы", "QA Engineer / LATAM". Whole candidate only, so
+// "Moscow Exchange" keeps its name. LOCATIONISH_RE misses these: its \b
+// never fires next to a Cyrillic letter, and its list is short. Closed on
+// purpose: the cities, countries and regions RU/CIS channels post for.
+const PLACE_RE = /^(?:москва|мск|санкт-петербург|петербург|спб|питер|новосибирск|екатеринбург|казань|нижний новгород|краснодар|ростов-на-дону|самара|пермь|воронеж|уфа|омск|томск|иннополис|калининград|минск|киев|київ|львов|алматы|астана|ташкент|бишкек|тбилиси|батуми|ереван|баку|белград|нови-сад|лимассол|кипр|дубай|оаэ|стамбул|анталья|варшава|берлин|лиссабон|бали|таиланд|россия|рф|беларусь|казахстан|узбекистан|кыргызстан|армения|грузия|азербайджан|сербия|черногория|турция|польша|германия|португалия|испания|европа|снг|moscow|saint petersburg|st petersburg|minsk|kyiv|kiev|almaty|astana|tashkent|bishkek|tbilisi|batumi|yerevan|baku|belgrade|novi sad|limassol|cyprus|dubai|uae|istanbul|warsaw|berlin|london|lisbon|amsterdam|prague|bali|thailand|russia|belarus|kazakhstan|uzbekistan|kyrgyzstan|armenia|georgia|azerbaijan|serbia|montenegro|turkey|türkiye|poland|germany|portugal|spain|netherlands|uk|usa|us|eu|europe|emea|apac|latam|cis|mena|asia)$/iu;
+// The employer withheld under an NDA, given where the name would be
+// ("Компания: NDA"); "NDA Group" is a name and keeps it.
+const NDA_RE = /^(?:под\s+|under\s+)?nda$/iu;
+// The employer phrase "X ищет …" opens a line (Proglib channels: "💻
+// Wildberries ищет iOS-разработчика"; POSTER channels: "💎 Plus8Soft ищет
+// Senior Frontend Developer"; "Компания «Top Selection» ищет …"). Singular
+// verb only: "Ищут Head of Frontend" names nobody.
+const SEEKS_RE = /^(?:(?:компания|студия|стартап)\s+)?[«"]?([^«»"]{2,60}?)[»"]?\s+(?:ищет|нанимает|is hiring|is looking for)(?![\p{L}\p{N}])/iu;
+// "от 200 000 до 230 000 ₽", "$2000–2700 на руки": a salary line.
+const SALARY_LINE_RE = /^(?:от|до|from|up to|~)?\s*[$€]?\s*\d[\d\s.,]*(?:\s*(?:[-–—]|до)\s*[$€]?\s*\d[\d\s.,]*)?\s*(?:₽|руб|\$|€|usd|eur|rub|тыс)/iu;
 
 /** First non-empty line of a post, cut at a word boundary under TITLE_CAP. */
 function headline(lines) {
@@ -114,6 +213,63 @@ function plausibleEmployer(name, fromTitle) {
   if (LOCATIONISH_RE.test(n) || ANONYMOUS_RE.test(n)) return '';
   if (fromTitle && (DATE_LIKE_RE.test(n) || /\d/.test(n))) return '';
   if (!/\p{Lu}/u.test(n)) return '';
+  // Where every shape puts the employer, a place, a reach or an NDA is not
+  // one: the hashtag template's second line "Worldwide 🌏" and "Компания:
+  // NDA" (@remote_jobs_relocate, @backend_frontend_jobs, measured
+  // 2026-11-03) were emitted as employers.
+  const bare = n.replace(/[^\p{L}\p{N}]+$/u, '');
+  if (PLACE_RE.test(bare) || FORMAT_ONLY_RE.test(bare) || NDA_RE.test(bare)) return '';
+  return n;
+}
+
+/**
+ * A title line without its decoration: the leading emoji or bullet, a
+ * trailing pasted link (`Title в Tabby : https://…`), trailing emoji, and
+ * trailing parenthesised or bracketed notes (`в Авиасейлс (команда SERP)`).
+ *
+ * @param {string} line
+ */
+function bareLine(line) {
+  let s = line.replace(ZERO_WIDTH_RE, '').replace(/^[^\p{L}\p{N}«"]+/u, '');
+  s = s.replace(/\s*[:—–-]?\s*https?:\/\/\S+\s*$/u, '');
+  for (let prev = ''; prev !== s;) {
+    prev = s;
+    s = s.replace(/[^\p{L}\p{N})\]»"]+$/u, '').replace(/\s*[([][^()[\]]*[)\]]$/u, '');
+  }
+  return s.trim();
+}
+
+/**
+ * A work format leading a phrase about the work rather than a name: a format
+ * word, then a function word, a place, another format or a lower-case word
+ * ("Релокация в Сербию", "Relocation to Serbia", "Гибрид (Москва)",
+ * "Relocation available"). "Relocation Today" is not one: a name's next word
+ * is capitalised.
+ *
+ * @param {string} name
+ */
+function isFormatPhrase(name) {
+  const m = name.match(/^(\S+?)(?:\s*[,·|/]\s*|\s+)(.+)$/u);
+  if (!m || !FORMAT_ONLY_RE.test(m[1].replace(/[^\p{L}\p{N}]+$/u, ''))) return false;
+  const rest = m[2].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  return FUNCTION_WORD_RE.test(rest) || PLACE_RE.test(rest) || FORMAT_ONLY_RE.test(rest) || /^\p{Ll}/u.test(rest);
+}
+
+/**
+ * plausibleEmployer() for the shapes that take the employer from its position
+ * in a line rather than from a marker: also refuses a sector, a unit, a
+ * contract term, a role, a person, a year, a place, and a name that does not
+ * start the way a name does. Digits are allowed (`БЮРО 1440`, `01.tech`).
+ *
+ * @param {string} raw
+ */
+function positionalEmployer(raw) {
+  // "Social — 2ГИС", "TATLIN.UNIFIED — YADRO": a team, then its company.
+  const tail = raw.split(/\s[—–]\s/).pop() || '';
+  const n = plausibleEmployer(tail.replace(/[\s—–-]+$/u, ''), false).replace(/^[«"]|[»"]$/g, '');
+  if (!n || !/^[\p{Lu}\p{N}]/u.test(n) || /[()[\]«»]/.test(n)) return '';
+  if (YEAR_RE.test(n) || ROLE_WORD_RE.test(n) || GENERIC_ORG_RE.test(n) || CONTRACT_RE.test(n) || PERSON_RE.test(n)) return '';
+  if (WORK_FORMAT_RE.test(n) || FUNCTION_WORD_RE.test(n) || isDepartment(n) || isFormatPhrase(n)) return '';
   return n;
 }
 
@@ -133,9 +289,19 @@ function plausibleEmployer(name, fromTitle) {
  * marker pinning the candidate line to "employer" at all, so it also
  * refuses one that reads as a role (`ROLE_WORD_RE`, e.g. "Senior Engineer") —
  * every other shape is anchored by an explicit `Компания:`/`@`/`|`/`в` token
- * and does not need that check. Nothing else is guessed: not the channel
- * name, not the link's host, not free text — a wrong employer on a row is
- * worse than a missing row.
+ * and does not need that check.
+ *
+ * Four positional shapes follow, tried only when the five above found nothing
+ * (measured 2026-10-31, 2,973 posts from 51 channels): `Employer ищет …`
+ * (Proglib, POSTER), `Title в Employer` on the title line (offerclaw, Remocate,
+ * Sparkles mirrors), a second line `Employer is a …` (@geekjobs and its
+ * siblings), and a finder.work mirror's employer on the line after the
+ * salary. Their capture is a
+ * position, not a label, so positionalEmployer() also refuses a role, a
+ * sector or unit, a department, a work format, a contract term, a person, a
+ * year and a phrase. Nothing else is guessed: not the channel name, not the
+ * link's host, not free text — a wrong employer on a row is worse than a
+ * missing row.
  *
  * Exported for tests.
  *
@@ -180,7 +346,52 @@ export function employerName(lines) {
   // bare employer name alone on the next one, with no marker at all.
   if (HASHTAG_LINE_RE.test(first) && second) {
     const hashtagEmployer = plausibleEmployer(second, false);
-    if (hashtagEmployer && !ROLE_WORD_RE.test(hashtagEmployer)) return hashtagEmployer;
+    // A line of business is not a name either: "#Develpment\nCustom Software
+    // Development" (@remote_jobs_relocate, measured 2026-10-31).
+    // Nor is a work format followed by a destination ("Релокация в Сербию",
+    // "Relocation to Serbia"), which FORMAT_ONLY_RE in plausibleEmployer()
+    // lets through. A name that merely holds a format word stays one:
+    // "Relocation Today".
+    if (hashtagEmployer && !ROLE_WORD_RE.test(hashtagEmployer) && !isDepartment(hashtagEmployer)
+        && !isFormatPhrase(hashtagEmployer)) return hashtagEmployer;
+  }
+  // The four positional shapes below run only when every marked shape above
+  // found nothing, so no post those attribute changes. Measured 2026-10-31 on
+  // 2,973 posts from 51 public RU/CIS channels (3 pages each).
+  //
+  // "Employer ищет …" opening one of the first four lines. First, because it
+  // is the most explicit of the four: "МТС Банк ищет iOS-разработчика для
+  // продуктов в «Мой МТС»" also reads as a `в` title.
+  for (const line of lines.slice(0, 4)) {
+    if ((m = bareLine(line).match(SEEKS_RE))) {
+      const name = positionalEmployer(m[1]);
+      if (name) return name;
+    }
+  }
+  const head = lines.find((l) => !HASHTAG_LINE_RE.test(l)) || '';
+  const title = bareLine(head);
+  // A `в` inside a quoted title belongs to the title: «ML Engineer в Поиск».
+  const quoted = (s) => (s.match(/«/g) || []).length > (s.match(/»/g) || []).length;
+  // "Title в Employer" / "Title at Employer" on the title line (offerclaw,
+  // Remocate and Sparkles mirrors, Proglib's Go channel). The LAST `в` wins —
+  // "Разработчик на Go в Server Infrastructure Yandex Cloud" would otherwise
+  // read "Go в …" — and the employer is at most three words, so a team name
+  // in front of the company fails closed.
+  if ((m = title.match(/^(.{3,140})\s(?:в|at)\s(.{2,60})$/u)) && !quoted(m[1]) && !DESTINATION_LEAD_RE.test(m[1])) {
+    const name = positionalEmployer(m[2]);
+    if (name && name.split(/\s+/).length <= 3 && !LOCATIVE_RE.test(name)) return name;
+  }
+  // "Title\nEmployer is a …" — the EN template of @geekjobs and its siblings
+  // ("iOS Engineer – Creative App\nElevenLabs is an AI research…").
+  if ((m = (lines[1] || '').match(/^([\p{Lu}\p{N}][^,.;:!?]{0,40}?)\s+(?:is|are)\s+(?:a|an|the|one of)\s/u)) && !PRONOUN_RE.test(m[1]) && !STACK_WORD_RE.test(m[1])) {
+    const name = positionalEmployer(m[1]);
+    if (name) return name;
+  }
+  // finder.work mirrors: title, salary, then the employer alone on the third
+  // line ("Data Engineer / от 200 000 до 230 000 ₽ / WILIX").
+  if (lines.length >= 3 && SALARY_LINE_RE.test(lines[1])) {
+    const name = positionalEmployer(lines[2]);
+    if (name && !LOCATIVE_RE.test(name)) return name;
   }
   return '';
 }
@@ -202,9 +413,13 @@ export function classifyLink(href) {
   try { u = new URL(href); } catch { return null; }
   if (u.protocol !== 'https:') return null;
   const host = u.hostname.replace(/^www\./, '').toLowerCase();
-  if (!host || NON_APPLY_HOSTS.test(host) || SHORTENER_HOSTS.test(host) || FORM_HOSTS.test(host)) return null;
+  const board = BOARD_HOSTS.test(host);
+  if (!host || (!board && NON_APPLY_HOSTS.test(host)) || UNDECLARED_HOSTS.test(host) || SHORTENER_HOSTS.test(host) || FORM_HOSTS.test(host)) return null;
   const path = u.pathname.replace(/\/+$/, '');
   if (host === 'linkedin.com' || host.endsWith('.linkedin.com')) return /\/jobs\/view\//.test(path) ? 'board' : null;
+  // Only a vacancy page: "/companies/job", "/companies/<slug>/vacancies" and
+  // "/vacancies?q=…" carry a vacancy word but are a profile and listings.
+  if (host === 'career.habr.com') return /^\/vacancies\/\d+$/.test(path) ? 'board' : null;
   // A homepage or a listing root stays one even with a tracking tail
   // (`/?utm_source=telegram` is what channel footers add); only a parameter
   // that could identify a vacancy (`?gh_jid=123`, `?id=…`) makes it a page.
@@ -212,7 +427,7 @@ export function classifyLink(href) {
   if (LOCALE_ROOT_RE.test(path) && !identifying) return null;
   if (LISTING_ROOT_RE.test(path) && !identifying) return null;
   if (!VACANCY_EVIDENCE_RE.test(path) && !identifying) return null;
-  return BOARD_HOSTS.test(host) ? 'board' : 'employer';
+  return board ? 'board' : 'employer';
 }
 
 /**
@@ -334,6 +549,7 @@ export function postToJob(post) {
   const company = employerName(post.lines);
   if (!company) return null;
   if (ANONYMOUS_RE.test(post.lines.slice(0, 3).join('\n'))) return null;
+  if (DISCLOSED_HIDDEN_RE.test(post.description)) return null;
   const link = applicationLink(post.hrefs);
   if (!link) return null;
   // A hashtag-first post needs a later title: skip tags, the matched employer
@@ -346,9 +562,14 @@ export function postToJob(post) {
     const isLinkLine = (l) => post.hrefs.includes(l) || /^https?:\/\//i.test(l);
     const better = post.lines.slice(1).find((l) => l.toLowerCase() !== companyLower
       && employerName(['', l]).toLowerCase() !== companyLower
-      && !HASHTAG_LINE_RE.test(l) && !isLinkLine(l));
+      && !HASHTAG_LINE_RE.test(l) && !isLinkLine(l) && !FORMAT_ONLY_RE.test(bareLine(l)));
     if (!better) return null;
     title = headline([better]);
+  }
+  // "Title в Tabby : https://tabby.ai/careers/…" — the link is the url,
+  // and cut by headline() it would leave "Title в Tabby :…".
+  else if (/https?:\/\/\S+$/u.test(post.lines[0] || '')) {
+    title = headline([post.lines[0].replace(/\s*[:—–-]?\s*https?:\/\/\S+$/u, '')]) || title;
   }
   const source = `\n\nSource: ${post.url}`;
   return {
