@@ -27,9 +27,10 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import {
   buildContentFilter, compileContentTraits, matchContentTraits, foldContentText,
-  matchedTitleKeywords,
+  matchedTitleKeywords, buildTitleGate,
 } from '../scan.mjs';
-import { passesFilters } from '../scan-ats-full.mjs';
+import { passesFilters, warnRescueTitleMissesIgnored, RESCUE_TITLE_MISSES_IGNORED_WARNING } from '../scan-ats-full.mjs';
+import { scanBoard } from '../scan-dayforce.mjs';
 import { buildTitleFilter, buildLocationFilter } from '../scan.mjs';
 import { validatePortalsConfig } from '../validate-portals.mjs';
 
@@ -231,7 +232,7 @@ ok('scan-ats-full picks up trait matching through the same buildContentFilter', 
 
 // ── 5. The real scan.mjs ────────────────────────────────────────────────
 /** Run scan.mjs over one builtin board whose fetch returns `jobs`. */
-function scan(contentFilterYaml, jobs, { titleFilterYaml = ['title_filter:', '  positive: [Solutions Engineer]'], args = [] } = {}) {
+function scan(contentFilterYaml, jobs, { titleFilterYaml = ['title_filter:', '  positive: [Solutions Engineer]'], args = [], profileYaml = '' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'content-filter-traits-'));
   try {
     mkdirSync(join(dir, 'data'), { recursive: true });
@@ -248,6 +249,9 @@ function scan(contentFilterYaml, jobs, { titleFilterYaml = ['title_filter:', '  
       '',
     ].join('\n'));
     writeFileSync(join(dir, 'jobs.json'), JSON.stringify(jobs));
+    // An explicit profile, so the caller's own CAREER_OPS_PROFILE never leaks in.
+    const profile = join(dir, 'profile.yml');
+    writeFileSync(profile, profileYaml);
     const preload = join(dir, 'preload.mjs');
     writeFileSync(preload, [
       "import { readFileSync } from 'node:fs';",
@@ -259,7 +263,7 @@ function scan(contentFilterYaml, jobs, { titleFilterYaml = ['title_filter:', '  
     ].join('\n'));
     const r = spawnSync(NODE, ['--import', pathToFileURL(preload).href, join(ROOT, 'scan.mjs'), ...args], {
       cwd: dir, encoding: 'utf-8', timeout: 30000,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals },
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals, CAREER_OPS_PROFILE: profile },
     });
     const read = (name) => (existsSync(join(dir, 'data', name)) ? readFileSync(join(dir, 'data', name), 'utf-8') : '');
     const urls = read('pipeline.md').split('\n').map(l => l.match(/^- \[[ x]\]\s+(https?:\/\/\S+)/)?.[1]).filter(Boolean);
@@ -349,6 +353,147 @@ ok('scan: an unusable content_filter stops the run before any fetch', () => {
   assert.match(r.stderr, /content_filter\.min_match must be an integer from 1 to 1/);
   assert.deepStrictEqual(r.urls, []);
 });
+
+ok('scan: a rescued posting still goes through the re-apply cooldown', () => {
+  const today = new Date();
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const jobs = [job(1, 'Forward Deployed Engineer', 'Customer-facing presales work with a live demo.')];
+  const r = scan(RESCUE, jobs, { profileYaml: [
+    're_apply_windows:',
+    '  Acme:',
+    `    last_apply_date: "${iso}"`,
+    '    same_role_days: 90',
+    '    applied_to: ["Forward Deployed Engineer"]',
+    '',
+  ].join('\n') });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.deepStrictEqual(r.urls, []);
+  assert.match(r.stdout, /Title misses kept by content: 1\b/);
+  assert.match(r.stdout, /Filtered by cooldown:\s+1 removed/);
+});
+
+ok('scan: a rescued posting already seen in the same run is a duplicate, not a second offer', () => {
+  const jobs = [
+    job(1, 'Forward Deployed Engineer', 'Customer-facing presales work with a live demo.'),
+    job(1, 'Forward Deployed Engineer', 'Customer-facing presales work with a live demo.'),
+  ];
+  const r = scan(RESCUE, jobs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.deepStrictEqual(r.urls, [jobs[0].url]);
+  assert.match(r.stdout, /Duplicates:\s+1\b/);
+});
+
+// ── 5b. The shared title decision, and the other two scanners ──────────
+ok('buildTitleGate: match, rescue and reject follow title_filter and rescue_title_misses', () => {
+  const titleConfig = { positive: ['Solutions Engineer'], negative: ['Intern'] };
+  const on = buildTitleGate(titleConfig, buildContentFilter({ positive: ['demo'], rescue_title_misses: true }));
+  assert.strictEqual(on('Solutions Engineer'), 'match');
+  assert.strictEqual(on('Forward Deployed Engineer'), 'rescue');
+  assert.strictEqual(on('Pre-sales Intern'), 'reject');
+  const off = buildTitleGate(titleConfig, buildContentFilter({ positive: ['demo'] }));
+  assert.strictEqual(off('Solutions Engineer'), 'match');
+  assert.strictEqual(off('Forward Deployed Engineer'), 'reject');
+  assert.strictEqual(buildTitleGate(titleConfig, () => true)('Forward Deployed Engineer'), 'reject');
+});
+
+/** A stub Dayforce page whose list API returns `rows`; detail fetches are recorded. */
+function dayforcePage(rows, detailIds) {
+  const response = (json) => ({ ok: () => true, status: () => 200, json: async () => json });
+  return {
+    goto: async () => {},
+    url: () => 'https://jobs.dayforcehcm.com/en-US/tenant/CANDIDATEPORTAL',
+    title: async () => 'Careers',
+    locator: () => ({ count: async () => 0 }),
+    request: {
+      post: async () => response({ jobPostings: rows, offset: 0, count: rows.length, maxCount: rows.length }),
+      get: async (url) => {
+        if (String(url).endsWith('/api/auth/csrf')) return response({ csrfToken: 'token' });
+        detailIds.push(String(url).split('/').at(-1));
+        return response({ jobTitle: 'x', jobPostingContent: { jobDescription: 'full detail' } });
+      },
+    },
+  };
+}
+const DAYFORCE_BOARD = { name: 'Acme', tenant: 'tenant', board: 'CANDIDATEPORTAL', culture: 'en-US', jobBoardId: '1' };
+
+function dayforceFilters(contentFilterConfig) {
+  const titleConfig = { positive: ['Solutions Engineer'], negative: ['Intern'] };
+  const titleFilter = buildTitleFilter(titleConfig);
+  const contentFilter = buildContentFilter(contentFilterConfig);
+  return {
+    titleFilter,
+    titleGate: buildTitleGate(titleConfig, contentFilter, titleFilter),
+    contentFilter,
+    matchedTitleKeywords: (title) => matchedTitleKeywords(title, titleConfig),
+  };
+}
+
+await okAsync('scan-dayforce: a title miss is kept on its list description, and a failed rescue is a title skip', async () => {
+  const row = (id, jobTitle, jobDescription) => ({ jobPostingId: id, jobTitle, jobDescription, postingLocations: [] });
+  const rows = [
+    row(1, 'Solutions Engineer', 'Customer-facing demo work.'),
+    row(2, 'Forward Deployed Engineer', 'Customer-facing presales work with a live demo.'),
+    row(3, 'Platform Engineer', 'Kubernetes, plus one demo a year.'),
+    row(4, 'Pre-sales Intern', 'Customer-facing presales demo.'),
+    row(5, 'Customer Engineer', ''),
+    row(6, 'Solutions Engineer II', 'One demo.'),
+  ];
+  const detailIds = [];
+  const result = await scanBoard(dayforcePage(rows, detailIds), DAYFORCE_BOARD, dayforceFilters({
+    positive: ['customer-facing', 'pre-sales | presales', 'demo'], min_match: 2, rescue_title_misses: true,
+  }));
+  assert.deepStrictEqual(detailIds, ['1', '2']);
+  assert.deepStrictEqual(result.titleSkipped.map(s => s.title), ['Platform Engineer', 'Pre-sales Intern', 'Customer Engineer']);
+  assert.deepStrictEqual(result.contentSkipped.map(s => s.title), ['Solutions Engineer II']);
+});
+
+await okAsync('scan-dayforce: without rescue_title_misses, or without a titleGate, title misses stay skipped', async () => {
+  const rows = [{ jobPostingId: 1, jobTitle: 'Forward Deployed Engineer', jobDescription: 'Customer-facing demo.', postingLocations: [] }];
+  for (const filters of [
+    dayforceFilters({ positive: ['customer-facing', 'demo'], min_match: 2 }),
+    { ...dayforceFilters({ positive: ['customer-facing', 'demo'], min_match: 2, rescue_title_misses: true }), titleGate: undefined },
+  ]) {
+    const detailIds = [];
+    const result = await scanBoard(dayforcePage(rows, detailIds), DAYFORCE_BOARD, filters);
+    assert.deepStrictEqual(detailIds, []);
+    assert.strictEqual(result.titleSkipped.length, 1);
+  }
+});
+
+ok('scan-ats-full: rescue_title_misses is named as ignored, never dropped silently', () => {
+  const warnings = [];
+  warnRescueTitleMissesIgnored(buildContentFilter({ positive: ['demo'], rescue_title_misses: true }), (m) => warnings.push(m));
+  warnRescueTitleMissesIgnored(buildContentFilter({ positive: ['demo'] }), (m) => warnings.push(m));
+  warnRescueTitleMissesIgnored(buildContentFilter(undefined), (m) => warnings.push(m));
+  assert.deepStrictEqual(warnings, [RESCUE_TITLE_MISSES_IGNORED_WARNING]);
+  assert.match(RESCUE_TITLE_MISSES_IGNORED_WARNING, /ignored by scan-ats-full\.mjs/);
+});
+
+/** Run `script` against a portals.yml holding only `lines`; no network is reachable. */
+function runWithPortals(script, lines, args = []) {
+  const dir = mkdtempSync(join(tmpdir(), 'content-filter-exit-'));
+  try {
+    const portals = join(dir, 'portals.yml');
+    writeFileSync(portals, [...lines, ''].join('\n'));
+    const preload = join(dir, 'preload.mjs');
+    writeFileSync(preload, "globalThis.fetch = async () => { throw new Error('Unexpected network request'); };\n");
+    return spawnSync(NODE, ['--import', pathToFileURL(preload).href, join(ROOT, script), ...args], {
+      cwd: dir, encoding: 'utf-8', timeout: 30000,
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals, CAREER_OPS_PROFILE: join(dir, 'profile.yml') },
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+for (const script of ['scan-dayforce.mjs', 'scan-ats-full.mjs']) {
+  ok(`${script}: an unusable content_filter exits 1 with the same error as scan.mjs`, () => {
+    const r = runWithPortals(script, ['title_filter:', '  positive: [Engineer]', 'content_filter:', '  positive: ["demo"]', '  min_match: 3'], ['--dry-run']);
+    assert.strictEqual(r.status, 1, `${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /^Error: content_filter\.min_match must be an integer from 1 to 1/m);
+    assert.doesNotMatch(r.stderr, /\n\s+at /, 'no stack trace');
+  });
+}
 
 // ── 6. validate-portals reports the same shapes scan.mjs refuses ────────
 await okAsync('validate-portals: min_match and rescue_title_misses errors match scan.mjs', async () => {
