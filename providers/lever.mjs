@@ -138,12 +138,26 @@ export default {
       // fallback cannot buffer more than ~120 MiB however the server behaves.
       const maxPages = Math.min(30, ctx.maxPages ?? 30);
       let lastPageFull = false;
+      let truncated = false;
       for (let n = 0; n < maxPages; n++) {
+        const probing = ctx.maxPages === 1;
         if (n > 0) await sleep(250, ctx);
         const pageUrl = new URL(apiUrl);
         pageUrl.searchParams.set('limit', String(PAGE));
         pageUrl.searchParams.set('skip', String(n * PAGE));
-        const page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: 4 * 1024 * 1024 });
+        let page;
+        try {
+          page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: 4 * 1024 * 1024 });
+        } catch (err) {
+          // First page, or a probe: propagate, so a dead board still reads as broken.
+          // A later page that fails after retries (or is over the page cap) keeps
+          // the postings already read, flagged as truncated.
+          if (n === 0 || probing) throw err;
+          console.warn(`[lever] ${entry.name}: page ${n + 1} failed (${/** @type {any} */ (err)?.message || err}); keeping the ${all.length} posting(s) already read.`);
+          truncated = true;
+          lastPageFull = false;
+          break;
+        }
         if (!Array.isArray(page)) throw new Error(`lever: ${entry.name} returned a non-array page (${typeof page}) for skip=${n * PAGE}`);
         if (page.length === 0) { lastPageFull = false; break; }
         // A server that ignores `limit` must not amplify the total: refuse the page.
@@ -152,11 +166,13 @@ export default {
         lastPageFull = page.length === PAGE;
         if (!lastPageFull) break;
       }
-      // Cap stop, not completion: a full last page at the ceiling means more
+      // Cap stop, not completion: a full last page at the ceiling may mean more
       // postings exist. A probe (maxPages === 1) asks for one page by design.
       if (lastPageFull && ctx.maxPages !== 1) {
-        console.warn(`[lever] ${entry.name}: stopped at the ${maxPages}-page ceiling (${all.length} postings); the board has more.`);
+        console.warn(`[lever] ${entry.name}: stopped at the ${maxPages}-page ceiling (${all.length} postings); the board may have more.`);
+        truncated = true;
       }
+      if (truncated) /** @type {any} */ (all).leverTruncated = true;
       return all;
     };
     let json;
@@ -172,7 +188,7 @@ export default {
     }
     if (!Array.isArray(json)) return [];
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v0\/postings\/([^/]+)\/?$/)?.[1] || '';
-    return json.map(j => ({
+    const mapped = json.map(j => ({
       title: j.text || '',
       url: j.hostedUrl || '',
       company: entry.name,
@@ -188,5 +204,7 @@ export default {
       // field, so requisitionId stays unset rather than being inferred.
       externalId: coerceId(j.id),
     }));
+    if (/** @type {any} */ (json).leverTruncated) /** @type {any} */ (mapped).leverTruncated = true;
+    return mapped;
   },
 };

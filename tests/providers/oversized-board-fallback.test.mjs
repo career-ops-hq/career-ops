@@ -112,3 +112,37 @@ test('lever warns when the page ceiling stops on a full page, not on a short fin
   assert.equal((await run(3500)).length, 1);
   assert.equal((await run(230)).length, 0);
 });
+
+const pagedCtx = (total, extra = {}) => ({
+  sleep: async () => {},
+  fetchJson: async (url, opts) => {
+    assert.equal(opts?.redirect, 'error');
+    const u = new URL(url);
+    if (!u.searchParams.has('limit')) throw tooLarge();
+    const skip = Number(u.searchParams.get('skip'));
+    if (extra.failAtSkip === skip) throw Object.assign(new Error('HTTP 400'), { status: 400 });
+    return Array.from({ length: Math.max(0, Math.min(100, total - skip)) }, (_, k) => posting(skip + k));
+  },
+  ...extra,
+});
+
+test('lever marks the result truncated at the ceiling, not for short pages or probes', async () => {
+  const entry = { name: 'X', careers_url: 'https://jobs.lever.co/x' };
+  const warn = console.warn; console.warn = () => {};
+  try {
+    assert.equal((await lever.fetch(entry, pagedCtx(3500))).leverTruncated, true);
+    assert.equal((await lever.fetch(entry, pagedCtx(230))).leverTruncated, undefined);
+    assert.equal((await lever.fetch(entry, pagedCtx(3500, { maxPages: 1 }))).leverTruncated, undefined);
+  } finally { console.warn = warn; }
+});
+
+test('lever keeps postings already read when a later page fails, flagged truncated', async () => {
+  const warn = console.warn; console.warn = () => {};
+  try {
+    const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, pagedCtx(500, { failAtSkip: 200 }));
+    assert.equal(out.length, 200);
+    assert.equal(out.leverTruncated, true);
+    // the first page failing still propagates
+    await assert.rejects(() => lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, pagedCtx(500, { failAtSkip: 0 })), /HTTP 400/);
+  } finally { console.warn = warn; }
+});
