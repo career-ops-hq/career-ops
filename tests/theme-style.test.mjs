@@ -266,13 +266,36 @@ try {
 
       // A new template must declare its default here, or the opt-in would ship
       // dead in it (template-page-breaks.test.mjs discovers templates the same way).
+      // For user-authored named template variants (DATA_CONTRACT.md / #6514),
+      // infer the declared default from the template itself when validly declared.
       const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html')
         .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
-      const unlisted = discovered.filter((t) => !(t in tok.expected));
+      const expected = { ...tok.expected };
+      const unlisted = [];
+      for (const tpl of discovered) {
+        if (tpl in expected) continue;
+        try {
+          const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
+          const rootDecls = rules.filter((r) => r.selector.trim() === ':root')
+            .flatMap((r) => declValues(r.body, tok.cssVar));
+          const owned = rules.filter((r) => targets(r.selector, tok.cls));
+          const modern = owned.flatMap((r) => declValues(r.body, 'break-inside'));
+          const match = modern.map((m) => m.match(new RegExp(`var\\(\\s*${tok.cssVar}\\s*,\\s*(auto|avoid)\\s*\\)`))).find(Boolean);
+          if (match) {
+            const val = match[1];
+            const declaresRoot = rootDecls.length > 0;
+            if (!declaresRoot || rootDecls[0] === val) {
+              expected[tpl] = [val, declaresRoot];
+              continue;
+            }
+          }
+        } catch {}
+        unlisted.push(tpl);
+      }
       if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared ${tok.key} default`);
       else fail(`templates with no declared ${tok.key} default: ${unlisted.join(', ') || '(none discovered)'}`);
 
-      for (const [tpl, [value, declaresRoot]] of Object.entries(tok.expected)) {
+      for (const [tpl, [value, declaresRoot]] of Object.entries(expected)) {
         const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
         const owned = rules.filter((r) => targets(r.selector, tok.cls));
         const want = `var(${tok.cssVar}, ${value})`;
