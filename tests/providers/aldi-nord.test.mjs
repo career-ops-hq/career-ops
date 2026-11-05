@@ -254,7 +254,7 @@ test('DEFAULT_MAX_PAGES stops the walk even when the source reports more, and wa
   const { result, lines } = await captureErrors(() => provider.fetch(entry(), ctx));
   assert.deepEqual(calls.map((c) => c.body.page), [1, 500]);
   assert.equal(result.length, 5000);
-  assert.equal(result.aldiNordTruncated, true);
+  assert.equal(result.aldiNordTruncated, 'cap');
   assert.equal(lines.length, 1);
   assert.match(lines[0], /truncated at max_pages=500 \(5000 of 6000 postings\) — narrow aldi_nord.categories or raise max_pages/);
 });
@@ -280,10 +280,20 @@ test('a failed covering page keeps page 1 and warns, without the max_pages warni
   // Page 1, then the covering page and its two retries.
   assert.deepEqual(calls.map((c) => c.body.page), [1, 4, 4, 4]);
   assert.equal(result.length, 10);
-  assert.equal(result.aldiNordTruncated, true);
+  assert.equal(result.aldiNordTruncated, 'fetch-error');
   assert.equal(lines.length, 1);
   assert.match(lines[0], /kept the first 10 of 35 postings: HTTP 503/);
   assert.doesNotMatch(lines[0], /max_pages/);
+});
+
+test('with two incomplete locales the marker carries the first stop reason', async () => {
+  const err = Object.assign(new Error('HTTP 503'), { status: 503 });
+  const { ctx } = makeCtx((body) => {
+    if (body.locale === 'nl-BE') return body.page === 1 ? source(35, { locale: 'nl-BE' })(body) : err;
+    return source(35, { locale: 'fr-BE' })(body);
+  });
+  const { result } = await captureErrors(() => provider.fetch({ name: 'ExampleCo BE', careers_url: 'https://www.aldi.be/', max_pages: 2 }, ctx));
+  assert.equal(result.aldiNordTruncated, 'fetch-error');
 });
 
 test('a covering page over the body cap points at max_response_mb', async () => {
@@ -328,7 +338,7 @@ test('with no total the walk asks for the page budget, and the cap still warns',
   const capped = makeCtx(noTotal(100));
   const c2 = await captureErrors(() => provider.fetch(entry({ max_pages: 5 }), capped.ctx));
   assert.equal(c2.result.length, 50);
-  assert.equal(c2.result.aldiNordTruncated, true);
+  assert.equal(c2.result.aldiNordTruncated, 'cap');
   assert.match(c2.lines.join('\n'), /truncated at max_pages=5 \(50 of \? postings\)/);
 });
 
@@ -354,7 +364,7 @@ test('a non-cumulative covering page keeps page 1 and says why', async () => {
   }));
   const { result, lines } = await captureErrors(() => provider.fetch(entry(), ctx));
   assert.equal(result.length, 10);
-  assert.equal(result.aldiNordTruncated, true);
+  assert.equal(result.aldiNordTruncated, 'not-cumulative');
   assert.match(lines.join('\n'), /page 4 returned no more rows than page 1 — the API no longer treats page as cumulative/);
 });
 

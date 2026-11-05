@@ -266,7 +266,8 @@ export default {
 
     const jobs = [];
     const seen = new Set();
-    let truncated = false;
+    /** @type {'cap' | 'fetch-error' | 'not-cumulative' | null} */
+    let truncatedReason = null; // the first incomplete locale's stop reason
     let requests = 0;
 
     // A probe only needs to know the board answers: the first locale is enough.
@@ -311,7 +312,7 @@ export default {
         stopReason = 'cap';
         console.error(`⚠️  aldi-nord: ${company} (${locale}) truncated at max_pages=${maxPages} (${result.rawCount} of ${result.total ?? '?'} postings) — narrow aldi_nord.categories or raise max_pages on this entry`);
       }
-      if (stopReason !== 'complete') truncated = true;
+      if (stopReason !== 'complete') truncatedReason ??= stopReason;
 
       for (const job of result.jobs) {
         if (seen.has(job.url)) continue;
@@ -320,7 +321,7 @@ export default {
       }
     }
 
-    if (truncated) /** @type {any} */ (jobs).aldiNordTruncated = true;
+    if (truncatedReason) /** @type {any} */ (jobs).aldiNordTruncated = truncatedReason;
     return jobs;
   },
 };
