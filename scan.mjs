@@ -37,6 +37,7 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
+import { buildWorkplacePolicy } from './providers/_country.mjs';
 import {
   closeSync,
   existsSync,
@@ -664,6 +665,7 @@ export function titleSignalsRemote(title) {
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
+  const workplacePolicy = buildWorkplacePolicy(locationFilter.workplace_policy);
   const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
   const alwaysAllow = alwaysAllowKeywords.map(compileLocationKeyword);
   // US-targeted configs list the country in always_allow and foreign cities
@@ -682,7 +684,8 @@ export function buildLocationFilter(locationFilter) {
   const strict = locationFilter.strict === true
     && (allow.length > 0 || block.length > 0 || blockHard.length > 0);
 
-  return (location, url, title) => {
+  const filter = (location, url, title, offer) => {
+    if (!workplacePolicy(location, title, offer).eligible) return false;
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
     // Nothing to judge on either field → pass (don't penalize missing data),
@@ -718,6 +721,11 @@ export function buildLocationFilter(locationFilter) {
     // stays rejected. This widens `allow`, never `block`.
     return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
+  // Detail readers may recheck this opt-in policy without repeating legacy
+  // location tiers. Arbitrary caller-provided filters have no such capability.
+  return Object.assign(filter, {
+    workplacePolicyOnly: (location, url, title, offer) => workplacePolicy(location, title, offer).eligible,
+  });
 }
 
 // ── Posting-age filter ──────────────────────────────────────────────
@@ -4781,7 +4789,7 @@ async function main() {
         }
         // job.title is passed so a role whose remoteness is stated in the title
         // ("Program Manager - Remote") isn't rejected for a city-only location.
-        if (!locationFilter(job.location, job.url, job.title)) {
+        if (!locationFilter(job.location, job.url, job.title, job)) {
           totalFilteredLocation++;
           if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;

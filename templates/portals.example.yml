@@ -218,6 +218,10 @@
 #     - "Brazil"
 #     - "Australia"
 
+# Conditional office/hybrid-city + remote-country rules are also opt-in:
+# location_filter.workplace_policy (see docs/WORKPLACE_GEOGRAPHY.md). Unlike
+# an allow entry of "Remote", this checks where remote applicants may work.
+
 # -- Country-eligibility filter (optional, opt-in, #2093) --
 # location_filter only reads the ATS provider's STRUCTURED location field
 # (e.g. "Remote"). Many US companies tag every remote requisition "Remote"
