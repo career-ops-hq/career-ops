@@ -57,18 +57,20 @@ requirement_importance:
     importance: "critical"
     match: "strong"`);
 
-test("levers list hard stops first, then missing requirements by importance", () => {
+test("levers name hard stops and leave requirement importance out of the score", () => {
   const levers = scoreLevers(readMachineSummary(full));
   assert.deepEqual(levers, {
     holding: [
       { text: "Requires on-site in a city outside the profile", importance: null },
-      { text: "Kubernetes in production", importance: "critical" },
-      { text: "Terraform", importance: "meaningful" },
     ],
-    close: [{ text: "On-call leadership", importance: "high" }],
+    close: [],
     verify: ["Confirm the salary band", "Compensation evidence is unknown"],
     strengths: ["Five years of Python services"],
   });
+  const names = [...levers.holding, ...levers.close].map((item) => item.text);
+  assert.equal(names.includes("Kubernetes in production"), false);
+  assert.equal(names.includes("Terraform"), false);
+  assert.equal(names.includes("On-call leadership"), false);
 });
 
 test("the decision comes from final_decision", () => {
@@ -102,13 +104,20 @@ test("a card reason names the call, the top strength, and the top blocker", () =
   });
 });
 
-test("a card reason falls back to a close call when nothing is missing", () => {
+test("a missing requirement does not become the thing holding the score down", () => {
   const r = cardReason(report(`final_decision: "Apply"
 requirement_importance:
   - requirement: "Mentoring"
     importance: "high"
     match: "partial"`));
-  assert.deepEqual(r, { decision: "Apply", plus: null, minus: "Mentoring" });
+  assert.deepEqual(r, { decision: "Apply", plus: null, minus: null });
+});
+
+test("a card reason uses a CV gap when there is no hard stop", () => {
+  const r = cardReason(report(`final_decision: "Apply"
+soft_gaps:
+  - "Light on people management"`));
+  assert.deepEqual(r, { decision: "Apply", plus: null, minus: "Light on people management" });
 });
 
 test("a report without a summary gives no card reason", () => {
@@ -125,8 +134,8 @@ requirement_importance:
     importance: "high"
     match: "partial"`);
   assert.deepEqual(scoreLevers(readMachineSummary(summary)).close, [
-    { text: "On-call leadership", importance: "high" },
     { text: "Light on people management", importance: null },
+    { text: "On-call leadership", importance: null },
   ]);
   assert.equal(cardReason(report(`final_decision: "Apply"
 soft_gaps:

@@ -67,30 +67,19 @@ export function readMachineSummary(report) {
   };
 }
 
-/** @param {Requirement[]} rows @param {string} match */
-function byImportance(rows, match) {
-  return rows
-    .filter((r) => r.match === match && IMPORTANCE_RANK[r.importance] <= IMPORTANCE_RANK.meaningful)
-    .sort((a, b) => IMPORTANCE_RANK[a.importance] - IMPORTANCE_RANK[b.importance])
-    .map((r) => ({ text: r.requirement, importance: r.importance }));
-}
-
 /**
- * What holds a score down, what is a near miss, and what to confirm before
- * trusting it. Preferred and low-signal requirements are left out because
- * they do not move the score.
+ * Levers the rubric actually lets move the 1-5 score.
+ * Hard stops are red flags. Soft gaps are CV-match evidence.
+ * Requirement importance, evidence confidence, and unknown dimensions do not
+ * hold the score down. Confidence gaps stay under verify so the reader can
+ * see them without being told they changed the number.
  * @param {MachineSummary} s
  * @returns {ScoreLevers}
  */
 export function scoreLevers(s) {
-  const partial = byImportance(s.requirements, "partial");
-  const listed = new Set(partial.map((r) => r.text.toLowerCase()));
   return {
-    holding: [...s.hardStops.map((text) => ({ text, importance: null })), ...byImportance(s.requirements, "missing")],
-    close: [
-      ...partial,
-      ...[...new Set(s.softGaps)].filter((text) => !listed.has(text.toLowerCase())).map((text) => ({ text, importance: null })),
-    ],
+    holding: s.hardStops.map((text) => ({ text, importance: null })),
+    close: [...new Set(s.softGaps)].map((text) => ({ text, importance: null })),
     verify: [...s.confidenceGaps, ...s.unknownEvidence.map((label) => `${label} evidence is unknown`)],
     strengths: s.strengths,
   };
@@ -102,7 +91,8 @@ export function scoreLevers(s) {
 
 /**
  * The one-line reason a Today card shows: the evaluator's call, the strongest
- * match, and the biggest thing holding the score down.
+ * match, and the first hard stop or CV gap. A missing requirement is not used.
+ * Requirement importance does not move the score.
  * @param {string} report
  * @returns {CardReason | null}
  */

@@ -1,4 +1,5 @@
 import { readMachineSummary, scoreLevers } from "@/lib/machine-summary.mjs";
+import { leverCopy } from "@/lib/score-claims.mjs";
 
 type Item = { text: string; tag?: string };
 
@@ -27,25 +28,26 @@ export function ScoreLevers({ report }: { report: string }) {
   const summary = readMachineSummary(report);
   if (!summary) return null;
   const { holding, close, verify, strengths } = scoreLevers(summary);
+  const copy = leverCopy();
   if (holding.length + close.length + verify.length + strengths.length === 0) return null;
   return (
     <section data-testid="score-levers" className="mt-4 rounded-2xl border border-border bg-surface/30 px-5 py-4">
       <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">What would change this score</p>
       <div className="mt-3 grid gap-5 sm:grid-cols-2">
         <ItemList
-          title="Holding it down"
-          hint="Blockers and requirements with no evidence in your CV."
-          items={holding.map((l) => ({ text: l.text, tag: l.importance ?? "blocker" }))}
+          title={copy.holdingTitle}
+          hint={copy.holdingHint}
+          items={holding.map((l) => ({ text: l.text, tag: "blocker" }))}
           dot="bg-red-500"
         />
         <ItemList
-          title="Close calls"
-          hint="Partly covered. Clearer CV evidence could raise the score."
-          items={close.map((l) => ({ text: l.text, tag: l.importance ?? undefined }))}
+          title={copy.closeTitle}
+          hint={copy.closeHint}
+          items={close.map((lever) => plain(lever.text))}
           dot="bg-amber-500"
         />
-        <ItemList title="Working for you" hint="Your strongest matches for this role." items={strengths.map(plain)} dot="bg-emerald-500" />
-        <ItemList title="Check before you trust it" hint="Open questions behind the score." items={verify.map(plain)} dot="bg-sky-500" />
+        <ItemList title={copy.strengthsTitle} hint={copy.strengthsHint} items={strengths.map(plain)} dot="bg-emerald-500" />
+        <ItemList title={copy.verifyTitle} hint={copy.verifyHint} items={verify.map(plain)} dot="bg-sky-500" />
       </div>
     </section>
   );
