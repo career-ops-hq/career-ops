@@ -37,7 +37,7 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
-import { buildWorkplacePolicy } from './providers/_country.mjs';
+import { buildWorkplacePolicy, isCountryKeyword } from './providers/_country.mjs';
 import {
   closeSync,
   existsSync,
@@ -422,9 +422,10 @@ export function matchedTitleKeywords(title, titleFilter) {
 //     matches, so block: [Dublin] does not drop "Dublin, OH".
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
-//   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
-//     an explicit remote marker (see titleSignalsRemote below), unless
-//     `remote_title_fallback: false` disables that final rescue.
+//   - `allow` non-empty → must match a keyword, an exact worldwide label when
+//     non-strict and both allow-lists contain only countries (#6413), OR the
+//     TITLE carries an explicit remote marker (see titleSignalsRemote below),
+//     unless `remote_title_fallback: false` disables that final title rescue.
 
 // Normalize a keyword list from portals.yml: tolerates a bare string
 // (wrapped to a 1-item array), null/undefined (→ []), and non-string
@@ -661,6 +662,15 @@ export function titleSignalsRemote(title) {
   return REMOTE_TITLE_RE.test(lower);
 }
 
+// Whole labels only: a substring must not promote qualified or negated
+// geography ("Worldwide except Canada", "Not worldwide") to worldwide.
+const WORLDWIDE_LOCATION_LABELS = new Set([
+  'worldwide',
+  'anywhere in the world',
+  'remote (worldwide)',
+  'worldwide (himalayas: no country restriction)',
+]);
+
 // `url` and `title` are optional. Callers that omit them get the original
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
@@ -675,7 +685,12 @@ export function buildLocationFilter(locationFilter) {
   if (alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k))) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
-  const allow = compileLocationKeywordList(locationFilter.allow);
+  const allowKeywords = normalizeKeywordList(locationFilter.allow);
+  const allow = allowKeywords.map(compileLocationKeyword);
+  // Do not widen city-only or mixed city/country targeting. Reuse the shared
+  // country vocabulary rather than introducing a second country-name list.
+  const countryOnlyAllow = allowKeywords.length > 0
+    && [...alwaysAllowKeywords, ...allowKeywords].every(isCountryKeyword);
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
   // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
@@ -716,6 +731,7 @@ export function buildLocationFilter(locationFilter) {
     if (block.length > 0 && block.some(matches)) return false;
     if (allow.length === 0) return true;
     if (allow.some(matches)) return true;
+    if (!strict && countryOnlyAllow && WORLDWIDE_LOCATION_LABELS.has(lower)) return true;
     // Last resort only. Deliberately placed AFTER `block` so a remote title can
     // never rescue a blocked location — "Program Manager - Remote" in Bengaluru
     // stays rejected. This widens `allow`, never `block`.
