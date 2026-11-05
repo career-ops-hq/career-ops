@@ -272,6 +272,12 @@ async function cmdRun(args) {
       for (const r of failed) console.error(`${r.id} ${hook} failed: ${r.error}`);
       process.exit(1);
     }
+    // export and notify return a non-array on success. Only ingest and search promise Job[].
+    const notJobs = results.filter(r => !Array.isArray(r.result));
+    if (notJobs.length) {
+      for (const r of notJobs) console.error(`${r.id} ${hook} failed: expected an array of jobs`);
+      process.exit(1);
+    }
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     const { jobs, counts } = admitPluginJobs(found, {
       id,

@@ -148,3 +148,18 @@ test('an enabled plugin whose hook does not load exits 1 and does not claim zero
   assert.match(failed.stderr, /did not run/);
   assert.doesNotMatch(failed.stdout, /0 found/);
 });
+
+test('an ingest hook that returns a non-array exits 1 and does not claim zero jobs', (t) => {
+  guardRealCheckout(t);
+  const checkout = disposableCheckout();
+  t.after(() => rmSync(checkout, { recursive: true, force: true }));
+  writeFileSync(join(checkout, 'plugins.local', 'fixture-run', 'index.mjs'), 'export default { async ingest() { return { jobs: [] }; } };\n');
+
+  const root = dataRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'config', 'plugins.yml'), 'plugins:\n  fixture-run:\n    enabled: true\n    mode: list\n');
+  const failed = run(checkout, root);
+  assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+  assert.match(failed.stderr, /^fixture-run ingest failed: expected an array of jobs$/m);
+  assert.doesNotMatch(failed.stdout, /0 found/);
+});
