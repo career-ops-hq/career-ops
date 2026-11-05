@@ -157,6 +157,29 @@ test('lever marks the result truncated at the ceiling, not for short pages or pr
   } finally { console.warn = warn; }
 });
 
+test('lever keeps postings when a later page exhausts retries on a 429, with count, marker and warning', async () => {
+  const warns = [];
+  const warn = console.warn; console.warn = (m) => warns.push(String(m));
+  const requests = [];
+  try {
+    const ctx = pagedCtx(500);
+    const inner = ctx.fetchJson;
+    ctx.fetchJson = async (url, opts) => {
+      const u = new URL(url);
+      if (u.searchParams.has('limit')) requests.push(Number(u.searchParams.get('skip')));
+      if (u.searchParams.get('skip') === '200') throw Object.assign(new Error('HTTP 429'), { status: 429 });
+      return inner(url, opts);
+    };
+    const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
+    assert.equal(out.length, 200);
+    assert.equal(out.leverTruncated, true);
+    // pages 0 and 100 once each, then the default policy: 1 attempt + 2 retries at skip=200
+    assert.deepEqual(requests, [0, 100, 200, 200, 200]);
+    assert.equal(warns.filter((m) => m.includes('keeping the 200 posting(s)')).length, 1);
+    assert.equal(warns.filter((m) => m.includes('ceiling')).length, 0);
+  } finally { console.warn = warn; }
+});
+
 test('lever keeps postings already read when a later page fails, flagged truncated', async () => {
   const warn = console.warn; console.warn = () => {};
   try {
