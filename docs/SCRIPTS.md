@@ -907,7 +907,7 @@ Paths follow `CAREER_OPS_ROOT` / `CAREER_OPS_DATA_DIR` / `CAREER_OPS_TRACKER`. D
 
 Adds the applications in another tracker's CSV export to `data/applications.md`. It is for a user who already kept a search in Teal, Huntr, Simplify or a spreadsheet: export that tracker as CSV and import it once, instead of adding each row by hand. Zero-LLM, no network.
 
-**Dry run by default**: nothing is written without `--confirm`. The preview names the column it read for each field, the columns it ignores, and what happens to every row.
+**Dry run by default**: nothing is written without `--confirm`. The preview names the column it read for each field, the columns it ignores, and reports the outcome for every row. It shows up to 20 importable rows and five rows for each other outcome, with an `... N more` line when details are omitted.
 
 Columns are matched by header name, so their order does not matter. The file needs a company column (`Company`, `Company Name`, `Employer`) and a role column (`Job Position`, `Job Title`, `Position Title`, `Title`, `Role`). Status, date, posting URL, location and notes are optional; `--help` lists every recognized header. Stage names resolve through `templates/states.yml` first, then through a small table of other trackers' stages (`Interviewing` becomes `Interview`, `Negotiating` becomes `Offer`, `Not Selected` becomes `Rejected`, `No Response`, `Withdrawn` and `Archived` become `Discarded`). A row with an empty stage is read as `Applied`.
 
@@ -920,7 +920,7 @@ Columns are matched by header name, so their order does not matter. The file nee
 | unknown stage | a stage neither table knows. Rename it in the file to a tracker state and run again |
 | missing company or role | the row is left out |
 
-Dates are read as `YYYY-MM-DD` (a time part is dropped), `Jul 3, 2026`, `3 Jul 2026`, or a slash date. Slash dates are read month first unless a date in the file has a first part above 12, which proves day first; `--day-first` forces it. A file that proves both orders is refused. A row with no readable date gets today's date and `no date in source` in Notes. Notes also carry `imported from <file>` and the source stage when it differs from the tracker state.
+Dates are read as `YYYY-MM-DD` (a time part is dropped), `Jul 3, 2026`, `3 Jul 2026`, or a slash date. Slash dates are read month first unless a date in the file has a first part above 12, which proves day first. `--day-first` forces day/month/year and skips that check, so a mixed file is not refused. A slash date that does not fit the chosen order has no readable date. It gets today's date and `no date in source` in Notes. Normalize the dates in the file before importing. Notes also carry `imported from <file>` and the source stage when it differs from the tracker state.
 
 `--confirm` reserves numbers with `reserve-report-num.mjs`, writes one headed tracker-addition TSV per row, runs `merge-tracker.mjs` and releases the numbers. A missing tracker is created first, with a `URL` column when the file has posting links. On a tracker with no `URL` column the preview says the links cannot be kept, and `--confirm` refuses the import until `node merge-tracker.mjs --backfill-urls` adds the column. A row merge refuses (for example a report link to a number `batch-state.tsv` marks failed) is not lost: its TSV stays in the printed temp directory with its number reserved, the import exits `1`, and the message gives the `merge-tracker.mjs` command to re-run after the fix. Re-running the same file adds nothing.
 
