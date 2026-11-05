@@ -58,11 +58,13 @@ import path from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
 
 import { makeHttpCtx } from './providers/_http.mjs';
+import { formatHttpCacheWindow, httpCacheStats, resolveHttpCacheTtlMs, withHttpCache } from './providers/_http-cache.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
+import { portalTopLevelTypos } from './validate-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
@@ -85,7 +87,14 @@ import { checkLivenessViaApi } from './liveness-api.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = getCareerOpsRoot();
+export const DATA_ROOT = getCareerOpsRoot();
+// Preserve the actual shell environment before dotenv adds data-root values to
+// process.env. The browser resolver uses this snapshot to distinguish an
+// explicit shell path (which keeps cwd-relative behavior) from a path read from
+// DATA_ROOT/.env (which must resolve relative to that file's directory). The
+// helper also retains Windows' case-insensitive environment lookup when the
+// result becomes an ordinary object.
+export const BROWSER_PROCESS_ENV = snapshotBrowserProcessEnv();
 
 try {
   const { config } = await import('dotenv');
@@ -102,6 +111,7 @@ const parseYaml = loadYaml;
 
 // ── Config ──────────────────────────────────────────────────────────
 import { resolveTrackerPath } from './path-resolver.mjs';
+import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-launch.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 // An explicit override wins; otherwise the root fixed above, since the .env just
@@ -121,6 +131,17 @@ const PROFILE_PATH = hasProfileOverride() ? getProfilePath() : getProfilePath(DA
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
 export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
 
+// The closing hint names the lane's inbox when CAREER_OPS_PIPELINE is set.
+// `/career-ops pipeline` alone reads data/pipeline.md unless the agent's own
+// environment carries the same variable, so a lane run that only says "run
+// pipeline" sends the user to the other lane's inbox (#6379).
+export function pipelineRunHint(lane = process.env.CAREER_OPS_PIPELINE) {
+  const file = lane?.trim();
+  return file
+    ? `→ Run /career-ops pipeline ${file} to evaluate new offers (this lane's inbox, not data/pipeline.md).`
+    : '→ Run /career-ops pipeline to evaluate new offers.';
+}
+
 export const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
@@ -132,7 +153,30 @@ const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 // module must stay side-effect free: a sibling that only reads a constant used
 // to leave a stray data/ in whatever cwd it ran from.
 
-const CONCURRENCY = 10;
+// A morning scan of mixed ATS hosts was waiting on 10 slots while the CPU
+// sat idle. 32 is the global cap. 10 per hostname keeps a single-ATS list
+// at today's parallelism, so one Greenhouse board does not get a bigger
+// burst than it did before. Verify stays at 10. It hammers one URL at a
+// time and is not the morning-scan wait.
+export const SCAN_CONCURRENCY = 32;
+export const HOST_CONCURRENCY = 10;
+export const VERIFY_CONCURRENCY = 10;
+
+export function companyFetchHost(company) {
+  try {
+    const declared = company?._provider?.fetchHost?.(company);
+    if (typeof declared === 'string' && declared.trim()) return declared.trim().toLowerCase();
+    const detected = company?._provider?.detect?.(company);
+    const raw = (detected && typeof detected.url === 'string' && detected.url)
+      || (typeof company?.api === 'string' && company.api)
+      || (typeof company?.careers_url === 'string' && company.careers_url)
+      || '';
+    if (!raw) return '';
+    return new URL(raw).hostname;
+  } catch {
+    return '';
+  }
+}
 const PROGRESS_EVERY = 25;
 
 export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
@@ -498,18 +542,37 @@ const USPS_STATES = Object.freeze([
 function compileUsStateAbbrev(abbr) {
   const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`(?:,\\s*${escaped}(?![\\p{L}\\p{M}\\p{N}])|(?:^|[^\\p{L}\\p{M}\\p{N}])${escaped}[^\\p{L}\\p{M}\\p{N}]*$)`, 'u');
-  return (lower) => re.test(withoutCountryCodeSlot(lower));
+  return (lower) => placesWithoutCountryCode(lower).some((place) => re.test(place));
 }
 
 // "City, Region, CC" ends in an ISO country code, and several of those are
 // also USPS codes: "Bengaluru, Karnataka, IN" read as Indiana and "Toronto,
 // ON, CA" as California, so always_allow beat the user's own block entry.
-// A two-letter last part after two or more parts is the country slot, never
-// a state. "Austin, TX, US" still keeps TX.
-function withoutCountryCodeSlot(lower) {
-  const parts = lower.split(',');
-  if (parts.length < 3 || !/^\s*\p{L}{2}\s*$/u.test(parts.at(-1))) return lower;
-  return parts.slice(0, -1).join(',');
+// A two-letter last part after two or more parts is the country slot. So is
+// the last part of "Austin TX, US" or "Perth WA, AU", where a state code ends
+// the city part. "Santa Fe, NM" and "Dublin, OH" keep their state. "LA, CA"
+// is two state codes, so the last part is the state, not a country. So is
+// a state code written twice, as in "Brooklyn, NY, NY". A place
+// with a country slot other than US has no US state at all, so "Perth WA, AU"
+// does not read as Washington. Providers join several places with "; "
+// (Lever) or " · " (Jobvite), and each place gets its own check, so the TX in
+// "Austin TX · Toronto, ON, CA" counts even though it is not at the end.
+const USPS_CODES = new Set(USPS_STATES.map(([, abbr]) => abbr));
+
+function placesWithoutCountryCode(lower) {
+  return lower.split(/[;·]/).flatMap((place) => {
+    const parts = place.split(',');
+    const code = parts.at(-1).trim();
+    if (parts.length < 2 || !/^\p{L}{2}$/u.test(code)) return [place];
+    if (parts.length === 2) {
+      const cityTail = /(?:^|[^\p{L}\p{M}\p{N}])(\p{L}{2})\s*$/u.exec(parts[0]);
+      if (!cityTail || !USPS_CODES.has(cityTail[1])) return [place];
+      if (USPS_CODES.has(code)) return [place];
+    } else if (USPS_CODES.has(code) && parts.at(-2).trim() === code) {
+      return [place];
+    }
+    return code === 'us' ? [parts.slice(0, -1).join(',')] : [];
+  });
 }
 
 const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
@@ -3435,13 +3498,14 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
 // Both surface as rows that silently stop counting, because every reader skips
 // a malformed line quietly.
 //
-// `alreadyLocked` is for the one caller whose APPEND is decided by a READ of
-// this same file — check-liveness's expired-verdict recorder, which must hold
-// the lock across both or its plan is a check-then-act (a concurrent scanner
-// appending in between makes it write a row that is no longer needed). The
-// lock is not reentrant, so that caller cannot simply wrap this call; it takes
-// the lock itself and passes true. Everything else must leave it alone: true
-// with no lock actually held reintroduces both races described above.
+// `alreadyLocked` is for the callers whose APPEND is decided by a READ of this
+// same file — check-liveness's expired-verdict recorder and
+// appendUnrecordedToScanHistory below — which must hold the lock across both
+// or their plan is a check-then-act (a concurrent scanner appending in between
+// makes them write a row that is no longer needed). The lock is not reentrant,
+// so such a caller cannot simply wrap this call; it takes the lock itself and
+// passes true. Everything else must leave it alone: true with no lock actually
+// held reintroduces both races described above.
 export async function appendToScanHistory(offers, date, status = 'added', { alreadyLocked = false } = {}) {
   const write = () => {
     // Ensure file + header exist. The header is SCAN_HISTORY_COLUMNS, the same
@@ -3459,6 +3523,27 @@ export async function appendToScanHistory(offers, date, status = 'added', { alre
 
   if (alreadyLocked) write();
   else await withPipelineLock(SCAN_HISTORY_PATH, write);
+}
+
+/**
+ * appendToScanHistory for a skip bucket a scanner refills on every run: only
+ * the offers not yet recorded under `status` are written (unrecordedOffers),
+ * so the file grows with new postings rather than with scans (#2695). This is
+ * how scan.mjs records its own skips; the scanners beside it appended theirs
+ * straight, re-recording every skipped posting on every run.
+ *
+ * @param {Array<object>} offers
+ * @param {string} date
+ * @param {string} status
+ * @returns {Promise<number>} rows written
+ */
+export async function appendUnrecordedToScanHistory(offers, date, status) {
+  if (offers.length === 0) return 0;
+  return withPipelineLock(SCAN_HISTORY_PATH, async () => {
+    const fresh = unrecordedOffers(offers, status, readIfExists(SCAN_HISTORY_PATH));
+    if (fresh.length > 0) await appendToScanHistory(fresh, date, status, { alreadyLocked: true });
+    return fresh.length;
+  });
 }
 
 // ── Company blacklist (#1742) ───────────────────────────────────────
@@ -3816,20 +3901,97 @@ export function emptyTargetStatus(observation) {
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
-async function parallelFetch(tasks, limit, onDone = () => {}) {
-  const results = [];
-  let i = 0;
+export async function parallelFetch(tasks, limit, onDone = () => {}, { hostOf = null, hostLimit = limit } = {}) {
+  // Verify and any other caller that does not name a host keeps the plain
+  // worker pool. Completion order of the returned array stays what it was.
+  if (typeof hostOf !== 'function') {
+    const results = [];
+    let i = 0;
 
-  async function next() {
-    while (i < tasks.length) {
-      const task = tasks[i++];
-      results.push(await task());
-      onDone();
+    async function next() {
+      while (i < tasks.length) {
+        const task = tasks[i++];
+        results.push(await task());
+        onDone();
+      }
     }
+
+    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
+    await Promise.all(workers);
+    return results;
   }
 
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
-  await Promise.all(workers);
+  const n = tasks.length;
+  if (n === 0 || !(limit > 0)) return [];
+  const perHost = Math.max(1, hostLimit);
+  const hosts = tasks.map((task, index) => {
+    try {
+      const host = hostOf(task, index);
+      return typeof host === 'string' ? host : '';
+    } catch {
+      return '';
+    }
+  });
+  const results = new Array(n);
+  const pending = hosts.map((_, index) => index);
+  const hostActive = new Map();
+  let active = 0;
+  let finished = 0;
+  let firstError = null;
+
+  function takeReady() {
+    for (let k = 0; k < pending.length; k++) {
+      const index = pending[k];
+      const host = hosts[index];
+      // An empty host is not a bucket. Unknown URLs must not share one cap.
+      if (host && (hostActive.get(host) || 0) >= perHost) continue;
+      pending.splice(k, 1);
+      return index;
+    }
+    return -1;
+  }
+
+  await new Promise((resolve, reject) => {
+    const launch = () => {
+      while (active < limit) {
+        const index = takeReady();
+        if (index < 0) break;
+        active += 1;
+        const host = hosts[index];
+        if (host) hostActive.set(host, (hostActive.get(host) || 0) + 1);
+        Promise.resolve()
+          .then(() => tasks[index]())
+          .then(
+            (value) => {
+              results[index] = value;
+              try {
+                onDone();
+              } catch (err) {
+                if (firstError === null) firstError = err;
+              }
+            },
+            (err) => {
+              if (firstError === null) firstError = err;
+            },
+          )
+          .finally(() => {
+            active -= 1;
+            finished += 1;
+            if (host) {
+              const left = (hostActive.get(host) || 1) - 1;
+              if (left <= 0) hostActive.delete(host);
+              else hostActive.set(host, left);
+            }
+            launch();
+            if (finished === n) {
+              if (firstError !== null) reject(firstError);
+              else resolve();
+            }
+          });
+      }
+    };
+    launch();
+  });
   return results;
 }
 
@@ -3874,7 +4036,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       console.warn(`  ⚠️ API verification failed for ${offer.url}; falling back to Playwright: ${err.message}`);
       verdicts[i] = null;
     }
-  }), CONCURRENCY);
+  }), VERIFY_CONCURRENCY);
 
   let browser = null, page = null, headed = null;
   let hadBrowserOffer = false;
@@ -3890,7 +4052,12 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
         );
       }
       try {
-        browser = await chromium.launch({ headless: true });
+        browser = await chromium.launch(
+          browserLaunchOptions(
+            { headless: true },
+            { projectRoot: DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+          ),
+        );
       } catch (err) {
         throw new Error(
           `--verify could not launch Chromium (run "npx playwright install chromium" or re-run without --verify): ${err.message}`,
@@ -3899,7 +4066,10 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       }
       page = await newLivenessPage(browser);
       await installLivenessRouteGuard(page);
-      headed = headedFallback ? createHeadedPageProvider(chromium) : null;
+      headed = headedFallback ? createHeadedPageProvider(chromium, {
+        projectRoot: DATA_ROOT,
+        processEnv: BROWSER_PROCESS_ENV,
+      }) : null;
     }
     // Space only browser work, including a search after an API 404 and the
     // offer after a successful migration. API-only verdicts need no WAF delay.
@@ -4166,6 +4336,16 @@ async function main() {
     process.exit(1);
   }
   const config = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+  const typos = portalTopLevelTypos(config);
+  if (typos.length > 0) {
+    for (const typo of typos) {
+      console.error(
+        `Error: ${PORTALS_PATH}: unknown top-level key "${typo.key}" — did you mean "${typo.suggestion}"? The misspelled key is ignored, so this scan would report success without applying it.`,
+      );
+    }
+    console.error('Example: node scan.mjs --dry-run --json');
+    process.exit(1);
+  }
   const companies = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
   const boards = Array.isArray(config.job_boards) ? config.job_boards : [];
   const titleFilter = buildTitleFilter(config.title_filter);
@@ -4731,7 +4911,28 @@ async function main() {
     }
   });
 
-  await parallelFetch(tasks, CONCURRENCY, progressTicker(tasks.length));
+  const companyFetches = () => parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
+    hostLimit: HOST_CONCURRENCY,
+    hostOf: (_task, index) => companyFetchHost(targets[index]),
+  });
+  if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
+    await companyFetches();
+  } else {
+    const ttlMs = resolveHttpCacheTtlMs(process.env.CAREER_OPS_HTTP_CACHE_TTL_MS);
+    await withHttpCache({
+      dir: path.join(DATA_ROOT, 'data', 'cache', 'http'),
+      ttlMs,
+      write: !dryRun,
+    }, async () => {
+      await companyFetches();
+      const stats = httpCacheStats();
+      if (!stats || (stats.hits === 0 && stats.revalidated === 0)) return;
+      const parts = [];
+      if (stats.hits > 0) parts.push(`reused ${stats.hits} board responses saved in the last ${formatHttpCacheWindow(ttlMs)}`);
+      if (stats.revalidated > 0) parts.push(`rechecked ${stats.revalidated} older board responses`);
+      process.stderr.write(`scan: ${parts.join(', and ')}. Set CAREER_OPS_HTTP_CACHE=0 to always download.\n`);
+    });
+  }
   // --dry-run leaves no trace, this cache included.
   if (!dryRun) {
     try {
@@ -5197,7 +5398,7 @@ async function main() {
   // The run completed (or was a dry run) — disarm the failure row.
   registerRunFailureSnapshot(null);
 
-  console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
+  console.log(`\n${pipelineRunHint()}`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
 
   if (jsonMode) {

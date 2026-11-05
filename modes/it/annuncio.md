@@ -205,9 +205,6 @@ I nomi dei campi dell'intestazione (`Date`, `URL`, `Archetype`, `Score`, `Legiti
 
 ---
 
-## Machine Summary
-(blocco YAML per gli script -- vedi il requisito più sotto)
-
 ## A) Riepilogo del ruolo
 (contenuto completo del blocco A)
 
@@ -251,11 +248,14 @@ I nomi dei campi dell'intestazione (`Date`, `URL`, `Archetype`, `Score`, `Legiti
 
 ## Job Description (archived verbatim)
 (il testo completo dell'annuncio, incollato alla lettera -- vedi il requisito più sotto)
+
+## Machine Summary
+(blocco YAML per gli script -- vedi il requisito più sotto)
 ```
 
 **Riga della decisione (obbligatoria):** `**Decisione:**` è il `final_decision` della Machine Summary, e la riga sotto l'intestazione è la frase di `## Verdetto (lead)`, copiata parola per parola. Compilarle entrambe per ultime. Non usare mai `Verdict:` come nome di campo: l'app web legge il primo `VERDICT:` come riga del punteggio.
 
-**Machine Summary (obbligatoria):** blocco YAML subito dopo l'intestazione, con schema, nomi esatti dei campi e regole di `batch/batch-prompt.md` (la fonte; non duplicarla qui). Contiene `advertised_comp` (la cifra dell'annuncio alla lettera, oppure `null`), `risk_summary` e `requirement_importance` (Blocco B riga per riga; il limite `inferred` vale anche qui).
+**Machine Summary (obbligatoria):** blocco YAML alla fine del report, dopo `## Job Description (archived verbatim)`, con schema, nomi esatti dei campi e regole di `batch/batch-prompt.md` (la fonte; non duplicarla qui). Contiene `advertised_comp` (la cifra dell'annuncio alla lettera, oppure `null`), `risk_summary` e `requirement_importance` (Blocco B riga per riga; il limite `inferred` vale anche qui).
 
 **Archiviazione dell'annuncio (obbligatoria, #2789):** ogni report DEVE avere una sezione `## Job Description (archived verbatim)` con il testo completo dell'annuncio, mai riassunto né riformulato. Il titolo resta in inglese: `check-jd-archive.mjs` lo cerca per nome. La prima riga è la data di pubblicazione visibile (`Posted: {data o testo relativo}`, oppure `Posted: not visible in source`), mai la data del file del report. Se l'annuncio è troppo lungo o non si può citare per intero, salvarlo con `archive-posting.mjs` (comando qui sotto) e scrivere nella sezione **esattamente** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, senza altro testo. Se non è possibile alcun salvataggio automatico (per esempio un testo lungo incollato senza URL), rinominare la sezione in `## Job Description (not archived)` e indicarne il motivo. Mai una parafrasi al suo posto; la regola completa è in `modes/oferta.md` (**JD archival**).
 

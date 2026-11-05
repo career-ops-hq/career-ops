@@ -61,6 +61,16 @@ const PARSE_CASES = [
   ['Ideally 4+ years in a strategy role', 'preferred-only', null, false, 'pref 4+'],
   ['Preferred qualifications:\n- 8 years of experience in strategy', 'preferred-only', null, false, 'pref 8+'],
   ['Minimum qualifications:\n- 5 years of experience in finance\nPreferred qualifications:\n- 8 years of experience in strategy', 'stated', 5, true, '5+'],
+  // The same lists with each item's text on a new line (`<li>\n<p>`), as many
+  // Greenhouse and Lever descriptions write them: every bar stays under its heading
+  ['<p>Preferred qualifications</p><ul><li>\n<p>8 years of experience in strategy</p>\n</li></ul>', 'preferred-only', null, false, 'pref 8+'],
+  ['<p>Minimum qualifications</p><ul><li>\n<p>5 years of experience in finance</p>\n</li></ul><p>Preferred qualifications</p><ul><li>\n<p>8 years of experience in strategy</p>\n</li></ul>', 'stated', 5, true, '5+'],
+  // An empty item leaves the same bare marker, and the heading above it still holds
+  ['<p>Preferred qualifications</p><ul><li></li><li>8 years of experience in strategy</li></ul>', 'preferred-only', null, false, 'pref 8+'],
+  ['<p>Minimum qualifications</p><ul><li></li><li>5 years of experience in finance</li></ul>', 'stated', 5, true, '5+'],
+  ['Preferred qualifications:\n*\n8 years of experience in strategy', 'preferred-only', null, false, 'pref 8+'],
+  // A marker ends at a space or the end of the line, so this "1." is part of the figure
+  ['1.5 years of experience in finance', 'stated', 1.5, true, '1.5+'],
   ['Required: 3+ years in FP&A. Preferred: 5+ years in strategy.', 'stated', 3, true, '3+'],
   ['5+ years of experience is a plus', 'preferred-only', null, false, 'pref 5+'],
   ['Nice to have\n- 3 years of experience in fintech', 'preferred-only', null, false, 'pref 3+'],
@@ -140,6 +150,21 @@ const NEVER_OUT = [
   'Requirements:\n- 2+ years of experience with SQL\nAdditional Qualifications\n- 8+ years of experience in fintech',
   'Requirements:\n- 2+ years of experience with SQL\nPreferred Qualifications (any 2 of the following)\n- 7+ years of experience in fintech',
   'Requirements:\n- 2+ years of experience with SQL\nIt would be great if you also have the following things\n- 7+ years of experience in fintech',
+  // A list item holding a heading word does not start a required section.
+  'Requirements:\n- 2+ years of experience with SQL\nPreferred qualifications\n- Excellent communication skills\n- 8+ years of experience in fintech',
+  'Requirements:\n- 2+ years of experience with SQL\nNice to have\n- Experience in fintech\n- 8+ years of experience in payments',
+  'Requirements:\n- 2+ years of experience with SQL\nBonus points\n- Startup experience\n- 7+ years of experience with data platforms',
+  '<p>Requirements:</p><ul><li>2+ years of experience with SQL</li></ul><p>Preferred qualifications</p><ul><li>Strong analytical skills</li><li>8+ years of experience in fintech</li></ul>',
+  // The same two lines with no list markers, as a pasted JD arrives.
+  'Requirements:\n2+ years of experience with SQL\nPreferred qualifications\nExperience in fintech\n8+ years of experience in payments',
+  // An item whose text starts the line after its marker, as `<li>\n<p>text`
+  // converts, is still an item.
+  '<p>Requirements:</p><ul><li>2+ years of experience with SQL</li></ul><p>Preferred qualifications</p><ul><li>\n<p>Strong analytical skills</p></li><li><p>8+ years of experience in fintech</p></li></ul>',
+  'Requirements:\n- 2+ years of experience with SQL\nPreferred qualifications\n-\nStrong analytical skills\n- 8+ years of experience in fintech',
+  'Requirements:\n- 2+ years of experience with SQL\nPreferred qualifications\n-\n\nExcellent communication skills\n- 8+ years of experience in fintech',
+  // "Experience in fintech:" introduces the items after it, not a section.
+  'Requirements:\n- 2+ years of experience with SQL\nPreferred qualifications\nExperience in fintech:\n- 8+ years of experience in payments',
+  'Requirements:\n- 2+ years of experience with SQL\nNice to have\n- Experience with:\n- 8+ years of Kafka',
 ];
 
 await ok(`review regressions: ${NEVER_OUT.length} ceilings, third parties and unknown headings never read as out`, () => {
@@ -157,6 +182,16 @@ await ok('a bar under an unknown heading still gates when the sentence speaks to
   // not end the required section it sits in (a live Lever JD).
   const travel = parseYearsRequirement('What We Require\n- Ability to travel (50%+) per business needs\n- 10+ years of outbound sales experience');
   assert.strictEqual(classifyYears(travel, { years: 3, stretchYears: 1 }), 'out');
+});
+
+await ok('a real required heading still gates, as a bare word, in a list or after a preferred section', () => {
+  const out = (jd) => classifyYears(parseYearsRequirement(jd), { years: 3, stretchYears: 1 });
+  assert.strictEqual(out('Experience\n- 8+ years of Python'), 'out');
+  assert.strictEqual(out('Experience:\n- 8+ years of Python'), 'out');
+  assert.strictEqual(out('Skills & Experience\n- 8+ years of Python'), 'out');
+  assert.strictEqual(out('- Requirements:\n- 8+ years of Python'), 'out');
+  assert.strictEqual(out('Nice to have\n- Kubernetes\nRequirements\n- 8+ years of experience in Python'), 'out');
+  assert.strictEqual(out('Minimum qualifications\n- Experience in fintech\n- 8+ years of experience in payments'), 'out');
 });
 
 await ok('pathological whitespace and tag-like input parse in well under a second', () => {

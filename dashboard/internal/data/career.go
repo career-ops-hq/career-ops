@@ -213,6 +213,7 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 	// reader. Falls back to the legacy fixed layout when no header is present.
 	// This matches the Node tracker tooling, which became header-aware in #954.
 	cols := resolveTrackerColumns(lines)
+	width := trackerRowWidth(cols)
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -229,8 +230,18 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 		}
 
 		fields := splitTrackerRow(line)
-		if len(fields) < 8 {
+		// A complete row has a cell for every column the header maps, as
+		// parseTrackerRow in tracker-parse.mjs requires. The guard was a fixed 8,
+		// which got both directions wrong: a tracker narrower than that (a
+		// 7-column `# … Status | Report` layout the header detection accepts)
+		// lost every row and read as an empty pipeline with no error, and a row
+		// missing an interior cell under a wider header was read with every
+		// later column shifted one to the left.
+		if len(fields) < width {
 			continue
+		}
+		for i, field := range fields {
+			fields[i] = SanitizeTerminalText(field)
 		}
 
 		at := func(name string) string {
@@ -750,9 +761,15 @@ func LoadReportSummary(careerOpsPath, reportPath string) (archetype, tldr, remot
 		comp = cleanTableCell(m[1])
 	}
 
-	// Truncate long fields
-	if len(tldr) > 120 {
-		tldr = tldr[:117] + "..."
+	archetype = SanitizeTerminalText(archetype)
+	tldr = SanitizeTerminalText(tldr)
+	remote = SanitizeTerminalText(remote)
+	comp = SanitizeTerminalText(comp)
+
+	// Truncate long fields by characters, not bytes: a byte cut splits a
+	// multi-byte character and stops non-Latin text at half the length.
+	if r := []rune(tldr); len(r) > 120 {
+		tldr = string(r[:117]) + "..."
 	}
 
 	return
@@ -778,8 +795,10 @@ func splitTrackerRow(line string) []string {
 			fields = append(fields, strings.TrimSpace(strings.Trim(p, "|")))
 		}
 	} else {
-		// Pure pipe format.
-		line = strings.Trim(line, "|")
+		// Pure pipe format. Only the two outer pipes come off: in a row ending in
+		// `||` the first of them closes an empty last cell, which parseTrackerRow
+		// keeps and the width guard counts.
+		line = strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|")
 		for _, p := range strings.Split(line, "|") {
 			fields = append(fields, strings.TrimSpace(p))
 		}
@@ -1016,6 +1035,20 @@ func detectTrackerColumns(lines []string) map[string]int {
 	return nil
 }
 
+// trackerRowWidth is how many cells a complete row has under cols: one per
+// column up to the highest one mapped. The Go twin of parseTrackerRow's
+// dynamic width guard; splitTrackerRow drops the outer pipes, so no edge cells
+// are counted.
+func trackerRowWidth(cols map[string]int) int {
+	width := 0
+	for _, idx := range cols {
+		if idx+1 > width {
+			width = idx + 1
+		}
+	}
+	return width
+}
+
 // resolveTrackerColumns returns the header-detected column map, falling back to
 // the legacy fixed layout when no header row is found.
 func resolveTrackerColumns(lines []string) map[string]int {
@@ -1046,6 +1079,13 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 	return runStatusWriter(careerOpsPath, app.ReportNumber, newStatus, notesAppend)
 }
 
+// IsCanonicalStatusName reports whether status is one of the states.yml
+// stages, matched case-insensitively. The pipeline screen uses it to decide
+// which rows belong on the OTHER tab.
+func IsCanonicalStatusName(status string) bool {
+	return isCanonicalStatusName(status)
+}
+
 // Reject malformed UI input cheaply; the writer validates against states.yml.
 func isCanonicalStatusName(status string) bool {
 	switch strings.ToLower(status) {
@@ -1065,6 +1105,11 @@ func cleanTableCell(s string) string {
 // StatusPriority returns the sort priority for a status (lower = higher priority).
 func StatusPriority(status string) int {
 	switch NormalizeStatus(status) {
+	// Hired sorts first, as in statusGroupOrder (screens/pipeline.go), the
+	// order the group headers and the metrics strip use. -1 keeps the other
+	// values as they are.
+	case "hired":
+		return -1
 	case "interview":
 		return 0
 	case "offer":
