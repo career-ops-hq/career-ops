@@ -1,8 +1,7 @@
 // The /career-ops discovery menu in each SKILL.md copy is the list a new user
 // sees in the agent. It must name every router input, and describe oferta
 // the way modes/oferta.md does: blocks A-G always, Block H at or above 4.5.
-// The menu used to say "A-F". README Usage is checked by
-// readme-usage-commands.test.mjs.
+// README Usage is checked by readme-usage-commands.test.mjs.
 //
 // Run: node --test tests/readme-command-menus.test.mjs
 
@@ -51,7 +50,7 @@ test('each discovery menu describes oferta as A-G plus Block H at or above 4.5',
   for (const rel of COPIES) {
     const line = discoveryMenu(read(rel), rel).split('\n').find((row) => /\/career-ops\s+oferta\b/.test(row) && !/\bofertas\b/.test(row));
     assert.ok(line, `${rel} lists oferta`);
-    assert.match(line, /A-G/, rel);
+    assert.match(line, /A-G always/, rel);
     assert.match(line, /Block H at or above 4\.5/, rel);
     assert.doesNotMatch(line, /only above|A-F|A to H/, rel);
   }
