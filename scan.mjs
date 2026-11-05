@@ -69,7 +69,7 @@ import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
 import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
-import { normalizeCompany, appendLedgerRows, companiesMatchIgnoringCorporateForm } from './tracker-utils.mjs';
+import { normalizeCompany, appendLedgerRows, companiesMatchIgnoringCorporateForm, LEGAL_SUFFIXES } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldTitle } from './title-keywords.mjs';
@@ -4170,6 +4170,8 @@ async function main() {
   };
   const filterCompanyRaw = requireValue('--company');
   const filterCompany = filterCompanyRaw?.toLowerCase() ?? null;
+  // --company may ignore a legal suffix. It must not ignore a place name.
+  const legalSuffixes = new Set(LEGAL_SUFFIXES);
   // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
   // employer's real posting date (job.postedAt), gated against a typo since a
   // silently-ignored bound would look like "no jobs matched" instead of an error.
@@ -4314,14 +4316,15 @@ async function main() {
         continue;
       }
       // Substring, the tracker's normalized equality ("Acme Labs Inc" for
-      // "Acme Labs, Inc."), plus the same legal-suffix rule the tracker uses.
-      // "Acme Labs, Inc." selects a row named "Acme Labs". A bare extra word
-      // that is not a corporate form still does not. A disabled row still
-      // counts, so --company does not say the company is missing when it is
-      // only turned off.
+      // "Acme Labs, Inc."), plus legal suffixes only. "Acme Labs, Inc."
+      // selects a row named "Acme Labs". A place or descriptor such as
+      // "Canada" does not, so "Acme Canada" does not select "Acme". Tracker
+      // dedup still allows those descriptors. A disabled row still counts,
+      // so --company does not say the company is missing when it is only
+      // turned off.
       if (filterCompany && !entry.name.toLowerCase().includes(filterCompany)
         && normalizeCompany(entry.name) !== normalizeCompany(filterCompanyRaw)
-        && !companiesMatchIgnoringCorporateForm(entry.name, filterCompanyRaw)) continue;
+        && !companiesMatchIgnoringCorporateForm(entry.name, filterCompanyRaw, legalSuffixes)) continue;
       if (filterCompanyRaw != null) companyFilterMatched = true;
       if (entry.enabled === false) continue;
       // Only a real boolean false turns an entry off. The string "false" and
@@ -4458,7 +4461,7 @@ async function main() {
   if (dryRun) console.log('(dry run — no files will be written)\n');
   for (const warning of enabledWarnings) console.error(`Warning: ${warning}`);
   if (unclaimed.length > 0) {
-    console.log('No provider matched these entries. Set provider to an id this scanner loads, point careers_url at a board a provider detects, or set scan_method so the handoff list names the company:');
+    console.log('No provider matched these entries. Set provider to an id this scanner loads, point careers_url at a board a provider detects, or set scan_method: websearch so the handoff list names the company:');
     for (const entry of unclaimed) {
       const where = typeof entry.careers_url === 'string' && entry.careers_url
         ? entry.careers_url

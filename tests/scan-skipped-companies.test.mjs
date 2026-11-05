@@ -70,6 +70,7 @@ test('names each company no provider claims, and warns when enabled is not a boo
   assert.equal(result.status, 0, describeSpawn(result));
   assert.match(result.text, /Brassbound Freight/);
   assert.match(result.text, /https:\/\/boards\.example\.com\/brassbound/);
+  assert.match(result.text, /scan_method: websearch/);
   assert.match(result.text, /String Off/);
   assert.match(result.text, /enabled is "false"/);
   assert.match(result.text, /stays in the run and is scanned if a provider matches it/);
@@ -90,6 +91,12 @@ test('--company matches a row when only the legal suffix differs', () => {
   assert.match(result.text, /Scanning 1 companies/);
   assert.doesNotMatch(result.text, /Brassbound Freight/);
   assert.doesNotMatch(result.text, /no tracked company matches/);
+});
+
+test('--company does not treat a place name as a legal suffix', () => {
+  const result = runScan(['--company', 'Acme Labs Canada']);
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(result.text, /no tracked company matches "Acme Labs Canada"/);
 });
 
 test('--company matches a row whose name differs only in punctuation', () => {
