@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { rmSync } from './helpers.mjs';
 import apify from '../plugins/apify/index.mjs';
+import { localToday } from '../lib/local-today.mjs';
 
 const DESCRIPTION = 'Build and run the data platform. '.repeat(4);
 const ITEMS = [{ title: 'Data Engineer', url: 'https://jobs.example.test/1', company: 'Acme', description: DESCRIPTION }];
@@ -122,6 +123,6 @@ test('JD frontmatter round-trips through js-yaml with awkward values', async () 
   assert.equal(parsed.company, awkwardItem.company);
   assert.equal(parsed.url, awkwardItem.url);
   assert.equal(parsed.location, awkwardItem.location);
-  assert.equal(parsed.scraped, new Date().toISOString().slice(0, 10));
+  assert.equal(parsed.scraped, localToday());
   assert.equal(parsed.source, 'owner-actor');
 });

@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=22 level=handle handle=pelarson28 role="Customer Success Associate" sector="Startup (growth-stage)" geo="United States" weeks=10 link="https://github.com/career-ops-hq/career-ops/issues/6337" -->
+### Hire #22
+
+> After a layoff, I used career-ops to scan and evaluate roles, prep a take-home and a final round that walked through every job on my LinkedIn, and script my offer call. About 10 we
+
+<a href="https://github.com/pelarson28"><img src="https://github.com/pelarson28.png?size=64" width="28" height="28" align="top" alt="@pelarson28"> **@pelarson28**</a> · Customer Success Associate · United States · 10 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/6337)
+
 <!-- hire n=21 level=handle handle=gpirujo role="Staff Software Engineer" sector="Full remote agency" geo="Remote LATAM + EU" weeks=5 link="https://github.com/career-ops-hq/career-ops/issues/6249" -->
 ### Hire #21
 
