@@ -210,3 +210,40 @@ test('an unidentifiable jobs listing cannot mint an exact PDF receipt by title',
   }), /no direct individual-posting identity/);
   assert.equal(browserCalls, 0);
 }));
+
+test('missing LinkedIn archive never starts another HTTP or browser loading attempt', fixture(async root => {
+  const url = 'https://www.linkedin.com/jobs/view/900000000001';
+  let http = 0, browser = 0, security = 0;
+  const options = { guardFn: async () => { security++; }, fetchFn: async () => { http++; return new Response('', { status: 404 }); },
+    browserCaptureFn: async () => { browser++; throw new Error('offline browser sentinel'); } };
+  const result = await prepareEvaluationArchive(root, payload({ url }), { captureFn: id => capturePostingSource(id, options) });
+  assert.equal(result.ok, false);
+  assert.equal(http, 0, 'a prior LinkedIn load budget cannot be retried for archival');
+  assert.equal(browser, 0);
+  assert.match(result.error, /LinkedIn.*unavailable|LinkedIn.*already loaded/i);
+  await assert.rejects(() => capturePostingSource({ url, num: '061', slug: 'exampleco', role: 'Product Manager', privateDir: root }, options), /LinkedIn.*unavailable|LinkedIn.*already loaded/i);
+  assert.equal(http, 0); assert.equal(browser, 0); assert.equal(security, 0, 'no security/DNS lookup may precede the LinkedIn guard');
+}));
+
+test('complete inline LinkedIn text remains valid without any new source load', fixture(async root => {
+  const p = payload({ url: 'https://www.linkedin.com/jobs/view/900000000001', markdown: report(JD) });
+  let captures = 0;
+  const result = await persistEvaluationArtifacts(root, p, { captureFn: async () => { captures++; throw new Error('must reuse text'); } });
+  assert.equal(result.ok, true, result.error); assert.equal(captures, 0);
+}));
+
+test('an existing verified LinkedIn capture is reused without network or replacement', fixture(async root => {
+  const { createHash } = await import('node:crypto'); const digest = value => createHash('sha256').update(value).digest('hex');
+  const url = 'https://www.linkedin.com/jobs/view/900000000001'; const p = payload({ url });
+  const name = `061-exampleco-${digest(url).slice(0, 16)}.md`; const dir = path.join(root, 'jds'); fs.mkdirSync(dir, { mode: 0o700 });
+  const bytes = Buffer.from('# Previously captured full source\n\n' + JD);
+  fs.writeFileSync(path.join(dir, name), bytes, { mode: 0o600 });
+  const receipt = { version: 1, report: '061', companySlug: 'exampleco', sourceUrl: url, settledUrl: url,
+    httpStatus: 200, complete: true, truncated: false, format: 'text/markdown', bytes: bytes.length, sha256: digest(bytes),
+    sourceKind: 'previous-verified-source', evidenceScope: 'source-archive-only', evaluationAllowed: false };
+  fs.writeFileSync(path.join(dir, '.' + name + '.receipt.json'), JSON.stringify(receipt), { mode: 0o600 });
+  const files = fs.readdirSync(dir); let captures = 0;
+  const result = await prepareEvaluationArchive(root, p, { captureFn: async () => { captures++; throw new Error('must reuse existing capture'); } });
+  assert.equal(result.ok, true, result.error); assert.equal(captures, 0);
+  assert.match(result.markdown, /See jds\/061-exampleco-/); assert.deepEqual(fs.readdirSync(dir), files);
+}));
