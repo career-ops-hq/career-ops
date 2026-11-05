@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { mergeTracker } from '../merge-tracker.mjs';
 import { writeEvaluationArtifacts } from '../persist-evaluation-report.mjs';
 import { trackerTsvLine } from '../lib/tracker-addition.mjs';
+import { extractTrackerReportLinks } from '../tracker-parse.mjs';
 
 const PRIMARY = 'https://himalayas.app/companies/exampleco/jobs/product-lead-123456';
 const FIRST = 'https://jobs.ashbyhq.com/exampleco/11111111-1111-4111-8111-111111111111';
@@ -44,6 +45,15 @@ async function scenario({ name, urlColumn = false, oldUrl = PRIMARY, oldOfficial
     assert.equal(code, pending ? 1 : 0, 'merge outcome');
     assert.equal(rows.length, expected, name);
     assert.equal(new Set(rows.map(row => row.split('|')[1].trim())).size, rows.length, 'tracker row IDs remain unique');
+    const owners = new Map();
+    for (const row of rows) {
+      const cells = row.split('|');
+      for (const { target } of extractTrackerReportLinks(cells[8], cells[9])) {
+        const owner = cells[1].trim();
+        assert.ok(!owners.has(target) || owners.get(target) === owner, `native report ${target} cannot belong to two rows`);
+        owners.set(target, owner);
+      }
+    }
     if (expected === 2) {
       assert.ok(rows.some(line => line.includes('3.7/5') && line.includes(FILE('101'))), 'prior score/report remain referenced');
       assert.ok(rows.some(line => line.includes('4.0/5') && line.includes(newFile)), 'new score/report remain referenced');
@@ -97,3 +107,6 @@ await scenario({ name: 'same report number with conflicting identities stays pen
 await scenario({ name: 'same report number with the same employer identity preserves re-evaluation', newUrl: OTHER_PUBLISHER, newOfficial: FIRST, newNum: '101', newFile: '101-exampleco-second-2026-10-01.md', expected: 1 });
 await scenario({ name: 'same exact report file stays trusted', newUrl: OTHER_PUBLISHER, newOfficial: FIRST, newNum: '101', newFile: FILE('101'), expected: 1 });
 await scenario({ name: 'distinct report numbers with a tracker-ID collision keep both report references', oldEntryNum: '102' });
+await scenario({ name: 'a different incoming label cannot give the same file a conflicting report owner', oldUrl: FIRST, newUrl: SECOND, oldOfficial: FIRST, newNum: '900', newFile: FILE('101'), pending: true, expected: 1 });
+await scenario({ name: 'a different incoming label preserves same-file same-identity replay', oldUrl: FIRST, newUrl: FIRST, oldOfficial: FIRST, newNum: '900', newFile: FILE('101'), expected: 1 });
+await scenario({ name: 'a different incoming report number does not collide with a distinct report target', newNum: '900', newFile: FILE('900') });

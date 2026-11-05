@@ -1929,10 +1929,12 @@ export async function mergeTracker(options = {}) {
       // employer requisitions, even through the same file, appending a row
       // would preserve the wrong shared key. Keep the artifacts and the TSV
       // pending instead; never rename a report or overwrite the prior row.
-      if (reportNum && existingApps.some(app =>
-        extractTrackerReportLinks(app.report, app.notes).some(link => link.target === reportNum)
-        && declaredEmployerConflict(app, addition))) {
-        console.error(`❌ ${file}: report #${reportNum} names conflicting employer postings; nothing merged for this addition. Keep the reports and correct the report-number collision before re-running.`);
+      const incomingReportTargets = new Set(extractTrackerReportLinks(addition.report, addition.notes).map(link => link.target));
+      const conflictingReportTarget = [...incomingReportTargets].find(target => existingApps.some(app =>
+        extractTrackerReportLinks(app.report, app.notes).some(link => link.target === target)
+        && declaredEmployerConflict(app, addition)));
+      if (conflictingReportTarget !== undefined) {
+        console.error(`❌ ${file}: report #${conflictingReportTarget} names conflicting employer postings; nothing merged for this addition. Keep the reports and correct the report-number collision before re-running.`);
         failedAdditions.push(file);
         continue;
       }
