@@ -50,6 +50,7 @@ import { redactIfEnabled } from './utils/privacy-filter.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+import { NO_INVENTED_PAY_RULE, normalizeEvaluationText } from './lib/eval-evidence.mjs';
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -432,7 +433,7 @@ ${contextBody}
 IMPORTANT OPERATING RULES FOR THIS CLI SESSION
 ═══════════════════════════════════════════════════════
 1. You do NOT have access to WebSearch, Playwright, or file writing tools.
-   - For Block D (Comp research): provide salary estimates based on your training data, clearly noted as estimates.
+   - ${NO_INVENTED_PAY_RULE}
    - For Block G (Legitimacy): analyze the JD text only; skip URL/page freshness checks.
    - Post-evaluation file saving is handled by the script, not by you.
 2. ${languageInstruction}
@@ -505,6 +506,8 @@ try {
   }
   process.exit(1);
 }
+
+evaluationText = normalizeEvaluationText(evaluationText, jdText);
 
 try {
   validateEvaluationShape(evaluationText);

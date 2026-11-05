@@ -88,11 +88,22 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 
 Decide the Global Score once from these dimensions, applying the user's own scoring rules from `modes/_profile.md` and `modes/_custom.md`. The report header, Machine Summary `score`, and application tracker must record that same value. A–H are report sections, not numeric inputs to average; Block B requirement importance and Block G posting legitimacy remain separate from the 1–5 score.
 
-**Score interpretation:**
-- 4.5+ → Strong match, recommend applying immediately
-- 4.0-4.4 → Good match, worth applying
-- 3.5-3.9 → Decent but not ideal. Recommend against applying unless the user names a specific reason (Ethical Use in AGENTS.md draws the line at 4.0)
-- Below 3.5 → Recommend against applying (see Ethical Use in AGENTS.md)
+**Score bands.** `lib/score-action.mjs` is the only score-to-action table. Read the band from the global score. Do not invent a second cutoff.
+
+| Band | Score | `final_decision` | What to tell the user |
+|------|-------|------------------|------------------------|
+| Strong apply | 4.5 to 5.0 | Apply | Apply |
+| Apply | 4.0 to 4.4 | Apply | Apply. Ethical Use in AGENTS.md draws this line at 4.0 |
+| Maybe | 3.0 to 3.9 | Consider | Do not apply unless the user names a reason. Triage still writes the full evaluation at 3.5 and above |
+| Skip | below 3.0 | Skip | Do not apply |
+
+The same file names the other gates, so they cannot drift from this table:
+
+- Triage PASS is `TRIAGE_PASS_MIN` (3.5) unless `config/profile.yml` sets `pipeline.triage_threshold`. From the Maybe floor (3.0) up to that line, triage is MARGINAL. Below 3.0, triage is FAIL.
+- The PDF gate default is `PDF_GATE_DEFAULT` (3.0), the Maybe floor. `auto_pdf_score_threshold` overrides it. `0` still means a PDF for every score.
+- Inbox rank clamps to `SCORE_MIN` and `SCORE_MAX` (0 and 5). It does not apply a separate cutoff.
+
+A hard stop forces `final_decision` Skip. A suspicious posting forces Research first. Neither changes the 1-5 number. Evidence confidence, Block G, Block B importance, and role clarity do not change the number either.
 
 ### Evidence confidence for the Global Score
 
@@ -115,12 +126,12 @@ Show a short evidence table in the report with each dimension's status, its sour
 Name up to three concrete checks that could change the decision; use an empty list only when none remain. Never convert this tier into a numeric probability or silently treat missing evidence as a neutral score. In the Machine Summary, mirror the five statuses under `score_evidence` and the checks under `confidence_gaps`; the human-readable explanation and `confidence` tier must agree.
 
 **How to score the "Cultural signals" dimension:**
-1. Read `culture_screen.require` from `config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension qualitatively based on company size, remote policy, and stability.
+1. Read `culture_screen.require` from `config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension from company size, remote policy, and stability when the posting states those facts. If it states none of them, the dimension is unknown and does not move the global score. Do not default it to 3.
 2. Actively look for evidence in the JD + Block G company research corresponding to those requirements (e.g., team size mentions, org-chart depth/manager layers, meeting-culture language, company stage, named interview stages).
 3. **If most `require` criteria have positive evidence** → score 4-5.
 4. **If some criteria have positive evidence, and none are contradicted** → score 3.
 5. **If evidence contradicts the `require` criteria** → **cap this dimension at 2/5**, and add an explicit line to Block A's Culture Screen field (see `oferta.md`) naming what's missing or contradicted. Do not let a strong CV-match score silently compensate for this — surface it, don't bury it.
-6. **If no evidence exists for any `require` criterion** → score 3 by default, unless `culture_screen.deprioritize_if_absent: true` is set, in which case **cap this dimension at 2/5**.
+6. **If no evidence exists for any `require` criterion** → the dimension is unknown and does not move the global score. Do not score 3. If `culture_screen.deprioritize_if_absent: true` is set, cap this dimension at 2/5 instead, because the user asked to treat absence as a negative.
 7. A role scoring 4.5+ overall but 2 or below on Cultural signals must carry an explicit warning in the report: "High technical fit, unconfirmed/poor culture fit — verify before applying."
 8. If `modes/oferta.md`'s Block A "PcD-quota check" fired a match (🟢 PcD-Quota flag line present), treat it as a positive contributor to this dimension, worth at most +1 — a legally mandated quota opening is a genuine hiring-process advantage. It never overrides a `culture_screen` contradiction (rule 5 above still caps the dimension at 2/5 if evidence contradicts required criteria); it only adds weight when the dimension isn't otherwise capped.
 
@@ -128,7 +139,7 @@ Name up to three concrete checks that could change the decision; use an empty li
 
 Block G assesses whether a posting is likely a real, active opening. It does NOT affect the 1-5 global score -- it is a separate qualitative assessment.
 
-The same holds for Block B's **requirement Importance column**: it does NOT affect the 1-5 global score either -- it is a prioritization and interview-preparation surface. The CV-match dimension stays a holistic judgment, so reports written before and after that column remain comparable, and the 4.0 apply / don't-apply line keeps its meaning across the whole history folded by `analyze-patterns.mjs`, `stats.mjs`, `funnel-velocity.mjs` and `rank-pipeline.mjs`.
+The same holds for Block B's **requirement Importance column**: it does NOT affect the 1-5 global score either -- it is a prioritization and interview-preparation surface. The CV-match dimension stays a holistic judgment, so reports written before and after that column remain comparable, and the Apply band in `lib/score-action.mjs` (4.0) keeps its meaning across the whole history folded by `analyze-patterns.mjs`, `stats.mjs`, `funnel-velocity.mjs` and `rank-pipeline.mjs`.
 
 **Three tiers:**
 - **High Confidence** -- Real, active opening (most signals positive)
