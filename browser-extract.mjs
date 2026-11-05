@@ -370,10 +370,17 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
   else if (job.isRemote === true) meta.push('Work model: Remote');
   if (job.isListed === false) meta.push('Not currently listed (isListed: false)');
 
+  // Preserve the actual field from this same parsed job, not an inferred
+  // status from wording in the JD. Missing/invalid is never listed=true.
+  const hasIsListed = Object.hasOwn(job, 'isListed');
+  const sourceFacts = { type: 'ashby-listing', isListedState: !hasIsListed ? 'absent'
+    : typeof job.isListed === 'boolean' ? 'boolean' : 'invalid',
+    ...(hasIsListed && typeof job.isListed === 'boolean' ? { isListed: job.isListed } : {}) };
   return {
     url: postingUrl,
     title: compactText(str(job.title), 300),
     text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    sourceFacts,
   };
 }
 

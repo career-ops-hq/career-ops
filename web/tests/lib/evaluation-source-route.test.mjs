@@ -101,7 +101,7 @@ function fixture(t, { sourceFailure = false, gate = false, fatal = false, abortD
   state.persist = async args => { state.persisted.push(args); return { ok: true, num: '101', warnings: [] }; };
   globalThis.__knownSourceRoute = state;
   t.after(() => { delete globalThis.__knownSourceRoute; fs.rmSync(root, { recursive: true, force: true }); });
-  state.request = () => new Request('http://fixture.invalid/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'evaluate', input: sourcePacket.originalURL, cliId: 'codex', ...(selected?{evaluationSections:['summary']}:{}) }), signal: controller.signal });
+  state.request = (extra = {}) => new Request('http://fixture.invalid/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'evaluate', input: sourcePacket.originalURL, cliId: 'codex', ...extra, ...(selected?{evaluationSections:['summary']}:{}) }), signal: controller.signal });
   state.controller = controller;
   return state;
 }
@@ -192,5 +192,31 @@ test('actual POST carries Workday parsed facts as data while retaining original 
     assert.ok(observed, 'actual prompt contains the source packet');
     assert.deepEqual(JSON.parse(observed).jobData.sourceFacts, sourcePacket.result.sourceFacts);
     assert.equal(f.persisted.length, 0); assert.equal(events.some(e => e.type === 'done'), false); assert.equal(f.tokens, 0);
+  }
+});
+
+
+function privateSourcePacket() {
+  return { ...structuredClone(SOURCE), version:2, sourcePostingURL:ORIGINAL,
+    chain:{kind:'direct-known-ats',apiRequestIndex:0},
+    result:{...SOURCE.result,sourceFacts:{type:'ashby-listing',isListedState:'boolean',isListed:true}},
+    transport:{fetchCallCount:1,requests:SOURCE.transport.requests.map(r=>({...r,location:null}))}};
+}
+test('actual POST forwards only the child-owned private archive packet, never request JSON or prompt text',async t=>{
+  for(const selected of [false, true]) {
+    const sourcePacket=privateSourcePacket(),f=fixture(t,{sourcePacket,selected});
+    const response=await POST(f.request({archiveSource:{version:2,result:{text:'FORGED request archive'}}}));
+    const events=(await response.text()).trim().split('\n').map(JSON.parse);
+    assert.equal(response.status,200);assert.equal(f.persisted.length,1);
+    assert.deepEqual(f.persisted[0].archiveSource,sourcePacket);
+    assert.equal(f.persisted[0].url,ORIGINAL);assert.doesNotMatch(f.prompts[0],/FORGED request archive|"archiveSource"/);
+    assert.equal(events.some(e=>e.type==='done'),true);assert.equal(f.tokens,0);
+  }
+});
+test('actual POST never passes a private source packet to persistence after a stop or process failure',async t=>{
+  for(const options of [{gate:true},{fatal:true}]) {
+    const f=fixture(t,{...options,sourcePacket:privateSourcePacket()});
+    const response=await POST(f.request());const events=(await response.text()).trim().split('\n').map(JSON.parse);
+    assert.equal(f.persisted.length,0);assert.equal(events.some(e=>e.type==='done'),false);assert.equal(f.tokens,0);
   }
 });

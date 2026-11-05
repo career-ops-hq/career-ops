@@ -490,6 +490,7 @@ export async function POST(req: Request) {
             root: careerOpsRoot(),
             coreRoot: resolveCodeRoot(process.cwd(), process.env),
             markdown,
+            archiveSource: postingSource.archiveSource,
             url: input,
             today,
             postedAt,

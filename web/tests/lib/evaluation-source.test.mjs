@@ -200,3 +200,47 @@ test('source facts reject malformed states/fields and whitelist away unrelated v
   const otherVendor = packet(); otherVendor.result.sourceFacts = base;
   assert.equal('sourceFacts' in evaluationSourceEvidence(otherVendor, ORIGINAL).jobData, false);
 });
+
+function archivalPacket() {
+  const originalURL='https://www.arbeitnow.com/jobs/companies/fictional/fictional-product-manager-123456';
+  const sourcePostingURL=ORIGINAL+'/application?source=fictional';
+  const requests=[{...transport().requests[0],requestURL:originalURL,finalURL:originalURL,httpStatus:200,location:null},
+    {...transport().requests[0],requestURL:originalURL+'/apply',finalURL:originalURL+'/apply',httpStatus:302,location:sourcePostingURL},
+    {...transport().requests[0],location:null}];
+  return {version:2,originalURL,sourcePostingURL,textCap:20000,result:{url:sourcePostingURL,ats:'ashby',title:'Fictional Product Manager',text:TEXT,
+    sourceFacts:{type:'ashby-listing',isListedState:'boolean',isListed:true}},transport:{fetchCallCount:3,requests},
+    chain:{kind:'arbeitnow-apply-redirect',publisherRequestIndex:0,applyRequestIndex:1,apiRequestIndex:2,observedApplyHref:originalURL+'/apply',redirectLocation:sourcePostingURL}};
+}
+
+test('complete native v2 is held privately with original/source URLs distinct and no eligibility verdict', async () => {
+  const p=archivalPacket();p.requestArchiveSource={forged:true};
+  const f=childFactory(child=>{child.stdout.emit('data',JSON.stringify(p));child.emit('close',0);});
+  const result=await readEvaluationSource({kind:'evaluate',input:p.originalURL,root:'/fixture',spawnFn:f.spawnFn});
+  assert.equal(result.outcome,'available');assert.equal(result.evidence.originalURL,p.originalURL);
+  assert.equal(result.evidence.sourcePostingURL,p.sourcePostingURL);assert.equal(result.evidence.transport.requests[1].location,p.sourcePostingURL);
+  assert.deepEqual(result.evidence.jobData.sourceFacts,p.result.sourceFacts);
+  assert.equal('archiveSource' in result.evidence,false);assert.equal('open' in result.evidence,false);
+  assert.equal('requestArchiveSource' in result.archiveSource,false);
+  assert.equal(result.archiveSource.result.url,p.sourcePostingURL);
+  const {validateArchiveSourcePacket}=await import('../../../read-known-jd.mjs');
+  const validated=validateArchiveSourcePacket(result.archiveSource,p.originalURL);assert.equal(validated.ok,true,validated.error);
+  assert.equal(validated.binding.sourcePostingURL,p.sourcePostingURL);
+});
+
+test('legacy evidence remains supported without fabricating a reusable archive packet', async () => {
+  const f=childFactory(child=>{child.stdout.emit('data',JSON.stringify(packet()));child.emit('close',0);});
+  const result=await readEvaluationSource({kind:'evaluate',input:ORIGINAL,root:'/fixture',spawnFn:f.spawnFn});
+  assert.equal(result.outcome,'available');assert.equal(result.archiveSource,undefined);
+  const p=archivalPacket();p.result.text+='…';
+  const capped=childFactory(child=>{child.stdout.emit('data',JSON.stringify(p));child.emit('close',0);});
+  const missing=await readEvaluationSource({kind:'evaluate',input:p.originalURL,root:'/fixture',spawnFn:capped.spawnFn});
+  assert.equal(missing.outcome,'inconclusive');assert.equal(missing.archiveSource,undefined);
+});
+
+test('actual Ashby bool and unknown status survive as untrusted data, never JD-word inference', () => {
+  for(const facts of [{type:'ashby-listing',isListedState:'boolean',isListed:false},{type:'ashby-listing',isListedState:'absent'},{type:'ashby-listing',isListedState:'invalid'}]) {
+    const p=archivalPacket();p.result.sourceFacts=facts;
+    const evidence=evaluationSourceEvidence(p,p.originalURL);assert.deepEqual(evidence.jobData.sourceFacts,facts);
+    assert.equal('open' in evidence,false);assert.equal('listed' in evidence,false);
+  }
+});

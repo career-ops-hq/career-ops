@@ -740,6 +740,17 @@ try {
     fail(`normalizeLeverJob headless list => ${JSON.stringify(headless)}`);
   }
 
+  // Actual Ashby status is retained from the same selected parsed job, not
+  // inferred from marker-looking wording in the description.
+  for (const [state, value] of [['boolean', true], ['boolean', false], ['absent', undefined], ['invalid', null]]) {
+    const job = { id: 'fictional-id', title: 'Fictional Manager', descriptionPlain: 'Applications closed (canApply: false) is example wording. ' + 'Own roadmap and product discovery. '.repeat(20),
+      ...(state !== 'absent' ? { isListed: value } : {}) };
+    const result = normalizeAshbyJob({ jobs: [job] }, 'fictional-id', 'https://jobs.ashbyhq.com/fictional/fictional-id');
+    const expected = { type: 'ashby-listing', isListedState: state, ...(state === 'boolean' ? { isListed: value } : {}) };
+    if (result && JSON.stringify(result.sourceFacts) === JSON.stringify(expected)) pass(`normalizeAshbyJob preserves actual isListed ${state}/${value}`);
+    else fail(`normalizeAshbyJob status facts => ${JSON.stringify(result)}`);
+  }
+
   // normalizeListing — resolve relatives, drop nav/short labels, dedup, cap
   const anchors = [
     { href: '/jobs/1', label: 'Staff Engineer' },

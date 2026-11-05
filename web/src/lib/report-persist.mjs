@@ -193,10 +193,10 @@ function spawnScript({ spawnFn, execPath, root, cwd = root, script, args = [], i
  * the sentinel. Never throws: the caller routes `{ok:false}` through the same
  * honesty gate as every other evaluate failure.
  *
- * @param {{spawnFn: Function, execPath: string, root: string, coreRoot?: string, markdown: string, url: string, today: string, postedAt?: string, evaluationSections?: string[]}} args
+ * @param {{spawnFn: Function, execPath: string, root: string, coreRoot?: string, markdown: string, url: string, today: string, postedAt?: string, evaluationSections?: string[], archiveSource?: Record<string, unknown>}} args
  * @returns {Promise<{ok: true, num: string, reportFile: string, warnings: string[]} | {ok: false, error: string}>}
  */
-export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = root, markdown, url, today, postedAt, evaluationSections = undefined }) {
+export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = root, markdown, url, today, postedAt, evaluationSections = undefined, archiveSource }) {
   const evaluation = parseEvaluationOptions(evaluationSections);
   if (!evaluation.ok) return { ok: false, error: evaluation.error };
   if (!evaluation.full) {
@@ -215,6 +215,33 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
   }
   const meta = parseReportMeta(markdown);
   if (!meta.ok) return meta;
+
+  let archivePayload;
+  if (archiveSource !== undefined) {
+    // Old writers reject the read-only flag before stdin or artifact work.
+    // Never send their strict JSON payload a key they do not understand.
+    const capabilities = await spawnScript({
+      spawnFn, execPath, root: coreRoot, cwd: root, script: "persist-evaluation-report.mjs", args: ["--capabilities"], input: "",
+    });
+    if (!capabilities.ok) {
+      if (!/persist-evaluation-report: unrecognized argument: --capabilities\b/.test(capabilities.stderr)) {
+        return { ok: false, error: "Could not read the native archive-source capability." };
+      }
+    } else {
+      let advertised;
+      try {
+        if (Buffer.byteLength(capabilities.stdout) > 4096) throw new Error('oversized capability');
+        advertised = JSON.parse(capabilities.stdout);
+      } catch { return { ok: false, error: "The native archive-source capability is malformed." }; }
+      if (!advertised || advertised.version !== 1 || !Array.isArray(advertised.archiveSourcePacketVersions)
+          || Object.keys(advertised).some(key => !['version', 'archiveSourcePacketVersions'].includes(key))
+          || advertised.archiveSourcePacketVersions.some(version => !Number.isSafeInteger(version) || version < 1)
+          || new Set(advertised.archiveSourcePacketVersions).size !== advertised.archiveSourcePacketVersions.length) {
+        return { ok: false, error: "The native archive-source capability is malformed." };
+      }
+      if (advertised.archiveSourcePacketVersions.includes(2)) archivePayload = archiveSource;
+    }
+  }
 
   const reserved = await spawnScript({
     spawnFn, execPath, root: coreRoot, cwd: root, script: "reserve-report-num.mjs",
@@ -291,6 +318,7 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
       url: postingUrl,
       notes,
       reportFile,
+      ...(archivePayload !== undefined ? { archiveSource: archivePayload } : {}),
     }),
   });
   if (!written.ok) {

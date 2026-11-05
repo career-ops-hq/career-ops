@@ -544,3 +544,39 @@ test("persistEvaluation: refuses a non-ISO today rather than joining it into a p
   assert.equal(result.ok, false);
   assert.match(result.error, /Invalid evaluation date/);
 });
+
+test('persistEvaluation: only advertised native v2 support receives the backend private source packet', async () => {
+  const archiveSource={version:2,originalURL:'https://example.invalid/job/1',result:{text:'backend-only fictional text'}};
+  let legacyRaw;
+  for(const support of ['baseline','supported','unavailable','old']) {
+    let payload, rawPayload;
+    const {spawnFn,calls}=makeRouterSpawn({
+      'reserve-report-num.mjs':args=>args.includes('--release')?{exitCode:0}:{stdout:'035\n'},
+      'persist-evaluation-report.mjs':args=>args.includes('--capabilities')
+        ? support==='old'?{exitCode:1,stderr:'persist-evaluation-report: unrecognized argument: --capabilities'}
+          : {stdout:JSON.stringify({version:1,archiveSourcePacketVersions:support==='supported'?[2]:[]})}
+        : {onStdin:raw=>{rawPayload=raw;payload=JSON.parse(raw);return{stdout:'{"ok":true}'};}},
+      'merge-tracker.mjs':{exitCode:0},
+    });
+    const result=await persistEvaluation({spawnFn,execPath:'node',root:'/fictional/data',coreRoot:'/fictional/core',markdown:REPORT,
+      url:archiveSource.originalURL,today:'2026-08-04',...(support==='baseline'?{}:{archiveSource})});
+    assert.equal(result.ok,true,result.error);assert.equal(payload.url,archiveSource.originalURL);
+    if(support==='baseline') { legacyRaw=rawPayload;assert.equal(calls.some(call=>call.args.includes('--capabilities')),false); }
+    else {assert.equal(calls[0].args.at(-1),'--capabilities');assert.equal(calls[0].stdin,'');}
+    if(['unavailable','old'].includes(support))assert.equal(rawPayload,legacyRaw,'unsupported native writer receives BYTE-EXACT legacy JSON stdin');
+    if(support==='supported')assert.deepEqual(payload.archiveSource,archiveSource);
+    else assert.equal('archiveSource' in payload,false,'legacy strict writer never receives an unknown JSON field');
+  }
+});
+
+test('persistEvaluation: corrupt capability data or unexpected probe failure stops before reservation', async () => {
+  for(const spec of [{stdout:'not json'},{stdout:JSON.stringify({version:1,archiveSourcePacketVersions:[2],extra:true})},
+    {stdout:JSON.stringify({version:1,archiveSourcePacketVersions:['2']})},{stdout:'x'.repeat(4097)},
+    {exitCode:1,stderr:'reader import failed'}]) {
+    const {spawnFn,calls}=makeRouterSpawn({'persist-evaluation-report.mjs':spec});
+    const result=await persistEvaluation({spawnFn,execPath:'node',root:'/fictional/data',markdown:REPORT,
+      url:'https://example.invalid/job/1',today:'2026-08-04',archiveSource:{version:2}});
+    assert.equal(result.ok,false);assert.match(result.error,/capability/);
+    assert.equal(calls.length,1);assert.equal(calls[0].args.at(-1),'--capabilities');assert.equal(calls[0].stdin,'');
+  }
+});
