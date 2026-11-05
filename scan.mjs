@@ -552,10 +552,20 @@ function placesWithoutCountryCode(lower) {
   });
 }
 
+// A state name that is also a country cannot beat the user's own `block`:
+// "Tbilisi, Georgia" is the country, and reading "Georgia" as always_allow let
+// it through a filter that blocked "Tbilisi". Such a name counts at the `allow`
+// tier instead, so "Atlanta, Georgia" still passes and a blocked Georgian city
+// does not. The 2-letter code is unambiguous and stays in always_allow, so
+// "Dublin, GA" still beats a blocked "Dublin".
+const US_STATE_NAMES_ALSO_COUNTRIES = new Set(['georgia']);
+
 const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
-  compileLocationKeyword(name),
+  ...(US_STATE_NAMES_ALSO_COUNTRIES.has(name) ? [] : [compileLocationKeyword(name)]),
   compileUsStateAbbrev(abbr),
 ]);
+
+const US_STATE_ALLOW_MATCHERS = [...US_STATE_NAMES_ALSO_COUNTRIES].map(compileLocationKeyword);
 
 // Some providers report a rolled-up display string ("5 Locations", "2 Locations")
 // while the canonical URL still names the real primary location. Workday is the
@@ -647,10 +657,16 @@ export function buildLocationFilter(locationFilter) {
   // in block. "Dublin, OH" does not contain "United States", so without this
   // expansion block: [Dublin] rejects a real US job. Opt-in on the country
   // token — configs with no US always_allow entry are unchanged.
-  if (alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k))) {
+  const usExpansion = alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k));
+  if (usExpansion) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
   const allow = compileLocationKeywordList(locationFilter.allow);
+  // Only a list the user already filled: an empty `allow` means "everything not
+  // blocked passes", and adding a matcher to it would reject every other place.
+  if (usExpansion && allow.length > 0) {
+    allow.push(...US_STATE_ALLOW_MATCHERS);
+  }
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
   // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
