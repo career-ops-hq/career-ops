@@ -135,9 +135,13 @@ try {
       && full.location === 'Springfield, IL') pass('parseDetail reads title, decoded description, posted date and location');
   else fail(`full detail: ${JSON.stringify(full)}`);
   const odd = mod.parseDetail(fixture('applicantpro-detail-odd.html'));
-  if (odd.title === 'Operations Manager - Midwest' && !('employmentType' in odd) && !('validThrough' in odd) && !('salary' in odd)) {
-    pass('parseDetail takes the JSON-LD title and ignores validThrough, employmentType and baseSalary');
+  if (odd.title === 'Operations Manager - Midwest' && !('employmentType' in odd) && !('validThrough' in odd) && !('closesAt' in odd) && !('salary' in odd)) {
+    pass('parseDetail takes the JSON-LD title and ignores a non-ISO validThrough, employmentType and baseSalary');
   } else fail(`odd detail: ${JSON.stringify(odd)}`);
+  const isoClose = mod.parseDetail('<script type="application/ld+json">{"@type":"JobPosting","title":"Analyst","validThrough":"2026-11-02"}</script>');
+  if (isoClose.closesAt === '2026-11-02' && isoClose.title === 'Analyst' && !('validThrough' in isoClose)) {
+    pass('parseDetail copies a real validThrough day to closesAt');
+  } else fail(`iso close detail: ${JSON.stringify(isoClose)}`);
   if (Object.keys(mod.parseDetail('<html>no json-ld</html>')).length === 0
       && Object.keys(mod.parseDetail('<script type="application/ld+json">{not json</script>')).length === 0
       && Object.keys(mod.parseDetail(null)).length === 0) pass('parseDetail tolerates pages with no or broken JSON-LD');

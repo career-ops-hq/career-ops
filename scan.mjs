@@ -79,6 +79,7 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { closesAtIso } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
@@ -3222,6 +3223,7 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     requisition_id: typeof offer.requisitionId === 'string' ? offer.requisitionId : '',
     language: typeof offer.language === 'string' ? offer.language : '',
     listing_key: typeof offer.listingKey === 'string' ? offer.listingKey : '',
+    closes_at: closesAtIso(offer.closesAt),
   };
   return SCAN_HISTORY_COLUMNS.map((name) => sanitizeTsvField(record[name])).join('\t');
 }

@@ -38,8 +38,10 @@
 // default and skipped while a health probe runs.
 //
 // Gotchas, all from live observation of the JSON-LD / list data:
-//   - `validThrough` can sit years in the future, so it is never used to
-//     decide whether a posting is open — presence in the list is the signal.
+//   - `validThrough` can sit years in the future, or in a shape that is not a
+//     calendar day, so it is never used to decide whether a posting is open.
+//     Presence in the list is that signal. A real calendar day is copied to
+//     `closesAt`.
 //   - `employmentType` can be wrong (a permanent management posting tagged
 //     CONTRACTOR), so it is not mapped to anything.
 //   - the JSON-LD title is the posting's title and wins over the list title
@@ -50,6 +52,7 @@
 //     `requisitionId` is set (the payload has no employer requisition field);
 //     the posting id goes to `externalId`.
 
+import { closesAtIso } from '../lib/posting-close.mjs';
 import { cachedLookup } from './_cached-lookup.mjs';
 import { intInRange } from './_config-utils.mjs';
 import { coerceId } from './_ids.mjs';
@@ -209,11 +212,12 @@ function flattenJsonLd(value) {
 }
 
 /**
- * Title, description and posted date from a detail page's `JobPosting`
- * JSON-LD. `validThrough`, `employmentType` and `baseSalary` are deliberately
- * not read (see the header). Exported for unit tests.
+ * Title, description, posted date, and a close day from a detail page's
+ * `JobPosting` JSON-LD. `closesAt` is set only when `validThrough` is a real
+ * calendar day. `employmentType` and `baseSalary` are not read (see the
+ * header). Exported for unit tests.
  * @param {unknown} html
- * @returns {{ title?: string, description?: string, postedAt?: number, location?: string }}
+ * @returns {{ title?: string, description?: string, postedAt?: number, location?: string, closesAt?: string }}
  */
 export function parseDetail(html) {
   if (typeof html !== 'string') return {};
@@ -228,6 +232,7 @@ export function parseDetail(html) {
     const title = typeof node.title === 'string' ? node.title.replace(/\s+/g, ' ').trim() : '';
     const description = htmlToText(typeof node.description === 'string' ? node.description : '');
     const postedAt = toEpochMs(node.datePosted);
+    const closesAt = closesAtIso(node);
     const places = Array.isArray(node.jobLocation) ? node.jobLocation : [node.jobLocation];
     const address = places.find((p) => p?.address)?.address || {};
     const location = [address.addressLocality, address.addressRegion]
@@ -236,6 +241,7 @@ export function parseDetail(html) {
       ...(title ? { title } : {}),
       ...(description ? { description } : {}),
       ...(postedAt !== undefined ? { postedAt } : {}),
+      ...(closesAt ? { closesAt } : {}),
       ...(location ? { location } : {}),
     };
   }
@@ -289,6 +295,7 @@ export default {
         if (detail.title) job.title = detail.title;
         if (detail.description) job.description = detail.description;
         if (job.postedAt === undefined && detail.postedAt !== undefined) job.postedAt = detail.postedAt;
+        if (detail.closesAt) job.closesAt = detail.closesAt;
         if (!job.location && detail.location) job.location = detail.location;
       } catch { /* optional enrichment: keep the list row */ }
     }

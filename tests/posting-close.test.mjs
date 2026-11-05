@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closesAtIso, stripQuery } from '../lib/posting-close.mjs';
+import { closeDateForUrl, closeDatesByUrl, closesAtIso, stripQuery } from '../lib/posting-close.mjs';
+import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -112,6 +113,67 @@ test('a field that is not a close-date name is ignored', () => {
   const inherited = Object.create({ validThrough: '2026-01-01' });
   inherited.applicationDeadline = '2026-08-08';
   assert.equal(closesAtIso(inherited), '2026-08-08');
+});
+
+test('closes_at is the last scan-history column', () => {
+  assert.equal(SCAN_HISTORY_COLUMNS.at(-1), 'closes_at');
+  assert.equal(SCAN_HISTORY_COLUMNS.at(-2), 'listing_key');
+});
+
+function historyRow(cells) {
+  const byName = Object.fromEntries(SCAN_HISTORY_COLUMNS.map((name) => [name, '']));
+  Object.assign(byName, cells);
+  return SCAN_HISTORY_COLUMNS.map((name) => byName[name]).join('\t');
+}
+
+test('scan history indexes a close day by exact URL and by URL without the query', () => {
+  const header = SCAN_HISTORY_COLUMNS.join('\t');
+  const text = [
+    header,
+    historyRow({
+      url: 'https://jobs.example/acme-exact',
+      company: 'Acme',
+      closes_at: '2026-10-03',
+    }),
+    historyRow({
+      url: 'https://jobs.example/acme-exact',
+      company: 'Acme',
+      closes_at: '',
+    }),
+    historyRow({
+      url: 'https://jobs.example/northwind?src=board',
+      company: 'Northwind Traders',
+      closes_at: '2026-09-15',
+    }),
+    historyRow({
+      url: 'https://jobs.example/blank',
+      company: 'Acme',
+      closes_at: 'not-a-day',
+    }),
+    historyRow({
+      url: '',
+      company: 'Acme',
+      closes_at: '2026-01-01',
+    }),
+  ].join('\n');
+  const index = closeDatesByUrl(text);
+  assert.equal(index.get('https://jobs.example/acme-exact'), '2026-10-03');
+  assert.equal(index.get('https://jobs.example/northwind?src=board'), '2026-09-15');
+  assert.equal(index.get('https://jobs.example/northwind'), '2026-09-15');
+  assert.equal(index.has('https://jobs.example/blank'), false);
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact'), '2026-10-03');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?src=email'), '2026-10-03');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/northwind'), '2026-09-15');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/other'), '');
+  assert.equal(closeDateForUrl(index, ''), '');
+});
+
+test('a later scan-history day replaces an earlier one for the same URL', () => {
+  const text = [
+    historyRow({ url: 'https://jobs.example/acme', closes_at: '2026-01-01' }),
+    historyRow({ url: 'https://jobs.example/acme', closes_at: '2026-04-04' }),
+  ].join('\n');
+  assert.equal(closeDatesByUrl(text).get('https://jobs.example/acme'), '2026-04-04');
 });
 
 test('stripQuery removes the query and keeps the hash', () => {
