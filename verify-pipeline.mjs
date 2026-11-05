@@ -37,7 +37,7 @@ import {
   normalizeTextKey, normalizeVia, unwrapReportUrlToken, parseMarkdownLinks,
   extractReqNumber,
 } from './tracker-parse.mjs';
-import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor, companiesMatchIgnoringCorporateForm } from './tracker-utils.mjs';
+import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor, corporateFormTokensMatch, MIN_STEM_CHARS } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
@@ -202,8 +202,13 @@ for (const e of entries) {
   companyRoleMap.get(key).push(e);
   if (String(e.company || '').trim() !== '?') {
     const roleKey = normalizeTextKey(e.role);
-    if (!roleMap.has(roleKey)) roleMap.set(roleKey, []);
-    roleMap.get(roleKey).push(e);
+    const companyKey = normalizeTextKey(e.company);
+    const tokens = normalizeTextKey(e.company, ' ').split(' ').filter(Boolean);
+    if (!roleMap.has(roleKey)) roleMap.set(roleKey, new Map());
+    const buckets = roleMap.get(roleKey);
+    const bucketKey = companyKey.slice(0, MIN_STEM_CHARS);
+    if (!buckets.has(bucketKey)) buckets.set(bucketKey, []);
+    buckets.get(bucketKey).push({ entry: e, companyKey, tokens });
   }
 }
 for (const [key, group] of companyRoleMap) {
@@ -235,13 +240,17 @@ for (const [key, group] of companyRoleMap) {
 // keys pairwise as well: corporate-form twins otherwise never meet (#4421).
 // Do not cluster these matches: "Acme" matches both "Acme Solutions" and
 // "Acme Technologies", but the latter two must never be reported as one group.
-for (const group of roleMap.values()) {
+// The matcher guarantees matching names share this normalized prefix.
+// Cache keys and tokens once per row, then compare only within that bucket.
+for (const group of [...roleMap.values()].flatMap(buckets => [...buckets.values()])) {
   for (let i = 0; i < group.length; i++) {
     for (let j = i + 1; j < group.length; j++) {
-      const a = group[i];
-      const b = group[j];
-      if (normalizeTextKey(a.company) === normalizeTextKey(b.company)
-          || !companiesMatchIgnoringCorporateForm(a.company, b.company)) continue;
+      const left = group[i];
+      const right = group[j];
+      if (left.companyKey === right.companyKey
+          || !corporateFormTokensMatch(left.tokens, right.tokens)) continue;
+      const a = left.entry;
+      const b = right.entry;
       const reqA = extractReqNumber(a.notes);
       const reqB = extractReqNumber(b.notes);
       if (reqA && reqB && reqA !== reqB) continue;

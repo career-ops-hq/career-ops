@@ -32,6 +32,10 @@ try {
     else fail(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(groups)}`);
   }
 
+  check('minimum-length stem shares its bucket', [row('A B C'), row('A B C Inc')], [[1, 2]]);
+  check('short stems do not become corporate matches', [row('AB'), row('AB Inc')], []);
+  check('normalized Unicode prefix shares its bucket', [row('ＡＢＣ'), row('ABC Inc')], [[1, 2]]);
+  check('separate prefixes retain their own matches', [row('Acme'), row('Zenith'), row('Acme Inc'), row('Zenith LLC')], [[1, 3], [2, 4]]);
   check('APC suffix twin is reported', [row('Acme Widgets, APC'), row('Acme Widgets')], [[1, 2]]);
   check('APC suffix twin in reverse order is reported', [row('Acme Widgets'), row('Acme Widgets, APC')], [[1, 2]]);
   check('distinct corporate-form tails stay separate', [row('Acme Solutions'), row('Acme Technologies')], []);
