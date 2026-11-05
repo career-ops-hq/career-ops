@@ -33,7 +33,7 @@ Claude फिर `modes/` की जगह इस folder की files पढ़�
 
 ```yaml
 language:
-  primary: hi
+  output: hi
   modes_dir: modes/hi
 ```
 
