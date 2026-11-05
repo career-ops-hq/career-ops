@@ -31,7 +31,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
-import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks, unwrapReportUrlToken } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks, soleMarkdownLink, unwrapReportUrlToken } from './tracker-parse.mjs';
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
@@ -544,10 +544,31 @@ export async function mergeTracker(options = {}) {
   const declaredEmployerUrls = new Map();
   let resolvePostingApi = null;
   let workdayPostingKey = null;
+  function reportFieldForMetadata(app) {
+    const direct = String(app.report ?? '').trim();
+    if (direct) return direct;
+    // With no Report column buildRow appends "Report: <link>." to Notes.
+    // Prefer that last valid marked reference over older examples/history.
+    const notes = String(app.notes ?? '');
+    const markers = [...notes.matchAll(/(?:^|\s)Report:\s*(?=\[)/gi)];
+    for (const marker of markers.reverse()) {
+      const tail = notes.slice(marker.index + marker[0].length);
+      // Use the shared parser for escaped/balanced report filenames. A partial
+      // first link must not make a later unmarked prose link authoritative.
+      const endings = [...tail.matchAll(/\)\.(?=\s|$)/g)].map(match => match.index + 1);
+      endings.push(tail.trimEnd().length);
+      for (const end of endings) {
+        const field = tail.slice(0, end);
+        if (soleMarkdownLink(field)) return field;
+      }
+    }
+    return '';
+  }
   function declaredEmployerUrl(app) {
-    if (declaredEmployerUrls.has(app.report)) return declaredEmployerUrls.get(app.report);
+    const reportField = reportFieldForMetadata(app);
+    if (declaredEmployerUrls.has(reportField)) return declaredEmployerUrls.get(reportField);
     let url = '';
-    const reportPath = resolveReportPath(app.report);
+    const reportPath = resolveReportPath(reportField);
     if (reportPath) {
       for (const line of readFileSync(reportPath, 'utf-8').replace(/\r\n?/g, '\n').split('\n')) {
         // Body sections, examples, and machine-summary payloads are not metadata.
@@ -559,7 +580,7 @@ export async function mergeTracker(options = {}) {
         break;
       }
     }
-    declaredEmployerUrls.set(app.report, url);
+    declaredEmployerUrls.set(reportField, url);
     return url;
   }
 
@@ -1909,7 +1930,7 @@ export async function mergeTracker(options = {}) {
       // would preserve the wrong shared key. Keep both artifacts and the TSV
       // pending instead; never rename a report or overwrite the prior row.
       if (reportNum && existingApps.some(app =>
-        extractReportNum(app.report, app.notes) === reportNum
+        extractReportNum(reportFieldForMetadata(app), app.notes) === reportNum
         && resolveReportPath(app.report) !== resolveReportPath(addition.report)
         && declaredEmployerConflict(app, addition))) {
         console.error(`❌ ${file}: report #${reportNum} names conflicting employer postings in different files; nothing merged for this addition. Keep the reports and correct the report-number collision before re-running.`);
