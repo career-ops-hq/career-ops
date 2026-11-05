@@ -9,6 +9,7 @@
  * untrusted input and must not be able to aim those tools. kind "research"
  * stays read-only.
  */
+import path from "node:path";
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 import { REPORT_ENVELOPE_INSTRUCTION } from "./report-envelope.mjs";
 import { COVER_TONES } from "./cover-brief.mjs";
@@ -97,19 +98,19 @@ const USER_TEMPLATE_FILE_RE = new RegExp(`^${TEMPLATE_IN_DIR.source}`);
 
 /**
  * The user layer's directory (#5777), relative to the data root, as
- * resolveUserTemplatesDir() reports it from the core. It is not spelled out here:
- * the core owns where that directory is. It only has to be a plain relative path
- * — no `.`/`..` segment, no space, nothing a prompt or shell reads as syntax —
- * because the template path that must sit under it is written into the prompt.
+ * resolveUserTemplatesDir() reports it from the core. The core owns where that
+ * directory is. It has to be a plain relative path, with no `.` or `..` segment,
+ * no space, and nothing a shell reads as syntax. A template under it is joined
+ * onto the data root and handed to the HTML builder.
  */
 const USER_TEMPLATES_DIR_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*(?![\s\S])/;
 
 /**
- * The template path is interpolated into an agent's instructions, so it is a
- * trust boundary even though config/profile.yml is the user's own file: a path
- * that never went through the resolver has no business reaching a worker. An
- * unrecognized value falls back to the base template rather than throwing,
- * because a CV the user can still send beats a run that dies on their config.
+ * A template path is a trust boundary even though config/profile.yml is the
+ * user's own file. A path that never went through the resolver does not reach
+ * the HTML builder. An unrecognized value falls back to the base template
+ * rather than throwing, because a CV the user can still send beats a run that
+ * dies on their config.
  *
  * Two shapes pass, and each keeps its root: a system template under the
  * checkout's templates/, and a user template directly under (or one pack level
@@ -175,11 +176,19 @@ function shellFromCheckout(rel, codeRoot) {
   return `'${escaped}'`;
 }
 
-// A user-layer template is the user's file: like cv.md and the report it is named
-// relative to the worker's cwd, the data root, and never joined onto the checkout.
-function templateFile(value, codeRoot, userTemplatesDir) {
-  const template = safeCvTemplate(value, userTemplatesDir);
-  return template.inDataRoot ? JSON.stringify(template.path) : fromCheckout(template.path, codeRoot);
+/**
+ * Absolute template path for the HTML builder. The pdf prompt no longer names
+ * the file, because the model emits JSON and the platform fills the template.
+ * The same trust boundary as the old prompt interpolation still applies.
+ *
+ * @param {{cvTemplate?: string, codeRoot?: string, userTemplatesDir?: string|null, dataRoot?: string}} args
+ * @returns {string}
+ */
+export function cvTemplateAbsolute({ cvTemplate, codeRoot, userTemplatesDir, dataRoot }) {
+  const template = safeCvTemplate(cvTemplate, userTemplatesDir);
+  const root = template.inDataRoot ? dataRoot : (codeRoot || dataRoot);
+  if (typeof root !== "string" || !root) return template.path;
+  return path.join(/* turbopackIgnore: true */ root, template.path);
 }
 
 export function buildPrompt({ kind, input, memory, today, postedAt, lang, cvTemplate, userTemplatesDir, codeRoot, reportFile, coverBrief, profile = DEFAULT_PROFILE_REF, evaluationInstructions = /** @type {string | null} */ (null) }) {
@@ -240,13 +249,13 @@ Target: ${input}`;
     // cv.md or data/applications.md. The agent now emits the CV inline and the
     // backend (a plain Node process, no CLI sandbox) writes and renders it, so
     // pdf mode runs with no write tool at all.
-    return `${profileLine}You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
+    return `${profileLine}You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules. Keyword injection, the competency grid, project selection, and its never-invent-a-skill rule all apply. Keep every role newest-first. Reorder bullets inside a role, never the roles. Do not run the mode's shell steps. The platform builds the HTML, runs the title, structure, and keyword checks, and renders the PDF.
 1. Read ${fromCheckout("modes/pdf.md", codeRoot)}, cv.md, ${profile}, and the evaluation report at ${JSON.stringify(reportFile ?? `reports/${input}-*.md`)} (for the JD keywords + analysis).
-2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill ${templateFile(cvTemplate, codeRoot, userTemplatesDir)}'s {{...}} placeholders with the tailored content. Use that exact file: the platform already resolved it from cv.template through cv-templates.mjs, so do NOT run modes/pdf.md's own template-resolution step. ${CV_ENVELOPE_INSTRUCTION}
+2. Tailor the CV per modes/pdf.md. Inject the JD's keywords into the summary and the first bullets of each role, build the competency grid, and pick the top 3-4 projects. NEVER invent skills. Only reword REAL experience using the JD's vocabulary. Keep roles newest-first.
+3. Emit the tailored CV as one JSON object matching the JSON Input Schema in modes/pdf.md. Do not fill an HTML template and do not emit HTML. Do NOT run modes/pdf.md's template-resolution step. The platform already resolved the template through cv-templates.mjs and builds the HTML itself. ${CV_ENVELOPE_INSTRUCTION}
 4. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
-After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
+After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete JSON envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
   if (kind === "cover") {
     // modes/cover.md stops five times to ask the candidate something. Step 6's

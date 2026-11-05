@@ -27,7 +27,7 @@ function runPdfStream(lines) {
 
 test("a cv envelope that opens a new grok message after a tool call is parsed", () => {
   const { log, envelope } = runPdfStream(grokLines);
-  assert.deepEqual(envelope, { ok: true, html, format: "letter", warnings: [] });
+  assert.deepEqual(envelope, { ok: true, kind: "html", html, format: "letter", warnings: [] });
   assert.equal(log, "I'll tailor from the title, then check the HTML against the fact gate.\nVERDICT: 5/5 — Letter CV tailored for Monarch AI");
 });
 

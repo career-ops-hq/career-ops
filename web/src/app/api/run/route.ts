@@ -13,6 +13,7 @@ import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, re
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
+import { materializeTailoredCv } from "@/lib/cv-from-json.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome } from "@/lib/report-persist.mjs";
@@ -395,8 +396,8 @@ export async function POST(req: Request) {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
       /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
-        const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
+      const saveCv = (paths: PdfPaths, cv: { html: string }) => {
+        const written = writeCvHtml({ pdfPaths: paths, html: cv.html });
         if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
         return written.ok;
       };
@@ -501,13 +502,11 @@ export async function POST(req: Request) {
           close();
         }
       };
-      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
+      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4", ats?: { html: string; finalPdf: string } | null) => {
         send({ type: "status", label: "Rendering PDF…" });
-        // renderAndMarkPdf is designed to resolve, never throw — but this is
-        // the one place nothing else awaits or catches this promise (cancel()
-        // only attaches a .finally for the write-token release), so an
-        // unexpected exception here must still close the stream instead of
-        // leaving it — and the write-token — open until process shutdown.
+        // renderAndMarkPdf resolves and does not throw. The caller awaits this
+        // and catches too. This try still closes the stream if a throw escapes
+        // first, so the write token is not held until process shutdown.
         try {
           const result = await renderAndMarkPdf({
             spawnFn: spawn,
@@ -516,6 +515,7 @@ export async function POST(req: Request) {
             pdfPaths: paths,
             format,
             reportNum: paths.reportNum,
+            ats,
           });
           if (result.kind === "render-failed") {
             send({ type: "error", msg: result.error.slice(0, 200) });
@@ -602,12 +602,35 @@ export async function POST(req: Request) {
             send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
           } else {
             sendWarnings(envelope.warnings);
-            if (saveCv(pdfPaths, envelope)) {
-              // Tracked so cancel() can defer releasing writeToken until this
-              // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
-              return;
-            }
+            // Tracked so cancel() can defer releasing writeToken until this
+            // settles. close() happens once rendering finishes, not here.
+            pdfRenderPromise = (async () => {
+              try {
+                const built = await materializeTailoredCv({
+                  envelope,
+                  coreRoot: resolveCodeRoot(process.cwd(), process.env),
+                  dataRoot: careerOpsRoot(),
+                  cvTemplate,
+                  userTemplatesDir,
+                  reportFile: pdfPaths.reportFile,
+                  htmlPath: pdfPaths.html,
+                  finalPdf: pdfPaths.finalPdf,
+                });
+                if (!built.ok) {
+                  send({ type: "error", msg: built.error.slice(0, 200) });
+                  return;
+                }
+                sendWarnings(built.warnings);
+                if (saveCv(pdfPaths, { html: built.html })) {
+                  await renderPdf(pdfPaths, envelope.format, built.ats);
+                }
+              } catch (e) {
+                send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+              } finally {
+                close();
+              }
+            })();
+            return;
             // saveCv already streamed the specific reason.
           }
           return close();

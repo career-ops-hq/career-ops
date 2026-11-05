@@ -4,6 +4,10 @@ Optional passes:
 - **`--hm-audit`:** `/career-ops pdf --hm-audit` adds the hiring-manager audit at Step 20 — an adversarial read of the tailored CV by a separate, research-grounded reviewer before it becomes a PDF (`modes/pdf/hm-audit.md`). Off by default: it costs a subagent dispatch plus web research. Turn it on per run with the flag, or for every run in your own `modes/_custom.md`.
 - **`--ats`:** `/career-ops pdf --ats` adds Step 21a — a second, ATS-parseable render of the same tailored CV, for the application form you paste into while the styled PDF is the one you attach. Off by default: only candidates applying through ATS text forms need it, and everyone else would pay a second render for nothing. Turn it on per run with the flag, or for every run in your own `modes/_custom.md`.
 
+## Dashboard
+
+A dashboard PDF run asks the model for the JSON Input Schema inside a `<<cv-json>>` envelope. The server builds the HTML with `build-cv-html.mjs`, then runs the title check, the structure check, and the keyword check. Roles stay newest-first, so the chronological guard stays on. When the model returns JSON, the server also writes the ATS PDF beside the styled PDF. That ATS render omits `--report`, so the index still points at the styled PDF. Apply uploads the ATS file when it is on disk, and the styled PDF when it is not. The report keyword panel scores the tailored HTML when that file exists for the report.
+
 ## Full pipeline
 
 **Locked Sections:** If `cv.locked_sections` is defined in `profile.yml`, NEVER remove, shorten, or paraphrase those sections during CV generation or tailoring. They must appear verbatim.

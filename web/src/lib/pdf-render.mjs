@@ -118,6 +118,31 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
 }
 
 /**
+ * The ATS upload PDF. Same renderer as the styled CV, without --report, so
+ * the index keeps pointing at the styled file. Never passes
+ * --allow-nonchronological. Roles stay newest-first instead.
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4"}} args
+ * @returns {Promise<{ok: boolean, stderr: string}>}
+ */
+export function spawnAtsPdf({ spawnFn, execPath, coreRoot, html, finalPdf, format }) {
+  return new Promise((resolve) => {
+    const child = spawnFn(
+      execPath,
+      [path.join(coreRoot, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, "--allow-reorder"],
+      {
+        cwd: coreRoot,
+        windowsHide: true,
+        env: { ...process.env, CAREER_OPS_PDF_SHARED: "1" },
+      },
+    );
+    let stderr = "";
+    child.stderr.on("data", (d) => { stderr += d.toString(); });
+    child.on("close", (code) => resolve({ ok: code === 0, stderr: stderr.trim() }));
+    child.on("error", (e) => resolve({ ok: false, stderr: `ATS PDF rendering failed to start: ${e.message}` }));
+  });
+}
+
+/**
  * Spawn mark-pdf-ready.mjs (--json) and resolve once it exits, parsing its
  * JSON stdout when present (mark-pdf-ready.mjs prints a JSON payload even on
  * a failure exit when --json is passed) so a caller can surface the specific
@@ -206,14 +231,20 @@ export function keepTailoredHtml(pdfPaths, warnings) {
  * Call after writeCvHtml for the same pdfPaths — this reads the HTML that
  * function wrote. `format` is passed in rather than read back off disk, so the two
  * no longer share a file and the only coupling left is the HTML itself.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string, ats?: {html: string, finalPdf: string}|null}} args
  * @returns {Promise<RenderResult>}
  */
-export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, format, reportNum }) {
+export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, format, reportNum, ats = null }) {
   const warnings = [];
 
   const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
   if (render.ok) keepTailoredHtml(pdfPaths, warnings);
+  if (render.ok && ats?.html && ats?.finalPdf) {
+    const atsRender = await spawnAtsPdf({ spawnFn, execPath, coreRoot, html: ats.html, finalPdf: ats.finalPdf, format });
+    if (!atsRender.ok) {
+      warnings.push(`ATS PDF was not created: ${atsRender.stderr || "render failed"}. Apply will use the styled PDF.`);
+    }
+  }
   cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
 
   if (!render.ok) {

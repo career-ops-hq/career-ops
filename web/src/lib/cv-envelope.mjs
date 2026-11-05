@@ -30,13 +30,18 @@ import { PAGE_FORMATS, DEFAULT_PAGE_FORMAT } from "./page-formats.mjs";
 // pdf run at runtime with the whole suite still green.
 export const OPEN_MARK = "<<cv-html";
 export const CLOSE_MARK = "<</cv-html>>";
+export const JSON_OPEN_MARK = "<<cv-json";
+export const JSON_CLOSE_MARK = "<</cv-json>>";
 
 // One pattern source per marker. The closer needs two compiled flavours because
 // `exec` on a global regex advances `lastIndex` between calls, so the single-shot
 // lookup and the scanning one must not share an object; the opener is only ever
 // scanned with `matchAll`, which clones and needs just the one.
-const OPENER_SRC = String.raw`^<<cv-html(?:[ \t]+format="([^"\n]*)")?>>[ \t]*$`;
-const CLOSER_SRC = String.raw`^<<\/cv-html>>[ \t]*$`;
+// Kind is group 1 and the page format stays group 2. A legacy HTML envelope and
+// the JSON payload the CLI builds from share one parser so a prompt echo cannot
+// open a second envelope of either kind.
+const OPENER_SRC = String.raw`^<<cv-(html|json)(?:[ \t]+format="([^"\n]*)")?>>[ \t]*$`;
+const CLOSER_SRC = String.raw`^<<\/cv-(html|json)>>[ \t]*$`;
 const OPENER = new RegExp(OPENER_SRC, "gm");
 const CLOSER = new RegExp(CLOSER_SRC, "m");
 const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
@@ -60,12 +65,14 @@ const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
  * capabilities invites it to test the claim.
  */
 export const CV_ENVELOPE_INSTRUCTION =
-  `Do NOT save or edit any file — the platform persists your output for you. Instead OUTPUT the finished HTML inline, between two marker lines. The first line contains only the opening marker carrying your chosen page format — \`${OPEN_MARK} format="a4">>\` or \`${OPEN_MARK} format="letter">>\`, and nothing else on that line. Choose letter for a US/Canada company, otherwise a4. Then the complete HTML document, then a final line containing only \`${CLOSE_MARK}\`. Each marker appears exactly once. Emit the WHOLE document from <!DOCTYPE html> to </html> — never abbreviate, summarize, or write "unchanged"; the platform renders exactly these bytes and nothing else.`;
+  `Do NOT save or edit any file. The platform persists your output for you. Instead OUTPUT one JSON object, the modes/pdf.md JSON Input Schema, between two marker lines. The first line contains only the opening marker carrying your chosen page format, \`${JSON_OPEN_MARK} format="a4">>\` or \`${JSON_OPEN_MARK} format="letter">>\`, and nothing else on that line. Choose letter for a US/Canada company, otherwise a4. Then the JSON object alone, with no markdown fence and no HTML, then a final line containing only \`${JSON_CLOSE_MARK}\`. Each marker appears exactly once. The platform builds the HTML from this JSON and runs the same checks as the CLI. Keep experience roles newest-first. Reorder bullets inside a role, never the roles themselves.`;
 
 /**
  * @typedef {Object} CvEnvelope
  * @property {true} ok
- * @property {string} html - The tailored CV HTML, byte-exact as emitted.
+ * @property {"html"|"json"} kind
+ * @property {string} [html] - Legacy tailored CV HTML, byte-exact as emitted.
+ * @property {object} [payload] - CLI JSON payload. Present only for a cv-json envelope.
  * @property {"a4"|"letter"} format - Page format for generate-pdf.mjs.
  * @property {string[]} warnings - Non-fatal issues to surface in the run log.
  */
@@ -90,47 +97,70 @@ export function parseCvEnvelope(text) {
 
   const openers = [...normalized.matchAll(OPENER)];
   if (openers.length === 0) {
-    return { ok: false, error: "The agent emitted no <<cv-html>> envelope, so there is no CV to render." };
+    return { ok: false, error: "The agent emitted no CV envelope, so there is no CV to render." };
   }
   if (openers.length > 1) {
-    // Choosing one would be choosing blind — an injected envelope looks exactly
-    // like the real one from here.
-    return { ok: false, error: `Found ${openers.length} <<cv-html>> envelopes; refusing to guess which is the real CV.` };
+    // Choosing one would be choosing blind. An injected envelope looks exactly
+    // like the real one from here. HTML-only runs keep the original wording.
+    const label = openers.every((opener) => opener[1] === "html") ? "<<cv-html>>" : "CV";
+    return { ok: false, error: `Found ${openers.length} ${label} envelopes; refusing to guess which is the real CV.` };
   }
 
   const opener = openers[0];
+  const kind = opener[1] === "json" ? "json" : "html";
   const afterOpener = normalized.slice(opener.index + opener[0].length);
   const closer = CLOSER.exec(afterOpener);
   if (!closer) {
-    return { ok: false, error: "The <<cv-html>> envelope was never closed — the CV output is incomplete." };
+    return { ok: false, error: `The <<cv-${kind}>> envelope was never closed. The CV output is incomplete.` };
+  }
+  if (closer[1] !== kind) {
+    return { ok: false, error: `The <<cv-${kind}>> envelope was closed by <</cv-${closer[1]}>>.` };
   }
 
   // The opener match stops before its newline and the closer starts on its own
   // line, so exactly one delimiting newline sits on each side of the body.
-  const html = afterOpener.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
-  if (!html.trim()) {
-    return { ok: false, error: "The <<cv-html>> envelope was empty — no CV was tailored." };
-  }
-  // A closing </html> is what distinguishes a whole document from one the agent
-  // cut off mid-emission — the realistic failure when emitting 15-25 KB inline.
-  // This belongs here, not in the caller: the caller reports THIS error string, so
-  // splitting the rule out would leave the user with a generic message.
-  if (!/<\/html\s*>/i.test(html)) {
-    return { ok: false, error: "The CV was cut off before its closing </html> tag — the output is incomplete." };
+  const body = afterOpener.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
+  if (!body.trim()) {
+    return { ok: false, error: `The <<cv-${kind}>> envelope was empty. No CV was tailored.` };
   }
 
   const warnings = [];
-  const declared = opener[1];
-  let format = DEFAULT_PAGE_FORMAT;
-  if (declared === undefined) {
-    warnings.push(`The agent declared no page format; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
-  } else {
-    const lower = declared.trim().toLowerCase();
-    if (PAGE_FORMATS.has(lower)) format = lower;
-    else warnings.push(`Unrecognized page format "${declared}"; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
+  const format = pageFormat(opener[2], warnings);
+  if (kind === "html") {
+    // A closing </html> is what distinguishes a whole document from one the agent
+    // cut off mid-emission. The realistic failure when emitting 15-25 KB inline.
+    if (!/<\/html\s*>/i.test(body)) {
+      return { ok: false, error: "The CV was cut off before its closing </html> tag. The output is incomplete." };
+    }
+    return { ok: true, kind, html: body, format, warnings };
   }
 
-  return { ok: true, html, format, warnings };
+  let payload;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return { ok: false, error: "The <<cv-json>> envelope was not valid JSON, so there is no CV to render." };
+  }
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, error: "The <<cv-json>> envelope must hold one JSON object, so there is no CV to render." };
+  }
+  return { ok: true, kind, payload, format, warnings };
+}
+
+/**
+ * @param {string|undefined} declared
+ * @param {string[]} warnings
+ * @returns {"a4"|"letter"}
+ */
+function pageFormat(declared, warnings) {
+  if (declared === undefined) {
+    warnings.push(`The agent declared no page format; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
+    return DEFAULT_PAGE_FORMAT;
+  }
+  const lower = declared.trim().toLowerCase();
+  if (PAGE_FORMATS.has(lower)) return lower;
+  warnings.push(`Unrecognized page format "${declared}"; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
+  return DEFAULT_PAGE_FORMAT;
 }
 
 /**
@@ -143,12 +173,8 @@ export function parseCvEnvelope(text) {
  * @returns {boolean}
  */
 function couldBecomeMarker(line) {
-  return (
-    // Still growing into a marker (`<`, `<<c`)...
-    OPEN_MARK.startsWith(line) || CLOSE_MARK.startsWith(line) ||
-    // ...or already past it and still growing towards `>>`.
-    line.startsWith(OPEN_MARK) || line.startsWith(CLOSE_MARK)
-  );
+  const marks = [OPEN_MARK, CLOSE_MARK, JSON_OPEN_MARK, JSON_CLOSE_MARK];
+  return marks.some((mark) => mark.startsWith(line) || line.startsWith(mark));
 }
 
 /**
