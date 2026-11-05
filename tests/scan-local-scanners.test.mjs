@@ -10,10 +10,6 @@ import {
   createLocalGate, writeRunLog,
 } from '../scan-local-lib.mjs';
 import { buildSeekUrl, parseSeekPage, extractReduxJson, loadSearches as seekSearches } from '../scan-seek.mjs';
-import {
-  buildSearchUrl, buildJobPostingUrl, parseSearchCards, parseJobPosting,
-  loadSearches as linkedinSearches,
-} from '../scan-linkedin.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -28,17 +24,6 @@ const SEEK_HTML = `<html><script>window.SEEK_REDUX_DATA = ${JSON.stringify({
     { id: '81000001', title: 'Senior Data Analyst', advertiser: { description: 'Kiwi Power &amp; Light' } },
   ] }, other: 'a } brace in a string', missing: undefined },
 })};</script></html>`;
-
-const CARD = (id, title, company, loc, date) => `<li><div class="base-card" data-entity-urn="urn:li:jobPosting:${id}">
-<a class="base-card__full-link" href="https://nz.linkedin.com/jobs/view/${title.toLowerCase().replace(/ /g, '-')}-at-x-${id}?position=1&amp;trackingId=abc"></a>
-<h3 class="base-search-card__title">  ${title} </h3>
-<h4 class="base-search-card__subtitle"><a href="#">${company}</a></h4>
-<span class="job-search-card__location">${loc}</span>
-<time class="job-search-card__listdate" datetime="${date}">2 days ago</time></div></li>`;
-
-const LI_HTML = CARD('3900000001', 'Platform Engineer', 'Xero', 'Auckland, New Zealand', '2026-11-01')
-  + CARD('3900000002', 'Site Reliability Engineer', 'Fisher &amp; Paykel', 'Wellington, New Zealand', '2026-10-30')
-  + CARD('3900000001', 'Platform Engineer', 'Xero', 'Auckland, New Zealand', '2026-11-01');
 
 const res = (status, body = '', headers = {}) => ({
   ok: status >= 200 && status < 300,
@@ -241,63 +226,15 @@ test('seek searches config: minimal { keyword, location? } schema', () => {
   assert.deepStrictEqual(seekSearches({}), []);
 });
 
-// ── scan-linkedin ────────────────────────────────────────────────────
-
-test('linkedin search URL targets the guest endpoint with paging and window', () => {
-  const url = new URL(buildSearchUrl({ keywords: 'platform engineer', location: 'Auckland, New Zealand' }, { page: 2, sinceDays: 7 }));
-  assert.strictEqual(url.pathname, '/jobs-guest/jobs/api/seeMoreJobPostings/search');
-  assert.strictEqual(url.searchParams.get('keywords'), 'platform engineer');
-  assert.strictEqual(url.searchParams.get('start'), '50');
-  assert.strictEqual(url.searchParams.get('f_TPR'), 'r604800');
-  assert.ok(!new URL(buildSearchUrl({ keywords: 'x', location: '' })).searchParams.has('f_TPR'));
-});
-
-test('linkedin jobPosting URL rejects non-numeric ids', () => {
-  assert.match(buildJobPostingUrl('3900000001'), /\/jobPosting\/3900000001$/);
-  assert.throws(() => buildJobPostingUrl('../../me'));
-});
-
-test('linkedin cards parse to offers with clean URLs and dedup by id', () => {
-  const offers = parseSearchCards(LI_HTML);
-  assert.strictEqual(offers.length, 2);
-  assert.deepStrictEqual(offers[0], {
-    id: '3900000001',
-    url: 'https://www.linkedin.com/jobs/view/platform-engineer-at-x-3900000001',
-    title: 'Platform Engineer',
-    company: 'Xero',
-    location: 'Auckland, New Zealand',
-    postedAt: '2026-11-01',
-    source: 'linkedin',
-  });
-  assert.strictEqual(offers[1].company, 'Fisher & Paykel');
-  assert.deepStrictEqual(parseSearchCards('<html>nothing</html>'), []);
-});
-
-test('linkedin JD parsing returns text with line breaks preserved, or empty for unknown markup', () => {
-  const jd = parseJobPosting('<div class="show-more-less-html__markup"><p>Build things.</p><ul><li>Go</li><li>K8s</li></ul></div>');
-  assert.match(jd, /Build things\./);
-  assert.match(jd, /- Go/);
-  assert.match(jd, /Build things\.\n- Go/);
-  assert.strictEqual(parseJobPosting('<html></html>'), '');
-});
-
-test('linkedin searches config: minimal { keywords, location? } schema', () => {
-  assert.deepStrictEqual(
-    linkedinSearches({ linkedin_searches: [{ keywords: 'sre', location: 'NZ' }, 'devops', {}] }),
-    [{ keywords: 'sre', location: 'NZ' }, { keywords: 'devops', location: '' }],
-  );
-});
-
 // ── CLI ──────────────────────────────────────────────────────────────
 
-for (const script of ['scan-seek.mjs', 'scan-linkedin.mjs']) {
-  test(`${script}: --help exits 0 without scanning; unknown flag and missing operand exit 1`, () => {
-    const run = (...args) => spawnSync(process.execPath, [join(ROOT, script), ...args], { cwd: ROOT, encoding: 'utf-8', timeout: 30000 });
-    const help = run('--help');
-    assert.strictEqual(help.status, 0, help.stderr);
-    assert.match(help.stdout, /Usage:/);
-    assert.strictEqual(run('--dryrun').status, 1);
-    assert.strictEqual(run('--delay-ms').status, 1);
-  });
-}
+test('scan-seek.mjs: --help exits 0 without scanning; unknown flag, missing operand and invalid --daterange exit 1', () => {
+  const run = (...args) => spawnSync(process.execPath, [join(ROOT, 'scan-seek.mjs'), ...args], { cwd: ROOT, encoding: 'utf-8', timeout: 30000 });
+  const help = run('--help');
+  assert.strictEqual(help.status, 0, help.stderr);
+  assert.match(help.stdout, /Usage:/);
+  assert.strictEqual(run('--dryrun').status, 1);
+  assert.strictEqual(run('--delay-ms').status, 1);
+  assert.strictEqual(run('--daterange', '0').status, 1);
+});
 

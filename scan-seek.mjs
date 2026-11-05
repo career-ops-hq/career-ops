@@ -8,12 +8,13 @@
  * advertiser, location, salary label, listing date, teaser, work types).
  *
  * WHY THIS SHAPE. nz.seek.com/robots.txt disallows, for every agent,
- * any /job/ path, `*?`, `/graphql` and `/api/jobsearch/`. The JSON API the
- * jobstreet provider calls is therefore off limits here. The SEO path form
- * carries no disallowed segment, so this scanner fetches only that. It never
- * fetches a `/job/<id>` page: the URL is built for the pipeline, not requested.
- * To read a JD for a Seek-only role, use scan-linkedin.mjs's jobPosting
- * endpoint when LinkedIn lists the same role.
+ * any /job/ path, `*?`, `/graphql` and `/api/jobsearch/`. The JSON API that
+ * `providers/jobstreet.mjs` calls (`/api/jobsearch/v5/search` for known
+ * companies in `companies:`) is therefore off limits for robots-strict scanning.
+ * The SEO path form carries no disallowed segment, so this scanner fetches only
+ * that, and discovers roles by keyword across NZ-domestic employers and
+ * recruiters with no public ATS board. It never fetches a `/job/<id>` page:
+ * the URL is built for the pipeline, not requested.
  *
  * NO PAGINATION. Paging needs a query string, which `*?` disallows. Depth
  * comes from more, narrower queries (one per seek_searches entry); Seek's

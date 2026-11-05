@@ -1,9 +1,8 @@
 /**
- * scan-local-lib.mjs — shared plumbing for scan-seek.mjs and scan-linkedin.mjs.
+ * scan-local-lib.mjs — shared plumbing for local keyword scanners (scan-seek.mjs).
  *
- * The two scanners read different sites but must agree on what a keyword
- * match and a "same role" mean, so that logic lives here and is assembled from
- * the pieces every other scanner already uses:
+ * Assembles the filtering, deduplication, polite HTTP and run-logging logic
+ * from the pieces every other scanner already uses:
  *
  *   - title / location / blacklist / seen-URL decisions: createAdmissionGate
  *     (lib/admission-gate.mjs), whose title filter is title-keywords.mjs's
@@ -11,13 +10,14 @@
  *   - "same role": scan.mjs's companyRoleDedupKey with invite-match.mjs's
  *     normalizeCompanyName as the canonicalizer, checked against the company+role
  *     keys of scan-history, pipeline and tracker (loadDedupSnapshot) and against
- *     the other postings of this run, so a role found on both SEEK and LinkedIn
- *     is admitted once;
+ *     the other postings of this run, so a role listed more than once across
+ *     sources or queries is admitted once;
  *   - run log: scan.mjs's appendScanRunSummary into data/scan-runs.tsv, the
  *     file stats.mjs reads, written under the same lock.
  *
  * Network access goes through politeFetch: one request at a time, a pause
- * between requests, and Retry-After-aware back-off on 429/5xx.
+ * between requests, per-attempt timeout, and Retry-After-aware back-off on
+ * 429/5xx and transient network errors.
  */
 
 import path from 'node:path';
