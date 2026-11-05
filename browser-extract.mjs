@@ -954,7 +954,7 @@ async function fetchHibobJd(resolved, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeHibobJob(await res.json(), postingUrl, textCap);
   } catch {
     return null;
