@@ -106,13 +106,9 @@ export type InboxJob = { url: string; company: string; role: string; location?: 
  *  live in pipeline-table.mjs — see there for the column rules (#1015, #1017). */
 export function readInbox(applications: Pick<Application, "url">[] = readApplications()): InboxJob[] {
   const file = path.join(careerOpsRoot(), "data", "pipeline.md");
-  let jobs: InboxJob[] | null;
-  try {
-    jobs = cachedFileValue(file, "inbox", (text) => parseInbox(text));
-  } catch (err) {
-    if (err && (err as NodeJS.ErrnoException).code) return [];
-    throw err;
-  }
+  // A missing pipeline.md is null here. Any other read error throws, so an
+  // unreadable inbox does not show up as an empty one (web/AGENTS.md).
+  const jobs = cachedFileValue(file, "inbox", (text) => parseInbox(text));
   if (!jobs) return [];
   // Copy the cached list before reconcile. reconcileInbox maps to new objects,
   // but a future change that mutates in place must not poison the slot.
@@ -129,27 +125,23 @@ export function readInbox(applications: Pick<Application, "url">[] = readApplica
  */
 export function readScanDates(): Map<string, string> {
   const file = path.join(careerOpsRoot(), "data", "scan-history.tsv");
-  try {
-    const dates = cachedFileValue(file, "scan-dates", (tsv) => {
-      const parsed = new Map<string, string>();
-      const lines = splitLines(tsv);
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line || (i === 0 && line.startsWith("url\t"))) continue;
-        const tab = line.indexOf("\t");
-        if (tab < 1) continue;
-        const url = line.slice(0, tab);
-        const firstSeen = line.slice(tab + 1).split("\t")[0]?.trim();
-        if (/^\d{4}-\d{2}-\d{2}$/.test(firstSeen) && !parsed.has(url)) parsed.set(url, firstSeen);
-      }
-      return parsed;
-    });
-    // Copy so a caller that mutates the Map cannot poison the cache.
-    return dates ? new Map(dates) : new Map();
-  } catch (err) {
-    if (err && (err as NodeJS.ErrnoException).code) return new Map();
-    throw err;
-  }
+  // Missing file: null, so an empty map. Other read errors throw.
+  const dates = cachedFileValue(file, "scan-dates", (tsv) => {
+    const parsed = new Map<string, string>();
+    const lines = splitLines(tsv);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line || (i === 0 && line.startsWith("url\t"))) continue;
+      const tab = line.indexOf("\t");
+      if (tab < 1) continue;
+      const url = line.slice(0, tab);
+      const firstSeen = line.slice(tab + 1).split("\t")[0]?.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(firstSeen) && !parsed.has(url)) parsed.set(url, firstSeen);
+    }
+    return parsed;
+  });
+  // Copy so a caller that mutates the Map cannot poison the cache.
+  return dates ? new Map(dates) : new Map();
 }
 
 /** Raw scan-history lines, reused until the file's mtime or size changes.

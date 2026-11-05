@@ -300,3 +300,25 @@ test("a caller cannot poison the cached tracker rows by mutating the returned li
   });
 });
 
+
+test("an unreadable inbox or scan history throws instead of reading as empty", () => {
+  withRoot((root) => {
+    writeFileSync(join(root, "data", "applications.md"), [
+      "| # | Date | Company | Role | Score | Status | PDF | Report | Notes |",
+      "|---|---|---|---|---|---|---|---|---|",
+    ].join("\n"));
+    // A directory where the file should be: stat works, the read fails with EISDIR.
+    mkdirSync(join(root, "data", "pipeline.md"));
+    mkdirSync(join(root, "data", "scan-history.tsv"));
+  }, () => {
+    assert.throws(() => readInbox([]), { code: "EISDIR" });
+    assert.throws(() => readScanDates(), { code: "EISDIR" });
+  });
+});
+
+test("a missing inbox or scan history is still empty", () => {
+  withRoot(() => {}, () => {
+    assert.deepEqual(readInbox([]), []);
+    assert.equal(readScanDates().size, 0);
+  });
+});
