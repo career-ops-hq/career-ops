@@ -1759,18 +1759,6 @@ export function orderByPreferredLanguage(jobs, rank) {
     .map(({ job }) => job);
 }
 
-/**
- * Comparison key for a posting URL. The rule lives in canonicalJobKey
- * (url-key.mjs): Greenhouse aliases, LinkedIn spellings, and tracking params
- * share one key. Callers still write the original URL.
- *
- * A value that is not an http(s) posting (a `local:` pipeline ref, a bare
- * path, a blank cell) comes back unchanged. canonicalJobKey returns '' for
- * those, and '' must not become the key every blank cell shares.
- *
- * @param {string} url
- * @returns {string}
- */
 export function normalizeUrlForDedup(url) {
   if (typeof url !== 'string' || !url) return url;
   return canonicalJobKey(url) || url;

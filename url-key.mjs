@@ -488,16 +488,6 @@ export function relatePostingLanguageKeys(a, b) {
   return a.language && b.language ? 'distinct' : 'one-sided-language';
 }
 
-/**
- * One key per posting: the board's own posting id on a known aggregator, so a
- * LinkedIn alert link and the plain /jobs/view/ link agree, else normalizeUrl.
- *
- * @param {string} raw
- * @returns {string} '' when the input is not a usable posting URL
- */
-// Click and campaign params scan.mjs already ignores when it asks "seen this
-// job?". Generic names stay OUT of normalizeUrl() because a tracker merge that
-// drops them can fold two postings. The same-job key is the scan question.
 const SAME_JOB_TRACKING = [
   /^ref$/i, /^src$/i, /^source$/i,
   /^lever-origin$/i, /^lever-source$/i, /^rltr$/i,
@@ -538,34 +528,12 @@ function greenhouseJobId(url) {
   return pathId || queryId;
 }
 
-/**
- * Indeed posting id (`jk` on the job page, `vjk` on a results page).
- *
- * @param {URL} url - Hostname already folded.
- * @returns {string|null}
- */
 function indeedJobId(url) {
   if (!/(^|\.)indeed\.com$/.test(url.hostname)) return null;
   const jk = url.searchParams.get('jk') ?? url.searchParams.get('vjk');
   return jk && /^[\w-]+$/.test(jk) ? jk : null;
 }
 
-/**
- * One key for one posting.
- *
- * LinkedIn spellings share `linkedin.com:{id}` (see linkedInCanonicalKey).
- * Greenhouse board URLs and a company page `?gh_jid=` share `greenhouse:{id}`.
- * Indeed shares `indeed.com:{id}`. Everything else is a normalized https URL
- * with tracking and language params removed and the path lowercased, so two
- * scans that differ only by `utm_*`, `ref`, `source`, or `lever-origin` match.
- *
- * '' means no key. A placeholder, a `local:` pipeline ref, and two empty
- * cells must not compare equal. Callers that still need a map key for those
- * use the raw string themselves.
- *
- * @param {string} raw
- * @returns {string}
- */
 export function canonicalJobKey(raw) {
   if (typeof raw !== 'string') return '';
   const s = raw.trim();
@@ -600,10 +568,6 @@ export function canonicalJobKey(raw) {
   return out.toString();
 }
 
-/**
- * @param {string} raw
- * @returns {string} '' when the input is not a usable posting URL
- */
 export function postingKey(raw) {
   return canonicalJobKey(raw);
 }

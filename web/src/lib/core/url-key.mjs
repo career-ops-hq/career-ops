@@ -201,10 +201,6 @@ export function postingUrlRelation(rawA, rawB) {
   return a.language && b.language ? "distinct" : "one-sided-language";
 }
 
-// Same-job key. Keep this block aligned with url-key.mjs `canonicalJobKey`.
-// The parity test fails the build if the two disagree. normalizeUrl stays the
-// conservative tracker key; this one answers "is this the same posting?".
-
 const SAME_JOB_TRACKING = [
   /^ref$/i, /^src$/i, /^source$/i,
   /^lever-origin$/i, /^lever-source$/i, /^rltr$/i,
@@ -249,12 +245,6 @@ function indeedJobId(url) {
   return jk && /^[\w-]+$/.test(jk) ? jk : null;
 }
 
-/**
- * One key for one posting. '' means no key.
- *
- * @param {string} raw
- * @returns {string}
- */
 export function canonicalJobKey(raw) {
   if (typeof raw !== "string") return "";
   const s = raw.trim();
