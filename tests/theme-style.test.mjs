@@ -4,7 +4,7 @@
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join, relative } from 'path';
 import { pathToFileURL } from 'url';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\ntheme-style.mjs (dynamic PDF theming, #1837)');
@@ -264,15 +264,43 @@ try {
         else fail(`${tok.key}: ${v} => ${block}`);
       }
 
-      // A new template must declare its default here, or the opt-in would ship
+      // A new shipped template must declare its default here, or the opt-in would ship
       // dead in it (template-page-breaks.test.mjs discovers templates the same way).
+      // User-authored template variants (DATA_CONTRACT.md) are supported when they
+      // declare their token default on :root or in .job / .project rules (#6514).
+      const resolveTemplateContract = (tpl) => {
+        if (tpl in tok.expected) return tok.expected[tpl];
+        try {
+          const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
+          const tokenDecls = rules.flatMap((r) => declValues(r.body, tok.cssVar).map((v) => `${r.selector} => ${v}`));
+          const rootMatch = tokenDecls.find((d) => d.startsWith(':root => '));
+          if (rootMatch) {
+            const val = rootMatch.replace(':root => ', '').trim();
+            return [val, true];
+          }
+          const owned = rules.filter((r) => targets(r.selector, tok.cls));
+          const varMatch = owned.flatMap((r) => declValues(r.body, 'break-inside'))
+            .map((v) => v.match(new RegExp(`var\\(${tok.cssVar},\\s*([^)]+)\\)`)))
+            .find(Boolean);
+          if (varMatch) {
+            return [varMatch[1].trim(), false];
+          }
+        } catch {
+          // unreadable or invalid file
+        }
+        return null;
+      };
+
       const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html')
         .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
-      const unlisted = discovered.filter((t) => !(t in tok.expected));
+      const contracts = new Map(discovered.map((t) => [t, resolveTemplateContract(t)]));
+      const unlisted = discovered.filter((t) => !contracts.get(t));
       if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared ${tok.key} default`);
       else fail(`templates with no declared ${tok.key} default: ${unlisted.join(', ') || '(none discovered)'}`);
 
-      for (const [tpl, [value, declaresRoot]] of Object.entries(tok.expected)) {
+      for (const [tpl, contract] of contracts.entries()) {
+        if (!contract) continue;
+        const [value, declaresRoot] = contract;
         const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
         const owned = rules.filter((r) => targets(r.selector, tok.cls));
         const want = `var(${tok.cssVar}, ${value})`;
@@ -293,6 +321,24 @@ try {
         } else {
           fail(`${tpl}: ${tok.label} contract broken (want ${want}, legacy alias first, token on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} aliases=${JSON.stringify(aliases)} legacyFirst=${legacyFirst} token=${JSON.stringify(tokenDecls)}`);
         }
+      }
+    }
+
+    // Regression (#6514): a user-authored named template variant documented in
+    // DATA_CONTRACT.md must not fail the theme-style test suite when it declares
+    // token defaults.
+    {
+      const sampleVariantPath = join(ROOT, 'templates/cv-template.test-user-variant.html');
+      try {
+        const baseContent = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+        writeFileSync(sampleVariantPath, baseContent, 'utf-8');
+        const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html')
+          .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
+        if (discovered.includes('templates/cv-template.test-user-variant.html')) {
+          pass('user-authored template variant recognized and tested without hardcoded entry (#6514)');
+        }
+      } finally {
+        if (existsSync(sampleVariantPath)) rmSync(sampleVariantPath);
       }
     }
   }
