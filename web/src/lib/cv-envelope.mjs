@@ -37,9 +37,6 @@ export const JSON_CLOSE_MARK = "<</cv-json>>";
 // `exec` on a global regex advances `lastIndex` between calls, so the single-shot
 // lookup and the scanning one must not share an object; the opener is only ever
 // scanned with `matchAll`, which clones and needs just the one.
-// Kind is group 1 and the page format stays group 2. A legacy HTML envelope and
-// the JSON payload the CLI builds from share one parser so a prompt echo cannot
-// open a second envelope of either kind.
 const OPENER_SRC = String.raw`^<<cv-(html|json)(?:[ \t]+format="([^"\n]*)")?>>[ \t]*$`;
 const CLOSER_SRC = String.raw`^<<\/cv-(html|json)>>[ \t]*$`;
 const OPENER = new RegExp(OPENER_SRC, "gm");
@@ -100,8 +97,6 @@ export function parseCvEnvelope(text) {
     return { ok: false, error: "The agent emitted no CV envelope, so there is no CV to render." };
   }
   if (openers.length > 1) {
-    // Choosing one would be choosing blind. An injected envelope looks exactly
-    // like the real one from here. HTML-only runs keep the original wording.
     const label = openers.every((opener) => opener[1] === "html") ? "<<cv-html>>" : "CV";
     return { ok: false, error: `Found ${openers.length} ${label} envelopes; refusing to guess which is the real CV.` };
   }
@@ -127,8 +122,6 @@ export function parseCvEnvelope(text) {
   const warnings = [];
   const format = pageFormat(opener[2], warnings);
   if (kind === "html") {
-    // A closing </html> is what distinguishes a whole document from one the agent
-    // cut off mid-emission. The realistic failure when emitting 15-25 KB inline.
     if (!/<\/html\s*>/i.test(body)) {
       return { ok: false, error: "The CV was cut off before its closing </html> tag. The output is incomplete." };
     }

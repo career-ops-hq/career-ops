@@ -1,11 +1,3 @@
-/**
- * Turn the dashboard's JSON CV envelope into the HTML generate-pdf.mjs renders.
- *
- * The model does not write HTML. This module runs the CLI's title check and
- * structure check, puts roles back into newest-first when the dates prove an
- * inversion, then asks build-cv-html.mjs for the document. Keyword coverage
- * and the ATS sibling are warnings. A check that cannot run stops the render.
- */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,19 +5,11 @@ import { pathToFileURL } from "node:url";
 import { cvTemplateAbsolute } from "./run-prompts.mjs";
 import { atsPdfPath } from "./apply/ats-pdf.mjs";
 
-/**
- * @param {string} coreRoot
- * @param {string} fileName
- */
 async function loadCore(coreRoot, fileName) {
   const href = pathToFileURL(path.join(coreRoot, fileName)).href;
   return import(/* webpackIgnore: true */ href);
 }
 
-/**
- * @param {string} dataRoot
- * @param {string[]} args Script path plus its own arguments.
- */
 function runNode(dataRoot, args) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, args, {
@@ -50,9 +34,6 @@ function runNode(dataRoot, args) {
 }
 
 /**
- * Comparable roles only. An unknown month never decides the order, matching
- * the CLI. Unparsed dates stay in their slots.
- *
  * @param {unknown} experience
  * @param {(period: string) => {year: number, month: number|null}|null} parseExperienceStart
  */

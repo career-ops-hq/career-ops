@@ -1,7 +1,3 @@
-// The report keyword panel must score the tailored CV when that report has
-// one. Master cv.md misses keywords that exist only in the tailored document,
-// so a 0% reading there is the wrong CV.
-//
 import "../helpers/web-ts-alias-loader.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -1,8 +1,3 @@
-// Dashboard CV generation: a fake JSON envelope becomes HTML, the CLI checks
-// run, and roles that arrived oldest-first go back to newest-first.
-//
-// Run: node --test tests/lib/cv-from-json.test.mjs
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";

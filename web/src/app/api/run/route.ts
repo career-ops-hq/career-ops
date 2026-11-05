@@ -504,9 +504,6 @@ export async function POST(req: Request) {
       };
       const renderPdf = async (paths: PdfPaths, format: "letter" | "a4", ats?: { html: string; finalPdf: string } | null) => {
         send({ type: "status", label: "Rendering PDF…" });
-        // renderAndMarkPdf resolves and does not throw. The caller awaits this
-        // and catches too. This try still closes the stream if a throw escapes
-        // first, so the write token is not held until process shutdown.
         try {
           const result = await renderAndMarkPdf({
             spawnFn: spawn,

@@ -177,10 +177,6 @@ function shellFromCheckout(rel, codeRoot) {
 }
 
 /**
- * Absolute template path for the HTML builder. The pdf prompt no longer names
- * the file, because the model emits JSON and the platform fills the template.
- * The same trust boundary as the old prompt interpolation still applies.
- *
  * @param {{cvTemplate?: string, codeRoot?: string, userTemplatesDir?: string|null, dataRoot?: string}} args
  * @returns {string}
  */

@@ -1,9 +1,3 @@
-// The dashboard PDF run must ask for the same JSON payload the CLI builds
-// from, and that payload must parse as the tailored CV. A full HTML document
-// skips the title, structure, and keyword checks.
-//
-// Run from web/: node --test tests/lib/cv-dashboard-contract.test.mjs
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildPrompt } from "../../src/lib/run-prompts.mjs";

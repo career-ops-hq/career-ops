@@ -9,21 +9,15 @@ version: 1.0.0
 <title>{{NAME}} — CV</title>
 <style>
   /* ── Compact ──────────────────────────────────────────────────────────────
-     Maximum content per page. Tight leading, small type, inline section
-     headings, and a left-rail label column so headings consume vertical space
-     only once. Use when a two-page CV needs to become one, or when a
+     Maximum content per page. Tight leading, small type, and section labels
+     stacked above the body. Use when a two-page CV needs to become one, or when a
      bullet-heavy history would otherwise spill to a third page.
 
      ATS discipline is identical to templates/cv-template.html and is NOT
      negotiable: a static system font stack (never the bundled variable woff2
      fonts, whose glyph advances make PDF extractors inject spaces inside words)
      and ligatures disabled (headless Chromium otherwise emits U+FB01/FB02 and a
-     literal keyword search for "verification" misses "veriﬁcation").
-
-     Single-column by design. Each section stacks its label above the body.
-     A flex row put the label and the body on one visual line, and pdftotext
-     read that line as one string. Multi-column page layouts are the classic
-     ATS parse failure and are deliberately avoided. */
+     literal keyword search for "verification" misses "veriﬁcation"). */
 
   :root {
     --accent-color: hsl(222 47% 34%);

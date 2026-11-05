@@ -1,13 +1,3 @@
-// Compact and Executive must extract as readable text.
-//
-// Compact used a flex row, so a text extractor glued the side label onto the
-// section body. Executive tracked headings, so "SENIOR" extracted as
-// "S E N I O R". Matchable strings keep letter-spacing at zero and Compact
-// sections stack title then body.
-//
-// A local Chromium render is extra evidence. The CSS and DOM checks always run.
-// Missing Chromium does not fail the suite.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -118,9 +118,6 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
 }
 
 /**
- * The ATS upload PDF. Same renderer as the styled CV, without --report, so
- * the index keeps pointing at the styled file. Never passes
- * --allow-nonchronological. Roles stay newest-first instead.
  * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4"}} args
  * @returns {Promise<{ok: boolean, stderr: string}>}
  */

@@ -1,8 +1,3 @@
-/**
- * The ATS PDF sits beside the styled PDF. It is not indexed, so Apply finds
- * it by name. `cv-jane-018-acme-2026-11-05.pdf` pairs with
- * `cv-jane-018-acme-ats-2026-11-05.pdf`.
- */
 import fs from "node:fs";
 
 const DATED_ATS = /-ats-(\d{4}-\d{2}-\d{2})\.pdf$/i;

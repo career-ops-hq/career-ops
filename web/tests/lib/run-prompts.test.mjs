@@ -30,7 +30,6 @@ test("buildPrompt: the pdf prompt asks for the envelope and forbids saving", () 
   // Given a pdf run
   const prompt = buildPrompt({ kind: "pdf", ...ARGS });
 
-  // Then it names both JSON markers in the parser's own spelling.
   assert.ok(prompt.includes(JSON_OPEN_MARK), "pdf prompt must name the opening marker");
   assert.ok(prompt.includes(JSON_CLOSE_MARK), "pdf prompt must name the closing marker");
   // ...and tells it not to save, so an agent that ignores the envelope has been
@@ -463,9 +462,6 @@ test("buildPrompt: a codeRoot that is not a plain path keeps the relative form",
   }
 });
 
-// The model no longer fills a template. cvTemplateAbsolute is the trust boundary
-// the prompt interpolation used to be. These fixtures use /opt/career-ops and
-// /srv/data, never a home directory. The prompt must not carry the path.
 const CODE_ROOT = "/opt/career-ops";
 const DATA_ROOT = "/srv/data";
 const BASE_TEMPLATE = path.join(CODE_ROOT, "templates/cv-template.html");

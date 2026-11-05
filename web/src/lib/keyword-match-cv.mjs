@@ -1,8 +1,3 @@
-/**
- * The report keyword panel scores the tailored CV when one was kept beside
- * the indexed PDF. The PDF bytes are not a CV the matcher can read. Master
- * cv.md is the fallback, and that fallback is "pass no --cv".
- */
 import fs from "node:fs";
 
 /**

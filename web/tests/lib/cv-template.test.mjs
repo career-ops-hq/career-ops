@@ -220,7 +220,6 @@ test("a template in the data root's user layer reaches the prompt relative to th
   const userTemplatesDir = await asDashboard(root, undefined, () => resolveUserTemplatesDir(root, dataRoot), { dataRoot });
   assert.equal(userTemplatesDir, path.posix.dirname(expected));
 
-  // The builder joins that file onto the data root. The prompt does not name it.
   const prompt = buildPrompt({ kind: "pdf", input: "018", memory: "", today: "2026-08-04", cvTemplate: rel, userTemplatesDir, codeRoot: root });
   assert.equal(
     cvTemplateAbsolute({ cvTemplate: rel, userTemplatesDir, codeRoot: root, dataRoot }),
