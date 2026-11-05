@@ -1757,7 +1757,7 @@ search_queries:
 #   careers_url: https://www.aldi-nord.de/karriere/jobs.html   # also www.aldi.nl / .be / .lu / .fr / .es / .pt / .pl
 #   provider: aldi-nord                   # optional — those hosts also auto-detect
 #   aldi_nord:
-#     categories: []                      # optional jobCategoryIds, the same on every country site; [] = all.
+#     categories: []                      # optional jobCategoryIds, mostly shared by the country sites; [] = all.
 #                                         # 10420 Tech & IT, 19000 Data Analytics & Research, 12297 Finance &
 #                                         # Controlling, 10421 store sales (most postings), 10424 logistics
 #     locales: [de-DE]                    # optional; default: every locale of the host (www.aldi.be: nl-BE, fr-BE)
@@ -2733,6 +2733,13 @@ tracked_companies:
     notes: "Fully remote. Employer-of-record / global HR platform. Each posting names its hiring regions (EMEA, NORAM, LATAM, APAC)."
     enabled: true
 
+  - name: ALDI Nord
+    careers_url: https://www.aldi-nord.de/karriere/jobs.html
+    aldi_nord:
+      categories: ['10420', '19000']   # example: Tech & IT, Data Analytics & Research; omit for every category
+    notes: "Essen, Germany HQ. Discount grocery retailer with country sites across Europe; tech roles in Germany and Poland (www.aldi.pl needs its own entry)."
+    enabled: false
+
   - name: AMCS Group
     careers_url: https://amcsgroup.hirehive.com/
     notes: "Limerick / Dublin / Berlin. Software for the waste, recycling and utilities industry."
@@ -2834,15 +2841,6 @@ tracked_companies:
     careers_url: https://jobs.ashbyhq.com/forto
     notes: "Berlin DE. Digital freight forwarder, product & data roles, German + English."
     enabled: true
-
-  # -- DACH retail --
-
-  - name: ALDI Nord
-    careers_url: https://www.aldi-nord.de/karriere/jobs.html
-    aldi_nord:
-      categories: ['10420', '19000']   # Tech & IT, Data Analytics & Research; without this, mostly store roles
-    notes: "Essen, Germany HQ. Discount grocery retailer with country sites across Europe; tech roles in Germany and Poland (www.aldi.pl needs its own entry)."
-    enabled: false
 
   # -- DACH IT services / digital transformation consulting --
 

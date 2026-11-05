@@ -286,14 +286,23 @@ test('a failed covering page keeps page 1 and warns, without the max_pages warni
   assert.doesNotMatch(lines[0], /max_pages/);
 });
 
-test('with two incomplete locales the marker carries the first stop reason', async () => {
+test('a fetch error in one locale takes precedence over a cap in the other, in either order', async () => {
   const err = Object.assign(new Error('HTTP 503'), { status: 503 });
-  const { ctx } = makeCtx((body) => {
-    if (body.locale === 'nl-BE') return body.page === 1 ? source(35, { locale: 'nl-BE' })(body) : err;
-    return source(35, { locale: 'fr-BE' })(body);
-  });
+  for (const locales of [['nl-BE', 'fr-BE'], ['fr-BE', 'nl-BE']]) {
+    const { ctx } = makeCtx((body) => {
+      if (body.locale === 'nl-BE') return body.page === 1 ? source(35, { locale: 'nl-BE' })(body) : err;
+      return source(35, { locale: 'fr-BE' })(body);
+    });
+    const { result, lines } = await captureErrors(() => provider.fetch({ name: 'ExampleCo BE', careers_url: 'https://www.aldi.be/', max_pages: 2, aldi_nord: { locales } }, ctx));
+    assert.equal(result.aldiNordTruncated, 'fetch-error', locales.join());
+    assert.equal(lines.length, 2, locales.join());
+  }
+});
+
+test('two capped locales keep the cap reason', async () => {
+  const { ctx } = makeCtx((body) => source(35, { locale: body.locale })(body));
   const { result } = await captureErrors(() => provider.fetch({ name: 'ExampleCo BE', careers_url: 'https://www.aldi.be/', max_pages: 2 }, ctx));
-  assert.equal(result.aldiNordTruncated, 'fetch-error');
+  assert.equal(result.aldiNordTruncated, 'cap');
 });
 
 test('a covering page over the body cap points at max_response_mb', async () => {
