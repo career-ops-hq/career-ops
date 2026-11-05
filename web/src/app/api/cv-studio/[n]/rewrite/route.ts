@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJsonObject } from "@/lib/json-body";
-import { keywordsInText, loadStudio, unsupportedRewriteClaims } from "@/lib/cv-studio/server";
+import { keywordsInText, loadStudio, missingDataFolderMessage, unsupportedRewriteClaims } from "@/lib/cv-studio/server";
 import { runRewrite } from "@/lib/cv-studio/rewrite-run";
 import { buildRewritePrompt, MAX_INSTRUCTION, parseRewrite } from "@/lib/cv-studio/rewrite.mjs";
 
@@ -27,6 +27,8 @@ export async function POST(req: Request, { params }: RouteContext) {
   }
   const instruction = body.instruction.trim().slice(0, MAX_INSTRUCTION);
   if (!instruction) return NextResponse.json({ error: "Say how the bullet should change." }, { status: 400 });
+  const missing = missingDataFolderMessage();
+  if (missing) return NextResponse.json({ error: missing }, { status: 400 });
 
   const load = await loadStudio(n);
   if (!load.ok) return NextResponse.json({ error: load.reason }, { status: 404 });

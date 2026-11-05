@@ -46,6 +46,7 @@ register(`data:text/javascript,${encodeURIComponent(`
   export function resolve(specifier, context, nextResolve) {
     const stubs = ${JSON.stringify({ "@/lib/clis": cliStub, "@/lib/spawn-cli.mjs": spawnStub })};
     if (Object.hasOwn(stubs, specifier)) return { url: "data:text/javascript," + encodeURIComponent(stubs[specifier]), shortCircuit: true };
+    if (specifier === "next/server") return nextResolve("next/server.js", context);
     return nextResolve(specifier, context);
   }
 `)}`, import.meta.url);
@@ -200,7 +201,7 @@ test("pdf-index uses the external data folder and stays quiet when it is missing
   delete process.env.CAREER_OPS_PDF_INDEX;
   try {
     const indexPath = await resolvePdfIndexPath();
-    assert.equal(indexPath, path.join(dataRoot, "data", "pdf-index.tsv"));
+    assert.equal(indexPath, path.join(fs.realpathSync(dataRoot), "data", "pdf-index.tsv"));
   } finally {
     restoreCareerOpsEnv(again);
     fs.rmSync(dataRoot, { recursive: true, force: true });

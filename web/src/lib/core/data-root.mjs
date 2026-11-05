@@ -60,3 +60,8 @@ export function resolveDataRoot(coreRoot, readMarker, env, resolve, join) {
 
   return coreRoot;
 }
+
+/** One line for a data root that is not a directory. No stack, no second sentence. */
+export function dataFolderMissingMessage(root) {
+  return `Career-Ops data folder not found at ${root}. Set CAREER_OPS_ROOT or CAREER_OPS_DATA_DIR, or run node onboard-write.mjs`;
+}
