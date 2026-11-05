@@ -114,7 +114,9 @@ export function readInbox(applications: Pick<Application, "url">[] = readApplica
     throw err;
   }
   if (!jobs) return [];
-  return reconcileInbox(jobs, applications);
+  // Copy the cached list before reconcile. reconcileInbox maps to new objects,
+  // but a future change that mutates in place must not poison the slot.
+  return reconcileInbox(jobs.slice(), applications);
 }
 
 /**
@@ -142,7 +144,8 @@ export function readScanDates(): Map<string, string> {
       }
       return parsed;
     });
-    return dates ?? new Map();
+    // Copy so a caller that mutates the Map cannot poison the cache.
+    return dates ? new Map(dates) : new Map();
   } catch (err) {
     if (err && (err as NodeJS.ErrnoException).code) return new Map();
     throw err;
@@ -201,7 +204,10 @@ export function readApplications(): Application[] {
     parseApplications(md, root, codeRoot) as Application[],
     aliasFiles,
   );
-  return rows ?? [];
+  // A new array each call. The cache keeps the parsed rows; callers that push
+  // or splice cannot poison the next read, and each request gets its own list
+  // identity for React.
+  return rows ? rows.slice() : [];
 }
 
 export type TrackerShape = "missing" | "empty" | "malformed" | "rows";

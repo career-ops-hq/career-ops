@@ -280,3 +280,23 @@ test("a file deleted between the stat and the read is null, not an error", (t) =
   writeFileSync(file, "abc");
   assert.equal(cachedFileValue(file, "gone-test", (text) => text.length), 3);
 });
+
+test("a caller cannot poison the cached tracker rows by mutating the returned list", () => {
+  withRoot((root) => {
+    writeFileSync(join(root, "data", "applications.md"), [
+      "# Applications Tracker",
+      "",
+      "| # | Date | Company | Role | Score | Status | PDF | Report | Notes |",
+      "|---|---|---|---|---|---|---|---|---|",
+      "| 1 | 2026-01-01 | Lumenfold | Platform Engineer | 4.2/5 | Applied | | | synthetic |",
+    ].join("\n"));
+  }, () => {
+    const first = readApplications();
+    assert.equal(first.length, 1);
+    first.push({ ...first[0], n: "99", company: "Poisoned Co" });
+    assert.notEqual(first, readApplications());
+    assert.equal(readApplications().length, 1);
+    assert.equal(readApplications()[0].company, "Lumenfold");
+  });
+});
+
