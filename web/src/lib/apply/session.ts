@@ -7,6 +7,7 @@ import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpt
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
+import { cvUploadFile } from "./upload-name.mjs";
 import { resolveCli } from "../clis";
 import { fencingReport } from "../cli-fencing.mjs";
 import { CAPS } from "../worker-capabilities.mjs";
@@ -425,6 +426,7 @@ export async function fillSession(
   answers: Record<string, string>,
   fieldsMeta: ApplyField[],
   cvPath?: string,
+  cvUploadName?: string,
 ): Promise<{ steps: FillStep[]; navigated: boolean; issues: ApplyIssue[] }> {
   const s = SESSIONS.get(id);
   if (!s) throw new Error("apply session not found (it may have expired)");
@@ -455,11 +457,14 @@ export async function fillSession(
   //    time; setInputFiles works even when the ATS visually hides it behind a
   //    dropzone. Other file fields (cover letter, portfolio) are left to the user.
   if (cvPath) {
+    // The employer sees the uploaded file's name, so send cvUploadName when
+    // given; the file on disk keeps its own name (#6399).
+    const cvFile = cvUploadFile(cvPath, cvUploadName);
     for (const meta of fieldsMeta) {
       if (!isResumeField(meta)) continue;
       let ok = false;
       try {
-        await s.frame.locator(`[data-co-field="${cssAttr(meta.id)}"]`).first().setInputFiles(cvPath);
+        await s.frame.locator(`[data-co-field="${cssAttr(meta.id)}"]`).first().setInputFiles(cvFile);
         ok = true;
       } catch {
         // A replaced/missing resume control does not identify another upload.

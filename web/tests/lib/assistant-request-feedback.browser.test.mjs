@@ -242,7 +242,7 @@ test("request feedback is transition-only, quiet when closed and user-navigated"
   await until(async () => (await status.innerText()) === "Reply ready.");
   const beforeWorkerFinish = (await notices()).length;
   worker.end(JSON.stringify({ type: "done", tokens: 10 }) + "\n");
-  await page.getByText("10 tokens", { exact: true }).first().waitFor();
+  await page.getByText("10 tokens", { exact: true }).filter({ visible: true }).first().waitFor();
   assert.equal((await notices()).length, beforeWorkerFinish, "worker completion belongs to #5083");
   await until(() => saved?.messages.some((m) => m.parts.some((p) => p.type === "text" && p.text.trim() === "Worker launched.")));
   await page.reload(); await open.waitFor(); await tabTo(open); await page.keyboard.press("Enter");

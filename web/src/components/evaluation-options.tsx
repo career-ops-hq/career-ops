@@ -35,12 +35,12 @@ export function EvaluationOptions({ sections, onChange }: { sections: string[]; 
   const full = sections.length === FULL_EVALUATION.length;
   return (
     <fieldset className="min-w-0 rounded-xl border border-border bg-surface p-4">
-      <legend className="flex items-center gap-2 px-1 text-sm font-medium"><SlidersHorizontal className="size-4 text-brand" /> Evaluation sections</legend>
+      <legend className="flex items-center gap-2 px-1 text-sm font-medium"><SlidersHorizontal className="size-4 text-brand-text" /> Evaluation sections</legend>
       <div className="mb-3 flex flex-wrap gap-2">
-        <button type="button" aria-pressed={sections.length === 1 && sections[0] === "summary"} onClick={() => onChange([...ESSENTIAL_EVALUATION])} className="rounded-full border border-border px-3 py-1.5 text-xs aria-pressed:border-brand aria-pressed:bg-brand-soft aria-pressed:text-brand">Essentials</button>
-        <button type="button" aria-pressed={full} onClick={() => onChange([...FULL_EVALUATION])} className="rounded-full border border-border px-3 py-1.5 text-xs aria-pressed:border-brand aria-pressed:bg-brand-soft aria-pressed:text-brand">Full evaluation</button>
+        <button type="button" aria-pressed={sections.length === 1 && sections[0] === "summary"} onClick={() => onChange([...ESSENTIAL_EVALUATION])} className="rounded-full border border-border px-3 py-1.5 text-xs aria-pressed:border-brand aria-pressed:bg-brand-soft aria-pressed:text-brand-text">Essentials</button>
+        <button type="button" aria-pressed={full} onClick={() => onChange([...FULL_EVALUATION])} className="rounded-full border border-border px-3 py-1.5 text-xs aria-pressed:border-brand aria-pressed:bg-brand-soft aria-pressed:text-brand-text">Full evaluation</button>
       </div>
-      <p className="mb-3 flex items-start gap-2 text-xs text-muted"><Check className="mt-0.5 size-3.5 shrink-0 text-brand" /> Always included: fit score, key requirements and gaps, evidence confidence, and basic posting checks.</p>
+      <p className="mb-3 flex items-start gap-2 text-xs text-muted"><Check className="mt-0.5 size-3.5 shrink-0 text-brand-text" /> Always included: fit score, key requirements and gaps, evidence confidence, and basic posting checks.</p>
       <div className="grid gap-2 sm:grid-cols-2">
         {EVALUATION_OPTIONS.map((option) => (
           <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg p-2 hover:bg-surface-hover">

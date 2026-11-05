@@ -248,7 +248,7 @@ Levels are additive — they are executed in order, and results are merged and d
    - The filter applies to every source, including an employer's own ATS board; there is no per-source exemption. An old posting date is not evidence that a role is closed — evergreen roles may remain open for months. To include them, increase the window or disable `max_posting_age_days` (affects all sources), then verify the specific posting before applying. CLI date-window flags still apply independently.
 
 7. **Deduplicate** against 3 sources:
-   - `scan-history.tsv` → exact URL already seen (except rows marked `skipped_title`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa` or `skipped_country_eligibility`, which never count as seen; see Scan History)
+   - `scan-history.tsv` → exact URL already seen (except rows marked `skipped_title`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility` or `skipped_experience`, which never count as seen; see Scan History)
    - `applications.md` → normalized company + role already evaluated
    - `pipeline.md` → exact URL already in pending or processed list
 
@@ -314,7 +314,7 @@ If a non-publicly accessible URL is found:
 | 3 | `portal` | `Ashby — AI PM` | Query name from `portals.yml` |
 | 4 | `title` | `PM AI` | Job title as returned by the ATS |
 | 5 | `company` | `Acme` | Company name |
-| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility`, `skipped_date`, `skipped_invalid_url`, `skipped_blocked_host`, `cooldown:{company}:{until}` |
+| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility`, `skipped_experience`, `skipped_date`, `skipped_invalid_url`, `skipped_blocked_host`, `cooldown:{company}:{until}` |
 | 7 | `location` | `Remote — Europe` | Location string (may be empty); persisted for later auditing |
 | 8 | `fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
 | 9 | `posted_at` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
@@ -333,7 +333,7 @@ Cells are stored with reversible spreadsheet-formula escaping: tabs and line bre
 
 `skipped_no_apply_control` marks a page that loaded without a recognised Apply control. It also carries no dedup weight: the check not finding a button is not proof the posting is closed, so the next scan verifies the URL again. Unlike the other two observational statuses, which are decided from data already in hand, this re-check costs a browser load every time the URL comes up. It is recorded once per posting.
 
-`skipped_content`, `skipped_visa` and `skipped_country_eligibility` are written by `scan-dayforce.mjs` for postings its `content_filter`, visa filter and `country_eligibility_filter` removed. They name settings too, so they carry no dedup weight either: widen one of those filters and the next Dayforce scan hands the posting back. `scan.mjs` applies the same three filters but writes no row for them. `skipped_date` is `scan-interamt.mjs`'s incremental cut, a posting published before its last scan, which that scan already covered; it does count as seen.
+`skipped_content`, `skipped_visa` and `skipped_country_eligibility` are written by `scan-dayforce.mjs` for postings its `content_filter`, visa filter and `country_eligibility_filter` removed. They name settings too, so they carry no dedup weight either: widen one of those filters and the next Dayforce scan hands the posting back. `scan.mjs` applies the same three filters but writes no row for them. `skipped_experience` is written by `scan.mjs` for a new posting `experience_filter` dropped (only with `action: drop`; the default `label` keeps it) because its JD states a minimum above your band; like the other config skips it carries no dedup weight, so changing your years or `stretch_years` hands it back. `skipped_date` is `scan-interamt.mjs`'s incremental cut, a posting published before its last scan, which that scan already covered; it does count as seen.
 
 The scanner writes the other statuses in that list itself: `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` comes from the agent workflow above, which also writes `skipped_title` for the titles it filters.
 

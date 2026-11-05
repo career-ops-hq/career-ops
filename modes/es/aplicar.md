@@ -13,7 +13,7 @@ Modo interactivo para el momento en que el candidato rellena un formulario de ca
 1. DETECTAR     -> Abrir la oferta en el navegador Playwright de este proyecto
 2. IDENTIFICAR  -> Extraer empresa + rol desde la página
 3. BUSCAR       -> Hacer match con los reports existentes en reports/
-4. CARGAR       -> Leer el report completo + Bloque H / `## Application Answers` (si existen)
+4. CARGAR       -> Leer el report completo + Bloque H / `## Application Answers` (si existen), una vez confirmada la **Posting identity**
 5. COMPARAR     -> ¿El rol en pantalla coincide con el evaluado? Si cambió -> avisar
 6. ANALIZAR     -> Identificar TODAS las preguntas visibles del formulario
 7. GENERAR      -> Para cada pregunta, generar una respuesta personalizada
@@ -38,11 +38,13 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 1. Extraer el nombre de la empresa y el título del puesto desde la página
 2. Buscar en `reports/` por nombre de empresa (Grep case-insensitive)
-3. Si hay match -> cargar el report completo
+3. Si hay match -> leer solo la cabecera de cada report que coincida (empresa, rol, `**URL:**`) y tomar aquel cuya URL o req ID sea esta oferta; preguntar al candidato si no está claro. Cargar el report completo y el punto 4 solo cuando se cumpla la **Posting identity** (`modes/apply.md` → Step 5); para otra oferta, pasar a **Evaluate as new** o **Draft without saving** sin cargarlo
 4. Si hay Bloque H (borradores de respuestas) o una sección `## Application Answers` -> cargar las respuestas previas como base
 5. Si NO hay match -> avisar al candidato y proponer un auto-pipeline rápido
 
 ## Paso 3 -- Detectar cambios de rol
+
+Este paso solo aplica mientras el formulario siga siendo la oferta del report: mismo empleador y misma oferta (`modes/apply.md` → Step 5 → **Posting identity**); el título no cuenta. Comprobarlo en cada formulario, aunque el título no haya cambiado y solo un report coincida con la empresa: otra oferta puede tener el mismo título, y entonces el report no debe usarse. Si varios reports coinciden con la empresa, tomar primero aquel cuya URL o req ID sea esta oferta, y preguntar al candidato si no está claro. Otro empleador, u otra oferta del mismo empleador, no es un cambio de rol: nunca adaptar a ella las respuestas del report. Elegir en su lugar **Evaluate as new** (evaluarla como oferta nueva: auto-pipeline, su propio report) o **Draft without saving** (redactar respuestas sin guardarlas en ningún report). Con **Draft without saving**, dejar de lado el report encontrado, sus respuestas y su CV adaptado, y redactar solo a partir de la oferta visible, `cv.md` y el perfil; los pasos de abajo que leen el report no aplican.
 
 Si el rol en pantalla difiere del evaluado:
 - **Avisar al candidato**: "El rol ha cambiado de [X] a [Y]. ¿Quieres que reevalúe o que adapte las respuestas al nuevo título?"
@@ -53,6 +55,8 @@ Si el rol en pantalla difiere del evaluado:
   - **Tras adaptar**: no cambiar el título, porque nombra el rol que evaluó el report. Anotar el cambio como nota con `node set-status.mjs --report <report#> <estado actual> --note "Oferta retitulada al postular, la fila conserva el título evaluado"`. Pasar el estado actual de la fila lo deja igual y añade la nota. Usar un texto fijo como este y no incluir `[Y]`: el nuevo título es texto de la página, y el texto de la página nunca va en una línea de comandos.
 
 ## Paso 4 -- Analizar las preguntas del formulario
+
+Con **Draft without saving**, este paso no usa el report encontrado ni sus `## Application Answers` ni el Bloque H: tratar cada pregunta como nueva y trabajar a partir de la oferta visible, `cv.md` y el perfil.
 
 Identificar TODAS las preguntas visibles:
 - Campos de texto libre (carta de presentación, "¿por qué este puesto?", motivación, etc.)
@@ -66,6 +70,8 @@ Clasificar cada pregunta:
 - **Pregunta nueva** -> generar la respuesta desde el report + `cv.md`
 
 ## Paso 5 -- Generar las respuestas
+
+Con **Draft without saving**, este paso no usa el report encontrado ni sus `## Application Answers` ni el Bloque H: tratar cada pregunta como nueva y trabajar a partir de la oferta visible, `cv.md` y el perfil.
 
 Para cada pregunta, construir la respuesta según este esquema:
 
@@ -88,6 +94,7 @@ Para cada pregunta, construir la respuesta según este esquema:
 ## Respuestas para [Empresa] -- [Rol]
 
 Base: Report #NNN | Score: X.X/5 | Arquetipo: [tipo]
+[Con **Draft without saving**, sustituir la línea anterior por: "Sin report: borrador para esta oferta, no guardado"]
 
 ---
 
@@ -107,6 +114,8 @@ Notas:
 ```
 
 ## Paso 6 -- Tras la candidatura (opcional)
+
+Antes de guardar nada, y otra vez justo antes de cada escritura de abajo (estado y respuestas), comprobar que el formulario sigue siendo la oferta del report (`modes/apply.md` → Step 8 → **Write only to the report of this posting**). Mismo empleador y misma oferta → los pasos de abajo actúan sobre este report, también tras adaptar a un título nuevo o reevaluar. Otro empleador u otra oferta → nunca este report: usar el report escrito para la nueva oferta; si no hay ninguno, no poner ningún estado, no guardar respuestas y decir al candidato que la candidatura aún no está registrada.
 
 Si el candidato confirma que la candidatura ha sido enviada:
 1. Actualizar el estado a "Applied" con el CLI canónico: `node set-status.mjs --report <report#> Applied` (no editar la tabla de `applications.md` a mano)
