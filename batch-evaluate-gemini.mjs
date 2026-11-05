@@ -181,11 +181,12 @@ export function parseBatchArgs(args) {
   const count = (flag, fallback) => {
     const raw = flagValue(args, flag);
     if (raw === undefined) return fallback;
-    if (!/^\d+$/.test(raw) || Number(raw) < 1) {
+    const value = Number(raw);
+    if (!/^\d+$/.test(raw) || !Number.isFinite(value) || value < 1) {
       console.error(`Error: ${flag} needs a whole number above 0, got "${raw}"`);
       process.exit(1);
     }
-    return Number(raw);
+    return value;
   };
   return {
     limit: count('--limit', 0),

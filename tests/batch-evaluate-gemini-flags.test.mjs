@@ -66,6 +66,13 @@ for (const args of [['--limt', '1'], ['--limit=1', '--limit', 'all'], ['--limit'
   });
 }
 
+test('a concurrency digit string that Number turns into Infinity is a usage error, not a full run', () => {
+  const r = run(['--concurrency', '9'.repeat(400)]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /needs a whole number above 0/);
+  assert.doesNotMatch(r.stdout + r.stderr, /GEMINI_API_KEY|pending offers/);
+});
+
 test('--mode and --single-pass pass the flag check and pick the evaluation mode', () => {
   for (const args of [['--mode', 'match', '--limit', '1'], ['--mode=full', '--limit=1'], ['--single-pass', '--limit', '1']]) {
     assert.equal(parseBatchArgs(args).limit, 1, args.join(' '));
