@@ -124,7 +124,31 @@ export default {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`lever: cannot derive API URL for ${entry.name}`);
     assertLeverUrl(apiUrl);
-    const json = await ctx.fetchJson(apiUrl, { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS });
+    let json;
+    try {
+      json = await ctx.fetchJson(apiUrl, { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS });
+    } catch (err) {
+      // A very large board (Shield AI: 10.7 MB with full descriptions) exceeds the
+      // body cap in one response. The v0 API pages with limit/skip, so read it in
+      // slices instead of giving the board up.
+      if (/** @type {any} */ (err)?.code !== 'response_too_large') throw err;
+      json = [];
+      const PAGE = 100;
+      // Bounded: at most 30 pages (3,000 postings), each capped at 4 MiB, so the
+      // fallback cannot buffer more than ~120 MiB however the server behaves.
+      const maxPages = Math.min(30, ctx.maxPages ?? 30);
+      for (let skip = 0; skip < maxPages * PAGE; skip += PAGE) {
+        const pageUrl = new URL(apiUrl);
+        pageUrl.searchParams.set('limit', String(PAGE));
+        pageUrl.searchParams.set('skip', String(skip));
+        const page = await ctx.fetchJson(assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: 4 * 1024 * 1024 });
+        if (!Array.isArray(page) || page.length === 0) break;
+        // A server that ignores `limit` must not amplify the total: refuse the page.
+        if (page.length > PAGE) throw new Error(`lever: ${entry.name} returned ${page.length} postings for limit=${PAGE}`);
+        for (const posting of page) json.push(posting);
+        if (page.length < PAGE) break;
+      }
+    }
     if (!Array.isArray(json)) return [];
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v0\/postings\/([^/]+)\/?$/)?.[1] || '';
     return json.map(j => ({
