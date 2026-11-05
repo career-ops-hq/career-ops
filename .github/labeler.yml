@@ -25,6 +25,10 @@
           - claude-directory/skills/**
           # The thin plugin for the OpenAI plugin directory carries one too.
           - openai-directory/skills/**
+          # And the thin plugin for the Cursor Marketplace.
+          - cursor-directory/skills/**
+          # And the thin plugin for the Antigravity Marketplace.
+          - antigravity-directory/skills/**
 
 "🔧 scripts":
   - changed-files:
