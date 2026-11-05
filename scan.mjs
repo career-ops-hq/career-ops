@@ -78,7 +78,7 @@ import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { canonicalJobKey, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
@@ -2056,8 +2056,12 @@ function extractPipelineCompanyRole(line) {
  * URL), so the hook only fires there. Return a string, an array of strings,
  * or a falsy value for "nothing extra".
  */
+function scanHistoryRows(text, rows) {
+  return rows ?? parsedScanHistory(text);
+}
+
 export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
-  const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
+  const { scanHistoryText = '', pipelineText = '', applicationsText = '', historyRows = null } = sources;
   const seen = new Set();
   // Which language versions each seen URL key stands for — read by
   // isUnseenLanguageVersion under scan_history.dedup_include_language.
@@ -2076,8 +2080,9 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
 
   // scan-history.tsv
   // Line 0 only when it is the header; a headerless legacy file starts with a data row.
-  for (const line of scanHistoryDataLines(scanHistoryText)) {
-    const { url, first_seen: firstSeen, portal, status: rawStatus, title, language, listing_key: listingKey } = parseScanHistoryLine(line);
+  // `historyRows` is that parse already done, so a snapshot does not repeat it.
+  for (const row of scanHistoryRows(scanHistoryText, historyRows)) {
+    const { url, first_seen: firstSeen, portal, status: rawStatus, title, language, listing_key: listingKey } = row;
     const status = rawStatus || 'added';
     if (!url) continue;
     // Not pinned, no listing identity, and not a recheck candidate either: the
@@ -2856,9 +2861,9 @@ function recordLanguages(languagesByKey, key, requisitions, languages) {
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
 export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null } = {}) {
-  const { applicationsText = '', scanHistoryText = '', pipelineText = '' } = sources;
+  const { applicationsText = '', scanHistoryText = '', pipelineText = '', historyRows = null } = sources;
   const seen = new Set();
-  const postingAttributes = collectPostingAttributes(scanHistoryText);
+  const postingAttributes = collectPostingAttributes(scanHistoryText, historyRows);
   const attributesFor = (url) => (typeof url === 'string' && url
     ? postingAttributes.get(normalizeUrlForDedup(url.trim())) ?? {}
     : {});
@@ -2920,8 +2925,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   // and (trailing) requisition_id + language. This is the source that carries a
   // location for every scanned posting, and so the one that makes the opt-in key
   // discriminate between two cities of one role.
-  for (const line of scanHistoryDataLines(scanHistoryText)) {
-    const row = parseScanHistoryLine(line);
+  for (const row of scanHistoryRows(scanHistoryText, historyRows)) {
     const status = row.status || 'added';
     if (!row.url) continue;
     if (status !== 'added') continue;
@@ -2959,12 +2963,13 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
  * earlier one and an empty cell keeping it.
  *
  * @param {string} scanHistoryText - Full scan-history.tsv contents.
+ * @param {Array<Record<string, string>>|null} [historyRows] - Rows from
+ *   {@link parsedScanHistory} when the caller already parsed the file.
  * @returns {Map<string, {requisitionId?: string, language?: string}>}
  */
-export function collectPostingAttributes(scanHistoryText) {
+export function collectPostingAttributes(scanHistoryText, historyRows = null) {
   const attributes = new Map();
-  for (const line of scanHistoryDataLines(scanHistoryText)) {
-    const row = parseScanHistoryLine(line);
+  for (const row of scanHistoryRows(scanHistoryText, historyRows)) {
     const requisitionId = row.requisition_id.trim();
     const language = row.language.trim();
     if (!row.url || (!requisitionId && !language)) continue;
@@ -3287,15 +3292,14 @@ export function migrateOfferToUrl(offer, url) {
  * text ('' for an absent file), like its `collect*` siblings.
  *
  * @param {string} [scanHistoryText] - Full scan-history.tsv contents.
+ * @param {Array<Record<string, string>>|null} [historyRows] - Rows from
+ *   {@link parsedScanHistory} when the caller already parsed the file.
  * @returns {Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}
  */
-export function collectFingerprintHistory(scanHistoryText = '') {
+export function collectFingerprintHistory(scanHistoryText = '', historyRows = null) {
   const rows = [];
-  for (const line of scanHistoryText.split('\n')) {
-    const row = parseScanHistoryLine(line);
-    // Skip the header row: a header that names the fingerprint column carries
-    // the non-empty word `fingerprint` there and would otherwise be read as
-    // data. Real rows always carry a URL, never the literal `url`.
+  for (const row of scanHistoryRows(scanHistoryText, historyRows)) {
+    // The header's url cell is the word "url". A real row never is.
     if (row.url === 'url') continue;
     if (!row.fingerprint.trim()) continue;
     rows.push({
@@ -3348,8 +3352,11 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   const scanHistoryText = readIfExists(scanHistoryPath);
   const pipelineText = readIfExists(pipelinePath);
   const applicationsText = readIfExists(applicationsPath);
+  // One parse. The four readers below walk these rows instead of splitting
+  // the file again (seen URLs, posting attributes, company roles, fingerprints).
+  const historyRows = parsedScanHistory(scanHistoryText);
   const { seen, recheckEligible, identityPromotableUrls, variants: seenUrlVariants } = collectSeenUrls(
-    { scanHistoryText, pipelineText, applicationsText },
+    { scanHistoryText, pipelineText, applicationsText, historyRows },
     policy,
     { extraTokensFor: (_url, _portal, listingKey) => listingKey ? `listing:${listingKey}` : null },
   );
@@ -3362,7 +3369,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   const locatedRequisitionsByBase = new Map();
   const seenCompanyRoleLanguages = new Map();
   const locatedLanguagesByBase = new Map();
-  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, {
+  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText, historyRows }, policy, canonicalize, {
     includeLocation,
     locatedBases: seenCompanyRoleBases,
     requisitionsByBase: seenCompanyRoleRequisitions,
@@ -3370,7 +3377,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
     languagesByBase: seenCompanyRoleLanguages,
     locatedLanguagesByBase,
   });
-  const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
+  const fingerprintHistory = collectFingerprintHistory(scanHistoryText, historyRows);
   return { seen, identityPromotableUrls, recheckEligible, seenUrlVariants, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
 }
 
