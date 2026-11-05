@@ -15,6 +15,11 @@ location_filter:
     remote_regions: [Europe, European Union, EU, EMEA, Worldwide, Anywhere, Global]
 ```
 
+Europe, the EU and the EEA are different scopes. Add EU/EEA region labels only
+when they cover your allowed remote country; these labels do not establish work
+authorization. See the [EU Council's EEA overview](https://www.consilium.europa.eu/en/policies/eu-eea-relations/)
+and [EFTA's membership FAQ](https://www.efta.int/about-efta/faqs).
+
 The policy is an additional gate before the normal location tiers. It never
 rescues a posting the existing `block_hard`, `block` or `allow` rules reject.
 Without `workplace_policy`, location matching is unchanged.
@@ -34,8 +39,13 @@ as its default; a supplied nonempty country list must name a recognized country.
   prose uses country names, aliases or an ISO token after explicit geography
   such as `must be based in PT` or `work remotely from PT`. Ordinary words such
   as `us` or `by` cannot establish remote-country eligibility.
+- Timezone abbreviations in hours/overlap wording do not count as countries.
+  A region qualified by "where we have a hiring presence" needs separate
+  evidence that the allowed remote country is eligible.
 
 Normal scans, full ATS scans and shared admission gates use the same check.
+Dayforce rechecks the policy against its detail description without repeating
+legacy location matching on a changed detail location.
 Discover retains the saved policy in its temporary filters and carries provider
 geography evidence through its results. Add to Inbox checks the current policy
 again before either canonical writer runs. A mixed incompatible selection adds

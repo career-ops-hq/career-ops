@@ -118,3 +118,59 @@ for (const [code, name, ordinary, mandatory] of [
     assert.equal(policy('Remote', '', { eligibleCountries: [code] }).eligible, true);
   });
 }
+
+test('timezone abbreviations in locations do not become country evidence', () => {
+  for (const zone of ['ET', 'PT', 'MT', 'CT', 'EST', 'PST', 'CST', 'MST', 'EDT', 'PDT']) {
+    for (const suffix of [`(${zone} overlap)`, `(overlap until 5pm ${zone})`, `(${zone} hours)`]) {
+      assert.equal(gate(`Remote - Europe ${suffix}`).eligible, true, suffix);
+    }
+  }
+  const portugal = buildWorkplacePolicy({ onsite_locations: ['Lisbon'], remote_countries: ['Portugal'], remote_regions: ['Europe'] });
+  assert.equal(portugal('Remote - US (PT hours)').eligible, false);
+  assert.equal(portugal('Remote - PT').eligible, true, 'a country token without a timezone context stays geographic');
+  assert.equal(portugal('Remote (PT hours)').eligible, false);
+  assert.equal(portugal('Remote (PT hours)', '', { eligibleCountries: ['PT'] }).eligible, true);
+});
+
+test('timezone wording in prose cannot supply the missing remote country', () => {
+  const us = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: ['US'] });
+  for (const description of ['Work remotely and work in US time zones.', 'Work remotely from US working hours.']) {
+    assert.equal(us('Remote', '', { description }).eligible, false, description);
+  }
+  assert.equal(us('Remote', '', { description: 'You can work remotely from US.' }).eligible, true);
+});
+
+for (const [code, name] of [['IN', 'India'], ['IT', 'Italy'], ['BE', 'Belgium']]) {
+  test(`explicit mandatory ${code} is disambiguated by worker geography`, () => {
+    const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [code] });
+    assert.equal(policy(`Remote ${name}`, '', { description: `Candidates must be based in ${code}.` }).eligible, true);
+    assert.equal(policy('Remote', '', { eligibleCountries: [code], description: `Candidates must be based in ${code}, ${code} only.` }).eligible, true);
+    assert.equal(policy('Remote', '', { description: 'We work in IT systems and build software.' }).eligible, false);
+    assert.equal(policy('Remote', '', { description: 'We work remotely and work in IT and build applications.' }).eligible, false);
+  });
+}
+
+test('mandatory worker geography is not rescued by an unrelated home-country mention', () => {
+  const us = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: ['US'], remote_regions: ['Worldwide'] });
+  for (const description of [
+    'Candidates must be based in AU and collaborate with colleagues who work remotely from US.',
+    'Candidates must be based in Australia and work with our United States office.',
+    'Candidates must be located in London, where we also serve United States customers.',
+  ]) assert.equal(us('Remote Worldwide', '', { description }).eligible, false, description);
+  assert.equal(us('Remote Worldwide', '', { description: 'Candidates must be based in Australia or United States.' }).eligible, true);
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in Europe.' }).eligible, true);
+  for (const target of ['any Europe country', 'any EMEA country', 'a country in Europe', 'an eligible country within Europe']) {
+    assert.equal(gate('Remote Europe', '', { description: `Candidates must be based in ${target}.` }).eligible, true, target);
+  }
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in any country in Australia.' }).eligible, false);
+});
+
+test('conditional hiring-presence regions need independent home-country eligibility', () => {
+  const description = 'This position can be remote in any EMEA country where we have a hiring presence.';
+  assert.equal(gate('Remote EMEA', '', { description }).eligible, false);
+  assert.equal(gate('Remote EMEA', '', { description: description + ' We have an office in Spain.' }).eligible, false);
+  assert.equal(gate('Remote EMEA', '', { description, eligibleCountries: ['ES'] }).eligible, true);
+  assert.equal(gate('Remote Spain', '', { description }).eligible, true);
+  assert.equal(gate('Remote EMEA', '', { description: description + ' You can work remotely from Spain.' }).eligible, true);
+  assert.equal(buildWorkplacePolicy(undefined)('Remote EMEA', '', { description }).eligible, true);
+});

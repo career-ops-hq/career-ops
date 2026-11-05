@@ -10,6 +10,7 @@ import { buildLocationFilter } from '../scan.mjs';
 import { passesFilters } from '../scan-ats-full.mjs';
 import { createAdmissionGate } from '../lib/admission-gate.mjs';
 import { validatePortalsConfig } from '../validate-portals.mjs';
+import { scanBoard } from '../scan-dayforce.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const POLICY = { onsite_locations: ['Barcelona'], remote_countries: ['Spain'], remote_regions: ['Europe', 'European Union', 'EU', 'EMEA', 'Worldwide', 'Anywhere'] };
 const CONFIG = { title_filter: { positive: ['Sales Engineer'] }, location_filter: { allow: ['Barcelona', 'Remote', 'Europe', 'Spain'], always_allow: ['Barcelona'], workplace_policy: POLICY }, tracked_companies: [{ name: 'Policy Fixture', careers_url: 'https://boards.example.com/workplace', parser: { command: 'node', script: 'tests/fixtures/workplace-policy-board.mjs' } }] };
@@ -37,6 +38,40 @@ test('all shared admission paths reject a remote Australia and narrower JD eligi
   assert.equal(passesFilters(job, { titleFilter: () => true, locationFilter: filter }), false);
   assert.equal(createAdmissionGate({ config: CONFIG, seen: new Set(), blacklist: new Map() }).check(job), 'location');
   assert.equal(filter('Barcelona', '', 'Sales Engineer'), true);
+});
+
+test('policy-only detail checks keep legacy location matching unchanged', () => {
+  const legacy = buildLocationFilter({ allow: ['Barcelona'] });
+  assert.equal(legacy.workplacePolicyOnly('Madrid', '', '', {}), true);
+  assert.equal(legacy('Madrid'), false);
+  const policy = buildLocationFilter(CONFIG.location_filter);
+  assert.equal(policy.workplacePolicyOnly('Remote Europe', '', '', { description: 'Candidates must be based in UK.' }), false);
+});
+
+test('Dayforce rechecks only workplace policy against the actual detail JD', async () => {
+  const response = json => ({ ok: () => true, status: () => 200, json: async () => json });
+  for (const { config, callback, listLocation, detailLocation, description, expected } of [
+    { config: CONFIG.location_filter, listLocation: 'Remote Europe', detailLocation: 'Remote Europe', description: 'Candidates must be based in UK.', expected: 0 },
+    { config: CONFIG.location_filter, listLocation: 'Remote Europe', detailLocation: 'Remote Spain', description: 'Candidates must be based in Spain.', expected: 1 },
+    { config: { allow: ['Barcelona'] }, listLocation: 'Barcelona', detailLocation: 'Madrid', description: 'Office role in Madrid.', expected: 1 },
+    { callback: location => location === 'Barcelona', listLocation: 'Barcelona', detailLocation: 'Madrid', description: 'Generic legacy location callback.', expected: 1 },
+  ]) {
+    const page = {
+      goto: async () => {}, url: () => 'https://jobs.dayforcehcm.com/en-US/fixture/CANDIDATEPORTAL',
+      title: async () => 'Careers', locator: () => ({ count: async () => 0 }),
+      request: {
+        post: async () => response({ jobPostings: [{ jobPostingId: 1, jobTitle: 'Engineer', jobDescription: 'List summary', postingLocations: [{ formattedAddress: listLocation }] }], offset: 0, count: 1, maxCount: 1 }),
+        get: async url => String(url).endsWith('/api/auth/csrf') ? response({ csrfToken: 'fictional' })
+          : response({ jobTitle: 'Engineer', jobPostingContent: { jobDescription: description }, postingLocations: [{ formattedAddress: detailLocation }] }),
+      },
+    };
+    const calls = [];
+    const locationFilter = callback ? location => { calls.push(location); return callback(location); } : buildLocationFilter(config);
+    const result = await scanBoard(page, { name: 'Fictional Company', tenant: 'fixture', board: 'CANDIDATEPORTAL', culture: 'en-US', jobBoardId: '1' }, { locationFilter });
+    assert.equal(result.found.length, expected, description);
+    assert.equal(result.locationSkipped.length, 1 - expected, description);
+    if (callback) assert.deepEqual(calls, [listLocation], 'a generic legacy callback is not repeated on detail data');
+  }
 });
 test('a real offline scanner run writes only policy-compatible jobs to Inbox and records rejects', () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'workplace-policy-'));

@@ -661,7 +661,7 @@ export function buildLocationFilter(locationFilter) {
   const strict = locationFilter.strict === true
     && (allow.length > 0 || block.length > 0 || blockHard.length > 0);
 
-  return (location, url, title, offer) => {
+  const filter = (location, url, title, offer) => {
     if (!workplacePolicy(location, title, offer).eligible) return false;
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
@@ -698,6 +698,11 @@ export function buildLocationFilter(locationFilter) {
     // stays rejected. This widens `allow`, never `block`.
     return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
+  // Detail readers may recheck this opt-in policy without repeating legacy
+  // location tiers. Arbitrary caller-provided filters have no such capability.
+  return Object.assign(filter, {
+    workplacePolicyOnly: (location, url, title, offer) => workplacePolicy(location, title, offer).eligible,
+  });
 }
 
 // ── Posting-age filter ──────────────────────────────────────────────
