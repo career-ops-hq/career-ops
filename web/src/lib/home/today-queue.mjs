@@ -1,6 +1,3 @@
-// Order of the Today queue. Due follow-ups lead. Upcoming follow-ups,
-// which are not due, stay behind decisions and new matches.
-
 function rank(item) {
   if (item?.kind === "follow-up" && item.due) return 0;
   if (item?.kind === "decision") return 1;

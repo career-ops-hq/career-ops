@@ -4,7 +4,6 @@
 
 import { CHINA_PRESET } from "./employer-preset.mjs";
 
-/** Where the empty Pipeline inbox sends someone who wants roles. */
 export function pipelineFindRolesHref() {
   return "/explore";
 }

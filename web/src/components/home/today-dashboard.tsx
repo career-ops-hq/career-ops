@@ -166,8 +166,6 @@ export function TodayDashboard({
   // the outage. See displayCounts().
   const shown = displayCounts({ followupsError, freshError, overdue, newThisWeek });
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
-  // Due rows lead even if a refresh hands back a mixed list. Upcoming stays
-  // in its own section, below the work that is due now.
   const dueFollowups = useMemo(
     () => selectDueFollowups(followups, Math.max(followups.length, 1)),
     [followups],

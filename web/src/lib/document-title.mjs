@@ -1,6 +1,3 @@
-// Titles on the Documents page. The filename stays available as the
-// secondary line. The title names the document the way a person would.
-
 import { reportNumberFromCell } from "./apply/cv-selection.mjs";
 
 function clean(value) {
