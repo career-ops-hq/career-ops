@@ -119,7 +119,7 @@
 # -- SEEK NZ keyword searches (optional) --
 # Read by scan-seek.mjs (`npm run scan:seek`), which covers NZ-domestic
 # employers and recruiters with no public ATS board. One request per entry
-# over the robots-allowed SEO path (`nz.seek.com/<keyword>-jobs[/<location>]`,
+# over the robots-allowed SEO path (`nz.seek.com/<keyword>-jobs[/in-All-<Location>]`,
 # no query string by default). title_filter, location_filter and
 # data/blacklist.md below apply. See docs/SUPPORTED_JOB_BOARDS.md for the
 # robots.txt notes on SEEK.

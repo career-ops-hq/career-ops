@@ -3,8 +3,8 @@
 /**
  * scan-seek.mjs — SEEK NZ keyword scanner over the SEO path form.
  *
- * Fetches https://nz.seek.com/<keyword>-jobs[/<location>] and reads the job
- * records out of the page's inlined `window.SEEK_REDUX_DATA` (id, title,
+ * Fetches https://nz.seek.com/<keyword>-jobs[/in-All-<Location>] and reads the
+ * job records out of the page's inlined `window.SEEK_REDUX_DATA` (id, title,
  * advertiser, location, salary label, listing date, teaser, work types).
  *
  * WHY THIS SHAPE. nz.seek.com/robots.txt disallows, for every agent,
@@ -60,8 +60,8 @@ Reads seek_searches from portals.yml:
     - keyword: "data analyst"
       location: "Wellington"          # optional; omit for all of NZ
 
-Fetches only the SEO path (nz.seek.com/<keyword>-jobs/<location>) and reads the
-inlined search results. No pagination; add narrower searches for depth.
+Fetches only the SEO path (nz.seek.com/<keyword>-jobs[/in-All-<Location>]) and
+reads the inlined search results. No pagination; add narrower searches for depth.
 
 Flags:
   --daterange N     append ?daterange=N so page 1 holds the last N days of ads.
@@ -81,11 +81,30 @@ export function loadSearches(portals) {
     .map((s) => ({ keyword: s.keyword.trim(), location: (s.location || '').trim() }));
 }
 
+/**
+ * Resolve a configured location ("Wellington" or "in-All-Wellington") to
+ * SEEK's canonical `in-All-<Location>` path segment, preserving required casing.
+ */
+export function formatSeekLocation(location) {
+  const raw = String(location ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+  if (!raw) return '';
+  if (/^in-[A-Za-z0-9-]+$/.test(raw)) {
+    return raw.replace(/^in-(all-)?/i, (_, all) => (all ? 'in-All-' : 'in-'));
+  }
+  const tokens = raw.match(/[A-Za-z0-9]+/g);
+  if (!tokens) return '';
+  const titled = tokens.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join('-');
+  return `in-All-${titled}`;
+}
+
 /** SEO path URL for one search. `daterange` (days) is the opt-in query string. */
 export function buildSeekUrl({ keyword, location }, daterange = null) {
   const kw = slugify(keyword);
   if (!kw) throw new Error(`Empty keyword: ${JSON.stringify(keyword)}`);
-  const loc = slugify(location);
+  const loc = formatSeekLocation(location);
   const url = `${BASE}/${kw}-jobs${loc ? `/${loc}` : ''}`;
   return daterange ? `${url}?daterange=${Number(daterange)}` : url;
 }

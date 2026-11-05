@@ -176,9 +176,11 @@ test('writeRunLog appends a scan-runs.tsv row stats.mjs can read by header name'
 
 // ── scan-seek ────────────────────────────────────────────────────────
 
-test('seek URL is the SEO path with no query string by default', () => {
+test('seek URL is the SEO path with canonical in-All-<Location> segment and no query string by default', () => {
   assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'Wellington' }),
-    'https://nz.seek.com/data-analyst-jobs/wellington');
+    'https://nz.seek.com/data-analyst-jobs/in-All-Wellington');
+  assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'in-All-Auckland' }),
+    'https://nz.seek.com/data-analyst-jobs/in-All-Auckland');
   assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: '' }), 'https://nz.seek.com/devops-jobs');
   assert.ok(!buildSeekUrl({ keyword: 'a', location: 'b' }).includes('?'));
 });
