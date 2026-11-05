@@ -231,6 +231,40 @@ export async function auditCompanies(companies, {
       if (providers && providers.size > 0) {
         resolved = resolveProvider(entry, providers, { skipIds: ['local-parser'] });
       }
+      const careersUrl = typeof entry.careers_url === 'string' ? entry.careers_url : '';
+      // An explicit provider id that does not exist used to fall through the
+      // null-provider check, so a typo and a URL nothing claims printed the
+      // same "unnamed skip" line. The error is already on the resolve result.
+      if (resolved?.error) {
+        const providerLabel = typeof entry.provider === 'string' ? entry.provider : 'unknown';
+        const { verdict, count, detail } = classifyBoard({
+          provider: providerLabel,
+          error: resolved.error,
+          scanMethod: entry.scan_method || null,
+        }, { smallThreshold });
+        rows.push({
+          name, provider: providerLabel, careers_url: careersUrl, verdict, count, detail, samples: [],
+        });
+        continue;
+      }
+      // local-parser is claimed by scan.mjs. This audit still must not run the
+      // command. Reporting it as no-provider said scan would drop a board scan
+      // actually reads.
+      if ((!resolved || !resolved.provider) && providers && providers.size > 0) {
+        const full = resolveProvider(entry, providers);
+        if (full?.provider?.id === 'local-parser') {
+          rows.push({
+            name,
+            provider: 'local-parser',
+            careers_url: careersUrl,
+            verdict: 'ok',
+            count: null,
+            detail: 'local parser; this audit does not run it. scan.mjs will.',
+            samples: [],
+          });
+          continue;
+        }
+      }
       const providerId = resolved?.provider?.id || null;
 
       let result = { provider: providerId, scanMethod: entry.scan_method || null };
@@ -247,7 +281,7 @@ export async function auditCompanies(companies, {
       rows.push({
         name,
         provider: providerId || '—',
-        careers_url: typeof entry.careers_url === 'string' ? entry.careers_url : '',
+        careers_url: careersUrl,
         verdict,
         count,
         detail,
