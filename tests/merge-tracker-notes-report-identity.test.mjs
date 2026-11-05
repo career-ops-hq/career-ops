@@ -285,3 +285,55 @@ test('a Notes metadata alias grants no positive identity across distinct primary
   f.add({ num: '102', url: SECOND, official: FIRST, score: '4.0/5' });
   assert.equal(await f.merge(), 0); assert.equal(f.rows().length, 2);
 });
+
+
+for (const reportColumn of [false, true]) {
+  for (const sharedTarget of [true, false]) {
+    test(`${sharedTarget ? 'shared' : 'distinct'} report targets retain declared identity across different company names with ${reportColumn ? 'Report' : 'Notes'} metadata`, async t => {
+      const root = mkdtempSync(join(tmpdir(), 'tracker-lazy-shared-target-'));
+      t.after(() => rmSync(root, { recursive: true, force: true }));
+      for (const dir of ['data', 'reports', 'batch/tracker-additions']) mkdirSync(join(root, dir), { recursive: true });
+      const tracker = join(root, 'data/applications.md');
+      const columns = ['#', 'Date', 'Company', 'Role', 'Score', 'Status', 'PDF', ...(reportColumn ? ['Report'] : []), 'Notes', 'URL'];
+      const oldFile = '101-original-brand-2026-01-01.md';
+      const incomingNum = sharedTarget ? '101' : '102';
+      const incomingFile = `${incomingNum}-different-brand-2026-01-01.md`;
+      const oldLink = `[101](../reports/${oldFile})`;
+      const publisher = 'https://himalayas.app/companies/exampleco/jobs/product-lead-123456';
+      const oldRow = `| ${['101', '2026-01-01', 'Original Brand', 'Product Lead', '3.7/5', 'Evaluated', '❌', ...(reportColumn ? [oldLink] : []), reportColumn ? 'original' : `Report: ${oldLink}.`, publisher].join(' | ')} |`;
+      const before = `| ${columns.join(' | ')} |\n|${columns.map(() => '---').join('|')}|\n${oldRow}\n`;
+      writeFileSync(tracker, before);
+      const oldReport = report(publisher, FIRST);
+      // The incoming report has no official-posting declaration. Its raw ATS
+      // URL conflicts with the existing report's declared identity, regardless
+      // of the two different company labels or distinct report filenames.
+      const incomingReport = report(SECOND, '');
+      writeFileSync(join(root, 'reports', oldFile), oldReport);
+      writeFileSync(join(root, 'reports', incomingFile), incomingReport);
+      const pending = join(root, 'batch/tracker-additions/incoming.tsv');
+      const contribution = trackerTsvLine({ num: incomingNum, today: '2026-01-01', company: 'Different Brand', role: 'Product Lead', score: '3.7/5', reportFile: incomingFile, notes: 'fictional contribution', url: SECOND });
+      writeFileSync(pending, contribution);
+      writeFileSync(join(root, 'data/pdf-index.tsv'), '');
+      writeFileSync(join(root, 'batch/batch-state.tsv'), '');
+      const code = await mergeTracker({ appsFile: tracker, dataRoot: root, batchStateFile: join(root, 'batch/batch-state.tsv'), pdfIndexFile: join(root, 'data/pdf-index.tsv'), logger: { log() {}, warn() {}, error() {} } });
+      assert.equal(code, sharedTarget ? 1 : 0);
+      const after = readFileSync(tracker, 'utf8');
+      const rows = after.split('\n').filter(line => /^\|\s*\d+\s*\|/.test(line));
+      const targets = rows.flatMap(row => {
+        const cells = row.split('|').slice(1, -1).map(cell => cell.trim());
+        return extractTrackerReportLinks(reportColumn ? cells[columns.indexOf('Report')] : '', cells[columns.indexOf('Notes')]).map(link => link.target);
+      });
+      assert.deepEqual(targets, sharedTarget ? [101] : [101, 102], 'the native parser finds exactly one owner per report target');
+      assert.equal(readFileSync(join(root, 'reports', oldFile), 'utf8'), oldReport);
+      assert.equal(readFileSync(join(root, 'reports', incomingFile), 'utf8'), incomingReport);
+      if (sharedTarget) {
+        assert.equal(after, before, 'the conflicting contribution changes no tracker row');
+        assert.equal(readFileSync(pending, 'utf8'), contribution, 'the exact native TSV remains pending');
+      } else {
+        assert.equal(rows.length, 2);
+        assert.ok(rows.includes(oldRow), 'a distinct report target preserves the original row');
+        assert.equal(readFileSync(join(root, 'batch/tracker-additions/merged/incoming.tsv'), 'utf8'), contribution, 'a distinct target consumes the unchanged contribution');
+      }
+    });
+  }
+}

@@ -1914,11 +1914,13 @@ export async function mergeTracker(options = {}) {
         missingReports++;
       }
 
+      const incomingReportTargets = new Set(extractTrackerReportLinks(addition.report, addition.notes).map(link => link.target));
       // The optional metadata guard alone needs the API URL parser. Load its
       // provider graph only for a relevant declaration, not on every merge.
       if (declaredEmployerUrl(addition) || existingApps.some(app =>
         (companiesMatch(app.company, addition.company)
-          || companiesMatchIgnoringCorporateForm(app.company, addition.company)) && declaredEmployerUrl(app))) {
+          || companiesMatchIgnoringCorporateForm(app.company, addition.company)
+          || extractTrackerReportLinks(app.report, app.notes).some(link => incomingReportTargets.has(link.target))) && declaredEmployerUrl(app))) {
         if (!resolvePostingApi) {
           resolvePostingApi = (await import('./liveness-api.mjs')).resolveAtsApi;
           workdayPostingKey = (await import('./providers/workday.mjs')).workdayDedupKey;
@@ -1929,7 +1931,6 @@ export async function mergeTracker(options = {}) {
       // employer requisitions, even through the same file, appending a row
       // would preserve the wrong shared key. Keep the artifacts and the TSV
       // pending instead; never rename a report or overwrite the prior row.
-      const incomingReportTargets = new Set(extractTrackerReportLinks(addition.report, addition.notes).map(link => link.target));
       const conflictingReportTarget = [...incomingReportTargets].find(target => existingApps.some(app =>
         extractTrackerReportLinks(app.report, app.notes).some(link => link.target === target)
         && declaredEmployerConflict(app, addition)));
