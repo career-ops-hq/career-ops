@@ -36,6 +36,8 @@ process.on('exit', () => { if (requests === 0) writeSync(2, 'no board request wa
 ${preloadBody}`);
     const env = { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: dir };
     delete env.CAREER_OPS_PORTALS;
+    // With trusted proxy egress, the request would go through undici, past the stub.
+    delete env.CAREER_OPS_TRUST_PROXY_EGRESS;
     return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, join(ROOT, 'audit-portals.mjs'),
       '--file', portals, ...argsFor(dir)], { cwd: ROOT, encoding: 'utf8', timeout: 20000, env });
   } finally { rmSync(dir, { recursive: true, force: true }); }
