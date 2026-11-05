@@ -34,6 +34,10 @@ import { scanBoard } from '../scan-dayforce.mjs';
 import { buildTitleFilter, buildLocationFilter } from '../scan.mjs';
 import { validatePortalsConfig } from '../validate-portals.mjs';
 
+// The child scanners get none of the caller's CAREER_OPS_* settings: each one
+// points at the developer's own data.
+const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('CAREER_OPS_')));
+
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 const okAsync = async (name, fn) => { try { await fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 const traits = (positive, negative = [], minMatch = 1) => ({
@@ -274,7 +278,7 @@ function scan(contentFilterYaml, jobs, { titleFilterYaml = ['title_filter:', '  
     ].join('\n'));
     const r = spawnSync(NODE, ['--import', pathToFileURL(preload).href, join(ROOT, 'scan.mjs'), ...args], {
       cwd: dir, encoding: 'utf-8', timeout: 30000,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals, CAREER_OPS_PROFILE: profile,
+      env: { ...cleanEnv(), CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals, CAREER_OPS_PROFILE: profile,
         // Empty, so a caller's own pipeline lane or history file is never written to.
         CAREER_OPS_PIPELINE: '', CAREER_OPS_SCAN_HISTORY: '' },
     });
@@ -492,7 +496,7 @@ function runWithPortals(script, lines, args = []) {
     writeFileSync(preload, "globalThis.fetch = async () => { throw new Error('Unexpected network request'); };\n");
     return spawnSync(NODE, ['--import', pathToFileURL(preload).href, join(ROOT, script), ...args], {
       cwd: dir, encoding: 'utf-8', timeout: 30000,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals, CAREER_OPS_PROFILE: join(dir, 'profile.yml') },
+      env: { ...cleanEnv(), CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PORTALS: portals, CAREER_OPS_PROFILE: join(dir, 'profile.yml') },
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
