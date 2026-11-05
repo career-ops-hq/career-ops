@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applicationAccessNote, EVALUATION_ACCESS_INSTRUCTION } from '../../src/lib/evaluation-access.mjs';
+import { EVALUATION_GATE_INSTRUCTION } from '../../src/lib/evaluation-gate.mjs';
 import { buildPrompt } from '../../src/lib/run-prompts.mjs';
 
 for (const access of ['public', 'login_required', 'consent_required', 'email_only', 'blocked', 'unverified']) {
@@ -21,6 +22,8 @@ for (const [label, input, evaluationInstructions] of [
   test(`${label} retains the upstream liveness and confirmation boundary`, () => {
     const prompt = buildPrompt({ kind: 'evaluate', input, memory: '', today: '2026-11-04', evaluationInstructions });
     assert.ok(prompt.includes(EVALUATION_ACCESS_INSTRUCTION));
+    assert.ok(prompt.includes(EVALUATION_GATE_INSTRUCTION), 'the merged headless stop protocol remains in the actual prompt');
+    assert.match(prompt, /himalayas-posting\.mjs --request -/, 'safe exact publisher retrieval remains available');
     assert.match(prompt, /application_access: login_required/);
     assert.match(prompt, /application_access: email_only/);
     assert.match(prompt, /pasted JD text: note that liveness is unverified and proceed under the mode/);

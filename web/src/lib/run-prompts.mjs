@@ -12,6 +12,7 @@
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 import { REPORT_ENVELOPE_INSTRUCTION } from "./report-envelope.mjs";
 import { EVALUATION_ACCESS_INSTRUCTION } from "./evaluation-access.mjs";
+import { EVALUATION_GATE_INSTRUCTION } from "./evaluation-gate.mjs";
 import { COVER_TONES } from "./cover-brief.mjs";
 import { DEFAULT_PROFILE_REF, profileNote } from "./core/profile-path.mjs";
 
@@ -317,6 +318,8 @@ Use WebFetch to read the posting (you are headless — Playwright is unavailable
 ${mem}${unattendedAmbiguityStep}
 OUTPUT: Do NOT save or edit any file, run output/build/workflow scripts, or allocate report numbers. Only the explicitly permitted read-only JD retrieval above is an exception; never write request files. Output exactly one complete selected report between a line containing only \`<<report-md>>\` and a line containing only \`<</report-md>>\`. The platform saves it. Include the canonical Machine Summary and full verbatim JD archive. Never submit an application, fill forms, or contact anyone.
 
+${EVALUATION_GATE_INSTRUCTION}
+
 After the envelope, end with EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
 
@@ -335,6 +338,8 @@ Use WebFetch to read the posting (you are headless — Playwright is unavailable
    **If the permitted posting/API retrieval still cannot read this exact posting/JD — because the JD is a login/consent wall, partial shell, paywall, bot challenge, missing or mismatched — STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** Never score the wall itself. Confirmed same-posting HTTP404/410, explicit closure or a verified generic-listing redirect takes the mode file's "posting appears closed" path; an inconclusive transport failure is not proof of closure. Once the existing mode gates permit evaluation, a separate application login/consent/email/access-only403 is only an application_access note. Never override contradictory same-posting404/410, employer confirmation, agency/profile rules or the LinkedIn loading guard. Say which JD URL/method remains unresolved so the user can supply primary evidence.
 
 ${mem}${unattendedAmbiguityStep}2. ${REPORT_ENVELOPE_INSTRUCTION}
+
+   ${EVALUATION_GATE_INSTRUCTION}
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation ONLY.
 
