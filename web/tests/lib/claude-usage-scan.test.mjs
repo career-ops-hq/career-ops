@@ -238,3 +238,19 @@ test("a missing projects directory is zero, not an error", async () => {
   const r = await scanner.compute();
   assert.deepEqual([r.window5h.tokens, r.window7d.tokens], [0, 0]);
 });
+
+test("a message logged several times, across files, is counted once", async () => {
+  const root = setup();
+  try {
+    const msg = (id, req, out) =>
+      JSON.stringify({ timestamp: new Date(NOW - HOUR).toISOString(), requestId: req, message: { id, usage: { input_tokens: 10, output_tokens: out } } }) + "\n";
+    // Streamed copies in one file grow; a resumed session repeats the message.
+    writeFileSync(join(root, "proj-a", "s1.jsonl"), msg("m1", "r1", 5) + msg("m1", "r1", 50) + msg("m2", "r2", 1));
+    writeFileSync(join(root, "proj-a", "s2.jsonl"), msg("m1", "r1", 50));
+    const r = await createUsageScanner({ root, now: () => NOW }).compute();
+    assert.equal(r.window5h.messages, 2);
+    assert.equal(r.window5h.tokens, 60 + 11);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
