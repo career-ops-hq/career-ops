@@ -45,6 +45,12 @@ test("a Save for apply that already wrote is corrected when the screen has moved
   assert.equal(editSaveStatus("saved", "hidden", "hidden", null), "Saving");
 });
 
+test("a 422 before the edits are stored does not count as a write", () => {
+  assert.equal(postWroteEdits(422, false, "unreadable-layout"), false);
+  assert.equal(postWroteEdits(422, false, "PDF rendering failed."), true);
+  assert.equal(postWroteEdits(422, true, "PDF rendering failed."), false);
+});
+
 test("a Save for apply that stored nothing still sends the screen", () => {
   assert.equal(shouldPutAfterPost(true, "sent", "sent"), false);
   assert.equal(shouldPutAfterPost(true, "sent", "moved"), true);

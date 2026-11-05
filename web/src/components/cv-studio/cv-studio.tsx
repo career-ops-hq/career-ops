@@ -203,11 +203,15 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
       revRef.current += 1;
       const r = await send("POST", { op: "save", edits: sent, tab: tabRef.current, rev: revRef.current });
       const body = (await r.json()) as { pdf?: string; indexed?: boolean; warnings?: string[]; error?: string; superseded?: boolean };
-      const wrote = postWroteEdits(r.status, body.superseded === true);
+      const wrote = postWroteEdits(r.status, body.superseded === true, body.error);
       // Drop the in-flight Save for apply before the follow-up PUT. Otherwise
       // the same payload looks like it is already on the wire and is skipped.
       if (postingJsonRef.current === serialized) postingJsonRef.current = null;
-      if (wrote) savedJsonRef.current = serialized;
+      if (wrote) {
+        savedJsonRef.current = serialized;
+        autosaveUncertainRef.current = false;
+        setAutosaveError(null);
+      }
       if (shouldPutAfterPost(wrote, serialized, JSON.stringify(editsRef.current))) putEdits(editsRef.current, false);
       if (body.superseded) {
         setSave({ kind: "failed", error: "A newer edit was saved while this one was sending. Save again to export the latest." });

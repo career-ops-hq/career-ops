@@ -51,15 +51,19 @@ export function inflightEdits(saving, posting, current) {
 
 /**
  * True when Save for apply stored the edits before it answered.
- * Rendering runs after that write, so 422 still means the file changed.
+ * A PDF render failure is 422 after that write, so it still counts.
+ * unreadable-layout is the same status and returns before the write.
  * A superseded response, or a stale or busy 409, means it did not.
  *
  * @param {number} status
  * @param {boolean} superseded
+ * @param {string} [error]
  */
-export function postWroteEdits(status, superseded) {
+export function postWroteEdits(status, superseded, error) {
   if (superseded === true) return false;
-  return status === 200 || status === 422;
+  if (status === 200) return true;
+  if (status !== 422) return false;
+  return error !== "unreadable-layout";
 }
 
 /**
