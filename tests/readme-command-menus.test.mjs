@@ -55,3 +55,12 @@ test('each discovery menu describes oferta as A-G plus Block H at or above 4.5',
     assert.doesNotMatch(line, /only above|A-F|A to H/, rel);
   }
 });
+
+test('each discovery menu says retro saves proposals and applies only accepted ids', () => {
+  for (const rel of COPIES) {
+    const line = discoveryMenu(read(rel), rel).split('\n').find((row) => /\/career-ops\s+retro\b/.test(row));
+    assert.ok(line, `${rel} lists retro`);
+    assert.match(line, /Save the proposals, then apply only accepted ids to the rule files/, rel);
+    assert.doesNotMatch(line, /writes only the ids you accept/, rel);
+  }
+});
