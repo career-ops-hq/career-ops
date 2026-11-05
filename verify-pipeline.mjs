@@ -109,9 +109,18 @@ function warn(msg, hint) { console.log(`⚠️  ${msg}`); printHint(hint); warni
 function ok(msg) { console.log(`✅ ${msg}`); }
 
 // --- Read applications.md ---
+// Check 15 runs first. A fresh checkout has no tracker, and returning here used
+// to skip an unknown provider in portals.yml.
 if (!existsSync(APPS_FILE)) {
+  await checkPortalsCoverage();
   console.log('\n📊 No applications.md found. This is normal for a fresh setup.');
   console.log('   The file will be created when you evaluate your first offer.\n');
+  if (errors > 0) {
+    console.log('\n' + '='.repeat(50));
+    console.log(`📊 Pipeline Health: ${errors} errors, ${warnings} warnings`);
+    console.log('🔴 Pipeline has errors — fix before proceeding');
+    process.exit(1);
+  }
   process.exit(0);
 }
 const content = readFileSync(APPS_FILE, 'utf-8');
@@ -663,65 +672,72 @@ if (!existsSync(FOLLOWUPS_FILE)) {
 // jobs?) needs 170 fetches and stays a separate command: `node audit-portals.mjs`.
 //
 // portals.yml is user-layer and gitignored, so its absence is not a finding.
-const PORTALS_FILE = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
-if (!existsSync(PORTALS_FILE)) {
-  ok('No portals.yml yet — nothing to coverage-check');
-} else {
-  try {
-    const { findUnclaimedEntries } = await import('./audit-portals.mjs');
-    const { loadProviders } = await import('./providers/_registry.mjs');
-    const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
-    const { loadYaml } = await import('./lib/yaml-document.mjs');
+// Also called before the fresh-setup return, so a tracker-less checkout still
+// hears about an unknown provider. The body stays here so a tracker that exists
+// keeps this check in its original place.
+async function checkPortalsCoverage() {
+  const PORTALS_FILE = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
+  if (!existsSync(PORTALS_FILE)) {
+    ok('No portals.yml yet — nothing to coverage-check');
+  } else {
+    try {
+      const { findUnclaimedEntries } = await import('./audit-portals.mjs');
+      const { loadProviders } = await import('./providers/_registry.mjs');
+      const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
+      const { loadYaml } = await import('./lib/yaml-document.mjs');
 
-    const cfg = loadYaml(readFileSync(PORTALS_FILE, 'utf-8')) || {};
-    // Both sections, because scan.mjs resolves both through the same registry:
-    // an unclaimed aggregator board is exactly as dead as an unclaimed company.
-    const entries = [
-      ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
-      ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
-    ];
-    // providers/ and plugins/ both ship in the code layer — resolve them from
-    // CODE_ROOT (scan.mjs does the same). Without mergeProviderPlugins() the
-    // health check sees only providers/*.mjs and reports every enabled
-    // plugin-provider entry as an unknown provider that "never scans", while
-    // the scanner resolves and scans it (#4026). No-op for a plugin-free
-    // install: mergeProviderPlugins returns before any work when
-    // config/plugins.yml is absent.
-    const providers = await loadProviders(join(CODE_ROOT, 'providers'));
-    await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: CAREER_OPS });
-    const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
+      const cfg = loadYaml(readFileSync(PORTALS_FILE, 'utf-8')) || {};
+      // Both sections, because scan.mjs resolves both through the same registry:
+      // an unclaimed aggregator board is exactly as dead as an unclaimed company.
+      const entries = [
+        ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
+        ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
+      ];
+      // providers/ and plugins/ both ship in the code layer — resolve them from
+      // CODE_ROOT (scan.mjs does the same). Without mergeProviderPlugins() the
+      // health check sees only providers/*.mjs and reports every enabled
+      // plugin-provider entry as an unknown provider that "never scans", while
+      // the scanner resolves and scans it (#4026). No-op for a plugin-free
+      // install: mergeProviderPlugins returns before any work when
+      // config/plugins.yml is absent.
+      const providers = await loadProviders(join(CODE_ROOT, 'providers'));
+      await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: CAREER_OPS });
+      const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
-    // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
-    // it can't report what it can't label. Without this, that entry vanishes
-    // from silent/handoff/unknownProvider entirely, and the enabled count
-    // below (which doesn't share the same eligibility rule) would still
-    // include it — so a malformed entry never gets a provider check AND the
-    // "All N entries resolve" success line claims it as resolved anyway.
-    const malformed = entries.filter(e => e && e.enabled !== false && (typeof e.name !== 'string' || !e.name.trim()));
-    for (const e of malformed) {
-      warn(`portals.yml: an enabled entry has no name (careers_url: ${e.careers_url || 'none'}) — it cannot be provider-checked; give it a name`,
-           "add a name: field to that portals.yml entry, or set enabled: false");
-    }
+      // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
+      // it can't report what it can't label. Without this, that entry vanishes
+      // from silent/handoff/unknownProvider entirely, and the enabled count
+      // below (which doesn't share the same eligibility rule) would still
+      // include it — so a malformed entry never gets a provider check AND the
+      // "All N entries resolve" success line claims it as resolved anyway.
+      const malformed = entries.filter(e => e && e.enabled !== false && (typeof e.name !== 'string' || !e.name.trim()));
+      for (const e of malformed) {
+        warn(`portals.yml: an enabled entry has no name (careers_url: ${e.careers_url || 'none'}) — it cannot be provider-checked; give it a name`,
+             "add a name: field to that portals.yml entry, or set enabled: false");
+      }
 
-    for (const e of unknownProvider) {
-      error(`portals.yml: "${e.name}" sets an unknown provider — ${e.error}. The entry never scans (see providers/ for valid ids)`,
-            "correct the provider: value in portals.yml to an id from providers/, or remove the field to auto-detect");
+      for (const e of unknownProvider) {
+        error(`portals.yml: "${e.name}" sets an unknown provider — ${e.error}. The entry never scans (see providers/ for valid ids)`,
+              "correct the provider: value in portals.yml to an id from providers/, or remove the field to auto-detect");
+      }
+      for (const e of silent) {
+        warn(`portals.yml: "${e.name}" is enabled but no provider claims ${e.careers_url || 'its careers_url'} — scan.mjs skips it on every run without naming it (run node audit-portals.mjs)`,
+           "run node audit-portals.mjs for the per-entry diagnosis; fix the careers_url or set enabled: false");
+      }
+      if (silent.length === 0 && unknownProvider.length === 0 && malformed.length === 0) {
+        const enabled = entries.filter(e => e && e.enabled !== false).length;
+        ok(handoff.length > 0
+          ? `All ${enabled - handoff.length} scannable portals.yml entries resolve to a provider (${handoff.length} on websearch handoff)`
+          : `All ${enabled} enabled portals.yml entries resolve to a provider`);
+      }
+    } catch (err) {
+      warn(`Portal coverage check could not run: ${err.message}`,
+           "check portals.yml parses as YAML and run node audit-portals.mjs for the underlying error");
     }
-    for (const e of silent) {
-      warn(`portals.yml: "${e.name}" is enabled but no provider claims ${e.careers_url || 'its careers_url'} — scan.mjs skips it on every run without naming it (run node audit-portals.mjs)`,
-         "run node audit-portals.mjs for the per-entry diagnosis; fix the careers_url or set enabled: false");
-    }
-    if (silent.length === 0 && unknownProvider.length === 0 && malformed.length === 0) {
-      const enabled = entries.filter(e => e && e.enabled !== false).length;
-      ok(handoff.length > 0
-        ? `All ${enabled - handoff.length} scannable portals.yml entries resolve to a provider (${handoff.length} on websearch handoff)`
-        : `All ${enabled} enabled portals.yml entries resolve to a provider`);
-    }
-  } catch (err) {
-    warn(`Portal coverage check could not run: ${err.message}`,
-         "check portals.yml parses as YAML and run node audit-portals.mjs for the underlying error");
   }
 }
+
+await checkPortalsCoverage();
 
 // --- Check 16: invisible control bytes already in tracker cells (#3892) ---
 // cell() in tracker-utils.mjs strips these on the way in, which stops new ones
