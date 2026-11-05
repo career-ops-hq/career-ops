@@ -8,6 +8,7 @@ import { PageFrame } from "@/components/page-frame";
 import { BackLink } from "@/components/back-link";
 import { MarkPdfReadyButton } from "@/components/mark-pdf-ready-button";
 import { saveStatus } from "@/lib/pipeline-status.mjs";
+import { appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
 
 type CopyItem = { label: string; text: string };
 type PdfFile = { relativePath: string; downloadHref: string } | null;
@@ -219,10 +220,13 @@ function AppliedButton({ trackerNum, status }: { trackerNum: string | null; stat
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [ask, setAsk] = useState(false);
   const applied = status.trim().toLowerCase() === "applied";
+  const pending = appliedWriteAllowed({ status: "Applied", confirmed: false });
 
   async function markApplied() {
-    if (!trackerNum || busy || applied) return;
+    const gate = appliedWriteAllowed({ status: "Applied", confirmed: true });
+    if (!trackerNum || busy || applied || !gate.write) return;
     setBusy(true);
     setError("");
     try {
@@ -237,9 +241,31 @@ function AppliedButton({ trackerNum, status }: { trackerNum: string | null; stat
 
   return (
     <span className="inline-flex flex-col items-start gap-1">
-      <button type="button" className={PILL} disabled={!trackerNum || busy || applied} onClick={markApplied}>
-        {busy ? "Saving…" : "Applied"}
-      </button>
+      {!ask && (
+        <button
+          type="button"
+          className={PILL}
+          disabled={!trackerNum || busy || applied}
+          onClick={() => {
+            if (!pending.write) setAsk(true);
+          }}
+        >
+          {busy ? "Saving…" : "Applied"}
+        </button>
+      )}
+      {ask && (
+        <span className="inline-flex flex-col items-start gap-1">
+          <span className="text-xs text-foreground">{pending.prompt}</span>
+          <span className="inline-flex items-center gap-2">
+            <button type="button" className={PILL} disabled={!trackerNum || busy} onClick={() => void markApplied()}>
+              {busy ? "Saving…" : pending.yesLabel}
+            </button>
+            <button type="button" className="text-xs text-muted hover:text-foreground disabled:opacity-60" disabled={busy} onClick={() => setAsk(false)}>
+              Not yet
+            </button>
+          </span>
+        </span>
+      )}
       {error && <span className="max-w-xs text-xs text-red-500">{error}</span>}
     </span>
   );
