@@ -225,6 +225,9 @@ data/model-blacklist.json
 .idea/
 .vscode/
 
+# direnv local environment cache (machine-local, never shared)
+.direnv/
+
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
