@@ -193,8 +193,10 @@ export function buildWorkplacePolicy(policy) {
       const match = rest.match(geographyAtom);
       if (!match) break;
       const token = match[1], tail = rest.slice(match[0].length);
-      // Standalone AND can name Andorra; "and across ..." is ordinary prose.
-      if (token === 'and' && !/^\s*(?:$|[,/]|(?:and|or|only)\b)/.test(tail)) break;
+      // AND may be followed by a worker qualification in an explicit location
+      // requirement. General "work in and with ..." prose is not that evidence.
+      if (token === 'and' && !/^\s*(?:$|[,/]|(?:and|or|only)\b)/.test(tail)
+        && !(allowAmbiguousCodes && /^\s+with\b/.test(tail))) break;
       const found = countries(countryValue(token), true);
       if (!found.size && !has(token, regions) && !has(token, onsite)) break;
       // "IT systems" is not Italy. A bounded geographic token such as

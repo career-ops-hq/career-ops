@@ -219,3 +219,25 @@ test('parsed home ISO alternatives do not rescue another foreign requirement', (
   ]) assert.equal(andorra('Remote Europe', '', { description }).eligible, false, description);
   assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in Spain and collaborate with our France office.' }).eligible, true, 'an already-accepted office mention is unchanged');
 });
+
+
+test('explicit mandatory AND accepts a following worker qualification', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const target of ['AND with a valid work permit', 'AND with local tax registration']) {
+    const description = `Candidates must be based in ${target}.`;
+    assert.equal(andorra('Remote Europe', '', { description }).eligible, true, target);
+    assert.equal(gate('Remote Europe', '', { description }).eligible, false, 'an explicit foreign country remains mandatory');
+  }
+});
+
+test('AND qualification cannot rescue another mandatory foreign location', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND with a valid work permit and must be located in AU.' }).eligible, false);
+});
+
+test('a general prose conjunction does not become a qualified country token', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  assert.equal(andorra('Remote', '', { description: 'We work remotely and work in and with customer teams.' }).eligible, false);
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in and around Barcelona.' }).eligible, false);
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in and around Barcelona.' }).eligible, true);
+});
