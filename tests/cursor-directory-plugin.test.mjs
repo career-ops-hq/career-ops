@@ -121,9 +121,22 @@ test('the Cursor plugin contains exactly the expected skill with valid frontmatt
       `${rel}: frontmatter name must match its folder`
     );
 
+    // non empty string after yaml parsing(catches '', "", comment-only, null)
     assert.ok(
       typeof parsed.description === 'string' && parsed.description.trim().length > 0,
       `${rel}: frontmatter needs a description`);
+
+    //checks if its single line
+    const lines = front.split(/\r?\n/);
+    const descIdx = lines.findIndex((line) => line.startsWith('description:'));
+    const nextNonEmptyLine = lines.slice(descIdx + 1).find((line) => line.trim() !== '');
+
+    assert.ok(
+      /^description:[ \t]*[^\s|>]/.test(lines[descIdx]) &&
+      !/[\r?\n]/.test(parsed.description) &&
+      !(nextNonEmptyLine !== undefined && /^[ \t]/.test(nextNonEmptyLine)),
+      `${rel}: frontmatter description must be a single line`
+    );
   }
 });
 
