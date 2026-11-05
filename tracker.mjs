@@ -189,6 +189,14 @@ async function loadSqlite(ctx) {
 
 export function openDb(DatabaseSync, path = defaultDbPath()) {
   mkdirSync(dirname(path) || '.', { recursive: true });
+  // No file yet, or an empty one: SQLite reads both as a database with no
+  // schema. Looked at before the open, which creates the file.
+  let isNewDb;
+  try {
+    isNewDb = statSync(path).size === 0;
+  } catch (err) {
+    isNewDb = err?.code === 'ENOENT';
+  }
   const db = new DatabaseSync(path);
   // A schema step can throw against a db some other version or tool left
   // behind (an `applications` table without `status` fails the index below).
@@ -202,6 +210,21 @@ export function openDb(DatabaseSync, path = defaultDbPath()) {
     // once — and the default busy_timeout of 0 makes any overlap fail instantly.
     db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
+    // A new index gets its whole schema in ONE transaction. Run statement by
+    // statement, the six below are six commits, and every commit flushes the
+    // rollback journal and the database to disk: 18 to 24 synchronous flushes,
+    // depending on the platform, before a single row is indexed. On a slow disk
+    // that is most of what building an index costs. On windows-latest, whose
+    // %TEMP% is on the slow C: drive, it is what now and then kept the writers
+    // in tests/tracker-writer-lock.test.mjs that rebuild the index running past
+    // the harness's 10s budget, while the writers that never open SQLite (one
+    // flush each) always made it (#5514). An existing index keeps the
+    // statement-by-statement path: each IF NOT EXISTS is then a no-op that
+    // writes and flushes nothing, and a statement that does migrate an old
+    // index still waits out a busy lock, which it would not do inside a
+    // transaction that began as a read. A throw before the COMMIT is rolled
+    // back by the close in the catch below.
+    if (isNewDb) db.exec('BEGIN IMMEDIATE');
     db.exec(`
       CREATE TABLE IF NOT EXISTS applications (
         id      INTEGER PRIMARY KEY,
@@ -235,6 +258,7 @@ export function openDb(DatabaseSync, path = defaultDbPath()) {
       CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
       CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
     `);
+    if (isNewDb) db.exec('COMMIT');
     // CREATE TABLE IF NOT EXISTS leaves a db built by an older version alone, so
     // a column added after the fact has to be migrated in explicitly. Cheap and
     // idempotent; the rows are refilled by the next sync either way.
