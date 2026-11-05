@@ -108,8 +108,12 @@ function explicitRoot(root, source) {
  *   folder inside a plugin install copy
  */
 export function getCareerOpsRoot() {
-  const envName = process.env.CAREER_OPS_ROOT?.trim() ? 'CAREER_OPS_ROOT' : 'CAREER_OPS_DATA_DIR';
-  const env = process.env.CAREER_OPS_ROOT?.trim() || process.env.CAREER_OPS_DATA_DIR?.trim();
+  // Local fix 2026-11-01 (re-applied after v1.39.0 update): DATA_DIR wins over
+  // ROOT. VPS evals export BOTH (eval-or.sh needs ROOT for its .env paths, while
+  // DATA_DIR is the actual data root); upstream order sent cv.md/reports to the
+  // tool repo instead of career-ops-personal.
+  const envName = process.env.CAREER_OPS_DATA_DIR?.trim() ? 'CAREER_OPS_DATA_DIR' : 'CAREER_OPS_ROOT';
+  const env = process.env.CAREER_OPS_DATA_DIR?.trim() || process.env.CAREER_OPS_ROOT?.trim();
   if (env) {
     return explicitRoot(resolve(__dirname, env), envName);
   }
