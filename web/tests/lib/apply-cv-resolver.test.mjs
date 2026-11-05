@@ -167,6 +167,48 @@ test('resolveTailoredCv: a real cv-<slug>-*.pdf matches its company', async () =
   });
 });
 
+test('resolveTailoredCv: Apply uploads the ATS PDF when that sibling exists, even if the styled PDF is newer', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-ats-2026-01-01.pdf', 0],
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', 10000],
+    ],
+    async (outputDir) => {
+      const result = await resolveTailoredCv('Acme');
+      assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-ats-2026-01-01.pdf'));
+    },
+  );
+});
+
+test('resolveTailoredCv: an application number still prefers the ATS sibling of the indexed PDF', async () => {
+  await withFixture([], async (outputDir) => {
+    const root = dirname(outputDir);
+    mkdirSync(join(root, 'data'));
+    mkdirSync(join(root, 'reports'));
+    writeFileSync(join(root, 'reports', '018-acme-2026-07-01.md'), '# Acme engineer\n');
+    writeFileSync(join(root, 'data', 'applications.md'), [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      '| 309 | 2026-07-01 | Acme | Engineer | 4.5/5 | Evaluated | | [018](../reports/018-acme-2026-07-01.md) | |',
+    ].join('\n'));
+    writeFileSync(join(root, 'tracker-utils.mjs'), [
+      `export const resolveTrackerPath = () => ${JSON.stringify(join(root, 'data', 'applications.md'))};`,
+      `export const resolvePdfIndexPath = () => ${JSON.stringify(join(root, 'data', 'pdf-index.tsv'))};`,
+    ].join('\n'));
+
+    const styled = 'cv-jane-doe-018-acme-2026-07-26.pdf';
+    const ats = 'cv-jane-doe-018-acme-ats-2026-07-26.pdf';
+    writeFileSync(join(outputDir, styled), 'styled');
+    writeFileSync(join(outputDir, ats), 'ats');
+    writeFileSync(join(root, 'data', 'pdf-index.tsv'), [
+      '# report\tpdf\thtml\tformat\tdate',
+      `018\toutput/${styled}\t\tletter\t2026-07-26`,
+    ].join('\n'));
+
+    assert.equal(await resolveTailoredCv(undefined, '309'), join(outputDir, ats));
+  });
+});
+
 test('resolveTailoredCv: newest match wins when multiple CVs exist for the same company', async () => {
   await withFixture(
     [
