@@ -15,15 +15,14 @@ export function MarkPdfReadyButton({
   ready?: boolean;
 }) {
   const router = useRouter();
-  const [marked, setMarked] = useState(false);
-  const done = ready || marked;
+  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   if (reportNum == null) return null;
 
   async function mark() {
-    if (busy || done) return;
+    if (busy || ready || saved) return;
     setBusy(true);
     setError("");
     try {
@@ -37,7 +36,7 @@ export function MarkPdfReadyButton({
         setError(typeof body?.error === "string" ? body.error : "Could not mark the PDF ready.");
         return;
       }
-      setMarked(true);
+      setSaved(true);
       router.refresh();
     } catch {
       setError("Could not mark the PDF ready.");
@@ -51,16 +50,19 @@ export function MarkPdfReadyButton({
       <button
         type="button"
         onClick={mark}
-        disabled={busy || done}
+        disabled={busy || ready || saved}
         className={
-          done
+          ready
             ? `${PILL} border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400`
             : `${PILL} border-border text-muted hover:border-brand/40 hover:text-brand-text`
         }
       >
-        {done && <Check className="size-3.5" />}
-        {busy ? "Saving…" : done ? "PDF ready" : "Mark PDF ready"}
+        {ready && <Check className="size-3.5" />}
+        {busy ? "Saving…" : ready ? "PDF ready" : saved ? "Tracker marked" : "Mark PDF ready"}
       </button>
+      {saved && !ready && (
+        <span className="text-xs text-muted">The tracker is marked. PDF ready stays off until the file is in output/.</span>
+      )}
       {error && <span className="text-xs text-red-500">{error}</span>}
     </span>
   );

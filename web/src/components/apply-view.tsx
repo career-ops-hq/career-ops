@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
 import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs";
+import { markAppliedEnabled } from "@/lib/apply/mark-applied.mjs";
 import { isResumeLabel } from "@/lib/apply/resume-label.mjs";
 import type { ApplyField } from "@/lib/apply/extract";
 import { cn } from "@/lib/cn";
@@ -287,6 +288,7 @@ function ApplyExitBar() {
   }
 
   async function markApplied() {
+    if (!markAppliedEnabled({ status: a.status, issues: a.issues }).enabled) return;
     setMarking(true);
     setError("");
     try {
@@ -336,6 +338,7 @@ function ApplyExitBar() {
     );
   }
 
+  const appliedGate = markAppliedEnabled({ status: a.status, issues: a.issues });
   return (
     <div className="mt-8 border-t border-border/70 pt-5">
       <div className="flex flex-wrap items-center gap-3">
@@ -348,15 +351,15 @@ function ApplyExitBar() {
         {a.n && (
           <button
             onClick={markApplied}
-            disabled={marking}
-            title={`Set tracker row #${a.n} to Applied and go back`}
+            disabled={!appliedGate.enabled || marking}
+            title={appliedGate.hint}
             className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400 max-sm:min-h-[44px]"
           >
             {marking ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />}
             {marking ? "Updating your tracker…" : "Mark applied"}
           </button>
         )}
-        {a.n && <span className="text-xs text-muted">Click this once you have submitted the real form yourself.</span>}
+        {a.n && <span className="text-xs text-muted">{appliedGate.hint}</span>}
       </div>
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>

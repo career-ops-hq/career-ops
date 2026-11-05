@@ -7,6 +7,7 @@ import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusFor
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
+import { readCvDiskState } from "@/lib/read-cv-disk";
 import { markTrackerReady, spawnGeneratePdf } from "@/lib/pdf-render.mjs";
 import { htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
@@ -45,8 +46,9 @@ function originalOf(htmlPath: string) {
  */
 async function findTailoredHtml(reportNum: string, slug: string): Promise<string | null> {
   const dir = path.join(careerOpsRoot(), "output");
-  const indexed = await pdfPathStatusForReport(reportNum);
-  if (indexed.status === "found") {
+  const disk = await readCvDiskState(reportNum, slug, false);
+  const indexed = disk.exists ? await pdfPathStatusForReport(reportNum) : null;
+  if (indexed?.status === "found") {
     const sibling = originalOf(indexed.path.replace(/\.pdf$/i, ".html"));
     if (isRegularContainedFile(sibling, dir)) return sibling;
   }

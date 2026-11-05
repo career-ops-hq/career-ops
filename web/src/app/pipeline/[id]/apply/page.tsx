@@ -8,6 +8,7 @@ import { parseReport } from "@/lib/format";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { resolvePostingUrl } from "@/lib/posting-url.mjs";
 import { answerCopyItems, cvCopyFields, indexedPdf, PORTAL_TIPS, reportNumberFor } from "@/lib/apply-checklist.mjs";
+import { readCvDiskState } from "@/lib/read-cv-disk";
 import { ApplyChecklist } from "@/components/apply-checklist";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,7 @@ export default async function ApplyPage({
 
   const suffix = query ? `?${query}` : "";
   const company = app?.company || parseReport(report?.content ?? "").title || `Report #${id}`;
+  const disk = await readCvDiskState(id, company, (app?.pdf ?? "").includes("✅"));
   return (
     <ApplyChecklist
       company={company}
@@ -89,7 +91,8 @@ export default async function ApplyPage({
       trackerNum={app?.n ?? null}
       reportNum={reportNum}
       status={app?.status ?? ""}
-      pdfReady={(app?.pdf ?? "").includes("✅")}
+      pdfReady={disk.exists}
+      pdfNote={disk.note}
     />
   );
 }

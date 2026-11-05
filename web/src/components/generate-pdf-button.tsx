@@ -11,9 +11,7 @@ import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 
 // Fires the real career-ops `pdf` mode (worker kind "pdf") to generate an
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
-// Once a tailored CV exists (tracker PDF ✅, or a pdf worker just finished), it
-// becomes a "View tailored CV" link (served by /api/cv-pdf) + a regenerate icon.
-export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company: string; pdfReady: boolean }) {
+export function GeneratePdfButton({ n, company, onDisk }: { n: string; company: string; onDisk: boolean }) {
   const { jobs, startJob } = useJobs();
   const listQuery = pipelineQuery(useSearchParams().toString());
   const jobQuery = listQuery ? `?${listQuery}` : "";
@@ -25,7 +23,7 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
   const generate = () =>
     startJob({ title: `CV PDF · ${company}`, subtitle: "tailored for this role", kind: "pdf", input: n, page: `/pipeline/${n}` });
 
-  const state = pdfButtonState(job, pdfReady);
+  const state = pdfButtonState(job, onDisk);
 
   if (state.kind === "running")
     return (

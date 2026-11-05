@@ -33,6 +33,7 @@ export function ApplyChecklist({
   reportNum,
   status,
   pdfReady,
+  pdfNote = null,
 }: {
   company: string;
   role: string;
@@ -50,6 +51,7 @@ export function ApplyChecklist({
   reportNum: number | null;
   status: string;
   pdfReady: boolean;
+  pdfNote?: string | null;
 }) {
   return (
     <PageFrame className="max-w-3xl">
@@ -146,6 +148,7 @@ export function ApplyChecklist({
           <SeedButton trackerNum={trackerNum} />
           <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} />
         </div>
+        {pdfNote && <p className="mt-2 text-sm text-muted">{pdfNote}</p>}
         {!trackerNum && <p className="mt-2 text-xs text-faint">Applied and seed follow-up need a tracker row.</p>}
       </Section>
     </PageFrame>
