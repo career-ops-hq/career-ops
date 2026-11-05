@@ -92,8 +92,9 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
           <span className="sm:hidden">{state === "error" ? "Retry" : "Followed up"}</span>
         </button>
         {followup.num != null && (
-          <a href={`/pipeline/${followup.num}`} title="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand-text max-sm:min-h-[44px] max-sm:min-w-[44px]">
+          <a href={`/pipeline/${followup.num}`} title="Open report" className="inline-flex shrink-0 items-center justify-center gap-1 rounded p-1 text-xs text-faint transition hover:text-brand-text max-sm:min-h-[44px] max-sm:min-w-[44px]">
             <FileText className="size-4" />
+            <span>Open</span>
           </a>
         )}
         <button
