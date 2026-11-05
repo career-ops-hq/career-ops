@@ -19,7 +19,7 @@ try {
 
   if (
     jobspresso.detect({ provider: 'jobspresso' })?.url ===
-      'https://jobspresso.co/?feed=job_feed'
+      'https://jobspresso.co/feed/job_feed/'
   ) {
     pass('jobspresso.detect() claims explicit provider config');
   } else {
@@ -85,7 +85,7 @@ try {
       fetchCalled = true;
 
       if (
-        url !== 'https://jobspresso.co/?feed=job_feed' ||
+        url !== 'https://jobspresso.co/feed/job_feed/' ||
         opts?.redirect !== 'error'
       ) {
         throw new Error('unexpected fetch arguments');
@@ -99,6 +99,13 @@ try {
     pass('jobspresso.fetch() requests the pinned RSS feed');
   } else {
     fail('jobspresso.fetch() did not fetch correctly');
+  }
+
+  const detectedUrl = jobspresso.detect({ provider: 'jobspresso' })?.url;
+  if (detectedUrl && new URL(detectedUrl).search === '') {
+    pass('jobspresso feed URL carries no query string (robots.txt disallows /*?, #5774)');
+  } else {
+    fail('jobspresso feed URL must not carry a query string');
   }
 
   if (fetchCalled) {
