@@ -208,6 +208,10 @@ function locationString(job) {
 export default {
   id: 'getro',
 
+  fetchHost() {
+    return new URL(API_BASE).hostname;
+  },
+
   // Getro tenants live on arbitrary vanity domains (careers.atomico.com,
   // talent.cherry.vc, ...) with no common suffix to auto-detect against.
   // Still reports a hit when `getro_collection` is set explicitly, so

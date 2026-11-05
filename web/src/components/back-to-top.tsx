@@ -9,10 +9,10 @@ import { shouldShowBackToTop, scrollBehaviorFor } from "@/lib/scroll-to-top.mjs"
 // once from the app shell. The window is the scroll container here (main has no
 // own overflow-y), so it listens on window scroll and calls window.scrollTo.
 //
-// It sits one row above the assistant launcher, which owns bottom-5 right-5, so
-// the two never overlap; a lower z-index lets an open assistant panel cover it
-// cleanly. When hidden it's also removed from the tab order and hidden from
-// assistive tech, so there's nothing to land on until it's actually usable.
+// It sits one row above bottom-5 right-5, which the assistant launcher owns on
+// narrow or short windows (on tall desktop windows the launcher moves into the
+// sidebar). A lower z-index lets an open assistant panel cover it. When hidden it's removed from the tab order
+// and hidden from assistive tech, so there's nothing to land on until it shows.
 export function BackToTop() {
   const [visible, setVisible] = useState(false);
 

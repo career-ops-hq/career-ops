@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins } from "lucide-react";
+import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, CirclePause } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
+import { evaluationGateForJob } from "@/lib/job-gate.mjs";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
 
@@ -51,9 +52,11 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   );
   const working = job?.status === "running";
   const doneEval = job?.status === "done" && job.kind === "evaluate";
+  const gate = evaluationGateForJob(job);
   const statusLabel = WORKER_LABEL[job?.kind ?? ""] ?? "Working…";
 
-  const isAdded = added.has(offer.url) || inPipeline || working || doneEval;
+  // Worker state is not evidence that the separate Inbox write succeeded.
+  const isAdded = added.has(offer.url) || inPipeline;
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
   const employer = CHINA_SOURCES.includes(offer.source);
@@ -133,11 +136,15 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
           >
             <Check className="size-3.5" /> Evaluated · view report
           </a>
+        ) : gate && job ? (
+          <a href={`/jobs/${job.id}`} className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-2 text-xs font-medium text-amber-800 dark:text-amber-400 max-sm:min-h-[44px]">
+            <CirclePause className="size-3.5" /> Needs review · view reason
+          </a>
         ) : working ? (
           <div className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-2 text-xs font-medium text-brand-text">
             <Loader2 className="size-3.5 animate-spin" />
             {statusLabel}
-            <span className="text-brand-text">· in pipeline</span>
+            {isAdded && <span className="text-brand-text">· in pipeline</span>}
           </div>
         ) : (
           <div className="flex items-center gap-2">

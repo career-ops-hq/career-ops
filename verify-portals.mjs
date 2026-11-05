@@ -47,6 +47,8 @@ import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { ASHBY_TIMEOUT_MS } from './providers/ashby.mjs';
+import { LEVER_TIMEOUT_MS } from './providers/lever.mjs';
 import { isBlockedAddress } from './providers/_ip-guard.mjs';
 
 // The portal probes are the one place that keeps following redirects: they hit
@@ -111,6 +113,8 @@ const PROVIDERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'provider
 // How to turn a slug into a probe URL, and where the job list lives in the
 // response, for each supported ATS. Greenhouse/Ashby wrap jobs in `{ jobs }`;
 // Lever returns a bare array. `includeCompensation` mirrors the ashby provider.
+// `timeoutMs` is the one the provider fetches the same board with, so a board
+// `scan` reads is not reported unreachable here (none: _http.mjs's default).
 export const ATS = {
   greenhouse: {
     probeUrl: (slug) =>
@@ -126,6 +130,7 @@ export const ATS = {
   ashby: {
     probeUrl: (slug) =>
       `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`,
+    timeoutMs: ASHBY_TIMEOUT_MS,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
     // The posting API returns only {jobs, apiVersion}; the board page titles
     // itself with the owner ('deepset Jobs'), which is the only name either
@@ -138,6 +143,7 @@ export const ATS = {
     // EU boards (jobs.eu.lever.co) resolve to api.eu.lever.co, mirroring the
     // provider's resolveApiUrl; the default is the base instance.
     probeUrl: (slug, { eu = false } = {}) => `https://api.${eu ? 'eu.' : ''}lever.co/v0/postings/${slug}`,
+    timeoutMs: LEVER_TIMEOUT_MS,
     jobCount: (json) => (Array.isArray(json) ? json.length : null),
     ownerUrl: (slug, { eu = false } = {}) => `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
     ownerKind: 'html',
@@ -509,7 +515,7 @@ export async function probeSlug(
     };
   const url = spec.probeUrl(slug, { eu });
   try {
-    const json = await fetchJson(url);
+    const json = await fetchJson(url, spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : undefined);
     const count = spec.jobCount(json);
     if (count == null)
       return {
@@ -827,7 +833,8 @@ export async function probeProvider(entry, provider, baseCtx) {
 /**
  * Verify each enabled portals.yml entry's board is reachable.
  *
- * Two tiers, cheapest first:
+ * Two tiers, cheapest first. An explicit provider id the scanner does not
+ * load is reported before either tier, so a recognizable URL cannot hide the typo.
  *   1. Greenhouse/Ashby/Lever slugs are probed directly (one JSON request each),
  *      with cross-probe suggestions when a slug 404s.
  *   2. Everything else is routed through the SAME provider plugins the scanner
@@ -874,6 +881,21 @@ export async function verifyCompanies(
  */
 async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) {
   const name = typeof company.name === 'string' ? company.name : '(unnamed)';
+  // scan.mjs rejects an unknown provider before it looks at the URL. Probing
+  // a Greenhouse URL first used to return live, and --strict never saw the typo.
+  let resolved = null;
+  if (providers && providers.size > 0) {
+    resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
+    if (resolved?.error) {
+      return {
+        name,
+        status: 'missing',
+        errorKind: 'unknown',
+        provider: typeof company.provider === 'string' ? company.provider : 'unknown',
+        reason: resolved.error,
+      };
+    }
+  }
   const match =
     parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
   // An Ashby entry that opts into the embed source (`ashby: { embed: true }`)
@@ -893,20 +915,29 @@ async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) 
   }
 
   // Tier 2: hand the entry to the scanner's provider layer. Skip the
-  // local-parser provider — a health check must stay network-only and never
-  // execute a configured local command.
+  // local-parser provider. A health check must stay network-only and never
+  // execute a configured local command. The unknown-provider error was
+  // already returned above, before a recognizable URL could hide it.
   if (providers && providers.size > 0) {
-    const resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
     if (resolved && resolved.provider) {
       const probe = await probeProvider(company, resolved.provider, httpCtx || makeHttpCtx());
       return { name, ...probe };
+    }
+    const full = resolveProvider(company, providers);
+    if (full?.provider?.id === 'local-parser') {
+      return {
+        name,
+        status: 'skipped',
+        provider: 'local-parser',
+        reason: 'local parser; verify-portals does not run it. Use scan.mjs to read this board.',
+      };
     }
   }
 
   return {
     name,
     status: 'skipped',
-    reason: 'no provider matched careers_url or api',
+    reason: 'no provider matched. Name a provider this scanner loads, set a careers_url a provider detects, or set scan_method: websearch for the scan.mjs agent handoff. verify-portals does not verify that board.',
   };
 }
 

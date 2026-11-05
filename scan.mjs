@@ -37,6 +37,7 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
+import { buildWorkplacePolicy } from './providers/_country.mjs';
 import {
   closeSync,
   existsSync,
@@ -69,7 +70,7 @@ import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
 import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
-import { normalizeCompany, appendLedgerRows } from './tracker-utils.mjs';
+import { normalizeCompany, appendLedgerRows, companiesMatchIgnoringCorporateForm, LEGAL_SUFFIXES } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldTitle } from './title-keywords.mjs';
@@ -153,7 +154,30 @@ const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 // module must stay side-effect free: a sibling that only reads a constant used
 // to leave a stray data/ in whatever cwd it ran from.
 
-const CONCURRENCY = 10;
+// A morning scan of mixed ATS hosts was waiting on 10 slots while the CPU
+// sat idle. 32 is the global cap. 10 per hostname keeps a single-ATS list
+// at today's parallelism, so one Greenhouse board does not get a bigger
+// burst than it did before. Verify stays at 10. It hammers one URL at a
+// time and is not the morning-scan wait.
+export const SCAN_CONCURRENCY = 32;
+export const HOST_CONCURRENCY = 10;
+export const VERIFY_CONCURRENCY = 10;
+
+export function companyFetchHost(company) {
+  try {
+    const declared = company?._provider?.fetchHost?.(company);
+    if (typeof declared === 'string' && declared.trim()) return declared.trim().toLowerCase();
+    const detected = company?._provider?.detect?.(company);
+    const raw = (detected && typeof detected.url === 'string' && detected.url)
+      || (typeof company?.api === 'string' && company.api)
+      || (typeof company?.careers_url === 'string' && company.careers_url)
+      || '';
+    if (!raw) return '';
+    return new URL(raw).hostname;
+  } catch {
+    return '';
+  }
+}
 const PROGRESS_EVERY = 25;
 
 export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
@@ -641,6 +665,7 @@ export function titleSignalsRemote(title) {
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
+  const workplacePolicy = buildWorkplacePolicy(locationFilter.workplace_policy);
   const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
   const alwaysAllow = alwaysAllowKeywords.map(compileLocationKeyword);
   // US-targeted configs list the country in always_allow and foreign cities
@@ -659,7 +684,8 @@ export function buildLocationFilter(locationFilter) {
   const strict = locationFilter.strict === true
     && (allow.length > 0 || block.length > 0 || blockHard.length > 0);
 
-  return (location, url, title) => {
+  const filter = (location, url, title, offer) => {
+    if (!workplacePolicy(location, title, offer).eligible) return false;
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
     // Nothing to judge on either field → pass (don't penalize missing data),
@@ -695,6 +721,11 @@ export function buildLocationFilter(locationFilter) {
     // stays rejected. This widens `allow`, never `block`.
     return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
+  // Detail readers may recheck this opt-in policy without repeating legacy
+  // location tiers. Arbitrary caller-provided filters have no such capability.
+  return Object.assign(filter, {
+    workplacePolicyOnly: (location, url, title, offer) => workplacePolicy(location, title, offer).eligible,
+  });
 }
 
 // ── Posting-age filter ──────────────────────────────────────────────
@@ -3878,20 +3909,97 @@ export function emptyTargetStatus(observation) {
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
-async function parallelFetch(tasks, limit, onDone = () => {}) {
-  const results = [];
-  let i = 0;
+export async function parallelFetch(tasks, limit, onDone = () => {}, { hostOf = null, hostLimit = limit } = {}) {
+  // Verify and any other caller that does not name a host keeps the plain
+  // worker pool. Completion order of the returned array stays what it was.
+  if (typeof hostOf !== 'function') {
+    const results = [];
+    let i = 0;
 
-  async function next() {
-    while (i < tasks.length) {
-      const task = tasks[i++];
-      results.push(await task());
-      onDone();
+    async function next() {
+      while (i < tasks.length) {
+        const task = tasks[i++];
+        results.push(await task());
+        onDone();
+      }
     }
+
+    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
+    await Promise.all(workers);
+    return results;
   }
 
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
-  await Promise.all(workers);
+  const n = tasks.length;
+  if (n === 0 || !(limit > 0)) return [];
+  const perHost = Math.max(1, hostLimit);
+  const hosts = tasks.map((task, index) => {
+    try {
+      const host = hostOf(task, index);
+      return typeof host === 'string' ? host : '';
+    } catch {
+      return '';
+    }
+  });
+  const results = new Array(n);
+  const pending = hosts.map((_, index) => index);
+  const hostActive = new Map();
+  let active = 0;
+  let finished = 0;
+  let firstError = null;
+
+  function takeReady() {
+    for (let k = 0; k < pending.length; k++) {
+      const index = pending[k];
+      const host = hosts[index];
+      // An empty host is not a bucket. Unknown URLs must not share one cap.
+      if (host && (hostActive.get(host) || 0) >= perHost) continue;
+      pending.splice(k, 1);
+      return index;
+    }
+    return -1;
+  }
+
+  await new Promise((resolve, reject) => {
+    const launch = () => {
+      while (active < limit) {
+        const index = takeReady();
+        if (index < 0) break;
+        active += 1;
+        const host = hosts[index];
+        if (host) hostActive.set(host, (hostActive.get(host) || 0) + 1);
+        Promise.resolve()
+          .then(() => tasks[index]())
+          .then(
+            (value) => {
+              results[index] = value;
+              try {
+                onDone();
+              } catch (err) {
+                if (firstError === null) firstError = err;
+              }
+            },
+            (err) => {
+              if (firstError === null) firstError = err;
+            },
+          )
+          .finally(() => {
+            active -= 1;
+            finished += 1;
+            if (host) {
+              const left = (hostActive.get(host) || 1) - 1;
+              if (left <= 0) hostActive.delete(host);
+              else hostActive.set(host, left);
+            }
+            launch();
+            if (finished === n) {
+              if (firstError !== null) reject(firstError);
+              else resolve();
+            }
+          });
+      }
+    };
+    launch();
+  });
   return results;
 }
 
@@ -3936,7 +4044,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       console.warn(`  ⚠️ API verification failed for ${offer.url}; falling back to Playwright: ${err.message}`);
       verdicts[i] = null;
     }
-  }), CONCURRENCY);
+  }), VERIFY_CONCURRENCY);
 
   let browser = null, page = null, headed = null;
   let hadBrowserOffer = false;
@@ -4168,7 +4276,10 @@ async function main() {
     }
     return value;
   };
-  const filterCompany = requireValue('--company')?.toLowerCase() ?? null;
+  const filterCompanyRaw = requireValue('--company');
+  const filterCompany = filterCompanyRaw?.toLowerCase() ?? null;
+  // --company may ignore a legal suffix. It must not ignore a place name.
+  const legalSuffixes = new Set(LEGAL_SUFFIXES);
   // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
   // employer's real posting date (job.postedAt), gated against a typo since a
   // silently-ignored bound would look like "no jobs matched" instead of an error.
@@ -4290,8 +4401,11 @@ async function main() {
   const targets = [];
   let skippedCount = 0;
   let boardCount = 0;
+  let companyFilterMatched = filterCompanyRaw == null;
   const resolveErrors = [];
   const agentHandoff = [];
+  const unclaimed = [];
+  const enabledWarnings = [];
 
   /**
    * Processes a list of configuration entries, resolves their appropriate data providers,
@@ -4302,16 +4416,39 @@ async function main() {
   function resolveEntries(entries, { isBoard = false } = {}) {
     for (const entry of entries) {
       if (!entry || typeof entry !== 'object') continue;
-      if (entry.enabled === false) continue;
       if (typeof entry.name !== 'string' || !entry.name.trim()) {
-        console.error(`⚠️  Skipping entry — missing or non-string 'name' field: ${JSON.stringify(entry)}`);
+        // A disabled nameless row was already skipped before this warning.
+        if (entry.enabled !== false) {
+          console.error(`⚠️  Skipping entry — missing or non-string 'name' field: ${JSON.stringify(entry)}`);
+        }
         continue;
       }
-      if (filterCompany && !entry.name.toLowerCase().includes(filterCompany)) continue;
+      // Substring, the tracker's normalized equality ("Acme Labs Inc" for
+      // "Acme Labs, Inc."), plus legal suffixes only. "Acme Labs, Inc."
+      // selects a row named "Acme Labs". A place or descriptor such as
+      // "Canada" does not, so "Acme Canada" does not select "Acme". Tracker
+      // dedup still allows those descriptors. A disabled row still counts,
+      // so --company does not say the company is missing when it is only
+      // turned off.
+      if (filterCompany && !entry.name.toLowerCase().includes(filterCompany)
+        && normalizeCompany(entry.name) !== normalizeCompany(filterCompanyRaw)
+        && !companiesMatchIgnoringCorporateForm(entry.name, filterCompanyRaw, legalSuffixes)) continue;
+      if (filterCompanyRaw != null) companyFilterMatched = true;
+      if (entry.enabled === false) continue;
+      // Only a real boolean false turns an entry off. The string "false" and
+      // YAML's old `no` stay in the run, and the count alone does not say which
+      // company. validate-portals already rejects this shape; say it here too,
+      // with the name, because scan does not run that validator.
+      if (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') {
+        enabledWarnings.push(
+          `${entry.name}: enabled is ${JSON.stringify(entry.enabled)}, not a boolean. Only boolean false turns a company off, so this one stays in the run and is scanned if a provider matches it.`,
+        );
+      }
 
       const resolved = resolveProvider(entry, providers);
       if (!resolved) {
         skippedCount++;
+        unclaimed.push(entry);
         if (entry.scan_method === 'websearch') {
           agentHandoff.push({
             company: entry.name,
@@ -4334,6 +4471,11 @@ async function main() {
 
   resolveEntries(companies);
   resolveEntries(boards, { isBoard: true });
+
+  if (filterCompanyRaw != null && !companyFilterMatched) {
+    console.error(`Error: no tracked company matches "${filterCompanyRaw}"`);
+    process.exit(1);
+  }
 
   // #3438. Startup checks for field_filters / filter_on, before any network
   // call. scan.mjs does not run validatePortalsConfig, so every rule that
@@ -4425,6 +4567,17 @@ async function main() {
   parts.push(`${skippedCount} skipped — no provider matched`);
   console.log(`Scanning ${parts.join('; ')} via providers`);
   if (dryRun) console.log('(dry run — no files will be written)\n');
+  for (const warning of enabledWarnings) console.error(`Warning: ${warning}`);
+  if (unclaimed.length > 0) {
+    console.log('No provider matched these entries. Set provider to an id this scanner loads, point careers_url at a board a provider detects, or set scan_method: websearch so the handoff list names the company:');
+    for (const entry of unclaimed) {
+      const where = typeof entry.careers_url === 'string' && entry.careers_url
+        ? entry.careers_url
+        : (typeof entry.api === 'string' && entry.api ? entry.api : '(no careers_url)');
+      const method = entry.scan_method ? ` (scan_method: ${entry.scan_method})` : '';
+      console.log(`  • ${entry.name} — ${where}${method}`);
+    }
+  }
 
   // 3.5. Load the user's do-not-apply list (#1742). Opt-in: absent file =
   // empty Map = the filter below never fires.
@@ -4681,7 +4834,7 @@ async function main() {
         }
         // job.title is passed so a role whose remoteness is stated in the title
         // ("Program Manager - Remote") isn't rejected for a city-only location.
-        if (!locationFilter(job.location, job.url, job.title)) {
+        if (!locationFilter(job.location, job.url, job.title, job)) {
           totalFilteredLocation++;
           if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
@@ -4811,7 +4964,10 @@ async function main() {
     }
   });
 
-  const companyFetches = () => parallelFetch(tasks, CONCURRENCY, progressTicker(tasks.length));
+  const companyFetches = () => parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
+    hostLimit: HOST_CONCURRENCY,
+    hostOf: (_task, index) => companyFetchHost(targets[index]),
+  });
   if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
     await companyFetches();
   } else {
