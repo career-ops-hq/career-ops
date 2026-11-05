@@ -146,7 +146,8 @@ export default {
       let pageSize = PAGE;
       let requests = 0;
       let lastPageFull = false;
-      let truncated = false;
+      /** @type {'cap' | 'fetch-error' | null} */
+      let truncated = null;
       // The board ended on its own (an empty or short page), as opposed to a stop
       // forced by the posting ceiling, the request budget or a failed page.
       let ended = false;
@@ -175,7 +176,7 @@ export default {
           // flagged as truncated.
           if (skip === 0 || probing) throw err;
           console.warn(`[lever] ${entry.name}: page at skip=${skip} failed (${/** @type {any} */ (err)?.message || err}); keeping the ${all.length} posting(s) already read.`);
-          truncated = true;
+          truncated = 'fetch-error';
           lastPageFull = false;
           break;
         }
@@ -195,15 +196,18 @@ export default {
       // stop, so warn and mark it. A probe asks for one page by design.
       if (!ended && !truncated && !probing && all.length < maxPostings && requests >= maxRequests) {
         console.warn(`[lever] ${entry.name}: stopped at the ${maxRequests}-request budget (${all.length} postings); the board may have more.`);
-        truncated = true;
+        truncated = 'cap';
       }
       // Cap stop, not completion: a full last page at the ceiling may mean more
       // postings exist. A probe (maxPages === 1) asks for one page by design.
       if (lastPageFull && !probing && all.length >= maxPostings) {
         console.warn(`[lever] ${entry.name}: stopped at the ${maxPages}-page ceiling (${all.length} postings); the board may have more.`);
-        truncated = true;
+        truncated = 'cap';
       }
-      if (truncated) /** @type {any} */ (all).leverTruncated = true;
+      // leverTruncated carries why the walk stopped: 'cap' (ceiling or request budget)
+      // or 'fetch-error' (a later page failed), so a caller can tell a truncated
+      // healthy board from a broken one.
+      if (truncated) /** @type {any} */ (all).leverTruncated = truncated;
       return all;
     };
     let json;
@@ -235,7 +239,7 @@ export default {
       // field, so requisitionId stays unset rather than being inferred.
       externalId: coerceId(j.id),
     }));
-    if (/** @type {any} */ (json).leverTruncated) /** @type {any} */ (mapped).leverTruncated = true;
+    if (/** @type {any} */ (json).leverTruncated) /** @type {any} */ (mapped).leverTruncated = /** @type {any} */ (json).leverTruncated;
     return mapped;
   },
 };

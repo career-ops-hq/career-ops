@@ -151,7 +151,7 @@ test('lever marks the result truncated at the ceiling, not for short pages or pr
   const entry = { name: 'X', careers_url: 'https://jobs.lever.co/x' };
   const warn = console.warn; console.warn = () => {};
   try {
-    assert.equal((await lever.fetch(entry, pagedCtx(3500))).leverTruncated, true);
+    assert.equal((await lever.fetch(entry, pagedCtx(3500))).leverTruncated, 'cap');
     assert.equal((await lever.fetch(entry, pagedCtx(230))).leverTruncated, undefined);
     assert.equal((await lever.fetch(entry, pagedCtx(3500, { maxPages: 1 }))).leverTruncated, undefined);
   } finally { console.warn = warn; }
@@ -172,7 +172,7 @@ test('lever keeps postings when a later page exhausts retries on a 429, with cou
     };
     const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
     assert.equal(out.length, 200);
-    assert.equal(out.leverTruncated, true);
+    assert.equal(out.leverTruncated, 'fetch-error');
     // pages 0 and 100 once each, then the default policy: 1 attempt + 2 retries at skip=200
     assert.deepEqual(requests, [0, 100, 200, 200, 200]);
     assert.equal(warns.filter((m) => m.includes('keeping the 200 posting(s)')).length, 1);
@@ -185,7 +185,7 @@ test('lever keeps postings already read when a later page fails, flagged truncat
   try {
     const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, pagedCtx(500, { failAtSkip: 200 }));
     assert.equal(out.length, 200);
-    assert.equal(out.leverTruncated, true);
+    assert.equal(out.leverTruncated, 'fetch-error');
     // the first page failing still propagates
     await assert.rejects(() => lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, pagedCtx(500, { failAtSkip: 0 })), /HTTP 400/);
   } finally { console.warn = warn; }
@@ -235,7 +235,7 @@ test('lever warns and marks truncated when shrink retries spend the request budg
     };
     const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
     assert.ok(out.length > 0 && out.length < 200);
-    assert.equal(out.leverTruncated, true);
+    assert.equal(out.leverTruncated, 'cap');
     assert.equal(warns.filter((m) => m.includes('request budget')).length, 1);
   } finally { console.warn = warn; }
 });
