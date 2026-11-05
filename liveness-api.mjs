@@ -41,10 +41,13 @@ import { parseWwrFeed } from './providers/weworkremotely.mjs';
 import { ZOHO_HOST_RE, isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
 import { HOST_RE as ULTIPRO_HOST_RE, extractCandidateOpportunityDetail } from './providers/ultipro.mjs';
 import { VEJ_KEY_MONITOR } from './providers/vdab.mjs';
+import { PATH_BREAKING_CHAR, PATH_BREAKING_CHAR_ENCODED_ONCE } from './providers/arbeitsagentur.mjs';
 import { atsVendorOf } from './ats-vendor.mjs';
 import { linkedInJobId, linkedInGuestUrl } from './lib/linkedin-url.mjs';
 
 const TIMEOUT_MS = 8_000;
+// Arbeitsagentur: the hexadecimal digits of an encoded character can be in either case.
+const PATH_BREAKING_CHAR_ENCODED_ONCE_RE = new RegExp(PATH_BREAKING_CHAR_ENCODED_ONCE, 'gi');
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
 // rejected before it can reach the fixed-host API URL template. The one escape
 // allowed is %20, because some Ashby org slugs contain a space (#5018). A space
@@ -344,15 +347,26 @@ const ATS_PROVIDERS = [
     match(u) {
       if (u.hostname !== 'www.arbeitsagentur.de') return null;
       const m = u.pathname.match(/^\/jobsuche\/jobdetail\/([^/]+)\/?$/);
-      return m ? { refnr: m[1] } : null;
+      if (!m) return null;
+      // The path holds the reference number encoded once, except a slash, which
+      // is encoded once or twice (%2F or %252F). Decoding once keeps a literal
+      // percent sign, and leaves only a twice-encoded slash still encoded.
+      // The API takes the base64url of the real number. Only that form is passed
+      // on: the real number can hold characters the safe-value check refuses.
+      try {
+        const refnr = decodeURIComponent(m[1]).replace(PATH_BREAKING_CHAR_ENCODED_ONCE_RE, PATH_BREAKING_CHAR);
+        return { refnrBase64: Buffer.from(refnr).toString('base64url') };
+      } catch {
+        return null;
+      }
     },
-    api: ({ refnr }) => `https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/${Buffer.from(refnr).toString('base64url')}`,
+    api: ({ refnrBase64 }) => `https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/${refnrBase64}`,
     headers: { 'X-API-Key': 'jobboerse-jobsuche' },
     api404Authoritative: false, // no expired real-job control; absence stays unknown
-    async interpret(res, { refnr }) {
+    async interpret(res, { refnrBase64 }) {
       let posting;
       try { posting = await res.json(); } catch { return null; }
-      return posting?.referenznummer === refnr && posting?.stellenangebotsTitel
+      return posting?.referenznummer === Buffer.from(refnrBase64, 'base64url').toString() && posting?.stellenangebotsTitel
         ? { result: 'active', code: 'arbeitsagentur_api_active', reason: 'Arbeitsagentur returns the matching job detail' }
         : null;
     },

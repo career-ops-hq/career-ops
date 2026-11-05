@@ -7,6 +7,7 @@ import {
   APPLY_LINE,
   applyCtaQuiet,
   applyLineLabel,
+  archetypeCaption,
   cleanHeading,
   isLeadSection,
   isVerdictHeading,
@@ -81,7 +82,7 @@ export function ReportView({
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
   const score = app?.score || field("Score");
   const date = app?.date || field("Date");
-  const archetype = field("Archetype");
+  const archetype = archetypeCaption(field("Archetype"));
   const url = field("URL");
   const decision = field("Decision");
   const line = applyLineLabel(score ?? "", meta?.legitimacy);
