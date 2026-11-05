@@ -246,7 +246,7 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 - **Восстанавливай реплику кандидата точно.** Используй то, что кандидат, по его словам, сказал в Step 1, а не идеализированный ответ. "Correct/complete answer" из Step 2 относится к debrief file и никогда не попадает в transcript — transcript фиксирует то, что реально произошло.
 - **`source: debrief`.**
 - **`stated_priorities` идёт во front matter** (Step 1c) как YAML-список элементов `speaker` + `quote`, чтобы скрипты и `interview/plan` могли читать его, не разбирая тело файла. Бери каждый `quote` в двойные кавычки и экранируй внутренние двойные кавычки, чтобы front matter оставался валидным YAML. Round и date элемента — это собственные `round` и `date` файла. Не добавляй поле, если ничего не было названо, и всегда, когда `input_source: recall`. Никогда не записывай приоритеты в файл practice-сессии, потому что там нет реального интервьюера.
-- Файл сессии попадает в gitignored directory (real names/companies never enter version control); пиши его без редактирования.
+- Файл сессии попадает в gitignored directory (реальные имена и компании не попадают в систему контроля версий); сохраняй его без обезличивания.
 
 ---
 
