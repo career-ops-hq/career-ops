@@ -1002,6 +1002,40 @@ export function buildContentFilter(contentFilter) {
   return filter;
 }
 
+// A content_filter that cannot be honoured (a min_match above its trait
+// count, rescue_title_misses without a positive list) stops a scanner before
+// any network call: guessing would drop every posting or keep all of them
+// while the config reads as in force. Shared so every scanner that reads
+// content_filter fails the same way.
+export function buildContentFilterOrExit(contentFilter) {
+  try {
+    return buildContentFilter(contentFilter);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+// #6020. The one title decision for content_filter.rescue_title_misses, so
+// every scanner that honours the key applies the same rule:
+//   'match'  — title_filter keeps the title; content_filter judges it as usual,
+//   'rescue' — the title misses title_filter.positive and hits no
+//              title_filter.negative, and rescue_title_misses is on; the caller
+//              calls contentFilter(description, [], { titleMissed: true }) and
+//              books a failure there as a title rejection,
+//   'reject' — a title rejection, as without the key.
+// `titleFilter` defaults to buildTitleFilter(titleFilterConfig); a caller with
+// its own compiled filter (per-company overrides, declared fields) passes it.
+export function buildTitleGate(titleFilterConfig, contentFilter, titleFilter = buildTitleFilter(titleFilterConfig)) {
+  const rescue = contentFilter?.rescueTitleMisses === true;
+  const notVetoed = rescue ? buildTitleFilter({ negative: titleFilterConfig?.negative }) : null;
+  return (title) => {
+    if (titleFilter(title)) return 'match';
+    if (rescue && notVetoed(title)) return 'rescue';
+    return 'reject';
+  };
+}
+
 // ── Country-eligibility filter (#2093) ──────────────────────────────
 // Optional, opt-in. If `country_eligibility_filter` is absent from
 // portals.yml, all jobs pass — byte-identical to pre-#2093 behavior.
@@ -4356,22 +4390,12 @@ async function main() {
   const earlyStopSinceMs = resolveEarlyStopMs(effectiveAfter, config.max_posting_age_days);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
-  // A content_filter that cannot be honoured (a min_match above its trait
-  // count, rescue_title_misses without a positive list) stops the run here,
-  // before any network call: guessing would drop every posting or keep all of
-  // them while the config reads as in force.
-  let contentFilter;
-  try {
-    contentFilter = buildContentFilter(config.content_filter);
-  } catch (err) {
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
-  }
+  const contentFilter = buildContentFilterOrExit(config.content_filter);
   // #6020. Postings that title_filter.positive missed (and no title_filter
   // negative vetoed) still reach the content check, and pass it only on their
   // description. See the title gate in the scan loop.
   const rescueTitleMisses = contentFilter.rescueTitleMisses === true;
-  const titleNotVetoed = buildTitleFilter({ negative: config.title_filter?.negative });
+  const titleGate = buildTitleGate(config.title_filter, contentFilter, titleFilter);
   const candidateCountry = loadCandidateCountry();
   const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
@@ -4771,10 +4795,9 @@ async function main() {
         let titleMissed = false;
         for (const field of declaredFields) {
           if (field === 'title') {
-            if (!titleFilter(job.title)) {
-              if (rescueTitleMisses && titleNotVetoed(job.title)) { titleMissed = true; continue; }
-              failedField = field; break;
-            }
+            const verdict = titleGate(job.title);
+            if (verdict === 'rescue') { titleMissed = true; continue; }
+            if (verdict === 'reject') { failedField = field; break; }
           } else {
             const value = declaredFieldValue(job, field);
             if (isFieldAbsent(value)) sawAbsentField = true;
