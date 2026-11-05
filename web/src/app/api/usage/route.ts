@@ -24,6 +24,11 @@ let planInFlight: Promise<Plan> | null = null;
 const PLAN_TTL_MS = 5 * 60_000;
 const scanner = createUsageScanner({ root: path.join(os.homedir(), ".claude", "projects") });
 
+// Wait this long for a fresh plan lookup before answering with what is cached.
+// A normal lookup takes under a second; a slow or hung one (each candidate binary
+// can take up to its timeout) must not hold up the estimate or hide the meter.
+const PLAN_GRACE_MS = 1500;
+
 async function plan(): Promise<Plan> {
   if (planCache && Date.now() - planCache.at < PLAN_TTL_MS) return planCache.plan;
   if (!planInFlight) {
@@ -36,7 +41,14 @@ async function plan(): Promise<Plan> {
         planInFlight = null;
       });
   }
-  return planInFlight;
+  // The lookup keeps running and fills the cache for later polls; if it is slow
+  // the response carries the last known plan (or none, so the estimate shows).
+  const stale = planCache?.plan ?? null;
+  let timer: ReturnType<typeof setTimeout>;
+  const grace = new Promise<Plan>((resolve) => {
+    timer = setTimeout(() => resolve(stale), PLAN_GRACE_MS);
+  });
+  return Promise.race([planInFlight, grace]).finally(() => clearTimeout(timer));
 }
 
 export async function GET() {

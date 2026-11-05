@@ -101,8 +101,12 @@ async function run(bin, { exec = execFile } = {}) {
   const cwd = await fsPromises.mkdtemp(path.join(os.tmpdir(), "career-ops-usage-"));
   try {
     return await new Promise((resolve, reject) => {
-      // user settings only: this read-only query never needs project config.
-      const launch = prepareCliLaunch(bin, ["-p", "/usage", "--output-format", "json", "--setting-sources", "user"]);
+      const launch = prepareCliLaunch(bin, [
+        "-p", "/usage", "--output-format", "json",
+        // user settings only, and no user hooks: a SessionStart hook would
+        // otherwise fire on every cache refresh for a command that makes no model turn.
+        "--setting-sources", "user", "--settings", '{"disableAllHooks":true}',
+      ]);
       exec(
         launch.command,
         launch.args,
