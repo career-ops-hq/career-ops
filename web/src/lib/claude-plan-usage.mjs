@@ -62,16 +62,25 @@ export async function candidateBinaries({ fs = fsPromises, home = os.homedir() }
   return out;
 }
 
-function run(bin, { exec = execFile } = {}) {
-  return new Promise((resolve, reject) => {
-    exec(
-      bin,
-      ["-p", "/usage", "--output-format", "json"],
-      // tmpdir keeps the run out of any project's context and transcripts.
-      { timeout: TIMEOUT_MS, maxBuffer: 1 << 20, cwd: os.tmpdir(), windowsHide: true, env: { ...process.env, NO_COLOR: "1" } },
-      (err, stdout) => (err ? reject(err) : resolve(stdout)),
-    );
-  });
+async function run(bin, { exec = execFile } = {}) {
+  // A private (0700) directory, not the shared tmpdir: the CLI reads project
+  // settings from its working directory, and another local user must not be
+  // able to plant them there. It also keeps the run out of any real project's
+  // context and transcripts.
+  const cwd = await fsPromises.mkdtemp(path.join(os.tmpdir(), "career-ops-usage-"));
+  try {
+    return await new Promise((resolve, reject) => {
+      exec(
+        bin,
+        // user settings only: this read-only query never needs project config.
+        ["-p", "/usage", "--output-format", "json", "--setting-sources", "user"],
+        { timeout: TIMEOUT_MS, maxBuffer: 1 << 20, cwd, windowsHide: true, env: { ...process.env, NO_COLOR: "1" } },
+        (err, stdout) => (err ? reject(err) : resolve(stdout)),
+      );
+    });
+  } finally {
+    await fsPromises.rm(cwd, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /**
