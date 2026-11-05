@@ -11,6 +11,21 @@
 
 const FEED_URL = 'https://remotive.com/api/remote-jobs';
 
+/**
+ * Epoch ms for `publication_date`, or undefined when absent or unparseable.
+ * The feed writes it with no offset (2026-10-27T12:56:13), which Date.parse
+ * reads as the machine's local time. Read it as UTC instead, so the same row
+ * gets the same age on every machine; a few hours either way doesn't move a
+ * max_posting_age_days cut.
+ */
+export function toEpochMs(value) {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const v = value.trim();
+  const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(v);
+  const parsed = Date.parse(/T\d/.test(v) && !hasOffset ? `${v}Z` : v);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 /** @type {Provider} */
 export default {
   id: 'remotive',
@@ -19,7 +34,7 @@ export default {
    * Fetches and normalizes postings from the Remotive public feed.
    * @param {{ name?: string }} entry - The job_boards entry being processed.
    * @param {{ fetchJson: (url: string, opts?: { redirect?: 'error'|'follow'|'manual' }) => Promise<any> }} ctx - HTTP context.
-   * @returns {Promise<Array<{title: string, url: string, company: string, location: string}>>}
+   * @returns {Promise<Array<{title: string, url: string, company: string, location: string, postedAt?: number}>>}
    */
   async fetch(entry, ctx) {
     // redirect:'error' prevents SSRF via server-side redirects
@@ -32,11 +47,16 @@ export default {
       .filter(j => j && typeof j === 'object'
         && typeof j.title === 'string' && j.title.trim() !== ''
         && typeof j.url === 'string' && /^https?:\/\//i.test(j.url.trim()))
-      .map(j => ({
-        title: j.title.trim(),
-        url: j.url.trim(),
-        company: typeof j.company_name === 'string' && j.company_name.trim() ? j.company_name.trim() : (entry.name || 'Remotive'),
-        location: typeof j.candidate_required_location === 'string' ? j.candidate_required_location.trim() : '',
-      }));
+      .map(j => {
+        const job = {
+          title: j.title.trim(),
+          url: j.url.trim(),
+          company: typeof j.company_name === 'string' && j.company_name.trim() ? j.company_name.trim() : (entry.name || 'Remotive'),
+          location: typeof j.candidate_required_location === 'string' ? j.candidate_required_location.trim() : '',
+        };
+        const postedAt = toEpochMs(j.publication_date);
+        if (postedAt !== undefined) job.postedAt = postedAt;
+        return job;
+      });
   },
 };

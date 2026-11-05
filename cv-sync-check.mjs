@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -83,11 +84,46 @@ function main() {
       : 'config/profile.yml not found. Copy from config/profile.example.yml and fill in your details.');
   } else {
     const profileContent = readFileSync(profilePath, 'utf-8');
-    const requiredFields = ['full_name', 'email', 'location'];
-    for (const field of requiredFields) {
-      if (!profileContent.includes(field) || profileContent.includes(`"Jane Smith"`)) {
-        warnings.push(`config/profile.yml may still have example data. Check field: ${field}`);
-        break;
+    // Match the VALUE of each required field under `candidate`, against the
+    // parsed YAML only. The shipped template documents optional fields with
+    // commented-out examples (`#   # signature_name: "Jane Smith"`), and a
+    // whole-file substring search treated that comment as proof the profile
+    // was unedited — then reported the first field it checked (`full_name`),
+    // naming an innocent field on a correctly filled profile. A line-based
+    // regex was not enough either: it was not scoped to `candidate` (an
+    // unrelated top-level `location:` mapping satisfied the check), and its
+    // `\s*` could consume the newline after an empty `full_name:` and capture
+    // the next key, hiding the missing value. Parse the document with loadYaml
+    // (lib/yaml-document.mjs, the shared entry point: it returns null for an
+    // empty or comment-only file instead of throwing) so only a real
+    // `candidate[field]` string counts.
+    let candidate;
+    try {
+      candidate = loadYaml(profileContent)?.candidate ?? {};
+    } catch (err) {
+      candidate = null;
+      warnings.push(`config/profile.yml could not be parsed as YAML: ${err.message.split('\n')[0]}`);
+    }
+    if (candidate !== null) {
+      const requiredFields = ['full_name', 'email', 'location'];
+      for (const field of requiredFields) {
+        const raw = candidate[field];
+        // Only a string is a usable value for these three fields. Coercing with
+        // String() made `full_name: {first: Jane}` pass as "[object Object]" and
+        // a bare `email: 12345` pass as "12345" — an invalid field the check was
+        // meant to catch, accepted without a warning.
+        const value = typeof raw === 'string' ? raw.trim() : '';
+        if (!value || value.toLowerCase() === 'jane smith') {
+          // A string with no content (`full_name: ""`) is still a text value, so
+          // it is "missing or empty"; only a wrong type is "not a text value".
+          const detail = value
+            ? ` (still "${value}")`
+            : raw == null || typeof raw === 'string'
+              ? ' (missing or empty)'
+              : ' (not a text value)';
+          warnings.push(`config/profile.yml may still have example data. Check field: ${field}${detail}`);
+          break;
+        }
       }
     }
   }

@@ -155,14 +155,25 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-/** `city` → `municipality` → `region` → country, whichever the ad carries. */
+/**
+ * `{place}, {region}, {country}` from whichever parts the ad carries, where
+ * place is `city`, else `municipality`. The region and country are kept, not
+ * just the most specific part: a bare town ("Västerås") matches no
+ * `location_filter` entry for Sweden, so with a non-empty `allow` list every
+ * ad from an unlisted town was dropped as out of region. Repeated parts
+ * (a city named like its municipality or region) are written once.
+ */
 function formatLocation(address) {
   if (!address || typeof address !== 'object') return '';
-  for (const field of ['city', 'municipality', 'region', 'country']) {
-    const value = address[field];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return '';
+  const text = (field) => (typeof address[field] === 'string' ? address[field].trim() : '');
+  const parts = [text('city') || text('municipality'), text('region'), text('country')].filter(Boolean);
+  const seen = new Set();
+  return parts.filter((part) => {
+    const key = part.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).join(', ');
 }
 
 /**

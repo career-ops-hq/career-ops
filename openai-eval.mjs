@@ -3,7 +3,7 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Together, Groq, DeepSeek, Zhipu GLM,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, cheapaimodel, Together, Groq, DeepSeek, Zhipu GLM,
  * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
@@ -30,6 +30,7 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
@@ -39,9 +40,16 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
+import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
-  isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
+  isPostingUrl, normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+
+// Ambient guard over global fetch (idempotent); the explicit gate below is the
+// primary layer, this covers anything the script hands to fetch directly.
+installPiiInterceptor();
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -64,6 +72,7 @@ const PATHS = {
   cv:        join(DATA_ROOT, 'cv.md'),
   profileYml: getProfilePath(),
   profile:    join(DATA_ROOT, 'modes', '_profile.md'),
+  custom:     join(DATA_ROOT, 'modes', '_custom.md'),
   reports:    join(DATA_ROOT, 'reports'),
   // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
   // regardless would drop the addition somewhere the merge it instructs never
@@ -93,7 +102,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <id>     Model id            (env OPENAI_MODEL, default gpt-4o-mini)
+    --model <id>     Model id            (env OPENAI_MODEL; MiniMax direct default
+                                         MiniMax-M3.1-Flash, otherwise gpt-4o-mini)
     --url <base>     OpenAI-compatible base URL, including any /v1
                      (env OPENAI_BASE_URL, default https://api.openai.com/v1)
     --key <key>      API key             (env OPENAI_API_KEY)
@@ -111,10 +121,15 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     Requesty:    --url https://router.requesty.ai/v1  --model deepseek/deepseek-chat
     Cheaper Inference: --url https://api.cheaperinference.com/v1  --model gpt-5.4-mini
     API Route:   --url https://global.api-route.com/v1  --model gpt-5.5
+    Runcrate:    --url https://api.runcrate.ai/v1  --model deepseek-ai/DeepSeek-V4.1-Flash
+    CloudGPU:    --url https://cloudgpu.app/v1  --model deepseek-v4.1-flash
+    cheapaimodel: --url https://api.cheapaimodel.ai/v1  --model deepseek-v4-1-flash
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
     Zhipu GLM:   --url https://open.bigmodel.cn/api/paas/v4  --model glm-4-flash
+    MiniMax:     --url https://api.minimax.io/v1       --model MiniMax-M3.1-Flash
+                 --url https://api.minimax.cn/v1       --model MiniMax-M3
     LM Studio:   --url http://localhost:1234/v1        --model <loaded-model>   (no key)
 
   EXAMPLES
@@ -127,7 +142,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 // Parse flags
 let jdText     = '';
 let postingUrl = '';
-let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+let modelName  = process.env.OPENAI_MODEL || '';
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 let apiKey     = process.env.OPENAI_API_KEY || '';
 let saveReport = true;
@@ -197,6 +212,13 @@ let endpointHost;
     process.exit(1);
   }
   endpointHost = parsed.hostname;
+  // Resolve the default after CLI flags, without replacing saved/custom models.
+  // Limit this to the direct API; subscription and gateway routes are separate.
+  if (!modelName) {
+    const isMiniMax = ['https://api.minimax.io', 'https://api.minimax.cn'].includes(parsed.origin)
+      && parsed.pathname === '/v1';
+    modelName = isMiniMax ? 'MiniMax-M3.1-Flash' : 'gpt-4o-mini';
+  }
   const isLoopback = endpointHost === 'localhost' || endpointHost === '127.0.0.1' || endpointHost === '::1';
 
   if (!isLoopback && parsed.protocol !== 'https:') {
@@ -252,6 +274,8 @@ const ofertaLogic   = readFile(PATHS.oferta,     'modes/oferta.md');
 const cvContent     = readFile(PATHS.cv,         'cv.md');
 const profileYml    = readFile(PATHS.profileYml, 'config/profile.yml');
 const profileContent = readFile(PATHS.profile,   'modes/_profile.md');
+// _custom.md is optional: an absent file is a valid end state, so no warning.
+const customContent = existsSync(PATHS.custom) ? readFileSync(PATHS.custom, 'utf-8').trim() : '';
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
@@ -263,6 +287,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   cvContent,
   profileYml,
   profileContent,
+  customContent,
   jdText,
   noCompress,
   modelName,
@@ -338,31 +363,56 @@ if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
 console.log(`\n🔒  Privacy: your cv.md + JD will be sent to ${endpointHost}.`);
 console.log(`🤖  Calling ${modelName} via ${endpointHost}... this may take a minute.\n`);
 
+// One evaluation is one conversation: a single id for every request in this run.
+const SESSION_ID = randomUUID();
+// VERSION may carry a release-please marker ("1.38.0 # x-release-please-version").
+let careerOpsVersion;
+try { careerOpsVersion = readFileSync(join(ROOT, 'VERSION'), 'utf-8').trim().split(/\s+/)[0] || undefined; } catch { /* default User-Agent version */ }
+
 const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+// OpenCode Go asks for a session id and an own user agent (observed: HTTP 400 MissingSessionID without it):
+// https://opencode.ai/v2/docs/console/go/#where-can-i-use-it
+Object.assign(headers, endpointHeaders(endpointHost, SESSION_ID, careerOpsVersion));
 
 let evaluationText;
 try {
+  // Privacy gate: inspect the complete serialized request before it leaves the
+  // machine. Shared boundary so openai-eval and openai-tailor cannot diverge.
+  // The retry is a second body, so it is checked on its own.
   // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
   // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
   // Header-Timeout, bevor die erste Zeile ankommt (8 t/s × 22k-Prefill).
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
+  const signal = AbortSignal.timeout(timeoutMs);
+  const send = (withUsage) => {
+    const requestBody = JSON.stringify({
       model:    modelName,
       messages: [
         buildSystemMessage(systemPrompt, endpointHost),
         { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
       stream:      true,
+      ...(withUsage && { stream_options: { include_usage: true } }),
       temperature: 0.4,
-    }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+    });
+    assertLlmRequestAllowed(endpoint, requestBody);
+    return fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: requestBody,
+      signal,
+    });
+  };
+
+  let res = await send(true);
+  let body = res.ok ? '' : await res.text();
+  // Mistral, among others, answers an unknown field with 400/422 and names it.
+  if ((res.status === 400 || res.status === 422) && /stream_options|include_usage/.test(body)) {
+    res = await send(false);
+    body = res.ok ? '' : await res.text();
+  }
 
   if (!res.ok) {
-    const body = await res.text();
     console.error(`❌  API error: HTTP ${res.status}`);
     console.error(`    ${body.slice(0, 300)}`);
     if (res.status === 401 || res.status === 403) {
@@ -379,6 +429,7 @@ try {
   const decoder = new TextDecoder();
   let sseBuf = '';
   let thinkOpen = false;
+  let streamUsage;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -392,6 +443,7 @@ try {
       if (payload === '[DONE]') continue;
       let delta;
       try { delta = JSON.parse(payload); } catch { continue; }
+      streamUsage = delta.usage ?? delta.x_groq?.usage ?? streamUsage;
       const d = delta.choices?.[0]?.delta ?? {};
       if (d.reasoning_content) {
         if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
@@ -403,6 +455,7 @@ try {
     }
   }
   if (thinkOpen) parts.push('\n</think>\n');
+  if (streamUsage) tracker.record('evaluation', normalizeOpenAIUsage(streamUsage));
   evaluationText = parts.join('').trim();
   if (!evaluationText) {
     console.error('❌  The endpoint returned an empty response.');
@@ -429,25 +482,14 @@ console.log(evaluationText);
 // ---------------------------------------------------------------------------
 // Parse score summary
 // ---------------------------------------------------------------------------
-const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
-
-let company    = 'unknown';
-let role       = 'unknown';
-let score      = '?';
-let archetype  = 'unknown';
-let legitimacy = 'unknown';
-
-if (summaryMatch) {
-  const extract = (key) => {
-    const m = summaryMatch[1].match(new RegExp(`${key}:\\s*(.+)`));
-    return m ? m[1].trim() : 'unknown';
-  };
-  company    = extract('COMPANY');
-  role       = extract('ROLE');
-  score      = extract('SCORE');
-  archetype  = extract('ARCHETYPE');
-  legitimacy = extract('LEGITIMACY');
-}
+const summary    = parseScoreSummary(evaluationText);
+const company    = summary?.company    || 'unknown';
+const role       = summary?.role       || 'unknown';
+const score      = summary?.score      || '?';
+const archetype  = summary?.archetype  || 'unknown';
+const legitimacy = summary?.legitimacy || 'unknown';
+// An addition for company and role "unknown" would merge as a real application.
+const trackable  = Boolean(summary?.company && summary.role && summary.role.toLowerCase() !== 'unknown');
 
 // ---------------------------------------------------------------------------
 // Save report
@@ -494,41 +536,46 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     writeFileSync(reportPath, reportContent, 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
-    // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
-    // into data/applications.md. Evaluations persist as a tracker addition and
-    // merge-tracker.mjs applies dedup, status validation, report-link
-    // normalization and the tracker lock. A pasted literal skipped all of that,
-    // and at 8 cells it was also silently dropped by every reader's width guard.
-    // Field order is the TSV contract's -- status BEFORE score; merge-tracker
-    // swaps them into the tracker's own column order, resolved by name.
-    const additionName = `${num}-${companySlug}.tsv`;
-    const trackerFields = [
-      String(parseInt(num, 10)),
-      today,
-      tsvSafe(company),
-      tsvSafe(role),
-      'Evaluated',
-      normalizedTrackerScore(score),
-      '❌',
-      `[${num}](reports/${filename})`,
-      tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
-    ];
-    // Optional tenth field, labelled in the header below so it resolves by name.
-    // Pass 0 can then match on it instead of waiting for --backfill-urls.
-    if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
-    // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
-    // so this row cannot be ingested into the wrong columns. The optional URL
-    // needs its own label -- values are read BY label, so a tenth field the
-    // header does not name is not mis-mapped, it is dropped.
-    const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
-    mkdirSync(PATHS.trackerAdditions, { recursive: true });
-    writeFileSync(
-      join(PATHS.trackerAdditions, additionName),
-      `${additionHeader}\n${trackerFields.join('\t')}\n`,
-      'utf-8',
-    );
-    console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
-    console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
+    if (!trackable) {
+      console.warn(`\n⚠️   The reply has no ${summary ? 'company and role in its SCORE_SUMMARY' : 'SCORE_SUMMARY block'}, so no tracker row was written.`);
+      console.warn('    Re-run the evaluation, or use a model that follows the report format.');
+    } else {
+      // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
+      // into data/applications.md. Evaluations persist as a tracker addition and
+      // merge-tracker.mjs applies dedup, status validation, report-link
+      // normalization and the tracker lock. A pasted literal skipped all of that,
+      // and at 8 cells it was also silently dropped by every reader's width guard.
+      // Field order is the TSV contract's -- status BEFORE score; merge-tracker
+      // swaps them into the tracker's own column order, resolved by name.
+      const additionName = `${num}-${companySlug}.tsv`;
+      const trackerFields = [
+        String(parseInt(num, 10)),
+        today,
+        tsvSafe(company),
+        tsvSafe(role),
+        'Evaluated',
+        normalizedTrackerScore(score),
+        '❌',
+        `[${num}](reports/${filename})`,
+        tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
+      ];
+      // Optional tenth field, labelled in the header below so it resolves by name.
+      // Pass 0 can then match on it instead of waiting for --backfill-urls.
+      if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
+      // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
+      // so this row cannot be ingested into the wrong columns. The optional URL
+      // needs its own label -- values are read BY label, so a tenth field the
+      // header does not name is not mis-mapped, it is dropped.
+      const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+      mkdirSync(PATHS.trackerAdditions, { recursive: true });
+      writeFileSync(
+        join(PATHS.trackerAdditions, additionName),
+        `${additionHeader}\n${trackerFields.join('\t')}\n`,
+        'utf-8',
+      );
+      console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
+      console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
+    }
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
   } finally {

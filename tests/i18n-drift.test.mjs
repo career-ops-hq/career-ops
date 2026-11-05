@@ -327,7 +327,7 @@ test('CLI rejects invalid flags, missing operands and unknown languages before p
     ['--root', root], ['--threshold', '80'],
   ]) {
     const result = runCLI(root, args);
-    assert.equal(result.status, 1, `${args.join(' ')}: ${result.stderr}`);
+    assert.equal(result.status, 1, describeSpawn(result, `${args.join(' ')}`));
     assert.ok(result.stderr.trim(), 'usage errors explain the invalid argument');
     assert.equal(result.stdout, '');
   }
@@ -341,6 +341,6 @@ test('CLI help works without a modes directory, while a normal run reports the m
   assert.match(help.stdout, /i18n-drift\.mjs/);
   assert.match(help.stdout, /--lang/);
   const result = runCLI(root, []);
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.match(result.stderr, /modes/i);
 });

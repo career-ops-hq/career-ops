@@ -36,6 +36,7 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { detectNonContentMarker } from './check-jd-archive.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -498,7 +499,7 @@ async function main() {
     }
   } else {
     // Sequential — project convention: never Playwright in parallel
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       for (const { url, company, role } of targets) {
         try {

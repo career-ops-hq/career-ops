@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, rmSync } from './helpers.mjs';
 import { resolveColumns, parseTrackerRow, trackerRowIdentity } from '../tracker-parse.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'set-status.mjs');
 const HEADER = [
@@ -58,7 +59,7 @@ function run(f, ...args) {
 test('the reviewed row and status are written, with the ledger row', (t) => {
   const f = fixture(t);
   const r = run(f, '--row', '1', 'Interview', '--expect-row', identityOf(ROW_1), '--expect-status', 'Applied');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.equal(r.json.changed, true);
   assert.match(readFileSync(f.file, 'utf8'), /\| 1 \|.+\| Interview \|/);
   assert.match(readFileSync(join(f.data, 'status-log.tsv'), 'utf8'), /^1\t\d{4}-\d{2}-\d{2}\tApplied\tInterview\tset-status\t$/m);
@@ -68,7 +69,7 @@ test('a write to another row in the meantime does not void the review', (t) => {
   const f = fixture(t);
   writeFileSync(f.file, tracker([ROW_1, ROW_2.replace(/\| - \|$/, '| other note |')]));
   const r = run(f, '--row', '1', 'Interview', '--expect-row', identityOf(ROW_1), '--expect-status', 'Applied');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.equal(r.json.changed, true);
 });
 
@@ -80,7 +81,7 @@ test('an edited row is refused, even when it already carries the new status', (t
   ]) {
     writeFileSync(f.file, tracker([edited, ROW_2]));
     const r = run(f, '--row', '1', 'Interview', '--expect-row', identityOf(ROW_1), '--expect-status', 'Applied');
-    assert.equal(r.status, 3, r.stderr);
+    assert.equal(r.status, 3, describeSpawn(r));
     assert.equal(r.json.code, 'row-changed');
     assert.equal(readFileSync(f.file, 'utf8'), tracker([edited, ROW_2]), 'the tracker must not change');
     assert.equal(existsSync(join(f.data, 'status-log.tsv')), false, 'no ledger row for a refused write');
@@ -92,7 +93,7 @@ test('a status changed since review is refused and named', (t) => {
   const moved = ROW_1.replace('| Applied |', '| Rejected |');
   writeFileSync(f.file, tracker([moved, ROW_2]));
   const r = run(f, '--row', '1', 'Interview', '--expect-row', identityOf(ROW_1), '--expect-status', 'Applied');
-  assert.equal(r.status, 3, r.stderr);
+  assert.equal(r.status, 3, describeSpawn(r));
   assert.equal(r.json.code, 'status-changed');
   assert.equal(r.json.currentStatus, 'Rejected');
   assert.equal(readFileSync(f.file, 'utf8'), tracker([moved, ROW_2]));
@@ -103,7 +104,7 @@ test('a row already at the new status is a no-op, not a status conflict', (t) =>
   const current = ROW_1.replace('| Applied |', '| Interview |');
   writeFileSync(f.file, tracker([current, ROW_2]));
   const r = run(f, '--row', '1', 'Interview', '--expect-row', identityOf(ROW_1), '--expect-status', 'Applied');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.equal(r.json.changed, false);
 });
 
@@ -111,17 +112,17 @@ test('a row already at the new status under an alias is not a status conflict ei
   const f = fixture(t);
   writeFileSync(f.file, tracker([ROW_1.replace('| Applied |', '| interview |'), ROW_2]));
   const r = run(f, '--row', '1', 'Interview', '--expect-row', identityOf(ROW_1), '--expect-status', 'Applied');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.match(readFileSync(f.file, 'utf8'), /\| 1 \|.+\| Interview \|/);
 });
 
 test('an alias of the expected status still matches, and a malformed hash is a usage error', (t) => {
   const f = fixture(t);
   const r = run(f, '--row', '1', 'Interview', '--expect-row', identityOf(ROW_1), '--expect-status', 'applied');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   const bad = spawnSync(process.execPath, [SCRIPT, '--row', '2', 'Interview', '--expect-row', 'abc'], {
     cwd: f.root, env: f.env, encoding: 'utf8', timeout: 30_000,
   });
-  assert.equal(bad.status, 1);
+  assert.equal(bad.status, 1, describeSpawn(bad));
   assert.match(bad.stderr, /--expect-row expects a lowercase SHA-256 hash/);
 });

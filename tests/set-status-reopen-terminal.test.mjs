@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -30,12 +31,12 @@ function setStatus(from, to) {
 
 test('leaving a terminal state warns on stderr', () => {
   const r = setStatus('Rejected', 'Applied');
-  assert.equal(r.status, 0);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.match(r.stderr, /#7 was Rejected, a terminal state\. Reopened as Applied\./);
 });
 
 test('a forward move from an open state does not warn', () => {
   const r = setStatus('Evaluated', 'Applied');
-  assert.equal(r.status, 0);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.doesNotMatch(r.stderr, /terminal state/);
 });

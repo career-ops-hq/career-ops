@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { ROOT, pass, fail } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const initial = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|---|---|---|---|---|---|---|---|\n| 1 | 2026-01-05 | Fictional | Engineer | 4/5 | Applied | — | — | notes |\n';
 function check(label, fn) {
@@ -33,7 +34,7 @@ for (const kind of ['missing', 'directory', 'empty']) {
     check(`${kind} explicit CV returns invalid-cv without mutation ${flags.join(' ')}`, ({ root, tracker, run }) => {
       const path = kind === 'missing' ? join(root, 'missing.pdf') : kind === 'directory' ? root : '';
       const r = run(['--cv', path, ...flags]);
-      assert.equal(r.status, 1, r.stderr);
+      assert.equal(r.status, 1, describeSpawn(r));
       assert.equal(JSON.parse(r.stdout).code, 'invalid-cv');
       unchanged(root, tracker);
     });
@@ -45,7 +46,7 @@ for (const flags of [[], ['--dry-run']]) {
     const pdf = join(root, 'empty.pdf');
     writeFileSync(pdf, '');
     const r = run(['--cv', pdf, ...flags]);
-    assert.equal(r.status, 1, r.stderr);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.equal(JSON.parse(r.stdout).code, 'invalid-cv');
     unchanged(root, tracker);
     assert.equal(readFileSync(pdf).length, 0);
@@ -76,7 +77,7 @@ check('existing absolute PDF outside the workspace is archived rather than the m
   const bytes = '%PDF-fictional selected submission';
   writeFileSync(pdf, bytes);
   const selected = run(['--cv', pdf]);
-  assert.equal(selected.status, 0, selected.stderr);
+  assert.equal(selected.status, 0, describeSpawn(selected));
   assert.equal(readFileSync(join(root, 'data', 'outcomes', '1_fictional_engineer', 'submitted_cv.pdf'), 'utf8'), bytes);
   assert.equal(readFileSync(pdf, 'utf8'), bytes);
 });
@@ -87,7 +88,7 @@ check('relative CV archives the data-root PDF rather than a same-named cwd file'
   writeFileSync(join(root, 'submitted.pdf'), '%PDF-data-root submission');
   writeFileSync(join(cwd, 'submitted.pdf'), '%PDF-wrong cwd submission');
   const selected = run(['--cv', 'submitted.pdf']);
-  assert.equal(selected.status, 0, selected.stderr);
+  assert.equal(selected.status, 0, describeSpawn(selected));
   assert.equal(readFileSync(join(root, 'data', 'outcomes', '1_fictional_engineer', 'submitted_cv.pdf'), 'utf8'), '%PDF-data-root submission');
 });
 
@@ -95,7 +96,7 @@ for (const flags of [[], ['--dry-run']]) {
   check(`relative CV missing in the data root rejects a cwd decoy ${flags.join(' ')}`, ({ root, tracker, cwd, run }) => {
     writeFileSync(join(cwd, 'submitted.pdf'), '%PDF-wrong cwd submission');
     const r = run(['--cv', 'submitted.pdf', ...flags]);
-    assert.equal(r.status, 1, r.stderr);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.equal(JSON.parse(r.stdout).code, 'invalid-cv');
     unchanged(root, tracker);
   });
@@ -106,7 +107,7 @@ check('relative PDF preview resolves cleanup in the data root without mutation',
   const pdf = join(root, 'output', 'submitted.pdf');
   writeFileSync(pdf, '%PDF-data-root submission');
   const r = run(['--cv', join('output', 'submitted.pdf'), '--clean-output', '--dry-run']);
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.deepEqual(JSON.parse(r.stdout).cleanupCandidates, [pdf]);
   assert.equal(readFileSync(pdf, 'utf8'), '%PDF-data-root submission');
   unchanged(root, tracker);
@@ -114,7 +115,7 @@ check('relative PDF preview resolves cleanup in the data root without mutation',
 
 check('omitted --cv retains automatic master-CV fallback in an independent workspace', ({ root, run }) => {
   const automatic = run([]);
-  assert.equal(automatic.status, 0, automatic.stderr);
+  assert.equal(automatic.status, 0, describeSpawn(automatic));
   assert.equal(readFileSync(join(root, 'data', 'outcomes', '1_fictional_engineer', 'submitted_cv.md'), 'utf8'), '# Fictional master CV\n');
 });
 
@@ -187,13 +188,13 @@ check('a failed partial CV write leaves no archive to poison the next attempt', 
   const r = run(['--cv', pdf], cvPreload(cwd, pdf, 'archive-partial'));
   const archive = join(root, 'data', 'outcomes', '1_fictional_engineer');
   const dest = join(archive, 'submitted_cv.pdf');
-  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.equal(JSON.parse(r.stdout).code, 'invalid-cv');
   assert.equal(readFileSync(tracker, 'utf8'), initial);
   assert.equal(existsSync(join(archive, 'outcome.md')), false);
   const leftover = existsSync(dest) ? readFileSync(dest, 'utf8') : null;
   const retry = run(['--cv', pdf]);
-  assert.equal(retry.status, 0, retry.stderr);
+  assert.equal(retry.status, 0, describeSpawn(retry));
   assert.equal(leftover, null, `partial archive survived; retry archived ${JSON.stringify(readFileSync(dest, 'utf8'))}`);
   assert.equal(readFileSync(dest, 'utf8'), bytes);
   assert.equal(readFileSync(pdf, 'utf8'), bytes);
@@ -205,7 +206,7 @@ check('a concurrently published CV archive is preserved', ({ root, cwd, run }) =
   writeFileSync(pdf, '%PDF-selected submission');
   const r = run(['--cv', pdf], cvPreload(cwd, pdf, 'archive-race'));
   const archive = join(root, 'data', 'outcomes', '1_fictional_engineer');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.equal(readFileSync(join(archive, 'submitted_cv.pdf'), 'utf8'), '%PDF-earlier archived submission');
   assert.equal(readdirSync(archive).some(name => name.startsWith('.submitted-cv-')), false);
 });
@@ -217,7 +218,7 @@ for (const code of ['EPERM', 'ENOTSUP', 'ENOSYS', 'EXDEV']) {
     writeFileSync(pdf, bytes);
     const r = run(['--cv', pdf], cvPreload(cwd, pdf, `link-${code}`));
     const archive = join(root, 'data', 'outcomes', '1_fictional_engineer');
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.equal(readFileSync(join(archive, 'submitted_cv.pdf'), 'utf8'), bytes);
     assert.equal(readFileSync(pdf, 'utf8'), bytes);
     assert.equal(readdirSync(archive).some(name => name.startsWith('.submitted-cv-')), false);
@@ -229,7 +230,7 @@ check('exclusive-copy fallback preserves a concurrently published CV', ({ root, 
   writeFileSync(pdf, '%PDF-selected submission');
   const r = run(['--cv', pdf], cvPreload(cwd, pdf, 'link-race'));
   const archive = join(root, 'data', 'outcomes', '1_fictional_engineer');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.equal(readFileSync(join(archive, 'submitted_cv.pdf'), 'utf8'), '%PDF-earlier archived submission');
   assert.equal(readdirSync(archive).some(name => name.startsWith('.submitted-cv-')), false);
 });
@@ -241,14 +242,14 @@ for (const mode of ['copy-error', 'link-EIO']) {
     writeFileSync(pdf, bytes);
     const r = run(['--cv', pdf], cvPreload(cwd, pdf, mode));
     const archive = join(root, 'data', 'outcomes', '1_fictional_engineer');
-    assert.equal(r.status, 1, r.stderr);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.equal(JSON.parse(r.stdout).code, 'invalid-cv');
     assert.equal(readFileSync(tracker, 'utf8'), initial);
     assert.equal(existsSync(join(archive, 'outcome.md')), false);
     assert.equal(existsSync(join(archive, 'submitted_cv.pdf')), false);
     assert.equal(readdirSync(archive).some(name => name.startsWith('.submitted-cv-')), false);
     const retry = run(['--cv', pdf]);
-    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(retry.status, 0, describeSpawn(retry));
     assert.equal(readFileSync(join(archive, 'submitted_cv.pdf'), 'utf8'), bytes);
   });
 }
@@ -261,13 +262,13 @@ for (const mode of ['removed', 'replaced', 'read-error', 'archive-error']) {
     const r = run(['--cv', pdf], cvPreload(cwd, pdf, mode));
     const archive = join(root, 'data', 'outcomes', '1_fictional_engineer');
     if (mode === 'removed' || mode === 'replaced') {
-      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.status, 0, describeSpawn(r));
       assert.equal(readFileSync(join(archive, 'submitted_cv.pdf'), 'utf8'), bytes);
       assert.equal(existsSync(join(archive, 'submitted_cv.md')), false);
       if (mode === 'removed') assert.equal(existsSync(pdf), false);
       else assert.equal(readFileSync(pdf, 'utf8'), '%PDF-replacement CV');
     } else {
-      assert.equal(r.status, 1, r.stderr);
+      assert.equal(r.status, 1, describeSpawn(r));
       assert.equal(JSON.parse(r.stdout).code, 'invalid-cv');
       assert.equal(readFileSync(tracker, 'utf8'), initial);
       assert.equal(existsSync(join(archive, 'outcome.md')), false);

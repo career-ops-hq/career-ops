@@ -74,7 +74,8 @@ function churnLock(lockDir, everyMs) {
 // so the waiter never sees a free lock.
 // A remove-then-create swap would leave a gap another thread can slip through.
 // Resolves once the first owner is on disk; stop() is async because it ends the
-// worker.
+// worker, and resolves to the handoff count, read once nothing is renaming the
+// file.
 async function churnLockInWorker(lockDir, everyMs) {
   const worker = new Worker(`
     const { mkdirSync, writeFileSync } = require('node:fs');
@@ -111,10 +112,19 @@ async function churnLockInWorker(lockDir, everyMs) {
   return {
     async stop() {
       await worker.terminate();
+      const { token } = JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
       rmSync(lockDir, { recursive: true, force: true });
+      return Number(token.replace('handoff-', ''));
     },
   };
 }
+
+// The per-holder window for the tests of the extension rule. A window that sees
+// no handoff reads as wedged, so it has to outlast the longest gap a stalled
+// runner can leave between two handoffs, not just the handoff period. On
+// windows-latest gaps over 100ms failed these tests at windows of 100ms and
+// 150ms, from a worker thread as well.
+const EXTENSION_WINDOW_MS = 500;
 
 function fixtureRoot() {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-pipeline-lock-'));
@@ -490,26 +500,26 @@ async function settleOrGiveUp(promise, ms) {
 
 test('acquirePipelineLock: a lock that keeps changing hands does not time out a waiting caller', async () => {
   const root = fixtureRoot();
+  const p = join(root, 'data', 'pipeline.md');
+  const churn = await churnLockInWorker(`${p}.lock`, 40);
+  // Let the lock change hands for several times the caller's timeout, then
+  // free it. The caller must still be waiting, not dead.
+  const freeItLater = sleep(EXTENSION_WINDOW_MS * 2.6).then(() => churn.stop());
   try {
-    const p = join(root, 'data', 'pipeline.md');
-    const churn = churnLock(`${p}.lock`, 40);
-    // Let the lock change hands for several times the caller's timeout, then
-    // free it. The caller must still be waiting, not dead.
-    const freeItLater = sleep(600).then(() => churn.stop());
-
     const startedAt = Date.now();
-    // The old absolute deadline killed this caller at 150ms with
+    // The old absolute deadline killed this caller at its timeoutMs with
     // LockTimeoutError even though the lock was healthy and briskly shared —
     // which for agent-inbox.mjs meant its request was silently dropped. The
     // timeout is for a WEDGED holder, not for losing the retry lottery.
-    const lock = await acquirePipelineLock(p, { timeoutMs: 150, retryMs: 15 });
+    const lock = await acquirePipelineLock(p, { timeoutMs: EXTENSION_WINDOW_MS, retryMs: 15 });
     const elapsed = Date.now() - startedAt;
     lock.release();
-    await freeItLater;
+    const handoffs = await freeItLater;
 
-    assert.ok(elapsed > 400, `acquired after only ${elapsed}ms — the lock was not actually contended`);
-    assert.ok(churn.handoffs() > 5, `only ${churn.handoffs()} handoffs — the deadline was never crossed mid-contention`);
+    assert.ok(elapsed > EXTENSION_WINDOW_MS * 2, `acquired after only ${elapsed}ms — the lock was not actually contended`);
+    assert.ok(handoffs > 5, `only ${handoffs} handoffs — the deadline was never crossed mid-contention`);
   } finally {
+    await freeItLater;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -521,14 +531,16 @@ test('acquirePipelineLock: extended waiting is still bounded by maxWaitMs, so en
     const p = join(root, 'data', 'pipeline.md');
     // Progress must buy patience, never immortality: a lock handed round for
     // ever still has to fail the caller rather than block it indefinitely.
+    const maxWaitMs = EXTENSION_WINDOW_MS * 2.4;
     const startedAt = Date.now();
     await assert.rejects(
-      () => acquirePipelineLock(p, { timeoutMs: 100, retryMs: 10, maxWaitMs: 400 }),
+      () => acquirePipelineLock(p, { timeoutMs: EXTENSION_WINDOW_MS, retryMs: 10, maxWaitMs }),
       (err) => err instanceof LockTimeoutError,
     );
     const elapsed = Date.now() - startedAt;
-    assert.ok(elapsed >= 400, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
-    assert.ok(elapsed < 3000, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
+    assert.ok(elapsed >= maxWaitMs, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
+    // Under the default ceiling of ten windows, so an ignored maxWaitMs fails here.
+    assert.ok(elapsed < EXTENSION_WINDOW_MS * 8, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
   } finally {
     await churn.stop();
     rmSync(root, { recursive: true, force: true });

@@ -21,7 +21,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
       - name: Validate diff shape + line format
         id: check
@@ -63,7 +63,7 @@ jobs:
         # its failure must never turn a VALID signature's check red (30-jul,
         # first fork-signature #2311 sat blocked on exactly this).
         continue-on-error: true
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const login = context.payload.pull_request.user.login;
@@ -74,7 +74,7 @@ jobs:
       - name: Friendly fix-it (invalid)
         if: failure()
         continue-on-error: true
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const login = context.payload.pull_request.user.login;

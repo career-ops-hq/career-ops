@@ -175,6 +175,18 @@ func CanonicalizeLocation(raw string) string {
 	return strings.Join(normalized, ", ")
 }
 
+// ScoreTierLabels names the fit-quality tiers, best first. ComputeStatsMetrics
+// emits ScoreTiers in this order but omits a tier with no applications, so a
+// tier's position in ScoreTiers does not identify it; its label does. The
+// stats screen colours each slice by label from this list.
+var ScoreTierLabels = []string{
+	"Elite (≥4.5)",
+	"Strong (4.0-4.4)",
+	"Viable (3.5-3.9)",
+	"Moderate (3.0-3.4)",
+	"Below Bar (<3.0)",
+}
+
 // ComputeStatsMetrics builds dimension-based breakdowns (archetype, work
 // mode, location, pay, pay histogram, and insight captions) from parsed applications.
 func ComputeStatsMetrics(apps []model.CareerApplication) model.StatsMetrics {
@@ -354,15 +366,8 @@ func ComputeStatsMetrics(apps []model.CareerApplication) model.StatsMetrics {
 		}
 	}
 	if scoreTotal > 0 {
-		orderedTiers := []string{
-			"Elite (≥4.5)",
-			"Strong (4.0-4.4)",
-			"Viable (3.5-3.9)",
-			"Moderate (3.0-3.4)",
-			"Below Bar (<3.0)",
-		}
 		qualityBarCount := 0
-		for _, t := range orderedTiers {
+		for _, t := range ScoreTierLabels {
 			count := tierCounts[t]
 			if count > 0 {
 				sm.ScoreTiers = append(sm.ScoreTiers, model.LabelCountStat{

@@ -27,6 +27,13 @@ const cases = [
   ['Not _ spaced _ out', 'Not _ spaced _ out'],
   ['_open but never closed', '_open but never closed'],
   ['**Bold** and _italic_', '<strong>Bold</strong> and <em>italic</em>'],
+  // An address keeps its underscores: shown without them, it is no longer the
+  // address the mailto link holds, and a reader who copies it mails someone else.
+  ['a+_work_@example.com', 'a+_work_@example.com'],
+  ['_work_.jane@example.com', '_work_.jane@example.com'],
+  ['Mail x+_y_@example.com about _Orbit_', 'Mail x+_y_@example.com about <em>Orbit</em>'],
+  // Underscores around a whole address are italics, not part of it.
+  ['Write to _jane@example.com_.', 'Write to <em>jane@example.com</em>.'],
 ];
 for (const [input, want] of cases) {
   const got = body(input);

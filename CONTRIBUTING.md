@@ -231,6 +231,17 @@ section (syntax, scripts, dashboard, data contract, personal data, paths,
 etc.). A green `--only` run is **not** a green suite — always run the full
 `node test-all.mjs` before pushing.
 
+**A test that needs a real Chromium or a TeX engine** skips (or warns) where
+the tool is missing, and the `test` CI job installs neither. Declare the tool so
+that CI still runs it: call `toolRequired('browser')` in a node:test `skip`
+condition (from `tests/required-tools.mjs`), or `toolUnavailable('browser', …)`
+in place of `warn()` (from `tests/helpers.mjs`); `'latex'` for a TeX engine. The
+`tool-suites` CI job runs `node test-all.mjs --needs browser,latex` in the
+cv-visual Docker image, where a missing tool fails the run instead of skipping
+it.
+`tests/required-tools-declared.test.mjs` fails a suite that launches Chromium
+without declaring it.
+
 ### Checking translated mode structure
 
 Run `node i18n-drift.mjs --lang tr` (repeat `--lang` for several languages),

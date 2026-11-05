@@ -64,7 +64,8 @@ function fakeArchiveCodeRoot() {
     'session-activity.mjs', 'lib/is-main-module.mjs', 'check-jd-archive.mjs',
     'jd-capture.mjs', 'lib/cli-flags.mjs', 'lib/jd-archive-section.mjs', 'templates/states.yml',
     'tracker-aliases.json', 'lib/dir-lock.mjs', 'lib/run-bounded.mjs', 'lib/status-hooks.mjs',
-    'lib/yaml-document.mjs',
+    'lib/yaml-document.mjs', 'funnel-velocity.mjs', 'stats.mjs', 'followup-cadence.mjs', 'funnel-stages.mjs',
+    'lib/scan-history-columns.mjs', 'lib/tsv-formula-escape.mjs',
   ]) copyFileSync(join(ROOT, file), join(codeRoot, file));
   writeFileSync(join(codeRoot, 'archive-posting.mjs'), [
     "import { writeFileSync } from 'node:fs';",
@@ -212,13 +213,20 @@ test('--detach-jd-archive returns before a hung archive finishes', async () => {
     assert.ok(elapsed < 10_000, `set-status waited ${elapsed}ms for a detached archive`);
     const result = JSON.parse(raw.stdout);
     assert.equal(result.changed, true);
-    assert.deepEqual(result.jdArchiveTriggered, { attempted: true, detached: true });
+    const { pid: runnerPid, ...triggered } = result.jdArchiveTriggered;
+    assert.deepEqual(triggered, { attempted: true, detached: true });
+    assert.ok(Number.isInteger(runnerPid) && runnerPid > 0, 'no pid reported for the detached archive runner');
     assert.match(readFileSync(join(dir, 'data', 'applications.md'), 'utf-8'), /\| Interview \|/);
 
-    // The archive did start, and the timeout still applies without a parent.
-    const pid = Number(await waitFor(() => readIfExists(pidFile)));
-    assert.ok(pid > 0, 'the detached archive never started');
-    assert.equal(await waitFor(() => !isAlive(pid)), true, 'the detached archive outlived CAREER_OPS_JD_ARCHIVE_TIMEOUT_MS');
+    // The timeout still applies without a parent. Watch the runner, not the
+    // archive: lib/run-bounded.mjs exits only once the archive has, and the
+    // fake hangs 60s, so the runner ending inside that window proves the 3s
+    // bound fired. The archive's own pid file can't prove it: on a slow
+    // runner Node may still be booting the fake when the bound kills it, and
+    // the file is never written (#5931).
+    assert.equal(await waitFor(() => !isAlive(runnerPid), 30_000), true, 'the detached archive outlived CAREER_OPS_JD_ARCHIVE_TIMEOUT_MS');
+    const pid = Number(readIfExists(pidFile));
+    if (pid > 0) assert.equal(isAlive(pid), false, 'the bounded runner exited but left the archive running');
   } finally {
     cleanup(dir);
     rmSync(codeRoot, { recursive: true, force: true, maxRetries: 10 });

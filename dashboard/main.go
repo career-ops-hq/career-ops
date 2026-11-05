@@ -258,6 +258,16 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screens.PipelineOpenPDFMsg:
 		return m, openCmd(msg.Path)
 
+	case screens.PipelineCopyPDFPathMsg:
+		return m, copyPathCmd(msg.Path)
+
+	case screens.PipelineClipboardResultMsg:
+		// The copy runs asynchronously and the user may have left the pipeline
+		// meanwhile; the flash belongs to the pipeline whatever screen is shown.
+		pm, cmd := m.pipeline.Update(msg)
+		m.pipeline = pm
+		return m, cmd
+
 	case screens.PipelineGeneratePDFMsg:
 		return m, runGeneratePDF(msg)
 

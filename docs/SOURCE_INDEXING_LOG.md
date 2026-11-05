@@ -161,3 +161,27 @@ A general job board for Colombia. Measured: one GET of `https://www.magneto365.c
 **Rule 5 (aggregation stays in core).** Verified in code: the provider reads one search URL per entry, on `www.magneto365.com` / `magneto365.com` only.
 
 **Rule 6 (`robots.txt`).** Checked on 2026-10-23: one GET of `https://www.magneto365.com/robots.txt` with career-ops' default User-Agent, HTTP 200. Under `User-agent: *` it allows `/`, disallows `/*?` and `/manager/*`, and allows `/*paginator[page]`. Every URL the provider fetches carries `paginator[page]=N`, which the longer `Allow` covers; a configured search URL with other query parameters still carries it. No group names career-ops.
+
+---
+
+## jobs.cz and prace.cz
+
+| | |
+|---|---|
+| **Proposed by** | @kosinal (not the operator) |
+| **Provider** | `providers/jobscz.mjs`, `providers/pracecz.mjs` |
+| **PR** | [#5631](https://github.com/career-ops-hq/career-ops/pull/5631) · issue [#5627](https://github.com/career-ops-hq/career-ops/issues/5627) |
+| **Merged** | — |
+| **Status** | Proposed |
+
+**Rule 1 (real listings, identifiable employer, free for candidates).** Listings are individual offers, and each names its employer: a company line on every jobs.cz card, `company.publicName` on every prace.cz item. Listings are readable without an account, and the prace.cz footer links an advertising price list for employers ("Ceník inzerce"). Each offer page has an "Odpovědět" (reply) button leading to the portal's application form. It was opened by hand in a browser, as a candidate, on one offer of each portal (the providers never request it; prace.cz's `robots.txt` disallows `/odpovedni-formular/`): on both portals, sending an application requires no account and is free.
+
+**Rule 2 (canonical URL is the employer's).** jobs.cz cards link `https://www.jobs.cz/rpd/{id}/`, which redirects to the offer page, often on the employer's branded career site (`{employer}.jobs.cz/pd/{id}`). The listing exposes no direct ATS link, so `/rpd/{id}/` (without tracking params) is the canonical URL. On prace.cz, an item's `extended.careerPage.url`, the employer's branded page, is used when present; otherwise `https://www.prace.cz/nabidka/{advertId}/`.
+
+**Rule 3 (complete inventory, no paid placement).** Both portals mark promoted placement: "Příležitost dne" cards (`data-test-ad-status="jobsTip"`) on jobs.cz, `searchInfo.isPromoted` on prace.cz. Neither portal has a sort control. Walking every page of a search returns exactly the total the site shows: for "python", jobs.cz returned 281 unique offers over 10 pages, and prace.cz 63 over 2 pages. The providers walk all pages up to a cap, warn when the cap is hit, dedup by offer id, and leave ranking local. The id is the one in the offer URL on jobs.cz (`/rpd/{id}/`) and `advertId` on prace.cz, so an offer seen under both its branded career-page URL and `/nabidka/{advertId}/` is kept once.
+
+**Rule 4 (operator declared).** Alma Career Czechia s.r.o. runs both portals, according to their page footers. The proposer is not the operator, but a candidate using them.
+
+**Rule 5 (aggregation stays in core).** Each portal has its own provider. jobs.cz and prace.cz are separate portals, but many employers publish the same offer on both: for "python", 56 of the 63 prace.cz offers also appeared on jobs.cz with identical company and title. The scanner's existing company+role dedup merges these.
+
+**Rule 6 (the source's own `robots.txt`).** Under `User-agent: *`, jobs.cz does not disallow the listing path `/prace/`, and its disallowed `/api/` and `/iapi/` are never requested. prace.cz does not disallow `/nabidky/`, the only path the providers read; its disallowed `/hledat/` (the old search path, which now redirects to `/nabidky/`) and application-form paths are never requested. Neither file names an AI or agent crawler.

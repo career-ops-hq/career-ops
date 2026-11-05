@@ -24,7 +24,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail, warn } from './helpers.mjs';
-import { listTemplates, resolveTemplate } from '../cv-templates.mjs';
+import { listTemplates, resolveTemplate, DEFAULT_TEMPLATES_DIR } from '../cv-templates.mjs';
 
 console.log('\nCV template packs — discovery, resolution, and name collisions');
 
@@ -359,7 +359,7 @@ function throws(label, fn, ...patterns) {
 // ── The real pack, if one is checked in ─────────────────────────────────────
 
 {
-  const shipped = listTemplates('cv').filter((t) => t.pack);
+  const shipped = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.pack);
   if (shipped.length === 0) {
     pass('no packs shipped yet — mechanism lands ahead of the first template (#3209)');
   } else {

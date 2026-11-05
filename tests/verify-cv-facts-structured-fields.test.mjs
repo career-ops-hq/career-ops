@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { structuredFieldClaims, verifyFacts } from '../verify-cv-facts.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const tmp = mkdtempSync(join(tmpdir(), 'career-ops-structured-facts-'));
@@ -52,7 +53,7 @@ function build(script, payload, ext) {
   const output = `${input}.${ext}`;
   writeFileSync(input, JSON.stringify(payload));
   const run = spawnSync(process.execPath, [join(ROOT, script), input, output], { encoding: 'utf-8' });
-  assert.equal(run.status, 0, `${script} failed: ${run.stderr}${run.stdout}`);
+  assert.equal(run.status, 0, describeSpawn(run, `${script} failed`));
   return readFileSync(output, 'utf-8');
 }
 
@@ -149,3 +150,37 @@ test('skills lists are not structured claims', () => {
   }, 'html');
   assert.equal(verifyFacts(html, options()).verdict, 'pass', 'rewording a skill is the tailoring the gate allows');
 });
+
+test('a nowrap span inside a title keeps its hyphenated word (#5632)', () => {
+  // generate-pdf wraps hyphenated words in an unclassed nowrap span before the
+  // gate runs; reading that span as a nested field dropped "Full-Stack".
+  const claims = structuredFieldClaims(
+    '<div class="job-role">Senior <span style="white-space:nowrap">Full-Stack</span> Engineer</div>');
+  assert.deepEqual(kinds(claims), ['title=senior full-stack engineer']);
+});
+
+test('a nowrap span inside an edu-title keeps its word and separates edu-org (#5632)', () => {
+  const claims = structuredFieldClaims(
+    '<div class="edu-title">M.Sc. <span style="white-space:nowrap">Human-Computer</span> Interaction <span class="edu-org">State University</span></div>');
+  assert.deepEqual(kinds(claims), [
+    'education=m.sc. human-computer interaction',
+    'education=state university',
+  ]);
+});
+
+test('a span structured field containing a nowrap span does not close early (#5632)', () => {
+  const claims = structuredFieldClaims(
+    '<span class="job-company">The <span style="white-space:nowrap">Coca-Cola</span> Company</span>');
+  assert.deepEqual(kinds(claims), ['employer=the coca-cola company']);
+});
+
+test('nested edu-org with inner nowrap span is completely removed from edu-title (#5632)', () => {
+  const claims = structuredFieldClaims(
+    '<div class="edu-title">M.Sc. <span style="white-space:nowrap">Human-Computer</span> Interaction <span class="edu-org">The <span style="white-space:nowrap">State-University</span> of New York</span></div>');
+  assert.deepEqual(kinds(claims), [
+    'education=m.sc. human-computer interaction',
+    'education=the state-university of new york',
+  ]);
+});
+
+

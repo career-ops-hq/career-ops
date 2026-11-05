@@ -67,7 +67,7 @@ ok('restoring the .bak brings the deleted row back byte for byte', () => sandbox
 
 ok('a delete that finds no such row writes no .bak', () => sandbox(({ tracker, cli }) => {
   const r = cli(tracker, '--num', '99');
-  assert.equal(r.status, 1, r.all);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.match(r.all, /No application numbered 99/);
   assert.equal(readFileSync(tracker, 'utf-8'), TRACKER, 'the tracker was modified');
   assert.ok(!existsSync(`${tracker}.bak`), 'a .bak was written although nothing was deleted');

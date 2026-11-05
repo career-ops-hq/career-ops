@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseStatusLog, foldObservations } from '../funnel-velocity.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const states = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));
@@ -40,7 +41,7 @@ test('undo reverts a mis-clicked Applied and retracts it from the ledger', () =>
     assert.equal(s.run('--row', '7', 'Applied').status, 0);
     assert.deepEqual(s.timeline(), ['Applied']);
     const r = s.run('--row', '7', '--undo');
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.equal(s.status7(), 'Evaluated');
     assert.deepEqual(s.timeline(), []);
     assert.match(r.stdout, /#7 Acme/);
@@ -78,7 +79,7 @@ test('undo puts the status back when the retraction cannot be logged', { skip: p
   try {
     chmodSync(join(s.dir, 'data', 'status-log.tsv'), 0o444);
     const r = s.run('--row', '7', '--undo', '--json');
-    assert.equal(r.status, 1, r.stdout);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.equal(JSON.parse(r.stdout).code, 'undo-not-logged');
     assert.equal(s.status7(), 'Applied');
   } finally {
@@ -92,7 +93,7 @@ test('undo refuses when the tracker no longer matches the last logged change', (
   try {
     const before = s.log();
     const r = s.run('--row', '7', '--undo', '--json');
-    assert.equal(r.status, 3);
+    assert.equal(r.status, 3, describeSpawn(r));
     assert.equal(JSON.parse(r.stdout).code, 'undo-stale');
     assert.equal(s.status7(), 'Interview');
     assert.equal(s.log(), before);
@@ -103,7 +104,7 @@ test('undo with no logged change fails without writing', () => {
   const s = sandbox('Applied');
   try {
     const r = s.run('--row', '7', '--undo', '--json');
-    assert.equal(r.status, 2);
+    assert.equal(r.status, 2, describeSpawn(r));
     assert.equal(JSON.parse(r.stdout).code, 'nothing-to-undo');
     assert.equal(s.status7(), 'Applied');
     assert.equal(s.log(), '');
@@ -114,7 +115,7 @@ test('undo refuses a logged change with no known prior status', () => {
   const s = sandbox('Applied', '7\t2026-02-03\t-\tApplied\tbackfill\t\n');
   try {
     const r = s.run('--row', '7', '--undo', '--json');
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.equal(JSON.parse(r.stdout).code, 'undo-unknown-prior');
     assert.equal(s.status7(), 'Applied');
   } finally { s.cleanup(); }
@@ -126,7 +127,7 @@ test('undo --dry-run reports the revert and writes nothing', () => {
     s.run('--row', '7', 'Applied');
     const before = s.log();
     const r = s.run('--row', '7', '--undo', '--dry-run', '--json');
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     const out = JSON.parse(r.stdout);
     assert.equal(out.oldStatus, 'Applied');
     assert.equal(out.newStatus, 'Evaluated');
@@ -139,7 +140,7 @@ test('undo takes no state argument', () => {
   const s = sandbox();
   try {
     const r = s.run('--row', '7', 'Applied', '--undo');
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.equal(s.status7(), 'Evaluated');
   } finally { s.cleanup(); }
 });

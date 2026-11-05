@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { ROOT, pass, fail } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const initial = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|---|---|---|---|---|---|---|---|\n| 1 | 2026-01-05 | Fictional | Engineer | 4/5 | Applied | — | — | notes |\n';
 for (const explicit of [true, false]) for (const timeout of [true, false]) for (const json of [true, false]) {
@@ -44,7 +45,7 @@ syncBuiltinESMExports();
     assert.equal(result.status, 1, result.error?.message || result.stderr);
     if (json) {
       const error = JSON.parse(result.stdout);
-      assert.equal(error.code, 'cv-archive-locked');
+      assert.equal(error.code, 'cv-archive-locked', describeSpawn(result));
       assert.match(error.error, /CV archive lock unavailable/);
       assert.equal(result.stderr, '');
     } else {

@@ -282,7 +282,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 | **Kimi K2.5** | Moonshot AI | API pricing applies | Verified with OpenCode using the Moonshot OpenAI-compatible endpoint. Produces structured Markdown suitable for Career-Ops evaluations. See the verified OpenCode recipe below. |
 
 
-> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, Cheaper Inference, API Route, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
+> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
 > ```bash
 > OPENAI_BASE_URL=https://openrouter.ai/api/v1 \
 > OPENAI_MODEL=deepseek/deepseek-chat \
@@ -312,6 +312,35 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > node openai-eval.mjs --file ./jds/job.txt
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint. Use it only if you choose to share that data with the provider.
+>
+> OpenCode Go (`https://opencode.ai/zen/go/v1`) is an OpenAI-compatible gateway that works the same way. Its docs ask clients to identify themselves and send a session id, so `openai-eval.mjs` sends a `User-Agent` (`career-ops/<version>`) and one `x-opencode-session` id per run automatically, for `opencode.ai` only. Per its [docs](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it), Go is designed for coding-agent traffic and is monitored for abuse, so check its terms before pointing batch evaluations at it.
+>
+> Runcrate (`https://api.runcrate.ai/v1`) is another OpenAI-compatible endpoint that works the same way. Model ids carry the vendor prefix, such as `deepseek-ai/DeepSeek-V4.1-Flash`:
+> ```bash
+> OPENAI_BASE_URL=https://api.runcrate.ai/v1 \
+> OPENAI_MODEL=deepseek-ai/DeepSeek-V4.1-Flash \
+> OPENAI_API_KEY=your_runcrate_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> CloudGPU (`https://cloudgpu.app/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4.1-flash`:
+> ```bash
+> OPENAI_BASE_URL=https://cloudgpu.app/v1 \
+> OPENAI_MODEL=deepseek-v4.1-flash \
+> OPENAI_API_KEY=your_cloudgpu_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> cheapaimodel (`https://api.cheapaimodel.ai/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4-1-flash`:
+> ```bash
+> OPENAI_BASE_URL=https://api.cheapaimodel.ai/v1 \
+> OPENAI_MODEL=deepseek-v4-1-flash \
+> OPENAI_API_KEY=your_cheapaimodel_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
 >
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
@@ -380,9 +409,14 @@ To prevent unnecessary API costs or hitting rate limits, implement the following
    ./batch/batch-runner.sh --dry-run
    ```
 3. **Resume Interrupted Runs**:
-   If a batch run is interrupted by a rate limit or network error, do not restart from scratch. Use the `--resume-paused` flag to continue from where it left off, skipping completed jobs and preventing wasted tokens:
+   If a batch run stops part-way, do not restart from scratch. Run the same command again: completed offers are skipped and the rest are picked up, so no tokens go to work that already finished:
+   ```bash
+   ./batch/batch-runner.sh
+   ```
+   If the run paused on a Claude session or usage limit, the offers that hit it are marked `paused_rate_limit`, and a plain run leaves them alone. Once the limit resets, re-run just those with `--resume-paused`, then run without it for the offers that had not started:
    ```bash
    ./batch/batch-runner.sh --resume-paused
+   ./batch/batch-runner.sh
    ```
 4. **Use `--verify` on Scans**:
    When running job board scans, use the liveness verifier to filter out expired postings before they enter your pipeline. This prevents wasting LLM tokens evaluating closed jobs:
@@ -428,9 +462,9 @@ node openai-eval.mjs \
 ```
 
 **Approximate Token Usage:**
-- **Input:** ~20,000 tokens. The static prefix alone is **17,728**: the script sends `modes/_shared.md` (4,127) plus `modes/oferta.md` (13,601) as the system prompt, and your `cv.md` and the JD come on top of that.
+- **Input:** ~32,000 tokens. The static prefix alone is **29,341**: the script sends `modes/_shared.md` (7,307) plus `modes/oferta.md` (22,034) as the system prompt, and your `cv.md` and the JD come on top of that. Measured on 4 November 2026 with the command below.
 - **Output:** ~1,000 tokens (the A-G evaluation report).
-- **Cost:** at DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), roughly **$0.003 per evaluation**. Still cheap, and cheap enough that the number below matters more than this one.
+- **Cost:** at DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), roughly **$0.005 per evaluation**. Still cheap, and cheap enough that the number below matters more than this one.
 
 Measure it yourself rather than trusting this paragraph, because these files grow with every release:
 
@@ -444,12 +478,12 @@ for (const f of ['modes/_shared.md','modes/oferta.md','AGENTS.md'])
 
 ### What the default path costs (this is the number most people are actually paying)
 
-The figures above are for the standalone script. **If you paste a job URL into your CLI instead, the agent loads `AGENTS.md` (8,285) + `modes/_shared.md` (4,127) + `modes/oferta.md` (13,601) = about 26,000 tokens of instructions per evaluation**, before your CV, the job description, or any tool output. That is the real floor of an interactive evaluation, and it is why a long session of pasting URLs burns a quota that a batch of standalone script calls would not.
+The figures above are for the standalone script. **If you paste a job URL into your CLI instead, the agent loads `AGENTS.md` (23,430) + `modes/_shared.md` (7,307) + `modes/oferta.md` (22,034) = about 53,000 tokens of instructions per evaluation** (measured on 4 November 2026 with the command above), before your CV, the job description, or any tool output. That is the real floor of an interactive evaluation, and it is why a long session of pasting URLs burns a quota that a batch of standalone script calls would not.
 
 Two things follow from that, and they are the cheapest wins available:
 
 - **Batch beats pasting** when you have several roles: `batch/batch-runner.sh` reuses one worker instead of re-sending the instructions per role.
-- **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.003 evaluation and an exhausted five-hour limit.
+- **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.005 evaluation and an exhausted five-hour limit.
 
 ### Step 4: Tailor the CV HTML (~3,000 Tokens)
 

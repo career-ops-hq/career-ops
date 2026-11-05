@@ -192,6 +192,36 @@ const mkCtx = (pages) => ({
   }
 }
 
+// Some tenants suffix the label ("Location : Country") and put the value in
+// the next span, including a leading newline. A second "Location : Location"
+// field lives in a <dt> with its value in a later <dd>, not the next span.
+// The header value is the one a scan should show. "Locations" is a different
+// word and must not win.
+{
+  const card = `<li class="iCIMS_JobCardItem"><div class="row">
+    <div class="col-xs-6 header left"><span class="sr-only field-label">Location : Country</span><span >
+Oslo</span></div>
+    <div class="col-xs-12 title"><a href="${ORIGIN}/jobs/5151/bridge-engineer/job" class="iCIMS_Anchor"><h3>Bridge Engineer</h3></a></div>
+    <div class="col-xs-12 additionalFields">
+      <dt class="iCIMS_JobHeaderField"><span class="sr-only field-label">Location : Location</span></dt>
+      <dd class="iCIMS_JobHeaderData"><span >OSL-</span></dd>
+    </div>
+  </div></li>`;
+  const [j] = parseIcimsSearchPage(`<ul>${card}</ul>`, ORIGIN, 'acmefreight');
+  if (j && j.title === 'Bridge Engineer' && j.location === 'Oslo') pass('suffixed Location label yields the next span, not the later dd');
+  else fail(`suffix label → ${JSON.stringify(j && { title: j.title, location: j.location })}`);
+}
+{
+  const card = `<li class="iCIMS_JobCardItem"><div class="row">
+    <div class="col-xs-6 header left"><span class="field-label">Locations</span><span >Not A Place</span></div>
+    <div class="col-xs-6 header left"><span class="field-label">Location : City</span><span >Bend, OR</span></div>
+    <div class="col-xs-12 title"><a href="${ORIGIN}/jobs/5152/city-role/job" class="iCIMS_Anchor"><h3>City Role</h3></a></div>
+  </div></li>`;
+  const [j] = parseIcimsSearchPage(`<ul>${card}</ul>`, ORIGIN, 'acmefreight');
+  if (j && j.location === 'Bend, OR') pass('Locations does not satisfy a label that starts with Location');
+  else fail(`Locations label → ${JSON.stringify(j?.location)}`);
+}
+
 // Same failure mode on the detail page. A tenant running Content-Security-
 // Policy emits a nonce on every inline script, which pushes `type` off the
 // front of the tag. If the matcher requires `type` first, enrichment finds no

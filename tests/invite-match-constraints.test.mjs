@@ -58,7 +58,7 @@ check('analyzeInvite keeps every existing key and adds constraints', () => {
   const rows = [{ num: 7, company: 'Northwind Labs', role: 'Analyst', status: 'Applied', date: '2026-10-01', notes: '' }];
   const text = 'Company: Northwind Labs\nWe would like to invite you to schedule your interview.\nJoin via Zoom: https://zoom.us/j/1234567890\nAI tools are not permitted.';
   const r = analyzeInvite(text, rows);
-  assert.deepEqual(Object.keys(r), ['signals', 'classification', 'matchedPhrases', 'phraseStrength', 'candidates', 'constraints']);
+  assert.deepEqual(Object.keys(r), ['signals', 'classification', 'matchedPhrases', 'phraseStrength', 'candidates', 'constraints', 'clarificationDraft']);
   assert.deepEqual(Object.keys(r.signals), ['company', 'date', 'reqId', 'platform', 'isAIInterviewer']);
   assert.equal(r.signals.platform, 'Zoom');
   assert.equal(r.candidates[0].appNumber, 7);

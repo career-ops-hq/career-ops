@@ -49,8 +49,9 @@ const searchUrl = (origin, page) => `${origin}/jobs/search?ss=1&pr=${page}&in_if
  *
  * Postings are `<li class="iCIMS_JobCardItem">` cards: posting URL in an
  * `iCIMS_Anchor` href (`/jobs/{id}/{title-slug}/job`, query stripped), title
- * in the anchor's `<h3>`, location in the span following the card's
- * `field-label` "Location" label. Cards whose href resolves off-origin are
+ * in the anchor's `<h3>`, location in the span following a `field-label`
+ * whose text starts with the word Location ("Location", "Location : Country").
+ * Cards whose href resolves off-origin are
  * dropped (defense in depth —
  * a portal page should never link a posting on another host).
  *
@@ -79,11 +80,15 @@ export function parseIcimsSearchPage(html, origin, companyName) {
     if (!title || !title[1].trim()) continue;
     // `field-label` is one token in a themed class list, not reliably the last
     // one, so anchoring on the literal `field-label">` read an empty location
-    // off any tenant that appended a class. An empty location then fails
-    // location_filter and the posting is dropped with nothing to explain it.
+    // off any tenant that appended a class. An empty location then shows up as
+    // N/A on a normal scan (scan.mjs does not call enrichDate).
     // The lookarounds keep `field-label` a whole token, so a longer hyphenated
     // class like `field-label-inline` still doesn't count as a match.
-    const location = card.match(/<span\b[^>]*class=["'][^"']*(?<![\w-])field-label(?![\w-])[^"']*["'][^>]*>\s*Location\s*<\/span>\s*<span\b[^>]*>\s*([\s\S]*?)<\/span>/);
+    // The label text has to start with the word Location. Tenants suffix it
+    // ("Location : Country", "Location : City") and put the value in the next
+    // span. Requiring the span to contain only "Location" left those boards
+    // blank. "Locations" does not match: the word boundary stops it.
+    const location = card.match(/<span\b[^>]*class=["'][^"']*(?<![\w-])field-label(?![\w-])[^"']*["'][^>]*>\s*Location\b[^<]*<\/span>\s*<span\b[^>]*>\s*([\s\S]*?)<\/span>/);
     jobs.push({
       title: decodeEntities(title[1].replace(/\s+/g, ' ').trim()),
       url: `${parsed.origin}${parsed.pathname}`,

@@ -29,20 +29,51 @@ const DISPLAY_PERIOD_MAX = 60;
  * guessed at — the same "don't penalize missing data" discipline the location
  * and country filters use.
  *
- * @param {string} period - e.g. "Jan 2021 - Apr 2022", "2005 - 2008".
+ * @param {string} period - e.g. "Jan 2021 - Apr 2022", "09/2021 - 04/2022", "2005 - 2008".
  * @returns {{ year: number, month: number|null }|null} null when no year is found.
  */
 export function parseExperienceStart(period) {
   if (typeof period !== 'string') return null;
-  const text = period.replace(/&(?:[a-z]+|#\d+|#x[0-9a-f]+);/gi, ' ').trim();
+  // A dash stays a dash: blanked with the other entities, "Jun &ndash; Aug 2022"
+  // stops being a range.
+  const text = period
+    .replace(/&(?:[nm]dash|#821[12]|#x201[34]);/gi, '-')
+    .replace(/&(?:[a-z]+|#\d+|#x[0-9a-f]+);/gi, ' ')
+    .trim();
   const year = text.match(/\b(19|20)\d{2}\b/);
   if (!year) return null;
   const before = text.slice(0, year.index);
-  const month = before.match(/\b([a-z]{3})[a-z]*\.?\s*$/i);
+  // "Jun - Aug 2022" names both months ahead of the one year, and the role
+  // started in the first of them.
+  const range = before.match(/\b([a-z]{3})[a-z]*\.?\s*(?:[-\u2013\u2014]|\bto\b)\s*([a-z]+)\.?,?\s*$/i);
+  const month = range ?? before.match(/\b([a-z]{3})[a-z]*\.?,?\s*$/i);
+  const first = month ? (MONTHS.get(month[1].toLowerCase()) ?? null) : null;
+  const last = range ? (MONTHS.get(range[2].slice(0, 3).toLowerCase()) ?? null) : null;
+  // "Nov - Feb 2023" ran past New Year, so the year it names is the end's.
+  const crossed = first !== null && last !== null && first > last;
   return {
-    year: Number(year[0]),
-    month: month ? (MONTHS.get(month[1].toLowerCase()) ?? null) : null,
+    year: Number(year[0]) - (crossed ? 1 : 0),
+    month: first ?? numericMonth(before, text.slice(year.index + year[0].length)),
   };
+}
+
+/**
+ * The month of "09/2024", "09.2024" or "2024-09", from the text either side of
+ * the year. A full date written day or month first ("03/04/2024") stays unread,
+ * because which number is the month depends on the country.
+ *
+ * @param {string} before - The period's text ahead of the year.
+ * @param {string} after - The period's text after the year.
+ * @returns {number|null}
+ */
+function numericMonth(before, after) {
+  const monthFirst = before.match(/(?<![\d/.-])(0?[1-9]|1[0-2])[/.-]$/);
+  if (monthFirst) return Number(monthFirst[1]);
+  // A number ahead of the year makes this a full date, so what follows the year
+  // is the end of the range ("09/15/2024-10/20/2024"), not this date's month.
+  if (/\d[/.-]$/.test(before)) return null;
+  const yearFirst = after.match(/^[/.-](0?[1-9]|1[0-2])(?!\d)/);
+  return yearFirst ? Number(yearFirst[1]) : null;
 }
 
 /**

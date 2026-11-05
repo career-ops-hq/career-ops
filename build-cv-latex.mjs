@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFile, writeFile, stat } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, realpathSync } from 'fs';
 import { resolve, dirname, basename, join } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -9,6 +9,8 @@ import { escapeLatex, sanitizeUrl } from './lib/latex-escape.mjs';
 import { resolveTemplate } from './cv-templates.mjs';
 import { stripEmptySections } from './cv-sections-core.mjs';
 import { hasRequiredFields, hasText, validatePayload } from './lib/cv-payload-schema.mjs';
+import { resolvePageFormat } from './lib/page-format.mjs';
+import { getProfilePath } from './path-resolver.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.tex');
@@ -173,6 +175,13 @@ async function main() {
     console.error(`Input file not found: ${absInput}`);
     process.exit(1);
   }
+  const inputStat = await stat(absInput, { bigint: true });
+  const outputStat = existsSync(absOutput) ? await stat(absOutput, { bigint: true }) : null;
+  if (outputStat && (realpathSync.native(absOutput) === realpathSync.native(absInput)
+    || (inputStat.ino !== 0n && inputStat.dev === outputStat.dev && inputStat.ino === outputStat.ino))) {
+    console.error(`Output path is the input file: ${absOutput}`);
+    process.exit(1);
+  }
 
   let payload;
   try {
@@ -222,6 +231,16 @@ async function main() {
 
   const substitutions = {
     NAME: escapeLatex(payload.name || ''),
+    // The sheet, decided once for every renderer by lib/page-format.mjs: an
+    // explicit payload `page_format` outranks the profile, and `auto` hands it
+    // to the employer's country. The template used to hardcode letterpaper, so
+    // a `page_format: a4` user got a Letter sheet from the LaTeX path while the
+    // HTML path beside it honored the setting (modes/pdf.md promises it
+    // "already reaches every renderer").
+    PAPER: resolvePageFormat(payload.page_format, {
+      profilePath: getProfilePath(),
+      country: payload.country,
+    }) === 'a4' ? 'a4paper' : 'letterpaper',
     CONTACT_LINE: escapeLatex(payload.contact_line || ''),
     EMAIL_URL: emailUrl,
     EMAIL_DISPLAY: escapeLatex(emailDisplay),

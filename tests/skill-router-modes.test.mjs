@@ -82,3 +82,52 @@ if (routedModes.length < 20) {
 } else {
   fail(`routed modes with no context-loading rule: ${withoutContextRule.join(', ')}`);
 }
+
+// The discovery menu is what the agent prints for `/career-ops` with no
+// arguments. It had drifted from the routing table: `interview-redflag` and
+// `reply-watch` were routed but never listed, and `oferta` still read "A-F"
+// after the evaluation grew to A-H (#6214). The per-mode loop above only knows
+// five hard-coded names, so compare the two lists in full.
+const menu = skill.split('Show this menu:')[1]?.match(/```\n([\s\S]*?)\n```/)?.[1] ?? '';
+// The first word after `/career-ops` is the input, whatever arguments follow it.
+// `{JD}` is the auto-pipeline line, not a mode name, so it is checked on its own.
+const menuLines = [...menu.matchAll(/^  \/career-ops (\S+)/gm)].map((m) => m[1]);
+const menuInputs = menuLines.filter((input) => input !== '{JD}');
+// Rows may carry extra spacing; the two special rows (no arguments, a pasted JD)
+// are the only ones without a backticked input and mode.
+const routingSection = skill.split('## Mode Routing')[1]?.split('**Auto-pipeline')[0] ?? '';
+const routingRows = routingSection.split('\n').filter((line) => line.startsWith('|')).slice(2);
+const parsedRows = routingRows.map((row) => row.match(/^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|$/));
+const unparsedRows = routingRows.filter((row, i) => !parsedRows[i] && !/^\|\s*(\(empty|JD text)/.test(row));
+const routeInputs = new Map(parsedRows.filter(Boolean).map((m) => [m[1], m[2]]));
+// A Map keeps one mode per input, so a second row for the same input would
+// drop a mode from the comparison below without a word.
+const duplicateInputs = [...new Set(parsedRows.filter(Boolean).map((m) => m[1])
+  .filter((input, i, all) => all.indexOf(input) !== i))];
+
+if (menuInputs.length < 20 || routeInputs.size < 20 || unparsedRows.length) {
+  fail(`could not read the discovery menu (${menuInputs.length} entries) or routing table (${routeInputs.size} inputs${unparsedRows.length ? `; unparsed rows: ${unparsedRows.join(' ')}` : ''})`);
+} else if (duplicateInputs.length) {
+  fail(`routing table routes the same input more than once: ${duplicateInputs.join(', ')}`);
+} else if (!menuLines.includes('{JD}')) {
+  fail('discovery menu has no `/career-ops {JD}` auto-pipeline line');
+} else {
+  // An alias such as `inbox` → `agent-inbox` needs no line of its own while
+  // another input for the same mode is listed.
+  const listedModes = new Set(menuInputs.map((input) => routeInputs.get(input)));
+  const missing = [...new Set(routeInputs.values())].filter((mode) => !listedModes.has(mode));
+  const unrouted = menuInputs.filter((input) => !routeInputs.has(input));
+  if (missing.length === 0 && unrouted.length === 0) {
+    pass(`discovery menu lists every routed mode (${listedModes.size}) and only routed ones`);
+  } else {
+    if (missing.length) fail(`routed modes missing from the discovery menu: ${missing.join(', ')}`);
+    if (unrouted.length) fail(`discovery menu lists inputs the routing table does not route: ${unrouted.join(', ')}`);
+  }
+}
+
+const oferta = menu.match(/^  \/career-ops oferta .*$/m)?.[0] ?? '';
+if (/A-H/.test(oferta) && !/A-F/.test(oferta)) {
+  pass('discovery menu describes oferta as the A-H evaluation');
+} else {
+  fail(`discovery menu line for oferta should say A-H, not A-F: ${oferta || '(no oferta line found)'}`);
+}

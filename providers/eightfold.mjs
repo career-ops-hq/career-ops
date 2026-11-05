@@ -10,10 +10,16 @@
 //
 // Career page URL:
 //   https://<tenant>.eightfold.ai/careers[?domain=<domain>]
-// Many tenants also front the same board on a branded CNAME
-// (careers.<company>.com). That host is deliberately NOT accepted: the API is
-// host-pinned to *.eightfold.ai, so an entry must point at the canonical
-// tenant host. Set `careers_url` (or `api`) to the eightfold.ai form.
+// Many tenants also front the same board on a branded host of their own
+// (careers.<company>.com) that serves the same
+// /api/apply/v2/jobs API. Such a host is never matched by pattern. An entry
+// opts one in by naming it exactly:
+//   careers_url: https://careers.acme.com/careers?domain=acme.com
+//   eightfold_host: careers.acme.com
+// `eightfold_host` is one bare hostname: no scheme, port, path or wildcard,
+// and not an IP literal. The request is still https-only and redirect:'error',
+// and it still goes through ctx.fetchJson, so the shared private-address guard
+// (_ip-guard.mjs) checks what the branded name resolves to.
 //
 // JSON API (GET, zero-auth):
 //   https://<tenant>.eightfold.ai/api/apply/v2/jobs
@@ -51,6 +57,10 @@ import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs'
 import { coerceId } from './_ids.mjs';
 
 const EIGHTFOLD_HOST_RE = /^[a-z0-9-]+\.eightfold\.ai$/i;
+// A bare DNS name with at least two labels and an alphabetic TLD. That shape
+// leaves no room for a scheme, port, path, userinfo, `*` or trailing dot, and
+// the alphabetic TLD rules out an IPv4 literal (IPv6 needs brackets/colons).
+const BRANDED_HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 // The API refuses to return more than 10 rows per request regardless of `num`.
 const PAGE_SIZE = 10;
@@ -73,12 +83,32 @@ const PCSX_INTER_PAGE_DELAY_MS = 400;
 const PCSX_RETRY_POLICY = { retries: 5, baseDelayMs: 2_000, maxDelayMs: 32_000 };
 
 /**
+ * The entry's opt-in branded API host (`eightfold_host`), lowercased, or null
+ * when it is absent or not a bare hostname.
+ *
+ * @param {any} entry
+ * @returns {string|null}
+ */
+export function brandedHost(entry) {
+  const raw = entry?.eightfold_host;
+  if (typeof raw !== 'string') return null;
+  const host = raw.trim().toLowerCase();
+  return host.length <= 253 && BRANDED_HOST_RE.test(host) ? host : null;
+}
+
+/** Is `hostname` a tenant host, or the branded host this entry named? */
+function isTrustedHost(hostname, branded) {
+  return EIGHTFOLD_HOST_RE.test(hostname) || (branded !== null && hostname.toLowerCase() === branded);
+}
+
+/**
  * SSRF guard — every request URL passes through here before it is fetched.
  *
  * @param {string} url
+ * @param {string|null} [branded] - the entry's `eightfold_host`, if any.
  * @returns {string} the same URL, when it is a trusted Eightfold endpoint.
  */
-function assertEightfoldUrl(url) {
+function assertEightfoldUrl(url, branded = null) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -86,8 +116,8 @@ function assertEightfoldUrl(url) {
     throw new Error(`eightfold: invalid URL: ${url}`);
   }
   if (parsed.protocol !== 'https:') throw new Error(`eightfold: URL must use HTTPS: ${url}`);
-  if (!EIGHTFOLD_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`eightfold: untrusted hostname "${parsed.hostname}" — must match *.eightfold.ai`);
+  if (!isTrustedHost(parsed.hostname, branded)) {
+    throw new Error(`eightfold: untrusted hostname "${parsed.hostname}" — must match *.eightfold.ai or the entry's eightfold_host`);
   }
   return url;
 }
@@ -111,11 +141,14 @@ function epochSecondsToMs(value) {
  * over `entry.careers_url` (mirrors greenhouse/ashby/oraclecloud) so a branded
  * careers page can stay as careers_url while the tenant host is pinned via
  * api:. An explicit `entry.domain` overrides any `?domain=` in the URL.
+ * A host outside *.eightfold.ai is accepted only when it equals the entry's
+ * `eightfold_host`.
  *
- * @param {import('./_types.js').PortalEntry & {domain?: string}} entry
+ * @param {import('./_types.js').PortalEntry & {domain?: string, eightfold_host?: string}} entry
  * @returns {{host: string, domain: (string|null)}|null}
  */
 export function resolveTenant(entry) {
+  const branded = brandedHost(entry);
   for (const raw of [entry?.api, entry?.careers_url]) {
     if (typeof raw !== 'string' || !raw) continue;
     let parsed;
@@ -125,7 +158,7 @@ export function resolveTenant(entry) {
       continue;
     }
     if (parsed.protocol !== 'https:') continue;
-    if (!EIGHTFOLD_HOST_RE.test(parsed.hostname)) continue;
+    if (!isTrustedHost(parsed.hostname, branded)) continue;
 
     const override = typeof entry.domain === 'string' && entry.domain.trim()
       ? entry.domain.trim()
@@ -161,9 +194,11 @@ export function buildApiUrl(tenant, start = 0, num = PAGE_SIZE) {
  * A tenant serves exactly one of the two and says so in a 403 body:
  *   v2 on a migrated tenant   -> {"message": "Not authorized for PCSX"}
  *   pcsx on a classic tenant  -> {"message": "PCSX is not enabled for this user."}
- * Both paths are explicitly allowed by tenant robots.txt (`Allow: /api/apply`,
- * `Allow: /api/pcsx`), and both live on the same `*.eightfold.ai` host this
- * module already pins, so no new trust surface is introduced.
+ * Both paths are explicitly allowed by `*.eightfold.ai` tenant robots.txt
+ * (`Allow: /api/apply`, `Allow: /api/pcsx`), and both live on the same host
+ * this module already pins (the tenant host or the entry's eightfold_host), so
+ * no new trust surface is introduced. A branded host's own robots.txt is the
+ * employer's, and was not surveyed.
  *
  * @param {{host: string, domain?: (string|null)}} tenant
  * @param {number} [start] - Row offset (0-based).
@@ -356,7 +391,18 @@ export default {
 
   async fetch(entry, ctx) {
     const tenant = resolveTenant(entry);
-    if (!tenant) throw new Error(`eightfold: cannot derive API URL for ${entry.name}`);
+    if (!tenant) {
+      // Say which half is wrong: a malformed eightfold_host is silently
+      // ignored by resolveTenant, which would otherwise read as a URL problem.
+      let hint = '';
+      if (entry?.eightfold_host !== undefined) {
+        hint = brandedHost(entry) === null
+          ? ` (eightfold_host ${JSON.stringify(entry.eightfold_host)} must be one bare hostname, e.g. careers.example.com)`
+          : ` (eightfold_host is ${brandedHost(entry)}, so careers_url or api must be an https:// URL on that host)`;
+      }
+      throw new Error(`eightfold: cannot derive API URL for ${entry.name}${hint}`);
+    }
+    const branded = brandedHost(entry);
 
     const maxPages = resolveMaxPages(entry, ctx);
     // A probe's ctx.maxPages below the entry's own cap is the probe's budget,
@@ -380,14 +426,14 @@ export default {
       /** One request on whichever API this tenant is on. */
       const request = async (/** @type {string} */ which) => {
         const url = which === 'pcsx' ? buildPcsxUrl(tenant, start) : buildApiUrl(tenant, start, PAGE_SIZE);
-        assertEightfoldUrl(url); // SSRF guard before every fetch
+        assertEightfoldUrl(url, branded); // SSRF guard before every fetch
         return /** @type {any} */ (await fetchJsonWithRetry(
           /** @type {any} */ (ctx),
           url,
           {
             // redirect:'error' prevents SSRF via a server-side redirect; with
             // assertEightfoldUrl above it guarantees the final hostname stays
-            // inside *.eightfold.ai.
+            // inside *.eightfold.ai or the entry's own eightfold_host.
             redirect: 'error',
             headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'application/json' },
           },

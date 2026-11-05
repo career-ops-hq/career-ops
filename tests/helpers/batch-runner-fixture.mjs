@@ -54,16 +54,19 @@ export function runBatch({ offers, args = [], src = SRC, rateLimitFirst = true }
       '  exit 1',
       'fi',
       ': > "$FIXTURE_DIR/live/$id"',
+      'peak=$(ls "$FIXTURE_DIR/live" | wc -l | tr -d " ")',
       // Offers 2 and 3 wait (up to 10 s) to see each other instead of trusting a 1 s overlap: on Windows a worker can take
       // more than a second to reach this point, so the first one was gone before the second started. They look for each
       // other's file, not at the total, because the retry of offer 1 can be live too. If the runner is not parallel, the
-      // wait runs out and the assertion still fails.
-      'peak=$(ls "$FIXTURE_DIR/live" | wc -l | tr -d " ")',
-      'if [[ "$id" == 2 || "$id" == 3 ]]; then',
-      '  other=$(( id == 2 ? 3 : 2 ))',
-      '  for ((i = 0; i < 100; i++)); do [[ -f "$FIXTURE_DIR/live/$other" ]] && break; sleep 0.1; done',
-      '  peak=1; [[ -f "$FIXTURE_DIR/live/$other" ]] && peak=2',
-      'fi',
+      // wait runs out and the assertion still fails. A batch without offer 3 has no partner to wait for, so the wait is
+      // left out there: it would run out every time, 10 s on Linux and about 14 s on Windows, where each sleep is a process.
+      ...(offers >= 3 ? [
+        'if [[ "$id" == 2 || "$id" == 3 ]]; then',
+        '  other=$(( id == 2 ? 3 : 2 ))',
+        '  for ((i = 0; i < 100; i++)); do [[ -f "$FIXTURE_DIR/live/$other" ]] && break; sleep 0.1; done',
+        '  peak=1; [[ -f "$FIXTURE_DIR/live/$other" ]] && peak=2',
+        'fi',
+      ] : []),
       'echo "start $id live $peak" >> "$FIXTURE_DIR/starts.log"',
       'sleep 1',
       'rm -f "$FIXTURE_DIR/live/$id"',

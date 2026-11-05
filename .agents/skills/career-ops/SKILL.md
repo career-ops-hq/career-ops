@@ -1,10 +1,6 @@
 ---
 name: career-ops
-description: >-
-  Open-source AI job search agent -- evaluate offers, generate CVs, scan portals,
-  track applications. Use when the user pastes a job URL or JD, asks to scan
-  portals, generate a CV/PDF, track applications, prepare for interviews, draft
-  outreach/emails, or run any career-ops mode.
+description: "Open-source AI job search agent -- evaluate offers, generate CVs, scan portals, track applications. Use when the user pastes a job URL or JD, asks to scan portals, generate a CV/PDF, track applications, prepare for interviews, draft outreach/emails, or run any career-ops mode."
 arguments: mode
 user_invocable: true
 user-invocable: true
@@ -12,15 +8,28 @@ argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex |
 license: MIT
 ---
 
-# career-ops -- Router
+# career-ops: open-source AI job search agent
 
 career-ops is a multi-CLI AI job search agent. The routing below is shared across supported agent CLIs even when the invocation surface differs.
 
 ## Project Root Resolution
 
-Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `SKILL.md`: start at the skill file's directory and walk upward until the nearest directory containing both `AGENTS.md` and `modes/`. This is required even when the checkout itself is nested (for example `Development\\career-ops`) or the command starts from a subdirectory. If those two sentinels cannot be found, stop and locate the career-ops checkout before reading or writing files. Then derive `DATA_ROOT`, where the user's own files live, with the precedence `path-resolver.mjs` uses: `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` if either is set; otherwise the path written in `PROJECT_ROOT/.career-ops-data` if that file exists and is not empty; otherwise `PROJECT_ROOT` itself. A relative value in either place resolves against `PROJECT_ROOT`. Run from `PROJECT_ROOT`, `node -e "import('./path-resolver.mjs').then(m => console.log(m.getCareerOpsRoot()))"` prints the same directory. With no override the two roots are one directory.
+Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `SKILL.md`: start at the skill file's directory and walk upward until the nearest directory containing both `AGENTS.md` and `modes/`. This is required even when the checkout itself is nested (for example `Development\\career-ops`) or the command starts from a subdirectory. If those two sentinels cannot be found, career-ops itself is not installed next to this skill: follow **Skill installed without career-ops** below before reading or writing any file. Then derive `DATA_ROOT`, where the user's own files live, with the precedence `path-resolver.mjs` uses: `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` if either is set; otherwise the path written in `PROJECT_ROOT/.career-ops-data` if that file exists and is not empty; otherwise `~/career-ops-data` when `PROJECT_ROOT` is a Claude Code plugin install copy (inside `~/.claude/plugins/cache/`, `marketplaces/` or `synced/`); otherwise `PROJECT_ROOT` itself. A relative value in either place resolves against `PROJECT_ROOT`. Run from `PROJECT_ROOT`, `node -e "import('./path-resolver.mjs').then(m => console.log(m.getCareerOpsRoot()))"` prints the same directory. In a checkout with no override, the two roots are one directory. A plugin install copy never shares its directory with `DATA_ROOT`.
 
 Resolve every path in this router against one of these two roots, never against the process's current working directory. User Layer paths resolve against `DATA_ROOT`. They include `cv.md`, `article-digest.md`, `portals.yml`, `config/` (except the shipped `*.example.*` files), `data/`, `reports/`, `output/`, `interview-prep/`, `modes/_profile.md`, `modes/_custom.md`, `modes/_brief.md`, `batch/tracker-additions/`, and every other User Layer path in `DATA_CONTRACT.md`. Everything else (the other `modes/` files, scripts, templates, the `config/*.example.*` files) resolves against `PROJECT_ROOT`.
+
+### Skill installed without career-ops
+
+A skills catalog, or the career-ops plugin from a plugin directory (Claude or OpenAI), installs only this `SKILL.md`. The modes, scripts and `AGENTS.md` it routes to live in the career-ops repository, so no mode can run until career-ops is installed. Never improvise a mode from this file alone: an evaluation without the repo's modes and the user's CV is not a career-ops evaluation.
+
+1. Look for an existing install before offering a new one: the directory in `CAREER_OPS_ROOT` if it is set, then `./career-ops`, then `~/career-ops`. The first one that contains both `AGENTS.md` and `modes/` is `PROJECT_ROOT`; tell the user which one you are using, read `PROJECT_ROOT/AGENTS.md` in full, and continue with their request.
+2. If there is none, tell the user in a few lines that career-ops runs from its own folder, and offer to set it up with `npx @santifer/career-ops@1.39.0 init`. It needs Node.js, downloads the latest release from https://github.com/career-ops-hq/career-ops into `./career-ops` and installs its dependencies. Ask before running it: it downloads and installs software. <!-- x-release-please-version -->
+3. With a yes, run it from the current directory (or the folder the user picks). Then treat the new `career-ops` folder as `PROJECT_ROOT`: read its `AGENTS.md` in full, run every script from it, and pick up the user's original request (a pasted job URL or JD included). If their CV and profile are not there yet, the first-run setup in `AGENTS.md` comes first: it walks them through it by chatting. Tell them that next time they can open their AI CLI inside that folder.
+4. If they prefer to install it themselves, give the one command (`npx @santifer/career-ops@1.39.0 init`, then `cd career-ops` and open the AI CLI there) and, for Claude Code, the plugin alternative: `/plugin marketplace add career-ops-hq/career-ops` then `/plugin install career-ops@career-ops`. Then stop. <!-- x-release-please-version -->
+
+### Claude Code plugin install
+
+When `PROJECT_ROOT` is a plugin install copy, the session's working folder is not career-ops, so `AGENTS.md` was not loaded as project context. Read `PROJECT_ROOT/AGENTS.md` in full before running any mode: it holds the Data Contract, the Source-of-Truth Boundary, Ethical Use and the untrusted-content rules every mode depends on. Run every script from `PROJECT_ROOT`. Never write a User Layer file inside `PROJECT_ROOT`: Claude Code replaces that copy on every plugin update. If `node doctor.mjs --json` reports that the data root is inside the plugin install, stop and relay its fix before writing anything.
 
 ## Invocation Notes
 
@@ -151,7 +160,7 @@ career-ops -- AI Job Search Agent
 Available commands:
   /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
   /career-ops pipeline  → Process pending URLs from inbox (data/pipeline.md)
-  /career-ops oferta    → Evaluation only A-F (no auto PDF)
+  /career-ops oferta    → Evaluation only A-H (no auto PDF)
   /career-ops ofertas   → Compare and rank multiple offers
   /career-ops contacto  → LinkedIn power move: find contacts + draft message
   /career-ops deep      → Deep research prompt about company
@@ -164,6 +173,7 @@ Available commands:
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
   /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round
+  /career-ops interview-redflag → Analyze employer warning signs before joining a company
   /career-ops pdf       → PDF only, ATS-optimized CV
   /career-ops ats       → ATS-friendliness check of a generated CV (score + fixable issues)
   /career-ops text      → Tailored markdown CV (mirrors cv.md, no PDF)
@@ -188,6 +198,7 @@ Available commands:
   /career-ops titles    → Suggest adjacent job titles from your CV to broaden the search
   /career-ops upskill   → Aggregate skill-gap analysis from your evaluated reports
   /career-ops followup  → Follow-up cadence tracker: flag overdue, generate drafts
+  /career-ops reply-watch → Classify employer replies and suggest tracker updates
   /career-ops outcome   → Record application outcome & archive artifacts
   /career-ops update    → Update career-ops system files with diff preview + compat check
 
@@ -203,7 +214,7 @@ After determining the mode, load the necessary files before executing:
 
 If `modes/_custom.md` exists, read it after `modes/_profile.md` and before the selected mode file. It contains user house rules and procedural preferences. It may override workflow/style defaults, but it never adds factual claims about the candidate.
 
-Resolve `language.modes_dir` before applying the path shorthand below. With no setting, use `modes`. With a scalar directory, preserve the existing behavior: use that directory's `_shared.md` and localized mode file when it provides one. With a list, load every declared directory's `_shared.md` exactly once (including the baseline `modes/_shared.md` when `modes` appears), but use only the FIRST entry's evaluation-mode file for Blocks A-F; later entries contribute context, never a competing evaluation file. User-layer `_profile.md` and `_custom.md` remain under `modes/` in `DATA_ROOT`.
+Resolve `language.modes_dir` before applying the path shorthand below. With no setting, use `modes`. With a scalar directory, preserve the existing behavior: use that directory's `_shared.md` and localized mode file when it provides one. When it provides no file for the selected mode (most market sets ship no `cover.md`, `email.md` or `contacto.md`), load the English `modes/{mode}.md`: it is the canonical file and carries that mode's guardrails, including the draft-only, never-send rule. Never run a mode from the localized `_shared.md` alone or improvise its steps. With a list, load every declared directory's `_shared.md` exactly once (including the baseline `modes/_shared.md` when `modes` appears), but use only the FIRST entry's evaluation-mode file for Blocks A-F; later entries contribute context, never a competing evaluation file. User-layer `_profile.md` and `_custom.md` remain under `modes/` in `DATA_ROOT`.
 
 ### Modes that require `_shared.md` + their mode file
 
@@ -230,7 +241,7 @@ For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as a wor
 ```python
 Agent(
   subagent_type="general-purpose",
-  prompt="[output language directive]\n\n[content of modes/_shared.md, or resolved shared context: every declared _shared.md once]\n\n[content of modes/_profile.md if exists]\n\n[content of modes/_custom.md if exists]\n\n[content of modes/{mode}.md, or resolved selected mode file; primary evaluation file for Blocks A-F]\n\n[invocation-specific data]",
+  prompt="[output language directive]\n\nPROJECT_ROOT: [resolved absolute PROJECT_ROOT]\nDATA_ROOT: [resolved absolute DATA_ROOT]\nRun every script from PROJECT_ROOT. Resolve User Layer paths against DATA_ROOT and every other path against PROJECT_ROOT.\n\n[content of modes/_shared.md, or resolved shared context: every declared _shared.md once]\n\n[content of modes/_profile.md if exists]\n\n[content of modes/_custom.md if exists]\n\n[content of modes/{mode}.md, or resolved selected mode file; primary evaluation file for Blocks A-F]\n\n[invocation-specific data]",
   description="career-ops {mode}"
 )
 ```

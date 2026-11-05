@@ -44,8 +44,9 @@ const DETAIL_API = 'https://www.vdab.be/rest/vindeenjob/v4/vacatures/';
 // Public, build-time constant baked into VDAB's own frontend JS bundle (an
 // Angular HTTP interceptor stamps this on every request) — not a per-visitor
 // session token. Verified live: works from a cold request with no cookies.
-// Same trust tier as arbeitsagentur.mjs's public API_KEY below.
-const VEJ_KEY_MONITOR = 'b277002f-e1fa-4fc5-868a-fdab633c3851';
+// Same trust tier as arbeitsagentur.mjs's public API_KEY below. Exported for
+// liveness-api.mjs, whose VDAB rung reads the same detail endpoint.
+export const VEJ_KEY_MONITOR = 'b277002f-e1fa-4fc5-868a-fdab633c3851';
 // Plural + no slug is the correct canonical form and resolves without a
 // redirect (verified live). The singular form ("/vacature/{id}", no 's')
 // looks plausible but silently redirects to the generic listing page —

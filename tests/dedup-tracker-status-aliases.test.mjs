@@ -28,6 +28,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEDUP = join(HERE, '..', 'dedup-tracker.mjs');
@@ -46,7 +47,7 @@ function withTracker(rows, fn) {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_TRACKER: tracker },
     });
-    assert.equal(r.status, 0, `dedup-tracker exited ${r.status}: ${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `dedup-tracker exited ${r.status}`));
     fn(readFileSync(tracker, 'utf-8').split('\n').filter((l) => /^\|\s*\d+\s*\|/.test(l)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -196,7 +197,7 @@ function inSandbox(statesYml, fn) {
 
 ok('control: the sandbox copy dedups normally when states.yml is beside it', () => {
   inSandbox(readFileSync(join(ROOT, 'templates', 'states.yml'), 'utf-8'), ({ r, tracker }) => {
-    assert.equal(r.status, 0, `exited ${r.status}: ${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `exited ${r.status}`));
     assert.ok(!readFileSync(tracker, 'utf-8').includes('| 2 | 2026-09-02 |'), 'the duplicate row is still there');
   });
 });
@@ -216,7 +217,7 @@ for (const [what, statesYml, names] of [
 ]) {
   ok(`when states.yml ${what}, dedup-tracker stops with an error and leaves the tracker alone`, () => {
     inSandbox(statesYml, ({ r, tracker }) => {
-      assert.equal(r.status, 1, `expected exit 1, got ${r.status}: ${r.stdout}${r.stderr}`);
+      assert.equal(r.status, 1, describeSpawn(r, `expected exit 1, got ${r.status}`));
       assert.match(r.stderr, names, `the error does not say what is wrong: ${r.stderr}`);
       assert.equal(readFileSync(tracker, 'utf-8'), trackerText(DUPLICATE_ROWS), 'the tracker was modified');
       assert.ok(!existsSync(`${tracker}.bak`), 'a .bak was written although nothing ran');

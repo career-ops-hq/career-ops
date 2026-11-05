@@ -71,6 +71,7 @@ Read:
 - `article-digest.md` if it exists
 - `modes/_writing.md` — shared writing guidance (Voice DNA guardrail, Writing Style calibration, Professional Writing rules). An application email is candidate-facing prose, the same category that module governs (#2006)
 - `modes/_profile.md` if it exists
+- If `modes/_profile.md` has no `## Writing Style` section and `writing-samples/` holds a file other than `README.md`, run the Writing Style calibration in `modes/_writing.md` and write it to `modes/_profile.md` before drafting
 - `modes/_custom.md` if it exists
 - `voice-dna.md` if it exists, for writing style only
 - The selected report if invoked by report number or slug

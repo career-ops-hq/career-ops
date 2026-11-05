@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = join(ROOT, 'scan.mjs');
@@ -60,7 +61,7 @@ const lastLine = (text) => text.trim().split('\n').at(-1) || '';
 test('exits 2 when every target failed, after writing the scan-runs row', () => {
   const { dir, result } = runScan(portals(FAILING));
   try {
-    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.status, 2, describeSpawn(result));
     assert.match(lastLine(result.stderr), /^Error: every scan target failed \(1 of 1\)/);
 
     const runs = join(dir, 'data', 'scan-runs.tsv');
@@ -76,7 +77,7 @@ test('exits 2 when every target failed, after writing the scan-runs row', () => 
 test('exits 0 when at least one target was read', () => {
   const { dir, result } = runScan(portals(FAILING, WORKING), ['--dry-run']);
   try {
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.match(result.stdout, /Failing Co/, 'the failure is still reported');
     assert.doesNotMatch(result.stderr, /every scan target failed/);
   } finally {
@@ -87,7 +88,7 @@ test('exits 0 when at least one target was read', () => {
 test('exits 0 when no target was configured', () => {
   const { dir, result } = runScan(portals(), ['--dry-run']);
   try {
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.doesNotMatch(result.stderr, /every scan target failed/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -98,7 +99,7 @@ test('an entry whose provider cannot be resolved counts as a failed target', () 
   const unknown = ['  - name: Broken Co', '    provider: provider-that-does-not-exist'];
   const { dir, result } = runScan(portals(unknown), ['--dry-run']);
   try {
-    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.status, 2, describeSpawn(result));
     assert.match(lastLine(result.stderr), /every scan target failed \(1 of 1\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

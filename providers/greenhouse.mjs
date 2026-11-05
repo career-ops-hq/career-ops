@@ -12,6 +12,7 @@ import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
 
 const LEGACY_BOARD_HOSTS = new Set(['boards.greenhouse.io', 'boards.eu.greenhouse.io']);
+const JOB_BOARD_HOSTS = new Set(['job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io']);
 
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
@@ -41,21 +42,24 @@ function resolveApiUrl(entry) {
     return entry.api;
   }
   const url = entry.careers_url || '';
-  const match = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
-  let slug = match ? match[1] : null;
-  // Legacy boards[.eu].greenhouse.io/<slug>, which still 301s to job-boards[.eu]
-  // with the same slug. Read from the PARSED url, never a regex over the raw
-  // string: that one also found "boards.greenhouse.io/acme" inside the path of
-  // a boards-api URL and returned acme's board.
-  if (!slug) {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === 'https:' && LEGACY_BOARD_HOSTS.has(parsed.hostname)) {
-        slug = parsed.pathname.split('/').find(Boolean) ?? null;
-      }
-    } catch {
-      // unparseable url: no board to read
-    }
+  // job-boards[.eu].greenhouse.io/<slug>, and the legacy boards[.eu] host that
+  // still 301s there with the same slug. Both are read from the PARSED url,
+  // never a regex over the raw string. That one found
+  // "boards.greenhouse.io/acme" inside the path of a boards-api URL and
+  // returned acme's board, and its job-boards twin did the same for any
+  // careers_url that merely mentioned a board: a redirect wrapper
+  // (`?next=https://job-boards.greenhouse.io/othercorp`) or a path segment on
+  // another site scanned othercorp's board under this entry's name.
+  // http: is still accepted on the job-boards host, as the regex accepted it;
+  // the API call below is https either way.
+  let slug = null;
+  try {
+    const parsed = new URL(url);
+    const boardHost = (JOB_BOARD_HOSTS.has(parsed.hostname) && (parsed.protocol === 'https:' || parsed.protocol === 'http:'))
+      || (LEGACY_BOARD_HOSTS.has(parsed.hostname) && parsed.protocol === 'https:');
+    if (boardHost) slug = parsed.pathname.split('/').find(Boolean) ?? null;
+  } catch {
+    // unparseable url: no board to read
   }
   // Embed boards carry the token in ?for= (e.g. /embed/job_board?for=stripe).
   // The path segment is literally "embed", which resolves to a nonexistent

@@ -45,45 +45,45 @@ test('-h prints usage and exits 0', () => {
 
 test('an unknown flag exits 1 and names the flag', () => {
   const result = runCadence('--summry');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /unrecognized flag\(s\): --summry/);
   assert.match(result.stderr, /Valid flags:/);
 });
 
 test('--help plus an unknown flag still fails', () => {
   const result = runCadence('--help', '--bogus');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /unrecognized flag\(s\): --bogus/);
   assert.doesNotMatch(result.stdout, /Usage:/);
 });
 
 test('--applied-days without a value is rejected instead of using the default', () => {
   const result = runCadence('--applied-days');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /--applied-days requires a value/);
 });
 
 test('--applied-days abc is rejected instead of silently falling back to the default', () => {
   const result = runCadence('--applied-days', 'abc');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /--applied-days requires a non-negative integer, got "abc"/);
 });
 
 test('--applied-days -5 is rejected instead of silently accepting a negative window', () => {
   const result = runCadence('--applied-days', '-5');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /--applied-days requires a non-negative integer, got "-5"/);
 });
 
 test('--applied-days 1.5 is rejected, not truncated to 1', () => {
   const result = runCadence('--applied-days', '1.5');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /--applied-days requires a non-negative integer, got "1\.5"/);
 });
 
 test('--applied-days 10days is rejected, not truncated to 10', () => {
   const result = runCadence('--applied-days', '10days');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /--applied-days requires a non-negative integer, got "10days"/);
 });
 

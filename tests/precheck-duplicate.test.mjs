@@ -5,7 +5,7 @@ import { execFileSync } from 'child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { findDuplicateCandidates, companyRelation } from '../precheck-duplicate.mjs';
+import { findDuplicateCandidates, companyRelation, stripLocationSuffix } from '../precheck-duplicate.mjs';
 
 console.log('\nprecheck-duplicate — read-only pre-apply duplicate check');
 
@@ -125,6 +125,63 @@ try {
   const w = findDuplicateCandidates(reqRows, { company: 'Northwind Hospital', title: 'Zzz', req: '2026-32061' })[0];
   if (w && w.warning === true) pass('a bold/dated Rejected status still sets the warning flag');
   else fail('decorated Rejected status should warn');
+
+  // 13. Issue #5997: separator-less req IDs and location-suffixed titles (fictional tracker).
+  const root2 = join(work, 'root2');
+  mkdirSync(join(root2, 'data'), { recursive: true });
+  writeFileSync(join(root2, 'data', 'applications.md'), [...HEADER,
+    row(1, '2026-10-23', 'Acme Supply Canada', 'HR Generalist (Brampton, ON)', 'Applied', 'Brampton ON on-site; JR9727; full time'),
+    row(2, '2026-10-24', 'Northwind Foods', 'Operations Analyst', 'Applied', 'req JR-4411; remote'),
+    row(3, '2026-10-25', 'Acme Supply Canada', 'Payroll Manager (Brampton, ON)', 'Applied'),
+  ].join('\n') + '\n');
+  const q = (args) => json(args, { CAREER_OPS_ROOT: root2 }).candidates;
+  let cc = q(['--company', 'Acme Supply Canada', '--title', 'Zzz Unrelated', '--req', 'JR9727']);
+  if (cc[0]?.num === 1 && cc[0].reason === 'req') pass('--req JR9727 matches a note written JR9727');
+  else fail(`JR9727: ${JSON.stringify(cc)}`);
+  for (const rq of ['JR-9727', '9727']) {
+    cc = q(['--company', 'Acme Supply Canada', '--title', 'Zzz Unrelated', '--req', rq]);
+    if (cc[0]?.num === 1 && cc[0].reason === 'req') pass(`--req ${rq} matches the same requisition as JR9727`);
+    else fail(`${rq}: ${JSON.stringify(cc)}`);
+  }
+  cc = q(['--company', 'Acme Supply Canada', '--title', 'HR Generalist']);
+  if (cc.length === 1 && cc[0].num === 1 && cc[0].reason === 'same-title') pass('title without the location suffix matches the suffixed row');
+  else fail(`suffix one side: ${JSON.stringify(cc)}`);
+  cc = q(['--company', 'Acme Supply Canada', '--title', 'HR Generalist (Brampton, ON)', '--req', 'JR9727']);
+  if (cc[0]?.num === 1 && cc[0].reason === 'req') pass('suffixed title plus req still matches #1');
+  else fail(`suffix + req: ${JSON.stringify(cc)}`);
+  cc = q(['--company', 'Northwind Foods', '--title', 'Operations Analyst II', '--req', 'JR-4411']);
+  if (cc[0]?.num === 2 && cc[0].reason === 'req') pass('hyphenated JR-4411 still matches');
+  else fail(`JR-4411: ${JSON.stringify(cc)}`);
+  cc = q(['--company', 'Globex Corp', '--title', 'HR Generalist', '--req', 'JR9727']);
+  if (cc.length === 0) pass('same req at an unrelated company still does not match');
+  else fail(`unrelated company req: ${JSON.stringify(cc)}`);
+  cc = q(['--company', 'Acme Supply Canada', '--title', 'Warehouse Supervisor (Brampton, ON)']);
+  if (cc.length === 0) pass('different titles at the same company do not match on a shared suffix');
+  else fail(`suffix-only match: ${JSON.stringify(cc)}`);
+  cc = q(['--company', 'Acme Supply Canada', '--title', 'Payroll Manager']);
+  if (cc.length === 1 && cc[0].num === 3) pass('suffix stripping does not cross-match #1 and #3');
+  else fail(`payroll: ${JSON.stringify(cc)}`);
+  if (stripLocationSuffix('Analyst (II)') === 'Analyst (II)' && stripLocationSuffix('(Remote)') === '(Remote)' && stripLocationSuffix('Analyst (Remote)') === 'Analyst')
+    pass('stripLocationSuffix keeps level markers and never empties a title');
+  else fail('stripLocationSuffix edge cases');
+
+  // 13b. Review follow-ups: REQ9727, specialisation qualifiers, parent-org keeps suffixes.
+  const rr = findDuplicateCandidates([{ num: 9, date: '2026-10-01', company: 'Acme Supply Canada', role: 'Zzz', status: 'Applied', notes: 'REQ9727', url: '' }], { company: 'Acme Supply Canada', title: 'Other Role', req: 'REQ9727' });
+  if (rr[0]?.reason === 'req') pass('--req REQ9727 matches a note written REQ9727'); else fail('REQ9727');
+  const sw = findDuplicateCandidates([{ num: 10, date: '2026-10-01', company: 'Acme Supply Canada', role: 'Software Engineer (Backend)', status: 'Applied', notes: '', url: '' }], { company: 'Acme Supply Canada', title: 'Software Engineer (Frontend)' });
+  if (!sw.some(x => x.reason === 'same-title')) pass('(Backend) vs (Frontend) are not the same title');
+  else fail('specialisation merged');
+  if (stripLocationSuffix('Engineer (Backend)') === 'Engineer (Backend)' && stripLocationSuffix('Analyst (Hybrid)') === 'Analyst' && stripLocationSuffix('Analyst (Toronto)') === 'Analyst' && stripLocationSuffix('Analyst (Austin, TX)') === 'Analyst')
+    pass('only location/work-mode suffixes are stripped'); else fail('stripLocationSuffix location detection');
+  const par = findDuplicateCandidates([{ num: 11, date: '2026-10-01', company: 'Fabrikam University (East)', role: 'Research Analyst (East)', status: 'Applied', notes: '', url: '' }], { company: 'Fabrikam University (West)', title: 'Research Analyst (West)' });
+  if (par.length === 0) pass('parent-org tier keeps (East) vs (West) distinct (original titles)');
+  else fail(`parent-org east/west: ${JSON.stringify(par)}`);
+
+  // 13c. Every component of a parenthesised label must be recognised; bare region codes count.
+  const keep = ['Engineer (Remote Backend)', 'Engineer (Hybrid, Platform Team)', 'Engineer (Remote, Backend)', 'Engineer (Backend, TX)', 'Engineer (Frontend, TX)', 'Engineer (Oakville, ON)'];
+  const drop = ['Analyst (TX)', 'Analyst (Remote, ON)', 'Analyst (Remote/Hybrid)', 'Analyst (Austin, TX)', 'Analyst (Fully Remote)'];
+  if (keep.every(k => stripLocationSuffix(k) === k) && drop.every(d => stripLocationSuffix(d) === 'Analyst')) pass('compound labels are stripped only when every component is recognised');
+  else fail(`compound labels: ${[...keep, ...drop].map(x => stripLocationSuffix(x)).join(' | ')}`);
 
   // 12. A lookup with no usable key is rejected, not reported as "no duplicate".
   const rejects = (args) => {

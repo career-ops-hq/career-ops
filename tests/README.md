@@ -131,6 +131,30 @@ A suite that starts a `test-all.mjs` of its own gets a serial one unless it
 passes `--jobs` itself: the runner sets `CAREER_OPS_TEST_JOBS=1` for everything
 it starts, so N workers do not fan out N more each.
 
+## One full run at a time
+
+A full run already keeps every core busy, so two started together (from two
+agent sessions in two worktrees, say) each get half the machine and overrun
+their timeouts. A full run therefore waits for any other full run on the
+machine to finish first, and says so:
+
+```
+  ⏳ another full test-all.mjs run holds the queue (pid 4242 in /path/to/worktree, for 3 min) — waiting for it to finish.
+```
+
+The queue is a `lib/dir-lock.mjs` lock in the OS temp directory, shared by
+every clone and worktree. A run that is killed leaves a lock whose PID is dead,
+and the next run takes it over. Waiting runs are not served strictly in the
+order they arrived, but only one proceeds at a time. A waiter gives up after
+an hour with the same holder, naming it.
+
+`--only` runs do not queue: they are small, and they are what you run while a
+full run is going. `CAREER_OPS_TEST_QUEUE=0` turns the queue off for a run; the
+run holding the queue sets it for everything it starts, so a suite that starts
+a `test-all.mjs` of its own does not wait for its parent. Fixture runners
+(`tests/test-all-sandbox.mjs`) set it too. `CAREER_OPS_TEST_QUEUE_LOCK=<dir>`
+puts the lock somewhere else.
+
 ## Adding a test
 
 Add one `{name}.test.mjs` file here — it is auto-discovered, no registration

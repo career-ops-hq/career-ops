@@ -14,7 +14,10 @@
  *   1. url / req   exact normalizeUrl() match, or the same requisition ID
  *                  (REQ_NUMBER_RE via extractReqNumber) at the same or a parent
  *                  company. A bare req ID with an unrelated company never counts.
+ *                  IDs are compared after normReq(), so JR9727 == JR-9727 == 9727.
  *   2. same-title  same normalized company and the same titleIdentityKey().
+ *   Same-company tiers ignore one trailing parenthesised location/remote suffix
+ *   on either title ("HR Generalist (Brampton, ON)" == "HR Generalist").
  *   3. parent-org / similar-title
  *                  same parent organisation (one name is a leading-token prefix
  *                  of the other, or differs only by a parenthesised unit) or the
@@ -43,9 +46,75 @@ import { isMainModule } from './lib/is-main-module.mjs';
 
 const CANONICAL_STATES = loadCanonicalStates(join(dirname(fileURLToPath(import.meta.url)), 'templates', 'states.yml'));
 
-/** Requisition ID without a leading REQ label, so "REQ-2026-32061" and "2026-32061" compare equal. */
+/**
+ * Requisition ID reduced to its identity, applied to BOTH the --req value and the
+ * tracker note so the two sides compare equal however the site wrote the ID:
+ * "REQ-2026-32061" == "REQ2026-32061" == "2026-32061", and "JR9727" == "JR-9727" == "9727". Only a
+ * leading label (REQ / JR / R / JOB / POSTING / ID) is dropped, and only when an ID
+ * with a digit follows it; the ID body is never altered. tracker-parse.mjs's
+ * extractReqNumber() is deliberately left as is (merge-tracker, scan and
+ * followup-cadence depend on it), so the normalization lives here.
+ */
 function normReq(v) {
-  return String(v ?? '').trim().replace(/^REQ[-s:#_]+/i, '').toUpperCase();
+  let s = String(v ?? '').trim().toUpperCase();
+  const m = s.match(/^(?:REQ|JR|R|JOB|POSTING|ID)[-\s:#_]*(\S*\d\S*)$/);
+  if (m) s = m[1];
+  return s;
+}
+
+/** Trailing parenthesised level markers are part of the title, not a location. */
+const LEVEL_SUFFIX_RE = /^(?:i{1,3}|iv|v|d+|sr.?|jr.?|senior|junior|lead|intern|co-?op|contract|temporary|part[- ]time|full[- ]time)$/i;
+
+// How "location-like" is decided. There is no way to tell a city from a team name by
+// shape alone ("(Toronto)" and "(Backend)" are both one capitalised word), so a
+// parenthesised suffix is stripped ONLY when it is positively recognised:
+//   - a work-mode word (remote, hybrid, on-site, in-office, work from home);
+//   - a bare region name or code, country, or one of the major cities listed below;
+//   - a comma/slash list of the above (every component is checked, see isLocationLike).
+// Anything else ("(Backend)", "(Platform Team)", a town not in the list, "(Backend, TX)") is kept,
+// so an unlisted bare city is simply not stripped: that can only cause a missed
+// same-title match on a suffixed title (the pre-existing behaviour), never merge two
+// distinct roles. What it cannot tell apart: a team or product name that happens to
+// equal a listed city or region (e.g. "(Austin)" as a project name).
+const REGION_CODES = new Set('AB BC MB NB NL NS NT NU ON PE QC SK YT AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC UK USA US CAN CA GB'.split(' '));
+const REGION_NAMES = new Set(['alberta', 'british columbia', 'manitoba', 'new brunswick', 'newfoundland and labrador', 'nova scotia', 'ontario', 'prince edward island', 'quebec', 'saskatchewan', 'canada', 'united states', 'usa', 'united kingdom', 'uk', 'north america', 'emea', 'apac', 'gta', 'greater toronto area', 'california', 'texas', 'new york', 'florida', 'washington', 'illinois', 'massachusetts']);
+const BARE_CITIES = new Set(['toronto', 'vancouver', 'montreal', 'ottawa', 'calgary', 'edmonton', 'winnipeg', 'halifax', 'mississauga', 'brampton', 'markham', 'vaughan', 'hamilton', 'kitchener', 'waterloo', 'london', 'victoria', 'regina', 'saskatoon', 'quebec city', 'new york', 'chicago', 'austin', 'seattle', 'boston', 'san francisco', 'los angeles', 'denver', 'atlanta', 'dallas', 'houston', 'miami']);
+
+const WORK_MODE_WORD_RE = /^(?:(?:fully |100% )?remote|hybrid|on[- ]?site|in[- ]office|work from home|wfh)$/;
+
+// One component of a comma/slash separated label is recognised on its own.
+function isKnownPlace(c) {
+  return WORK_MODE_WORD_RE.test(c) || REGION_NAMES.has(c) || BARE_CITIES.has(c) || REGION_CODES.has(c.toUpperCase());
+}
+
+// EVERY component must be recognised (work-mode word, region code/name or listed city),
+// so "(Remote Backend)", "(Hybrid, Platform Team)" and "(Backend, TX)" are never stripped
+// just because one part looks like a location. There is deliberately NO free-form city
+// allowance: "City, REGION" strips only when the city is in BARE_CITIES, so an unlisted
+// small town such as "(Oakville, ON)" is simply not stripped (a missed same-title match,
+// acceptable) rather than risking a false merge of "(Backend, TX)" and "(Frontend, TX)".
+// Other trade-offs, stated plainly: a bare two-letter team or product code that equals a
+// region code ("(ON)", "(CA)", "(ID)") is stripped as a location, and so is a team name
+// that equals a listed city.
+function isLocationLike(text) {
+  const t = text.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!t) return false;
+  const parts = t.split(/\s*[,/;]\s*/).filter(Boolean);
+  return parts.length > 0 && parts.every(isKnownPlace);
+}
+
+/**
+ * Title without one trailing parenthesised location/remote suffix:
+ * "HR Generalist (Brampton, ON)" -> "HR Generalist". Only the LAST group at the
+ * very end is removed, never when nothing would be left, never for a level marker
+ * such as "(II)", and never for a qualifier that is not recognised as a location
+ * (see isLocationLike): "Software Engineer (Backend)" is left alone.
+ */
+export function stripLocationSuffix(title) {
+  const t = String(title ?? '').trim();
+  const m = t.match(/^(.*\S)\s*\(([^()]*)\)$/);
+  if (!m || LEVEL_SUFFIX_RE.test(m[2].trim()) || !isLocationLike(m[2])) return t;
+  return m[1].trim();
 }
 
 // ADDING A FLAG: add it to BOTH lists below and to USAGE (validateFlags reads these).
@@ -105,7 +174,8 @@ export function companyRelation(a, b) {
 export function findDuplicateCandidates(rows, { company = '', title = '', req = '', url = '' } = {}) {
   const wantUrl = normalizeUrl(url);
   const wantReq = normReq(req);
-  const wantTitleKey = title ? titleIdentityKey(title) : '';
+  const cleanTitle = stripLocationSuffix(title);
+  const wantTitleKey = cleanTitle ? titleIdentityKey(cleanTitle) : '';
   const out = [];
   for (const row of rows) {
     const rel = companyRelation(company, row.company);
@@ -114,11 +184,11 @@ export function findDuplicateCandidates(rows, { company = '', title = '', req = 
       reason = 'url';
     } else if (wantReq && rel && normReq(extractReqNumber(row.notes)) === wantReq) {
       reason = 'req';
-    } else if (rel === 'same' && wantTitleKey && titleIdentityKey(row.role) === wantTitleKey) {
+    } else if (rel === 'same' && wantTitleKey && titleIdentityKey(stripLocationSuffix(row.role)) === wantTitleKey) {
       reason = 'same-title';
     } else if (rel === 'parent' && title && roleFuzzyMatch(title, row.role)) {
       reason = 'parent-org';
-    } else if (rel === 'same' && title && roleFuzzyMatch(title, row.role)) {
+    } else if (rel === 'same' && cleanTitle && roleFuzzyMatch(cleanTitle, stripLocationSuffix(row.role))) {
       reason = 'similar-title';
     }
     if (!reason) continue;

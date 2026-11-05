@@ -62,6 +62,20 @@ await check('Himalayas honors the health probe page cap without requesting more 
   assert.equal(jobs.length, 1);
 });
 
+await check('Himalayas health probe does not retry a status-less failure', async () => {
+  // A plain Error has no status, so isRetryableError() treats it as retryable.
+  // The probe must still make exactly one call and rethrow that same error
+  // (providers/magneto.mjs's health-probe check).
+  const probeErr = new Error('budget');
+  let calls = 0;
+  await assert.rejects(himalayas.fetch(entry, {
+    maxPages: 1,
+    sleep: async () => {},
+    fetchJson: async () => { calls++; throw probeErr; },
+  }), (err) => err === probeErr);
+  assert.equal(calls, 1);
+});
+
 await check('Himalayas enforces the configured page budget and its absolute ceiling', async () => {
   const originalError = console.error;
   const warnings = [];

@@ -18,6 +18,7 @@ import { safeEncodeURIComponent } from './providers/_safe-url.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -89,8 +90,7 @@ const GENERIC_NAMES = new Set([
   'round',
 ]);
 
-function usage() {
-  console.log(`Usage:
+const USAGE = `Usage:
   node company-funded.mjs --dry-run
   node company-funded.mjs --limit 25 --months 6 --sort date
   node company-funded.mjs --sources techcrunch,prnewswire,guardian,hn --dry-run
@@ -104,42 +104,43 @@ Options:
   --dry-run               Print only; do not write report/JSON files.
   --json                  Print machine-readable JSON.
   --self-test             Run offline self-test.
-`);
-}
+`;
+
+function usage() { console.log(USAGE); }
 
 function parseArgs(argv) {
-  const opts = {
-    limit: DEFAULT_LIMIT,
-    months: DEFAULT_MONTHS,
-    sort: DEFAULT_SORT,
-    sources: [...DEFAULT_SOURCES],
-    dryRun: false,
-    json: false,
-    selfTest: false,
-    help: false,
+  const args = argv.slice(2);
+  const KNOWN_FLAGS = ['--dry-run','--json','--self-test','--help','-h','--limit','--months','--sort','--sources'];
+  const VALUE_FLAGS = ['--limit','--months','--sort','--sources'];
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  return {
+    limit: parseLimit(flagValue(args, '--limit') ?? String(DEFAULT_LIMIT)),
+    months: parseMonths(flagValue(args, '--months') ?? String(DEFAULT_MONTHS)),
+    sort: parseSort(flagValue(args, '--sort') ?? DEFAULT_SORT),
+    sources: parseSources(flagValue(args, '--sources') ?? DEFAULT_SOURCES.join(',')),
+    dryRun: hasFlag(args, '--dry-run'),
+    json: hasFlag(args, '--json'),
+    selfTest: hasFlag(args, '--self-test'),
+    help: hasFlag(args, '--help') || hasFlag(args, '-h'),
   };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === '--dry-run') opts.dryRun = true;
-    else if (arg === '--json') opts.json = true;
-    else if (arg === '--self-test') opts.selfTest = true;
-    else if (arg === '--help' || arg === '-h') opts.help = true;
-    else if (arg === '--limit') opts.limit = Number(argv[++i] || '');
-    else if (arg === '--months') opts.months = Number(argv[++i] || '');
-    else if (arg === '--sort') opts.sort = String(argv[++i] || '').trim().toLowerCase();
-    else if (arg === '--sources') opts.sources = parseSources(argv[++i] || '');
-    else throw new Error(`unknown option: ${arg}`);
-  }
-  if (!Number.isInteger(opts.limit) || opts.limit <= 0 || opts.limit > 100) {
-    throw new Error('--limit must be an integer from 1 to 100');
-  }
-  if (!Number.isInteger(opts.months) || opts.months <= 0 || opts.months > 120) {
-    throw new Error('--months must be an integer from 1 to 120');
-  }
-  if (!['date', 'score'].includes(opts.sort)) {
-    throw new Error('--sort must be date or score');
-  }
-  return opts;
+}
+
+function parseLimit(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 100) throw new Error('--limit must be an integer from 1 to 100');
+  return n;
+}
+
+function parseMonths(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 120) throw new Error('--months must be an integer from 1 to 120');
+  return n;
+}
+
+function parseSort(value) {
+  const s = String(value || '').trim().toLowerCase();
+  if (!['date', 'score'].includes(s)) throw new Error('--sort must be date or score');
+  return s;
 }
 
 function parseSources(value) {
@@ -1019,7 +1020,7 @@ async function selfTest() {
 }
 
 async function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const opts = parseArgs(process.argv);
   if (opts.help) {
     usage();
     return;

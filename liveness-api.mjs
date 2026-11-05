@@ -27,8 +27,9 @@
  *   - Per-job HTML (LinkedIn): the guest endpoint returns the rendered posting as
  *     HTML and answers 200 for closed postings too, so `interpret` reads two
  *     independent signals out of the body and only concludes when they agree.
- *     Zoho Recruit is the same shape: its posting page embeds the record and
- *     answers 200 for a removed posting too, so `interpret` reads the body.
+ *     Zoho Recruit and UltiPro are the same shape: their posting pages embed
+ *     the record and answer 200 for a removed posting too, so `interpret` reads
+ *     the body.
  *
  * SSRF-safe by construction: the request URL is built from a FIXED, hard-coded API
  * host plus path segments extracted from the posting URL with a strict charset
@@ -37,11 +38,16 @@
 
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { parseWwrFeed } from './providers/weworkremotely.mjs';
-import { isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
+import { ZOHO_HOST_RE, isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
+import { HOST_RE as ULTIPRO_HOST_RE, extractCandidateOpportunityDetail } from './providers/ultipro.mjs';
+import { VEJ_KEY_MONITOR } from './providers/vdab.mjs';
+import { PATH_BREAKING_CHAR, PATH_BREAKING_CHAR_ENCODED_ONCE } from './providers/arbeitsagentur.mjs';
 import { atsVendorOf } from './ats-vendor.mjs';
 import { linkedInJobId, linkedInGuestUrl } from './lib/linkedin-url.mjs';
 
 const TIMEOUT_MS = 8_000;
+// Arbeitsagentur: the hexadecimal digits of an encoded character can be in either case.
+const PATH_BREAKING_CHAR_ENCODED_ONCE_RE = new RegExp(PATH_BREAKING_CHAR_ENCODED_ONCE, 'gi');
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
 // rejected before it can reach the fixed-host API URL template. The one escape
 // allowed is %20, because some Ashby org slugs contain a space (#5018). A space
@@ -155,9 +161,9 @@ const ATS_PROVIDERS = [
     },
     api: ({ account, shortcode }) => `https://apply.workable.com/api/v2/accounts/${account}/jobs/${shortcode}`,
     // Workable's posting pages render client-side, so the browser rung reads a
-    // not-yet-painted live posting as nav/footer only (insufficient_content) and
-    // reports it expired, the costly direction: scan --verify writes that to
-    // scan-history as skipped. The v2 JSON endpoint is per-job and needs no
+    // not-yet-painted live posting as nav/footer only (insufficient_content),
+    // which used to read as expired, the costly direction: scan --verify wrote
+    // that to scan-history as skipped. The v2 JSON endpoint is per-job and needs no
     // browser. Measured live (#5000): 200 with state "published" is the live
     // shape and 404 ("Job not found") is the removed shape, so a 404 is
     // authoritative here and any other readable state stays uncertain.
@@ -287,18 +293,18 @@ const ATS_PROVIDERS = [
   },
   {
     id: 'zoho-recruit',
-    // {tenant}.zohorecruit.com/jobs/{portal}/{id}[/{slug}]. Zoho Recruit has no
+    // {tenant}.zohorecruit.<regional tld>/jobs/{portal}/{id}[/{slug}]. Zoho Recruit has no
     // JSON endpoint; the posting page itself embeds the record (see
     // providers/zoho-recruit.mjs), so `api` is that page and `interpret` reads
     // it. Zoho answers 200 for a removed posting too, so liveness comes from
     // the body, never from the status.
     match(u) {
-      const host = u.hostname.match(/^([a-z0-9][a-z0-9-]*)\.zohorecruit\.com$/);
+      const host = u.hostname.match(ZOHO_HOST_RE);
       if (!host) return null;
       const m = u.pathname.match(/^\/jobs\/([^/]+)\/(\d+)(?:\/[^/]*)?\/?$/);
-      return m ? { tenant: host[1], portal: m[1], id: m[2] } : null;
+      return m ? { tenant: host[1], host: u.hostname, portal: m[1], id: m[2] } : null;
     },
-    api: ({ tenant, portal, id }) => `https://${tenant}.zohorecruit.com/jobs/${portal}/${id}`,
+    api: ({ host, portal, id }) => `https://${host}/jobs/${portal}/${id}`,
     accept: 'text/html',
     async interpret(res, { id }) {
       let html;
@@ -307,19 +313,60 @@ const ATS_PROVIDERS = [
     },
   },
   {
+    id: 'ultipro',
+    // {host}/{tenant}/JobBoard/{boardId}/OpportunityDetail?opportunityId={id}, the
+    // URL providers/ultipro.mjs writes. Like Zoho Recruit, UKG has no per-posting
+    // JSON endpoint: the detail page embeds the record (see providers/ultipro.mjs)
+    // and answers 200 for a closed posting too, so `interpret` reads the body.
+    //
+    // The browser reads a closed posting here as uncertain: it either keeps its
+    // page without an Apply control or gets the board's near-empty page, and on
+    // 2026-10-28 all 57 closed postings read uncertain. Measured that day on 156
+    // postings across 24 tenants, against each board's own listing: 99 listed
+    // postings carried an open record, 14 unlisted ones a closed record and 42
+    // the empty page's notice; the last, an internal-only posting, stays with
+    // the browser.
+    match(u) {
+      if (!ULTIPRO_HOST_RE.test(u.hostname)) return null;
+      const m = u.pathname.match(/^\/([^/]+)\/JobBoard\/([^/]+)\/OpportunityDetail\/?$/);
+      const id = u.searchParams.get('opportunityId');
+      if (!m || !id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+      // UKG reads the id in any case and answers with the record's own lower-case id.
+      return { host: u.hostname, tenant: m[1], boardId: m[2], id: id.toLowerCase() };
+    },
+    api: ({ host, tenant, boardId, id }) => `https://${host}/${tenant}/JobBoard/${boardId}/OpportunityDetail?opportunityId=${id}`,
+    accept: 'text/html',
+    async interpret(res, { id }) {
+      let html;
+      try { html = await res.text(); } catch { return null; }
+      return classifyUltiproDetailPage(html, id);
+    },
+  },
+  {
     id: 'arbeitsagentur',
     match(u) {
       if (u.hostname !== 'www.arbeitsagentur.de') return null;
       const m = u.pathname.match(/^\/jobsuche\/jobdetail\/([^/]+)\/?$/);
-      return m ? { refnr: m[1] } : null;
+      if (!m) return null;
+      // The path holds the reference number encoded once, except a slash, which
+      // is encoded once or twice (%2F or %252F). Decoding once keeps a literal
+      // percent sign, and leaves only a twice-encoded slash still encoded.
+      // The API takes the base64url of the real number. Only that form is passed
+      // on: the real number can hold characters the safe-value check refuses.
+      try {
+        const refnr = decodeURIComponent(m[1]).replace(PATH_BREAKING_CHAR_ENCODED_ONCE_RE, PATH_BREAKING_CHAR);
+        return { refnrBase64: Buffer.from(refnr).toString('base64url') };
+      } catch {
+        return null;
+      }
     },
-    api: ({ refnr }) => `https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/${Buffer.from(refnr).toString('base64url')}`,
+    api: ({ refnrBase64 }) => `https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/${refnrBase64}`,
     headers: { 'X-API-Key': 'jobboerse-jobsuche' },
     api404Authoritative: false, // no expired real-job control; absence stays unknown
-    async interpret(res, { refnr }) {
+    async interpret(res, { refnrBase64 }) {
       let posting;
       try { posting = await res.json(); } catch { return null; }
-      return posting?.referenznummer === refnr && posting?.stellenangebotsTitel
+      return posting?.referenznummer === Buffer.from(refnrBase64, 'base64url').toString() && posting?.stellenangebotsTitel
         ? { result: 'active', code: 'arbeitsagentur_api_active', reason: 'Arbeitsagentur returns the matching job detail' }
         : null;
     },
@@ -489,6 +536,40 @@ const ATS_PROVIDERS = [
       let json;
       try { json = await res.json(); } catch { return null; }
       return classifyAlibabaPosition(json, id);
+    },
+  },
+  {
+    id: 'vdab',
+    // www.vdab.be/vindeenjob/vacatures/{id}, the URL providers/vdab.mjs writes;
+    // older links add a title slug after the id.
+    //
+    // A closed vacancy keeps its page and its "Solliciteer nu" button, and only
+    // a banner says it is closed, "Deze vacature is niet meer gepubliceerd"
+    // (#5244). The browser reads the page while it renders: on 2026-10-22 it
+    // read 13 of 87 loads of unpublished vacancies active (the button rendered
+    // before the banner) and 5 no_apply_control, as it did 2 of 40 loads of
+    // published ones. The detail endpoint the page itself calls has no render
+    // to wait for.
+    match(u) {
+      if (u.hostname !== 'www.vdab.be' && u.hostname !== 'vdab.be') return null;
+      const m = u.pathname.match(/^\/vindeenjob\/vacatures\/(\d+)(?:\/[^/]+)?\/?$/);
+      return m ? { id: m[1] } : null;
+    },
+    api: ({ id }) => `https://www.vdab.be/rest/vindeenjob/v4/vacatures/${id}?preview=false`,
+    // Without the key the endpoint answers 403, which falls back to the browser,
+    // so a rotated key costs this rung, not the check.
+    headers: { 'vej-key-monitor': VEJ_KEY_MONITOR },
+    // Measured 2026-10-22: a published vacancy answers 200 with gepubliceerd
+    // true, an unpublished one 200 with gepubliceerd false and a status, and an
+    // id VDAB never had 404 {"code":"NOT_FOUND"}. The 404 body is read too, so
+    // a 404 saying anything else falls back to the browser instead of closing
+    // the vacancy for good, and so does a 410, which VDAB never answered.
+    interpretStatuses: [200, 404],
+    api404Authoritative: false,
+    async interpret(res, { id }) {
+      let json;
+      try { json = await res.json(); } catch { return null; }
+      return classifyVdabVacancy(json, id, res.status);
     },
   },
 ];
@@ -770,6 +851,48 @@ export function classifyAlibabaPosition(json, id) {
 }
 
 /**
+ * Decide liveness for one VDAB vacancy from its detail answer (HTTP 200 or 404).
+ * Pure + deterministic (no I/O), mirroring classifyNoFluffJobsPosting.
+ *
+ * `gepubliceerd` is what the page's closed banner reports ("Deze vacature is
+ * niet meer gepubliceerd"): true is live. An unpublished vacancy's `status`
+ * says why. PASSIEF is closed. HANGEND (pending) also covers vacancies VDAB has
+ * not published yet, so it stays uncertain: an expired verdict is one
+ * scan --verify records for good. An unpublished status this rung has not seen
+ * stays uncertain too. On a 404, only NOT_FOUND says the id is gone. A record
+ * for another vacancy, or one without the flag, returns null so the browser
+ * rung decides.
+ *
+ * @param {any} json - the parsed detail response
+ * @param {string} id - the vacancy id from the posting URL
+ * @param {number} [httpStatus=200] - the response's HTTP status (200 or 404)
+ * @returns {{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null}
+ */
+export function classifyVdabVacancy(json, id, httpStatus = 200) {
+  if (!json || typeof json !== 'object') return null;
+  if (httpStatus === 404) {
+    return json.code === 'NOT_FOUND'
+      ? { result: 'expired', code: 'vdab_api_gone', reason: 'VDAB has no vacancy under this id (404 NOT_FOUND)' }
+      : null;
+  }
+  if (!isSameId(json.referentie?.id, id) || typeof json.gepubliceerd !== 'boolean') return null;
+  if (json.gepubliceerd) {
+    return { result: 'active', code: 'vdab_api_published', reason: 'VDAB reports the vacancy published (live)' };
+  }
+  if (json.status === 'PASSIEF') {
+    return { result: 'expired', code: 'vdab_api_closed', reason: 'VDAB reports the vacancy no longer published (PASSIEF)' };
+  }
+  if (json.status === 'HANGEND') {
+    return { result: 'uncertain', code: 'vdab_api_pending', reason: 'VDAB reports the vacancy pending (HANGEND): not published, and not closed' };
+  }
+  return {
+    result: 'uncertain',
+    code: 'vdab_status_unrecognised',
+    reason: `VDAB reports the vacancy unpublished with status ${String(json.status)}; not a verdict this rung can make`,
+  };
+}
+
+/**
  * Decide liveness for one Zoho Recruit posting from its own page.
  * Pure + deterministic (no I/O), mirroring classifyAshbyBoard.
  *
@@ -795,6 +918,47 @@ export function classifyZohoPostingPage(html, id) {
   }
   return /This job posting is no longer available/i.test(html)
     ? { result: 'expired', code: 'zoho_recruit_unavailable', reason: 'Zoho Recruit shows "This job posting is no longer available."' }
+    : null;
+}
+
+// The notice on UKG's empty detail page, the one the browser shows as "This
+// opportunity is currently not available." An internal-only posting's page has
+// no record either, but carries a sign-in notice instead, so it does not match.
+const ULTIPRO_UNAVAILABLE_NOTICE = 'data-i18n="Opportunity.OpportunityError.OpportunityUnavailableMessage"';
+
+/**
+ * Decide liveness for one UltiPro (UKG Pro Recruiting) posting from its own
+ * detail page. Pure + deterministic (no I/O), mirroring classifyZohoPostingPage.
+ *
+ * A posting's page embeds its record, and the record for THIS id says whether
+ * it is closed: `OpportunityIsClosed` false is live, true is closed (a closed
+ * posting can keep its whole page, only without an Apply control). A posting
+ * UKG no longer shows gets the board's empty page: no record, and the
+ * "opportunity unavailable" notice. Anything else (a record for another id or
+ * without the flag, an internal-only notice, an error page, a markup change)
+ * returns null so the browser rung decides.
+ *
+ * @param {any} html - the detail page's body
+ * @param {string} id - the opportunityId from the posting URL
+ * @returns {{ result: 'active' | 'expired', code: string, reason: string } | null}
+ */
+export function classifyUltiproDetailPage(html, id) {
+  if (typeof html !== 'string' || !html) return null;
+  let page;
+  try {
+    page = extractCandidateOpportunityDetail(html, id);
+  } catch {
+    return null; // a record for another id, or one that no longer parses
+  }
+  if (page.status === 'ok') {
+    const closed = page.detail.OpportunityIsClosed;
+    if (typeof closed !== 'boolean') return null;
+    return closed
+      ? { result: 'expired', code: 'ultipro_api_closed', reason: 'UKG marks the opportunity closed (OpportunityIsClosed)' }
+      : { result: 'active', code: 'ultipro_api_open', reason: 'UKG marks the opportunity open (live)' };
+  }
+  return html.includes(ULTIPRO_UNAVAILABLE_NOTICE)
+    ? { result: 'expired', code: 'ultipro_api_unavailable', reason: 'UKG shows "This opportunity is currently not available."' }
     : null;
 }
 
@@ -876,14 +1040,16 @@ export function isAtsPosting(url) {
 // greenhouse-embedded (a company careers page carrying only `?gh_jid=`) reaches
 // the same per-job Greenhouse endpoint once its embed redirect names the board.
 // Zoho Recruit has no JSON API; the posting page resolveAtsApi() points at
-// embeds the record with its HTML `Job_Description`.
+// embeds the record with its HTML `Job_Description`. UltiPro is the same: its
+// detail page embeds the `CandidateOpportunityDetail` record with its HTML
+// `Description`.
 // Workable canonical and share links expose description, requirements and benefits
 // on the per-posting v2 API, after the existing guarded account-resolution hop.
 // Microsoft and LinkedIn are on ATS_PROVIDERS
 // for liveness only — their public endpoints answer search/status, never body
 // text — so they are deliberately excluded here; see fetch-jd.mjs / the
 // fetch*Jd() family in browser-extract.mjs for the per-provider fetchers.
-export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters', 'zoho-recruit', 'workable', 'workable-short']);
+export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters', 'zoho-recruit', 'workable', 'workable-short', 'ultipro']);
 
 /**
  * Zero-token liveness check via the posting's ATS API.

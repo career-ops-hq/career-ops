@@ -78,6 +78,50 @@ test('ats-rules.yml: no accepted section header is invented past the doc', () =>
   }
 });
 
+// #4798: auditAts judges rendered output, atsLint judges an unrendered
+// template, and a rule that depends on content cannot pass or fail before
+// render. Every rule says which kind it is, so a dispatch between the two
+// checkers has something to partition on.
+test('ats-rules.yml: every rule is classified structural or content', () => {
+  for (const rule of rules) {
+    assert.ok(['structural', 'content'].includes(rule.scope), `${rule.id}: scope must be "structural" or "content", got ${JSON.stringify(rule.scope)}`);
+  }
+  const scopeOf = Object.fromEntries(rules.map((r) => [r.id, r.scope]));
+  assert.equal(scopeOf['no-nested-tables'], 'structural');
+  assert.equal(scopeOf['no-hidden-text'], 'structural');
+  assert.equal(scopeOf['no-critical-info-in-page-furniture'], 'content',
+    'what a fixed-position block carries is known only once the payload has filled it');
+});
+
+function contentScopedRules() {
+  const rulesPath = join(mkdtempSync(join(tmpdir(), 'atsrules-')), 'ats-rules.yml');
+  const rule = (id, scope) => `  - id: ${id}\n    rule: ${id}\n    severity: warning\n    scope: ${scope}\n`
+    + '    detect: hidden-text\n    source:\n      - q\n    must_not_flag: n\n';
+  writeFileSync(rulesPath, `rules:\n${rule('as-structural', 'structural')}${rule('as-content', 'content')}`);
+  return rulesPath;
+}
+
+test('a content-scoped rule is skipped on a template, never run and never passed', () => {
+  // Both rules share one detector and one violating input. The structural one
+  // fires; the content one must not even run, because on an unrendered template
+  // "no finding" would read as "checked and clean".
+  const dir = mkdtempSync(join(tmpdir(), 'atslint-'));
+  const path = join(dir, 'cv-template.html');
+  writeFileSync(path, '<html><body><span style="color:#fff">stuffing</span></body></html>');
+  const result = atsLint(path, 'cv', { rulesPath: contentScopedRules() });
+  assert.equal(result.error, null);
+  assert.deepEqual(ids(result), ['as-structural']);
+  assert.deepEqual(result.skipped.map((s) => s.id), ['as-content']);
+  assert.match(result.skipped[0].reason, /rendered/i);
+  assert.equal(result.skipped[0].scope, 'content');
+});
+
+test('findings and skips carry the rule scope, so a caller can partition them', () => {
+  const result = lint('<html><body><table><tr><td><table><tr><td>x</td></tr></table></td></tr></table></body></html>');
+  assert.deepEqual(result.findings.map((f) => f.scope), ['structural']);
+  for (const s of result.skipped) assert.ok(['structural', 'content'].includes(s.scope), `${s.id}: skip carries a scope`);
+});
+
 test('detector map and rules file name exactly the same detectors', () => {
   const named = new Set(rules.map((r) => r.detect).filter(Boolean));
   const registered = new Set(Object.keys(ATS_DETECTORS));
@@ -481,7 +525,7 @@ test('the CLI refuses a non-HTML template rather than reporting it clean', () =>
   assert.equal(tex.stdout.trim(), '', 'nothing that looks like a clean result may be printed');
 
   const html = cli(['lint', 'cv']);
-  assert.equal(html.status, 0, `the html path must still work: ${html.stderr}`);
+  assert.equal(html.status, 0, describeSpawn(html, `the html path must still work`));
   assert.equal(JSON.parse(html.stdout).ok, true);
 });
 
@@ -495,7 +539,7 @@ test('the CLI test helper does not inherit CAREER_OPS_PROFILE', () => {
   process.env.CAREER_OPS_PROFILE = profile;
   try {
     const html = cli(['lint', 'cv']);
-    assert.equal(html.status, 0, `an ambient CAREER_OPS_PROFILE must not reach the child: ${html.stderr}`);
+    assert.equal(html.status, 0, describeSpawn(html, `an ambient CAREER_OPS_PROFILE must not reach the child`));
     assert.equal(JSON.parse(html.stdout).ok, true);
   } finally {
     if (prior === undefined) delete process.env.CAREER_OPS_PROFILE;
@@ -510,7 +554,7 @@ test('the CLI test helper does not inherit CAREER_OPS_PROFILE', () => {
 // different --rules-path being garbage. The contract the loader enforces is the
 // one ats-rules.yml's own header states.
 test('a rules file whose entries are malformed is an error, not a clean pass', () => {
-  const VALID = 'id: x\n    rule: X\n    severity: warning\n    detect: null\n'
+  const VALID = 'id: x\n    rule: X\n    severity: warning\n    scope: structural\n    detect: null\n'
     + '    unimplemented_because: pending\n    source:\n      - q\n    must_not_flag: n\n';
   const cases = [
     ['an empty entry', 'rules:\n  - {}\n', /id/i],
@@ -519,6 +563,9 @@ test('a rules file whose entries are malformed is an error, not a clean pass', (
     ['no id', `rules:\n  - ${VALID.replace('id: x\n    ', '')}`, /id/i],
     ['no rule name', `rules:\n  - ${VALID.replace('rule: X\n    ', '')}`, /rule/i],
     ['a non-warning severity', `rules:\n  - ${VALID.replace('severity: warning', 'severity: error')}`, /severity/i],
+    ['no scope', `rules:\n  - ${VALID.replace('scope: structural\n    ', '')}`, /scope/i],
+    ['a scope that is neither structural nor content', `rules:\n  - ${VALID.replace('scope: structural', 'scope: both')}`, /scope/i],
+    ['a scope inherited from Object.prototype', `rules:\n  - ${VALID.replace('scope: structural', 'scope: toString')}`, /scope/i],
     ['no source quote', `rules:\n  - ${VALID.replace('source:\n      - q\n    ', '')}`, /source/i],
     ['an empty source list', `rules:\n  - ${VALID.replace('source:\n      - q', 'source: []')}`, /source/i],
     ['no must_not_flag', `rules:\n  - ${VALID.replace('must_not_flag: n\n', '')}`, /must_not_flag/i],
@@ -549,7 +596,7 @@ test('a rules file whose entries are malformed is an error, not a clean pass', (
 // yet, and has to stay loadable, or the validator would delete the open items.
 test('a valid rule with a null detector still loads and still skips', () => {
   const rulesPath = join(mkdtempSync(join(tmpdir(), 'atsrules-')), 'ats-rules.yml');
-  writeFileSync(rulesPath, 'rules:\n  - id: x\n    rule: X\n    severity: warning\n'
+  writeFileSync(rulesPath, 'rules:\n  - id: x\n    rule: X\n    severity: warning\n    scope: structural\n'
     + '    detect: null\n    unimplemented_because: pending\n    source:\n      - q\n    must_not_flag: n\n');
   const loaded = loadAtsRules(rulesPath);
   assert.equal(loaded.rules.length, 1);
@@ -571,10 +618,10 @@ test('the CLI honours --fallback on lint, the same as on resolve', () => {
   assert.notEqual(cli(['lint', 'cv', missing]).status, 0, 'lint without --fallback must refuse');
 
   const resolved = cli(['resolve', 'cv', missing, '--fallback']);
-  assert.equal(resolved.status, 0, `resolve --fallback must answer: ${resolved.stderr}`);
+  assert.equal(resolved.status, 0, describeSpawn(resolved, `resolve --fallback must answer`));
   assert.match(resolved.stdout.trim(), /cv-template\.html$/, 'it falls back to the standard template');
 
   const linted = cli(['lint', 'cv', missing, '--fallback']);
-  assert.equal(linted.status, 0, `lint --fallback must answer too: ${linted.stderr}`);
+  assert.equal(linted.status, 0, describeSpawn(linted, `lint --fallback must answer too`));
   assert.equal(JSON.parse(linted.stdout).ok, true);
 });

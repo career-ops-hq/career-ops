@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { formatApplicationAnswersSection, parseApplicationAnswersSection, upsertApplicationAnswersSection } from '../application-answers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 function check(label, run) {
   try {
@@ -34,7 +35,7 @@ for (const heading of ['##\tInterview Notes', '  ## Interview Notes', '##', '# I
         cwd: new URL('..', import.meta.url), encoding: 'utf8',
         env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '' },
       });
-      assert.equal(run.status, 0, run.stderr);
+      assert.equal(run.status, 0, describeSpawn(run));
       const updated = readFileSync(report, 'utf8');
       assert.ok(updated.includes(`${heading}${nextBody}`), updated);
       assert.deepEqual(parseApplicationAnswersSection(reportText, { strict: true }).files, []);

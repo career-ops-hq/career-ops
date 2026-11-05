@@ -92,7 +92,7 @@ test('help flags cannot supply --file or migrate the default history', (t) => {
   for (const help of ['--help', '-h']) {
     for (const args of [['--file', help], ['--apply', '--file', help]]) {
       const result = run(root, args);
-      assert.equal(result.status, 1, `accepted ${args.join(' ')}`);
+      assert.equal(result.status, 1, describeSpawn(result, `accepted ${args.join(' ')}`));
       assert.match(result.stderr, /--file requires (?:a value|a path argument)/);
       assert.equal(result.stdout, '');
       assert.equal(readFileSync(file, 'utf8'), OLD_RUNS);

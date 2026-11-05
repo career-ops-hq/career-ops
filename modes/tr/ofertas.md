@@ -17,6 +17,6 @@
 
 Her ilan için: boyut başına puan ve toplam ağırlıklı puan.
 Teklife Kadar Geçen Süre (time-to-offer) değerlendirmeleriyle birlikte nihai sıralama + öneri.
-Tüm raporlar çıktı başlığında **URL:** ve **Meşruiyet:** alanlarını içermelidir.
+Tüm raporlar çıktı başlığında **URL:** ve **Legitimacy:** alanlarını içermelidir.
 
 Kullanıcıdan, bağlamda (context) yoksa iş ilanlarını iste. Bunlar metin, URL'ler veya takipçide halihazırda değerlendirilmiş ilanlara atıflar olabilir.

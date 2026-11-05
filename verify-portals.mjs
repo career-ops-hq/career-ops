@@ -47,6 +47,8 @@ import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { ASHBY_TIMEOUT_MS } from './providers/ashby.mjs';
+import { LEVER_TIMEOUT_MS } from './providers/lever.mjs';
 import { isBlockedAddress } from './providers/_ip-guard.mjs';
 
 // The portal probes are the one place that keeps following redirects: they hit
@@ -111,6 +113,8 @@ const PROVIDERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'provider
 // How to turn a slug into a probe URL, and where the job list lives in the
 // response, for each supported ATS. Greenhouse/Ashby wrap jobs in `{ jobs }`;
 // Lever returns a bare array. `includeCompensation` mirrors the ashby provider.
+// `timeoutMs` is the one the provider fetches the same board with, so a board
+// `scan` reads is not reported unreachable here (none: _http.mjs's default).
 export const ATS = {
   greenhouse: {
     probeUrl: (slug) =>
@@ -126,6 +130,7 @@ export const ATS = {
   ashby: {
     probeUrl: (slug) =>
       `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`,
+    timeoutMs: ASHBY_TIMEOUT_MS,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
     // The posting API returns only {jobs, apiVersion}; the board page titles
     // itself with the owner ('deepset Jobs'), which is the only name either
@@ -138,6 +143,7 @@ export const ATS = {
     // EU boards (jobs.eu.lever.co) resolve to api.eu.lever.co, mirroring the
     // provider's resolveApiUrl; the default is the base instance.
     probeUrl: (slug, { eu = false } = {}) => `https://api.${eu ? 'eu.' : ''}lever.co/v0/postings/${slug}`,
+    timeoutMs: LEVER_TIMEOUT_MS,
     jobCount: (json) => (Array.isArray(json) ? json.length : null),
     ownerUrl: (slug, { eu = false } = {}) => `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
     ownerKind: 'html',
@@ -286,7 +292,8 @@ const AGGREGATOR_HOSTS = [
   'greenhouse.io', 'ashbyhq.com', 'lever.co', 'myworkdayjobs.com', 'workday.com',
   'smartrecruiters.com', 'jobvite.com', 'icims.com', 'bamboohr.com', 'gem.com',
   'recruitee.com', 'teamtailor.com', 'personio.com', 'workable.com', 'breezy.hr',
-  'linkedin.com', 'indeed.com', 'glassdoor.com', 'ycombinator.com', 'wellfound.com',
+  'paylocity.com', 'join.com', 'linkedin.com', 'indeed.com', 'glassdoor.com',
+  'ycombinator.com', 'wellfound.com',
 ];
 
 /** Subdomain labels that describe a careers site rather than the company. */
@@ -508,7 +515,7 @@ export async function probeSlug(
     };
   const url = spec.probeUrl(slug, { eu });
   try {
-    const json = await fetchJson(url);
+    const json = await fetchJson(url, spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : undefined);
     const count = spec.jobCount(json);
     if (count == null)
       return {

@@ -42,7 +42,7 @@ function run(input, extra = []) {
 
 test('--markdown renders the payload with resolved titles in builder order', () => {
   const { r, outPath } = run(payload);
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   const md = readFileSync(outPath, 'utf8');
   assert.match(md, /^# Test Candidate\n\nSenior Engineer\n\n\+1 234 567 8900 \| test@example\.com \| github\.com\/test \| Remote\n/);
   assert.deepEqual(md.match(/^## .+$/gm), [
@@ -77,7 +77,7 @@ test('--markdown follows the section order of the given template', () => {
   // Skills first, Interests absent: the markdown mirrors both.
   writeFileSync(tpl, '{{SECTION_SKILLS}} {{SECTION_SUMMARY}} {{SECTION_EXPERIENCE}} {{SECTION_EDUCATION}}');
   const { r, outPath } = run(payload, [tpl]);
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.deepEqual(readFileSync(outPath, 'utf8').match(/^## .+$/gm), [
     '## Skills', '## Professional Summary', '## Experiencia', '## Education',
   ]);
@@ -88,7 +88,7 @@ test('--markdown percent-encodes Markdown delimiters in project URLs', () => {
     ...payload,
     projects: [{ name: 'Proj', url: 'https://example.com/a_(b))c d', description: 'Does things.' }],
   });
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.match(readFileSync(outPath, 'utf8'), /### \[Proj\]\(https:\/\/example\.com\/a_%28b%29%29c%20d\)\n/);
 });
 
@@ -109,13 +109,13 @@ test('--markdown escapes link-label delimiters in project names', () => {
     ...payload,
     projects: [{ name: 'A](https://example.invalid) [B', url: 'https://example.com', description: 'Does things.' }],
   });
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.match(readFileSync(outPath, 'utf8'), /### \[A\\\]\(https:\/\/example\.invalid\) \\\[B\]\(https:\/\/example\.com\)\n/);
 });
 
 test('--markdown ends with the consent footer when the payload sets one', () => {
   const { r, outPath } = run({ ...payload, consent: 'I consent to the processing of my data.' });
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.match(readFileSync(outPath, 'utf8'), /\n---\n\nI consent to the processing of my data\.\n$/);
   const plain = run(payload);
   assert.doesNotMatch(readFileSync(plain.outPath, 'utf8'), /^---$/m);

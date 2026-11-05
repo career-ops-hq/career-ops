@@ -27,6 +27,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf-8');
@@ -109,7 +110,7 @@ test('a TSV written where AGENTS.md says merges under a configured data root', (
         CAREER_OPS_ADDITIONS: '',
       },
     });
-    assert.equal(r.status, 0, `merge-tracker exited ${r.status}: ${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `merge-tracker exited ${r.status}`));
     assert.match(readFileSync(tracker, 'utf-8'), /\| 901 \| 2026-10-16 \| Example Co \| Engineer \|/,
       `the documented TSV was not merged:\n${r.stdout}`);
   } finally {

@@ -40,6 +40,10 @@ Three independent pieces, smallest first. You can use any of them on their own.
 `node scan.mjs` is safe to run unattended — it's idempotent (already-seen URLs are
 deduped) and costs nothing. Pick your platform.
 
+The scan exits 2 when every target it tried failed (no network, for example), and 0
+when at least one board was read, so a scheduler that alerts on a non-zero exit
+reports an outage without flagging every run that hit one dead board.
+
 Replace `/path/to/career-ops` with your checkout path, and make sure `node` is on
 the `PATH` the scheduler uses (schedulers often run with a minimal environment — use
 an absolute path to `node` if in doubt, e.g. `which node`).
@@ -236,6 +240,18 @@ so this piece runs `claude -p` (or your CLI's headless equivalent, see
    read the cadence (`node followup-cadence.mjs`), draft a follow-up for
    every overdue/urgent entry, and **write the drafts to a dated file**
    (`output/followup-drafts-{date}.md`) instead of trying to act on them.
+   Headless `claude -p` denies any tool call that would need approval, so
+   the script allows exactly what that takes: the read-only scripts the mode
+   runs (`followup-cadence.mjs`, `funnel-velocity.mjs`,
+   `rejection-latency.mjs`, `company-history.mjs`) and a write to that one
+   draft file, with the data root passed through `--add-dir`. It also runs
+   in `dontAsk` mode, so an `acceptEdits` or `auto` default in your own
+   settings doesn't widen that, and it denies `set-status.mjs`,
+   `followup-seed.mjs` and file edits under `data/`, even where your own
+   allow rules cover them. A broad `Bash` rule in your own settings still
+   applies to other shell commands, and a command such as `node -e` can
+   write files, so keep such a rule out of the settings this job runs with
+   if you want the sweep strictly draft-only.
 3. Logs start/end to `data/followup-sweep.log` (gitignored).
 4. Exits before starting Claude when follow-ups are turned off: with
    `follow_ups.enabled: false` in `config/profile.yml` the sweep calls

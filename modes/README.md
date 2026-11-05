@@ -14,7 +14,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 
 | File | Mode | Purpose |
 |---|---|---|
-| `oferta.md` | `oferta` | Full A-G evaluation of a single offer |
+| `oferta.md` | `oferta` | Full evaluation of a single offer: Blocks A-G, plus Block H (draft application answers) for high-scoring offers |
 | `ofertas.md` | `ofertas` | Multi-job comparison |
 | `auto-pipeline.md` | (paste a JD/URL) | Full automatic pipeline (evaluate + PDF + tracker) on a pasted JD/URL |
 | `pipeline.md` | `pipeline` | Process the URL inbox (`data/pipeline.md`) |

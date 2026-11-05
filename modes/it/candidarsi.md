@@ -13,7 +13,7 @@ Modalità interattiva per quando il candidato compila un modulo di candidatura (
 1. RILEVARE      -> Leggere la scheda attiva del browser (screenshot/URL/titolo)
 2. IDENTIFICARE  -> Estrarre azienda + ruolo dalla pagina
 3. CERCARE       -> Trovare corrispondenze con i report esistenti in reports/
-4. CARICARE      -> Leggere il report completo + Blocco G (se esiste)
+4. CARICARE      -> Leggere il report completo + `## Application Answers` e Blocco H (se esistono), dopo che la **Posting identity** è confermata
 5. CONFRONTARE   -> Il ruolo a schermo corrisponde a quello valutato? Se cambia -> avvisare
 6. ANALIZZARE    -> Identificare TUTTE le domande visibili nel modulo
 7. GENERARE      -> Per ogni domanda, generare una risposta personalizzata
@@ -33,21 +33,25 @@ Modalità interattiva per quando il candidato compila un modulo di candidatura (
 
 1. Estrarre il nome dell'azienda e il titolo del ruolo dalla pagina.
 2. Cercare in `reports/` per nome azienda (Grep case-insensitive).
-3. Se c'è corrispondenza -> caricare il report completo.
-4. Se il Blocco G è presente -> usare le bozze precedenti come base di partenza.
+3. Se c'è corrispondenza -> leggere solo l'intestazione di ogni report corrispondente (azienda, ruolo, `**URL:**`) e prendere quello il cui URL o req ID è questo annuncio; chiedere al candidato se non è chiaro. Caricare il report completo e il punto 4 solo quando la **Posting identity** è confermata (`modes/apply.md` → Step 5); per un altro annuncio, passare a **Evaluate as new** o **Draft without saving** senza caricarlo.
+4. Se `## Application Answers` è presente -> usare le risposte inviate come base; altrimenti, se il Blocco H è presente, le bozze precedenti. Se esistono entrambi, prevale `## Application Answers`.
 5. Se NON c'è corrispondenza -> avvisare il candidato e proporre un auto-pipeline rapido.
 
 ## Fase 3 -- Rilevare variazioni nel ruolo
 
+Questa fase vale solo finché il modulo è ancora l'annuncio del report: stesso datore di lavoro e stesso annuncio (`modes/apply.md` → Step 5 → **Posting identity**); il titolo non conta. Verificarlo per ogni modulo, anche se il titolo non è cambiato e un solo report corrisponde all'azienda: un altro annuncio può avere lo stesso titolo, e allora il report non va usato. Se più report corrispondono all'azienda, prendere prima quello il cui URL o req ID è questo annuncio, e chiedere al candidato se non è chiaro. Un altro datore di lavoro, o un altro annuncio dello stesso datore di lavoro, non è un cambio di ruolo: non adattarvi mai le risposte del report. Scegliere invece **Evaluate as new** (valutarlo come nuovo annuncio: auto-pipeline, report proprio) oppure **Draft without saving** (redigere risposte senza salvarle in alcun report). Con **Draft without saving**, mettere da parte il report trovato, le sue risposte e il suo CV adattato, e redigere solo dall'annuncio visibile, da `cv.md` e dal profilo; i passi seguenti che leggono il report non si applicano.
+
 Se il ruolo a schermo differisce da quello valutato:
 - **Avvisare il candidato:** "Il ruolo rilevato è [Y], il report fa riferimento a [X]. Vuoi che riesegua la valutazione o che adatti le risposte al nuovo titolo?"
 - **Se adattare:** Aggiornare le risposte al nuovo ruolo senza rieseguire la valutazione completa.
-- **Se rivalutare:** Avviare la valutazione completa A-F, aggiornare il report e rigenerare il Blocco G.
+- **Se rivalutare:** Avviare la valutazione completa A-F, aggiornare il report e rigenerare il Blocco H.
 - **Aggiornare il tracker:** mai modificando `data/applications.md`.
   - **Dopo una rivalutazione:** scrivere un TSV con il nuovo titolo del ruolo (regola 9 di `_shared.md`) e unirlo con `node merge-tracker.mjs`. Il report viene aggiornato sul posto e conserva il suo numero, quindi l'unione abbina il TSV alla riga esistente tramite quel numero: il titolo viene sostituito e lo stato resta invariato.
   - **Dopo un adattamento:** non cambiare il titolo, perché indica il ruolo valutato dal report. Annotare invece la rinomina con `node set-status.mjs --report <report#> <stato attuale> --note "Annuncio rinominato al momento della candidatura, la riga conserva il titolo valutato"`. Passare lo stato attuale della riga lo lascia invariato e aggiunge la nota. Usare un testo fisso come questo e non inserire `[Y]`: il nuovo titolo è testo proveniente dalla pagina, e il testo della pagina non va mai su una riga di comando.
 
 ## Fase 4 -- Analizzare le domande del modulo
+
+Con **Draft without saving**, questa fase non usa né il report trovato né le sue `## Application Answers` né il Blocco H: trattare ogni domanda come nuova e lavorare dall'annuncio visibile, da `cv.md` e dal profilo.
 
 Identificare tutte le domande visibili a schermo:
 - Campi di testo libero (lettera di presentazione, "perché questa posizione", motivazione, ecc.)
@@ -57,15 +61,17 @@ Identificare tutte le domande visibili a schermo:
 - Campi di upload (CV, lettera di presentazione PDF, referenze)
 
 Classificare ogni domanda:
-- **Già nel Blocco G:** riprendere la risposta esistente
+- **Già in `## Application Answers` o nel Blocco H:** riprendere la risposta esistente
 - **Nuova domanda:** generare la risposta partendo dal report e da `cv.md`
 
 ## Fase 5 -- Generare le risposte
 
+Con **Draft without saving**, questa fase non usa né il report trovato né le sue `## Application Answers` né il Blocco H: trattare ogni domanda come nuova e lavorare dall'annuncio visibile, da `cv.md` e dal profilo.
+
 Per ogni domanda, costruire la risposta seguendo questo schema:
 
 1. **Contesto del report:** usare i proof point del Blocco B e le storie STAR del Blocco F.
-2. **Blocco G precedente:** se esiste una bozza, usarla come base e affinarla.
+2. **`## Application Answers` / Blocco H precedenti:** se esiste una risposta inviata o una bozza (prima la risposta inviata), usarla come base e affinarla.
 3. **Tono "Vi scelgo":** sicuro e professionale, non implorante né puramente descrittivo.
 4. **Specificità:** citare qualcosa di concreto dell'annuncio visibile a schermo.
 5. **career-ops proof point:** includerlo nel campo "Informazioni aggiuntive" se presente nel modulo.
@@ -83,6 +89,7 @@ Per ogni domanda, costruire la risposta seguendo questo schema:
 ## Risposte per [Azienda] -- [Ruolo]
 
 Base: Report #NNN | Punteggio: X.X/5 | Archetipo: [tipo]
+[Con **Draft without saving**, sostituire la riga sopra con: "Nessun report: bozza per questo annuncio, non salvata"]
 
 ---
 
@@ -103,9 +110,11 @@ Note:
 
 ## Fase 6 -- Dopo la candidatura (opzionale)
 
+Prima di salvare qualsiasi cosa, e di nuovo subito prima di ogni scrittura qui sotto (stato e risposte), verificare che il modulo sia ancora l'annuncio del report (`modes/apply.md` → Step 8 → **Write only to the report of this posting**). Stesso datore di lavoro e stesso annuncio → i passi seguenti riguardano questo report, anche dopo un adattamento a un nuovo titolo o una rivalutazione. Altro datore di lavoro o altro annuncio → mai questo report: usare il report scritto per il nuovo annuncio; se non ce n'è nessuno, non impostare alcuno stato, non salvare risposte e dire al candidato che la candidatura non è ancora tracciata.
+
 Se il candidato conferma di aver inviato il modulo:
 1. Aggiornare lo stato ad "Applied" con la CLI canonica: `node set-status.mjs --report <report#> Applied` (non modificare la tabella di `applications.md` a mano).
-2. Aggiornare il Blocco G del report con le risposte effettivamente inviate.
+2. Aggiornare la sezione `## Application Answers` del report con le risposte effettivamente inviate e `**State:** submitted` (formato in `modes/apply.md` -> Step 8). Il Blocco H resta la bozza della valutazione e non va modificato.
 3. Suggerire il passo successivo: `/career-ops contacto` per avviare il contatto su LinkedIn con il responsabile della selezione.
 
 ## Gestione dello scorrimento

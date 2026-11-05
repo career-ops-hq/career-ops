@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { acquireTrackerLock, openTrackerTransaction } from '../tracker-utils.mjs';
+import { describeWriterTimeout } from './helpers/writer-timeout.mjs';
 import { waitForContentionMarker } from './helpers/tracker-contention-marker.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -122,6 +123,7 @@ async function runWhileLocked({
   verifyOutput,
   mutateWhileLocked,
   beforeMutationOutput = null,
+  isolateDataRoot = false,
 }) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-writer-lock-'));
   const tracker = join(dir, 'applications.md');
@@ -147,6 +149,10 @@ async function runWhileLocked({
     CAREER_OPS_TRACKER_DB: db,
     CAREER_OPS_TRACKER_LOCK: lockDir,
     CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
+    // Opt-in for writers that also read sibling data files (active-interviews,
+    // follow-ups): point the data root at the fixture dir so a developer's real
+    // data can never change the outcome.
+    ...(isolateDataRoot ? { CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_FOLLOWUPS: '' } : {}),
   };
   const launchWriter = (timeoutMs, markerPath = null) => {
     let stdout = '';
@@ -166,6 +172,11 @@ async function runWhileLocked({
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    const launchedAt = Date.now();
+    // 'exit' can come well before 'close' on a loaded runner, so a timeout can
+    // tell a writer that finished from one that did not (#5514).
+    let exitedAt = null;
+    child.once('exit', () => { exitedAt = Date.now(); });
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     let closed = false;
@@ -177,6 +188,8 @@ async function runWhileLocked({
     return {
       child,
       closePromise,
+      launchedAt,
+      exitedAt: () => exitedAt,
       closed: () => closed,
       output: () => ({ stdout, stderr }),
     };
@@ -187,15 +200,17 @@ async function runWhileLocked({
       deadline(timeoutMs).then(() => null),
     ]);
     if (result === null) {
+      // Read before the kill, which brings an exit of its own.
+      const exitedBeforeKill = run.exitedAt();
       run.child.kill('SIGKILL');
       result = await run.closePromise;
-      return { ...result, timedOut: true };
+      return { ...result, timedOut: true, exitedAt: exitedBeforeKill };
     }
-    return { ...result, timedOut: false };
+    return { ...result, timedOut: false, exitedAt: run.exitedAt() };
   };
 
   const evidence = {
-    probe: null, reachedPrompt: null, watched: false, marker: null, markerNotAwaited: null, lockDir, run: null,
+    probe: null, reachedPrompt: null, watched: false, marker: null, reachedLockAt: null, markerNotAwaited: null, lockDir, run: null,
     cleanupError: null,
   };
   try {
@@ -257,7 +272,8 @@ async function runWhileLocked({
         } else {
           // Stops early once the writer has exited: no marker can arrive then.
           evidence.marker = await waitForContentionMarker(markerPath, HARNESS_WAIT_MS, { stopWhen: run.closed });
-          if (!evidence.marker) markerFirstMissed = name;
+          if (evidence.marker) evidence.reachedLockAt = Date.now();
+          else markerFirstMissed = name;
         }
       }
       // Simulate the current lock owner committing another row. The waiting
@@ -270,12 +286,21 @@ async function runWhileLocked({
     } finally {
       lock.release();
     }
+    const releasedAt = Date.now();
 
     const result = await waitForWriter(run, HARNESS_WAIT_MS);
     const { stdout, stderr } = run.output();
     const after = existsSync(tracker) ? readFileSync(tracker, 'utf-8') : '';
     evidence.run = {
       ...result,
+      timing: {
+        launchedAt: run.launchedAt,
+        reachedLockAt: evidence.reachedLockAt,
+        markerExpected: evidence.watched && !evidence.markerNotAwaited,
+        releasedAt,
+        exitedAt: result.exitedAt,
+        waitMs: HARNESS_WAIT_MS,
+      },
       stdout,
       stderr,
       after,
@@ -359,7 +384,10 @@ function writerCase({
       const { run, reachedPrompt } = await outcome;
       assert.notEqual(reachedPrompt, false, say('did not reach the pre-lock review prompt before the fixture mutation'));
       const detail = `exit=${run.code}, timedOut=${run.timedOut}\n${run.stdout}${run.stderr}\n${run.after}`;
-      assert.equal(run.timedOut, false, say(`writer hung after lock release (${detail})`));
+      // Says which of three things a timeout was, measured against a starved
+      // Windows box where none of them was a writer stuck on a handle (#5514).
+      assert.equal(run.timedOut, false, say(`writer did not exit in time after lock release: `
+        + `${run.timedOut ? describeWriterTimeout(run.timing) : ''} (${detail})`));
       assert.equal(run.code, 0, say(`writer failed after lock release (${detail})`));
       assert.ok(run.updated, say(`writer did not make its update (${detail})`));
       assert.ok(run.concurrentKept, say(`writer lost the row committed while it waited (${detail})`));
@@ -397,6 +425,20 @@ writerCase({
   verify: content => (content.match(/\| Acme \| Engineer \|/g) || []).length === 1,
   verifyOutput: (stdout, _stderr, tracker) => stdout.includes(`Written to ${realpathSync(tracker)}`)
     && stdout.includes(`${realpathSync(tracker)}.bak`),
+});
+
+writerCase({
+  name: 'close-stale',
+  script: 'close-stale.mjs',
+  isolateDataRoot: true,
+  args: ['--confirm', '--today', '2026-10-24'],
+  content: trackerTable([
+    '| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ❌ | [1](reports/001-acme.md) | seed |',
+  ]),
+  verify: content => content.includes('| Discarded |') && content.includes('no response (auto-closed 2026-10-24, 60d)'),
+  // The row committed while the writer waited is old and Applied too, so it is closed
+  // as well: what must survive is the row itself, not its Applied status.
+  verifyConcurrent: after => after.includes('ConcurrentCo') && after.includes('preserve me'),
 });
 
 writerCase({

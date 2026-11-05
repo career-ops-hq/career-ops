@@ -99,7 +99,7 @@ for (const report of [
     const before = HEADER + ROW.replace('[7](reports/007.md)', report) + ROW.replace('42', '99');
     const f = fixture(t, before);
     const result = run(f);
-    assert.equal(result.status, 3, result.stderr);
+    assert.equal(result.status, 3, describeSpawn(result));
     assert.equal(result.json.code, 'malformed-report');
     unchanged(f, before);
   });
@@ -189,7 +189,7 @@ test('pipe-only writers cannot begin rewriting tab rows through the shared parse
     encoding: 'utf8', timeout: 30_000,
   });
   assert.equal(result.error, undefined);
-  assert.equal(result.status, 2, result.stderr);
+  assert.equal(result.status, 2, describeSpawn(result));
   assert.equal(JSON.parse(result.stdout).code, 'not-found');
   unchanged(f, before);
 });
@@ -209,7 +209,7 @@ for (const note of ['--dry-run', '--help']) {
 test('separate note flag still cannot consume --dry-run as its value', t => {
   const f = fixture(t);
   const result = run(f, ['--report-link', '7', 'Applied', '--note', '--dry-run']);
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.equal(result.json.code, 'usage');
   unchanged(f, HEADER + ROW);
 });

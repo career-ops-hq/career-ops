@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, ownRootEnv } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const oferta = readFileSync(join(ROOT, 'modes', 'oferta.md'), 'utf8');
 const autoPipeline = readFileSync(join(ROOT, 'modes', 'auto-pipeline.md'), 'utf8');
@@ -82,7 +83,7 @@ test('the headless SKIP row merges into the tracker with the rule and the JD lin
     .replaceAll('\\t', '\t');
   writeFileSync(join(dir, 'batch', 'tracker-additions', '7-adatum.tsv'), row);
   const result = spawnSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], { cwd: dir, encoding: 'utf8', env: ownRootEnv({ CAREER_OPS_ROOT: dir }) });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   const merged = readFileSync(join(dir, 'data', 'applications.md'), 'utf8').trim().split('\n').at(-1);
   assert.match(merged, /\| Adatum \| Staff Designer \| N\/A \| SKIP \|/);
   assert.ok(merged.includes('"no fully on-site roles"') && merged.includes('"This role is on site five days a week"'), merged);
