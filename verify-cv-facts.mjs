@@ -581,6 +581,34 @@ function latexBody(text) {
   return LATEX_BODY_RE.exec(uncommented)?.[1] ?? uncommented;
 }
 
+// A command whose braced argument holds no further brace: the innermost one.
+const LATEX_INNERMOST_COMMAND_RE = /\\[a-zA-Z]+\*?(?:\[[^\]]*\])?\{([^{}]*)\}/g;
+// Any command, with its first argument if one follows (up to the first `}`).
+const LATEX_COMMAND_RE = /\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g;
+
+/**
+ * Replace each LaTeX command with the text of its first argument.
+ *
+ * A single pass of LATEX_COMMAND_RE could not handle a command nested inside
+ * another one's argument: in `\resumeItem{Built UI using \textbf{Next.js}}`
+ * the outer match ran to the first `}`, so its captured text still held
+ * `\textbf{Next.js`, and a replacement is never rescanned. The surviving
+ * command name read as "using textbf", a tool claim no source backs, which
+ * blocked every truthful CV that bolded a term after "using". Commands are now
+ * unwrapped innermost first, repeating until none with a brace-free argument
+ * is left (each round removes at least one command, so it ends), and the old
+ * pass then removes what remains: commands with no argument, and arguments
+ * holding bare braces, exactly as before.
+ */
+function unwrapLatexCommands(text) {
+  let previous;
+  do {
+    previous = text;
+    text = text.replace(LATEX_INNERMOST_COMMAND_RE, ' $1 ');
+  } while (text !== previous);
+  return text.replace(LATEX_COMMAND_RE, ' $1 ');
+}
+
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
 export function stripMarkup(text, { keepLineBreaks = false } = {}) {
   text = latexBody(text);
@@ -597,7 +625,7 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     // A trademark sign is not part of the name it marks. Left in, it joined
     // the name inside a clause, and normalization turns "\u2122" into "TM".
     .replace(/[\u00ae\u2120\u2122]/g, '');
-  return foldDigits(visible)
+  const untagged = foldDigits(visible)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
     // Only strip things that actually look like tags: `<name …>` or `</name>`.
@@ -613,8 +641,8 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     // The markdown sources never had the problem (their newlines break the
     // chain), so the two sides now normalise the same way.
     .replace(/<\/?(?:li|p|div|tr|h[1-6]|section|article|ul|ol|table|br)\b[^>\n]*>/gi, '. ')
-    .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
-    .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
+    .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ');
+  return unwrapLatexCommands(untagged)
     // An escaped special character is the character. LaTeX writes a percent
     // sign as `\%` (and markdown allows the same escape), and the backslash
     // broke the digit-percent adjacency the claim pattern needs, so every
