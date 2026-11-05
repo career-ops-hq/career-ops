@@ -11,8 +11,14 @@
  * go in a separate `overdue` group; rows where a closing marker was found but
  * no date could be read go in `unparsed`, so nothing is silently dropped.
  *
- * Zero LLM, read-only: nothing is ever written to the tracker or any other
- * file, and no tracker column or schema is involved (issue #5412).
+ * Zero LLM. The default report only reads. It writes nothing, and no tracker
+ * column is added (issue #5412).
+ *
+ * `--discard-passed` is opt-in. It prints Evaluated rows whose close date is
+ * before `--today`. The date comes from Notes, or from scan-history `closes_at`
+ * when Notes have no readable date. `--apply` asks `set-status.mjs` to mark
+ * those rows Discarded. `node set-status.mjs <n> --undo` puts the status back.
+ * Applied and every later status are left alone. JD captures are not consulted.
  *
  * Recognized dates, each introduced by `closes`, `closing date`, `closing`,
  * `deadline` or `apply by` (optionally followed by `:`, `on`, `by`, `is` and a
@@ -32,6 +38,8 @@
  *      node closing-soon.mjs --status Evaluated,Applied
  *      node closing-soon.mjs --today 2026-10-17     (deterministic runs/tests)
  *      node closing-soon.mjs --tracker path/to/applications.md --jds path/to/jds
+ *      node closing-soon.mjs --discard-passed       (dry run: Evaluated rows past their close date)
+ *      node closing-soon.mjs --discard-passed --apply
  *      node closing-soon.mjs --clashes              (interview days with closings piling up)
  *      node closing-soon.mjs --clashes --clash-min 3 --interviews path/to/active-interviews.md
  *
@@ -42,6 +50,7 @@
  * `clashes` group. Without the flag the output is unchanged.
  */
 
+import { spawnSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
@@ -52,6 +61,7 @@ import { findCaptureForReport, captureSlug } from './jd-capture.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { parseDate } from './lib/parse-date.mjs';
+import { closeDateForUrl, closeDatesByUrl } from './lib/posting-close.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { parseActiveInterviews, findColumn } from './process-quality.mjs';
@@ -430,6 +440,7 @@ export function computeClashes(closingSoon, interviewsMd, { today, within = DEFA
 const KNOWN_FLAGS = [
   '--within', '--status', '--today', '--tracker', '--jds',
   '--clashes', '--clash-min', '--interviews',
+  '--discard-passed', '--apply',
   '--json', '--summary', '--help', '-h',
 ];
 const VALUE_FLAGS = ['--within', '--status', '--today', '--tracker', '--jds', '--clash-min', '--interviews'];
@@ -445,10 +456,15 @@ const USAGE = `Usage:
   node closing-soon.mjs --clashes               # also flag interview days with closings piling up
   node closing-soon.mjs --clash-min <N>         # closings needed for a clash (default ${DEFAULT_CLASH_MIN}; needs --clashes)
   node closing-soon.mjs --interviews <path>     # a different active-interviews.md (needs --clashes)
+  node closing-soon.mjs --discard-passed        # print Evaluated rows past their close date
+  node closing-soon.mjs --discard-passed --apply
   node closing-soon.mjs --help                  # show this message
 
-Read-only: reads Notes (and jds/ captures when Notes have no closing marker)
-and never writes to the tracker or any other file.`;
+The default report reads Notes (and jds/ captures when Notes have no closing
+marker) and writes nothing. --discard-passed prints Evaluated rows whose close
+date is before --today. Add --apply to move them to Discarded through
+set-status.mjs. node set-status.mjs <n> --undo puts the status back.
+--apply without --discard-passed is an error.`;
 
 function fail(message) {
   console.error(message);
@@ -490,11 +506,86 @@ function printSummary(report) {
   console.log(`\nRows checked: ${metadata.rowsChecked}\n`);
 }
 
+function scanHistoryPath(dataRoot) {
+  return process.env.CAREER_OPS_SCAN_HISTORY || join(dataRoot, 'data/scan-history.tsv');
+}
+
+function closeDayForRow(row, today, index) {
+  const found = extractClosingDates(row.notes, today);
+  if (found.dates.length) return found.dates.map((item) => item.date).sort()[0];
+  return closeDateForUrl(index, row.url);
+}
+
+function rowsPastClose(trackerMd, { today, index, lookup }) {
+  const todayIso = isoDay(today);
+  const lines = String(trackerMd || '').replace(/\r\n/g, '\n').split('\n');
+  const colmap = resolveColumns(lines);
+  const matches = [];
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (!row) continue;
+    const rawStatus = String(row.status || '').replace(/\*\*/g, '').trim();
+    const status = lookup.get(rawStatus.toLowerCase()) ?? rawStatus;
+    if (status !== 'Evaluated') continue;
+    const day = closeDayForRow(row, today, index);
+    if (!day || day >= todayIso) continue;
+    matches.push(row.num);
+  }
+  matches.sort((a, b) => a - b);
+  return matches;
+}
+
+function printDiscardPlan(matches, todayIso, apply) {
+  if (!matches.length) {
+    console.log(`No Evaluated row has a close date before ${todayIso}.`);
+  } else if (apply) {
+    console.log(`Moved to Discarded: ${matches.map((n) => `#${n}`).join(' ')}`);
+  } else {
+    console.log(`Would move to Discarded: ${matches.map((n) => `#${n}`).join(' ')}`);
+  }
+  console.log('Run node closing-soon.mjs --discard-passed --apply to move them. node set-status.mjs <n> --undo puts the status back.');
+}
+
+function discardPassed(args, today) {
+  const dataRoot = getCareerOpsRoot();
+  const trackerPath = (hasFlag(args, '--tracker') ? flagValue(args, '--tracker') : null) || resolveTrackerPath(dataRoot);
+  const historyPath = scanHistoryPath(dataRoot);
+  const trackerMd = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
+  const historyText = existsSync(historyPath) ? readFileSync(historyPath, 'utf-8') : '';
+  const matches = rowsPastClose(trackerMd, {
+    today,
+    index: closeDatesByUrl(historyText),
+    lookup: loadStateLookup(),
+  });
+  const apply = hasFlag(args, '--apply');
+  if (apply) {
+    for (const n of matches) {
+      const child = spawnSync(process.execPath, [join(CODE_ROOT, 'set-status.mjs'), '--row', String(n), 'Discarded'], {
+        cwd: CODE_ROOT,
+        encoding: 'utf-8',
+        env: process.env,
+      });
+      if (child.status !== 0) {
+        const detail = (child.stderr || child.stdout || '').trim();
+        console.error(detail || `set-status exited ${child.status} for #${n}`);
+        process.exit(child.status || 1);
+      }
+    }
+  }
+  printDiscardPlan(matches, isoDay(today), apply);
+}
+
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-  if (hasFlag(args, '--json') && hasFlag(args, '--summary')) fail('Choose one of --json or --summary.');
+  if (hasFlag(args, '--apply') && !hasFlag(args, '--discard-passed')) {
+    fail('--apply only applies together with --discard-passed.');
+  }
+
+  if (!hasFlag(args, '--discard-passed') && hasFlag(args, '--json') && hasFlag(args, '--summary')) {
+    fail('Choose one of --json or --summary.');
+  }
 
   const valueOf = (flag) => (hasFlag(args, flag) ? flagValue(args, flag) : null);
 
@@ -534,6 +625,11 @@ if (isMainModule(import.meta.url)) {
     statuses = resolveStatusFilter(valueOf('--status') ?? DEFAULT_STATUS);
   } catch (err) {
     fail(err.message);
+  }
+
+  if (hasFlag(args, '--discard-passed')) {
+    discardPassed(args, today);
+    process.exit(0);
   }
 
   const dataRoot = getCareerOpsRoot();

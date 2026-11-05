@@ -851,20 +851,22 @@ node role-clarity.mjs --self-test
 
 Surfaces tracker rows whose posting is about to close. Posting closing dates have no structured home, so people type them into Notes (`closes 2026-10-22`, `deadline Nov 4`); this script reads them and lists the rows closing within `--within N` days (default 7), soonest first. Dates are recognized only after a marker (`closes`, `closing date`, `closing`, `deadline`, `apply by`): ISO `2026-10-22`, `Mon D, YYYY`, `Mon D` (this year, or next year when it passed more than 60 days ago) and `MM/DD/YYYY` only when unambiguous. Anything else after a marker (`04/05/2026`, `4 Nov 2026`, `TBD`) is listed under `unparsed` instead of being guessed. Rows already past their date go in a separate `overdue` group (most recently overdue first). When a row's Notes carry no marker at all, the `jds/` capture resolved by report number (`jd-capture.mjs`; text captures only) is read instead. Several dates in one row surface the earliest. Rows are filtered by `--status` (default `Evaluated`; any canonical state from `templates/states.yml`, comma-separated).
 
-Read-only and zero-LLM: the tracker is read once and parsed defensively through `tracker-parse.mjs`; nothing is written and no lock is taken, so a concurrent session rewriting the tracker cannot be disturbed. No tracker column or schema is involved.
+Zero-LLM. The default report reads the tracker once through `tracker-parse.mjs` and writes nothing, so a concurrent session rewriting the tracker is not disturbed. No tracker column is added. `--discard-passed` is opt-in. Without `--apply` it prints Evaluated rows whose close date is before `--today`. The date comes from Notes, or from `closes_at` in scan history when Notes have no readable date. `--apply` asks `set-status.mjs` to mark those rows Discarded. `node set-status.mjs <n> --undo` puts the status back. Applied and every later status are not passed to set-status. JD captures are not used for that move.
 
 ```bash
 node closing-soon.mjs                          # JSON (closingSoon, overdue, unparsed)
 node closing-soon.mjs --summary                # human-readable table
 node closing-soon.mjs --within 14 --status Evaluated,Applied
 node closing-soon.mjs --today 2026-10-17       # deterministic runs/tests
+node closing-soon.mjs --discard-passed --today 2026-11-05
+node closing-soon.mjs --discard-passed --apply # move those Evaluated rows to Discarded
 node closing-soon.mjs --tracker path/to/applications.md --jds path/to/jds
 node closing-soon.mjs --clashes --clash-min 3  # warn when closings pile up on an interview day
 ```
 
 **Interview-day clashes (opt-in):** `--clashes` reads `data/active-interviews.md` (the leading `YYYY-MM-DD` of the Date/Time cell; rows whose Status is Rejected, Declined, Ghosted or Done are skipped, emoji prefixes tolerated; unreadable dates are skipped silently). For each interview date inside the `--within` window it counts the closing-soon rows closing on that day or the day before; at `--clash-min` (default 2) or more it adds a `clashes` group `[{date, interview, closing}]` and a one-line hint in `--summary`. `--interviews <path>` overrides the file. Without `--clashes` the output is unchanged.
 
-**Exit codes:** `0` on a report (a missing tracker yields an empty result with a warning), `1` unrecognized flag, `2` invalid `--today` / `--within` / `--status` value.
+**Exit codes:** `0` on a report (a missing tracker yields an empty result with a warning), `1` unrecognized flag, `2` invalid `--today` / `--within` / `--status` value, or `--apply` without `--discard-passed`. A refused `set-status.mjs` run exits with that command's status.
 
 ---
 

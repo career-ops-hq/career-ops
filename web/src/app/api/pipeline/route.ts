@@ -1,4 +1,4 @@
-import { pipelineSummary } from "@/lib/career-ops";
+import { pipelineSummary, withCloseDates } from "@/lib/career-ops";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // always read fresh local files
@@ -8,9 +8,10 @@ export const dynamic = "force-dynamic"; // always read fresh local files
 // model only ever emits a company name, never URLs (no hallucination, no tokens).
 export async function GET() {
   const s = pipelineSummary();
+  const applications = await withCloseDates(s.applications);
   return Response.json({
     inbox: s.inbox,
-    applications: s.applications,
+    applications,
     root: s.root,
     rootExists: s.rootExists,
   });

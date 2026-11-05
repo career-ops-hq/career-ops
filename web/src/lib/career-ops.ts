@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { resolveDataRoot } from "@/lib/core/data-root.mjs";
@@ -15,7 +16,7 @@ import { reconcileInbox } from "@/lib/inbox-pending.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
-import { firstMarkdownLinkTarget, soleMarkdownLinkTarget } from "@/lib/posting-url.mjs";
+import { firstMarkdownLinkTarget, postingHref, soleMarkdownLinkTarget } from "@/lib/posting-url.mjs";
 import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 // Pure parser, no I/O — shared with the apply flow's CV resolver so the two
 // don't drift into two different definitions of "which report does this
@@ -135,6 +136,48 @@ export function readScanDates(): Map<string, string> {
   return dates;
 }
 
+type CloseDateModule = {
+  closeDatesByUrl: (text: string) => Map<string, string>;
+  closeDateForUrl: (index: Map<string, string>, url: string) => string;
+};
+
+let closeDateModule: CloseDateModule | null = null;
+
+async function loadCloseDateModule(): Promise<CloseDateModule | null> {
+  if (closeDateModule) return closeDateModule;
+  const file = path.join(
+    /* turbopackIgnore: true */ resolveCodeRoot(process.cwd(), process.env),
+    "lib",
+    "posting-close.mjs",
+  );
+  try {
+    const mod = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as Partial<CloseDateModule>;
+    if (typeof mod.closeDatesByUrl !== "function" || typeof mod.closeDateForUrl !== "function") return null;
+    closeDateModule = mod as CloseDateModule;
+    return closeDateModule;
+  } catch {
+    return null;
+  }
+}
+
+/** Join scan-history `closes_at` onto tracker rows by posting URL.
+ *  Exact URL first, then the URL with the query string removed. A missing
+ *  module or file leaves the rows unchanged. Success is cached. A failed
+ *  import is not. */
+export async function withCloseDates(applications: Application[]): Promise<Application[]> {
+  const text = read("data/scan-history.tsv");
+  if (!text) return applications;
+  const mod = await loadCloseDateModule();
+  if (!mod) return applications;
+  const index = mod.closeDatesByUrl(text);
+  return applications.map((app) => {
+    const href = postingHref(app.url);
+    if (!href) return app;
+    const day = mod.closeDateForUrl(index, href);
+    return day ? { ...app, closesAt: day } : app;
+  });
+}
+
 export type Application = {
   n: string;
   date: string;
@@ -155,6 +198,8 @@ export type Application = {
   notes: string;
   /** Tracker's `URL` column. A raw URL or a markdown link. "" when the column is absent. */
   url: string;
+  /** Calendar day the posting closes, from scan history. Absent when that file has no day for this URL. */
+  closesAt?: string;
 };
 
 /**

@@ -1,5 +1,5 @@
 // tests/closing-soon.test.mjs — closing-soon.mjs reads closing dates out of
-// tracker Notes (and jds/ captures) and never writes anything (#5412).
+// tracker Notes (and jds/ captures). The default report never writes (#5412).
 //
 // Run:  node --test tests/closing-soon.test.mjs
 
