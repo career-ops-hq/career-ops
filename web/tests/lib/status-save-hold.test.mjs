@@ -2,7 +2,7 @@
 // Run: node --test web/tests/lib/status-save-hold.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { offscreenStatusFailures, reduceHeldSave } from "../../src/lib/status-save-hold.mjs";
+import { clearHeldSaves, offscreenStatusFailures, reduceHeldSave } from "../../src/lib/status-save-hold.mjs";
 
 const key = JSON.stringify(["12", "Fixture Beta", "Engineer", "2026-10-02", ""]);
 
@@ -40,4 +40,15 @@ test("only an unmounted row's failure is repeated above the table", () => {
   assert.deepEqual(offscreenStatusFailures(holds, [other]), [
     { key, n: "12", error: "Tracker is locked" },
   ]);
+});
+
+test("a bulk save clears earlier failures for the rows it saved", () => {
+  const other = JSON.stringify(["11", "Fixture Alpha", "Engineer", "2026-10-02", ""]);
+  let holds = new Map();
+  holds = reduceHeldSave(holds, { type: "fail", key, error: "Tracker is locked", n: "12" });
+  holds = reduceHeldSave(holds, { type: "fail", key: other, error: "Tracker is locked", n: "11" });
+  const after = clearHeldSaves(holds, [key]);
+  assert.equal(after.has(key), false);
+  assert.equal(after.has(other), true);
+  assert.equal(clearHeldSaves(holds, ["missing"]), holds);
 });

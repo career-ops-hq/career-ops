@@ -32,6 +32,16 @@ export function reduceHeldSave(holds, event) {
   return holds;
 }
 
+/** Drop the hold for each key, e.g. rows a bulk save just wrote.
+ * @param {ReadonlyMap<string, HeldStatusSave>} holds
+ * @param {Iterable<string>} keys
+ */
+export function clearHeldSaves(holds, keys) {
+  let next = holds;
+  for (const key of keys) next = reduceHeldSave(next, { type: "clear", key });
+  return next;
+}
+
 /** Failures for rows that are not currently mounted. The mounted row shows its own alert.
  * @param {ReadonlyMap<string, HeldStatusSave>} holds
  * @param {Iterable<string>} mountedKeys

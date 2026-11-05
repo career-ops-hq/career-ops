@@ -24,7 +24,7 @@ import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
 import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
-import { offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
+import { clearHeldSaves, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
 import { LinkedInPaste } from "@/components/linkedin-paste";
@@ -423,6 +423,9 @@ export function PipelineView({
         setBulkError(`${failed.length} not saved: ${failed.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
       }
       setAnnouncement(`${saved.length} application${saved.length === 1 ? "" : "s"} set to ${status}.`);
+      // A row saved here no longer has an older failure to show.
+      const savedKeys = rows.filter((row) => savedNums.has(row.n)).map((row) => applicationKey(row));
+      setHeldSaves((prev) => clearHeldSaves(prev, savedKeys));
       startTransition(() => {
         for (const row of rows) {
           if (savedNums.has(row.n)) showSavedStatus({ key: applicationKey(row), status });
