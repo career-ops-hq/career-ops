@@ -71,15 +71,17 @@ export function saveChat(root, id, input) {
   if (input.title !== undefined && (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 100)) throw new ChatError('Title must contain 1–100 characters');
   if (Buffer.byteLength(JSON.stringify(messages)) > MAX_CHAT_BYTES) throw new ChatError('Conversation is too large to save', 413);
   if (input.writer !== undefined && (typeof input.writer !== 'string' || !/^[\w-]{1,64}$/.test(input.writer))) throw new ChatError('Invalid writer');
+  if (input.seq !== undefined && (!Number.isSafeInteger(input.seq) || input.seq < 1)) throw new ChatError('Invalid save sequence');
   return withLock(root, id, file => {
     const prior = readChat(root, id);
     if (input.revision === 0 && prior && JSON.stringify(prior.messages) === JSON.stringify(messages) && (!input.title || input.title.trim() === prior.title)) return prior;
     // A page saves one request at a time, so a newer revision stamped with its
     // own writer id is a save whose response it never got (sleep, dropped
     // connection), not another tab: its current messages supersede it (#6381).
-    const ownLostSave = input.writer && prior?.writer === input.writer;
+    // Only a later save does: a delayed earlier request must not undo its retry.
+    const ownLostSave = input.writer && prior?.writer === input.writer && input.seq > (prior.seq ?? 0);
     if ((prior?.revision ?? 0) !== input.revision && !ownLostSave) throw new ChatError('Conversation changed in another tab. Reload before editing; your unsaved text is still visible.', 409);
-    const chat = { version: 1, id, revision: (prior?.revision ?? 0) + 1, title: input.title?.trim() || prior?.title || conversationTitle(messages), updatedAt: new Date().toISOString(), ...(input.writer ? { writer: input.writer } : {}), messages };
+    const chat = { version: 1, id, revision: (prior?.revision ?? 0) + 1, title: input.title?.trim() || prior?.title || conversationTitle(messages), updatedAt: new Date().toISOString(), ...(input.writer ? { writer: input.writer, seq: input.seq } : {}), messages };
     const temp = `${file}.${randomUUID()}.tmp`;
     try { writeFileSync(temp, JSON.stringify(chat), { mode: 0o600, flag: 'wx' }); renameSync(temp, file); }
     finally { try { unlinkSync(temp); } catch (err) { if (err.code !== 'ENOENT') console.error('chat temp cleanup failed', err); } }

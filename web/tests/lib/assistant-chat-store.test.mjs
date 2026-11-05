@@ -37,12 +37,15 @@ test('stale tabs and deletes cannot overwrite newer messages', t => {
 });
 test('a save whose response was lost does not lock its own page out (#6381)', t => {
   const root = fixture(t), id = randomUUID();
-  saveChat(root, id, { revision: 0, messages, writer: 'page-a' });
+  saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 });
   // The page never saw revision 1, so it still sends 0 with its newer messages.
   const next = [...messages, { role: 'assistant', content: 'Reply' }];
-  const saved = saveChat(root, id, { revision: 0, messages: next, writer: 'page-a' });
+  const saved = saveChat(root, id, { revision: 0, messages: next, writer: 'page-a', seq: 2 });
   assert.equal(saved.revision, 2);
   assert.equal(readChat(root, id).messages.length, 2);
+  // A delayed earlier request from the same page cannot undo its retry.
+  assert.throws(() => saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 2, messages: next, writer: 'page-a', seq: 0 }), /Invalid save sequence/);
   assert.throws(() => saveChat(root, id, { revision: 1, messages, writer: 'page-b' }), /another tab/);
   assert.throws(() => saveChat(root, id, { revision: 1, messages }), /another tab/);
   assert.throws(() => saveChat(root, id, { revision: 2, messages, writer: '../x' }), /Invalid writer/);
