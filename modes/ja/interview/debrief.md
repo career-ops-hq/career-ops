@@ -258,7 +258,7 @@ stated_priorities:        # トランスクリプト入力のみ。何も述べ�
 
 次のステップが明確な暦日を 1 日だけ示しているなら、2 度目の質問はせずに `--next YYYY-MM-DD` を渡す。曜日はローカルの暦日から解決し、今日も含める。その表現に日付がなければ `--next` は省略する。曖昧な場合（`next week`、2 つの日付など）は、日付を 1 つ尋ねてから渡す。
 
-それらのフラグを付けて `node debrief-sync.mjs` を実行する。そのあと、連絡先を保存した場合は `node contacts.mjs --summary` を、日付を確定した場合は `node followup-cadence.mjs --summary` を実行する。
+それらのフラグを付けて `node debrief-sync.mjs --app <tracker#>` を実行する。`<tracker#>` はトラッカーにおけるその応募の `#` である（レポート番号ではない）。渡す dealbreaker、連絡先、`--next` の日付がどれもなければ、コマンドは実行しない：記録するものがない呼び出しをスクリプトは拒否する。そのあと、連絡先を保存した場合は `node contacts.mjs --summary` を、日付を確定した場合は `node followup-cadence.mjs --summary` を実行する。
 
 ユーザーが新しいステータスを挙げない限り、ステータスは変更しない。それは別の `set-status.mjs` の呼び出しであり、このコマンドより前に行う。
 
