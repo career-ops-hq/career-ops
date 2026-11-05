@@ -118,6 +118,8 @@ test('the Cursor plugin contains exactly the expected skill with valid frontmatt
       rel.split('/')[1],
       `${rel}: frontmatter name must match its folder`
     );
+
+    assert.match(front, /^description:[ \t]*\S/m, `${rel}: frontmatter needs a description`);
   }
 });
 
