@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { trackerWindow } from "../../src/lib/tracker-window.mjs";
+import { clampTrackerWindow, trackerWindow } from "../../src/lib/tracker-window.mjs";
 
 // A desktop viewport with the table sitting under the page header.
 const FIRST_SCREEN = { rowHeight: 57, overscan: 6, tableTop: 220, viewportHeight: 900 };
@@ -57,4 +57,20 @@ test("the tracker remeasures when an off-screen save failure appears", () => {
   const alertSkip = measure.indexOf("[role='alert'], [aria-busy='true']");
   const heightRead = measure.indexOf("getBoundingClientRect().height");
   assert.ok(alertSkip > 0 && alertSkip < heightRead, "an error or pending row must not set the shared spacer height");
+});
+
+test("a filter change keeps the measured rows instead of the first screen", () => {
+  // Row 80 is on screen. A filter that keeps it in place must not unmount it.
+  assert.deepEqual(clampTrackerWindow({ start: 70, end: 100 }, 1200), { start: 70, end: 100 });
+  // A shorter list keeps a window of the same size at its end.
+  assert.deepEqual(clampTrackerWindow({ start: 70, end: 100 }, 90), { start: 60, end: 90 });
+  assert.deepEqual(clampTrackerWindow({ start: 70, end: 100 }, 12), { start: 0, end: 12 });
+  assert.deepEqual(clampTrackerWindow({ start: 70, end: 100 }, 0), { start: 0, end: 0 });
+});
+
+test("the first-screen guess is only used before any measurement", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/components/pipeline-view.tsx"), "utf8");
+  const line = src.slice(src.indexOf("const span ="), src.indexOf("const bodyRef"));
+  assert.match(line, /!windowState\s*\?\s*initialTrackerWindow/);
+  assert.match(line, /clampTrackerWindow\(windowState\.span, filtered\.length\)/);
 });

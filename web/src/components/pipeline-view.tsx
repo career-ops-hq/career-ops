@@ -23,7 +23,7 @@ import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
-import { initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
+import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
 import { offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
@@ -307,7 +307,14 @@ export function PipelineView({
 
   const filterKey = `${visibleTab}|${deferredQ}|${sort.key}|${sort.dir}|${minFilter ?? ""}|${filtered.length}`;
   const [windowState, setWindowState] = useState<{ key: string; span: { start: number; end: number } } | null>(null);
-  const span = windowState?.key === filterKey ? windowState.span : initialTrackerWindow(filtered.length);
+  // Until the next measurement after a filter change, keep the last measured
+  // rows (fitted to the new count) so a row on screen keeps its editor state.
+  // The first-screen guess is only for the paint before any measurement.
+  const span = !windowState
+    ? initialTrackerWindow(filtered.length)
+    : windowState.key === filterKey
+      ? windowState.span
+      : clampTrackerWindow(windowState.span, filtered.length);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
   // TRACKER_ROW_PX is the first-paint guess. The status cell wraps to two
   // lines at some widths, so the spacers use the height a mounted row has.

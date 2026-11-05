@@ -33,3 +33,20 @@ export function initialTrackerWindow(count) {
     viewportHeight: DESKTOP_VIEWPORT_HEIGHT_PX,
   });
 }
+
+/**
+ * The last measured window, fitted to a new row count. Used for the commit
+ * after a filter change, before the next measurement, so rows already on
+ * screen stay mounted instead of jumping back to the first screen.
+ *
+ * @param {{ start: number, end: number }} span
+ * @param {number} count
+ * @returns {{ start: number, end: number }}
+ */
+export function clampTrackerWindow(span, count) {
+  if (count <= 0) return { start: 0, end: 0 };
+  const size = Math.max(0, span.end - span.start);
+  const end = Math.min(count, span.end);
+  const start = Math.max(0, Math.min(span.start, end - size));
+  return { start, end: Math.max(start, end) };
+}
