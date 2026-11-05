@@ -58,6 +58,26 @@ test("the embedded derived-URL adapter works in fresh V8 without Node or Web URL
   assert.match(prompt, /Keep the ORIGINAL Posting URL below/);
 });
 
+test("the emitted adapter binds the instructed name after production renaming in full and selected prompts", () => {
+  const previous = Object.getOwnPropertyDescriptor(knownJdStdinCommand, "toString");
+  const renamed = Function.prototype.toString.call(knownJdStdinCommand).replace(/^function\s+knownJdStdinCommand/, "function W");
+  const url = "https://jobs.ashbyhq.com/fictional/11111111-1111-4111-8111-111111111111";
+  try {
+    Object.defineProperty(knownJdStdinCommand, "toString", { configurable: true, value: () => renamed });
+    for (const evaluationInstructions of [null, "SELECTED-SCOPE-ONLY"]) {
+      const prompt = buildPrompt({ kind: "evaluate", input: "https://himalayas.app/companies/fictional/jobs/role-123", memory: "", today: "2026-01-01", codeRoot: "/opt/fictional-code", evaluationInstructions });
+      const emitted = prompt.split("as DATA:\n\n")[1]?.split("\n\nThen call")[0];
+      assert.ok(emitted, "extract the actual instruction rather than constructing a replacement");
+      assert.match(emitted, /const knownJdStdinCommand = \(function W/);
+      assert.equal(vm.runInNewContext(emitted + "\nknownJdStdinCommand(" + JSON.stringify(url) + ")"), knownJdStdinCommand(url));
+      assert.ok(prompt.includes('workdir: "/opt/fictional-code"'));
+    }
+  } finally {
+    if (previous) Object.defineProperty(knownJdStdinCommand, "toString", previous);
+    else delete knownJdStdinCommand.toString;
+  }
+});
+
 test("generated POSIX bridge preserves hostile-looking URL JSON literally with no shell side effect", t => {
   if (!fs.existsSync("/bin/sh")) { t.skip("POSIX shell unavailable"); return; }
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "known-jd-bridge-"));
