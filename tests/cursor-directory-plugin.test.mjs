@@ -119,7 +119,7 @@ test('the Cursor plugin contains exactly the expected skill with valid frontmatt
       `${rel}: frontmatter name must match its folder`
     );
   }
-})
+});
 
 test('only the skill: no hooks, MCP servers, rules, agents or commands', () => {
   for (const key of ['hooks', 'mcpServers', 'rules', 'agents', 'commands', 'lspServers']) {
