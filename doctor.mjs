@@ -937,15 +937,19 @@ function checkScanExtractor(root) {
 const USER_LAYER_PREREQS = [
   {
     path: 'cv.md',
+    blocksExit: true,
     fix: [
+      'Run: node onboard-write.mjs',
       'Create cv.md in the project root with your CV in markdown',
       'See examples/ for reference CVs',
     ],
   },
   {
     path: 'config/profile.yml',
+    blocksExit: true,
     emptyImpact: 'evaluations and scans have none of your targeting',
     fix: [
+      'Run: node onboard-write.mjs',
       'Run: cp config/profile.example.yml config/profile.yml',
       'Then edit it with your details',
     ],
@@ -1036,6 +1040,11 @@ function checkPrereq(prereq) {
       label: `${path} not found (.env sets CAREER_OPS_PROFILE=${fromEnvFile}, but most commands never load .env)`,
       fix: [`Export CAREER_OPS_PROFILE=${fromEnvFile} in your shell so every command sees it, or remove it from .env and put the profile at ${profilePathFor(projectRoot)}`],
     };
+  }
+  // cv.md and config/profile.yml are the files a run cannot score without.
+  // The other two stay warnings: a checkout can be healthy and still unfinished.
+  if (prereq.blocksExit) {
+    return { pass: false, label: `${path} not found (user setup required)`, fix };
   }
   return { warn: true, label: `${path} not found (user setup required)`, fix };
 }
@@ -1425,7 +1434,7 @@ async function main() {
   const setupNote = setupMissing.length > 0
     ? `Setup is not finished (${setupMissing.length} file${setupMissing.length === 1 ? '' : 's'} missing: ${setupMissing.map(({ path }) => path).join(', ')})`
     : null;
-  const setupHint = `Open your AI CLI in this folder (${CLI_NAMES}) and it walks you through setup by chatting.`;
+  const setupHint = `Run \`node onboard-write.mjs\`. Open your AI CLI in this folder (${CLI_NAMES}) and it walks you through setup by chatting.`;
   if (failures > 0) {
     console.log(`Result: ${failures} issue${failures === 1 ? '' : 's'} found. Fix them and run \`npm run doctor\` again.`);
     if (setupNote) {

@@ -40,7 +40,7 @@ test('a fresh checkout is told setup is not finished, not that tools are ready',
     assert.equal(status, 1, out);
     assert.match(out, /Setup is not finished \(4 files missing: cv\.md, config\/profile\.yml, modes\/_profile\.md, portals\.yml\)/);
     assert.match(out, /node onboard-write\.mjs/);
-    assert.match(out, /\d+ warning/);
+    assert.match(out, /Result: 2 issues found/);
     assert.doesNotMatch(out, /Your tools are ready/);
     assert.doesNotMatch(out, /ready to go/);
     assert.doesNotMatch(out, /Personalization files customized/);
@@ -70,7 +70,7 @@ test('a fresh checkout with a skill-entrypoint stub does not claim tools are rea
     assert.equal(status, 1, out);
     assert.match(out, /Setup is not finished \(4 files missing:/);
     assert.match(out, /node onboard-write\.mjs/);
-    assert.match(out, /\d+ warning/);
+    assert.match(out, /Result: 2 issues found/);
     assert.doesNotMatch(out, /Your tools are ready/);
     assert.doesNotMatch(out, /ready to go/);
   } finally {
