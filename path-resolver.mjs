@@ -108,12 +108,8 @@ function explicitRoot(root, source) {
  *   folder inside a plugin install copy
  */
 export function getCareerOpsRoot() {
-  // Local fix 2026-11-01 (re-applied after v1.39.0 update): DATA_DIR wins over
-  // ROOT. VPS evals export BOTH (eval-or.sh needs ROOT for its .env paths, while
-  // DATA_DIR is the actual data root); upstream order sent cv.md/reports to the
-  // tool repo instead of career-ops-personal.
-  const envName = process.env.CAREER_OPS_DATA_DIR?.trim() ? 'CAREER_OPS_DATA_DIR' : 'CAREER_OPS_ROOT';
-  const env = process.env.CAREER_OPS_DATA_DIR?.trim() || process.env.CAREER_OPS_ROOT?.trim();
+  const envName = process.env.CAREER_OPS_ROOT?.trim() ? 'CAREER_OPS_ROOT' : 'CAREER_OPS_DATA_DIR';
+  const env = process.env.CAREER_OPS_ROOT?.trim() || process.env.CAREER_OPS_DATA_DIR?.trim();
   if (env) {
     return explicitRoot(resolve(__dirname, env), envName);
   }
@@ -286,3 +282,22 @@ export function resolveTrackerPathForWrite(root) {
   return join(root, 'data/applications.md');
 }
 
+
+/**
+ * Every batch/batch-state.tsv to take report numbers from. batch-runner.sh keeps
+ * the file beside itself, in the checkout, wherever the data root is. batch/ is
+ * System Layer, and batch-tailor.mjs, reconcile-pipeline.mjs, sync-batch-input.mjs
+ * and the dashboard (#5254) all read the file there. A data root can hold a copy
+ * of its own, and the failed rows in it still name reports that must not be
+ * merged or handed out again. The runner never copies them into the checkout's
+ * file, so both are read: preferring the checkout's once it existed dropped
+ * them. In the default layout the two are one file.
+ *
+ * @param {string} rootDir The career-ops data root directory
+ * @returns {string[]} Absolute paths, the checkout's first; a reader skips one that does not exist
+ */
+export function resolveBatchStatePaths(rootDir) {
+  const checkout = join(__dirname, 'batch', 'batch-state.tsv');
+  const dataRoot = resolve(rootDir, 'batch', 'batch-state.tsv');
+  return dataRoot === checkout ? [checkout] : [checkout, dataRoot];
+}

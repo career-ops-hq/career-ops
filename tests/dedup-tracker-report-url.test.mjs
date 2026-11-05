@@ -26,7 +26,6 @@ const DEDUP = join(HERE, '..', 'dedup-tracker.mjs');
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
-const SEP = '|---|---|---|---|---|---|---|---|---|';
 const row = (n, score, report) =>
   `| ${n} | 2026-10-01 | Acme | Backend Engineer | ${score} | Evaluated | ❌ | ${report} |  |`;
 const reportDoc = (url) => `# Acme — Backend Engineer\n\n**Score:** 4.0/5 | **URL:** ${url} | **Legitimacy:** High\n`;
@@ -36,7 +35,7 @@ const reportDoc = (url) => `# Acme — Backend Engineer\n\n**Score:** 4.0/5 | **
  * numbers. The data root is a child of the temp dir, so a fixture can place a
  * file just OUTSIDE it (`outside`) and the whole tree is still removed.
  */
-function survivors(rows, reports, outside) {
+function survivors(rows, reports, outside, header = HEADER) {
   const base = mkdtempSync(join(tmpdir(), 'dedup-report-url-'));
   const root = join(base, 'root');
   try {
@@ -45,7 +44,8 @@ function survivors(rows, reports, outside) {
     for (const [name, url] of Object.entries(reports)) writeFileSync(join(root, 'reports', name), reportDoc(url));
     if (outside) writeFileSync(join(base, 'outside.md'), reportDoc(outside));
     const tracker = join(root, 'data', 'applications.md');
-    writeFileSync(tracker, ['# Applications Tracker', '', HEADER, SEP, ...rows, ''].join('\n'));
+    const separator = `|${'---|'.repeat(header.split('|').length - 2)}`;
+    writeFileSync(tracker, ['# Applications Tracker', '', header, separator, ...rows, ''].join('\n'));
     execFileSync(process.execPath, [DEDUP], {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '' },
@@ -118,4 +118,34 @@ ok('containedReportTarget refuses a path that escapes the root', () => {
   assert.strictEqual(containedReportTarget('[1](reports/../../../etc/passwd)', root), null,
     'an embedded ../ that walks out of the root is refused');
   assert.strictEqual(containedReportTarget('—', root), null, 'no link, no path');
+});
+
+// A URL column whose cell holds a placeholder is the same case as no column:
+// the cell names nothing, so the report still has to decide. Read as a URL, the
+// placeholder hid the report and these two openings were deleted down to one.
+const WITH_URL = `${HEADER} URL |`;
+const urlRow = (n, score, report, cell) => `${row(n, score, report)} ${cell} |`;
+const OPENINGS = {
+  '001-acme.md': 'https://jobs.ashbyhq.com/acme/11111111-1111-4111-8111-111111111111',
+  '002-acme.md': 'https://jobs.ashbyhq.com/acme/22222222-2222-4222-8222-222222222222',
+};
+const links = ['[1](../reports/001-acme.md)', '[2](../reports/002-acme.md)'];
+
+for (const cell of ['', '—', '-', 'N/A', 'n/a']) {
+  ok(`a URL cell of "${cell}" leaves two openings to their reports`, () => {
+    const rows = [urlRow(1, '4.0/5', links[0], cell), urlRow(2, '3.5/5', links[1], cell)];
+    assert.deepStrictEqual(survivors(rows, OPENINGS, null, WITH_URL), [1, 2]);
+  });
+}
+
+ok('a placeholder does not hide a true duplicate', () => {
+  const same = { ...OPENINGS, '002-acme.md': OPENINGS['001-acme.md'] };
+  const rows = [urlRow(1, '4.0/5', links[0], '—'), urlRow(2, '3.5/5', links[1], 'N/A')];
+  assert.deepStrictEqual(survivors(rows, same, null, WITH_URL), [1]);
+});
+
+ok('a real URL in the cell still decides over the report', () => {
+  const url = OPENINGS['001-acme.md'];
+  const rows = [urlRow(1, '4.0/5', links[0], url), urlRow(2, '3.5/5', links[1], url)];
+  assert.deepStrictEqual(survivors(rows, OPENINGS, null, WITH_URL), [1]);
 });
