@@ -436,19 +436,28 @@ async function main() {
   await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: ROOT });
   const rows = await auditCompanies(companies, { providers, smallThreshold });
 
+  // From here on, a failure sets process.exitCode and returns instead of
+  // calling process.exit(1). On Windows, Node 24 aborts when process.exit()
+  // runs right after a request (nodejs/node#56645): it prints a libuv assertion
+  // and exits with a crash code instead of 1. Measured 2026-11-05 on Node
+  // 24.14.1: --strict on a Greenhouse, Ashby, SmartRecruiters or Workday board
+  // that does not exist aborted 4 times out of 4, and so did a missing
+  // --baseline file. Returning lets the process exit 1 once the event loop drains.
   let drops = [];
   const baselinePath = flagValue(args, '--baseline');
   if (baselinePath) {
     if (!existsSync(baselinePath)) {
       console.error(`Error: baseline file not found: ${baselinePath}`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     try {
       const prev = JSON.parse(readFileSync(baselinePath, 'utf-8'));
       drops = diffAgainstBaseline(rows, Array.isArray(prev) ? prev : prev.rows, {});
     } catch (err) {
       console.error(`Error: could not read baseline ${baselinePath}: ${err.message}`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
   }
 
@@ -491,7 +500,7 @@ async function main() {
         if (drops.length > 0) reasons.push(`${drops.length} board(s) below baseline`);
         console.log(`\n🔴 ${reasons.join(' and ')} (--strict).`);
       }
-      process.exit(1);
+      process.exitCode = 1;
     }
   }
 }
@@ -505,6 +514,6 @@ async function main() {
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`audit-portals failed: ${err.message}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given after auditCompanies() in main()
   });
 }
