@@ -65,7 +65,7 @@ import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { applyEntryResponseCap } from './scan.mjs';
+import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
 import { DEFAULT_SMALL_THRESHOLD, isSmallBoard, smallBoardDetail } from './lib/small-board.mjs';
 
 // Anchored, not cwd-relative. Both paths below used to be bare relative

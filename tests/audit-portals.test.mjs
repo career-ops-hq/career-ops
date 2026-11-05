@@ -17,6 +17,7 @@
 // only DROPS are reported so growth and new entries stay quiet.
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
+import { readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 console.log('\naudit-portals — board classification');
@@ -182,6 +183,14 @@ try {
     pass('auditCompanies() applies max_response_mb per entry without leaking it');
   } else {
     fail(`max_response_mb drifted: ${JSON.stringify(seenCaps)}`);
+  }
+
+  // scan.mjs loads the data root's .env when imported, which can move the audit onto another
+  // portals.yml than the scanner reads; the audit takes the cap helper from lib/ instead.
+  {
+    const src = readFileSync(join(ROOT, 'audit-portals.mjs'), 'utf8');
+    if (!/from '\.\/scan\.mjs'/.test(src)) pass('audit-portals.mjs does not import scan.mjs');
+    else fail('audit-portals.mjs imports scan.mjs, which loads the data root .env as a side effect');
   }
 
   // A provider that throws must degrade to `error`, never take the run down.
