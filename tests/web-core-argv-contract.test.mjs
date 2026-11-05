@@ -137,11 +137,12 @@ const CALL_SITES = [
   {
     source: 'web/src/app/api/keyword-match/route.ts',
     script: 'keyword-match.mjs',
-    // {{report}} is replaced with the fixture report below. This script takes a
-    // FILE as its first argument, so unlike every other site here the argv is
-    // only meaningful against a real report — and `--help` exits 1, so
-    // 'flags-only' cannot stand in for it either.
-    args: ['{{report}}', '--json'],
+    // {{report}} and {{cv}} are replaced with the fixture files below. This
+    // script takes a FILE as its first argument, so unlike every other site
+    // here the argv is only meaningful against a real report — and `--help`
+    // exits 1, so 'flags-only' cannot stand in for it either. The route adds
+    // --cv when a tailored HTML sibling is on disk.
+    args: ['{{report}}', '--json', '--cv', '{{cv}}'],
     probe: 'run',
   },
   {
@@ -309,9 +310,11 @@ export function runWebCoreArgvContract() {
 
     for (const site of CALL_SITES) {
       if (site.probe === 'none') continue;
-      // {{report}} is the only token: a couple of scripts take a FILE rather
-      // than flags, and the file only exists once the sandbox is built.
-      const resolved = site.args.map((a) => (a === '{{report}}' ? reportFile : a));
+      // {{report}} and {{cv}} are the only tokens: a couple of scripts take a
+      // FILE rather than flags, and the file only exists once the sandbox is built.
+      const resolved = site.args.map((a) => (
+        a === '{{report}}' ? reportFile : a === '{{cv}}' ? join(sandbox, 'cv.md') : a
+      ));
       const argv = site.probe === 'flags-only' ? [...resolved, '--help'] : resolved;
       // Label with the TOKEN, not the resolved temp path: a failure message
       // naming /var/folders/…/T/co-web-argv-xyz/reports/… is unreadable and

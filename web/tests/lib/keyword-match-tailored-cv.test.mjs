@@ -2,19 +2,28 @@
 // one. Master cv.md misses keywords that exist only in the tailored document,
 // so a 0% reading there is the wrong CV.
 //
-// Run from web/: node --test tests/lib/keyword-match-tailored-cv.test.mjs
-
 import "../helpers/web-ts-alias-loader.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const CODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 test("keyword match scores the tailored CV when its HTML exists for the report", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "kw-cv-"));
-  const prev = process.env.CAREER_OPS_ROOT;
+  const prev = {
+    CAREER_OPS_ROOT: process.env.CAREER_OPS_ROOT,
+    CAREER_OPS_CODE_ROOT: process.env.CAREER_OPS_CODE_ROOT,
+    CAREER_OPS_DATA_DIR: process.env.CAREER_OPS_DATA_DIR,
+    CAREER_OPS_PROFILE: process.env.CAREER_OPS_PROFILE,
+  };
   process.env.CAREER_OPS_ROOT = root;
+  process.env.CAREER_OPS_CODE_ROOT = CODE_ROOT;
+  delete process.env.CAREER_OPS_DATA_DIR;
+  delete process.env.CAREER_OPS_PROFILE;
   try {
     mkdirSync(path.join(root, "reports"), { recursive: true });
     mkdirSync(path.join(root, "output"), { recursive: true });
@@ -45,8 +54,10 @@ test("keyword match scores the tailored CV when its HTML exists for the report",
     assert.equal(body.result.coveragePct, 100);
     assert.deepEqual(body.result.missing, []);
   } finally {
-    if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
-    else process.env.CAREER_OPS_ROOT = prev;
+    for (const [key, value] of Object.entries(prev)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });
