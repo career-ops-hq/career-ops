@@ -11,6 +11,7 @@
  */
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 import { REPORT_ENVELOPE_INSTRUCTION } from "./report-envelope.mjs";
+import { EVALUATION_GATE_INSTRUCTION } from "./evaluation-gate.mjs";
 import { COVER_TONES } from "./cover-brief.mjs";
 import { DEFAULT_PROFILE_REF, profileNote } from "./core/profile-path.mjs";
 
@@ -338,6 +339,8 @@ ${sourceReadInstruction} Mark the report header "Verification: unconfirmed (batc
 ${mem}${unattendedAmbiguityStep}
 OUTPUT: Do NOT save or edit any file, run scripts other than the read-only source reader described above, or allocate report numbers. Output exactly one complete selected report between a line containing only \`<<report-md>>\` and a line containing only \`<</report-md>>\`. The platform saves it. Include the canonical Machine Summary and full verbatim JD archive. Never submit an application, fill forms, or contact anyone.
 
+${EVALUATION_GATE_INSTRUCTION}
+
 After the envelope, end with EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
 
@@ -356,6 +359,8 @@ ${derivedSourceBridge}
    **Follow the mode's bounded known-ATS API fallback before declaring jd_unavailable.** A login/consent wall, partial JavaScript shell or bot challenge from WebFetch alone is inconclusive; it does not erase a successful exact-source API read. A confirmed 404, expired ad, different job, or any explicit closure still invokes the mode file's "posting appears closed" rule. After the allowed fallback, if the JD remains inaccessible (including a paywall with no substantive JD), STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV. Say which URL and actual client were used and what came back; never score a login screen, invent missing text, or waive the mode's identity, open-status, location and agency gates.
 
 ${mem}${unattendedAmbiguityStep}2. ${REPORT_ENVELOPE_INSTRUCTION}
+
+   ${EVALUATION_GATE_INSTRUCTION}
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation ONLY.
 

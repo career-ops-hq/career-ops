@@ -21,7 +21,7 @@ const modules = {
   '@/lib/core/code-root.mjs': `export const resolveCodeRoot=()=>globalThis.__knownSourceRoute.codeRoot;`,
   '@/lib/evaluation-source.mjs': `export const readEvaluationSource=(args)=>globalThis.__knownSourceRoute.prefetch(args);`,
   '@/lib/spawn-cli.mjs': `export const spawnHeadlessCli=(...args)=>globalThis.__knownSourceRoute.spawnModel(...args);`,
-  '@/lib/report-persist.mjs': `export {evaluateRunOutcome} from ${JSON.stringify(PERSIST)}; export const persistEvaluation=(args)=>globalThis.__knownSourceRoute.persist(args);`,
+  '@/lib/report-persist.mjs': `export {evaluateRunOutcome, evaluationOutcomeEvent} from ${JSON.stringify(PERSIST)}; export const persistEvaluation=(args)=>globalThis.__knownSourceRoute.persist(args);`,
   '@/lib/core/run-registry': `export const acquireTrackerWrite=()=>{globalThis.__knownSourceRoute.tokens++;return 'fixture-token'};export const releaseTrackerWrite=()=>{globalThis.__knownSourceRoute.tokens--};`,
 };
 register(`data:text/javascript,${encodeURIComponent(`
@@ -132,12 +132,23 @@ test('actual POST source failure is nonfatal and never rewrites the posting URL'
   assert.equal(f.tokens, 0);
 });
 
-test('actual POST preserves no-report stops and authoritative process errors after prefetch', async t => {
+test('actual POST distinguishes confirmation stops from authoritative process errors after prefetch', async t => {
   for (const options of [{ gate: true }, { fatal: true }]) {
     const f = fixture(t, options); const response = await POST(f.request());
     const events = (await response.text()).trim().split('\n').map(JSON.parse);
     assert.equal(f.persisted.length, 0); assert.equal(events.some(e=>e.type==='done'), false);
-    assert.equal(events.some(e=>e.type==='error'), true); // main's existing no-report contract is retained
+    if (options.gate) {
+      const stopped = events.filter(e => e.type === 'gated');
+      assert.equal(stopped.length, 1);
+      assert.equal(stopped[0].reason, 'dealbreaker');
+      assert.equal(stopped[0].message, 'Review the fictional location rule.');
+      assert.equal(stopped[0].confirmationRequired, true);
+      assert.equal(stopped[0].tokens, 4);
+      assert.equal(events.some(e => e.type === 'error'), false);
+    } else {
+      assert.equal(events.some(e => e.type === 'error'), true);
+      assert.equal(events.some(e => e.type === 'gated'), false);
+    }
     assert.equal(f.tokens, 0);
   }
 });

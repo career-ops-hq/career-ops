@@ -3,7 +3,7 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, cheapaimodel, Together, Groq, DeepSeek, Zhipu GLM,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, cheapaimodel, UberLLM, Together, Groq, DeepSeek, Zhipu GLM,
  * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
@@ -124,6 +124,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     Runcrate:    --url https://api.runcrate.ai/v1  --model deepseek-ai/DeepSeek-V4.1-Flash
     CloudGPU:    --url https://cloudgpu.app/v1  --model deepseek-v4.1-flash
     cheapaimodel: --url https://api.cheapaimodel.ai/v1  --model deepseek-v4-1-flash
+    UberLLM:     --url https://api.uberllm.dev/v1  --model deepseek/deepseek-v4-flash
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
