@@ -208,7 +208,7 @@ test('only actual structured closure blocks reuse; JD wording cannot invent list
 });
 
 test('fixed synchronous loader is import-safe and exposes pure validators without CLI/global changes', t => {
-  const f=fixture(t);const run=spawnSync(process.execPath,['-e',`const before=globalThis.fetch;const m=require(${JSON.stringify(path.join(ROOT,'read-known-jd.mjs'))});if(globalThis.fetch!==before||typeof m.validateArchiveSourcePacket!=='function'||typeof m.validateArchiveSourceBinding!=='function')process.exit(1);console.log('import-safe');`],
+  const f=fixture(t);const run=spawnSync(process.execPath,['-e',`const before=globalThis.fetch;const m=require(${JSON.stringify(path.join(ROOT,'read-known-jd.mjs'))});if(globalThis.fetch!==before||typeof m.validateArchiveSourcePacket!=='function'||typeof m.validateArchiveSourceBinding!=='function')throw new Error('import contract changed');console.log('import-safe');`],
     {cwd:f.root,input:'not JSON',encoding:'utf8',env:{...process.env,CAREER_OPS_ROOT:f.root,CAREER_OPS_DATA_DIR:f.root}});
   assert.equal(run.status,0,run.stderr);assert.equal(run.stdout.trim(),'import-safe');assert.deepEqual(f.requests(),[]);
 });
