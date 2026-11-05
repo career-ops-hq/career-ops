@@ -205,9 +205,6 @@ Les libelles de l'en-tete (`**Date:**`, `**URL:**`, `**Archetype:**`, `**Score:*
 
 ---
 
-## Machine Summary
-(bloc YAML pour les scripts -- voir l'exigence ci-dessous)
-
 ## A) Resume du role
 (contenu complet du bloc A)
 
@@ -251,11 +248,14 @@ Les libelles de l'en-tete (`**Date:**`, `**URL:**`, `**Archetype:**`, `**Score:*
 
 ## Job Description (archived verbatim)
 (le texte complet de l'offre, colle mot pour mot -- voir l'exigence ci-dessous)
+
+## Machine Summary
+(bloc YAML pour les scripts -- voir l'exigence ci-dessous)
 ```
 
 **Ligne de decision (obligatoire) :** `**Décision:**` est le `final_decision` du Machine Summary, et la ligne sous l'en-tete est la phrase de `## Verdict (lead)`, copiee telle quelle. Remplir les deux en dernier. Ne jamais utiliser `Verdict:` comme libelle de champ : l'app web lit le premier `VERDICT:` comme ligne de score.
 
-**Machine Summary (obligatoire) :** bloc YAML juste apres l'en-tete, avec le schema, les noms de champs exacts et les regles de `batch/batch-prompt.md` (la source ; ne pas le dupliquer ici). Il contient `advertised_comp` (le montant de l'offre mot pour mot, ou `null`), `risk_summary` et `requirement_importance` (le bloc B ligne par ligne ; la limite `inferred` s'applique aussi ici).
+**Machine Summary (obligatoire) :** bloc YAML a la fin du report, apres `## Job Description (archived verbatim)`, avec le schema, les noms de champs exacts et les regles de `batch/batch-prompt.md` (la source ; ne pas le dupliquer ici). Il contient `advertised_comp` (le montant de l'offre mot pour mot, ou `null`), `risk_summary` et `requirement_importance` (le bloc B ligne par ligne ; la limite `inferred` s'applique aussi ici).
 
 **Archivage de l'offre (obligatoire, #2789) :** chaque report DOIT comporter une section `## Job Description (archived verbatim)` avec le texte complet de l'offre, jamais resume ni reformule. Le titre reste en anglais : `check-jd-archive.mjs` le cherche par son nom. La premiere ligne est la date de publication visible (`Posted: {date ou texte relatif}`, ou `Posted: not visible in source`), jamais la date du fichier du report. Si l'offre est trop longue ou ne peut pas etre citee en entier, la capturer avec `archive-posting.mjs` (commande ci-dessous) et mettre dans la section **exactement** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, sans autre texte. Si aucune capture automatique n'est possible (par exemple un long texte colle sans URL), renommer la section en `## Job Description (not archived)` et en donner la raison. Jamais une paraphrase a la place ; la regle complete est dans `modes/oferta.md` (**JD archival**).
 

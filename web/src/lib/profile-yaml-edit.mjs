@@ -90,9 +90,9 @@ function findSection(lines, section) {
 
 /**
  * The block-list items under the key at `at`. Comment lines between them, and
- * the trailing comment of an item line (`- "Old" # note`, which has no new
- * item to stay on), are returned as comment lines to keep ahead of the new
- * items.
+ * the trailing comment of any line of an item (`- "Old" # note`, or a mapping
+ * item's `fit: "primary" # note`, which have no new item to stay on), are
+ * returned as comment lines to keep ahead of the new items.
  * @param {string[]} lines
  * @param {number} at
  * @param {number} end
@@ -100,18 +100,29 @@ function findSection(lines, section) {
  */
 function listItems(lines, at, end, indent) {
   let last = at;
+  let dash = -1;
   for (let i = at + 1; i < end; i++) {
     if (isBlankOrComment(lines[i])) continue;
-    if (/^\s*- /.test(lines[i]) && indentOf(lines[i]).length >= indent.length) last = i;
-    else break;
+    const width = indentOf(lines[i]).length;
+    if (/^\s*- /.test(lines[i]) && width >= indent.length) {
+      last = i;
+      if (dash === -1) dash = width;
+    } else if (dash !== -1 && width > dash) {
+      // The rest of an item that is a mapping: `- name: x` then `  level: y`.
+      last = i;
+    } else break;
   }
+  const firstItem = lines.slice(at + 1, last + 1).find((line) => /^\s*- /.test(line));
+  const itemIndent = firstItem ? indentOf(firstItem) : `${indent}  `;
   const kept = lines.slice(at + 1, last + 1).flatMap((line) => {
     if (line.trim().startsWith("#")) return [line];
-    const comment = /^\s*- /.test(line) ? trailingComment(line.replace(/^\s*-/, "")).trim() : "";
-    return comment ? [`${indentOf(line)}${comment}`] : [];
+    // trailingComment reads a value, so the list marker and any key come off
+    // first: left on, `name: "Role #1"` would read as holding a comment.
+    const value = line.replace(/^\s*(?:-\s+)?/, "").replace(/^[^\s"'#:]+:(?=\s|$)/, "");
+    const comment = trailingComment(value).trim();
+    return comment ? [`${itemIndent}${comment}`] : [];
   });
-  const itemIndent = lines.slice(at + 1, last + 1).find((line) => /^\s*- /.test(line));
-  return { last, kept, itemIndent: itemIndent ? indentOf(itemIndent) : `${indent}  ` };
+  return { last, kept, itemIndent };
 }
 
 /**
@@ -201,4 +212,41 @@ export function patchProfileText(source, patch, expected) {
   } catch {
     return null;
   }
+}
+
+// What config/profile.example.yml says about the person it describes, by section.
+// Every other key there is a setting with a default of its own.
+const EXAMPLE_PERSON = {
+  candidate: ["full_name", "email", "phone", "location", "linkedin", "portfolio_url", "github", "twitter"],
+  target_roles: ["primary", "archetypes"],
+  narrative: ["headline", "exit_story", "superpowers", "proof_points"],
+  compensation: ["target_range", "minimum", "location_flexibility"],
+  location: ["country", "city", "timezone", "visa_status", "authorized_in"],
+};
+
+/**
+ * The template as a first profile: its comments and settings, without the person
+ * it describes. config/profile.yml is the ground truth for facts once it exists,
+ * so a value left in would reach a CV as the user's own claim. onboard-write.mjs
+ * clears the same fields when its answers leave them out.
+ *
+ * @param {string} template the text of config/profile.example.yml
+ * @returns {string}
+ */
+export function firstProfileText(template) {
+  const seed = yaml.load(template);
+  if (!seed || typeof seed !== "object" || Array.isArray(seed)) return template;
+  /** @type {Record<string, unknown>} */
+  const expected = { ...seed };
+  /** @type {Record<string, Record<string, ProfileValue>>} */
+  const patch = {};
+  for (const [section, keys] of Object.entries(EXAMPLE_PERSON)) {
+    const values = /** @type {Record<string, unknown> | undefined} */ (expected[section]);
+    if (!values || typeof values !== "object") continue;
+    const present = keys.filter((key) => key in values);
+    if (present.length === 0) continue;
+    patch[section] = Object.fromEntries(present.map((key) => [key, Array.isArray(values[key]) ? [] : ""]));
+    expected[section] = { ...values, ...patch[section] };
+  }
+  return patchProfileText(template, patch, expected) ?? yaml.dump(expected, { lineWidth: 100, noRefs: true });
 }

@@ -35,7 +35,7 @@ Trage in `config/profile.yml` eine Sprach-Präferenz ein, z. B.:
 
 ```yaml
 language:
-  primary: de
+  output: de
   modes_dir: modes/de
 ```
 
