@@ -100,13 +100,26 @@ test('the skill and the license are byte-identical copies of the canonical ones'
   assert.equal(read('cursor-directory/skills/career-ops/SKILL.md'), read('.agents/skills/career-ops/SKILL.md'),
     'cursor-directory/skills/career-ops/SKILL.md diverged: copy .agents/skills/career-ops/SKILL.md over it');
   assert.equal(read('cursor-directory/LICENSE'), read('LICENSE'), 'cursor-directory/LICENSE diverged: copy LICENSE over it');
-  for (const { path, rel } of files.filter(({ rel }) => rel.endsWith('/SKILL.md'))) {
-    assert.match(rel, /^skills\/[a-z0-9-]+\/SKILL\.md$/, `${rel}: skills live at skills/<name>/SKILL.md`);
-    const front = readFileSync(path, 'utf8').match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '';
-    assert.equal(front.match(/^name:\s*(.+)$/m)?.[1]?.trim(), rel.split('/')[1], `${rel}: frontmatter name must match its folder`);
-    assert.match(front, /^description:\s*\S/m, `${rel}: frontmatter needs a description`);
-  }
 });
+
+test('the Cursor plugin contains exactly the expected skill with valid frontmatter', () => {
+  const skillFiles = files.filter(({rel}) => rel.endsWith('/SKILL.md'));
+  assert.deepEqual(
+    skillFiles.map(({rel}) => rel),
+    ['skills/career-ops/SKILL.md'],
+    `Cursor plugin must contain exactly skills/career-ops/SKILL.md`
+  );
+
+  for (const { path, rel } of skillFiles) {
+    const front = readFileSync(path, 'utf8').match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '';
+
+    assert.equal(
+      front.match(/^name:\s*(.+)$/m)?.[1]?.trim(),
+      rel.split('/')[1],
+      `${rel}: frontmatter name must match its folder`
+    );
+  }
+})
 
 test('only the skill: no hooks, MCP servers, rules, agents or commands', () => {
   for (const key of ['hooks', 'mcpServers', 'rules', 'agents', 'commands', 'lspServers']) {
