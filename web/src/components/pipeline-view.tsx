@@ -24,7 +24,7 @@ import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
 import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
-import { clearHeldSaves, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
+import { clearHeldSaves, excludeInFlightStatusRows, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
 import { LinkedInPaste } from "@/components/linkedin-paste";
@@ -411,23 +411,30 @@ export function PipelineView({
 
   async function commitStatus(rows: Application[], status: string) {
     if (!status || rows.length === 0 || busyRef.current) return;
+    const { write, inFlight } = excludeInFlightStatusRows(rows, heldSaves, applicationKey);
     busyRef.current = true;
     setBulkBusy(true);
     setBulkError("");
     try {
-      const { saved, failed } = await saveStatuses(rows, status);
-      const failedNums = new Set(failed.map((f) => f.n));
+      const { saved, failed } = await saveStatuses(write, status);
+      const notSaved = [
+        ...failed,
+        ...inFlight.map((row) => ({ n: row.n, error: "a status save is already in progress" })),
+      ];
+      const failedNums = new Set(notSaved.map((f) => f.n));
       const savedNums = new Set(saved);
       setSelected((current) => new Set(selectionAfterFailedSave([...current], rows, failedNums, applicationKey)));
-      if (failed.length > 0) {
-        setBulkError(`${failed.length} not saved: ${failed.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
+      if (notSaved.length > 0) {
+        setBulkError(`${notSaved.length} not saved: ${notSaved.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
       }
-      setAnnouncement(`${saved.length} application${saved.length === 1 ? "" : "s"} set to ${status}.`);
+      if (saved.length > 0 || failed.length > 0) {
+        setAnnouncement(`${saved.length} application${saved.length === 1 ? "" : "s"} set to ${status}.`);
+      }
       // A row saved here no longer has an older failure to show.
-      const savedKeys = rows.filter((row) => savedNums.has(row.n)).map((row) => applicationKey(row));
+      const savedKeys = write.filter((row) => savedNums.has(row.n)).map((row) => applicationKey(row));
       setHeldSaves((prev) => clearHeldSaves(prev, savedKeys));
       startTransition(() => {
-        for (const row of rows) {
+        for (const row of write) {
           if (savedNums.has(row.n)) showSavedStatus({ key: applicationKey(row), status });
         }
         router.refresh();

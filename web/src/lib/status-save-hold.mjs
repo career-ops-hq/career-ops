@@ -32,14 +32,37 @@ export function reduceHeldSave(holds, event) {
   return holds;
 }
 
-/** Drop the hold for each key, e.g. rows a bulk save just wrote.
+/** Drop settled holds for the given keys, such as a failure a bulk save replaced.
+ * A pending hold stays. That save has not settled, and dropping it lets another
+ * write start before this one finishes.
  * @param {ReadonlyMap<string, HeldStatusSave>} holds
  * @param {Iterable<string>} keys
  */
 export function clearHeldSaves(holds, keys) {
   let next = holds;
-  for (const key of keys) next = reduceHeldSave(next, { type: "clear", key });
+  for (const key of keys) {
+    if (next.get(key)?.phase === "pending") continue;
+    next = reduceHeldSave(next, { type: "clear", key });
+  }
   return next;
+}
+
+/** Rows a bulk status write may include. A row still saving is left out so the
+ * two writes cannot overlap.
+ * @template T
+ * @param {readonly T[]} rows
+ * @param {ReadonlyMap<string, HeldStatusSave>} holds
+ * @param {(row: T) => string} keyOf
+ * @returns {{ write: T[], inFlight: T[] }}
+ */
+export function excludeInFlightStatusRows(rows, holds, keyOf) {
+  const write = [];
+  const inFlight = [];
+  for (const row of rows) {
+    if (holds.get(keyOf(row))?.phase === "pending") inFlight.push(row);
+    else write.push(row);
+  }
+  return { write, inFlight };
 }
 
 /** Failures for rows that are not currently mounted. The mounted row shows its own alert.
