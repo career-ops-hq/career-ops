@@ -228,6 +228,7 @@ export default {
       if (/** @type {any} */ (err)?.code !== 'response_too_large') throw err;
       const bare = new URL(apiUrl);
       bare.searchParams.delete('content');
+      console.warn(`[greenhouse] ${entry.name}: board too large for content=true; read without descriptions, so description-based filters (content_filter, visa, country eligibility) cannot judge these postings.`);
       json = /** @type {any} */ (await ctx.fetchJson(assertGreenhouseUrl(bare.href), { redirect: 'error' }));
     }
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];

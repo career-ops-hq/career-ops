@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 import { coerceId } from './_ids.mjs';
 import { htmlToText } from './_html-to-text.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
 
 // Lever provider — hits the public postings endpoint.
 // Auto-detects from careers_url via jobs.(eu.)?lever.co/<slug>.
@@ -124,29 +125,49 @@ export default {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`lever: cannot derive API URL for ${entry.name}`);
     assertLeverUrl(apiUrl);
-    let json;
-    try {
-      json = await ctx.fetchJson(apiUrl, { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS });
-    } catch (err) {
-      // A very large board (Shield AI: 10.7 MB with full descriptions) exceeds the
-      // body cap in one response. The v0 API pages with limit/skip, so read it in
-      // slices instead of giving the board up.
-      if (/** @type {any} */ (err)?.code !== 'response_too_large') throw err;
-      json = [];
+    // A very large board (Shield AI: 10.7 MB with full descriptions) exceeds the
+    // body cap in one response. The v0 API pages with limit/skip, so read it in
+    // slices instead of giving the board up. A one-page probe (ctx.maxPages === 1)
+    // goes straight to a single bounded page rather than downloading the full
+    // response first.
+    const readPaged = async () => {
+      /** @type {any[]} */
+      const all = [];
       const PAGE = 100;
       // Bounded: at most 30 pages (3,000 postings), each capped at 4 MiB, so the
       // fallback cannot buffer more than ~120 MiB however the server behaves.
       const maxPages = Math.min(30, ctx.maxPages ?? 30);
-      for (let skip = 0; skip < maxPages * PAGE; skip += PAGE) {
+      let lastPageFull = false;
+      for (let n = 0; n < maxPages; n++) {
+        if (n > 0) await sleep(250, ctx);
         const pageUrl = new URL(apiUrl);
         pageUrl.searchParams.set('limit', String(PAGE));
-        pageUrl.searchParams.set('skip', String(skip));
-        const page = await ctx.fetchJson(assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: 4 * 1024 * 1024 });
-        if (!Array.isArray(page) || page.length === 0) break;
+        pageUrl.searchParams.set('skip', String(n * PAGE));
+        const page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: 4 * 1024 * 1024 });
+        if (!Array.isArray(page)) throw new Error(`lever: ${entry.name} returned a non-array page (${typeof page}) for skip=${n * PAGE}`);
+        if (page.length === 0) { lastPageFull = false; break; }
         // A server that ignores `limit` must not amplify the total: refuse the page.
         if (page.length > PAGE) throw new Error(`lever: ${entry.name} returned ${page.length} postings for limit=${PAGE}`);
-        for (const posting of page) json.push(posting);
-        if (page.length < PAGE) break;
+        for (const posting of page) all.push(posting);
+        lastPageFull = page.length === PAGE;
+        if (!lastPageFull) break;
+      }
+      // Cap stop, not completion: a full last page at the ceiling means more
+      // postings exist. A probe (maxPages === 1) asks for one page by design.
+      if (lastPageFull && ctx.maxPages !== 1) {
+        console.warn(`[lever] ${entry.name}: stopped at the ${maxPages}-page ceiling (${all.length} postings); the board has more.`);
+      }
+      return all;
+    };
+    let json;
+    if (ctx.maxPages === 1) {
+      json = await readPaged();
+    } else {
+      try {
+        json = await ctx.fetchJson(apiUrl, { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS });
+      } catch (err) {
+        if (/** @type {any} */ (err)?.code !== 'response_too_large') throw err;
+        json = await readPaged();
       }
     }
     if (!Array.isArray(json)) return [];

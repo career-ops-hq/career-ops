@@ -10,7 +10,8 @@ const tooLarge = () => Object.assign(new Error('HTTP body exceeded maxBytes'), {
 test('greenhouse falls back to the list without content=true when too large', async () => {
   const urls = [];
   const ctx = {
-    fetchJson: async (url) => {
+    fetchJson: async (url, opts) => {
+      assert.equal(opts?.redirect, 'error');
       urls.push(url);
       if (new URL(url).searchParams.get('content') === 'true') throw tooLarge();
       return { jobs: [{ id: 1, title: 'Engineer', absolute_url: 'https://job-boards.greenhouse.io/x/jobs/1', location: { name: 'Remote' } }] };
@@ -23,7 +24,7 @@ test('greenhouse falls back to the list without content=true when too large', as
 });
 
 test('greenhouse still rethrows other errors', async () => {
-  const ctx = { fetchJson: async () => { throw new Error('HTTP 500'); } };
+  const ctx = { fetchJson: async (_url, opts) => { assert.equal(opts?.redirect, 'error'); throw new Error('HTTP 500'); } };
   await assert.rejects(() => greenhouse.fetch({ name: 'X', careers_url: 'https://job-boards.greenhouse.io/x' }, ctx), /HTTP 500/);
 });
 
@@ -33,7 +34,9 @@ test('lever pages with limit/skip when the single response is too large', async 
   const total = 230;
   const calls = [];
   const ctx = {
-    fetchJson: async (url) => {
+    sleep: async () => {},
+    fetchJson: async (url, opts) => {
+      assert.equal(opts?.redirect, 'error');
       const u = new URL(url);
       if (!u.searchParams.has('limit')) throw tooLarge();
       const limit = Number(u.searchParams.get('limit')), skip = Number(u.searchParams.get('skip'));
@@ -48,7 +51,9 @@ test('lever pages with limit/skip when the single response is too large', async 
 
 test('lever refuses a page larger than the requested limit', async () => {
   const ctx = {
-    fetchJson: async (url) => {
+    sleep: async () => {},
+    fetchJson: async (url, opts) => {
+      assert.equal(opts?.redirect, 'error');
       if (!new URL(url).searchParams.has('limit')) throw tooLarge();
       return Array.from({ length: 101 }, (_, i) => posting(i));
     },
@@ -56,16 +61,54 @@ test('lever refuses a page larger than the requested limit', async () => {
   await assert.rejects(() => lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx), /limit=100/);
 });
 
-test('lever honors ctx.maxPages in the paging fallback', async () => {
-  let pages = 0;
+test('lever one-page probe requests a single bounded page and never the full response', async () => {
+  const calls = [];
   const ctx = {
     maxPages: 1,
-    fetchJson: async (url) => {
-      if (!new URL(url).searchParams.has('limit')) throw tooLarge();
-      pages++;
+    sleep: async () => {},
+    fetchJson: async (url, opts) => {
+      assert.equal(opts?.redirect, 'error');
+      calls.push(url);
+      assert.ok(new URL(url).searchParams.has('limit'));
       return Array.from({ length: 100 }, (_, i) => posting(i));
     },
   };
   await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
-  assert.equal(pages, 1);
+  assert.equal(calls.length, 1);
+});
+
+test('lever throws a descriptive error on a non-array page', async () => {
+  const ctx = {
+    sleep: async () => {},
+    fetchJson: async (url, opts) => {
+      assert.equal(opts?.redirect, 'error');
+      if (!new URL(url).searchParams.has('limit')) throw tooLarge();
+      return { error: 'nope' };
+    },
+  };
+  await assert.rejects(() => lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx), /non-array page/);
+});
+
+test('lever warns when the page ceiling stops on a full page, not on a short final page', async () => {
+  const run = async (total) => {
+    const warns = [];
+    const orig = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    try {
+      const ctx = {
+        sleep: async () => {},
+        fetchJson: async (url, opts) => {
+          assert.equal(opts?.redirect, 'error');
+          const u = new URL(url);
+          if (!u.searchParams.has('limit')) throw tooLarge();
+          const skip = Number(u.searchParams.get('skip'));
+          return Array.from({ length: Math.max(0, Math.min(100, total - skip)) }, (_, k) => posting(skip + k));
+        },
+      };
+      await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
+    } finally { console.warn = orig; }
+    return warns;
+  };
+  assert.equal((await run(3500)).length, 1);
+  assert.equal((await run(230)).length, 0);
 });
