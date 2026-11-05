@@ -10,6 +10,7 @@
  *   node validate-portals.mjs --help
  */
 
+import { buildWorkplacePolicy } from './providers/_country.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -387,6 +388,16 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
     } else {
+      if (config.location_filter.workplace_policy !== undefined) {
+        const policy = config.location_filter.workplace_policy;
+        if (!isObject(policy)) add(errors, 'location_filter.workplace_policy', 'must be an object');
+        else {
+          for (const key of ['onsite_locations', 'onsite_countries', 'remote_countries', 'remote_regions']) {
+            validateKeywordList(policy[key], 'location_filter.workplace_policy.' + key, errors);
+          }
+          try { buildWorkplacePolicy(policy); } catch (error) { add(errors, 'location_filter.workplace_policy', error.message); }
+        }
+      }
       validateKeywordList(config.location_filter.always_allow, 'location_filter.always_allow', errors);
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);

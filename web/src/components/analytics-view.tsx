@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, BarChart3, BriefcaseBusiness, CircleDollarSign, MapPin, Sparkles, Target } from "lucide-react";
 import { PageFrame } from "@/components/page-frame";
+import { funnelBarModel } from "@/lib/analytics-metrics.mjs";
 
 type ProgressMetrics = {
   tracked: number;
@@ -93,11 +94,12 @@ export function ProgressPanel({ metrics }: { metrics: ProgressMetrics }) {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.85fr)]">
-        <Panel eyebrow="Funnel" title="Pipeline progress" description="Cumulative roles that reached each stage.">
+        <Panel eyebrow="Funnel" title="Pipeline progress" description="Cumulative roles that reached each stage. Each bar is that count out of everything tracked.">
           <div className="mt-5 space-y-3.5">
-            {metrics.funnel.map((stage, index) => (
-              <BarRow key={stage.label} label={stage.label} count={stage.count} pct={stage.pct} widthPct={metrics.tracked ? (stage.count / metrics.tracked) * 100 : 0} tone={index === metrics.funnel.length - 1 ? "bg-brand" : "bg-sky-400"} />
-            ))}
+            {metrics.funnel.map((stage, index) => {
+              const bar = funnelBarModel(stage, metrics.tracked);
+              return <BarRow key={stage.label} label={stage.label} count={bar.count} widthPct={bar.widthPct} tone={index === metrics.funnel.length - 1 ? "bg-brand" : "bg-sky-400"} />;
+            })}
           </div>
         </Panel>
 
