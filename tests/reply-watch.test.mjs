@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { ROOT, NODE, rmSync } from './helpers.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
-import { acquireTrackerLock, trackerLockDirFor } from '../tracker-utils.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath, trackerLockDirFor } from '../tracker-utils.mjs';
 
 const SCRIPT = join(ROOT, 'reply-watch.mjs');
 
@@ -193,7 +193,9 @@ test('a reply-watch run killed while set-status waits on the tracker lock report
   // spawn timeout. The child dies ETIMEDOUT mid-update waiting on set-status
   // lock contention; the failure message must say how far it got from its
   // captured stdout/stderr.
-  const lock = await acquireTrackerLock(trackerLockDirFor(trackerFile));
+  // Canonicalize the path so the lock matches set-status's even under a
+  // symlinked temp dir (macOS /var -> /private/var); otherwise nothing waits.
+  const lock = await acquireTrackerLock(trackerLockDirFor(canonicalizeTrackerPath(trackerFile)));
   try {
     const startedAt = Date.now();
     const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n', 5000);

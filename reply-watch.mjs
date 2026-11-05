@@ -36,8 +36,9 @@ export const DEFAULT_CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
 export const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 export const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
-// Debug-only timing output, gated behind CAREER_OPS_DEBUG=1 so normal runs are
-// unchanged and no new stderr appears for users.
+// CAREER_OPS_DEBUG=1 turns on the timing output (it always reports the sync
+// time and forwards tracker.mjs's parse/ledger/write timing), and a sync slower
+// than 5s is reported on stderr even without it.
 const DEBUG = process.env.CAREER_OPS_DEBUG === '1';
 
 // Helper to ask a question in the CLI
