@@ -34,6 +34,13 @@ function fixture(t, { reportColumn = false } = {}) {
   const additions = join(root, 'batch/tracker-additions');
   const rows = () => readFileSync(tracker, 'utf8').split('\n').filter(line => /^\|\s*\d+\s*\|/.test(line));
   const cell = (row, name) => row.split('|')[fields.indexOf(name) + 1].trim();
+  const setCell = (name, value) => {
+    const before = readFileSync(tracker, 'utf8');
+    const row = rows()[0], cells = row.split('|'), index = fields.indexOf(name) + 1;
+    assert.ok(index > 0, 'fixture column exists');
+    cells[index] = ` ${value} `;
+    writeFileSync(tracker, before.replace(row, cells.join('|')));
+  };
   const add = ({ num = '101', url = PRIMARY, official = FIRST, score = '3.7/5', file = fileFor(num), notes = 'initial', preamble = '', body = '' } = {}) => {
     const markdown = report(url, official, { score, preamble, body });
     assert.deepEqual(writeEvaluationArtifacts(root, { markdown, num, today: '2026-01-01', company: 'ExampleCo', role: 'Product Lead', score, url, notes, reportFile: file }), { ok: true });
@@ -41,7 +48,7 @@ function fixture(t, { reportColumn = false } = {}) {
   };
   const merge = () => mergeTracker({ appsFile: tracker, dataRoot: root, logger: { log() {}, warn() {}, error() {} } });
   const reportImages = () => Object.fromEntries(flatFiles(join(root, 'reports')).map(name => [name, readFileSync(join(root, 'reports', name), 'utf8')]));
-  return { root, tracker, additions, rows, cell, add, merge, reportImages };
+  return { root, tracker, additions, rows, cell, setCell, add, merge, reportImages };
 }
 
 async function existing(t, options = {}, layout = {}) {
@@ -128,6 +135,32 @@ test('a populated Report column remains preferred over a different Notes referen
   assert.equal(await f.merge(), 0);
   f.add({ num: '102', official: SECOND, score: '4.0/5' });
   assert.equal(await f.merge(), 0); assert.equal(f.rows().length, 2);
+});
+
+for (const placeholder of ['-', '—', 'N/A']) {
+  test(`a ${placeholder} Report cell retains employer evidence from its Notes reference`, async t => {
+    const f = await existing(t, { notes: `Report: [101](../reports/${fileFor('101')}).` }, { reportColumn: true });
+    f.setCell('Report', placeholder);
+    const prior = f.rows()[0];
+    f.add({ num: '102', official: SECOND, score: '4.0/5' });
+    const images = f.reportImages();
+    assert.equal(await f.merge(), 0);
+    assert.equal(f.rows().length, 2);
+    assert.ok(f.rows().includes(prior), 'the existing placeholder row stays byte-exact');
+    assert.ok(f.rows().some(row => row.includes(fileFor('102')) && f.cell(row, 'Score') === '4.0/5'));
+    assert.deepEqual(f.reportImages(), images, 'neither report is edited');
+  });
+}
+
+test('a non-placeholder Report value is not replaced by a Notes reference', async t => {
+  const f = await existing(t, { notes: `Report: [101](../reports/${fileFor('101')}).` }, { reportColumn: true });
+  f.setCell('Report', 'legacy-manual-reference');
+  f.add({ num: '102', official: SECOND, score: '4.0/5' });
+  const images = f.reportImages();
+  assert.equal(await f.merge(), 0);
+  assert.equal(f.rows().length, 1, 'unknown explicit metadata preserves existing matching semantics');
+  assert.ok(f.rows()[0].includes(fileFor('102')));
+  assert.deepEqual(f.reportImages(), images);
 });
 
 test('the shared Markdown parser reads a parenthesized report filename in Notes', async t => {

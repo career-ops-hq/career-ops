@@ -547,7 +547,7 @@ export async function mergeTracker(options = {}) {
   let workdayPostingKey = null;
   function reportFieldForMetadata(app) {
     const direct = String(app.report ?? '').trim();
-    if (direct) return direct;
+    if (direct && !PLACEHOLDER_CELL.test(direct)) return direct;
     // With no Report column buildRow appends "Report: <link>." to Notes.
     // Prefer that last valid marked reference over older examples/history.
     const notes = String(app.notes ?? '');
