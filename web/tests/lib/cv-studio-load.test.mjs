@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import "../helpers/web-ts-alias-loader.mjs";
 
 const { loadStudio } = await import("../../src/lib/cv-studio/server.ts");
@@ -17,6 +18,8 @@ const HTML = `<html><body><div class="section">
 </div>
   </div></body></html>`;
 
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
 const HEADER = "# report\tpdf\thtml\tformat\tdate\tkind\n";
 
 function workspace() {
@@ -28,11 +31,21 @@ function workspace() {
     path.join(root, "reports", "042-northwind-traders-analyst-2026-03-01.md"),
     "# Evaluation: Northwind Traders -- Analyst\n",
   );
-  const previousRoot = process.env.CAREER_OPS_ROOT;
-  process.env.CAREER_OPS_ROOT = root;
+  // The manifest resolver lives in the checkout's tracker-utils.mjs, found
+  // from cwd unless CAREER_OPS_CODE_ROOT names it, so pin both it and the
+  // manifest to this fixture whatever directory the suite runs from.
+  const env = {
+    CAREER_OPS_ROOT: root,
+    CAREER_OPS_CODE_ROOT: REPO_ROOT,
+    CAREER_OPS_PDF_INDEX: path.join(root, "data", "pdf-index.tsv"),
+  };
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
   const cleanup = () => {
-    if (previousRoot === undefined) delete process.env.CAREER_OPS_ROOT;
-    else process.env.CAREER_OPS_ROOT = previousRoot;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     fs.rmSync(root, { recursive: true, force: true });
   };
   return { root, cleanup };
