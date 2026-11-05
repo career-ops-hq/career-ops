@@ -34,7 +34,7 @@ import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs
 import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { postingKey } from './url-key.mjs';
+import { canonicalJobKey } from './url-key.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
@@ -131,9 +131,9 @@ function loadPortalsConfig() {
 
 /** Jobs whose posting is not in the pipeline yet, one per posting. */
 export function newPipelineJobs(found, pipelineUrls) {
-  const seen = new Set([...pipelineUrls].map(postingKey));
+  const seen = new Set([...pipelineUrls].map((url) => canonicalJobKey(url) || url));
   return found.filter((j) => {
-    const key = postingKey(j.url) || j.url;
+    const key = canonicalJobKey(j.url) || j.url;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

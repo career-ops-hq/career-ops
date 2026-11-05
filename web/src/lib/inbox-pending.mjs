@@ -1,4 +1,4 @@
-import { normalizeUrl } from "./core/url-key.mjs";
+import { canonicalJobKey } from "./core/url-key.mjs";
 import { readTrackerUrl } from "./posting-url.mjs";
 
 /**
@@ -13,10 +13,10 @@ import { readTrackerUrl } from "./posting-url.mjs";
  */
 export function reconcileInbox(inbox, applications) {
   const tracked = new Set(applications
-    .map((app) => normalizeUrl(readTrackerUrl(app.url)))
+    .map((app) => canonicalJobKey(readTrackerUrl(app.url)))
     .filter(Boolean));
   return inbox.map((job) => {
-    const key = normalizeUrl(job.url);
+    const key = canonicalJobKey(job.url);
     return !job.done && key && tracked.has(key) ? { ...job, done: true } : job;
   });
 }
@@ -34,8 +34,9 @@ export function pendingInbox(inbox) {
   const seen = new Set();
   const out = [];
   for (const j of inbox) {
-    if (j.done || seen.has(j.url)) continue;
-    seen.add(j.url);
+    const key = canonicalJobKey(j.url) || j.url;
+    if (j.done || seen.has(key)) continue;
+    seen.add(key);
     out.push(j);
   }
   return out;

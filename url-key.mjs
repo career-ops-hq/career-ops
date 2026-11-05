@@ -40,7 +40,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { linkedInPathJobId } from './lib/linkedin-url.mjs';
+import { linkedInCanonicalKey, linkedInPathJobId } from './lib/linkedin-url.mjs';
 
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
@@ -495,9 +495,117 @@ export function relatePostingLanguageKeys(a, b) {
  * @param {string} raw
  * @returns {string} '' when the input is not a usable posting URL
  */
+// Click and campaign params scan.mjs already ignores when it asks "seen this
+// job?". Generic names stay OUT of normalizeUrl() because a tracker merge that
+// drops them can fold two postings. The same-job key is the scan question.
+const SAME_JOB_TRACKING = [
+  /^ref$/i, /^src$/i, /^source$/i,
+  /^lever-origin$/i, /^lever-source$/i, /^rltr$/i,
+];
+
+const GREENHOUSE_BOARD_HOSTS = new Set([
+  'boards.greenhouse.io',
+  'boards.eu.greenhouse.io',
+  'job-boards.greenhouse.io',
+  'job-boards.eu.greenhouse.io',
+  'boards-api.greenhouse.io',
+]);
+
+/**
+ * Greenhouse's numeric posting id, or null when this URL does not carry one
+ * unambiguous id.
+ *
+ * Board hosts (`boards`, `job-boards`, the EU twins, `boards-api`) contribute
+ * the id at the end of `/jobs/{id}`. Any http(s) URL contributes `?gh_jid=`,
+ * which is how a company careers page embeds the same posting. The id is
+ * global on Greenhouse, so the company slug is not part of the key.
+ *
+ * A path id and a `gh_jid` that disagree are not one posting. Null sends the
+ * caller back to the full URL, so the two signals stay distinct.
+ *
+ * @param {URL} url - Hostname already folded.
+ * @returns {string|null}
+ */
+function greenhouseJobId(url) {
+  let pathId = null;
+  if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
+    const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    if (match) pathId = match[1];
+  }
+  const query = url.searchParams.get('gh_jid');
+  const queryId = query && /^\d+$/.test(query) ? query : null;
+  if (pathId && queryId && pathId !== queryId) return null;
+  return pathId || queryId;
+}
+
+/**
+ * Indeed posting id (`jk` on the job page, `vjk` on a results page).
+ *
+ * @param {URL} url - Hostname already folded.
+ * @returns {string|null}
+ */
+function indeedJobId(url) {
+  if (!/(^|\.)indeed\.com$/.test(url.hostname)) return null;
+  const jk = url.searchParams.get('jk') ?? url.searchParams.get('vjk');
+  return jk && /^[\w-]+$/.test(jk) ? jk : null;
+}
+
+/**
+ * One key for one posting.
+ *
+ * LinkedIn spellings share `linkedin.com:{id}` (see linkedInCanonicalKey).
+ * Greenhouse board URLs and a company page `?gh_jid=` share `greenhouse:{id}`.
+ * Indeed shares `indeed.com:{id}`. Everything else is a normalized https URL
+ * with tracking and language params removed and the path lowercased, so two
+ * scans that differ only by `utm_*`, `ref`, `source`, or `lever-origin` match.
+ *
+ * '' means no key. A placeholder, a `local:` pipeline ref, and two empty
+ * cells must not compare equal. Callers that still need a map key for those
+ * use the raw string themselves.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function canonicalJobKey(raw) {
+  if (typeof raw !== 'string') return '';
+  const s = raw.trim();
+  if (!s) return '';
+
+  const linked = linkedInCanonicalKey(s);
+  if (linked) return linked;
+
+  let u;
+  try { u = new URL(s); } catch { return ''; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+  u.hostname = foldHostname(u.hostname);
+
+  const indeed = indeedJobId(u);
+  if (indeed) return `indeed.com:${indeed}`;
+
+  const greenhouse = greenhouseJobId(u);
+  if (greenhouse) return `greenhouse:${greenhouse}`;
+
+  for (const key of [...u.searchParams.keys()]) {
+    const lower = key.toLowerCase();
+    if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
+      u.searchParams.delete(key);
+    }
+  }
+  const normalized = normalizeUrl(u.href);
+  if (!normalized) return '';
+  const out = new URL(normalized);
+  if (out.pathname.length > 1) {
+    out.pathname = out.pathname.toLowerCase().replace(/\/+$/, '') || '/';
+  }
+  return out.toString();
+}
+
+/**
+ * @param {string} raw
+ * @returns {string} '' when the input is not a usable posting URL
+ */
 export function postingKey(raw) {
-  const agg = aggregatorPostingId(raw);
-  return agg ? `${agg.domain}:${agg.id}` : normalizeUrl(raw);
+  return canonicalJobKey(raw);
 }
 
 export default normalizeUrl;

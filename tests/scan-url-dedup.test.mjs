@@ -64,7 +64,8 @@ try {
   const preExistingInternalParam = normalizeUrlForDedup(
     'https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id',
   );
-  if (preExistingInternalParam === 'https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id&_career_ops_fragment_job_id=hash-id') {
+  const fragmentParams = new URL(preExistingInternalParam).searchParams.getAll('_career_ops_fragment_job_id');
+  if (fragmentParams.includes('query-id') && fragmentParams.includes('hash-id')) {
     pass('pre-existing internal fragment key is preserved beside promoted hash job ID');
   } else {
     fail(`pre-existing fragment query key was overwritten: ${preExistingInternalParam}`);
@@ -75,10 +76,13 @@ try {
   if (cosmeticHash === fragmentFree) pass('cosmetic fragments still collapse onto the fragment-free key');
   else fail(`cosmetic fragment changed the key: ${JSON.stringify({ cosmeticHash, fragmentFree })}`);
 
-  // A tracking param must not take a real one with it.
+  // A company-site gh_jid is the Greenhouse posting, so tracking params drop
+  // and the board URL for that id is the same key. A different id stays apart
+  // (asserted above).
   const mixed = normalizeUrlForDedup('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
-  if (mixed === 'https://jobs.example.com/j?gh_jid=9') pass('only tracking params are dropped from a mixed query');
-  else fail(`mixed query = ${mixed}`);
+  const board = normalizeUrlForDedup('https://boards.greenhouse.io/acme/jobs/9');
+  if (mixed === 'greenhouse:9' && mixed === board) pass('gh_jid and the Greenhouse board URL share one key');
+  else fail(`mixed query = ${JSON.stringify({ mixed, board })}`);
 
   // Untracked URLs must keep matching what is already in scan-history.
   const plain = 'https://jobs.ashbyhq.com/acme/abc-123';

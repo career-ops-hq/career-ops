@@ -81,7 +81,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
+import { canonicalJobKey, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
@@ -1759,64 +1759,21 @@ export function orderByPreferredLanguage(jobs, rank) {
     .map(({ job }) => job);
 }
 
-// Query params that carry no identity information for a job posting — safe to
-// strip when computing the dedup key. Deliberately an allowlist rather than
-// "strip everything": several ATSes key the posting off a query param (e.g.
-// Greenhouse's `gh_jid`), so a blanket strip would collapse distinct roles.
-const DEDUP_STRIP_PARAMS = new Set([
-  // The language a page renders in: the language versions of one posting
-  // share a key, and languageFormsFromUrl reads the param back to tell them apart.
-  ...LANGUAGE_PARAMS,
-  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-  'ref', 'src', 'source', 'gh_src', 'lever-origin', 'lever-source',
-  'rltr', // StepStone: regenerated per request, so one posting returns as new every scan
-]);
-
 /**
- * Normalize a job posting URL into a stable dedup key.
+ * Comparison key for a posting URL. The rule lives in canonicalJobKey
+ * (url-key.mjs): Greenhouse aliases, LinkedIn spellings, and tracking params
+ * share one key. Callers still write the original URL.
  *
- * Strips cosmetic query params (locale/tracking), promotes recognized
- * hash-route job IDs before dropping other fragments, drops a trailing slash,
- * and lowercases scheme, host, and path. Only used to compute the *comparison*
- * key — callers keep writing/displaying the original URL so links stay
- * clickable and scan-history/pipeline.md stay faithful to what the provider
- * returned.
- *
- * The path is lowercased because scan.mjs and scan-ats-full.mjs run as
- * separate processes and can independently produce different casing for the
- * identical posting — a Workday tenant/site path segment reached via the
- * curated portals.yml entry vs. the reverse-ATS dataset, for instance. A
- * case-sensitive key silently treats those as two distinct URLs, so the same
- * role lands in pipeline.md twice. Path casing is not meaningfully distinct
- * for any provider these scanners target.
- *
- * Query *values* keep their original casing — those can be identity-bearing
- * (Greenhouse's `gh_jid`), which is also why DEDUP_STRIP_PARAMS is an
- * allowlist rather than a blanket strip.
- *
- * Falls back to the raw string when the URL is malformed, preserving the
- * old byte-for-byte behavior for unparsable history rows.
+ * A value that is not an http(s) posting (a `local:` pipeline ref, a bare
+ * path, a blank cell) comes back unchanged. canonicalJobKey returns '' for
+ * those, and '' must not become the key every blank cell shares.
  *
  * @param {string} url
  * @returns {string}
  */
 export function normalizeUrlForDedup(url) {
   if (typeof url !== 'string' || !url) return url;
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return url;
-  }
-  for (const param of Array.from(parsed.searchParams.keys())) {
-    if (DEDUP_STRIP_PARAMS.has(param.toLowerCase())) {
-      parsed.searchParams.delete(param);
-    }
-  }
-  promoteKnownFragmentIdentity(parsed);
-  parsed.hash = '';
-  parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
-  return parsed.toString();
+  return canonicalJobKey(url) || url;
 }
 
 /**

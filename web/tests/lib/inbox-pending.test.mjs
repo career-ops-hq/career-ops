@@ -37,6 +37,18 @@ test("tracked URLs reconcile tracking variants without hiding distinct requisiti
   assert.deepEqual(reconcileInbox(inbox, []), inbox, "a failed or unsaved evaluation remains pending");
 });
 
+test("pendingInbox counts one Greenhouse posting once across alias URLs", () => {
+  const inbox = [
+    { url: "https://boards.greenhouse.io/acme/jobs/42?utm_source=li", done: false, role: "Board" },
+    { url: "https://job-boards.greenhouse.io/acme/jobs/42", done: false, role: "Alias" },
+    { url: "https://careers.acme.example/open?gh_jid=42", done: false, role: "Embed" },
+    { url: "https://boards.greenhouse.io/acme/jobs/43", done: false, role: "Other" },
+    { url: "local:jds/one.md", done: false, role: "Local one" },
+    { url: "local:jds/two.md", done: false, role: "Local two" },
+  ];
+  assert.deepEqual(pendingInbox(inbox).map((j) => j.role), ["Board", "Other", "Local one", "Local two"]);
+});
+
 test("pendingInbox drops done postings and repeated URLs", () => {
   const inbox = [
     { url: "https://jobs.example.test/a", done: false, role: "First" },
