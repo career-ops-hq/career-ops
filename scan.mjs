@@ -3385,11 +3385,66 @@ Paste job URLs below as \`- [ ] {url}\` then run \`/career-ops pipeline\`.
 ## Processed
 `;
 
+function sameJobWriteKey(url) {
+  if (typeof url !== 'string' || !url) return '';
+  return canonicalJobKey(url) || url;
+}
+
+function keysInPipeline(text) {
+  const keys = new Set();
+  for (const line of String(text ?? '').split('\n')) {
+    const url = extractPipelineUrl(line);
+    if (!url) continue;
+    const key = sameJobWriteKey(url);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+function offersMissingFromPipeline(offers, pipelineText) {
+  const keys = keysInPipeline(pipelineText);
+  const fresh = [];
+  for (const offer of offers) {
+    const key = sameJobWriteKey(offer?.url);
+    if (!key || keys.has(key)) continue;
+    keys.add(key);
+    fresh.push(offer);
+  }
+  return fresh;
+}
+
+function keysInScanHistory(text, status) {
+  const keys = new Set();
+  for (const line of scanHistoryDataLines(text)) {
+    const row = parseScanHistoryLine(line);
+    if (row.status !== status || !row.url) continue;
+    const key = sameJobWriteKey(row.url);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+function offersMissingFromHistory(offers, status, historyText) {
+  const keys = keysInScanHistory(historyText, status);
+  const fresh = [];
+  for (const offer of offers) {
+    const key = sameJobWriteKey(offer?.url);
+    if (!key || keys.has(key)) continue;
+    keys.add(key);
+    fresh.push(offer);
+  }
+  return fresh;
+}
+
 // Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, and plugins.mjs
 // (pipeline mode) — the three current callers — can never interleave their
 // read-modify-write and silently drop each other's offers.
 // Same seam as loadSeenUrls above: the default is the CAREER_OPS_ROOT-anchored
 // module constant; a caller with its own lane (or a fixture) passes the path.
+//
+// The read that decides "already here" happens inside the lock. Two scans can
+// both decide a posting is new before either writes; the second write sees the
+// first's row and skips that key.
 export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } = {}) {
   if (offers.length === 0) return;
 
@@ -3398,6 +3453,8 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
     let text = existsSync(pipelinePath)
       ? readFileSync(pipelinePath, 'utf-8')
       : PIPELINE_SKELETON;
+    const fresh = offersMissingFromPipeline(offers, text);
+    if (fresh.length === 0) return;
 
     const headings = [...text.matchAll(/^##[ \t].*$/gm)];
     const pending = headings.find(h => sectionKind(h[0]) === 'pending');
@@ -3406,7 +3463,7 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
       // No Pending section found — insert one before Processed (or at end)
       const processed = headings.find(h => sectionKind(h[0]) === 'processed');
       const insertAt = processed ? processed.index : text.length;
-      const block = `\n## Pending\n\n` + offers.map(formatPipelineOffer).join('\n') + '\n\n';
+      const block = `\n## Pending\n\n` + fresh.map(formatPipelineOffer).join('\n') + '\n\n';
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     } else {
       // Find the end of existing Pending content (next ## or end)
@@ -3414,7 +3471,7 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
       const nextSection = text.indexOf('\n## ', afterMarker);
       const insertAt = nextSection === -1 ? text.length : nextSection;
 
-      const block = '\n' + offers.map(formatPipelineOffer).join('\n') + '\n';
+      const block = '\n' + fresh.map(formatPipelineOffer).join('\n') + '\n';
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     }
 
@@ -3450,13 +3507,20 @@ export async function appendToScanHistory(offers, date, status = 'added', { alre
       atomicWriteFile(SCAN_HISTORY_PATH, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
     }
 
-    const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
+    // Re-read under the lock (the caller holds it, or withPipelineLock does).
+    // A row already stored under this status is skipped. A different status
+    // still writes, so a later verdict is recorded.
+    const fresh = offersMissingFromHistory(offers, status, readIfExists(SCAN_HISTORY_PATH));
+    if (fresh.length === 0) return 0;
+
+    const lines = fresh.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
     appendLedgerRows(SCAN_HISTORY_PATH, lines);
+    return fresh.length;
   };
 
-  if (alreadyLocked) write();
-  else await withPipelineLock(SCAN_HISTORY_PATH, write);
+  if (alreadyLocked) return write();
+  else return await withPipelineLock(SCAN_HISTORY_PATH, write);
 }
 
 /**
@@ -3475,8 +3539,10 @@ export async function appendUnrecordedToScanHistory(offers, date, status) {
   if (offers.length === 0) return 0;
   return withPipelineLock(SCAN_HISTORY_PATH, async () => {
     const fresh = unrecordedOffers(offers, status, readIfExists(SCAN_HISTORY_PATH));
-    if (fresh.length > 0) await appendToScanHistory(fresh, date, status, { alreadyLocked: true });
-    return fresh.length;
+    if (fresh.length === 0) return 0;
+    // The inner write re-reads under this same lock and may drop an alias the
+    // pre-check still treated as new. The count is rows that landed.
+    return appendToScanHistory(fresh, date, status, { alreadyLocked: true });
   });
 }
 
