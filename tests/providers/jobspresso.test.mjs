@@ -78,33 +78,30 @@ try {
     fail(`unexpected parsed job: ${JSON.stringify(job)}`);
   }
 
-  let fetchCalled = false;
-
-  const fetched = await jobspresso.fetch({}, {
-    async fetchText(url, opts) {
-      fetchCalled = true;
-
-      if (
-        url !== 'https://jobspresso.co/?feed=job_feed' ||
-        opts?.redirect !== 'error'
-      ) {
-        throw new Error('unexpected fetch arguments');
-      }
-
-      return xml;
+  // fetch() — retired (#5774): throws immediately, names the cause, and never
+  // touches the network (jobspresso.co's robots.txt disallows the feed path).
+  let networkCalls = 0;
+  const ctx = {
+    transport: 'http',
+    fetchText: async (url) => {
+      networkCalls++;
+      throw new Error(`fetchText should not be called, got: ${url}`);
     },
-  });
-
-  if (fetchCalled && fetched.length === 1) {
-    pass('jobspresso.fetch() requests the pinned RSS feed');
-  } else {
-    fail('jobspresso.fetch() did not fetch correctly');
+    fetchJson: async (url) => {
+      networkCalls++;
+      throw new Error(`fetchJson should not be called, got: ${url}`);
+    },
+  };
+  let fetchErr = null;
+  try {
+    await jobspresso.fetch({ name: 'Jobspresso', provider: 'jobspresso' }, ctx);
+  } catch (e) {
+    fetchErr = e;
   }
-
-  if (fetchCalled) {
-    pass('jobspresso.fetch() passes redirect:"error" to fetchText');
+  if (networkCalls === 0 && fetchErr && /robots\.txt/.test(fetchErr.message) && /#5774/.test(fetchErr.message)) {
+    pass('jobspresso.fetch() throws a retirement message naming the cause (#5774) without touching the network');
   } else {
-    fail('jobspresso.fetch() never called fetchText');
+    fail(`jobspresso.fetch() should throw a retirement message with zero network calls, got: networkCalls=${networkCalls}, error=${fetchErr ? fetchErr.message : '(did not throw)'}`);
   }
 
 } catch (e) {

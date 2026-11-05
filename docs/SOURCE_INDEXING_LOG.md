@@ -208,3 +208,22 @@ A general job board for Colombia. Measured: one GET of `https://www.magneto365.c
 **Rule 5 (aggregation stays in core).** Each portal has its own provider. jobs.cz and prace.cz are separate portals, but many employers publish the same offer on both: for "python", 56 of the 63 prace.cz offers also appeared on jobs.cz with identical company and title. The scanner's existing company+role dedup merges these.
 
 **Rule 6 (the source's own `robots.txt`).** Under `User-agent: *`, jobs.cz does not disallow the listing path `/prace/`, and its disallowed `/api/` and `/iapi/` are never requested. prace.cz does not disallow `/nabidky/`, the only path the providers read; its disallowed `/hledat/` (the old search path, which now redirects to `/nabidky/`) and application-form paths are never requested. Neither file names an AI or agent crawler.
+
+---
+
+## jobspresso.co (retired)
+
+| | |
+|---|---|
+| **Proposed by** | issue [#1310](https://github.com/career-ops-hq/career-ops/issues/1310); provider by @aakash811 |
+| **Provider** | `providers/jobspresso.mjs` |
+| **PR** | [#1320](https://github.com/career-ops-hq/career-ops/pull/1320) · retirement issue [#5774](https://github.com/career-ops-hq/career-ops/issues/5774) |
+| **Merged** | 2026-06-29, before this policy existed (2026-08-04) |
+| **Retired** | 2026-11-05 |
+| **Status** | Not listed. `provider: jobspresso` still resolves, and `fetch()` throws a message naming the cause without making a request. |
+
+Re-read against rule 6 after a contributor checked the live `robots.txt` in [#5774](https://github.com/career-ops-hq/career-ops/issues/5774).
+
+**Rule 6 (the source's own `robots.txt`).** Checked on 2026-10-23 and again on 2026-11-05: one GET of `https://jobspresso.co/robots.txt`, HTTP 200. Under `User-agent: *` it disallows `/*?`, and its only `Allow` lines are `/*.css` and `/*.js`. The provider's one request, `https://jobspresso.co/?feed=job_feed`, carries a query string, so `/*?` covers it. No group names career-ops. Same case as Lagou in the [Evaluated, not supported](SUPPORTED_JOB_BOARDS.md#evaluated-not-supported) table. Whether the rule was there when the provider merged is unknown. The same feed is also served at `https://jobspresso.co/feed/job_feed/`, which carries no query string and is not covered by `/*?`; retiring anyway reads the `Disallow` as the operator not wanting the feed fetched at any URL. Switching to that URL instead is the alternative raised in [#5774](https://github.com/career-ops-hq/career-ops/issues/5774).
+
+**Rules 1 to 5.** Not re-verified: rule 6 decides on its own. Operator permission recorded here would reopen it.

@@ -2040,10 +2040,6 @@ search_queries:
 #   provider: hackernews
 #   enabled: true
 #
-# - name: Jobspresso                      # curated remote roles (public WordPress feed)
-#   provider: jobspresso
-#   enabled: true
-#
 # - name: The Muse                        # board-wide public jobs API
 #   provider: themuse
 #   enabled: true
