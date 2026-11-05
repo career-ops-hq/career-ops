@@ -178,10 +178,12 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
   const v1 = '# Avery Quinn\n\n## Experience\n\n### Example Co\n\n- Built a metric layer\n- Ran SQL reviews\n- Mentored two analysts\n';
   const v2 = '# Avery Quinn\n\n## Experience\n\n### Example Co\n\n- Built a metric layer\n- Led SQL reviews\n- Mentored two analysts\n- Shipped alerting\n';
   writeFileSync(join(docsDir, 'cv', 'master.md'), v1);
-  const env = { ...process.env, CAREER_OPS_DOCUMENTS_DIR: docsDir, CAREER_OPS_INTAKE_STATE: stateFile };
+  // A data root of its own, so the "never under the data root" check below
+  // neither reads the developer's checkout nor inherits their CAREER_OPS_ROOT.
+  const otherRoot = join(tmp, 'other-root');
+  mkdirSync(otherRoot, { recursive: true });
+  const env = { ...process.env, CAREER_OPS_ROOT: otherRoot, CAREER_OPS_DOCUMENTS_DIR: docsDir, CAREER_OPS_INTAKE_STATE: stateFile };
   const snapFor = (rel) => join(snapDir, intake.snapshotFileName(rel));
-  const repoSnapDir = join(ROOT, 'data', 'intake-snapshots');
-  const repoSnapBefore = existsSync(repoSnapDir) ? readdirSync(repoSnapDir).length : null;
 
   try {
     // Never committed: no snapshot, and --diff says so before the full text.
@@ -225,6 +227,14 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
       pass('--diff prints removed and added lines, with the enclosing heading on the hunk');
     } else fail(`--diff after edit: ${JSON.stringify(diff)}`);
 
+    // Re-saved with CRLF and no final newline: a new hash, but no line changed.
+    writeFileSync(join(docsDir, 'cv', 'master.md'), v1.replace(/\n/g, '\r\n').replace(/\r\n$/, ''));
+    const resaved = run(NODE, ['intake.mjs', '--diff', 'cv/master.md'], { env }) || '';
+    if (resaved === 'intake: cv/master.md differs from its snapshot only in line endings or the final newline; nothing to propose.') {
+      pass('--diff names a line-ending-only change instead of printing empty diff headers');
+    } else fail(`--diff after a line-ending-only change: ${JSON.stringify(resaved)}`);
+    writeFileSync(join(docsDir, 'cv', 'master.md'), v2);
+
     // A snapshot that no longer hashes to the ledger is not a baseline.
     writeFileSync(snapFor('cv/master.md'), 'tampered\n');
     const tampered = run(NODE, ['intake.mjs', '--diff', 'cv/master.md'], { env }) || '';
@@ -265,9 +275,8 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
       pass('case-variant source paths get different snapshot files on a case-insensitive disk');
     } else fail('case-variant paths share a snapshot name');
 
-    const repoSnapAfter = existsSync(repoSnapDir) ? readdirSync(repoSnapDir).length : null;
-    if (repoSnapAfter === repoSnapBefore) pass('snapshots follow the overridden ledger, never the checkout data/');
-    else fail(`tests wrote into ${repoSnapDir}`);
+    if (!existsSync(join(otherRoot, 'data', 'intake-snapshots'))) pass('snapshots follow the overridden ledger, never the data root');
+    else fail('snapshots were written under the data root instead of beside the overridden ledger');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

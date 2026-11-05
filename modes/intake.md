@@ -69,6 +69,8 @@ from the `+` and `-` lines; the rest was already reviewed.
 Its first line says which case you got:
 
 - `intake: … is unchanged` — nothing to propose for that source.
+- `intake: … differs from its snapshot only in line endings or the final
+  newline` — the file was re-saved, not edited. Nothing to propose.
 - `intake: no snapshot to diff … against (reason); full text follows.` — the
   source was committed before intake kept snapshots, or its snapshot is
   missing or out of step with the ledger. Treat the rest of the output as the

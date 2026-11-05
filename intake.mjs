@@ -696,8 +696,13 @@ function diffSource({ path, text }) {
     const body = text.endsWith('\n') ? text : `${text}\n`;
     return `intake: no snapshot to diff ${path} against (${reason}); full text follows.\n${body}`;
   }
-  return `--- ${path} (committed ${entry.ingestedAt || 'date unknown'})\n+++ ${path} (current)\n`
-    + formatHunks(diffLines(snapshot, text));
+  // The ledger hashes raw text, but toLines() folds CRLF and the final newline,
+  // so a source that changed only in those has a new hash and no hunks.
+  const hunks = formatHunks(diffLines(snapshot, text));
+  if (!hunks) {
+    return `intake: ${path} differs from its snapshot only in line endings or the final newline; nothing to propose.\n`;
+  }
+  return `--- ${path} (committed ${entry.ingestedAt || 'date unknown'})\n+++ ${path} (current)\n` + hunks;
 }
 
 const isMain = isMainModule(import.meta.url);
