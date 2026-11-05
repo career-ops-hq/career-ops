@@ -26,6 +26,7 @@ import { profileRef } from "@/lib/core/profile-path.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 import { readJsonObject } from "@/lib/json-body";
+import { readEvaluationSource } from "@/lib/evaluation-source.mjs";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 
 export const runtime = "nodejs";
@@ -40,6 +41,9 @@ export async function POST(req: Request) {
   if (evaluation && !evaluation.ok) return Response.json({ error: evaluation.error }, { status: 400 });
   if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
+  }
+  if (kind === "evaluate" && req.signal.aborted) {
+    return Response.json({ error: "Evaluation request cancelled before it started." }, { status: 499 });
   }
   const resolved = resolveCliOrFallback(requestedCliId);
   if (!resolved) {
@@ -179,6 +183,11 @@ export async function POST(req: Request) {
   const userTemplatesDir = dataRoot
     ? await resolveUserTemplatesDir(codeRoot, dataRoot)
     : undefined;
+  // Read from the system checkout; the original input remains the data identity.
+  const postingSource = await readEvaluationSource({ kind, input, root: codeRoot, signal: req.signal });
+  if (kind === "evaluate" && (req.signal.aborted || postingSource.outcome === "aborted")) {
+    return Response.json({ error: "Evaluation request cancelled before it started." }, { status: 499 });
+  }
   const prompt = buildPrompt({
     kind,
     input,
@@ -194,6 +203,7 @@ export async function POST(req: Request) {
     coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
     profile: profileRef(careerOpsRoot()),
     evaluationInstructions,
+    postingEvidence: postingSource.evidence,
   });
 
   const isClaude = cliId === "claude";
@@ -318,7 +328,8 @@ export async function POST(req: Request) {
       // routinely run past it — and the SIGTERM then surfaced as "didn't save a
       // report" (see the close handler), blaming the CLI for a limit we imposed
       // (#3124). 780s leaves ~20s under maxDuration for a graceful shutdown.
-      const killMs = killMsForKind(kind);
+      // Source loading consumes the existing route budget.
+      const killMs = Math.max(1, killMsForKind(kind) - (kind === "evaluate" ? postingSource.elapsedMs : 0));
       // Set by the killer so the close handler can tell "we timed it out" apart
       // from "the CLI exited on its own" — different failures, different message.
       let killedByTimeout = false;
