@@ -32,17 +32,34 @@ process.env.CAREER_OPS_ROOT = tmp;
 
 const { archiveUrl } = await import('../archive-posting.mjs');
 
-function makeFakeBrowser({ bodyText, title = 'Backend Engineer | Acme', h1 = 'Backend Engineer', httpStatus = 200, evaluateRejects = false, hydrateUrl = null, hydrateNavigation = false, pdfUrl = null }) {
+function makeFakeBrowser({ bodyText, title = 'Backend Engineer | Acme', h1 = 'Backend Engineer', httpStatus = 200, evaluateRejects = false, hydrateUrl = null, hydrateNavigation = false, pdfUrl = null, hydrateEvents = [], pdfEvents = [] }) {
   let pdfCalled = false;
-  let onNavigate;
+  const handlers = new Map();
   const frame = {};
+  const subframe = {};
+  // Playwright emits request for an actual document request; same-document
+  // history changes may emit framenavigated without another document request.
+  const emit = kind => {
+    if (kind === 'frame-main') return handlers.get('framenavigated')?.(frame);
+    handlers.get('request')?.({
+      isNavigationRequest() { if (kind === 'request-unknown-type') throw new Error('uninspectable request type'); return kind !== 'request-resource'; },
+      frame() {
+        if (['request-resource', 'request-unknown-frame'].includes(kind)) throw new Error('request frame unavailable');
+        return kind === 'request-subframe' ? subframe : frame;
+      },
+    });
+  };
   const page = {
-    on(event, handler) { if (event === 'framenavigated') onNavigate = handler; },
+    on(event, handler) { handlers.set(event, handler); },
     mainFrame() { return frame; },
     _landedUrl: null,
-    async goto(url) { page._landedUrl = url; return { status: () => httpStatus }; },
+    async goto(url) { page._landedUrl = url; emit('request-main'); emit('frame-main'); return { status: () => httpStatus }; },
     url() { return page._landedUrl; },
-    async waitForTimeout() { if (hydrateUrl) page._landedUrl = hydrateUrl; if (hydrateNavigation) onNavigate?.(frame); },
+    async waitForTimeout() {
+      if (hydrateUrl) page._landedUrl = hydrateUrl;
+      if (hydrateNavigation) { emit('request-main'); emit('frame-main'); }
+      hydrateEvents.forEach(emit);
+    },
     async title() { return title; },
     async $eval(selector) {
       if (selector !== 'h1') throw new Error(`fake page has no selector ${selector}`);
@@ -60,7 +77,7 @@ function makeFakeBrowser({ bodyText, title = 'Backend Engineer | Acme', h1 = 'Ba
       if (evaluateRejects) throw new Error('fake: page.evaluate() failed (simulated extraction failure)');
       return bodyText;
     },
-    async pdf() { pdfCalled = true; if (pdfUrl) page._landedUrl = pdfUrl; return Buffer.from('%PDF-fake'); },
+    async pdf() { pdfCalled = true; if (pdfUrl) page._landedUrl = pdfUrl; pdfEvents.forEach(emit); return Buffer.from('%PDF-fake'); },
   };
   const context = {
     async newPage() { return page; },
@@ -245,4 +262,39 @@ for (const [name, changes] of [
     report: '063', directory: dir, log() {}, requirePosting: e => e.httpStatus === 200,
   }), /document navigated/);
   assert.equal(existsSync(dir), false, 'a different document must not create a capture');
+});
+
+for (const [name, changes] of [
+  ['same-URL history events after HTTP200', { hydrateEvents: ['frame-main', 'frame-main'] }],
+  ['same-URL history event during PDF', { pdfEvents: ['frame-main'] }],
+  ['subframe navigation and resource requests', { hydrateEvents: ['request-subframe', 'request-resource'] }],
+]) test(`trusted exact capture allows ${name} without inventing a new document`, async () => {
+  const dir = join(tmp, `same-document-${name.replace(/[^a-z]/g, '-')}`);
+  const { browser, pdfCalled } = makeFakeBrowser({ bodyText: 'Backend Engineer owns service reliability and delivery. '.repeat(30), ...changes });
+  const result = await archiveUrl(browser, 'https://boards.greenhouse.io/acme/jobs/104', {
+    report: '064', directory: dir, log() {}, requirePosting: e => e.httpStatus === 200,
+  });
+  assert.equal(pdfCalled(), true); assert.equal(result.httpStatus, 200);
+  assert.equal(result.settledUrl, 'https://boards.greenhouse.io/acme/jobs/104');
+  assert.equal(existsSync(join(dir, result.filename)), true);
+});
+
+for (const [name, changes] of [
+  ['same-URL document request before its frame event', { hydrateEvents: ['request-main'] }],
+  ['same-URL document request during PDF', { pdfEvents: ['request-main'] }],
+  ['navigation request with an uninspectable frame', { hydrateEvents: ['request-unknown-frame'] }],
+  ['request with an uninspectable navigation type', { hydrateEvents: ['request-unknown-type'] }],
+]) test(`trusted exact capture refuses ${name}`, async () => {
+  const dir = join(tmp, `new-document-${name.replace(/[^a-z]/g, '-')}`);
+  const { browser } = makeFakeBrowser({ bodyText: 'Backend Engineer owns service reliability and delivery. '.repeat(30), ...changes });
+  await assert.rejects(() => archiveUrl(browser, 'https://boards.greenhouse.io/acme/jobs/105', {
+    report: '065', directory: dir, log() {}, requirePosting: e => e.httpStatus === 200,
+  }), /document navigated|cannot inspect.*navigation/);
+  assert.equal(existsSync(dir), false, 'no unproved capture is written');
+});
+
+test('legacy capture keeps its manual behavior but cannot attest an old HTTP status after a new document request', async () => {
+  const { browser } = makeFakeBrowser({ bodyText: 'Backend Engineer owns service reliability and delivery. '.repeat(30), hydrateEvents: ['request-main'] });
+  const result = await archiveUrl(browser, 'https://boards.greenhouse.io/acme/jobs/106', { directory: join(tmp, 'legacy-document'), log() {} });
+  assert.equal(result.httpStatus, null);
 });

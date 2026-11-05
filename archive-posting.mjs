@@ -344,8 +344,21 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
   await installEgressGuard(context);
   const page = await context.newPage();
 
-  let navigations = 0;
-  page.on?.('framenavigated', frame => { if (frame === page.mainFrame?.()) navigations++; });
+  let navigationRequests = 0;
+  let uninspectableNavigation = typeof page.on !== 'function' || typeof page.mainFrame !== 'function';
+  // Same-document history can emit framenavigated without another HTTP
+  // document. Only an actual main-frame navigation request invalidates the
+  // response we inspected; resource/subframe requests do not replace it.
+  if (!uninspectableNavigation) page.on('request', request => {
+    try {
+      const navigating = request.isNavigationRequest();
+      if (typeof navigating !== 'boolean') throw new Error('unknown request type');
+      if (!navigating) return;
+      const frame = request.frame(), mainFrame = page.mainFrame();
+      if (!frame || !mainFrame) throw new Error('unknown navigation frame');
+      if (frame === mainFrame) navigationRequests++;
+    } catch { uninspectableNavigation = true; }
+  });
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const httpStatus = response?.status() ?? 0;
@@ -354,7 +367,7 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     // redirect hop, so this is defence-in-depth: a first-hop-only check is the
     // classic miss here, and asserting on the settled URL costs nothing.
     const initialUrl = page.url();
-    const initialNavigations = navigations;
+    const initialNavigationRequests = navigationRequests;
     let landedUrl = initialUrl;
     const postGuard = rejectPrivateOrInvalid(landedUrl);
     if (postGuard) {
@@ -368,7 +381,10 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
       const actual = page.url();
       const rejected = rejectPrivateOrInvalid(actual);
       if (rejected) throw new Error('refusing to archive: restricted settled destination');
-      if (requirePosting && (actual !== initialUrl || navigations !== initialNavigations)) {
+      if (requirePosting && uninspectableNavigation) {
+        throw new Error('refusing to archive: cannot inspect document navigation');
+      }
+      if (requirePosting && (actual !== initialUrl || navigationRequests !== initialNavigationRequests)) {
         throw new Error('refusing to archive: posting document navigated after its HTTP response');
       }
       return actual;
@@ -477,7 +493,7 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     log(`Reference: ${reference}`);
 
     return { filename, reference, url, settledUrl: landedUrl,
-      httpStatus: landedUrl === initialUrl && navigations === initialNavigations ? httpStatus : null, size: pdfBuffer.length };
+      httpStatus: !uninspectableNavigation && landedUrl === initialUrl && navigationRequests === initialNavigationRequests ? httpStatus : null, size: pdfBuffer.length };
 
   } finally {
     await context.close();
