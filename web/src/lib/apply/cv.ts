@@ -5,6 +5,7 @@ import { careerOpsRoot, findApplication, pdfPathStatusForReport } from "@/lib/ca
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
+import { preferAtsPdf } from "./ats-pdf.mjs";
 import { reportNumberFromCell } from "./cv-selection.mjs";
 import { cvUploadName } from "./upload-name.mjs";
 
@@ -23,7 +24,7 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
     const reportNumber = reportNumberFromCell(app?.report);
     if (!reportNumber) return null;
     const result = await pdfPathStatusForReport(String(reportNumber));
-    return result.status === "found" ? result.path : null;
+    return result.status === "found" ? preferAtsPdf(result.path) : null;
   }
 
   const c = (company ?? "").trim();
@@ -48,7 +49,7 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
   if (!matches.length) return null;
   const sorted = sortNewestFirst(dir, matches);
   if (!sorted.length) return null;
-  return path.join(dir, sorted[0]);
+  return preferAtsPdf(path.join(dir, sorted[0]));
 }
 
 /**
