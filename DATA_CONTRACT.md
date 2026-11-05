@@ -29,6 +29,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/offers/.gitkeep` | System-owned empty directory scaffold; the updater writes only this exact file and preserves all user files in `data/offers/` |
 | `data/parser-output/.gitkeep` | System-owned empty directory scaffold; the updater writes only this exact file and preserves all user files in `data/parser-output/` |
 | `data/intake-state.json` | Fingerprints of already-ingested intake sources (written by `node intake.mjs --commit`; makes re-runs propose only new material — safe to delete, next intake re-proposes everything) |
+| `data/intake-snapshots/` | Extracted text of each committed intake source, one `{sha256 of the documents/ path}.txt` per source (written by `node intake.mjs --commit`, read by `node intake.mjs --diff <path>` to show what changed since the last commit). A second copy of the source text, so it is as personal as `documents/*`. Safe to delete: `--diff` then prints the full text once, and the next `--commit` writes it again |
 | `portals.yml` | Your customized company list |
 | `config/plugins.yml` | Your plugin activation toggles (opt-in; seeded from `config/plugins.example.yml`) |
 | `opencode.json` | Your OpenCode project config (MCP servers, model, formatter, LSP) — gitignored, copy `opencode.example.json` to start |

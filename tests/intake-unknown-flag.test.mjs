@@ -106,6 +106,22 @@ describe('intake rejects an unknown flag instead of scanning', () => {
     }
   });
 
+  test('--diff with no path is a usage error, --diff=path reads that file', () => {
+    const sb = sandbox();
+    try {
+      const missing = spawn(sb, ['--diff']);
+      assert.equal(missing.status, 1, missing.stdout);
+      assert.match(missing.stderr, /--diff requires a value/);
+      assert.doesNotMatch(missing.stdout, /"sources"/);
+      const eq = spawn(sb, ['--diff=cv/master.md']);
+      assert.equal(eq.status, 0, eq.stderr);
+      assert.match(eq.stdout, /^intake: no snapshot to diff cv\/master\.md/);
+      assert.match(eq.stdout, /Avery Quinn/);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  });
+
   test('--commit --all is still accepted', () => {
     const sb = sandbox();
     const sandboxState = join(sb.dir, 'data', 'intake-state.json');
