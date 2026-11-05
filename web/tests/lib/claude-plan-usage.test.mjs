@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parsePlanUsage, candidateBinaries, readPlanUsage } from "../../src/lib/claude-plan-usage.mjs";
+import { parsePlanUsage, candidateBinaries, readPlanUsage, resolveOnPath } from "../../src/lib/claude-plan-usage.mjs";
 
 const SAMPLE = [
   "You are currently using your subscription to power your Claude Code usage",
@@ -63,8 +63,25 @@ test("no desktop app: only PATH is tried", async () => {
 test("falls through a missing binary to the next, and to null when none answer", async () => {
   const exec = (bin, _a, _o, cb) =>
     bin === "claude" ? cb(Object.assign(new Error("not found"), { code: "ENOENT" })) : cb(null, JSON.stringify({ result: SAMPLE }));
-  const got = await readPlanUsage({ candidates: ["claude", "/desktop/claude"], exec });
+  const got = await readPlanUsage({ candidates: ["claude", "/desktop/claude"], exec, resolve: (b) => b });
   assert.equal(got.rows.length, 3);
-  const none = await readPlanUsage({ candidates: ["claude"], exec: (_b, _a, _o, cb) => cb(new Error("x")) });
+  const none = await readPlanUsage({ candidates: ["claude"], exec: (_b, _a, _o, cb) => cb(new Error("x")), resolve: (b) => b });
   assert.equal(none, null);
+});
+
+test("resolves a bare name on PATH, with PATHEXT on Windows, and skips an unresolved candidate", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "co-path-"));
+  try {
+    writeFileSync(join(dir, "claude"), "");
+    writeFileSync(join(dir, "other.cmd"), "");
+    assert.equal(await resolveOnPath("claude", { env: { PATH: dir }, platform: "linux" }), join(dir, "claude"));
+    assert.equal(await resolveOnPath("other", { env: { PATH: dir, PATHEXT: ".EXE;.CMD" }, platform: "win32" }), join(dir, "other.cmd"));
+    assert.equal(await resolveOnPath("missing", { env: { PATH: dir }, platform: "linux" }), null);
+    let ran = false;
+    const got = await readPlanUsage({ candidates: ["missing"], resolve: () => null, exec: () => { ran = true; } });
+    assert.equal(got, null);
+    assert.equal(ran, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

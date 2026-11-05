@@ -87,7 +87,7 @@ export function UsageMeter() {
           label: r.label,
           pct,
           text: `${fmt(r.tokens)} · ${pct}%`,
-          title: `${r.tokens.toLocaleString()} tokens in the last ${r.label} (estimate; install the Claude CLI for real plan limits)`,
+          title: `${r.tokens.toLocaleString()} tokens in the last ${r.label} (estimate; plan limits are unavailable)`,
         };
       });
 

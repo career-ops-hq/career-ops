@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import fsPromises from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { prepareCliLaunch } from "./cli-launch.mjs";
 
 const TIMEOUT_MS = 15_000;
 
@@ -62,6 +63,30 @@ export async function candidateBinaries({ fs = fsPromises, home = os.homedir() }
   return out;
 }
 
+/**
+ * Resolve a bare command name to a file on PATH, honouring PATHEXT on Windows,
+ * so prepareCliLaunch can see the npm shim (or native .exe) it must unwrap.
+ * Resolves to null when nothing matches.
+ */
+export async function resolveOnPath(name, { env = process.env, platform = process.platform, fs = fsPromises } = {}) {
+  if (path.isAbsolute(name)) return name;
+  const exts = platform === "win32" ? ["", ...(env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";")] : [""];
+  for (const dir of (env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const file = path.join(dir, name + ext);
+      try {
+        await fs.access(file);
+        return file;
+      } catch {
+        /* keep looking */
+      }
+    }
+  }
+  return null;
+}
+
+// On Windows an npm-installed CLI is a script shim execFile cannot run without
+// a shell, so launch the .js/.exe it wraps (a no-op elsewhere; cli-launch.mjs).
 async function run(bin, { exec = execFile } = {}) {
   // A private (0700) directory, not the shared tmpdir: the CLI reads project
   // settings from its working directory, and another local user must not be
@@ -70,10 +95,11 @@ async function run(bin, { exec = execFile } = {}) {
   const cwd = await fsPromises.mkdtemp(path.join(os.tmpdir(), "career-ops-usage-"));
   try {
     return await new Promise((resolve, reject) => {
+      // user settings only: this read-only query never needs project config.
+      const launch = prepareCliLaunch(bin, ["-p", "/usage", "--output-format", "json", "--setting-sources", "user"]);
       exec(
-        bin,
-        // user settings only: this read-only query never needs project config.
-        ["-p", "/usage", "--output-format", "json", "--setting-sources", "user"],
+        launch.command,
+        launch.args,
         { timeout: TIMEOUT_MS, maxBuffer: 1 << 20, cwd, windowsHide: true, env: { ...process.env, NO_COLOR: "1" } },
         (err, stdout) => (err ? reject(err) : resolve(stdout)),
       );
@@ -87,9 +113,11 @@ async function run(bin, { exec = execFile } = {}) {
  * Ask the Claude CLI for plan usage. Resolves to the parsed rows, or null when
  * no binary answers or the output is not recognised (API-key users, for one).
  */
-export async function readPlanUsage({ candidates, exec } = {}) {
-  for (const bin of candidates ?? (await candidateBinaries())) {
+export async function readPlanUsage({ candidates, exec, resolve = resolveOnPath } = {}) {
+  for (const candidate of candidates ?? (await candidateBinaries())) {
     try {
+      const bin = await resolve(candidate);
+      if (!bin) continue;
       const stdout = await run(bin, { exec });
       const parsed = parsePlanUsage(JSON.parse(stdout)?.result);
       if (parsed) return parsed;
