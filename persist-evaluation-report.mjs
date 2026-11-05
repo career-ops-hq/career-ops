@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { isPostingUrl, trackerTsvLine } from "./lib/tracker-addition.mjs";
-import { isEvaluationArtifactOwner, prepareEvaluationArchive, validateEvaluationArchive } from "./lib/evaluation-archive.mjs";
+import { isEvaluationArtifactOwner, prepareEvaluationArchive, validateEvaluationArchive, archiveSourceCapabilities } from "./lib/evaluation-archive.mjs";
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 const NUM_RE = /^\d{3,}$/;
@@ -95,10 +95,10 @@ export function validateEvaluationArtifactPayload(root, payload) {
 }
 
 /** Direct callers cannot bypass archive enforcement by skipping the CLI. */
-export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
+export function writeEvaluationArtifacts(root, payload, fsImpl = fs, { sourceAdapterLoader } = {}) {
   const plan = validateEvaluationArtifactPayload(root, payload);
   if (!plan.ok) return plan;
-  const archived = validateEvaluationArchive(root, payload);
+  const archived = validateEvaluationArchive(root, payload, { sourceAdapterLoader });
   if (!archived.ok) return archived;
   const { reportPath, tsvPath, reportsDir, additionsDir, markdown, tsv } = plan;
   const attempted = [];
@@ -134,12 +134,12 @@ function writeNew(fsImpl, filePath, content, attempted) {
 }
 
 /** Reserved-number orchestration: capture/check before report, TSV or merge. */
-export async function persistEvaluationArtifacts(root, payload, { captureFn, fsImpl = fs } = {}) {
+export async function persistEvaluationArtifacts(root, payload, { captureFn, fsImpl = fs, sourceAdapterLoader } = {}) {
   const valid = validateEvaluationArtifactPayload(root, payload);
   if (!valid.ok) return valid;
-  const prepared = await prepareEvaluationArchive(root, payload, { captureFn });
+  const prepared = await prepareEvaluationArchive(root, payload, { captureFn, sourceAdapterLoader });
   if (!prepared.ok) return prepared;
-  return writeEvaluationArtifacts(root, { ...payload, markdown: prepared.markdown }, fsImpl);
+  return writeEvaluationArtifacts(root, { ...payload, markdown: prepared.markdown }, fsImpl, { sourceAdapterLoader });
 }
 
 function cleanupNew(fsImpl, attempted) {
@@ -166,6 +166,7 @@ function readStdin() {
 
 const USAGE_LINES = [
   "Usage: node persist-evaluation-report.mjs < payload.json",
+  "       node persist-evaluation-report.mjs --capabilities (read-only JSON)",
   "",
   "Read one JSON object on stdin and write the evaluation report plus a",
   "headed tracker-addition TSV under the process cwd (the data root).",
@@ -178,6 +179,10 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(`${USAGE_LINES.join("\n")}\n`);
+    return;
+  }
+  if (args.length === 1 && args[0] === "--capabilities") {
+    process.stdout.write(`${JSON.stringify(archiveSourceCapabilities())}\n`);
     return;
   }
   if (args.length > 0) {

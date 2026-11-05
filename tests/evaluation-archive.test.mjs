@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
+import { hasEmbeddedJdArchive } from '../check-jd-archive.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { isEvaluationArtifactOwner, prepareEvaluationArchive, validateEvaluationArchive, sameArchivePosting, extractExactJsonLd, capturePostingSource } from '../lib/evaluation-archive.mjs';
+import { isEvaluationArtifactOwner, prepareEvaluationArchive, validateEvaluationArchive, sameArchivePosting, extractExactJsonLd, capturePostingSource, archiveSourceCapabilities } from '../lib/evaluation-archive.mjs';
 import { persistEvaluationArtifacts, writeEvaluationArtifacts } from '../persist-evaluation-report.mjs';
 
 const JD = 'The Product Manager owns the product roadmap, collects customer requirements, works with engineering and design, and measures reliable delivery. This role includes maintaining copyright notices and archive retention duties for customer documentation. '.repeat(6);
@@ -547,4 +549,133 @@ test('archive IO: post-read same-size mutation cannot retain the old receipt val
     assert.equal(changed, true); assert.ok(state.bytesRead <= IO_CAPTURE_LIMIT + 1);
     assert.equal(state.opened, state.closed);
   });
+}));
+
+// IO/composition fixtures use a privileged injected validator module. Provider
+// identity policy stays in read-known-jd; it is never reimplemented here.
+const sourceDigest = bytes => createHash('sha256').update(bytes).digest('hex');
+function nativeSourceFixture({ text = JD } = {}) {
+  const originalURL='https://www.arbeitnow.com/jobs/companies/exampleco/product-manager-123456';
+  const sourcePostingURL='https://jobs.ashbyhq.com/exampleco/11111111-1111-4111-8111-111111111111';
+  const apiRequest={requestURL:'https://api.ashbyhq.com/posting-api/job-board/exampleco',finalURL:'https://api.ashbyhq.com/posting-api/job-board/exampleco',
+    method:'GET',httpStatus:200,requestedAt:'2026-01-01T00:00:00.000Z',respondedAt:'2026-01-01T00:00:01.000Z',redirected:false,accept:'application/json',userAgent:'fictional-client',location:null};
+  const sourceBinding={version:1,kind:'fixture-provenance',originalURL,sourcePostingURL,textCap:20000,textSha256:sourceDigest(text),utf8Bytes:Buffer.byteLength(text),
+    title:'Product Manager',atsIdentity:{ats:'fixture',parts:{id:'123456'}},apiRequestIndex:0,transport:{fetchCallCount:1,requests:[apiRequest]},
+    sourceFacts:{type:'ashby-listing',isListedState:'absent'}};
+  const archiveSource={version:2,fixturePacket:'backend-known-only'};
+  let packetChecks=0,bindingChecks=0;
+  const sourceAdapterLoader=()=>({
+    validateArchiveSourcePacket(value,url){packetChecks++;return url===originalURL && JSON.stringify(value)===JSON.stringify(archiveSource)
+      ? {ok:true,text,sourcePostingURL,binding:structuredClone(sourceBinding)} : {ok:false,error:'fixture packet rejected'};},
+    validateArchiveSourceBinding(value,url){bindingChecks++;return url===originalURL && JSON.stringify(value)===JSON.stringify(sourceBinding)
+      ? {ok:true,sourcePostingURL,apiRequest} : {ok:false,error:'fixture binding rejected'};},
+  });
+  return { originalURL,sourcePostingURL,apiRequest,sourceBinding,archiveSource,sourceAdapterLoader,counts:()=>({packetChecks,bindingChecks}),
+    payload:payload({url:originalURL,markdown:report(stub),archiveSource}) };
+}
+
+test('private native source is saved FULL INLINE once with actual provenance and ZERO post-model capture',fixture(async root=>{
+  const f=nativeSourceFixture();let captureCalls=0;
+  const posted='Posted: 2026-01-01, retained original report metadata.';
+  f.payload.markdown=report(posted+'\n\n'+stub);
+  const saved=await persistEvaluationArtifacts(root,f.payload,{sourceAdapterLoader:f.sourceAdapterLoader,captureFn:async()=>{captureCalls++;throw Error('no second fetch');}});
+  assert.equal(saved.ok,true,saved.error);assert.equal(captureCalls,0);
+  const markdown=fs.readFileSync(path.join(root,'reports',f.payload.reportFile),'utf8');
+  assert.equal(markdown.split(JD).length-1,1,'complete exact native body occurs once');
+  assert.ok(markdown.includes('## Job Description (archived verbatim)\n\n'+posted),'literal existing Posted line is retained first');
+  assert.ok(markdown.includes(f.originalURL));assert.ok(markdown.includes(f.sourcePostingURL));assert.ok(markdown.includes(f.apiRequest.finalURL));
+  assert.ok(markdown.includes(f.sourceBinding.textSha256));assert.match(markdown,/source-archive-only/);assert.match(markdown,/"evaluationAllowed"\s*:\s*false/);
+  const provenance=/^(`{3,})json\n([\s\S]*?)\n\1$/m.exec(markdown);assert.ok(provenance,'typed provenance remains an inert JSON block');
+  assert.deepEqual(JSON.parse(provenance[2]).sourceBinding,f.sourceBinding,'whole observed chain/status facts persist, not only an opaque hash');
+  assert.equal(fs.existsSync(path.join(root,'jds')),false,'no new receipt format or supplementary sidecar is required');
+  assert.equal(validateEvaluationArchive(root,{...f.payload,markdown},{sourceAdapterLoader:f.sourceAdapterLoader}).ok,true);
+  const legacyRead={...f.payload,markdown};delete legacyRead.archiveSource;
+  assert.equal(validateEvaluationArchive(root,legacyRead).ok,true,'legacy no-packet receiver reads the complete inline report');
+  assert.equal(hasEmbeddedJdArchive(markdown),true,'unchanged legacy archive parser accepts full inline data');
+  assert.ok(fs.existsSync(path.join(root,'batch/tracker-additions/061-exampleco.tsv')));
+}));
+
+test('invalid explicit source cannot be laundered through valid inline text or a legacy pointer',fixture(async root=>{
+  const f=nativeSourceFixture();let calls=0;
+  const legacy={...f.payload};delete legacy.archiveSource;
+  const before=await prepareEvaluationArchive(root,legacy,{captureFn:async id=>source(id)});
+  assert.equal(before.ok,true,before.error);const snapshots=new Map(fs.readdirSync(path.join(root,'jds')).map(name=>[name,fs.readFileSync(path.join(root,'jds',name))]));
+  for(const markdown of [report(JD),before.markdown]) {
+    const result=await persistEvaluationArtifacts(root,{...f.payload,markdown,archiveSource:{version:2,fixturePacket:'forged'}},
+      {sourceAdapterLoader:f.sourceAdapterLoader,captureFn:async()=>{calls++;throw Error('must not retry invalid packet');}});
+    assert.equal(result.ok,false);assert.match(result.error,/fixture packet rejected/);
+    assert.equal(fs.existsSync(path.join(root,'reports')),false);assert.equal(fs.existsSync(path.join(root,'batch')),false);
+  }
+  assert.equal(calls,0);for(const[name,bytes]of snapshots)assert.deepEqual(fs.readFileSync(path.join(root,'jds',name)),bytes);
+}));
+
+test('absent/outdated/async source adapters fail only when a supplied packet requires them',fixture(async root=>{
+  for(const sourceAdapterLoader of [()=>null,()=>({}),()=>Promise.resolve({})]) {
+    let calls=0;const p=payload({markdown:report(JD)});
+    const legacy=await prepareEvaluationArchive(root,p,{sourceAdapterLoader:()=>{calls++;throw Error('legacy must not load adapter');}});
+    assert.equal(legacy.ok,true,legacy.error);assert.equal(calls,0);
+    const result=await persistEvaluationArtifacts(root,{...p,archiveSource:{version:2}},
+      {sourceAdapterLoader,captureFn:async()=>{calls++;throw Error('no implicit HTTP fallback');}});
+    assert.equal(result.ok,false);assert.match(result.error,/adapter|synchronous/);assert.equal(calls,0);
+    assert.equal(fs.existsSync(path.join(root,'reports')),false);assert.equal(fs.existsSync(path.join(root,'jds')),false);
+  }
+}));
+
+test('held native source replaces a plausible partial model archive and is checked exactly by sync writer',fixture(async root=>{
+  const f=nativeSourceFixture(),prefix=`# Evaluation: ExampleCo — Product Manager\n\n**URL:** ${f.originalURL}\n**Score:** 2.9/5\n\nAnalysis remains byte-exact.\n\n`;
+  const partial=JD.slice(0,260),p={...f.payload,markdown:prefix+'## Job Description (archived verbatim)\n\n'+partial+'\n'};
+  assert.equal(hasEmbeddedJdArchive(p.markdown),true,'old length heuristic alone would credit this partial');
+  const direct=writeEvaluationArtifacts(root,p,fs,{sourceAdapterLoader:f.sourceAdapterLoader});
+  assert.equal(direct.ok,false,'unprepared partial cannot bypass complete source enforcement');assert.deepEqual(fs.readdirSync(root),[]);
+  const options={sourceAdapterLoader:f.sourceAdapterLoader,captureFn:async()=>{throw Error('no re-fetch');}};
+  const first=await prepareEvaluationArchive(root,p,options);assert.equal(first.ok,true,first.error);
+  assert.equal(first.markdown.startsWith(prefix),true);assert.equal(first.markdown.split(JD).length-1,1);
+  assert.equal(/^Posted:/m.test(first.markdown),false,'absent Posted date is never fabricated from retrieval time');
+  const again=await prepareEvaluationArchive(root,{...p,markdown:first.markdown},options);
+  assert.equal(again.ok,true,again.error);assert.equal(again.markdown,first.markdown,'rendering is deterministic');
+  const tampered=first.markdown.replace(JD,'changed '+JD.slice(8));
+  assert.equal(validateEvaluationArchive(root,{...p,markdown:tampered},{sourceAdapterLoader:f.sourceAdapterLoader}).ok,false,'substantive tampered inline text is not the held source');
+  const noHeading=prefix+'Trailing analysis whitespace stays exact.  \n\n  \n';
+  const appended=await prepareEvaluationArchive(root,{...f.payload,markdown:noHeading},options);
+  assert.equal(appended.ok,true,appended.error);assert.equal(appended.markdown.startsWith(noHeading),true,'absent-heading append preserves every original prefix byte');
+  assert.equal(appended.markdown.split(JD).length-1,1);assert.equal(hasEmbeddedJdArchive(appended.markdown),true);
+  const saved=writeEvaluationArtifacts(root,{...p,markdown:first.markdown},fs,{sourceAdapterLoader:f.sourceAdapterLoader});
+  assert.equal(saved.ok,true,saved.error);assert.equal(fs.readFileSync(path.join(root,'reports',p.reportFile),'utf8'),first.markdown);
+  assert.equal(fs.existsSync(path.join(root,'jds')),false);
+}));
+
+test('source adapter contract refuses text/hash mismatches before artifacts and never weakens collisions',fixture(async root=>{
+  const f=nativeSourceFixture();const base=f.sourceAdapterLoader();
+  const mismatch=()=>({...base,validateArchiveSourcePacket:(packet,url)=>({...base.validateArchiveSourcePacket(packet,url),text:JD+'changed'})});
+  const result=await persistEvaluationArtifacts(root,f.payload,{sourceAdapterLoader:mismatch,captureFn:async()=>{throw Error('no fallback');}});
+  assert.equal(result.ok,false);assert.match(result.error,/text.*binding/);assert.deepEqual(fs.readdirSync(root),[]);
+  fs.mkdirSync(path.join(root,'reports'));fs.writeFileSync(path.join(root,'reports',f.payload.reportFile),'existing own report');
+  const collision=await persistEvaluationArtifacts(root,f.payload,{sourceAdapterLoader:f.sourceAdapterLoader,captureFn:async()=>{throw Error('no fallback');}});
+  assert.equal(collision.ok,false);assert.equal(fs.readFileSync(path.join(root,'reports',f.payload.reportFile),'utf8'),'existing own report');
+  const additions=path.join(root,'batch','tracker-additions');
+  assert.equal(fs.existsSync(path.join(additions,'061-exampleco.tsv')),false);
+  assert.deepEqual(fs.readdirSync(additions),[],'no contribution is written after the report collision');
+  assert.equal(fs.existsSync(path.join(root,'jds')),false);
+}));
+
+test('fixed real reader composition is validated when installed; standalone absence is explicit without skips',fixture(async root=>{
+  const reader=new URL('../read-known-jd.mjs',import.meta.url);
+  const capabilities=archiveSourceCapabilities();
+  if(!fs.existsSync(reader)) {
+    assert.deepEqual(capabilities,{version:1,archiveSourcePacketVersions:[]});
+    const result=await prepareEvaluationArchive(root,{...payload({markdown:report(JD)}),archiveSource:{version:2}});
+    assert.equal(result.ok,false);assert.match(result.error,/adapter.*unavailable/);assert.deepEqual(fs.readdirSync(root),[]);
+    return;
+  }
+  assert.deepEqual(capabilities,{version:1,archiveSourcePacketVersions:[2]});
+  const originalURL='https://jobs.ashbyhq.com/exampleco/11111111-1111-4111-8111-111111111111',api='https://api.ashbyhq.com/posting-api/job-board/exampleco';
+  const archiveSource={version:2,originalURL,sourcePostingURL:originalURL,textCap:20000,result:{url:originalURL,ats:'ashby',title:'Product Manager',text:JD,
+    sourceFacts:{type:'ashby-listing',isListedState:'absent'}},chain:{kind:'direct-known-ats',apiRequestIndex:0},transport:{fetchCallCount:1,requests:[{
+      requestURL:api,finalURL:api,method:'GET',httpStatus:200,redirected:false,requestedAt:'2026-01-01T00:00:00.000Z',respondedAt:'2026-01-01T00:00:01.000Z',accept:'application/json',userAgent:'fictional-client',location:null}]}};
+  let calls=0;const p=payload({url:originalURL,markdown:report(stub),archiveSource});
+  const saved=await persistEvaluationArtifacts(root,p,{captureFn:async()=>{calls++;throw Error('real composition must not recapture');}});
+  assert.equal(saved.ok,true,saved.error);assert.equal(calls,0);
+  const markdown=fs.readFileSync(path.join(root,'reports',p.reportFile),'utf8');
+  assert.equal(markdown.split(JD).length-1,1);assert.equal(hasEmbeddedJdArchive(markdown),true);
+  assert.equal(validateEvaluationArchive(root,{...p,markdown}).ok,true);assert.equal(fs.existsSync(path.join(root,'jds')),false);
 }));
