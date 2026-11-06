@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { coverDraftButtonState, pdfButtonState } from "../../src/lib/pdf-button-state.mjs";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { coverDraftButtonState, pdfButtonState, pdfJobRefreshesReport } from "../../src/lib/pdf-button-state.mjs";
 
 const reason = "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify. (The agent emitted no <<cv-html>> envelope, so there is no CV to render.)";
 const failed = {
@@ -26,6 +29,19 @@ test("a failed run with no status step still names a failure", () => {
     kind: "idle",
     failure: { jobId: "job-8", reason: "The run stopped before it finished." },
   });
+});
+
+test("only this offer's finished pdf job refreshes the report", () => {
+  assert.equal(pdfJobRefreshesReport({ kind: "pdf", input: "4" }, "4"), true);
+  assert.equal(pdfJobRefreshesReport({ kind: "pdf", input: "5" }, "4"), false);
+  assert.equal(pdfJobRefreshesReport({ kind: "evaluate", input: "4" }, "4"), false);
+  assert.equal(pdfJobRefreshesReport(null, "4"), false);
+  const button = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/components/generate-pdf-button.tsx"),
+    "utf8",
+  );
+  assert.match(button, /pdfJobRefreshesReport\(detail, n\)/);
+  assert.match(button, /router\.refresh\(\)/);
 });
 
 test("a finished run with no file on disk is not View tailored CV", () => {

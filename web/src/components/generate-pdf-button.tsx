@@ -1,19 +1,28 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FileDown, Loader2, FileText, RotateCcw, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
-import { pdfButtonState, type PdfFailure } from "@/lib/pdf-button-state.mjs";
+import { pdfButtonState, pdfJobRefreshesReport, type PdfFailure } from "@/lib/pdf-button-state.mjs";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 
 // Fires the real career-ops `pdf` mode (worker kind "pdf") to generate an
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
 export function GeneratePdfButton({ n, company, onDisk }: { n: string; company: string; onDisk: boolean }) {
   const { jobs, startJob } = useJobs();
+  const router = useRouter();
   const listQuery = pipelineQuery(useSearchParams().toString());
+  useEffect(() => {
+    const onDone = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail : null;
+      if (pdfJobRefreshesReport(detail, n)) router.refresh();
+    };
+    window.addEventListener("co-job-done", onDone);
+    return () => window.removeEventListener("co-job-done", onDone);
+  }, [n, router]);
   const jobQuery = listQuery ? `?${listQuery}` : "";
   const studioHref = `/pipeline/${encodeURIComponent(n)}/cv-studio${jobQuery}`;
   const job = useMemo(

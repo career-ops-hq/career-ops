@@ -32,4 +32,5 @@ test("pipeline Applied from a key or the bulk button asks before it writes", () 
   assert.match(confirm, /role="alert"/);
   assert.match(confirm, /ref=\{appliedAskYesRef\}/);
   assert.match(src, /appliedAskYesRef\.current\?\.focus\(\)/);
+  assert.match(src, /appliedPromptStale\(/);
 });

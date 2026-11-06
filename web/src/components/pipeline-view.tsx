@@ -27,7 +27,7 @@ import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW
 import { clearHeldSaves, excludeInFlightStatusRows, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
-import { appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
+import { appliedPromptStale, appliedSelectionToken, appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
 import { LinkedInPaste } from "@/components/linkedin-paste";
 import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
@@ -76,6 +76,7 @@ export function PipelineView({
   const [bulkError, setBulkError] = useState("");
   const [appliedAsk, setAppliedAsk] = useState<Application[] | null>(null);
   const appliedAskYesRef = useRef<HTMLButtonElement>(null);
+  const appliedAskScope = useRef<{ selection: string; cursor: number } | null>(null);
   const [cursor, setCursor] = useState(-1);
   const [views, setViews] = useState<SavedView[]>([]);
   const [naming, setNaming] = useState(false);
@@ -451,9 +452,14 @@ export function PipelineView({
   function requestStatus(rows: Application[], status: string, confirmed = false) {
     const gate = appliedWriteAllowed({ status, confirmed });
     if (!gate.write) {
+      appliedAskScope.current = {
+        selection: appliedSelectionToken(selectedRows.map((row) => applicationKey(row))),
+        cursor,
+      };
       setAppliedAsk(rows);
       return;
     }
+    appliedAskScope.current = null;
     setAppliedAsk(null);
     void commitStatus(rows, status);
   }
@@ -464,6 +470,18 @@ export function PipelineView({
     keyState.current = { visibleTab, filtered, cursor, selectedRows, isPending };
     requestRef.current = requestStatus;
   });
+  const selectionToken = appliedSelectionToken(selectedRows.map((row) => applicationKey(row)));
+  useEffect(() => {
+    if (!appliedAsk || !appliedAskScope.current) return;
+    if (!appliedPromptStale({
+      askedSelection: appliedAskScope.current.selection,
+      askedCursor: appliedAskScope.current.cursor,
+      selection: selectionToken,
+      cursor,
+    })) return;
+    appliedAskScope.current = null;
+    setAppliedAsk(null);
+  }, [appliedAsk, selectionToken, cursor]);
   useEffect(() => {
     if (!appliedAsk || appliedAsk.length === 0) return;
     appliedAskYesRef.current?.focus();

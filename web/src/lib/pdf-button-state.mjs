@@ -7,6 +7,15 @@ import { cvDiskState } from "./cv-disk-state.mjs";
  */
 
 /**
+ * @param {{ kind?: string, input?: string } | null | undefined} detail
+ * @param {string} n
+ * @returns {boolean}
+ */
+export function pdfJobRefreshesReport(detail, n) {
+  return Boolean(n && detail && detail.kind === "pdf" && detail.input === n);
+}
+
+/**
  * @param {PdfJob | undefined} job
  * @param {boolean} onDisk
  * @returns {PdfButtonState}
