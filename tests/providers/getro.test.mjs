@@ -395,7 +395,7 @@ try {
   const capFailLast = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5, failPage: 1 });
   if (capProbeEqual.capWarnings.length === 0 && capProbeEqual.calls === 1
       && capFailLast.capWarnings.length === 0 && capFailLast.jobs === 20
-      && capFailLast.warnings.some((w) => w.includes('truncated at page 1 after retries'))) {
+      && capFailLast.warnings.some((w) => w.includes('truncated at page 2 of 2'))) {
     pass('getro.fetch() does not warn on the cap when a probe cap equals it, or when the last allowed page fails');
   } else {
     fail(`getro.fetch() cap warning: probe=cap ${capProbeEqual.capWarnings.length} (${capProbeEqual.calls} calls), failed last page ${capFailLast.capWarnings.length} (${capFailLast.jobs} jobs, ${JSON.stringify(capFailLast.warnings)})`);
@@ -443,6 +443,37 @@ try {
   } else {
     fail(`getro.fetch() later-page failure handling: ${JSON.stringify(getroLaterPageFail)}`);
   }
+
+  // The truncation warning names the failed page in 1-based numbering, the pages
+  // the walk planned to read, and the requests really made for that page.
+  const truncationWarning = async (rejection) => {
+    const warnings = [];
+    const realConsoleError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    try {
+      await getro.fetch(okEntry, {
+        sleep: async () => {},
+        fetchJson: async (_url, opts) => {
+          const { page } = JSON.parse(opts.body);
+          if (page === 0) return { results: { count: 100, jobs: [{ title: 'First', url: 'https://jobs.examplevc.example/f', organization: { name: 'Acme' } }] } };
+          throw rejection;
+        },
+      });
+    } finally {
+      console.error = realConsoleError;
+    }
+    return warnings.join('\n');
+  };
+  const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+  const retriedWarning = await truncationWarning(httpError(429));
+  if (retriedWarning.includes('ExampleVC truncated at page 2 of 5 after 3 attempts (1 jobs): HTTP 429')) pass('getro.fetch() warning names the failed page, the planned pages and the attempts after a retried 429');
+  else fail(`getro.fetch() retried truncation warning: ${retriedWarning}`);
+  const notRetriedWarning = await truncationWarning(httpError(403));
+  if (notRetriedWarning.includes('truncated at page 2 of 5 after 1 attempt (1 jobs): HTTP 403')) pass('getro.fetch() warning counts one attempt for a non-retryable failure');
+  else fail(`getro.fetch() non-retried truncation warning: ${notRetriedWarning}`);
+  const stringWarning = await truncationWarning('plain string rejection');
+  if (stringWarning.includes('truncated at page 2 of 5 after an unknown number of attempts (1 jobs): plain string rejection')) pass('getro.fetch() warning says the attempts are unknown when a later page rejects with a non-object');
+  else fail(`getro.fetch() string rejection truncation warning: ${stringWarning}`);
 
   // Malformed / empty payload → empty array, no crash, no infinite pagination.
   const getroEmpty = await getro.fetch(okEntry, { fetchJson: async () => ({}) });
