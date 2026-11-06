@@ -75,6 +75,7 @@ export function PipelineView({
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState("");
   const [appliedAsk, setAppliedAsk] = useState<Application[] | null>(null);
+  const appliedAskYesRef = useRef<HTMLButtonElement>(null);
   const [cursor, setCursor] = useState(-1);
   const [views, setViews] = useState<SavedView[]>([]);
   const [naming, setNaming] = useState(false);
@@ -464,6 +465,11 @@ export function PipelineView({
     requestRef.current = requestStatus;
   });
   useEffect(() => {
+    if (!appliedAsk || appliedAsk.length === 0) return;
+    appliedAskYesRef.current?.focus();
+  }, [appliedAsk]);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const state = keyState.current;
       if (state.visibleTab === "INBOX") return;
@@ -747,10 +753,11 @@ export function PipelineView({
       )}
 
       {visibleTab !== "INBOX" && appliedAsk && appliedAsk.length > 0 && (
-        <div className="mt-3 rounded-md border border-border bg-surface px-3 py-2">
+        <div role="alert" className="mt-3 rounded-md border border-border bg-surface px-3 py-2">
           <p className="text-xs text-foreground">{appliedWriteAllowed({ status: "Applied", confirmed: false }).prompt}</p>
           <div className="mt-2 flex items-center gap-2">
             <button
+              ref={appliedAskYesRef}
               type="button"
               disabled={bulkBusy}
               onClick={() => requestStatus(appliedAsk, "Applied", true)}

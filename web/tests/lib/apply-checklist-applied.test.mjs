@@ -25,4 +25,7 @@ test("pipeline Applied from a key or the bulk button asks before it writes", () 
   assert.doesNotMatch(src, /commitRef\.current\(rows, command\.status\)/);
   assert.match(src, /requestStatus\(selectedRows, bulkStatus\)/);
   assert.match(src, /requestStatus\(appliedAsk, "Applied", true\)/);
+  assert.match(src, /role="alert"/);
+  assert.match(src, /appliedAskYesRef/);
+  assert.match(src, /appliedAskYesRef\.current\?\.focus\(\)/);
 });
