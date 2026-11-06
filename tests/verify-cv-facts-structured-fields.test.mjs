@@ -184,3 +184,65 @@ test('nested edu-org with inner nowrap span is completely removed from edu-title
 });
 
 
+
+test('a claim that spans markdown links reads the link text, not the link targets', () => {
+  const linked = join(tmp, 'cv-linked.md');
+  writeFileSync(linked, `${CV}
+## Previous Experience
+***[*MediaLink*](https://www.medialink.com/) *(Director),* [*The FeedRoom*](http://www.feedroom.com/) *(Engineer)*
+`);
+  const html = build('build-cv-html.mjs', {
+    candidate: { name: 'Jane Doe' },
+    summary: 'Engineer.',
+    experience: [
+      { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2019 – 2024', bullets: ['Led a team of 4 engineers.'] },
+      { company: 'Previous Experience', role: 'MediaLink (Director), The FeedRoom (Engineer)', dates: '', bullets: [] },
+    ],
+    skills: [{ category: 'Languages', items: 'Python, Go' }],
+  }, 'html');
+  const result = verifyFacts(html, { sourcePaths: [linked], configPath: join(tmp, 'none.json') });
+  const flagged = [...result.unsupportedFacts, ...result.advisoryFacts].map(({ value }) => value);
+  assert.deepEqual(flagged.filter(value => /medialink|feedroom/.test(value)), []);
+});
+
+test('a title the linked source does not hold is still flagged', () => {
+  const linked = join(tmp, 'cv-linked2.md');
+  writeFileSync(linked, `${CV}
+## Previous Experience
+[MediaLink](https://www.medialink.com/) (Director)
+`);
+  const html = build('build-cv-html.mjs', {
+    candidate: { name: 'Jane Doe' },
+    summary: 'Engineer.',
+    experience: [
+      { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2019 – 2024', bullets: ['Led a team of 4 engineers.'] },
+      { company: 'Previous Experience', role: 'MediaLink (Vice President)', dates: '', bullets: [] },
+    ],
+    skills: [{ category: 'Languages', items: 'Python, Go' }],
+  }, 'html');
+  const result = verifyFacts(html, { sourcePaths: [linked], configPath: join(tmp, 'none.json') });
+  const flagged = [...result.unsupportedFacts, ...result.advisoryFacts].map(({ value }) => value);
+  assert.ok(flagged.some(value => /vice president/.test(value)));
+});
+
+test('emphasis in a second source file does not leave a stray asterisk in the first', () => {
+  const a = join(tmp, 'cv-a.md');
+  const b = join(tmp, 'digest-b.md');
+  writeFileSync(a, `${CV}
+## Previous Experience
+***[*MediaLink*](https://www.medialink.com/) *(Director),* [*The FeedRoom*](http://www.feedroom.com/) *(Engineer)*
+`);
+  writeFileSync(b, '# Digest\n\n**Led** the migration of 3 systems.\n');
+  const html = build('build-cv-html.mjs', {
+    candidate: { name: 'Jane Doe' },
+    summary: 'Engineer.',
+    experience: [
+      { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2019 – 2024', bullets: ['Led a team of 4 engineers.'] },
+      { company: 'Previous Experience', role: 'MediaLink (Director), The FeedRoom (Engineer)', dates: '', bullets: [] },
+    ],
+    skills: [{ category: 'Languages', items: 'Python, Go' }],
+  }, 'html');
+  const result = verifyFacts(html, { sourcePaths: [a, b], configPath: join(tmp, 'none.json') });
+  const flagged = [...result.unsupportedFacts, ...result.advisoryFacts].map(({ value }) => value);
+  assert.deepEqual(flagged.filter(value => /medialink|feedroom/.test(value)), []);
+});

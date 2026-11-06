@@ -2365,13 +2365,22 @@ export function verifyFacts(targetText, {
   // Per file, before the join: stripMarkup keeps only the body of a LaTeX
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
-  const sourceText = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd)))).join('\n');
+  const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
+  const sourceText = sourceTexts.join('\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const planned = plannedClaims(targetText, planTexts);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim) && !planned.has(claim));
-  const sourceNormalized = normalizeFact(stripMarkup(sourceText));
+  // A markdown link keeps its target in the stripped source: "[MediaLink](https://…) (Director)"
+  // reads as "[medialink](https://…) (director)", so a claim that spans a link, such as
+  // a "Previous Experience" line of linked employers and titles, never found its own
+  // words in the source. Only the link text is evidence, so the lookup reads that.
+  // Each file is stripped on its own. Bold may span a wrapped line, so an unpaired `**` at
+  // the end of one file paired with the first `**` of the next and left a stray `*` in the
+  // name beside it ("medialink* (director)").
+  const sourceNormalized = normalizeFact(sourceTexts.map(text => stripMarkup(text)).join('\n'))
+    .replace(/\[\s*([^\]]*?)\s*\]\([^)\s]*\)/g, '$1');
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
   const unsourced = ({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
