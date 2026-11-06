@@ -76,6 +76,26 @@ mode picks it up.
 
 ---
 
+## The built-in script: `node backup.mjs`
+
+For a plain copy to a cloud drive, career-ops ships a script. It finds your Google Drive
+folder and copies your data into `Backups/career-ops` underneath it, skipping unchanged files
+and never deleting anything in the backup:
+
+```bash
+node backup.mjs --dry-run      # see what would be copied
+node backup.mjs                # run it
+node backup.mjs --dest ~/Backups/career-ops   # or any folder you choose
+```
+
+It also supports Dropbox, OneDrive and iCloud Drive (`--provider`) and several signed-in
+accounts (`--account`); see [SCRIPTS.md](SCRIPTS.md#backupmjs). It keeps no history, so it
+protects against a lost machine, not against a mistaken edit. Use Pattern 1 or 3 below when
+you want to go back to an earlier version. The script is on-demand; schedule it with
+[the same tools as scans](AUTOMATION.md) if you want it recurring.
+
+---
+
 ## Pattern 1: a private Git repository (recommended)
 
 Versioned history, works across machines, and you already have Git.
