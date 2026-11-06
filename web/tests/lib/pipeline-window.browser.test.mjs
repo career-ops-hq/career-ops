@@ -25,30 +25,41 @@ test("the pipeline table mounts a window of a long tracker", { skip: liveServerS
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
 
-  await page.goto(`${origin.origin}/pipeline?tab=ALL&sort=tracker&dir=1`);
-  await page.getByRole("link", { name: "#1", exact: true }).waitFor();
   // Count and match only what is on screen. On a slow runner the page can hold
   // a second, hidden copy of the table for a moment (CI saw 2 matches for the
-  // "tracked" count and 13 rows for a one-row search).
+  // "tracked" count, 2 tables for `table[aria-rowcount]` and 13 rows for a
+  // one-row search), so every locator below that could match inside it is
+  // scoped to visible elements.
+  const visible = (locator) => locator.filter({ visible: true });
   const mounted = () => page.locator("[data-application-key]:visible").count();
+  async function untilMounted(n) {
+    const start = Date.now();
+    while (await mounted() !== n && Date.now() - start < 10_000) await page.waitForTimeout(50);
+  }
+
+  await page.goto(`${origin.origin}/pipeline?tab=ALL&sort=tracker&dir=1`);
+  await visible(page.getByRole("link", { name: "#1", exact: true })).waitFor();
   const firstPaint = await mounted();
   assert.ok(firstPaint < 40, `first paint mounted ${firstPaint} rows`);
   assert.ok(firstPaint > 5, `first paint mounted ${firstPaint} rows`);
-  await page.getByText("120 tracked").filter({ visible: true }).waitFor();
+  await visible(page.getByText("120 tracked")).waitFor();
   const heights = await page.locator("[data-application-key]:visible").evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
   assert.ok(heights.every((h) => Math.abs(h - heights[1]) < 1), `mounted rows differ in height: ${heights.join(", ")}`);
   const bodyHeight = await page.locator("tbody", { has: page.locator("[data-application-key]:visible") }).evaluate((body) => body.getBoundingClientRect().height);
   assert.ok(Math.abs(bodyHeight - 120 * heights[1]) < heights[1], `table body is ${bodyHeight}px for 120 rows of ${heights[1]}px`);
-  assert.equal(await page.locator("table[aria-rowcount]").getAttribute("aria-rowcount"), "121");
+  assert.equal(await visible(page.locator("table[aria-rowcount]")).getAttribute("aria-rowcount"), "121");
 
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  await page.getByRole("link", { name: "#120", exact: true }).waitFor();
+  await visible(page.getByRole("link", { name: "#120", exact: true })).waitFor();
   const scrolled = await mounted();
   assert.ok(scrolled < 40, `scrolled paint mounted ${scrolled} rows`);
-  assert.equal(await page.getByRole("link", { name: "#1", exact: true }).count(), 0);
-  assert.equal(await page.locator("tr", { has: page.getByRole("link", { name: "#120", exact: true }) }).getAttribute("aria-rowindex"), "121");
-  await page.getByPlaceholder("Search company or role…").fill("Zulu");
-  await page.getByRole("link", { name: "Fixture Zulu", exact: true }).waitFor();
+  assert.equal(await visible(page.getByRole("link", { name: "#1", exact: true })).count(), 0);
+  assert.equal(await visible(page.locator("tr", { has: page.getByRole("link", { name: "#120", exact: true }) })).getAttribute("aria-rowindex"), "121");
+  await visible(page.getByPlaceholder("Search company or role…")).fill("Zulu");
+  await visible(page.getByRole("link", { name: "Fixture Zulu", exact: true })).waitFor();
+  // Fixture Zulu can already be on screen at the bottom of the list before the
+  // search applies, so wait for the filtered count rather than for its row.
+  await untilMounted(1);
   assert.equal(await mounted(), 1);
   assert.deepEqual(errors, []);
 });

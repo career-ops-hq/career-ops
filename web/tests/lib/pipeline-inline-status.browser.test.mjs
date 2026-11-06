@@ -38,7 +38,11 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
   page.on("request", (request) => {
     if (request.url().endsWith("/api/status") && request.method() === "POST") posts.push(request.postDataJSON());
   });
-  const row = (n) => page.locator("tbody tr").filter({ has: page.getByRole("link", { name: `#${n}`, exact: true }) });
+  // On a slow runner the page can hold a second, hidden copy of the table for a
+  // moment: rows and edit buttons are matched only where they are visible.
+  const visibleRows = page.locator("tbody tr").filter({ visible: true });
+  const editButtons = page.getByRole("button", { name: /^Edit status/ }).filter({ visible: true });
+  const row = (n) => visibleRows.filter({ has: page.getByRole("link", { name: `#${n}`, exact: true }) });
   const tab = (name) => page.getByRole("button", { name: new RegExp(`^${name} \\d+$`) });
   const edit = (n) => row(n).getByRole("button", { name: /^Edit status/ });
   const select = (n) => row(n).getByRole("combobox");
@@ -52,8 +56,9 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
 
   await page.goto(`${origin.origin}/pipeline?tab=ALL`);
   await edit(11).waitFor();
-  assert.equal(await page.locator("tbody tr").count(), 3);
-  assert.equal(await page.getByRole("button", { name: /^Edit status/ }).count(), 3);
+  await until(async () => await visibleRows.count() === 3);
+  assert.equal(await visibleRows.count(), 3);
+  assert.equal(await editButtons.count(), 3);
 
   await t.test("pencil, Cancel, Escape and same-value selection do not write", async () => {
     await edit(11).focus();
@@ -205,7 +210,8 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
     await select(11).press("Escape");
     await tab("INBOX").click();
     await page.waitForURL((value) => !value.searchParams.has("tab"));
-    assert.equal(await page.getByRole("button", { name: /^Edit status/ }).count(), 0);
+    await until(async () => await editButtons.count() === 0);
+    assert.equal(await editButtons.count(), 0);
   });
   assert.deepEqual(errors, []);
 });
