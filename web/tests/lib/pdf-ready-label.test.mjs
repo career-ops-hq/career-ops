@@ -14,3 +14,12 @@ test("PDF ready is the label only when the file is on disk and the tracker is al
   assert.match(src, /const settled = ready && trackerMarked/);
   assert.doesNotMatch(src, /setMarked|ready \|\| marked/);
 });
+
+test("the apply checklist is ready only when this report's resume can be downloaded", () => {
+  const page = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/app/pipeline/[id]/apply/page.tsx"),
+    "utf8",
+  );
+  assert.match(page, /pdfReady=\{resume !== null\}/);
+  assert.doesNotMatch(page, /pdfReady=\{disk\.exists\}/);
+});

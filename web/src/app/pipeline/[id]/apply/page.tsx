@@ -91,7 +91,7 @@ export default async function ApplyPage({
       trackerNum={app?.n ?? null}
       reportNum={reportNum}
       status={app?.status ?? ""}
-      pdfReady={disk.exists}
+      pdfReady={resume !== null}
       trackerMarked={(app?.pdf ?? "").includes("✅")}
       pdfNote={disk.note}
     />
