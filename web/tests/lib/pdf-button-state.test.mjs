@@ -49,10 +49,30 @@ test("an evaluation stop cannot make a PDF ready", () => {
   assert.deepEqual(pdfButtonState({ id: "gated", status: "gated", steps: [] }, false), { kind: "idle", failure: null });
 });
 
-test("a finished cover job is ready without a CV file on disk", () => {
-  const job = { id: "cover-1", status: "done", steps: [] };
+test("a finished cover job with a usable score is ready without a CV file on disk", () => {
+  const job = { id: "cover-1", status: "done", steps: [], result: { score: 5, summary: "Draft written." } };
   assert.deepEqual(pdfButtonState(job, false), { kind: "idle", failure: null });
   assert.deepEqual(coverDraftButtonState(job), { kind: "ready", failure: null });
+});
+
+test("a finished cover job with no usable score stays a retry", () => {
+  const fallback = "The cover run finished without a usable draft.";
+  assert.deepEqual(coverDraftButtonState({ id: "cover-4", status: "done", steps: [], result: { score: null, summary: "" } }), {
+    kind: "idle",
+    failure: { jobId: "cover-4", reason: fallback },
+  });
+  assert.deepEqual(coverDraftButtonState({ id: "cover-5", status: "done", steps: [], result: { score: null, summary: "No letter." } }), {
+    kind: "idle",
+    failure: { jobId: "cover-5", reason: "No letter." },
+  });
+  assert.deepEqual(coverDraftButtonState({ id: "cover-6", status: "done", steps: [] }), {
+    kind: "idle",
+    failure: { jobId: "cover-6", reason: fallback },
+  });
+  assert.deepEqual(coverDraftButtonState({ id: "cover-7", status: "done", steps: [], result: { score: Infinity, summary: "" } }), {
+    kind: "idle",
+    failure: { jobId: "cover-7", reason: fallback },
+  });
 });
 
 test("a weak cover verdict is a retry, not a draft link", () => {
