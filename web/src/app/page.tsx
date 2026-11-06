@@ -35,7 +35,7 @@ export default async function Home() {
     const parsed = parseReport(content);
     if (parsed.legitimacy) legitimacy[app.n] = parsed.legitimacy;
     const reportUrl = parsed.fields.find((field) => field.label === "URL")?.value ?? "";
-    postingUrls[app.n] = applyPostingUrl(reportUrl, app.url || app.applyLink);
+    postingUrls[app.n] = applyPostingUrl(reportUrl, app.url, app.applyLink);
   }
   const disks = await readCvDiskForRows(
     awaiting.map((app) => ({

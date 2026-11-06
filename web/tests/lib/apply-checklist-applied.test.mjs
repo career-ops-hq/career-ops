@@ -25,7 +25,11 @@ test("pipeline Applied from a key or the bulk button asks before it writes", () 
   assert.doesNotMatch(src, /commitRef\.current\(rows, command\.status\)/);
   assert.match(src, /requestStatus\(selectedRows, bulkStatus\)/);
   assert.match(src, /requestStatus\(appliedAsk, "Applied", true\)/);
-  assert.match(src, /role="alert"/);
-  assert.match(src, /appliedAskYesRef/);
+  const confirmAt = src.indexOf('visibleTab !== "INBOX" && appliedAsk && appliedAsk.length > 0 &&');
+  const confirmEnd = src.indexOf("bulkError", confirmAt);
+  assert.ok(confirmAt !== -1 && confirmEnd > confirmAt);
+  const confirm = src.slice(confirmAt, confirmEnd);
+  assert.match(confirm, /role="alert"/);
+  assert.match(confirm, /ref=\{appliedAskYesRef\}/);
   assert.match(src, /appliedAskYesRef\.current\?\.focus\(\)/);
 });

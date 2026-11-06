@@ -10,9 +10,11 @@ const PILL =
 export function MarkPdfReadyButton({
   reportNum,
   ready = false,
+  trackerMarked = false,
 }: {
   reportNum: number | null;
   ready?: boolean;
+  trackerMarked?: boolean;
 }) {
   const router = useRouter();
   const [saved, setSaved] = useState(false);
@@ -20,9 +22,10 @@ export function MarkPdfReadyButton({
   const [error, setError] = useState("");
 
   if (reportNum == null) return null;
+  const settled = ready && trackerMarked;
 
   async function mark() {
-    if (busy || ready || saved) return;
+    if (busy || settled || saved) return;
     setBusy(true);
     setError("");
     try {
@@ -50,15 +53,15 @@ export function MarkPdfReadyButton({
       <button
         type="button"
         onClick={mark}
-        disabled={busy || ready || saved}
+        disabled={busy || settled || saved}
         className={
-          ready
+          settled
             ? `${PILL} border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400`
             : `${PILL} border-border text-muted hover:border-brand/40 hover:text-brand-text`
         }
       >
-        {ready && <Check className="size-3.5" />}
-        {busy ? "Saving…" : ready ? "PDF ready" : saved ? "Tracker marked" : "Mark PDF ready"}
+        {settled && <Check className="size-3.5" />}
+        {busy ? "Saving…" : settled ? "PDF ready" : saved ? "Tracker marked" : "Mark PDF ready"}
       </button>
       {saved && !ready && (
         <span className="text-xs text-muted">The tracker is marked. PDF ready stays off until the file is in output/.</span>

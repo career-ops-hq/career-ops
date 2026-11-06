@@ -92,6 +92,7 @@ export default async function ApplyPage({
       reportNum={reportNum}
       status={app?.status ?? ""}
       pdfReady={disk.exists}
+      trackerMarked={(app?.pdf ?? "").includes("✅")}
       pdfNote={disk.note}
     />
   );

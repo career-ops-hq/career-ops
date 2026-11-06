@@ -34,6 +34,7 @@ export function ApplyChecklist({
   reportNum,
   status,
   pdfReady,
+  trackerMarked = false,
   pdfNote = null,
 }: {
   company: string;
@@ -52,6 +53,7 @@ export function ApplyChecklist({
   reportNum: number | null;
   status: string;
   pdfReady: boolean;
+  trackerMarked?: boolean;
   pdfNote?: string | null;
 }) {
   return (
@@ -147,7 +149,7 @@ export function ApplyChecklist({
         <div className="flex flex-wrap items-start gap-2">
           <AppliedButton trackerNum={trackerNum} status={status} />
           <SeedButton trackerNum={trackerNum} />
-          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} />
+          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} trackerMarked={trackerMarked} />
         </div>
         {pdfNote && <p className="mt-2 text-sm text-muted">{pdfNote}</p>}
         {!trackerNum && <p className="mt-2 text-xs text-faint">Applied and seed follow-up need a tracker row.</p>}

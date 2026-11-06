@@ -86,7 +86,7 @@ export function ReportView({
   const line = applyLineLabel(score ?? "", meta?.legitimacy);
   const recommended = line === "Recommended";
   const quietApply = applyCtaQuiet({ score, legitimacy: meta?.legitimacy });
-  const applyUrl = applyPostingUrl(url, app?.url || app?.applyLink) || undefined;
+  const applyUrl = applyPostingUrl(url, app?.url, app?.applyLink) || undefined;
   const disk = cvDiskState({ onDisk: pdfFileReady, trackerMarked: trackerMarkedPdf });
   const spend = reportSpendActions(Boolean(report));
   const company = app ? companyPresentation(app) : null;
@@ -183,7 +183,7 @@ export function ReportView({
                     Apply checklist
                   </Link>
                 )}
-                <MarkPdfReadyButton reportNum={reportNum} ready={disk.exists} />
+                <MarkPdfReadyButton reportNum={reportNum} ready={disk.exists} trackerMarked={trackerMarkedPdf} />
                 <ApplyButton n={id} url={applyUrl} company={companyName} pdfReady={disk.exists} quiet={quietApply} />
                 {coverReady && (
                   <a

@@ -41,6 +41,15 @@ test("applyPostingUrl prefers the report field, then the tracker", () => {
   );
   assert.equal(applyPostingUrl("", "https://jobs.example.com/tracker"), "https://jobs.example.com/tracker");
   assert.equal(applyPostingUrl("not a link", ""), "");
+  assert.equal(applyPostingUrl("", "—", "https://jobs.example.com/apply"), "https://jobs.example.com/apply");
+  assert.equal(
+    applyPostingUrl("", "https://jobs.example.com/tracker", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/tracker",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "—", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/report",
+  );
 });
 
 test("readTrackerUrl keeps a value that is already a URL", () => {
