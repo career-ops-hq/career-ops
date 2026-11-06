@@ -162,8 +162,9 @@ function firstMatches(segments, test, limit = 2, focus = null) {
 
 // The title after "reports to" must be a real word, not just an article ("Reports to the.")
 // or a placeholder ("Reports to: TBD", "Reports to: N/A").
-// A label form counts too: "Reports to: Head of X", "Reporting to – X", "Reports to - X".
-const REPORTS_TO = /\b(?:reports?|reporting)\s+(?:directly\s+)?to(?:\s*[:–—]\s*|\s+-\s*|\s+)(?:(?:the|our|a|an)\s+)?(?!(?:the|our|a|an|n\/a|tb[dca]|none|unknown)\b)[A-Za-z][\w&/'-]*/i;
+// A label form counts too: "Reports to: Head of X", "Reporting to – X", "Reports to - X",
+// with or without Markdown emphasis ("**Reports to:** X", "Reports to: **X**").
+const REPORTS_TO = /(?<![A-Za-z0-9])(?:reports?|reporting)\s+(?:directly\s+)?to[*_]*(?:\s*[:–—][*_]*\s*|\s+-\s*|\s+)[*_]*(?:(?:the|our|a|an)\s+)?(?!(?:the|our|a|an|n\/a|tb[dca]|none|unknown)\b)[A-Za-z][\w&/'-]*/i;
 // A named department or team: "in the Education Department", "Department of Finance", "Student Services Team".
 const NAMED_DEPARTMENT = /\b(?:in|within|of|for|from)\s+(?:the\s+)?[\w&\s-]{2,40}?\b(?:department|division|team|group|office|unit)\b|\b[A-Z][\w&-]+\s+(?:Department|Division|Team|Group|Office|Unit)\b|\b(?:department|division)\s+of\s+[A-Z]\w+/i;
 const SUPERVISOR_WORD = /\b(?:supervisor|line\s+manager|manager|director|head\s+of|team\s+lead|lead)\b/i;
@@ -391,6 +392,7 @@ function runSelfTest() {
   eq('"Reports to - " label names the supervisor', supervisorOf('Reports to - Head of ML Platform'), 'partial');
   eq('"Reports to: the." is not a supervisor', supervisorOf('Reports to: the.'), 'missing');
   eq('"Reports to: TBD" is not a supervisor', supervisorOf('Reports to: TBD'), 'missing');
+  eq('"**Reports to:** X" names the supervisor', supervisorOf('**Reports to:** Director of Engineering'), 'partial');
 
   const extended = analyzeRoleClarity('Zorgt voor ondersteuning.', {
     extraSoftVerbs: [{ label: 'ondersteuning', pattern: /\bondersteuning\b/i }],
