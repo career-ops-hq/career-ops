@@ -561,4 +561,52 @@ test('an expired path-case sibling still receives the close day', () => {
   assert.equal(onExact[0].url, current);
 });
 
+test('an aged skipped_expired URL keeps its own close day', () => {
+  const exact = 'https://jobs.example/acme';
+  const sibling = 'https://jobs.example/Acme';
+  const policy = { recheckAfterDays: 30, today: '2026-11-05' };
+  const history = [
+    historyRow({
+      url: exact,
+      status: 'skipped_expired',
+      first_seen: '2026-01-01',
+      language: 'en',
+      closes_at: '2026-02-01',
+    }),
+    historyRow({
+      url: sibling,
+      status: 'added',
+      first_seen: '2026-01-01',
+      language: 'en',
+      closes_at: '2026-03-01',
+    }),
+  ].join('\n');
+  const aligned = alignCloseRefreshOffers(
+    [{ url: exact, language: 'en', closesAt: '2026-07-07' }],
+    history,
+    policy,
+  );
+  assert.equal(aligned[0].url, exact);
+  const otherLanguage = [
+    historyRow({
+      url: exact,
+      status: 'skipped_expired',
+      first_seen: '2026-01-01',
+      language: 'fr',
+    }),
+    historyRow({
+      url: sibling,
+      status: 'added',
+      first_seen: '2026-01-01',
+      language: 'en',
+    }),
+  ].join('\n');
+  const kept = alignCloseRefreshOffers(
+    [{ url: exact, language: 'en', closesAt: '2026-07-07' }],
+    otherLanguage,
+    policy,
+  );
+  assert.equal(kept[0].url, sibling);
+});
+
 

@@ -1885,7 +1885,7 @@ function pinningRefreshUrls(historyText, policy) {
     if (!row.url) continue;
     const status = row.status || 'added';
     const pinned = shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy);
-    if (!pinned && status !== 'added') continue;
+    if (!pinned && !RECHECKABLE_SCAN_HISTORY_STATUSES.has(status)) continue;
     rememberRefreshUrl(urls, row.url, refreshLanguage(row.url, row.language));
   }
   return urls;
