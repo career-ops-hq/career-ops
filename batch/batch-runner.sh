@@ -1366,11 +1366,19 @@ process_offer() {
   # text inside a shell command the worker composes. fetch-jd.mjs only talks to
   # the known ATS API hosts it resolves from the URL, so a private or unknown
   # host is a miss (exit 1), not a request.
+  local jd_closed_note=""
   local jd_api_words=0
   if [[ ! -s "$jd_file" && -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
-    local jd_api_tmp
+    local jd_api_tmp jd_api_rc=0
     jd_api_tmp="$(mktemp "${TMPDIR:-/tmp}/batch-jd-api.XXXXXX")"
-    if node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_api_tmp" 2>/dev/null; then
+    node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_api_tmp" 2>/dev/null || jd_api_rc=$?
+    if [[ "$jd_api_rc" -eq 3 ]]; then
+      # Exit 3: the posting's own data says it is closed (validThrough in the past,
+      # closure text on the page, an ATS delisting flag). Do not fall back to
+      # WebFetch, which could read the JD from the page and score a closed role.
+      # The evidence is page text, so keep it to one short printable line.
+      jd_closed_note="posting closed (fetch-jd): $(head -c 160 "$jd_api_tmp" | tr -c '[:print:]' ' ' | sed 's/^CLOSED_POSTING //; s/  */ /g')"
+    elif [[ "$jd_api_rc" -eq 0 ]]; then
       jd_api_words=$(wc -w < "$jd_api_tmp" 2>/dev/null) || jd_api_words=0
       jd_api_words="${jd_api_words//[^0-9]/}"
       jd_api_words="${jd_api_words:-0}"
@@ -1387,7 +1395,11 @@ process_offer() {
   # 'webfetch', changes nothing: the worker is told to WebFetch. Detection only
   # here; the skip is recorded after the "Processing offer" line below.
   local jd_thin_skip=0 jd_thin_note="" jd_thin_retryable=0
-  if [[ ! -s "$jd_file" && "$THIN_ACTION" != "webfetch" ]]; then
+  if [[ -n "$jd_closed_note" ]]; then
+    # A closed posting is terminal ('skipped', not retryable) whatever --thin-action says.
+    jd_thin_skip=1
+    jd_thin_note="$jd_closed_note"
+  elif [[ ! -s "$jd_file" && "$THIN_ACTION" != "webfetch" ]]; then
     if [[ "$THIN_ACTION" == "browser-extract" && -f "$PROJECT_DIR/browser-extract.mjs" ]]; then
       # Real-browser read: zero model tokens, ~5-15s of Chromium. Success is
       # compact JSON on stdout, a failure is exit 1 with a JSON error on stderr.

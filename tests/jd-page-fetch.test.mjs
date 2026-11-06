@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { jdFromPageHtml, fetchJdFromPage, capJdText, markCappedAtsText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { inProviderFetch } from '../providers/_ip-guard.mjs';
 import { setHostResolver } from '../liveness-browser.mjs';
@@ -388,7 +389,7 @@ test('closure wording inside a script or style is not visible page text', async 
 test('NODE_USE_ENV_PROXY without CAREER_OPS_TRUST_PROXY_EGRESS fails closed', async () => {
   const { spawnSync } = await import('node:child_process');
   const code = `import { fetchJdFromPage } from './lib/jd-page-fetch.mjs'; let hit=0; globalThis.fetch=async()=>{hit++;throw new Error('x')}; const out=await fetchJdFromPage('https://careers.example.com/job/1'); console.log(JSON.stringify({out,hit}));`;
-  const run = (env) => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '', ...env }, encoding: 'utf8' }).stdout.trim());
+  const run = (env) => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '', ...env }, encoding: 'utf8' }).stdout.trim());
   assert.deepEqual(run({ NODE_USE_ENV_PROXY: '1', CAREER_OPS_TRUST_PROXY_EGRESS: '' }), { out: null, hit: 0 });
 });
 
@@ -444,4 +445,35 @@ test('a closure banner that only matches once &#39; is decoded is recognised', a
     const out = await fetchJdFromPage('https://careers.example.com/job/1');
     assert.equal(out.closed, true);
   } finally { net.restore(); }
+});
+
+test('an inherited property name such as &constructor; is not decoded as an entity', async () => {
+  const net = stubNetwork(() => html(page(`<p>${BODY} &constructor; &eacute;</p>`)));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.ok(out && !/function Object|\[native code\]/.test(out.text), out?.text?.slice(0, 80));
+  } finally { net.restore(); }
+});
+
+test('a character whose lowercase form is longer does not misalign the ld+json scan', () => {
+  const ld = JSON.stringify({ '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Eng', description: `<p>${BODY}</p>`, hiringOrganization: { name: 'Acme' } });
+  const out = jdFromPageHtml(`<html><body><p>${'İ'.repeat(50)}</p><script type="application/ld+json">${ld}</script></body></html>`);
+  assert.ok(out && out.method === 'ld+json');
+});
+
+test('a very large @graph array is walked without spread or shift limits', () => {
+  const nodes = Array.from({ length: 200_000 }, (_, i) => ({ '@type': 'Thing', name: `n${i}` }));
+  const posting = { '@type': 'JobPosting', title: 'Eng', description: `<p>${BODY}</p>`, hiringOrganization: { name: 'Acme' } };
+  const ld = JSON.stringify({ '@context': 'https://schema.org', '@graph': [...nodes, posting] });
+  const t0 = Date.now();
+  const out = jdFromPageHtml(`<html><body><script type="application/ld+json">${ld}</script></body></html>`);
+  assert.ok(out && out.method === 'ld+json');
+  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
+});
+
+test('batch-runner handles fetch-jd exit 3 as a closed posting, not a fetch miss', () => {
+  const runner = readFileSync(fileURLToPath(new URL('../batch/batch-runner.sh', import.meta.url)), 'utf8');
+  assert.match(runner, /jd_api_rc=\$\?/);
+  assert.match(runner, /"\$jd_api_rc" -eq 3/);
+  assert.match(runner, /jd_closed_note/);
 });

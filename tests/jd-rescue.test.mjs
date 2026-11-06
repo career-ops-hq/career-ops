@@ -401,3 +401,10 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   if (r.ok && out.includes('w99') && !/SECRET-PAYLOAD|leaked/.test(out)) pass('an unclosed script in a description drops its payload instead of leaking it as text');
   else fail(`unclosed script payload leaked: ${JSON.stringify(out.slice(-120))}`);
 }
+
+{
+  // Source-level guard: a closed ATS result must not be rescued as a JD.
+  const src = readFileSync(join(ROOT, 'batch/jd-rescue.mjs'), 'utf8');
+  if (/if \(result\.closed\) return null;/.test(src)) pass('jd-rescue declines a closed ATS posting instead of rescuing its text');
+  else fail('jd-rescue fromKnownApi does not decline closed postings');
+}

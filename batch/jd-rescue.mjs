@@ -76,6 +76,9 @@ async function fromKnownApi(url) {
     const { fetchJdViaKnownApi } = await import('../browser-extract.mjs');
     const result = await fetchJdViaKnownApi(url, 20_000, 15_000);
     if (!result?.text) return null;
+    // A delisted/closed posting is not a JD to rescue: decline, so the closure reaches
+    // fetch-jd.mjs's exit 3 and the runner skips the offer instead of scoring it.
+    if (result.closed) return null;
     const text = result.title ? `${result.title}\n\n${result.text}` : result.text;
     return { text, method: `ats-api:${result.ats}` };
   } catch {
