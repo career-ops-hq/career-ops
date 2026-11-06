@@ -301,6 +301,35 @@ for (const path of derivedIndexProbes) {
   }
 }
 
+// Files the probes above never reach (#6535). reports/ was covered for markdown
+// only, so an exported PDF or HTML copy of an evaluation sat beside it
+// unignored. A CV exported or saved at the repo root under any name but cv.md
+// was covered by nothing, and no-user-data.yml has no rule for those names
+// either. The rules are root-anchored, which the docs/ probe pins: a PDF the
+// repo adds under a subdirectory must stay committable.
+const exportedCopyProbes = [
+  'reports/001-acme-2026-11-06.pdf',
+  'reports/001-acme-2026-11-06.html',
+  'reports/superseded/001-acme-2026-11-06.pdf',
+  'cv.pdf',
+  'resume.pdf',
+  'cv.docx',
+];
+
+for (const path of exportedCopyProbes) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'ignored') pass(`${path} is git-ignored`);
+  else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — it holds the same PII as the report or CV it was exported from`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
+for (const path of ['reports/.gitkeep', 'docs/__gitignore_probe__.pdf']) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'not-ignored') pass(`${path} stays committable`);
+  else if (verdict === 'ignored') fail(`${path} is git-ignored — a rule meant for user data swallowed a system path`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
 // Not user-layer data, but the same mechanism: this one is about what a
 // reflexive `git add .` can swallow. test-all.mjs builds its script-runner
 // sandbox with mkdtempSync under the repo ROOT, and a suite interrupted
