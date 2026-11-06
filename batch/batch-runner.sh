@@ -99,10 +99,11 @@ DISCARD_LOG="$LOGS_DIR/discard.log"
 TRACKER_DIR="$DATA_ROOT/batch/tracker-additions"
 REPORTS_DIR="$DATA_ROOT/reports"
 # The runner's own bookkeeping (input, state, logs, locks) stays beside the
-# script. reserve-report-num.mjs and merge-tracker.mjs default batch-state.tsv
-# to the data root, where this runner never writes it, so name the real file
-# for them: both skip report numbers this run recorded as failed. Built from
-# PROJECT_DIR, which is the form node can open under Git Bash (see above).
+# script. reserve-report-num.mjs and merge-tracker.mjs read batch-state.tsv
+# there too, and a data root's own copy beside it (resolveBatchStatePaths), and
+# both skip report numbers recorded as failed. The variable still names the file for every worker, and
+# learn.mjs reads it to tell a batch worker. Built from PROJECT_DIR, which is
+# the form node can open under Git Bash (see above).
 export CAREER_OPS_BATCH_STATE="$PROJECT_DIR/batch/batch-state.tsv"
 # Workers run unattended, so nobody can confirm a change to the user's standing
 # rules. modes/_shared.md tells an agent that sees this flag not to write them.
@@ -112,6 +113,8 @@ PAUSE_FILE="$BATCH_DIR/batch-runner.paused"
 THROTTLE_FILE="$BATCH_DIR/batch-runner.throttled"
 STATE_LOCK_DIR="$BATCH_DIR/.batch-state.lock"
 STATE_LOCK_PID_FILE="$STATE_LOCK_DIR/pid"
+STATE_LOCK_FLOCK_FILE="$BATCH_DIR/.batch-state.flock"
+STATE_LOCK_FLOCK=0
 STATE_LOCK_TIMEOUT_SECONDS=30
 MAIN_PID="${BASHPID:-$$}"
 
@@ -564,6 +567,10 @@ release_state_lock() {
 }
 
 run_with_state_lock() {
+  if [[ "$STATE_LOCK_FLOCK" == "1" ]]; then
+    run_with_state_flock "$@" || return $?
+    return 0
+  fi
   acquire_state_lock || return $?
 
   local status=0
@@ -574,6 +581,53 @@ run_with_state_lock() {
   fi
 
   release_state_lock
+  return "$status"
+}
+
+# The mkdir lock is only as atomic as mkdir(1). On Ubuntu 26.04 mkdir is uutils
+# coreutils, and before uutils 0.11.0 it checks that the directory is absent,
+# then creates it, and exits 0 when a racing mkdir made it in between. Two
+# workers both took the lock, reserved the same report number and rewrote
+# batch-state.tsv together, with nothing printed (#6362). flock(1) leaves the
+# excluding to the kernel. main() calls this once, before any worker starts,
+# so every worker takes the same lock. Without flock (stock macOS, Git Bash)
+# mkdir(1) is atomic and the mkdir lock stays, as it does on a file system
+# that refuses flock.
+select_state_lock() {
+  command -v flock >/dev/null 2>&1 || return 0
+  if { flock -x -n 9; } 2>/dev/null 9>>"$STATE_LOCK_FLOCK_FILE"; then
+    STATE_LOCK_FLOCK=1
+  else
+    echo "WARN: flock cannot lock $STATE_LOCK_FLOCK_FILE; using the mkdir state lock." >&2
+  fi
+}
+
+# Polls every 0.1s up to STATE_LOCK_TIMEOUT_SECONDS, like the mkdir lock
+# (BusyBox flock has no -w). The lock lives on fd 9, open only inside this
+# function, so the workers, their CLI and the PDF painter never inherit it. A
+# program started inside the critical section does inherit it, and holds the
+# lock until it exits (9>&- would not stop that: bash saves fd 9 to another
+# descriptor that the program still gets), so start nothing long-lived there.
+# The lock file is never removed: a worker waiting on the old file and one
+# locking a new one would both get in.
+run_with_state_flock() {
+  local status=1 waited=0
+  local max_waits=$((STATE_LOCK_TIMEOUT_SECONDS * 10))
+  {
+    while true; do
+      if flock -x -n 9; then
+        status=0
+        "$@" || status=$?
+        break
+      fi
+      if (( waited >= max_waits )); then
+        echo "ERROR: Timed out waiting for state lock at $STATE_LOCK_FLOCK_FILE" >&2
+        break
+      fi
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+  } 9>>"$STATE_LOCK_FLOCK_FILE"
   return "$status"
 }
 
@@ -715,17 +769,27 @@ resolve_worker_model() {
 # Append a one-line, auditable record of a pre-screen-gate discard to
 # batch/logs/discard.log (see modes/batch.md — Pre-screen gate). Format:
 # {ISO8601 timestamp}\t{job id}\t{url}\t{reason}
+#
+# Callers write the "skipped" state first and call this only when that state
+# (or its recovery record) was written, so the same id, url and reason are on
+# disk. A failed append is therefore reported, not fatal: the record can be
+# rebuilt from state instead of aborting the run.
 log_discard() {
   local id="$1" url="$2" reason="$3"
-  mkdir -p "$LOGS_DIR"
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"
+  if ! { mkdir -p "$LOGS_DIR" && printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"; } 2>/dev/null; then
+    echo "    ⚠️  Could not append to $DISCARD_LOG for #$id; its skipped state record keeps the reason" >&2
+  fi
 }
 
 
+# The mode a plain redirect gives a new file (0644 under umask 022). mktemp
+# creates 0600, and the state file keeps the mode it has always had.
+STATE_FILE_MODE=$(printf '%o' "$(( 0666 & ~0$(umask) ))")
+
 # Update or insert state for an offer.
-# Caller must hold STATE_LOCK_DIR while this runs.
+# Caller must hold the state lock (run_with_state_lock) while this runs.
 update_state_unlocked() {
   local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
 
@@ -743,7 +807,12 @@ update_state_unlocked() {
     init_state
   fi
 
-  local tmp="$STATE_FILE.tmp"
+  # A tmp file of its own per rewrite, beside the state file so mv stays a
+  # rename. With one shared $STATE_FILE.tmp, two rewrites that overlapped
+  # truncated and renamed each other's file: rows doubled and mv failed (#6362).
+  local tmp
+  tmp=$(mktemp "$STATE_FILE.tmp.XXXXXX") || return 1
+  chmod "$STATE_FILE_MODE" "$tmp" 2>/dev/null || true
   local found=false
 
   # Write header
@@ -774,7 +843,10 @@ update_state_unlocked() {
       "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" >> "$tmp"
   fi
 
-  mv "$tmp" "$STATE_FILE"
+  if ! mv -f "$tmp" "$STATE_FILE"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 update_state() {
@@ -1844,7 +1916,13 @@ process_offer() {
         # Keep the reservation. The SKIP row uses this number and no report
         # file holds it, so releasing now would hand it to the next job before
         # the merge. merge_tracker releases it once the row is in the tracker.
-        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "-" "dealbreaker: \"$skip_rule\"" "$retries" || true
+        # rc 2: nothing was recorded and the job runs again as pending, so it
+        # is not a discard yet.
+        local skip_state_rc=0
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "-" "dealbreaker: \"$skip_rule\"" "$retries" || skip_state_rc=$?
+        if (( skip_state_rc != 2 )); then
+          log_discard "$id" "$url" "dealbreaker: \"$skip_rule\""
+        fi
         echo "    ⏭️  Skipped (dealbreaker): $url — \"$skip_rule\""
         return 0
       fi
@@ -1901,7 +1979,11 @@ process_offer() {
       # LC_ALL=C: under a non-English locale awk parses "4.5" as 4, so the
       # MIN_SCORE comparison would silently run on truncated integers.
       if LC_ALL=C awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
-        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
+        local score_state_rc=0
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || score_state_rc=$?
+        if (( score_state_rc != 2 )); then
+          log_discard "$id" "$url" "below-min-score"
+        fi
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0
@@ -2158,6 +2240,7 @@ main() {
   if [[ "$DRY_RUN" == "false" ]]; then
     acquire_lock
     rm -f "$PAUSE_FILE" "$THROTTLE_FILE"
+    select_state_lock
   fi
 
   init_state

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { readJsonObject } from "@/lib/json-body";
+import { EVALUATION_GATE_REASONS } from "@/lib/evaluation-gate.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,8 @@ type Body = {
   subtitle?: string;
   page?: string;
   input?: string;
+  status?: "done" | "gated";
+  gate?: { reason: string; message: string; confirmationRequired: boolean };
   result?: { score: number | null; summary: string };
   steps?: { kind: string; label: string }[];
   output?: string;
@@ -25,6 +28,13 @@ export async function POST(req: Request) {
   if (!b) return NextResponse.json({ error: "bad json" }, { status: 400 });
   const safeId = String(b.id ?? "").replace(/[^a-z0-9_-]/gi, "");
   if (!safeId) return NextResponse.json({ error: "id required" }, { status: 400 });
+  if (b.status !== undefined && b.status !== "done" && b.status !== "gated") return NextResponse.json({ error: "invalid status" }, { status: 400 });
+  const gate = b.status === "gated" ? b.gate : undefined;
+  if (b.status === "gated" && (!gate || !EVALUATION_GATE_REASONS.some(reason => reason === gate.reason)
+    || typeof gate.message !== "string" || !gate.message.trim() || gate.message.trim().length > 1200
+    || typeof gate.confirmationRequired !== "boolean" || b.result?.score != null)) {
+    return NextResponse.json({ error: "invalid evaluation stop" }, { status: 400 });
+  }
 
   const dir = path.join(careerOpsRoot(), ".career-ops-web", "runs");
   try {
@@ -39,7 +49,14 @@ export async function POST(req: Request) {
 - id: ${b.id}
 - page: ${b.page || "-"}
 - input: ${b.input || "-"}
-- verdict: ${verdict}
+${b.status ? `- status: ${b.status}\n` : ""}- verdict: ${verdict}
+${gate ? `
+## Evaluation stop
+- reason: ${gate.reason}
+- confirmation required: ${gate.confirmationRequired ? "yes" : "no"}
+
+${gate.message.trim()}
+` : ""}
 
 ## Steps
 ${steps}
