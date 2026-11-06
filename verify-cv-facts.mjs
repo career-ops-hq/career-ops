@@ -2356,6 +2356,43 @@ function sourceSpellsFact(sourceText, value) {
  * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], advisoryFacts: object[], forbidden: string[], warnings: string[] }}
  * @throws when the config is invalid
  */
+/**
+ * Reduce markdown links to their visible text, so a claim that spans a link is
+ * compared with the words a reader sees. Handles inline links whose target holds
+ * balanced parentheses or a title (`[a](https://x/Foo_(bar) "t")`), reference
+ * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`).
+ * A bracket pair with no link target after it is left alone.
+ */
+function collapseMarkdownLinks(text) {
+  let out = '';
+  let i = 0;
+  const opener = /\[\s*([^\][]*?)\s*\]\(/y;
+  while (i < text.length) {
+    if (text[i] === '[') {
+      opener.lastIndex = i;
+      const m = opener.exec(text);
+      if (m) {
+        let depth = 1;
+        let j = opener.lastIndex;
+        while (j < text.length && depth > 0) {
+          if (text[j] === '(') depth++;
+          else if (text[j] === ')') depth--;
+          j++;
+        }
+        if (depth === 0) {
+          out += m[1];
+          i = j;
+          continue;
+        }
+      }
+    }
+    out += text[i++];
+  }
+  return out
+    .replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1')
+    .replace(/(?:^|\s)\[[^\][]+\]:\s*\S+(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?/g, ' ');
+}
+
 export function verifyFacts(targetText, {
   sourcePaths = DEFAULT_SOURCES,
   planTexts = [],
@@ -2380,12 +2417,13 @@ export function verifyFacts(targetText, {
   // the end of one file paired with the first `**` of the next and left a stray `*` in the
   // name beside it ("medialink* (director)").
   const sourceNormalized = normalizeFact(sourceTexts.map(text => stripMarkup(text)).join('\n'))
-    .replace(/\[\s*([^\]]*?)\s*\]\([^)\s]*\)/g, '$1');
+    ;
+  const sourceLookup = collapseMarkdownLinks(sourceNormalized);
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsourced = ({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value);
+  const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
   const namedFacts = [
-    ...factClaims(targetText, sourceNormalized),
+    ...factClaims(targetText, sourceLookup),
     ...delegatedAuthorshipClaims(targetText, sourceText),
     ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);

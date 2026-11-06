@@ -246,3 +246,26 @@ test('emphasis in a second source file does not leave a stray asterisk in the fi
   const flagged = [...result.unsupportedFacts, ...result.advisoryFacts].map(({ value }) => value);
   assert.deepEqual(flagged.filter(value => /medialink|feedroom/.test(value)), []);
 });
+
+for (const [label, linked] of [
+  ['a target with nested parentheses', '[MediaLink](https://en.wikipedia.org/wiki/Foo_(bar)) (Director), [The FeedRoom](http://www.feedroom.com/) (Engineer)'],
+  ['a link title', '[MediaLink](https://www.medialink.com/ "MediaLink home") (Director), [The FeedRoom](http://www.feedroom.com/ \'The FeedRoom\') (Engineer)'],
+  ['reference-style links', '[MediaLink][ml] (Director), [The FeedRoom][] (Engineer)\n\n[ml]: https://www.medialink.com/ "MediaLink"\n[The FeedRoom]: http://www.feedroom.com/'],
+]) {
+  test(`a claim spanning ${label} reads the link text`, () => {
+    const linked_ = join(tmp, `cv-${Math.random().toString(36).slice(2)}.md`);
+    writeFileSync(linked_, `${CV}\n## Previous Experience\n${linked}\n`);
+    const html = build('build-cv-html.mjs', {
+      candidate: { name: 'Jane Doe' },
+      summary: 'Engineer.',
+      experience: [
+        { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2019 – 2024', bullets: ['Led a team of 4 engineers.'] },
+        { company: 'Previous Experience', role: 'MediaLink (Director), The FeedRoom (Engineer)', dates: '', bullets: [] },
+      ],
+      skills: [{ category: 'Languages', items: 'Python, Go' }],
+    }, 'html');
+    const result = verifyFacts(html, { sourcePaths: [linked_], configPath: join(tmp, 'none.json') });
+    const flagged = [...result.unsupportedFacts, ...result.advisoryFacts].map(({ value }) => value);
+    assert.deepEqual(flagged.filter(value => /medialink|feedroom/.test(value)), []);
+  });
+}
