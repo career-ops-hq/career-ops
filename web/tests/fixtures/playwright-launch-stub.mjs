@@ -6,6 +6,7 @@ export const chromium = {
   launch: Object.assign(
     async function launch() {
       globalThis.__applyLaunchAttempts += 1;
+      if (typeof globalThis.__applyCareerPage === "function") return globalThis.__applyCareerPage();
       throw new Error("stub: chrome was not launched");
     },
     { refusedByTest: true },

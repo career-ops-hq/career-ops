@@ -268,3 +268,93 @@ test("sessionFollowUp stops drive and prefill for an unsupported body", () => {
   assert.equal(sessionFollowUp({ id: "apply-1", fields: [] }).kind, "continue");
   assert.equal(sessionFollowUp(null).kind, "continue");
 });
+
+function careerPage(careerUrl, blockedHref, closed) {
+  const frame = {
+    url: () => careerUrl,
+    evaluate: async () => {
+      throw new Error("document is not defined");
+    },
+    waitForSelector: async () => null,
+  };
+  const page = {
+    url: () => careerUrl,
+    goto: async () => ({ status: () => 200, headers: () => ({}) }),
+    waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    screenshot: async () => Buffer.from("career"),
+    title: async () => "Acme role",
+    evaluate: async () => {
+      throw new Error("document is not defined");
+    },
+    frames: () => [frame],
+    mainFrame: () => frame,
+    locator(selector) {
+      const hit = /myworkdayjobs|myworkdaysite|icims\.com|ultipro/.test(String(selector));
+      const node = {
+        count: async () => (hit ? 1 : 0),
+        getAttribute: async () => (hit ? blockedHref : null),
+        isVisible: async () => false,
+        click: async () => {},
+        first() { return this; },
+      };
+      return { first: () => node };
+    },
+    getByRole() {
+      const node = {
+        count: async () => 0,
+        isVisible: async () => false,
+        innerText: async () => "",
+        getAttribute: async () => null,
+        click: async () => {},
+        first() { return this; },
+        or() { return this; },
+      };
+      return node;
+    },
+  };
+  return {
+    isConnected: () => false,
+    newContext: async () => ({
+      route: async () => {},
+      routeWebSocket: async () => {},
+      setDefaultTimeout() {},
+      newPage: async () => page,
+      close: async () => { closed.push(true); },
+    }),
+  };
+}
+
+describe("openSession closes a career page whose Apply link is a blocked ATS", { concurrency: 1 }, () => {
+  let restore;
+  before(() => {
+    restore = setHostResolver(async () => ["93.184.216.34"]);
+  });
+  after(() => {
+    restore?.();
+    clearTimeout(globalThis.__coIdleTimer);
+    globalThis.__coIdleTimer = undefined;
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = undefined;
+  });
+
+  for (const [href, vendor, label] of [
+    ["https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role", "workday", "Workday"],
+    ["https://careers-acme.icims.com/jobs/1", "icims", "iCIMS"],
+    ["https://acme.ultipro.com/jobs/1", "ultipro", "UKG"],
+  ]) {
+    test(`${label} Apply link`, async () => {
+      const career = "https://careers.example.com/jobs/1";
+      const closed = [];
+      globalThis.__applyCareerPage = () => careerPage(career, href, closed);
+      const before = globalThis.__applyLaunchAttempts;
+      const result = await openSession(career);
+      assert.equal(globalThis.__applyLaunchAttempts, before + 1);
+      assert.deepEqual(closed, [true]);
+      assert.equal(result.unsupported.vendor, vendor);
+      assert.equal(result.unsupported.label, label);
+      assert.equal(result.unsupported.postingUrl, href);
+      assert.equal(result.message, MESSAGE[label]);
+    });
+  }
+});

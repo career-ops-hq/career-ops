@@ -1,4 +1,6 @@
-import { pathToFileURL } from "node:url";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveCodeRoot, resolveRootScript } from "../core/code-root.mjs";
 
 // Server-only. The host table stays in ats-vendor.mjs. A static import of that
@@ -13,9 +15,24 @@ const LABELS = {
   ultipro: "UKG",
 };
 
+function atsVendorFile() {
+  const explicit = (process.env.CAREER_OPS_CODE_ROOT || "").trim();
+  if (explicit) return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "ats-vendor");
+  // resolveCodeRoot assumes cwd is <checkout>/web. The node test runner's cwd
+  // is the checkout, so that walk lands on the parent directory and the import
+  // misses ats-vendor.mjs. Prefer a candidate that exists.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "ats-vendor"),
+    resolveRootScript(path.resolve(process.cwd()), "ats-vendor"),
+    resolveRootScript(path.resolve(here, "../../../.."), "ats-vendor"),
+  ];
+  return candidates.find((file) => existsSync(file)) || candidates[0];
+}
+
 function loadAtsVendor() {
   if (!vendorModule) {
-    const file = resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "ats-vendor");
+    const file = atsVendorFile();
     vendorModule = import(/* webpackIgnore: true */ /* turbopackIgnore: true */ pathToFileURL(file).href);
   }
   return vendorModule;

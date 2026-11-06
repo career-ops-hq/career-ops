@@ -1,4 +1,6 @@
-import { pathToFileURL } from "node:url";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium, type Browser, type BrowserContext, type Page, type Frame, type Response } from "playwright-core";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
@@ -16,8 +18,22 @@ import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mj
 
 type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
 
+function applyScopeFile(): string {
+  const explicit = (process.env.CAREER_OPS_CODE_ROOT || "").trim();
+  if (explicit) return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope");
+  // resolveCodeRoot assumes cwd is <checkout>/web. node --test from the
+  // checkout walks up to the parent and misses apply-scope.mjs.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope"),
+    resolveRootScript(path.resolve(process.cwd()), "apply-scope"),
+    resolveRootScript(path.resolve(here, "../../../.."), "apply-scope"),
+  ];
+  return candidates.find((file) => existsSync(file)) || candidates[0];
+}
+
 async function applyLaunch(): Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }> {
-  const file = resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope");
+  const file = applyScopeFile();
   return import(/* webpackIgnore: true */ pathToFileURL(file).href) as Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }>;
 }
 
