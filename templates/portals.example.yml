@@ -3505,6 +3505,13 @@ tracked_companies:
     notes: "SmartRecruiters. 123 postings when checked."
     enabled: true
 
+  # -- Middle East & Pakistan --
+  - name: Careem
+    careers_url: https://jobs.careem.com/
+    api: https://boards-api.greenhouse.io/v1/boards/careem/jobs
+    notes: "Greenhouse. Technology and operations roles in Pakistan and the Middle East."
+    enabled: false
+
 # ── Job Boards ────────────────────────────────────────────────────────
 # Multi-employer aggregators. Unlike tracked_companies (one entry = one employer),
 # job boards return offers from many companies in a single API call.
