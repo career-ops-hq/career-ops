@@ -150,6 +150,15 @@ test('generated CV uses the linked report identity when its application number d
     assert.equal(await resolveTailoredCv(undefined, '309'), first.paths.finalPdf);
     assert.equal(await resolveTailoredCv(undefined, '310'), second.paths.finalPdf);
     assert.equal(await resolveTailoredCv(undefined, '0309'), first.paths.finalPdf);
+
+    writeFileSync(join(root, 'data', 'applications.md'), [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      '| 309 | 2026-07-01 | Acme | Engineer | 4.5/5 | Evaluated | | [report](../reports/018-acme-2026-07-01.md) | |',
+      '| 310 | 2026-07-01 | Acme | Manager | 4.5/5 | Evaluated | | [report](../reports/019-acme-2026-07-01.md) | |',
+    ].join('\n'));
+    assert.equal(await resolveTailoredCv(undefined, '309'), first.paths.finalPdf);
+    assert.equal(await resolveTailoredCv(undefined, '310'), second.paths.finalPdf);
   });
 });
 

@@ -6,7 +6,7 @@ import { careerOpsRoot, findApplication, isRegularContainedFile, readReport, roo
 import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 import { parseReport } from "@/lib/format";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
-import { resolvePostingUrl } from "@/lib/posting-url.mjs";
+import { applyPostingUrl } from "@/lib/posting-url.mjs";
 import { answerCopyItems, cvCopyFields, indexedPdf, PORTAL_TIPS, reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { readCvDiskState } from "@/lib/read-cv-disk";
 import { ApplyChecklist } from "@/components/apply-checklist";
@@ -32,7 +32,7 @@ export default async function ApplyPage({
 
   const reportNum = reportNumberFor(id, app, report?.file ?? null);
   const reportUrl = report ? parseReport(report.content).fields.find((field) => field.label === "URL")?.value : "";
-  const postingUrl = resolvePostingUrl((app as { url?: string } | null)?.url, reportUrl);
+  const postingUrl = applyPostingUrl(reportUrl, app?.url, app?.applyLink);
 
   let answers: { label: string; text: string }[] = [];
   if (report?.content) {

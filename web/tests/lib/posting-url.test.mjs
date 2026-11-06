@@ -34,10 +34,10 @@ test("resolvePostingUrl prefers the tracker cell", () => {
   assert.equal(resolvePostingUrl("", ""), "");
 });
 
-test("applyPostingUrl prefers the report field, then the tracker", () => {
+test("applyPostingUrl prefers the tracker cell, then the report", () => {
   assert.equal(
     applyPostingUrl("https://jobs.example.com/report", "https://jobs.example.com/tracker"),
-    "https://jobs.example.com/report",
+    "https://jobs.example.com/tracker",
   );
   assert.equal(applyPostingUrl("", "https://jobs.example.com/tracker"), "https://jobs.example.com/tracker");
   assert.equal(applyPostingUrl("not a link", ""), "");
