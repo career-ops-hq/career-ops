@@ -8,7 +8,7 @@
 // the shell. Every case below is offline: fetch and DNS are stubbed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jdFromPageHtml, fetchJdFromPage, capJdText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
+import { jdFromPageHtml, fetchJdFromPage, capJdText, markCappedAtsText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { inProviderFetch } from '../providers/_ip-guard.mjs';
@@ -303,10 +303,31 @@ test('an unrelated expired posting on the page is not reported as the requested 
   assert.equal(jdFromPageHtml(page(`<p>${BODY}</p>`, { extraLd: [expired] }), NOW), null, 'ambiguous expiry must be a miss, not a closure');
 });
 
-test('same-title description-less postings at different employers or locations are separate postings', () => {
-  const at = (org, city) => ({ '@type': 'JobPosting', title: 'Engineer', hiringOrganization: { name: org }, jobLocation: { address: { addressLocality: city } } });
-  const out = jdFromPageHtml(page('<p>Short teaser.</p>', { posting: { title: 'Engineer', description: undefined, hiringOrganization: { name: 'A' }, jobLocation: { address: { addressLocality: 'Paris' } } }, extraLd: [at('B', 'Paris'), at('A', 'Berlin')], body: embedded(long('unrelated', 300)) }), NOW);
-  assert.equal(out, null);
+// Otherwise-identical, description-less postings that differ in exactly one field.
+const sameButFor = (field, value) => {
+  const base = { '@type': 'JobPosting', title: 'Engineer', hiringOrganization: { name: 'A' }, jobLocation: { address: { addressLocality: 'Paris' } } };
+  return jdFromPageHtml(page('<p>Short teaser.</p>', {
+    posting: { title: 'Engineer', description: undefined, hiringOrganization: base.hiringOrganization, jobLocation: base.jobLocation },
+    extraLd: [{ ...base, [field]: value }],
+    body: embedded(long('unrelated', 300)),
+  }), NOW);
+};
+
+test('same-title description-less postings that differ only by employer are separate postings', () => {
+  assert.equal(sameButFor('hiringOrganization', { name: 'B' }), null);
+});
+
+test('same-title description-less postings that differ only by location are separate postings', () => {
+  assert.equal(sameButFor('jobLocation', { address: { addressLocality: 'Berlin' } }), null);
+});
+
+test('markCappedAtsText turns the bare ellipsis of a capped ATS result into the explicit notice', () => {
+  const cap = 50;
+  const capped = `${'x'.repeat(cap)}\u2026`;
+  const out = markCappedAtsText(capped, cap);
+  assert.ok(out.endsWith(TRUNCATION_NOTICE(cap)) && !out.includes('\u2026'));
+  assert.equal(markCappedAtsText('x'.repeat(cap), cap), 'x'.repeat(cap), 'text that was not cut is untouched');
+  assert.equal(markCappedAtsText('short \u2026', cap), 'short \u2026', 'an ellipsis in uncut text is not a cut marker');
 });
 
 test('rebinding over a real socket: public pre-check, loopback at connect time, and the server sees nothing', () => {

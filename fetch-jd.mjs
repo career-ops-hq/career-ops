@@ -34,7 +34,7 @@
 
 import { fetchJdViaKnownApi } from './browser-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { fetchJdFromPage } from './lib/jd-page-fetch.mjs';
+import { fetchJdFromPage, markCappedAtsText } from './lib/jd-page-fetch.mjs';
 
 const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget reason to cap tighter
 const TIMEOUT_MS = 15_000;
@@ -87,7 +87,7 @@ Options:
   }
 
   const header = result.title ? `${result.title}\n\n` : '';
-  process.stdout.write(header + result.text);
+  process.stdout.write(header + markCappedAtsText(result.text, TEXT_CAP));
 }
 
 if (isMainModule(import.meta.url)) {
