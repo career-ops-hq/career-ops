@@ -4,7 +4,7 @@ import path from "node:path";
  * Content-Disposition for a served file. Header values must be ByteStrings,
  * so a raw "cv-łukasz-….pdf" makes `new Response` throw. The quoted
  * `filename` is an ASCII fallback; `filename*` carries the real name
- * (RFC 6266). `inline` displays the PDF. `attachment` downloads it.
+ * (RFC 6266).
  *
  * @param {"inline" | "attachment"} type
  * @param {string} filename

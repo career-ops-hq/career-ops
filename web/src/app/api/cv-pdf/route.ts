@@ -19,8 +19,6 @@ function servePdf(file: string, downloadFlag: string | null): Response {
   });
 }
 
-// Serve the tailored CV PDF the pdf mode wrote to output/. Inline by default
-// so it opens in the browser. download=1 attaches the on-disk file name.
 export async function GET(req: NextRequest) {
   const located = await locateTailoredPdf(cvPdfSelectors(req.nextUrl.searchParams));
   if (!("file" in located)) return new Response(located.message, { status: located.status });

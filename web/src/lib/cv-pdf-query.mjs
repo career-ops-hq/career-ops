@@ -1,7 +1,4 @@
 /**
- * Selectors shared by the tailored-CV view, download, and reveal routes.
- * A client-supplied file path is not a selector.
- *
  * @param {{ get(name: string): string | null }} searchParams
  * @returns {{ n: string, company: string, application: string, kind: "cv" | "cover" }}
  */
