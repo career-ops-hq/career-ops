@@ -226,6 +226,9 @@ refuses('an impossible --next writes nothing', ['--app', '7', '--dealbreaker', S
 refuses('an unknown flag writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--bogus']);
 refuses('a repeated --dealbreaker writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--dealbreaker', 'No equity-only compensation']);
 refuses('a dealbreaker with a semicolon writes nothing', ['--app', '7', '--dealbreaker', 'No on-site; relocation']);
+refuses('a dealbreaker with a tab writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\trelocation']);
+refuses('a dealbreaker with a newline writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\nrelocation']);
+refuses('a dealbreaker with a carriage return writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\r\nrelocation']);
 refuses('a Machine Summary holding only comments writes nothing', ['--app', '7', '--dealbreaker', SENTENCE], {
   report: reportText('4.2', 'Apply', '[]').replace(/```yaml\n[\s\S]*?```/, '```yaml\n# summary pending\n```'),
 });
@@ -376,8 +379,12 @@ check('Step 10 tells the agent how to record the call', () => {
     'Drop every sentence the user declines',
     'run the list again from the first command',
     'Run the commands one at a time and check each exit status',
-    "or as `''` in PowerShell",
+    "In PowerShell, write it as `''`, and double a curly quote",
     'A second run of the same commands is safe',
+    'a semicolon (`;`), a tab or a line break',
+    'ask for a one-line version without it that keeps the meaning',
+    'Do not remove the character or reword the sentence yourself',
+    "the user's one-line version",
   ]) {
     assert.ok(section.includes(phrase), `missing ${phrase}`);
   }
@@ -507,3 +514,48 @@ if (englishBlock) {
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+// #6541: debrief-sync.mjs refuses a --dealbreaker value with a semicolon, tab
+// or line break, so every Step 10 that passes the profile sentence must check
+// it first, ask the user for a safe one-line value, and check that value
+// again, all before the [y/N] confirmation. Each file names the three
+// characters, the one-line request and the re-check in its own language; a
+// new translation that passes --dealbreaker has to be added here.
+const DELIMITER_GUARD = {
+  'modes/interview/debrief.md': ['a tab', 'a line break', 'one-line version', 'ask again until it has none'],
+  'modes/de/interview/debrief.md': ['Tabulator', 'Zeilenumbruch', 'einzeilige Fassung', 'frag erneut'],
+  'modes/fr/interview/debrief.md': ['une tabulation', 'un saut de ligne', 'une seule ligne', 'redemandez-la'],
+  'modes/id/interview/debrief.md': ['tab', 'baris baru', 'versi satu baris', 'minta lagi'],
+  'modes/es/interview/debrief.md': ['tabulador', 'salto de línea', 'una sola línea', 'vuelve a pedirla'],
+  'modes/it/interview/debrief.md': ['tabulazione', 'a capo', 'una sola riga', "chiedine un'altra"],
+  'modes/ja/interview/debrief.md': ['タブ', '改行', '1行の文', '改めて求める'],
+  'modes/ko/interview/debrief.md': ['탭', '줄바꿈', '한 줄짜리', '다시 요청합니다'],
+  'modes/pl/interview/debrief.md': ['tabulator', 'nowej linii', 'jednowierszową', 'proś ponownie'],
+  'modes/pt/interview/debrief.md': ['tabulação', 'quebra de linha', 'uma única linha', 'peça de novo'],
+  'modes/ru/interview/debrief.md': ['табуляцией', 'переводом строки', 'однострочный', 'проси снова'],
+  'modes/ua/interview/debrief.md': ['табуляцією', 'новий рядок', 'однорядковий', 'просіть знову'],
+  'modes/zh/interview/debrief.md': ['制表符', '换行', '单行版本', '再次请用户修改'],
+};
+
+check('every Step 10 that passes --dealbreaker checks the delimiters before the prompt', () => {
+  const modesDir = join(ROOT, 'modes');
+  const files = ['modes/interview/debrief.md', ...readdirSync(modesDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => `modes/${d.name}/interview/debrief.md`)
+    .filter((rel) => existsSync(join(ROOT, rel)))];
+  const affected = files.filter((rel) => readFileSync(join(ROOT, rel), 'utf8').includes('--dealbreaker'));
+  assert.deepEqual([...affected].sort(), Object.keys(DELIMITER_GUARD).sort(),
+    'every debrief that passes --dealbreaker needs an entry in DELIMITER_GUARD');
+  for (const rel of affected) {
+    const paragraph = readFileSync(join(ROOT, rel), 'utf8')
+      .split(/\n\s*\n/)
+      .find((p) => p.includes('`--dealbreaker`') && p.includes('[y/N]'));
+    assert.ok(paragraph, `${rel}: no dealbreaker paragraph with a [y/N] prompt`);
+    const prompt = paragraph.indexOf('[y/N]');
+    for (const phrase of ['debrief-sync.mjs', '`;`', ...DELIMITER_GUARD[rel]]) {
+      const at = paragraph.indexOf(phrase);
+      assert.ok(at >= 0, `${rel}: the dealbreaker paragraph is missing ${phrase}`);
+      assert.ok(at < prompt, `${rel}: ${phrase} comes after the [y/N] prompt`);
+    }
+  }
+});

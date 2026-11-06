@@ -2106,6 +2106,16 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "bvs2",
+      "name": "Bas",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125697484?v=4",
+      "profile": "https://github.com/bvs2",
+      "contributions": [
+        "code",
+        "test"
+      ]
     }
   ]
 }

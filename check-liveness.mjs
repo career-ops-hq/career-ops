@@ -31,7 +31,7 @@ import {
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
 import { planExpiredHistoryRows, trackerLivenessTargets, DEFAULT_TRACKER_STATUSES, planExpiredDiscards, postingClosedNote, DEFAULT_DISCARD_STATUSES, discardableExpiredUrls } from './liveness-core.mjs';
-import { appendToScanHistory, normalizeUrlForDedup, SCAN_HISTORY_PATH } from './scan.mjs';
+import { appendToScanHistory, seenJobKey, SCAN_HISTORY_PATH } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -163,10 +163,12 @@ export async function recordExpiredVerdicts(verdicts) {
     const rows = planExpiredHistoryRows(
       readFileSync(SCAN_HISTORY_PATH, 'utf-8'),
       verdicts,
-      normalizeUrlForDedup,
+      seenJobKey,
     );
-    if (rows.length > 0) await appendToScanHistory(rows, localToday(), 'skipped_expired', { alreadyLocked: true });
-    return rows.length;
+    // The writer drops an alias when another spelling of that posting already
+    // has a pinning skipped_expired row. The number below is rows that landed.
+    if (rows.length > 0) return await appendToScanHistory(rows, localToday(), 'skipped_expired', { alreadyLocked: true });
+    return 0;
   });
 }
 

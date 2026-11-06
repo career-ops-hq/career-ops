@@ -11,7 +11,7 @@
 // "apt-get: command not found", only from a transient one (a flaky
 // Chromium binary download, which the flagless form still guards against).
 
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
@@ -101,12 +101,15 @@ try {
 
   const env = { ...process.env, PATH: `${failDir}${delimiter}${process.env.PATH}` };
   delete env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD;
-  let output = '';
-  try {
-    output = execSync(`${postinstall} 2>&1`, { cwd: ROOT, env, encoding: 'utf-8' });
+  // Run the script in the platform shell, as npm does, and read both of its
+  // streams. Appending `2>&1` to the command redirected only its last `||`
+  // step, so stderr from the steps before it never reached `output`.
+  const run = spawnSync(postinstall, { cwd: ROOT, env, encoding: 'utf-8', shell: true });
+  const output = (run.stdout ?? '') + (run.stderr ?? '');
+  if (run.status === 0) {
     pass('postinstall exits 0 when both Chromium install attempts fail');
-  } catch (e) {
-    fail(`postinstall exited ${e.status} when the Chromium install failed, which fails npm install: ${postinstall}`);
+  } else {
+    fail(`postinstall exited ${run.status} when the Chromium install failed, which fails npm install: ${postinstall}`);
   }
   const ran = existsSync(attempts) ? readFileSync(attempts, 'utf-8').trim().split(/\r?\n/).length : 0;
   if (ran === 2) {

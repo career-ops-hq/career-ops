@@ -59,7 +59,6 @@ export function resolveDefaultTimeoutMs(raw, fallback = 10_000) {
   return parsed;
 }
 
-const DEFAULT_TIMEOUT_MS = resolveDefaultTimeoutMs(process.env.CAREER_OPS_HTTP_TIMEOUT_MS);
 let proxyAgent;
 let proxySignature;
 
@@ -142,6 +141,10 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
 // server-side redirect could point the request at a private address after the
 // ip guard already passed the original host (#4079). Callers that really need
 // to follow redirects opt in explicitly.
+//
+// The default timeout is read on each request, not when this module loads: an
+// entry script such as scan.mjs imports this file statically, so the module is
+// evaluated before that script loads the data root's .env.
 /**
  * @param {string} url
  * @param {FetchOptions} [opts]
@@ -151,7 +154,7 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
  * @param {typeof fetch} [fetchImpl] undici's fetch when a proxy dispatcher is used; global fetch otherwise.
  * @returns {Promise<any>}
  */
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse, acceptNotModified = false } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
+async function fetchInContext(url, { timeoutMs = resolveDefaultTimeoutMs(process.env.CAREER_OPS_HTTP_TIMEOUT_MS), headers = {}, method = 'GET', body = null, redirect = 'error', onResponse, acceptNotModified = false } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

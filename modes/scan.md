@@ -453,6 +453,8 @@ New added to pipeline.md: N
 → Run the `pipeline` mode to evaluate the new offers (`/career-ops pipeline` where available, or ask the agent to run `pipeline`).
 ```
 
+**Session title counts:** end the summary with `Title counts: {remaining}/{found}` and the URLs of the postings still counted, so the interactive parent session can rename itself and hand those URLs to `pipeline`. `found` is every posting that passed the scanner's filters plus every search hit taken forward for checking. `remaining` is `found` less each one removed since: a duplicate, a dead or unconfirmed link, a title or location miss. The router's **Session Title** rule (`SKILL.md`, #5303) holds the full definitions. A worker running this mode never renames anything.
+
 ## Managing careers_url
 
 Every company in `tracked_companies` must have a `careers_url` — the direct URL to its offers page. This avoids searching for it every time.
