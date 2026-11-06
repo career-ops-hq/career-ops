@@ -102,6 +102,23 @@ test("a stamp without a reason is not a rank", () => {
   assert.equal(parseRankStamp("4.0/5 \u2014 "), null);
 });
 
+test("a numeric compensation minimum is the pay floor", () => {
+  const numeric = fitTargetsFromProfile({
+    target_roles: { primary: ["Senior Data Analyst"] },
+    compensation: { minimum: 120000, currency: "USD", location_flexibility: "Remote preferred" },
+  });
+  assert.equal(numeric.payFloor, 120000);
+  const fit = scorePosting({
+    title: "Senior Data Analyst",
+    location: "Remote",
+    pay: "$140,000",
+  }, numeric);
+  assert.match(fit.reason, /pay above your floor/);
+  assert.equal(fitTargetsFromProfile({ compensation: { minimum: 500 } }).payFloor, null);
+  assert.equal(fitTargetsFromProfile({ compensation: { minimum: Infinity } }).payFloor, null);
+  assert.equal(fitTargetsFromProfile({ compensation: { minimum: "$100k" } }).payFloor, 100000);
+});
+
 test("the web copy matches the root module byte for byte", () => {
   const core = fs.readFileSync(path.join(ROOT, "lib", "inbox-rank.mjs"));
   const web = fs.readFileSync(path.join(ROOT, "web", "src", "lib", "core", "inbox-rank.mjs"));
