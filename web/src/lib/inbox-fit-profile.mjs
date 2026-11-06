@@ -15,3 +15,23 @@ export function loadFitTargets() {
   }
   return fitTargetsFromProfile(yaml.load(text));
 }
+
+/**
+ * @template T
+ * @param {T[]} jobs
+ * @param {() => object} load
+ * @param {(job: T, targets: object) => T} rank
+ * @returns {{ jobs: T[], error: string | null }}
+ */
+export function applyInboxFit(jobs, load, rank) {
+  try {
+    const targets = load();
+    return { jobs: jobs.map((job) => rank(job, targets)), error: null };
+  } catch (err) {
+    const detail = err && typeof err === "object" && typeof err.message === "string" ? err.message.trim() : "";
+    return {
+      jobs,
+      error: detail ? `config/profile.yml: ${detail}` : "config/profile.yml could not be read.",
+    };
+  }
+}

@@ -5,7 +5,7 @@ import { pendingInbox } from "@/lib/inbox-pending.mjs";
 import { PipelineView } from "@/components/pipeline-view";
 import { pipelineTab } from "@/lib/pipeline-navigation.mjs";
 import { scorePosting } from "@/lib/core/inbox-rank.mjs";
-import { loadFitTargets } from "@/lib/inbox-fit-profile.mjs";
+import { applyInboxFit, loadFitTargets } from "@/lib/inbox-fit-profile.mjs";
 
 export const dynamic = "force-dynamic"; // always read fresh local files
 
@@ -16,7 +16,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   const onInbox = pipelineTab(tab) === "INBOX";
   const { inbox, applications } = pipelineSummary();
   const pending = pendingInbox(inbox);
-  const inboxRows = onInbox ? withInboxFit(pending) : null;
+  const fitted = onInbox ? withInboxFit(pending) : null;
   const trackerShape = readTrackerShape();
   // Tracker row numbers whose tailored CV is indexed (data/pdf-index.tsv) AND on
   // disk; the tracker's own PDF emoji can drift from what output/ really holds.
@@ -35,14 +35,20 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
       ).filter((n): n is string => n !== null);
   return (
     <Suspense>
-      <PipelineView applications={applications} inbox={inboxRows} inboxCount={pending.length} trackerShape={trackerShape} cvRows={cvRows} />
+      <PipelineView
+        applications={applications}
+        inbox={fitted ? fitted.jobs : null}
+        inboxCount={pending.length}
+        inboxFitError={fitted?.error ?? null}
+        trackerShape={trackerShape}
+        cvRows={cvRows}
+      />
     </Suspense>
   );
 }
 
-function withInboxFit(jobs: InboxJob[]): InboxJob[] {
-  const targets = loadFitTargets();
-  return jobs.map((job) => ({
+function withInboxFit(jobs: InboxJob[]): { jobs: InboxJob[]; error: string | null } {
+  return applyInboxFit(jobs, loadFitTargets, (job, targets) => ({
     ...job,
     fit: scorePosting({
       title: job.role,
