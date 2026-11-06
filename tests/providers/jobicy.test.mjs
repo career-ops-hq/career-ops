@@ -129,6 +129,28 @@ try {
     fail(`jobicy.fetch() normalized row = ${JSON.stringify(fetched[0])}`);
   }
 
+  // The live feed encodes its text fields, so these used to reach pipeline.md,
+  // scan-history and the tracker as literal entities.
+  const [encoded] = parseJobicyResponse({
+    jobs: [{ jobTitle: 'R&#038;D Engineer &#8211; Part-Time', companyName: 'Zone &#038; Co', jobGeo: 'Asia &amp; Pacific', url: 'https://jobicy.com/jobs/1-rd-engineer' }],
+  });
+  if (encoded?.company === 'Zone & Co' && encoded?.title === 'R&D Engineer – Part-Time' && encoded?.location === 'Asia & Pacific') {
+    pass('parseJobicyResponse decodes HTML entities in the title, company and location');
+  } else {
+    fail(`parseJobicyResponse left entities in place: ${JSON.stringify(encoded)}`);
+  }
+
+  // A company that is only an entity for whitespace is no company: the fallback
+  // is decided on the decoded name, or the row would carry an empty one.
+  const blanks = parseJobicyResponse({
+    jobs: ['&nbsp;', ' &#160; ', '&#32;'].map((companyName, i) => ({ jobTitle: 'Data Engineer', companyName, url: `https://jobicy.com/jobs/${i + 2}-data-engineer` })),
+  });
+  if (blanks.length === 3 && blanks.every((j) => j.company === 'Jobicy')) {
+    pass('parseJobicyResponse falls back to the default company when the name decodes to whitespace');
+  } else {
+    fail(`parseJobicyResponse kept a blank company: ${JSON.stringify(blanks.map((j) => j.company))}`);
+  }
+
 } catch (e) {
   fail(`jobicy provider tests crashed: ${e.message}`);
 }

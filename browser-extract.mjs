@@ -53,9 +53,11 @@ import { classifyLiveness } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { isWorkModelOnly } from './providers/greenhouse.mjs';
 import { isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
+import { extractCandidateOpportunityDetail, extractLocations } from './providers/ultipro.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 
@@ -254,6 +256,27 @@ export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
 }
 
 /**
+ * Read the body of a response no fetcher will use, dropping each chunk as it
+ * arrives, and return null. Left unread, a body still arriving keeps its
+ * socket open, and with it the process: fetch-jd.mjs exits once nothing is
+ * left to run. Fetchers await this inside their try, so the read stays under
+ * their abort timer and a body that never ends stops at the same timeout as
+ * the rest of the request. Reading, not cancelling: these error bodies are
+ * small, while a cancel aborts the request mid-body and undici then opens a
+ * new connection that the process waits for (0.1 to 2.5 s on real Greenhouse
+ * and Workday misses, Node 24).
+ *
+ * @param {Response} res
+ */
+async function discard(res) {
+  try {
+    const reader = res.body?.getReader();
+    while (reader && !(await reader.read()).done) { /* drop the chunk */ }
+  } catch { /* cut off by the abort timer, or unreadable */ }
+  return null;
+}
+
+/**
  * Fetch + shape one Workday posting from its CXS endpoint. Returns null for
  * ANY inconclusive outcome (blocked host, redirect, non-200, unparseable or
  * unexpected body, timeout) so the caller falls through to the browser path —
@@ -278,7 +301,7 @@ async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error', // a redirect off the derived host is not one to follow
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeWorkdayJob(await res.json(), postingUrl, textCap);
   } catch {
     return null;
@@ -367,7 +390,7 @@ async function fetchAshbyJd(apiUrl, jobId, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeAshbyJob(json, jobId, postingUrl, textCap);
   } catch {
@@ -452,7 +475,7 @@ async function fetchGreenhouseJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeGreenhouseJob(json, postingUrl, textCap);
   } catch {
@@ -543,7 +566,7 @@ async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeLeverJob(json, postingUrl, textCap);
   } catch {
@@ -571,6 +594,7 @@ async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutM
       signal: controller.signal,
     });
     jobApiUrl = await resolved.followEmbed(res, resolved.parts);
+    await discard(res); // only its status and Location header are read
   } catch {
     return null;
   } finally {
@@ -627,7 +651,7 @@ async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeSmartRecruitersJob(json, postingUrl, textCap);
   } catch {
@@ -682,8 +706,139 @@ async function fetchZohoJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeZohoJob(await res.text(), id, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// `JobLocationType` as the board labels it. The page maps the number in script
+// it loads from elsewhere, so this was read off rendered pages: on 2026-10-29,
+// of 103 postings read in a browser, the 41 with 1 showed "On-site", the 6
+// with 2 "Remote" and the 8 with 0 "Hybrid"; the 48 without one showed none.
+const ULTIPRO_WORK_MODELS = { 0: 'Hybrid', 1: 'On-site', 2: 'Remote' };
+
+// The record's criteria lists, in the order the page's Qualifications section
+// shows them, each item worded as the page words it.
+const ULTIPRO_CRITERIA = [
+  ['SkillCriteria', 'Skill', (c) => [c.SkillName, c.MinimumScaleValueCode && c.MinimumScaleValueCode !== 'NONE' ? c.MinimumScaleValueDescription : '', c.SkillDescription]],
+  ['BehaviorCriteria', 'Behavior', (c) => [c.BehaviorName, c.BehaviorDescription]],
+  ['MotivationCriteria', 'Motivation', (c) => [c.MotivationName, c.MotivationDescription]],
+  ['EducationCriteria', 'Education', (c) => [c.DegreeName && `${c.DegreeName} or better${c.MajorName ? ` in ${c.MajorName}${c.Related ? ' or related field' : ''}` : ''}`]],
+  ['WorkExperienceCriteria', 'Experience', (c) => [ultiproYears(c.MinimumRequiredYears, c.MaximumRequiredYears), c.Description]],
+  ['LicenseAndCertificationCriteria', 'License or certification', (c) => [c.LicenseAndCertificationName]],
+];
+
+// The page reads "8-10 years" for a range and "5 years" for a minimum alone. No
+// sampled posting had a maximum alone; "Up to" keeps it from reading as a floor.
+function ultiproYears(min, max) {
+  if (Number.isFinite(min) && Number.isFinite(max)) return `${min}-${max} years`;
+  if (Number.isFinite(min)) return `${min} years`;
+  return Number.isFinite(max) ? `Up to ${max} years` : '';
+}
+
+/**
+ * Shape one UltiPro (UKG Pro Recruiting) detail page into a jd-mode result.
+ * Pure, same contract as normalizeZohoJob: UKG has no per-posting JSON API
+ * either, and the page embeds the posting record (providers/ultipro.mjs
+ * extractCandidateOpportunityDetail), whose `Description` is HTML. The record
+ * must be THIS posting's: the extractor throws on another id or on a page
+ * that changed shape, and finds nothing on the board's empty page (a removed
+ * posting). Each of those returns null so the caller falls through.
+ *
+ * The page shows more than the description: the header facts and a
+ * Qualifications section built from the record's criteria lists. Both are kept,
+ * so this text holds what a browser read of the page does, without its
+ * buttons and the equal-opportunity notice: on 2026-10-29, of 103 postings
+ * read both ways, every work model, pay line, travel line and criteria list
+ * the page showed was here too. Qualifications go before the description
+ * because compactText cuts the tail, and a long description must not push the
+ * requirements out.
+ *
+ * A closed posting keeps its record, so its JD is still returned, with the
+ * closure in the header, as normalizeWorkdayJob does for `canApply: false`.
+ *
+ * @param {any} html - the detail page's body
+ * @param {string} id - the posting's opportunityId, lower-cased as the rung requests it
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeUltiproJob(html, id, postingUrl, textCap = JD_TEXT_CAP) {
+  let record;
+  try {
+    const found = extractCandidateOpportunityDetail(html, id);
+    if (found.status !== 'ok') return null;
+    record = found.detail;
+  } catch {
+    return null;
+  }
+  const body = jdHtmlToText(record.Description);
+  if (!body) return null;
+
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim() : '');
+  const meta = [];
+  const location = extractLocations(record.Locations);
+  if (location) meta.push(`Location: ${location}`);
+  const workModel = ULTIPRO_WORK_MODELS[record.JobLocationType];
+  if (workModel) meta.push(`Work model: ${workModel}`);
+  if (typeof record.FullTime === 'boolean') meta.push(`Job type: ${record.FullTime ? 'Full time' : 'Part time'}`);
+  if (str(record.JobCategoryName)) meta.push(`Job category: ${str(record.JobCategoryName)}`);
+  const pay = record.PayRangeVisible === true ? record.PayRange : null;
+  if (str(pay?.PayRangeMinimum) && str(pay?.PayRangeMaximum)) {
+    meta.push(`Pay range: ${str(pay.PayRangeMinimum)} to ${str(pay.PayRangeMaximum)} ${str(record.PayRangeCurrencyCode)}`.trim());
+  }
+  const amount = record.CompensationAmount;
+  if (str(amount?.Value)) {
+    const salaried = record.Salaried === true;
+    meta.push(`${salaried ? 'Salary' : 'Pay'}: ${[str(amount.Value), str(amount.Code), salaried ? 'per year' : ''].filter(Boolean).join(' ')}`);
+  }
+  if (typeof record.TravelRequired === 'boolean') {
+    const travel = str(record.TravelDescription);
+    meta.push(`Travel required: ${record.TravelRequired ? 'Yes' : 'No'}${travel ? ` (${travel})` : ''}`);
+  }
+  const posted = str(record.PostedDate).match(/^\d{4}-\d{2}-\d{2}/);
+  if (posted) meta.push(`Posted: ${posted[0]}`);
+  if (str(record.RequisitionNumber)) meta.push(`Req ID: ${str(record.RequisitionNumber)}`);
+  if (record.OpportunityIsClosed === true) meta.push('Applications closed (OpportunityIsClosed: true)');
+
+  const qualifications = [];
+  for (const [key, label, words] of ULTIPRO_CRITERIA) {
+    const items = Array.isArray(record[key]) ? record[key].filter((c) => c && typeof c === 'object') : [];
+    // Required first, then preferred, as the page groups them.
+    for (const required of [true, false]) {
+      for (const c of items.filter((item) => (item.Required === true) === required)) {
+        const text = words(c).map(str).filter(Boolean).join(': ');
+        if (text) qualifications.push(`- ${label} (${required ? 'required' : 'preferred'}): ${text}`);
+      }
+    }
+  }
+
+  return {
+    url: postingUrl,
+    title: compactText(str(record.Title), 300),
+    text: compactText([
+      meta.join('\n'),
+      qualifications.length ? `Qualifications:\n${qualifications.join('\n')}` : '',
+      body,
+    ].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+async function fetchUltiproJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'text/html', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return await discard(res);
+    return normalizeUltiproJob(await res.text(), id, postingUrl, textCap);
   } catch {
     return null;
   } finally {
@@ -722,19 +877,24 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
     redirect: 'error',
     signal: controller.signal,
   };
+  // The share link's redirect, of which only the status and Location header
+  // are read. Its body is drained last: both requests share one timer, so a
+  // slow body read first would spend the posting request's budget.
+  let redirect;
   try {
     let apiUrl = resolved.apiUrl;
     if (resolved.followEmbed) {
-      const redirect = await fetch(apiUrl, { ...options, redirect: 'manual' });
+      redirect = await fetch(apiUrl, { ...options, redirect: 'manual' });
       apiUrl = await resolved.followEmbed(redirect, resolved.parts);
       if (!apiUrl || rejectPrivateOrInvalid(apiUrl)) return null;
     }
     const res = await fetch(apiUrl, options);
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeWorkableJob(await res.json(), resolved.parts.shortcode, postingUrl, textCap);
   } catch {
     return null;
   } finally {
+    if (redirect) await discard(redirect);
     clearTimeout(timer);
   }
 }
@@ -750,8 +910,8 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
  *
  * Every entry takes the same `(resolved, url, textCap, timeoutMs)` shape so
  * dispatch stays a lookup; the extra `parts` arguments (Ashby's `jobId`, Zoho
- * Recruit's `id`) are unpacked inside their own entries rather than widening
- * the shared signature.
+ * Recruit's and UltiPro's `id`) are unpacked inside their own entries rather
+ * than widening the shared signature.
  */
 export const JD_FETCHERS = {
   workable: fetchWorkableJd,
@@ -770,6 +930,8 @@ export const JD_FETCHERS = {
     fetchSmartRecruitersJd(resolved.apiUrl, url, textCap, timeoutMs),
   'zoho-recruit': (resolved, url, textCap, timeoutMs) =>
     fetchZohoJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
+  ultipro: (resolved, url, textCap, timeoutMs) =>
+    fetchUltiproJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
 };
 
 /**
@@ -1112,7 +1274,7 @@ async function main() {
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch(browserLaunchOptions({ headless: true }));
     const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
     // Block every request (main navigation, redirect hop, or subresource) to a
     // private/loopback/link-local or non-http(s) host. Guarding only the initial

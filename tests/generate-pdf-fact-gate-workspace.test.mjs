@@ -28,12 +28,12 @@ const workspace = join(base, 'ext');   // where CAREER_OPS_TRACKER points
 mkdirSync(code, { recursive: true });
 const script = join(code, 'generate-pdf.mjs');
 for (const file of [
-  'generate-pdf.mjs', 'verify-cv-facts.mjs', 'theme-style.mjs', 'cv-experience-order.mjs',
+  'generate-pdf.mjs', 'verify-cv-facts.mjs', 'cv-voice.mjs', 'theme-style.mjs', 'cv-experience-order.mjs',
   'tracker-utils.mjs', 'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
   'cv-sections-core.mjs', 'path-resolver.mjs',
 ]) copyFileSync(join(ROOT, file), join(code, file));
 mkdirSync(join(code, 'lib'), { recursive: true });
-for (const file of ['is-main-module.mjs', 'page-format.mjs', 'dir-lock.mjs', 'yaml-document.mjs']) {
+for (const file of ['is-main-module.mjs', 'page-format.mjs', 'browser-launch.mjs', 'dir-lock.mjs', 'yaml-document.mjs']) {
   copyFileSync(join(ROOT, 'lib', file), join(code, 'lib', file));
 }
 linkRepoPackage(code, 'js-yaml');

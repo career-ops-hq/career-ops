@@ -42,11 +42,12 @@ function addTsv(env, name, cols) {
   writeFileSync(join(env.addDir, name), cols.join('\t'));
 }
 function runMerge(env, args = []) {
-  // Pin the data root to the fixture and drop every other CAREER_OPS_* override,
-  // the way merge-tracker-cli-roots.test.mjs does. Spreading process.env alone
-  // let CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR, CAREER_OPS_BATCH_STATE and
-  // CAREER_OPS_CODE_ROOT through from whoever ran the suite, so a developer's
-  // real batch-state could decide whether a fixture row merged.
+  // Pin the data root and the batch state to the fixture and drop every other
+  // CAREER_OPS_* override, the way merge-tracker-cli-roots.test.mjs does.
+  // Spreading process.env alone let CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR,
+  // CAREER_OPS_BATCH_STATE and CAREER_OPS_CODE_ROOT through from whoever ran the
+  // suite, so a developer's real batch-state could decide whether a fixture row
+  // merged. Unset, the batch state is the checkout's, which has the same effect.
   const childEnv = {
     ...process.env,
     CAREER_OPS_ROOT: env.base,
@@ -55,7 +56,6 @@ function runMerge(env, args = []) {
     CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.addDir),
   };
   delete childEnv.CAREER_OPS_DATA_DIR;
-  delete childEnv.CAREER_OPS_BATCH_STATE;
   delete childEnv.CAREER_OPS_CODE_ROOT;
   return execFileSync('node', [MERGE, ...args], { encoding: 'utf-8', env: childEnv });
 }

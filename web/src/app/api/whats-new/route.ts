@@ -6,6 +6,7 @@ import { getAggregatorRule } from "@/lib/core/aggregator-id";
 import { evaluatedKeys, isEvaluated } from "@/lib/whats-new-suppression.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
+import { loadWorkplacePolicy } from "@/lib/core/workplace-policy.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,11 +61,17 @@ export async function GET(req: Request) {
   const aggregator = await getAggregatorRule();
   const evaluated = evaluatedKeys(readApplications(), normalizeTextKey, readLinkedReport);
 
+  let workplacePolicy: (location: string, title: string) => { eligible: boolean };
+  try { workplacePolicy = await loadWorkplacePolicy(careerOpsRoot()); }
+  catch (error) {
+    return Response.json({ error: `workplace geography policy could not be read: ${(error as Error).message}`, offers: [], count: 0 }, { status: 500 });
+  }
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
     if (!url || !/^https?:\/\//i.test(url)) return null;
     if (status && /skipped|expired/i.test(status)) return null;
     if (isEvaluated(evaluated, normalizeTextKey, company, title, url, aggregator)) return null;
+    if (!workplacePolicy(location || "", title || "").eligible) return null;
     return {
       url,
       company: (company || "").trim(),

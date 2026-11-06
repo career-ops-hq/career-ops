@@ -42,7 +42,7 @@ jobs:
       - name: Force LF checkout on Windows
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Test code (fork code, in a merge_group) must not find a token in .git/config.
           persist-credentials: false
@@ -51,15 +51,15 @@ jobs:
       # Renovate is told to leave node-version in this file alone (renovate.json);
       # tests/node-floor.test.mjs fails if this drifts from NODE_MIN.
       - name: Set up the Node floor (22.13) for syntax compatibility
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22.13'
       - run: npm run lint
       - name: Set up Node 24 for the test suite
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27'
           # The module lives in dashboard/, so without this setup-go looks for
@@ -139,14 +139,14 @@ jobs:
     # About 3 minutes. Limited for the test job's reason.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0            # harness needs release tags
           persist-credentials: false # the harness only ever touches a local mirror
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27'   # old updaters rebuild the dashboard during apply
           cache-dependency-path: dashboard/go.sum
@@ -175,10 +175,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
       - run: npm install --ignore-scripts

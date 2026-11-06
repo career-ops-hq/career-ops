@@ -125,7 +125,6 @@ func (m ProgressModel) renderHeader() string {
 		Bold(true).
 		Foreground(m.theme.Text).
 		Background(m.theme.Surface).
-		Width(m.width).
 		Padding(0, 2)
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Mauve).Render(i18n.Current.ProgressTitle)
@@ -137,13 +136,7 @@ func (m ProgressModel) renderHeader() string {
 		totalCount = m.metrics.FunnelStages[0].Count
 	}
 	info := right.Render(fmt.Sprintf(i18n.Current.ProgressSummary, totalCount, avgScoreLabel(m.metrics.AvgScore)))
-
-	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
-	if gap < 1 {
-		gap = 1
-	}
-
-	return style.Render(title + strings.Repeat(" ", gap) + info)
+	return oneLine(m.width, style, fitTitleBar(m.width, title, info))
 }
 
 func (m ProgressModel) renderFunnel() string {
@@ -395,25 +388,23 @@ func (m ProgressModel) renderHelp() string {
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Subtext).
 		Background(m.theme.Surface).
-		Width(m.width).
 		Padding(0, 1)
 
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Text)
 	descStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
-
-	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render("career-ops by santifer.io")
-
-	keys := keyStyle.Render("↑↓") + descStyle.Render(i18n.Current.HelpScroll) +
-		keyStyle.Render("PgUp/Dn") + descStyle.Render(i18n.Current.HelpPage) +
-		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) +
-		keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack)
-
-	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brand) - 2
-	if gap < 1 {
-		gap = 1
+	brandPlain := "career-ops by santifer.io"
+	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render(brandPlain)
+	budget := m.width - 2
+	if budget < 1 {
+		budget = 1
 	}
-
-	return style.Render(keys + strings.Repeat(" ", gap) + brand)
+	keys := joinHelp(budget, []helpPiece{
+		{keyStyle.Render("↑↓") + descStyle.Render(i18n.Current.HelpScroll), false},
+		{keyStyle.Render("PgUp/Dn") + descStyle.Render(i18n.Current.HelpPage), false},
+		{keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage), false},
+		{keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack), true},
+	}, brandPlain, brand)
+	return oneLine(m.width, style, keys)
 }
 
 // rateColor returns a color based on the rate value.

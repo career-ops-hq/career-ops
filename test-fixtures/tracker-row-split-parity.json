@@ -78,6 +78,21 @@
       ]
     },
     {
+      "name": "pipe row whose empty last cell sits flush against the closing pipe",
+      "line": "| 10 | 2026-09-04 | Example Co | Engineer | 4.1/5 | Evaluated | ❌ | — ||",
+      "cells": [
+        "10",
+        "2026-09-04",
+        "Example Co",
+        "Engineer",
+        "4.1/5",
+        "Evaluated",
+        "❌",
+        "—",
+        ""
+      ]
+    },
+    {
       "name": "legacy tab row: leading \"| \", closing \" |\"",
       "line": "| 11\t2026-09-05\tTabCo\tEngineer\t4/5\tApplied\t❌\t—\tseed |",
       "cells": [

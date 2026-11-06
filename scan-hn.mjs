@@ -20,6 +20,12 @@ import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs'
 import { buildTitleFilter } from './title-keywords.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { assertGoogleRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor, PrivacyGuardError } from './lib/pii-interceptor.mjs';
+
+// The Google SDK issues its own global fetch; this ambient install covers it.
+// The explicit gate inside extractWithAI() is the primary layer.
+installPiiInterceptor();
 
 // Import the deterministic provider
 import hnProvider from './providers/hackernews.mjs';
@@ -85,6 +91,11 @@ const UNKNOWN_LOCATION = 'Remote/Unknown';
 // ── AI Extraction Layer ─────────────────────────────────────────
 export async function extractWithAI(rawText, model) {
   const prompt = `--- BEGIN UNTRUSTED DATA ---\n${rawText.substring(0, 2000)}\n--- END UNTRUSTED DATA ---`;
+  // Privacy gate. Built from the same prompt handed to the SDK below, so the
+  // inspected payload and the transmitted one cannot drift. HN postings are
+  // public-third-party text, but they can carry a poster's contact details, and
+  // the configured values are the candidate's own.
+  assertGoogleRequestAllowed({ turns: [prompt] });
   // A failed API call is not a non-match, so it is not caught here: an invalid
   // key, an exhausted quota or a retired model must reach the caller, which
   // counts it. Returning null for it made every job look like a non-match and
@@ -164,7 +175,11 @@ async function main() {
       } catch (err) {
         aiFailures++;
         if (!firstAiError) firstAiError = `${modelName}: ${err?.message || err}`;
-        gate.markSeen(job);
+        // A PrivacyGuardError means a configured value was found in the job
+        // text before it reached the network. The job was never evaluated, so
+        // it must NOT be recorded as seen — it should surface again on the next
+        // scan once the user has resolved the privacy configuration.
+        if (err?.code !== 'PRIVACY_GUARD_BLOCKED') gate.markSeen(job);
         continue;
       }
       if (!extracted || !extracted.company || !extracted.title) { gate.markSeen(job); continue; }

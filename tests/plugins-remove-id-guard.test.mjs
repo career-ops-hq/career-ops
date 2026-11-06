@@ -24,7 +24,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 import { linkNodeModules } from './helpers.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -116,7 +116,7 @@ test('remove rejects a parent-relative probe id before touching the checkout', (
   const cfgSeed = `plugins:\n  ${JSON.stringify(id)}:\n    enabled: true\n`;
   writeFileSync(cfgFile, cfgSeed);
   const r = run('remove', id);
-  assert.notEqual(r.status, 0, describeSpawn(r, `exited ${r.status} — traversal id must be refused, not processed\n`));
+  assert.ok(exitedNonZero(r), describeSpawn(r, `exited ${r.status} — traversal id must be refused, not processed\n`));
   assert.match(r.all, /[Ii]nvalid plugin id/, `expected an invalid-id error, got:\n${r.all}`);
   assert.equal(existsSync(probe), true, 'the sentinel at the traversal target must survive');
   assert.equal(readFileSync(lockFile, 'utf8'), lockSeed, 'plugins.lock must be untouched by an invalid id');
@@ -129,7 +129,7 @@ test('remove rejects an id containing a path separator', () => {
   const sepSentinel = join(sepDir, 'bar');
   writeFileSync(sepSentinel, 'sentinel');
   const r = run('remove', 'foo/bar');
-  assert.notEqual(r.status, 0, describeSpawn(r, `exited ${r.status} — a slash in the id must be refused\n`));
+  assert.ok(exitedNonZero(r), describeSpawn(r, `exited ${r.status} — a slash in the id must be refused\n`));
   assert.match(r.all, /[Ii]nvalid plugin id/, `expected an invalid-id error, got:\n${r.all}`);
   assert.equal(existsSync(sepSentinel), true, 'the sentinel under plugins.local must survive');
 });
@@ -139,7 +139,7 @@ test('remove rejects an id containing a path separator', () => {
 // checkout is never the rmSync target.
 test('remove rejects the bare parent id', () => {
   const r = run('remove', '..');
-  assert.notEqual(r.status, 0, describeSpawn(r, `exited ${r.status} — "remove .." must be refused\n`));
+  assert.ok(exitedNonZero(r), describeSpawn(r, `exited ${r.status} — "remove .." must be refused\n`));
   assert.match(r.all, /[Ii]nvalid plugin id/, `expected an invalid-id error, got:\n${r.all}`);
   assert.equal(existsSync(checkout), true, 'the disposable checkout root must still exist');
 });
@@ -150,7 +150,7 @@ test('remove rejects the current-directory id', () => {
   const localSentinel = join(localDir, 'sentinel');
   writeFileSync(localSentinel, 'sentinel');
   const r = run('remove', '.');
-  assert.notEqual(r.status, 0, describeSpawn(r, `exited ${r.status} — "remove ." must be refused\n`));
+  assert.ok(exitedNonZero(r), describeSpawn(r, `exited ${r.status} — "remove ." must be refused\n`));
   assert.match(r.all, /[Ii]nvalid plugin id/, `expected an invalid-id error, got:\n${r.all}`);
   assert.equal(existsSync(localSentinel), true, 'plugins.local contents must survive');
 });

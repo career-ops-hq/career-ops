@@ -18,6 +18,8 @@
  *     assign the same # to two rows), --role narrows it, otherwise it fails
  *     ambiguous with a candidate list instead of silently editing whichever
  *     row was found first
+ *   - a comma-separated list of numbers is not a company. The command updates
+ *     one row, so it exits usage and prints one command per number
  *   - otherwise → company match (normalized, same key as merge-tracker dedup);
  *     multiple hits are narrowed with --role (fuzzy, role-matcher.mjs), and
  *     anything still ambiguous fails with a numbered candidate list.
@@ -88,7 +90,7 @@
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
  *
  * Two rules the reader enforces that this writer never has to think about,
- * because it always has a real prior status and always writes its own source.
+ * because it canonicalizes the prior status and always writes its own source.
  * Any other producer does have to, so they are stated here:
  *   - An unknown from- or to-state is the sentinel "-", never an empty cell.
  *     funnel-velocity.mjs reads the two columns differently: a from of "-"
@@ -117,8 +119,8 @@ import { extractTrackerReportNumbers, parseMarkdownLinks, soleMarkdownLink, reso
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
-  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
-  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
+  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate,
+  prependNote, hasNoteEntry, normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
   appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot, resolveTrackerPathForWrite } from './path-resolver.mjs';
@@ -152,6 +154,7 @@ const USAGE = `Usage: node set-status.mjs <tracker#|company> <state> [--note "..
        node set-status.mjs <tracker#|company> --undo [--dry-run] [--json]
 
   <tracker#|company> Row selector: tracker # (exact) or company name (normalized match)
+                     A list such as 14,78 is not a company. Run one command per row.
   <state>            Canonical state from templates/states.yml (aliases accepted)
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
@@ -387,6 +390,35 @@ const requestedStatus = flags.undo ? null : resolveCanonicalState(stateInput, st
 if (!flags.undo && !requestedStatus) {
   const valid = states.map(s => s.label).join(' · ');
   failWith(EXIT_USAGE, 'invalid-state', `"${stateInput}" is not a canonical state. Valid states: ${valid}`);
+}
+
+// "14,78" is one argv token. It is not a company, and this command writes one
+// row. Checked after the state is known, so a bad state still wins, and before
+// the tracker is opened, so a missing file does not hide the usage error.
+// "Acme, Inc." stays a company name: a non-numeric piece is not an id list.
+function trackerIdList(value) {
+  if (typeof value !== 'string' || !value.includes(',')) return null;
+  const parts = value.split(',').map((part) => part.trim());
+  if (parts.length < 2) return null;
+  if (!parts.every((part) => part === '' || /^\d+$/.test(part))) return null;
+  if (!parts.some((part) => /^\d+$/.test(part))) return null;
+  return parts;
+}
+
+if (selector !== null) {
+  const idList = trackerIdList(selector);
+  if (idList) {
+    const nums = idList.filter((part) => /^\d+$/.test(part));
+    const shown = nums.slice(0, 8);
+    const action = flags.undo ? '--undo' : requestedStatus;
+    // These numbers are tracker rows. A bare `14 Applied` is rejected when that
+    // row's report id differs, so the command that means "tracker row" is --row.
+    const lines = shown.map((id) => `node set-status.mjs --row ${id} ${action}`);
+    const extra = nums.length - shown.length;
+    const more = extra > 0 ? `\n... and ${extra} more` : '';
+    const empty = idList.some((part) => part === '') ? ' The list has an empty slot.' : '';
+    failUsage(`set-status updates one row.${empty} Run one command per tracker number:\n${lines.join('\n')}${more}`);
+  }
 }
 
 // ── tracker access ───────────────────────────────────────────────
@@ -668,6 +700,11 @@ const oldStatus = target.status;
 // written rather than refused, so the caller still gets "status changed" and
 // not a usage error for a row it was right to show.
 const statusKey = value => resolveCanonicalState(value, states) ?? String(value ?? '').trim();
+// The ledger takes a canonical state or "-", and a row with anything else is
+// dropped by its readers. A legacy cell (`Applied 2026-01-02`) is a known state
+// once its date is off; copied raw, the change was lost to the funnel and to
+// --undo. dedup-tracker.mjs logs its promotions the same way.
+const ledgerState = value => resolveCanonicalState(stripStatusDecoration(value), states) ?? '-';
 
 // The change --undo takes back is the one a retraction line would pop: the
 // last surviving entry of this row's ledger replay. Read under the lock, so no
@@ -768,6 +805,15 @@ try {
   statusChanged = parts[colmap.status].trim() !== newStatus;
   if (statusChanged) replaceCellValue(colmap.status, newStatus);
 
+  // Text after a date in the old cell is no part of any state, and replacing the
+  // cell would lose it. It moves to Notes, as normalize-statuses.mjs moves it,
+  // unless a whole Notes entry already holds it.
+  if (statusChanged && colmap.notes != null && statusTextAfterDate(oldStatus)) {
+    const kept = (parts[colmap.notes] ?? '').trim();
+    const moved = oldStatus.trim();
+    if (!hasNoteEntry(kept, moved)) replaceCellValue(colmap.notes, prependNote(kept, moved));
+  }
+
   if (note) {
     if (colmap.notes == null) {
       failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
@@ -797,11 +843,7 @@ try {
       // suppress a genuinely new note. Matching the full note text at entry
       // boundaries (instead of splitting the field into segments) keeps retries
       // idempotent even when the note itself contains "; ".
-      const hasNote = existing === note
-        || existing.startsWith(`${note}; `)
-        || existing.endsWith(`; ${note}`)
-        || existing.includes(`; ${note}; `);
-      if (!hasNote) {
+      if (!hasNoteEntry(existing, note)) {
         replaceCellValue(colmap.notes, existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note);
         noteChanged = true;
       }
@@ -866,7 +908,7 @@ try {
     statusLogged = appendStatusTransition(APPS_FILE, {
       num: target.num,
       date: flags.on ?? localToday(),
-      from: oldStatus,
+      from: ledgerState(oldStatus),
       to: newStatus,
       source: flags.source ?? 'set-status',
     });

@@ -13,7 +13,7 @@
 1. 捕获 (DETECT)    → 用本项目的 Playwright 浏览器打开职位页面
 2. 识别 (IDENTIFY)  → 从页面中提取公司名称与职位名称
 3. 检索 (SEARCH)    → 匹配 reports/ 目录下已保存的评估报告
-4. 载入 (LOAD)      → 读取对应的评估报告及 H 部分的拟答草稿 (若存在)
+4. 载入 (LOAD)      → 读取对应的评估报告、`## Application Answers` 及 H 部分的拟答草稿 (若存在)，在 **Posting identity** 成立之后
 5. 校准 (COMPARE)   → 比对当前屏幕上的职位是否与之前评估的职位完全一致。若有变动，进行提示
 6. 解析 (ANALYZE)   → 识别出页面上所有可见的表单提问输入框
 7. 生成 (GENERATE)  → 结合报告背景与简历 cv.md，为每个问题生成定制草稿
@@ -42,13 +42,15 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 1. 提取屏幕或输入信息中的公司名称与职位名称。
 2. 在 `reports/` 目录下搜索对应的评估报告文件（执行大小写不敏感的模糊检索）。
-3. 如果匹配成功，载入完整的评估报告内容。
-4. 检查报告中是否有“维度 H (开放性问题拟答草稿)”，如果有，将其作为回答的基础模板。
+3. 如果匹配成功，先只读取每份匹配报告的开头信息（公司、职位、`**URL:**`），选出 URL 或 req ID 与本职位一致的那一份；不确定时询问候选人。只有在 **Posting identity** 成立之后（`modes/apply.md` → Step 5），才载入完整报告和第 4 项；若是不同职位，则不载入，改走 **Evaluate as new** 或 **Draft without saving**。
+4. 如果报告中有 `## Application Answers` 部分 → 以实际提交过的回答作为基础；否则，如果有“维度 H (开放性问题拟答草稿)”，将其作为回答的基础模板。两者都有时，`## Application Answers` 优先。
 5. 如果未匹配到任何历史报告，告知候选人，并询问是否需要针对此链接快速运行一次 `auto-pipeline` 自动评估流程。
 
 ---
 
 ## 步骤 3 — 校验岗位一致性
+
+本步骤仅在表单仍是该报告对应的职位时适用：同一雇主、同一职位发布（`modes/apply.md` → Step 5 → **Posting identity**）；职位名称不作为判断依据。即使职位名称没有变化、且只有一份报告与该公司匹配，也要对每个表单做这项检查：另一个职位可能使用相同的名称，此时不得使用该报告。如果有多份报告与该公司匹配，先选择 URL 或 req ID 与本职位一致的那一份，不确定时询问候选人。不同雇主，或同一雇主的另一个职位，不属于职位变更：绝不要把该报告的回答改写用于它。应改为选择 **Evaluate as new**（作为新职位评估：auto-pipeline，生成独立报告）或 **Draft without saving**（只起草回答，不保存到任何报告）。选择 **Draft without saving** 时，把匹配到的报告、其中的回答和定制简历都放到一边，只根据当前可见的职位、`cv.md` 和个人档案撰写；下文中读取报告的步骤此时不适用。
 
 如果表单上显示的职位细节（如职级、所属部门）与历史报告存在偏差：
 - **向候选人进行提示**：表现为：“检测到当前的职位已从 [X] 变为 [Y]。需要我重新为您进行一次快速评估，还是直接在当前话术基础上微调适配新职位？”
@@ -62,6 +64,8 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 ## 步骤 4 — 分析表单问答框
 
+选择 **Draft without saving** 时，本步骤不使用匹配到的报告、其中的 `## Application Answers` 或维度 H：把每个问题都当作新问题，只根据当前可见的职位、`cv.md` 和个人档案处理。
+
 定位并解析当前页面上所有的表单输入项：
 - 开放性问答框（如“你为什么想加入我们？”、“描述一次你解决棘手技术问题的经历”等）。
 - 下拉选择框（如求职渠道、是否需要工作签证支持等）。
@@ -70,12 +74,14 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 - 文件上传框（上传简历 PDF、自荐信 PDF）。
 
 对每个问题进行归类：
-- **已在维度 H 中有拟答** → 提取并根据当前表单的精细要求进行润色。
+- **已在 `## Application Answers` 或维度 H 中有回答** → 提取并根据当前表单的精细要求进行润色。
 - **新提问** → 根据报告背景分析、STAR故事及 `cv.md` 的量化指标现场撰写。
 
 ---
 
 ## 步骤 5 — 生成定制答案
+
+选择 **Draft without saving** 时，本步骤第 1 项的报告背景同样不使用：匹配到的报告属于另一个职位，只根据当前可见的职位、`cv.md` 和个人档案撰写。
 
 在生成每个问题的回答草稿时，必须严格遵守以下原则：
 
@@ -90,6 +96,7 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 ## [公司名称] — [职位名称] 表单拟答草稿
 
 关联报告: #NNN | 综合评分: X.X/5 | 检测画像: [类型]
+[选择 **Draft without saving** 时，把上面这一行换成：“无关联报告：为当前职位起草，未保存”]
 
 ---
 
@@ -105,16 +112,18 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 投递建议提示：
 - [此处填入需要候选人手动确认的个人信息，例如期望薪资、最早入职时间等]
-- [提醒候选人在此处上传之前定制好的简历 PDF]
+- [仅当已确认报告对应当前可见的职位时，提醒候选人在此处上传为该职位定制的简历 PDF；若选择了 **Draft without saving**，或没有与当前职位对应的报告，则说明尚未选定匹配的定制简历，不要推荐为其他职位定制的简历]
 ```
 
 ---
 
 ## 步骤 6 — 投递后动作
 
+保存任何内容之前，以及在下面每一次写入（状态和回答）之前，都要再次确认表单仍是该报告对应的职位（`modes/apply.md` → Step 8 → **Write only to the report of this posting**）。同一雇主、同一职位 → 以下步骤都作用于这份报告，微调适配新职位名称或重新评估之后也一样。不同雇主或不同职位 → 绝不写入这份报告：使用为新职位生成的报告；如果没有，不设置任何状态、不保存回答，并告知候选人这次投递尚未被记录。
+
 当候选人确认已经成功点击“提交申请/投递”后，执行以下清理与建档工作：
 1. 使用规范 CLI 将该职位状态更新为 `Applied`：`node set-status.mjs --report <report#> Applied`（不要手动编辑 `data/applications.md` 表格）。
-2. 将最终实际提交的表单回答归档并更新至该报告的维度 H 模块中，以便后续面试对照。
+2. 将最终实际提交的表单回答写入该报告的 `## Application Answers` 部分，并标注 `**State:** submitted`（格式见 `modes/apply.md` → Step 8），以便后续面试对照。维度 H 保留为评估时的草稿，不作修改。
 3. 推荐下一步行动：引导候选人使用 `/career-ops contacto` 指令生成 LinkedIn 招聘负责人直达勾兑话术。
 
 ---

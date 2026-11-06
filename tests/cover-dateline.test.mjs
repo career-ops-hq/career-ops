@@ -88,6 +88,12 @@ test('a whitespace-only recipient does not trigger the gate either', () => {
   assert.equal(d, 'Example Corp &nbsp;&nbsp; Boston, MA &nbsp;&nbsp; September 8, 2026');
 });
 
+test('a non-string company is omitted from the dateline rather than rendering [object Object]', () => {
+  const d = dateline(buildHtml(payload({ company: { name: 'Acme' }, recipient: {} }), template()));
+
+  assert.equal(d, 'Boston, MA &nbsp;&nbsp; September 8, 2026');
+});
+
 test('a template without the slot keeps the company and city in the dateline', () => {
   // The gate's real predicate is the LOADED TEMPLATE having somewhere to put the
   // address, not the payload having address data. The shipped base template

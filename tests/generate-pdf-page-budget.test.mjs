@@ -66,6 +66,7 @@ copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs')
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
 copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
 copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'browser-launch.mjs'));
 // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
 copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
 copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
@@ -270,12 +271,17 @@ try {
   }
 
   const strictOverflowPdf = join(sandbox, 'strict-overflow.pdf');
+  const strictOverflowDraft = join(sandbox, 'strict-overflow.overflow.pdf');
   const manifestBeforeStrictOverflow = readFileSync(manifest, 'utf-8');
   const strictOverflow = runPdf([input, strictOverflowPdf, '--max-pages=1', '--strict-pages']);
   if (
     strictOverflow.status !== 0 &&
-    existsSync(strictOverflowPdf) &&
-    countPages(strictOverflowPdf) === 2 &&
+    // #6325: the rejected render is kept as a sibling draft, never at the
+    // output path, so a previous good PDF there would survive.
+    !existsSync(strictOverflowPdf) &&
+    existsSync(strictOverflowDraft) &&
+    countPages(strictOverflowDraft) === 2 &&
+    strictOverflow.output.includes(`Rejected draft: ${strictOverflowDraft} (nothing was written to the output path)`) &&
     strictOverflow.output.includes('📐 Page budget: 1 (strict)') &&
     strictOverflow.output.includes('CV is 2 pages') &&
     strictOverflow.output.includes('allowed maximum is 1 page') &&
@@ -288,6 +294,156 @@ try {
     pass('generate-pdf rejects overflow only with --strict-pages');
   } else {
     fail(`generate-pdf strict page budget regressed: ${strictOverflow.output.trim()}`);
+  }
+
+  // A strict overflow re-rendering over an existing PDF keeps that PDF byte for
+  // byte. CV Studio restores only its HTML on a failed render, so a replaced
+  // PDF would leave the two describing different revisions.
+  const keptPdf = join(sandbox, 'kept-previous.pdf');
+  const keptDraft = join(sandbox, 'kept-previous.overflow.pdf');
+  writeFileSync(keptPdf, 'PREVIOUS GOOD PDF', 'latin1');
+  const keptRun = runPdf([input, keptPdf, '--max-pages=1', '--strict-pages']);
+  if (
+    keptRun.status !== 0 &&
+    readFileSync(keptPdf, 'latin1') === 'PREVIOUS GOOD PDF' &&
+    existsSync(keptDraft) &&
+    countPages(keptDraft) === 2 &&
+    keptRun.output.includes(`Rejected draft: ${keptDraft} (the existing PDF was left unchanged)`)
+  ) {
+    pass('a strict overflow leaves the existing PDF at the output path unchanged');
+  } else {
+    fail(`a strict overflow replaced the existing PDF or lost its draft: ${keptRun.output.trim()}`);
+  }
+
+  // The draft never replaces a file already at its name: a PDF legitimately
+  // called {name}.overflow.pdf survives, and the draft takes the next free name.
+  const takenPdf = join(sandbox, 'taken.pdf');
+  const takenDraftName = join(sandbox, 'taken.overflow.pdf');
+  const takenNextDraft = join(sandbox, 'taken.overflow-2.pdf');
+  writeFileSync(takenDraftName, 'ANOTHER GOOD PDF', 'latin1');
+  const takenRun = runPdf([input, takenPdf, '--max-pages=1', '--strict-pages']);
+  if (
+    takenRun.status !== 0 &&
+    readFileSync(takenDraftName, 'latin1') === 'ANOTHER GOOD PDF' &&
+    existsSync(takenNextDraft) &&
+    countPages(takenNextDraft) === 2 &&
+    takenRun.output.includes(`Rejected draft: ${takenNextDraft}`)
+  ) {
+    pass('a strict-overflow draft takes the next free name instead of replacing an existing file');
+  } else {
+    fail(`a strict-overflow draft replaced a file at its name: ${takenRun.output.trim()}`);
+  }
+
+  const bareFlagPdf = join(sandbox, 'bare-max-pages.pdf');
+  const bareFlag = runPdf([input, bareFlagPdf, '--max-pages'],
+    { CAREER_OPS_PROFILE: join(sandbox, 'no-such-profile.yml') });
+  if (
+    bareFlag.status !== 0 &&
+    bareFlag.output.includes('Invalid --max-pages ""') &&
+    !existsSync(bareFlagPdf)
+  ) {
+    pass('a bare --max-pages with no value is rejected, not replaced by a profile budget');
+  } else {
+    fail(`a bare --max-pages was not rejected: ${bareFlag.output.trim()}`);
+  }
+
+  // #6325: with no flag, cv.max_pages / cv.strict_pages in config/profile.yml set
+  // the budget, so a one-page preference holds on every render path. Each case
+  // writes its own profile and points CAREER_OPS_PROFILE at it.
+  const profileDir = join(sandbox, 'profiles');
+  mkdirSync(profileDir, { recursive: true });
+  const withProfile = (name, cvBlock) => {
+    const path = join(profileDir, `${name}.yml`);
+    writeFileSync(path, `name: Test Candidate\ncv:\n${cvBlock}`, 'utf-8');
+    return { CAREER_OPS_PROFILE: path };
+  };
+
+  const profileStrictPdf = join(sandbox, 'profile-strict.pdf');
+  const manifestBeforeProfileStrict = readFileSync(manifest, 'utf-8');
+  const profileStrict = runPdf([input, profileStrictPdf],
+    withProfile('strict-one-page', '  max_pages: 1\n  strict_pages: true\n'));
+  if (
+    profileStrict.status !== 0 &&
+    profileStrict.output.includes('📐 Page budget: 1 (strict) — cv.max_pages and cv.strict_pages from config/profile.yml') &&
+    profileStrict.output.includes('CV is 2 pages') &&
+    !profileStrict.output.includes('✅ PDF generated') &&
+    readFileSync(manifest, 'utf-8') === manifestBeforeProfileStrict
+  ) {
+    pass('generate-pdf takes a strict one-page budget from config/profile.yml when no flag is passed');
+  } else {
+    fail(`generate-pdf ignored cv.max_pages / cv.strict_pages in the profile: ${profileStrict.output.trim()}`);
+  }
+
+  const profileWarnPdf = join(sandbox, 'profile-warn.pdf');
+  const profileWarn = runPdf([input, profileWarnPdf], withProfile('warn-one-page', '  max_pages: "1"\n'));
+  if (
+    profileWarn.status === 0 &&
+    profileWarn.output.includes('📐 Page budget: 1 (warning only) — cv.max_pages from config/profile.yml') &&
+    profileWarn.output.includes('CV is 2 pages') &&
+    manifestHasPdf(profileWarnPdf)
+  ) {
+    pass('a profile max_pages without strict_pages warns on overflow and still indexes the PDF (quoted "1" accepted)');
+  } else {
+    fail(`a warn-only profile budget regressed: ${profileWarn.output.trim()}`);
+  }
+
+  const flagWinsPdf = join(sandbox, 'flag-wins.pdf');
+  const flagWins = runPdf([input, flagWinsPdf, '--max-pages=2'],
+    withProfile('flag-wins', '  max_pages: 1\n  strict_pages: true\n'));
+  if (
+    flagWins.status === 0 &&
+    flagWins.output.includes('📐 Page budget: 2 (strict) — cv.strict_pages from config/profile.yml') &&
+    manifestHasPdf(flagWinsPdf)
+  ) {
+    pass('a --max-pages flag outranks cv.max_pages for that render');
+  } else {
+    fail(`--max-pages did not outrank cv.max_pages: ${flagWins.output.trim()}`);
+  }
+
+  const coverLetterPdf = join(sandbox, 'cover-letter.pdf');
+  const coverLetter = runPdf([input, coverLetterPdf, '--kind=cover'],
+    withProfile('cover-untouched', '  max_pages: 1\n  strict_pages: true\n'));
+  if (
+    coverLetter.status === 0 &&
+    coverLetter.output.includes('📐 Page budget: 2 (warning only)\n') &&
+    existsSync(coverLetterPdf)
+  ) {
+    pass('cv.max_pages / cv.strict_pages leave a cover letter on the default budget');
+  } else {
+    fail(`a cover letter picked up the CV page budget from the profile: ${coverLetter.output.trim()}`);
+  }
+
+  // A typo in a stated budget must not quietly print a 2-page CV: the CV render
+  // stops before rendering and names every unusable key.
+  const invalidProfileEnv = withProfile('invalid', '  max_pages: 0\n  strict_pages: "yes"\n');
+  const invalidProfilePdf = join(sandbox, 'invalid-profile.pdf');
+  const invalidProfile = runPdf([input, invalidProfilePdf], invalidProfileEnv);
+  if (
+    invalidProfile.status !== 0 &&
+    invalidProfile.output.includes('Invalid page budget in config/profile.yml: cv.max_pages "0" is not a positive integer; cv.strict_pages "yes" is not true or false.') &&
+    !invalidProfile.output.includes('📐 Page budget') &&
+    !existsSync(invalidProfilePdf)
+  ) {
+    pass('an unusable cv.max_pages / cv.strict_pages stops a CV render before rendering');
+  } else {
+    fail(`an invalid profile page budget did not stop the CV render: ${invalidProfile.output.trim()}`);
+  }
+
+  // A flag that covers both keys never reads them, so the render proceeds.
+  const coveredPdf = join(sandbox, 'invalid-profile-covered.pdf');
+  const covered = runPdf([input, coveredPdf, '--max-pages=2', '--strict-pages'], invalidProfileEnv);
+  if (covered.status === 0 && covered.output.includes('📐 Page budget: 2 (strict)\n') && manifestHasPdf(coveredPdf)) {
+    pass('flags that cover an unusable profile budget let the CV render');
+  } else {
+    fail(`flags covering an invalid profile budget did not let the render through: ${covered.output.trim()}`);
+  }
+
+  const invalidCoverPdf = join(sandbox, 'invalid-profile-cover.pdf');
+  const invalidCover = runPdf([input, invalidCoverPdf, '--kind=cover'], invalidProfileEnv);
+  if (invalidCover.status === 0 && existsSync(invalidCoverPdf)) {
+    pass('an unusable CV page budget does not stop a cover letter');
+  } else {
+    fail(`an invalid CV page budget stopped a cover letter: ${invalidCover.output.trim()}`);
   }
 
   // A redirected tracker defines a separate workspace. The renderer must allow
@@ -390,6 +546,97 @@ try {
     pass('renderHtmlToPdf keeps an external baseDir temporary file inside the workspace');
   } else {
     fail(`renderHtmlToPdf placed its temporary file outside the workspace: ${observedTempPath}`);
+  }
+
+  // A direct caller has no CLI or profile check in front of it. An unusable
+  // budget is rejected before the page renders, so a strict render carrying one
+  // neither replaces the PDF at the output path nor leaves a draft beside it.
+  const guardedPdf = join(sandbox, 'direct-invalid-budget.pdf');
+  writeFileSync(guardedPdf, 'PREVIOUS GOOD PDF', 'latin1');
+  const onePagePdf = Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 1 >>\nendobj\n%%EOF');
+  for (const maxPages of [Number.NaN, 0, '1']) {
+    let rendered = false;
+    let rejection = null;
+    try {
+      await renderHtmlToPdf('<!doctype html><html><body>direct</body></html>', guardedPdf, {
+        workspaceRoot: sandbox,
+        maxPages,
+        strictPages: true,
+        launchBrowser: async () => ({
+          async newPage() {
+            rendered = true;
+            return { async goto() {}, async evaluate() {}, async pdf() { return onePagePdf; } };
+          },
+          async close() {},
+        }),
+      });
+    } catch (err) {
+      rejection = err;
+    }
+    const drafts = readdirSync(sandbox).filter((name) => name.startsWith('direct-invalid-budget.overflow'));
+    if (
+      rejection?.message === `Invalid page budget "${maxPages}". Use a positive integer.` &&
+      !rendered &&
+      readFileSync(guardedPdf, 'latin1') === 'PREVIOUS GOOD PDF' &&
+      drafts.length === 0
+    ) {
+      pass(`renderHtmlToPdf rejects maxPages ${JSON.stringify(String(maxPages))} before rendering, leaving the existing PDF in place`);
+    } else {
+      fail(`renderHtmlToPdf let maxPages ${JSON.stringify(String(maxPages))} reach the output path: ${rejection?.message ?? 'no error'}; rendered=${rendered}; drafts=${drafts.join(', ')}`);
+    }
+  }
+
+  // The shared painter receives its options as JSON, which turns NaN into null,
+  // so the painter's own check would see no budget and paint with the default.
+  // renderHtmlToPdf() must reject the value before sending the request.
+  mkdirSync(join(sandbox, 'lib'), { recursive: true });
+  copyFileSync(join(ROOT, 'lib', 'pdf-server.mjs'), join(sandbox, 'lib', 'pdf-server.mjs'));
+  const { startPdfServer } = await import(pathToFileURL(join(sandbox, 'lib', 'pdf-server.mjs')).href);
+  const socketDir = mkdtempSync(join(tmpdir(), 'co-pb-'));
+  const socketPath = process.platform === 'win32'
+    ? `\\\\.\\pipe\\career-ops-page-budget-${process.pid}`
+    : join(socketDir, 'pdf.sock');
+  let painted = false;
+  const server = await startPdfServer({
+    socketPath,
+    launchBrowser: async () => ({ async close() {} }),
+    render: async (_browser, _html, outputPath) => {
+      painted = true;
+      writeFileSync(outputPath, 'PAINTED BY THE SHARED BROWSER', 'latin1');
+      return { outputPath, pageCount: 1, size: 29 };
+    },
+  });
+  const savedShared = process.env.CAREER_OPS_PDF_SHARED;
+  const savedSocket = process.env.CAREER_OPS_PDF_SOCKET;
+  const sharedPdf = join(sandbox, 'shared-invalid-budget.pdf');
+  writeFileSync(sharedPdf, 'PREVIOUS GOOD PDF', 'latin1');
+  let sharedRejection = null;
+  try {
+    process.env.CAREER_OPS_PDF_SHARED = '1';
+    process.env.CAREER_OPS_PDF_SOCKET = socketPath;
+    await renderHtmlToPdf('<!doctype html><html><body>shared</body></html>', sharedPdf, {
+      workspaceRoot: sandbox,
+      maxPages: Number.NaN,
+      strictPages: true,
+    });
+  } catch (err) {
+    sharedRejection = err;
+  } finally {
+    if (savedShared === undefined) delete process.env.CAREER_OPS_PDF_SHARED;
+    else process.env.CAREER_OPS_PDF_SHARED = savedShared;
+    if (savedSocket === undefined) delete process.env.CAREER_OPS_PDF_SOCKET;
+    else process.env.CAREER_OPS_PDF_SOCKET = savedSocket;
+    await server.close();
+    rmSync(socketDir, { recursive: true, force: true });
+  }
+  if (
+    sharedRejection?.message === 'Invalid page budget "NaN". Use a positive integer.' &&
+    !painted &&
+    readFileSync(sharedPdf, 'latin1') === 'PREVIOUS GOOD PDF'
+  ) {
+    pass('renderHtmlToPdf rejects maxPages NaN before asking the shared painter, leaving the existing PDF in place');
+  } else {
+    fail(`renderHtmlToPdf sent maxPages NaN to the shared painter: ${sharedRejection?.message ?? 'no error'}; painted=${painted}`);
   }
   // --- Optional sections that arrived as a bare header (#3986) -------------
   // The builders strip these from the payload before filling a template, but

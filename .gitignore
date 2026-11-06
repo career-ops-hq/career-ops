@@ -46,6 +46,7 @@ batch/*
 !batch/README.md
 !batch/aggregate-tokens.mjs
 !batch/batch-prompt.md
+!batch/batch-prompt-match.md
 !batch/batch-runner.sh
 !batch/company-scope.mjs
 !batch/jd-rescue.mjs
@@ -106,6 +107,13 @@ writing-samples/*
 config/profile.yml
 config/cv-facts.json
 config/benchmarks.yml
+# Privacy guard configuration and token map — both hold real personal values.
+# config/privacy.example.yml (fictional placeholders only) ships; the real file
+# never does. The token map records the original values behind the placeholders
+# pii-workspace.mjs writes, so it is exactly as sensitive as cv.md.
+config/privacy.yml
+.pii-token-map.json
+**/.pii-token-map.json
 # Fork-local path declarations — this checkout's own files, read by
 # update-system.mjs. Gitignored on purpose: it describes THIS clone, not the
 # project, and must survive the sync that overwrites update-system.mjs (#2421).

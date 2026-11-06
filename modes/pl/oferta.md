@@ -205,9 +205,6 @@ Nazwy pól w nagłówku (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF
 
 ---
 
-## Machine Summary
-(blok YAML dla skryptów -- zobacz wymaganie poniżej)
-
 ## A) Podsumowanie roli
 (pełna zawartość bloku A)
 
@@ -251,11 +248,14 @@ Nazwy pól w nagłówku (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF
 
 ## Job Description (archived verbatim)
 (pełny tekst oferty, wklejony dosłownie -- zobacz wymaganie poniżej)
+
+## Machine Summary
+(blok YAML dla skryptów -- zobacz wymaganie poniżej)
 ```
 
 **Linia decyzji (obowiązkowa):** `**Decyzja:**` to `final_decision` z Machine Summary, a linia pod nagłówkiem to zdanie z `## Werdykt (lead)`, skopiowane słowo w słowo. Obie wypełnij na końcu. Nigdy nie używaj `Verdict:` jako nazwy pola: aplikacja webowa czyta pierwsze `VERDICT:` jako linię score.
 
-**Machine Summary (obowiązkowe):** blok YAML bezpośrednio po nagłówku, ze schematem, dokładnymi nazwami pól i regułami z `batch/batch-prompt.md` (źródło; tu bez powtarzania). Zawiera `advertised_comp` (kwota z oferty dosłownie, lub `null`), `risk_summary` i `requirement_importance` (blok B wiersz po wierszu; limit `inferred` obowiązuje także tutaj).
+**Machine Summary (obowiązkowe):** blok YAML na końcu raportu, po `## Job Description (archived verbatim)`, ze schematem, dokładnymi nazwami pól i regułami z `batch/batch-prompt.md` (źródło; tu bez powtarzania). Zawiera `advertised_comp` (kwota z oferty dosłownie, lub `null`), `risk_summary` i `requirement_importance` (blok B wiersz po wierszu; limit `inferred` obowiązuje także tutaj).
 
 **Archiwizacja oferty (obowiązkowa, #2789):** Każdy report MUSI mieć sekcję `## Job Description (archived verbatim)` z pełnym tekstem oferty, nigdy streszczonym ani przeredagowanym. Nagłówek zostaje po angielsku: `check-jd-archive.mjs` szuka go po nazwie. Pierwsza linia to widoczna data publikacji (`Posted: {data lub tekst względny}`, albo `Posted: not visible in source`), nigdy data pliku reportu. Jeśli oferta jest za długa lub nie da się jej zacytować w całości, zapisz ją przez `archive-posting.mjs` (polecenie poniżej) i wpisz w sekcji **dokładnie** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, bez innego tekstu. Jeśli maszynowe zapisanie nie jest możliwe (np. długi wklejony tekst bez URL), zmień tytuł sekcji na `## Job Description (not archived)` i podaj powód. Nigdy parafraza zamiast tego; pełna reguła jest w `modes/oferta.md` (**JD archival**).
 

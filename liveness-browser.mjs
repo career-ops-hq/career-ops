@@ -8,6 +8,7 @@
 import { classifyLiveness, jobIdToken, JOB_ID_PATTERN } from './liveness-core.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 import { SINKHOLE_ADDRESSES } from './providers/_ip-guard.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
 // Single-page-app ATS render the posting after domcontentloaded, so the page
@@ -803,7 +804,7 @@ export function isChallengeResult(result) {
 // across URLs. Headed Chromium needs a display, so launch can fail in headless/CI
 // environments — in that case get() returns null and callers degrade to the
 // headless result (challenge stays uncertain, never falsely expired).
-export function createHeadedPageProvider(chromium) {
+export function createHeadedPageProvider(chromium, browserContext = {}) {
   let browser = null;
   let page = null;
   let launchFailed = false;
@@ -840,7 +841,7 @@ export function createHeadedPageProvider(chromium) {
       if (page) return page;
       if (launchFailed) return null;
       try {
-        browser = await chromium.launch({ headless: false });
+        browser = await chromium.launch(browserLaunchOptions({ headless: false }, browserContext));
         const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
         page = await context.newPage();
         return page;

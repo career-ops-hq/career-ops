@@ -1,4 +1,4 @@
-import { readApplications, readInbox, readReport, doctorState } from "@/lib/career-ops";
+import { readApplications, readInbox, requestReportReader, doctorState } from "@/lib/career-ops";
 import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
 import { cardReason } from "@/lib/machine-summary.mjs";
 import type { CardReason } from "@/lib/machine-summary.mjs";
@@ -22,8 +22,9 @@ export default function Home() {
   const { inbox, applications } = todaySnapshot(snapshot, scoreNum);
   const reasons: Record<string, CardReason> = {};
   const legitimacy: Record<string, string> = {};
+  const readReport = requestReportReader();
   for (const app of pickAwaitingDecision(applications, scoreNum)) {
-    const content = readReport(app.n)?.content ?? "";
+    const content = readReport(app)?.content ?? "";
     const reason = cardReason(content);
     if (reason) reasons[app.n] = reason;
     const tier = parseReport(content).legitimacy;
