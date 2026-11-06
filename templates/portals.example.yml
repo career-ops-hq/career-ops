@@ -1301,6 +1301,7 @@ search_queries:
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
+#   aldi-nord       www.aldi-nord.de, www.aldi.(nl|be|lu|fr|es|pt|pl)  (ALDI Nord's own country sites; optional aldi_nord: block, see below)
 #   gupy            portal.gupy.io       (pt-BR board-wide Gupy search; each gupy.keywords entry swept separately, results
 #                   deduped. A single tenant's <slug>.gupy.io career page is NOT claimed)
 #   feishu-jobs     jobs.bytedance.com or <tenant>.jobs.feishu.cn
@@ -1756,6 +1757,18 @@ search_queries:
 # Single-employer career sites on their own dedicated provider. Most auto-detect
 # from the company's own host (provider: optional, shown for clarity); a few need
 # it named. All still go under tracked_companies:.
+#
+# - name: ALDI Nord                       # single-company; the country sites' own job search API
+#   careers_url: https://www.aldi-nord.de/karriere/jobs.html   # also www.aldi.nl / .be / .lu / .fr / .es / .pt / .pl
+#   provider: aldi-nord                   # optional — those hosts also auto-detect
+#   aldi_nord:
+#     categories: []                      # optional jobCategoryIds, mostly shared by the country sites; [] = all.
+#                                         # 10420 Tech & IT, 19000 Data Analytics & Research, 12297 Finance &
+#                                         # Controlling, 10421 store sales (most postings), 10424 logistics
+#     locales: [de-DE]                    # optional; default: every locale of the host (www.aldi.be: nl-BE, fr-BE)
+#   max_pages: 500                        # optional, 10 postings/page (default 500, max 1000); a whole list is
+#                                         # 2 requests per locale, since the API returns pages cumulatively
+#   enabled: true
 #
 # - name: Dassault Systèmes              # single-company; Exalead card_search_api
 #   careers_url: https://www.3ds.com/careers/jobs   # auto-detects on *.3ds.com
@@ -2740,6 +2753,13 @@ tracked_companies:
     careers_url: https://apply.remote.com/jobs
     notes: "Fully remote. Employer-of-record / global HR platform. Each posting names its hiring regions (EMEA, NORAM, LATAM, APAC)."
     enabled: true
+
+  - name: ALDI Nord
+    careers_url: https://www.aldi-nord.de/karriere/jobs.html
+    aldi_nord:
+      categories: ['10420', '19000']   # example: Tech & IT, Data Analytics & Research; omit for every category
+    notes: "Essen, Germany HQ. Discount grocery retailer with country sites across Europe; tech roles in Germany and Poland (www.aldi.pl needs its own entry)."
+    enabled: false
 
   - name: AMCS Group
     careers_url: https://amcsgroup.hirehive.com/
