@@ -23,10 +23,11 @@
 // them with hasNextPage false. So a walk is never one request per 10 rows. The
 // provider asks for page 1 (the probe page, and the source's `total`), then for
 // the page that covers `total`, bounded by max_pages: two list requests per
-// locale on a full scan. Rows added to the list between those two requests wait
-// for the next scan. A second response with no more than 10 rows while more
-// were promised means the parameter is no longer cumulative; the first page is
-// kept and a warning says so.
+// locale on a full scan. A covering page that still reports more rows (the list
+// grew between the two requests, or `total` is too low) is kept with no third
+// request, and a warning says the board is incomplete. A second response with
+// no more than 10 rows while more were promised means the parameter is no
+// longer cumulative; the first page is kept and a warning says so.
 //
 // One posting page per row: https://{host}{detail path}{slugTitle}-{postingId}.html,
 // the link the site's own job card carries. The list has no description and
@@ -74,6 +75,10 @@ const INTER_REQUEST_DELAY_MS = 250;
 // One response can carry a whole country list of a few MB, so the default 10 s
 // is raised.
 const LIST_TIMEOUT_MS = 30_000;
+// Which reason the entry's marker keeps when its locales stopped differently:
+// a broken locale outranks a source that reported more rows, and that outranks
+// a capped locale, whose remedy is only a config change.
+const STOP_REASON_RANK = Object.freeze({ cap: 1, 'source-reports-more': 2, 'not-cumulative': 3, 'fetch-error': 3 });
 
 /**
  * @param {unknown} raw
@@ -266,8 +271,8 @@ export default {
 
     const jobs = [];
     const seen = new Set();
-    /** @type {'cap' | 'fetch-error' | 'not-cumulative' | null} */
-    let truncatedReason = null; // a broken locale takes precedence over a capped one
+    /** @type {keyof typeof STOP_REASON_RANK | null} */
+    let truncatedReason = null;
     let requests = 0;
 
     // A probe only needs to know the board answers: the first locale is enough.
@@ -279,7 +284,7 @@ export default {
       // board, not a short one.
       let result = parseQueryResponse(await request(locale, 1), site);
       let page = 1;
-      /** @type {'complete' | 'cap' | 'fetch-error' | 'not-cumulative'} */
+      /** @type {'complete' | keyof typeof STOP_REASON_RANK} */
       let stopReason = 'complete';
 
       if (result.hasNextPage && page < pageBudget) {
@@ -312,7 +317,13 @@ export default {
         stopReason = 'cap';
         console.error(`⚠️  aldi-nord: ${company} (${locale}) truncated at max_pages=${maxPages} (${result.rawCount} of ${result.total ?? '?'} postings) — narrow aldi_nord.categories or raise max_pages on this entry`);
       }
-      if (stopReason !== 'complete' && (truncatedReason === null || truncatedReason === 'cap')) truncatedReason = stopReason;
+      // Below the cap, raising max_pages would not help: the walk asked for the
+      // page that covers `total`, and the source reports more rows after it.
+      if (!probing && stopReason === 'complete' && page < maxPages && result.hasNextPage) {
+        stopReason = 'source-reports-more';
+        console.error(`⚠️  aldi-nord: ${company} (${locale}) incomplete: page ${page} returned ${result.rawCount} postings (total ${result.total ?? '?'}) and the source reports more — the list grew during the scan, or its total is too low`);
+      }
+      if (stopReason !== 'complete' && (truncatedReason === null || STOP_REASON_RANK[stopReason] > STOP_REASON_RANK[truncatedReason])) truncatedReason = stopReason;
 
       for (const job of result.jobs) {
         if (seen.has(job.url)) continue;

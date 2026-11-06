@@ -324,13 +324,57 @@ test('a failed first page of a later locale fails the whole entry', async () => 
   await assert.rejects(provider.fetch({ name: 'ExampleCo BE', careers_url: 'https://www.aldi.be/' }, ctx), (e) => e === err);
 });
 
-test('a list that grows between the two requests keeps the covering page and makes no third request', async () => {
-  // Page 1 reports 35 rows, and the covering page reports the current 45.
-  const { ctx, calls } = makeCtx((body) => (body.page === 1 ? { ...source(45)(body), total: 35 } : source(45)(body)));
+/** Page 1 reports 35 rows, and the covering page reports the current 45. */
+const growing = (locale = 'de-DE') => (body) => {
+  const page = source(45, { locale })(body);
+  return body.page === 1 ? { ...page, total: 35 } : page;
+};
+
+test('a list that grows between the two requests keeps the covering page, makes no third request, and warns', async () => {
+  const { ctx, calls } = makeCtx(growing());
   const { result, lines } = await captureErrors(() => provider.fetch(entry(), ctx));
   assert.deepEqual(calls.map((c) => c.body.page), [1, 4]);
   assert.equal(result.length, 40);
+  assert.equal(result.aldiNordTruncated, 'source-reports-more');
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /incomplete: page 4 returned 40 postings \(total 45\) and the source reports more/);
+  assert.doesNotMatch(lines[0], /max_pages/);
+});
+
+test('a total that stays too low is marked incomplete on the covering page', async () => {
+  const { ctx } = makeCtx((body) => ({ ...source(45)(body), total: 35 }));
+  const { result, lines } = await captureErrors(() => provider.fetch(entry(), ctx));
+  assert.equal(result.length, 40);
+  assert.equal(result.aldiNordTruncated, 'source-reports-more');
+  assert.match(lines[0], /page 4 returned 40 postings \(total 35\) and the source reports more/);
+});
+
+test('a covering page that reaches max_pages stays a cap stop when the source reports more', async () => {
+  const { ctx } = makeCtx(growing());
+  const { result, lines } = await captureErrors(() => provider.fetch(entry({ max_pages: 4 }), ctx));
+  assert.equal(result.aldiNordTruncated, 'cap');
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /truncated at max_pages=4/);
+});
+
+test('a probe does not warn about a covering page that reports more', async () => {
+  const { ctx } = makeCtx(growing(), { maxPages: 4 });
+  const { result, lines } = await captureErrors(() => provider.fetch(entry({ max_pages: 10 }), ctx));
+  assert.equal(result.aldiNordTruncated, undefined);
   assert.deepEqual(lines, []);
+});
+
+test('across locales the marker keeps fetch-error over source-reports-more over cap, in either order', async () => {
+  const err = Object.assign(new Error('HTTP 503'), { status: 503 });
+  const broken = (body) => (body.page === 1 ? source(35, { locale: body.locale })(body) : err);
+  const capped = (body) => source(200, { locale: body.locale })(body);
+  for (const [other, expected] of [[broken, 'fetch-error'], [capped, 'source-reports-more']]) {
+    for (const locales of [['nl-BE', 'fr-BE'], ['fr-BE', 'nl-BE']]) {
+      const { ctx } = makeCtx((body) => (body.locale === 'nl-BE' ? growing('nl-BE')(body) : other(body)));
+      const { result } = await captureErrors(() => provider.fetch({ name: 'ExampleCo BE', careers_url: 'https://www.aldi.be/', max_pages: 10, aldi_nord: { locales } }, ctx));
+      assert.equal(result.aldiNordTruncated, expected, locales.join());
+    }
+  }
 });
 
 test('with no total the walk asks for the page budget, and the cap still warns', async () => {
