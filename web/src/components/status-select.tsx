@@ -151,8 +151,11 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
   async function confirmApplied() {
     if (!pendingApplied || saving.current || heldPending) return;
     const prev = pendingFrom.current;
+    const active = document.activeElement;
+    const hadFocus = active === select.current
+      || (active instanceof HTMLElement && Boolean(active.closest("[data-status-editor]")));
     setPendingApplied(false);
-    await commitChange("Applied", prev, document.activeElement === select.current);
+    await commitChange("Applied", prev, hadFocus);
   }
 
   const shown = heldPending ? heldPending : pendingApplied ? status : inline && !busy ? current : status;
@@ -182,7 +185,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     </select>
   );
   return (
-    <span className="inline-flex flex-wrap items-center gap-2" aria-busy={savingNow}>
+    <span className="inline-flex flex-wrap items-center gap-2" aria-busy={savingNow} data-status-editor="">
       {inline ? (editing || heldPending !== "") ? (
         <>
           {control}
