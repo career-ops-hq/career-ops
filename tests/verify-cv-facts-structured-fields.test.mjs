@@ -269,3 +269,27 @@ for (const [label, linked] of [
     assert.deepEqual(flagged.filter(value => /medialink|feedroom/.test(value)), []);
   });
 }
+
+test('a reference definition does not swallow the next line as its title', () => {
+  const linked = join(tmp, 'cv-refdef.md');
+  writeFileSync(linked, `${CV}
+## Previous Experience
+[MediaLink][ml]
+
+[ml]: https://www.medialink.com/
+
+(Director)
+`);
+  const html = build('build-cv-html.mjs', {
+    candidate: { name: 'Jane Doe' },
+    summary: 'Engineer.',
+    experience: [
+      { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2019 – 2024', bullets: ['Led a team of 4 engineers.'] },
+      { company: 'MediaLink', role: 'Director', dates: '', bullets: [] },
+    ],
+    skills: [{ category: 'Languages', items: 'Python, Go' }],
+  }, 'html');
+  const result = verifyFacts(html, { sourcePaths: [linked], configPath: join(tmp, 'none.json') });
+  const flagged = [...result.unsupportedFacts, ...result.advisoryFacts].map(({ value }) => value);
+  assert.deepEqual(flagged.filter(value => /director|medialink/.test(value)), []);
+});

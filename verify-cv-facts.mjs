@@ -2390,7 +2390,7 @@ function collapseMarkdownLinks(text) {
   }
   return out
     .replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1')
-    .replace(/(?:^|\s)\[[^\][]+\]:\s*\S+(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?/g, ' ');
+    .replace(/(?:^|[^\S\r\n])\[[^\][]+\]:[^\S\r\n]*\S+(?:[^\S\r\n]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[^\S\r\n]*(?=\r?$)/gm, ' ');
 }
 
 export function verifyFacts(targetText, {
@@ -2416,9 +2416,9 @@ export function verifyFacts(targetText, {
   // Each file is stripped on its own. Bold may span a wrapped line, so an unpaired `**` at
   // the end of one file paired with the first `**` of the next and left a stray `*` in the
   // name beside it ("medialink* (director)").
-  const sourceNormalized = normalizeFact(sourceTexts.map(text => stripMarkup(text)).join('\n'))
-    ;
-  const sourceLookup = collapseMarkdownLinks(sourceNormalized);
+  const sourceLookup = normalizeFact(sourceTexts
+    .map(text => collapseMarkdownLinks(stripMarkup(text, { keepLineBreaks: true })))
+    .join('\n'));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
   const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
