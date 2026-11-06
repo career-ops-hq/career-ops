@@ -46,7 +46,10 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
   const label = applicationLabel ?? `application #${n}`;
 
   useEffect(() => {
-    if (!saving.current) setStatus(current);
+    if (!saving.current) {
+      setStatus(current);
+      setPendingApplied(false);
+    }
   }, [current]);
 
   useEffect(() => {
