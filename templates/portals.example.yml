@@ -196,7 +196,8 @@
 # location_filter:
 #   # always_allow is checked BEFORE block — keep this list to your home region only
 #   always_allow:
-#     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states
+#     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states;
+#                         # "Georgia" is also a country, so the name loses to block
 #     - "New York"
 #   # strict: true       # reject postings with no location — see note above
 #   # remote_title_fallback: false  # require allow to match location evidence
