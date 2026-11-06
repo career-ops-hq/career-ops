@@ -80,7 +80,7 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
-import { closesAtIso } from './lib/posting-close.mjs';
+import { closesAtIso, selectCloseDateRefreshes } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
@@ -1749,6 +1749,10 @@ const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
  * pin, and widening one of those filters never handed back a Dayforce posting
  * it had dropped. (scan.mjs counts the same cuts and records no row for them.)
  *
+ * `skipped_close_refresh` is a newer close day for a URL already in history.
+ * The duplicate is not queued. The row must not pin the URL, or it would
+ * cancel a recheck window on the original `added` row.
+ *
  * `collectSeenCompanyRoles` needs no companion change — it already seeds from
  * `added` rows alone.
  */
@@ -1761,6 +1765,7 @@ const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
   'skipped_visa',
   'skipped_country_eligibility',
   'skipped_experience',
+  'skipped_close_refresh',
 ]);
 
 /**
@@ -4765,6 +4770,7 @@ async function main() {
   let totalFilteredVisa = 0;
   let totalDupes = 0;
   const newOffers = [];
+  const closeRefreshOffers = [];
   const verifyDedupKeys = new Map();
   const errors = [...resolveErrors];
   // Targets whose fetch threw. Not errors.length: that also holds resolve
@@ -5042,6 +5048,7 @@ async function main() {
             siblingsByUrl.get(dedupUrl),
           );
           if (!newLanguageVersion) {
+            if (!dryRun && seenUrls.has(dedupUrl)) closeRefreshOffers.push({ ...job, source: sourceName });
             totalDupes++;
             continue;
           }
@@ -5262,6 +5269,19 @@ async function main() {
   if (!dryRun && verifiedOffers.length > 0) {
     await appendToPipeline(verifiedOffers);
     await appendToScanHistory(verifiedOffers, date);
+  }
+  // A seen URL is not queued again. When its close day changed, append that
+  // day so closing-soon does not keep discarding from the old one. An empty
+  // day, or the same day, writes nothing.
+  if (!dryRun && closeRefreshOffers.length > 0) {
+    const refreshed = selectCloseDateRefreshes(closeRefreshOffers, readIfExists(SCAN_HISTORY_PATH));
+    if (refreshed.length > 0) {
+      await appendToScanHistory(
+        refreshed.map((offer) => ({ ...offer, fingerprint: '' })),
+        date,
+        'skipped_close_refresh',
+      );
+    }
   }
   // Postings the experience filter dropped: recorded for visibility, no dedup
   // weight (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so changing your years or

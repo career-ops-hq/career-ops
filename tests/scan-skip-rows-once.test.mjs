@@ -123,7 +123,7 @@ try {
 // every run. Writers allowed to do that, with the reason each records a
 // posting once by other means; an entry that stops matching fails below.
 const DIRECT_SKIP_WRITERS = new Map([
-  ['scan.mjs', 'routes its title/location/age/no-apply buckets through unrecordedOffers itself (#2695); its expired, cooldown and guard rows go to URLs the seen set then skips'],
+  ['scan.mjs', 'routes its title/location/age/no-apply buckets through unrecordedOffers itself (#2695); its expired, cooldown and guard rows go to URLs the seen set then skips; a changed close day on a seen URL is appended only when the stored day differs'],
   ['check-liveness.mjs', 'planExpiredHistoryRows writes each URL once, under the lock'],
 ]);
 const SKIP_APPEND = /appendToScanHistory\([^\n]*['"`](?:skipped_[a-z_]+|cooldown:)/;

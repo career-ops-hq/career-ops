@@ -419,11 +419,12 @@ test('the scanner resolves every call the four known writers contain', () => {
   // scan.mjs went 5 → 7 when the location and posting-age cuts started
   // recording what they drop (`skipped_location`, `skipped_age`), 7 → 8
   // when the title cut did (`skipped_title`, #2695), 8 → 9 when the
-  // experience filter did (`skipped_experience`), and 9 → 10 when
+  // experience filter did (`skipped_experience`), 9 → 10 when
   // appendUnrecordedToScanHistory, whose body is one more call, took over the
-  // sibling scanners' skip buckets. scan-interamt.mjs stayed at 5: its four
-  // skip writes moved onto that helper, which this counts as the same writer.
-  for (const [file, expected] of [['scan.mjs', 10], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
+  // sibling scanners' skip buckets, and 10 → 11 when a seen URL's new close
+  // day is recorded (`skipped_close_refresh`). scan-interamt.mjs stayed at 5:
+  // its four skip writes moved onto that helper, which this counts as the same writer.
+  for (const [file, expected] of [['scan.mjs', 11], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     const naive = [...src.matchAll(SCAN_HISTORY_WRITER)].length;
     assert.equal(naive, expected, `${file}: expected ${expected} call sites, source has ${naive} — update this expectation deliberately`);

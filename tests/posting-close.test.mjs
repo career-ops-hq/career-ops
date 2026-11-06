@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeDateForUrl, closeDatesByUrl, closesAtIso } from '../lib/posting-close.mjs';
+import { closeDateForUrl, closeDatesByUrl, closesAtIso, selectCloseDateRefreshes } from '../lib/posting-close.mjs';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -199,6 +199,34 @@ test('a later scan-history day replaces an earlier one for the same URL', () => 
     historyRow({ url: 'https://jobs.example/acme', closes_at: '2026-04-04' }),
   ].join('\n');
   assert.equal(closeDatesByUrl(text).get('https://jobs.example/acme'), '2026-04-04');
+});
+
+test('a seen posting with a new close day is selected, and an unchanged day is not', () => {
+  const history = [
+    historyRow({ url: 'https://jobs.example/acme', closes_at: '2026-01-01' }),
+    historyRow({ url: 'https://jobs.example/other', closes_at: '2026-05-05' }),
+  ].join('\n');
+  const selected = selectCloseDateRefreshes([
+    { url: 'https://jobs.example/acme?utm_source=board', closesAt: '2026-06-06' },
+    { url: 'https://jobs.example/other', closesAt: '2026-05-05' },
+    { url: 'https://jobs.example/blank', closesAt: '' },
+    { url: 'https://jobs.example/bad', closesAt: '2026-02-31', validThrough: '2026-07-07' },
+    { url: 'https://jobs.example/acme', closesAt: '2026-08-08' },
+  ], history);
+  assert.deepEqual(selected.map((offer) => offer.url), [
+    'https://jobs.example/acme',
+    'https://jobs.example/bad',
+  ]);
+  assert.equal(closesAtIso(selected[0].closesAt), '2026-08-08');
+  assert.equal(closesAtIso(selected[1].closesAt) || closesAtIso(selected[1]), '2026-07-07');
+});
+
+test('an offer with no close day does not clear a stored day', () => {
+  const history = historyRow({ url: 'https://jobs.example/acme', closes_at: '2026-01-01' });
+  assert.deepEqual(selectCloseDateRefreshes([
+    { url: 'https://jobs.example/acme', closesAt: '' },
+    { url: 'https://jobs.example/acme', closesAt: 'nope' },
+  ], history), []);
 });
 
 
