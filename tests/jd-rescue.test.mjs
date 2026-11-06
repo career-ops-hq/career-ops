@@ -340,3 +340,44 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   if (!r.ok && r.method === 'none') pass('an unrecognised host falls through the ATS lookup without a rescue');
   else fail(`unknown host not handled: ${JSON.stringify(r)}`);
 }
+
+/* -------------------------------------------------- escaped markup and entities */
+
+{
+  // Phenom ships the description as entity-ESCAPED markup. The tags must be decoded and stripped,
+  // and prose entities next to them must survive: a global &lt;/&gt; decode turned "latency &lt; 50 ms"
+  // into "<" and the tag strip then ate the prose up to the next ">".
+  const words = Array.from({ length: 100 }, (_, i) => `w${i}`).join(' ');
+  const r = rescue(ldJson(jobPosting({ description: `&lt;div&gt;&lt;p&gt;${words} Latency must stay &lt; 50 ms &amp; fast. Next sentence stays.&lt;/p&gt;&lt;/div&gt;` })));
+  const t = r.out ?? '';
+  if (r.ok && !/[<>]/.test(t.replace(/Latency must stay < 50 ms/, '')) && t.includes('Latency must stay < 50 ms & fast. Next sentence stays.')) {
+    pass('escaped tags are stripped and prose entities beside them are preserved');
+  } else {
+    fail(`escaped markup mishandled: ${JSON.stringify(t.slice(-120))}`);
+  }
+}
+
+{
+  // "&lt;b and c&gt;" is not a tag with name=value attributes; it is text.
+  const words = Array.from({ length: 100 }, (_, i) => `w${i}`).join(' ');
+  const r = rescue(ldJson(jobPosting({ description: `&lt;p&gt;${words} Compare &lt;b and c&gt; carefully.&lt;/p&gt;` })));
+  if (r.ok && (r.out ?? '').includes('Compare <b and c> carefully.')) pass('a malformed escaped "tag" stays text instead of being stripped');
+  else fail(`malformed escaped tag mishandled: ${JSON.stringify((r.out ?? '').slice(-100))}`);
+}
+
+{
+  // Escaped tags with quoted attributes are still tags.
+  const words = Array.from({ length: 100 }, (_, i) => `w${i}`).join(' ');
+  const r = rescue(ldJson(jobPosting({ description: `&lt;p&gt;${words} See &lt;a href=&quot;https://example.com/x&quot;&gt;the benefits page&lt;/a&gt;.&lt;/p&gt;` })));
+  if (r.ok && /See\s+the benefits page/.test(r.out ?? '') && !/[<>]|href/.test(r.out ?? '')) pass('an escaped tag with attributes is stripped to its text');
+  else fail(`escaped attribute tag mishandled: ${JSON.stringify((r.out ?? '').slice(-100))}`);
+}
+
+{
+  // An out-of-range numeric entity used to throw RangeError out of String.fromCodePoint, which
+  // ended the whole run with "error" instead of a rescue.
+  const words = Array.from({ length: 100 }, (_, i) => `w${i}`).join(' ');
+  const r = rescue(ldJson(jobPosting({ description: `<p>${words} bad &#99999999; and &#xD800; and &#x110000; entities, then real text.</p>` })));
+  if (r.ok && (r.out ?? '').includes('then real text.')) pass('invalid numeric entities read as spaces and do not abort the extraction');
+  else fail(`invalid numeric entity aborted the rescue: ${JSON.stringify(r)}`);
+}

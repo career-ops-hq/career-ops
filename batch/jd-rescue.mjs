@@ -61,18 +61,35 @@ const HTML_ENTITIES = {
   rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”', hellip: '…',
 };
 
+// An entity-escaped tag: `&lt;p&gt;`, `&lt;/p&gt;`, `&lt;br /&gt;`, `&lt;a href=&quot;x&quot;&gt;`.
+// Known tags only, and attributes must be name=value pairs (see htmlToText).
+const ESCAPED_TAG_NAMES = 'p|br|hr|div|span|b|i|u|em|strong|ul|ol|li|h[1-6]|a|table|thead|tbody|tr|td|th|section|article|blockquote|font|sup|sub|pre|code|small|big';
+const ESCAPED_ATTR = String.raw`\s+[a-z_:][\w:.-]*=(?:"[^"<>&]*"|'[^'<>&]*'|&quot;[^<>&]*?&quot;|[^\s"'<>&=]+)`;
+const ESCAPED_TAG_RE = new RegExp(String.raw`&lt;(/?(?:${ESCAPED_TAG_NAMES}))((?:${ESCAPED_ATTR})*)\s*/?&gt;`, 'gi');
+
+// `&#99999999;` is out of range and String.fromCodePoint throws on it, which
+// aborted the whole extraction (the batch CLI then logged "error"). An entity
+// that is not a real code point is not decodable, so it reads as a space.
+function codePointOrSpace(cp) {
+  return Number.isInteger(cp) && cp >= 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff)
+    ? String.fromCodePoint(cp)
+    : ' ';
+}
+
 /** Strip HTML to visible text, matching the runner's own normalization. */
 function htmlToText(html) {
   // Some boards (Phenom, observed on careers.roberthalf.com) ship the JobPosting
   // description as entity-ESCAPED markup (`&lt;div&gt;&lt;p&gt;…`). The tag strip
   // below cannot see those as tags, and the entity pass then turns them back into
-  // literal `<div><p>` in the JD. Unescape the angle brackets first, only when
-  // escaped tags are actually present, so a JD that merely mentions `&lt;` in
-  // prose is left alone.
-  const raw = String(html ?? '');
-  const markup = /&lt;\/?[a-z][^&<>]{0,200}&gt;/i.test(raw)
-    ? raw.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
-    : raw;
+  // literal `<div><p>` in the JD. Unescape the tags, and ONLY the tags: a global
+  // `&lt;`/`&gt;` replace would also decode prose like `latency &lt; 50 ms`, and
+  // the strip would then eat the prose up to the next `>`. A tag qualifies when
+  // it is a known HTML tag whose attributes are all name="value" pairs, so
+  // `&lt;b and c&gt;` stays text.
+  const markup = String(html ?? '').replace(
+    ESCAPED_TAG_RE,
+    (_m, name, attrs) => `<${name}${String(attrs).replace(/&quot;/gi, '"')}>`,
+  );
   return markup
     .replace(/<script[\s\S]*?<\/script[^>]*>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style[^>]*>/gi, ' ')
@@ -85,9 +102,9 @@ function htmlToText(html) {
       const k = e.toLowerCase();
       if (HTML_ENTITIES[k] !== undefined) return HTML_ENTITIES[k];
       const dec = /^#(\d+)$/.exec(k);
-      if (dec) return String.fromCodePoint(Number(dec[1]));
+      if (dec) return codePointOrSpace(Number(dec[1]));
       const hex = /^#x([0-9a-f]+)$/.exec(k);
-      if (hex) return String.fromCodePoint(parseInt(hex[1], 16));
+      if (hex) return codePointOrSpace(parseInt(hex[1], 16));
       return ' ';
     })
     .replace(/[ \t ]+/g, ' ')

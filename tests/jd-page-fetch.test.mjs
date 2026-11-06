@@ -8,16 +8,17 @@
 // the shell. Every case below is offline: fetch and DNS are stubbed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jdFromPageHtml, fetchJdFromPage, MIN_PAGE_JD_WORDS } from '../lib/jd-page-fetch.mjs';
+import { jdFromPageHtml, fetchJdFromPage, capJdText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
+import { inProviderFetch } from '../providers/_ip-guard.mjs';
 import { setHostResolver } from '../liveness-browser.mjs';
 
 const sentence = 'You will design, build and operate production services that process customer data safely. ';
 const BODY = sentence.repeat(12); // ~170 words, well over the 80-word floor
 
-function page(ldDescription, { extraLd = [] } = {}) {
-  const posting = { '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Staff Engineer', description: ldDescription, hiringOrganization: { name: 'Acme' } };
+function page(ldDescription, { extraLd = [], posting: extra = {}, body = '' } = {}) {
+  const posting = { '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Staff Engineer', description: ldDescription, hiringOrganization: { name: 'Acme' }, ...extra };
   const blocks = [posting, ...extraLd].map((o) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`).join('\n');
-  return `<html><head>${blocks}</head><body><main>Staff Engineer Remote Apply now</main></body></html>`;
+  return `<html><head>${blocks}</head><body><main>Staff Engineer Remote Apply now</main>${body}</body></html>`;
 }
 
 test('jdFromPageHtml reads the description out of a JSON-LD JobPosting', () => {
@@ -76,18 +77,28 @@ test('fetchJdFromPage returns the JD for a Phenom-shaped page', async () => {
   } finally { net.restore(); }
 });
 
-test('fetchJdFromPage honors the text cap', async () => {
+test('fetchJdFromPage honors the text cap and says when it cut the JD', async () => {
   const net = stubNetwork(() => html(page(`<p>${BODY}</p>`)));
   try {
     const jd = await fetchJdFromPage('https://careers.example.com/job/1', 200);
-    assert.ok(jd.text.length <= 201);
+    assert.ok(jd.text.endsWith(TRUNCATION_NOTICE(200)), 'a cut JD must carry the notice so nobody archives it as complete');
+    assert.ok(jd.text.length <= 200 + TRUNCATION_NOTICE(200).length + 2);
   } finally { net.restore(); }
 });
 
 test('fetchJdFromPage never requests a private or loopback host', async () => {
   const net = stubNetwork(() => html(page(`<p>${BODY}</p>`)));
   try {
-    for (const url of ['http://169.254.169.254/latest/meta-data/', 'http://127.0.0.1:3000/x', 'http://localhost/x', 'file:///etc/passwd']) {
+    for (const url of [
+      'http://169.254.169.254/latest/meta-data/',
+      'http://127.0.0.1:3000/x',
+      'http://localhost/x',
+      'file:///etc/passwd',
+      'http://[::1]/',
+      'http://[::ffff:127.0.0.1]/',
+      'http://[fd00::1]/',
+      'http://[fe80::1]/',
+    ]) {
       assert.equal(await fetchJdFromPage(url), null, url);
     }
     assert.deepEqual(net.calls, []);
@@ -146,4 +157,84 @@ test('fetchJdFromPage refuses an oversized body', async () => {
   const net = stubNetwork(() => html('x'.repeat(4 * 1024 * 1024)));
   try { assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null); }
   finally { net.restore(); }
+});
+
+test('capJdText leaves a JD under the cap untouched', () => {
+  assert.equal(capJdText('short JD', 100), 'short JD');
+});
+
+test('capJdText never splits a surrogate pair at the cut', () => {
+  const text = `${'a'.repeat(9)}\u{1F600}${'b'.repeat(50)}`; // the emoji occupies UTF-16 units 9 and 10
+  const capped = capJdText(text, 10);
+  assert.doesNotMatch(capped, /[\ud800-\udbff](?![\udc00-\udfff])/, 'no lone high surrogate');
+  assert.ok(capped.endsWith(TRUNCATION_NOTICE(10)));
+});
+
+test('capJdText prefers a paragraph boundary near the cap', () => {
+  const text = `${'x'.repeat(70)}\n\n${'y'.repeat(60)}`;
+  const capped = capJdText(text, 100);
+  assert.ok(capped.startsWith('x'.repeat(70)) && !capped.includes('y'), 'cut at the paragraph break, not mid-sentence');
+});
+
+test('LinkedIn hosts are recognised, and lookalikes are not', () => {
+  for (const host of ['linkedin.com', 'www.linkedin.com', 'uk.linkedin.com', 'LinkedIn.com.', 'WWW.LINKEDIN.COM']) assert.ok(isLinkedInHost(host), host);
+  for (const host of ['notlinkedin.com', 'linkedin.com.evil.example', 'example.com', '']) assert.equal(isLinkedInHost(host), false, host);
+});
+
+test('fetchJdFromPage never requests LinkedIn, directly or by redirect', async () => {
+  const net = stubNetwork((url) => url.startsWith('https://careers.example.com')
+    ? new Response(null, { status: 302, headers: { location: 'https://www.linkedin.com/jobs/view/4486063768/' } })
+    : html(page(`<p>${BODY}</p>`)));
+  try {
+    assert.equal(await fetchJdFromPage('https://www.linkedin.com/jobs/view/4486063768/'), null);
+    assert.equal(await fetchJdFromPage('https://uk.linkedin.com/jobs/view/1/'), null);
+    assert.deepEqual(net.calls, [], 'no request may reach LinkedIn');
+    assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null);
+    assert.deepEqual(net.calls, ['https://careers.example.com/job/1'], 'the redirect target must not be requested');
+  } finally { net.restore(); }
+});
+
+test('every hop runs inside the connect-time address guard (DNS-rebinding defence)', async () => {
+  const seen = [];
+  const net = stubNetwork((url) => {
+    seen.push([url, inProviderFetch()]);
+    return url.endsWith('/old') ? new Response(null, { status: 301, headers: { location: '/new' } }) : html(page(`<p>${BODY}</p>`));
+  });
+  try {
+    assert.ok(await fetchJdFromPage('https://careers.example.com/old'));
+    assert.deepEqual(seen, [['https://careers.example.com/old', true], ['https://careers.example.com/new', true]]);
+    assert.equal(inProviderFetch(), false, 'the guard context must not leak out of the fetch');
+  } finally { net.restore(); }
+});
+
+const NOW = Date.parse('2026-11-06T12:00:00Z');
+
+test('jdFromPageHtml refuses a posting whose validThrough is past (closed per its own data)', () => {
+  assert.equal(jdFromPageHtml(page(`<p>${BODY}</p>`, { posting: { validThrough: '2026-10-01T00:00:00Z' } }), NOW), null);
+});
+
+test('jdFromPageHtml accepts a future, absent or unparseable validThrough', () => {
+  for (const validThrough of ['2026-12-31T00:00:00Z', undefined, 'sometime soon', '']) {
+    assert.ok(jdFromPageHtml(page(`<p>${BODY}</p>`, { posting: { validThrough } }), NOW), String(validThrough));
+  }
+});
+
+const embedded = (text) => `<script>window.__appData={"descriptionHtml":${JSON.stringify(`<p>${text}</p>`)}}</script>`;
+const long = (word, n = 120) => Array.from({ length: n }, (_, i) => `${word}${i}`).join(' ');
+
+test('jdFromPageHtml does not borrow another job\'s embedded description when the page lists several postings', () => {
+  const other = { '@type': 'JobPosting', title: 'Other Job', description: `<p>${long('other')}</p>` };
+  const out = jdFromPageHtml(page(`<p>${BODY}</p>`, { extraLd: [other], body: embedded(long('unrelated', 400)) }), NOW);
+  assert.equal(out, null, 'an ambiguous page must be a miss, not the longest description on it');
+});
+
+test('jdFromPageHtml refuses a page with several embedded descriptions and no structured posting', () => {
+  const body = embedded(long('first', 150)) + embedded(long('second', 300));
+  assert.equal(jdFromPageHtml(`<html><body>${body}</body></html>`, NOW), null);
+});
+
+test('jdFromPageHtml still uses a single embedded description when the structured posting is a thin stub', () => {
+  const out = jdFromPageHtml(page('<p>Short teaser.</p>', { body: embedded(long('full', 200)) }), NOW);
+  assert.ok(out);
+  assert.equal(out.method, 'embedded-description');
 });

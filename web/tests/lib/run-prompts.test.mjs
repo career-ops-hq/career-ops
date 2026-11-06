@@ -725,6 +725,13 @@ for (const [label, extra] of [["official", {}], ["user-selected", { evaluationIn
     assert.ok(prompt.includes(REPORT_OPEN), "the report envelope instruction must survive");
   });
 
+  test(`buildPrompt (${label}): supplied text still stops on a closed posting or a truncated JD`, () => {
+    const prompt = buildPrompt({ kind: "evaluate", input: PREFETCH_URL, memory: "", today: "2026-08-04", prefetchedJd: PREFETCHED, ...extra });
+    assert.match(prompt, /Two stops still do/);
+    assert.match(prompt, /closed-posting rule/);
+    assert.match(prompt, /Job description truncated/);
+  });
+
   test(`buildPrompt (${label}): without a prefetched JD the WebFetch path is unchanged`, () => {
     for (const value of [undefined, null, ""]) {
       const prompt = buildPrompt({ kind: "evaluate", input: PREFETCH_URL, memory: "", today: "2026-08-04", prefetchedJd: value, ...extra });
