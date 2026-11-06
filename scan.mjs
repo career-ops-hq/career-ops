@@ -80,7 +80,7 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
-import { closesAtIso, refreshOfferForSeenUrl, selectCloseDateRefreshes } from './lib/posting-close.mjs';
+import { closesAtIso, closeDatesByUrl, refreshOfferForSeenUrl, selectCloseDateRefreshes } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
@@ -3844,7 +3844,24 @@ function keysInScanHistory(text, status, policy = {}) {
   return keys;
 }
 
+function offersWithChangedCloseDay(offers, historyText) {
+  const index = closeDatesByUrl(historyText);
+  const fresh = [];
+  const seen = new Set();
+  for (const offer of offers) {
+    const day = closesAtIso(offer?.closesAt) || closesAtIso(offer);
+    const key = normalizeUrl(offer?.url);
+    if (!day || !key || seen.has(key)) continue;
+    if (index.get(key) === day) continue;
+    seen.add(key);
+    index.set(key, day);
+    fresh.push(offer);
+  }
+  return fresh;
+}
+
 function offersMissingFromHistory(offers, status, historyText, policy = {}) {
+  if (status === 'skipped_close_refresh') return offersWithChangedCloseDay(offers, historyText);
   const keys = keysInScanHistory(historyText, status, policy);
   const fresh = [];
   for (const offer of offers) {

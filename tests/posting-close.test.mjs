@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closeDateForUrl, closeDatesByUrl, closesAtIso, refreshOfferForSeenUrl, selectCloseDateRefreshes } from '../lib/posting-close.mjs';
-import { alignCloseRefreshOffers, closeRefreshUrlForSeenOffer, collectSeenUrls } from '../scan.mjs';
+import { alignCloseRefreshOffers, closeRefreshUrlForSeenOffer, collectSeenUrls, seenJobKey } from '../scan.mjs';
 import { computeListingFingerprint } from '../listing-fingerprint.mjs';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 
@@ -358,6 +358,23 @@ test('one accepted listing identity refreshes its recorded URL', () => {
   });
   const ambiguous = collectSeenUrls({ scanHistoryText: `${history}\n${other}` });
   assert.equal(closeRefreshUrlForSeenOffer(job, new Set(), ambiguous.listingRefreshUrls), '');
+});
+
+test('a listing refresh follows the offer language, and a seen URL stands alone', () => {
+  const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
+  const key = computeListingFingerprint({ strong: identity }).listing_key;
+  const en = 'https://jobs.example/acme-en';
+  const fr = 'https://jobs.example/acme-fr';
+  const history = [
+    historyRow({ url: en, status: 'added', first_seen: '2026-10-01', listing_key: key, language: 'en' }),
+    historyRow({ url: fr, status: 'added', first_seen: '2026-10-01', listing_key: key, language: 'fr' }),
+  ].join('\n');
+  const { listingRefreshUrls } = collectSeenUrls({ scanHistoryText: history });
+  const parsed = { url: 'https://jobs.example.test/parsed', listingIdentity: identity, language: 'fr' };
+  assert.equal(closeRefreshUrlForSeenOffer(parsed, new Set(), listingRefreshUrls), fr);
+  assert.equal(closeRefreshUrlForSeenOffer({ ...parsed, language: 'en' }, new Set(), listingRefreshUrls), en);
+  const plain = { url: 'https://jobs.example/acme' };
+  assert.equal(closeRefreshUrlForSeenOffer(plain, new Set([seenJobKey(plain.url)]), new Map()), plain.url);
 });
 
 

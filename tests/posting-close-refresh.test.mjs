@@ -131,10 +131,27 @@ test('a seen posting keeps a later close day and stays out of the pipeline', () 
     assert.equal(dataRows(historyText(box.dir)).length, 2);
     assert.equal(pendingCount(box.dir), 1);
 
+    const fourth = runScan(box.dir, '2026-11-01');
+    assert.equal(fourth.status, 0, describeSpawn(fourth));
+    const changed = dataRows(historyText(box.dir));
+    assert.equal(changed.length, 3);
+    assert.equal(changed[2].status, 'skipped_close_refresh');
+    assert.equal(changed[2].closes_at, '2026-11-01');
+    assert.equal(closeDateForUrl(closeDatesByUrl(historyText(box.dir)), URL), '2026-11-01');
+    assert.equal(pendingCount(box.dir), 1);
+
+    const applied = spawnSync(process.execPath, [join(ROOT, 'closing-soon.mjs'), '--discard-passed', '--apply', '--today', TODAY], {
+      cwd: box.dir,
+      encoding: 'utf-8',
+      env: childEnv(box.dir),
+    });
+    assert.equal(applied.status, 0, describeSpawn(applied));
+    assert.match(readFileSync(box.tracker, 'utf-8'), /\| Discarded \|/);
+
     const cleared = runScan(box.dir, 'none');
     assert.equal(cleared.status, 0, describeSpawn(cleared));
-    assert.equal(dataRows(historyText(box.dir)).length, 2);
-    assert.equal(closeDateForUrl(closeDatesByUrl(historyText(box.dir)), URL), '2026-12-01');
+    assert.equal(dataRows(historyText(box.dir)).length, 3);
+    assert.equal(closeDateForUrl(closeDatesByUrl(historyText(box.dir)), URL), '2026-11-01');
   } finally {
     box.cleanup();
   }
