@@ -211,7 +211,8 @@ test('supervisor: a "Reports to:" label line names the reporting line', () => {
   }
   assert.equal(status(analyzeRoleClarity('Reports to: Head of ML Platform in the Engineering Department.'), 'supervisor'), 'present');
   // The label form keeps the article guard, and a bare label is not evidence.
-  for (const line of ['Reports to: the.', 'Reports to - the.', 'Reports to:', 'Reports toward the goal.']) {
+  for (const line of ['Reports to: the.', 'Reports to - the.', 'Reports to:', 'Reports toward the goal.',
+    'Reports to: N/A', 'Reports to: TBD', 'Reports to - TBC', 'Reports to the TBD.', 'Reporting to: None']) {
     assert.deepEqual(analyzeRoleClarity(line).points.find((x) => x.id === 'supervisor').evidence, [], line);
   }
 });
