@@ -117,6 +117,9 @@ export function parseHydration(html) {
 function placeOf(l) {
   const name = l?.name;
   const country = l?.countryName;
+  // Only two strings are joined. Anything else passes through as it did before
+  // the join, where name.includes() would throw and fail the whole page.
+  if (typeof name !== 'string' || typeof country !== 'string') return name;
   return name && country && l.level !== 1 && !name.includes(country) ? `${name}, ${country}` : name;
 }
 

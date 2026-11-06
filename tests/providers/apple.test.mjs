@@ -122,6 +122,19 @@ try {
       ? pass('apple.fetch() joins a city to its country and leaves a country entry alone')
       : fail(`apple location strings: ${JSON.stringify(places)}`);
 
+    // A name that is not a string reaches the location as it did before the
+    // join, instead of throwing on includes() and failing the whole page.
+    const { ctx: oddCtx } = recordingCtx(() => hydration([
+      located([{ name: 42, countryName: 'United States of America', level: 5 }]),
+      located([{ name: 'Austin', countryName: 7, level: 5 }]),
+      located([city]),
+    ], 3));
+    let odd;
+    try { odd = (await provider.fetch(ENTRY, oddCtx)).map((j) => j.location); } catch (e) { odd = `threw: ${e.message}`; }
+    JSON.stringify(odd) === JSON.stringify(['42', 'Austin', 'Cupertino, United States of America'])
+      ? pass('apple.fetch() passes a non-string location name or country through without joining')
+      : fail(`apple non-string location fields: ${JSON.stringify(odd)}`);
+
     const usOnly = buildLocationFilter({ always_allow: ['United States', 'USA'], allow: ['United States', 'USA'] });
     usOnly('Cupertino, United States of America') && !usOnly('London, United Kingdom')
       ? pass('apple locations pass the US allow-list onboarding writes')
