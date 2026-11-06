@@ -122,6 +122,7 @@ const pipelineMode = read('modes/pipeline.md').split('## Session title')[1]?.spl
 check('modes/pipeline.md keeps the scan counter and returns the title counts',
   pipelineMode.includes('**Session Title** rule') && pipelineMode.includes('`Title counts: {remaining}/{found}`')
     && /removal of a posting the scan counted/.test(pipelineMode)
+    && /An `unreadable` posting the scan counted is an unconfirmed link: it stays in Pending, but it leaves this run's count, once/.test(pipelineMode)
     && /never renames anything/.test(pipelineMode));
 
 // The point in the flow where the role and employer first become known.
