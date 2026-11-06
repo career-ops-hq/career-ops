@@ -1,7 +1,7 @@
 import { cvDiskState } from "./cv-disk-state.mjs";
 
 /**
- * @typedef {{ id: string, status: "running" | "done" | "error", steps: { kind: string, label: string }[] }} PdfJob
+ * @typedef {{ id: string, status: "running" | "done" | "error" | "gated", steps: { kind: string, label: string }[] }} PdfJob
  * @typedef {{ jobId: string, reason: string } | null} PdfFailure
  * @typedef {{ kind: "running", jobId: string } | { kind: "ready" | "idle", failure: PdfFailure }} PdfButtonState
  */

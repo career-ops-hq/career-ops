@@ -90,6 +90,7 @@ function ingestJsonOffer(
     company: o.company,
     title: o.title,
     location: o.location || "",
+    ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
     postedAt: o.postedAt || "",
     ats: source.replace(/-full$/, ""),
     source,
@@ -146,7 +147,7 @@ export function scannerSupportsJson(): boolean {
   }
 }
 
-type JsonOffer = { company?: string; title?: string; url?: string; location?: string | null; postedAt?: string | null; source?: string };
+type JsonOffer = { geographyEvidence?: Record<string, unknown>; company?: string; title?: string; url?: string; location?: string | null; postedAt?: string | null; source?: string };
 type ScanJson = {
   companiesAvailable?: number;
   companiesScanned?: number;
