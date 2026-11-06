@@ -32,6 +32,7 @@ export function TodayDashboard({
   reasons,
   legitimacy,
   inbox,
+  inBetween,
 }: {
   applications: Application[];
   reasons: Record<string, CardReason>;
@@ -224,7 +225,7 @@ export function TodayDashboard({
               Open pipeline
             </Link>
           </div>
-          <QuickEvaluate />
+          {inBetween && <QuickEvaluate />}
         </div>
       </section>
 

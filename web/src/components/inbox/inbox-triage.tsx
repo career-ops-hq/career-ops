@@ -10,7 +10,6 @@ import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
 import { orderInbox } from "@/lib/core/inbox-rank.mjs";
-import { LinkedInPaste } from "@/components/linkedin-paste";
 import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
 import { FacetChips } from "./facet-chips";
@@ -380,14 +379,33 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {writeError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-400">{writeError}</p>}
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
+      <FacetChips
+        within={within}
+        setWithin={setWithin}
+        sources={sources}
+        toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+        seniorities={seniorities}
+        toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+        locQ={locQ}
+        setLocQ={setLocQ}
+        kw={kw}
+        setKw={setKw}
+        availSources={availSources}
+        availSeniorities={availSeniorities}
+        resultCount={filtered.length}
+        totalCount={enriched.length - hiddenCount}
+        anyActive={anyFacet}
+        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
+      />
+
       <div className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
           {capped ? (sortMode === "newest" ? "Fresh — worth a look" : "Best fits") : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
         </p>
         <div className="flex items-center gap-3">
           <div role="group" aria-label="Sort inbox" className="flex items-center gap-2 text-xs">
-            <button type="button" aria-pressed={sortMode === "fit"} onClick={() => setSortMode("fit")} className={cn("hover:text-foreground", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
-            <button type="button" aria-pressed={sortMode === "newest"} onClick={() => setSortMode("newest")} className={cn("hover:text-foreground", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")}>Newest</button>
+            <button type="button" aria-pressed={sortMode === "fit"} onClick={() => setSortMode("fit")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
+            <button type="button" aria-pressed={sortMode === "newest"} onClick={() => setSortMode("newest")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")}>Newest</button>
           </div>
           {hiddenCount > 0 && (
             <button type="button" onClick={() => void restoreHidden()} disabled={restoring} aria-busy={restoring} className="text-xs text-faint transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]">
@@ -396,6 +414,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           )}
         </div>
       </div>
+      <p className="mt-1 text-xs text-faint">j and k move. s saves. x skips. Shift+X skips the checked rows.</p>
 
       {/* multi-select action bar */}
       {selected.size > 0 && (
@@ -455,28 +474,6 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {shortlist.length === 0 && (
         <p className="mt-4 text-center text-xs text-faint">Save roles worth a look, then score them together — one token spend.</p>
       )}
-      </div>
-      <LinkedInPaste />
-      <div hidden={inbox.length === 0}>
-      <FacetChips
-        within={within}
-        setWithin={setWithin}
-        sources={sources}
-        toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
-        seniorities={seniorities}
-        toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
-        locQ={locQ}
-        setLocQ={setLocQ}
-        kw={kw}
-        setKw={setKw}
-        availSources={availSources}
-        availSeniorities={availSeniorities}
-        resultCount={filtered.length}
-        totalCount={enriched.length - hiddenCount}
-        anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
-      />
-      <p className="mt-3 text-xs text-faint">j and k move. s saves. x skips. Shift+X skips the checked rows.</p>
       </div>
 
       {/* undo toast (sits above the tray) */}
