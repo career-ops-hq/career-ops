@@ -32,6 +32,14 @@ test("The in-page back link returns to the list where it was left", { skip: live
 
   await page.goto(`${origin.origin}/pipeline?${query}`);
   const company = page.getByRole("link", { name: "Fixture Company 60", exact: true });
+  // Off-screen rows are not mounted, so scroll the page until that row exists.
+  const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+  let mountedCompany = false;
+  for (let y = 0; y <= scrollHeight && !mountedCompany; y += 400) {
+    await page.evaluate((top) => window.scrollTo(0, top), y);
+    mountedCompany = await company.waitFor({ state: "attached", timeout: 800 }).then(() => true).catch(() => false);
+  }
+  assert.equal(mountedCompany, true, "Fixture Company 60 mounts when the list is scrolled");
   await company.scrollIntoViewIfNeeded();
   const before = await page.evaluate(() => window.scrollY);
   assert.ok(before > 1000, `the list scrolled to row 60 (scrollY ${before})`);
@@ -39,7 +47,14 @@ test("The in-page back link returns to the list where it was left", { skip: live
   await company.click();
   await page.getByRole("heading", { name: "Fixture Company 60", exact: true }).waitFor();
   await back().click();
-  await company.waitFor();
+  const returned = await company.waitFor({ timeout: 5_000 }).then(() => true).catch(() => false);
+  if (!returned) {
+    const diag = await page.evaluate(() => ({
+      scrollY: window.scrollY,
+      rows: [...document.querySelectorAll("tr[data-application-key] a")].slice(0, 6).map((a) => a.textContent.trim()),
+    }));
+    assert.equal(returned, true, `company 60 was not mounted after back (scrollY ${diag.scrollY}, first rows ${diag.rows.join(", ")})`);
+  }
   await page.waitForFunction((y) => Math.abs(window.scrollY - y) < 50, before, { timeout: 5_000 }).catch(() => {});
   const after = await page.evaluate(() => window.scrollY);
   assert.ok(Math.abs(after - before) < 50, `scrollY ${after} returned to ${before}`);

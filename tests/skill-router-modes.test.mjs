@@ -126,8 +126,10 @@ if (menuInputs.length < 20 || routeInputs.size < 20 || unparsedRows.length) {
 }
 
 const oferta = menu.match(/^  \/career-ops oferta .*$/m)?.[0] ?? '';
-if (/A-H/.test(oferta) && !/A-F/.test(oferta)) {
-  pass('discovery menu describes oferta as the A-H evaluation');
+// Oferta always writes blocks A-G. Block H is included at or above 4.5.
+// The short "A-H" token hides that, and "A-F" drops Block H entirely.
+if (/A-G always/.test(oferta) && /Block H at or above 4\.5/.test(oferta) && !/A-F/.test(oferta)) {
+  pass('discovery menu describes oferta as blocks A-G always, Block H at or above 4.5');
 } else {
-  fail(`discovery menu line for oferta should say A-H, not A-F: ${oferta || '(no oferta line found)'}`);
+  fail(`discovery menu line for oferta should say "A-G always" and "Block H at or above 4.5", not A-F: ${oferta || '(no oferta line found)'}`);
 }

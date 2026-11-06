@@ -5,7 +5,7 @@ import { CalendarPlus, Loader2, Sparkles, X } from "lucide-react";
 import type { ScanEngine } from "@/lib/scheduled-jobs";
 import { DEFAULT_FILTERS, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "@/components/explore/filter-builder";
-import { ScheduledOverlay } from "./scheduled-overlay";
+import { Modal } from "@/components/ui/modal";
 import { cadenceMinimum, cadenceValueForUnit, createScheduledJobRequest } from "@/lib/scheduled-job-client.mjs";
 
 export function CreateJobModal({
@@ -51,7 +51,7 @@ export function CreateJobModal({
   };
 
   return (
-    <ScheduledOverlay isOpen={isOpen} onClose={onClose} titleId="create-scheduled-scan-title" initialFocusRef={nameRef} panelClassName="max-w-2xl">
+    <Modal isOpen={isOpen} onClose={onClose} labelledBy="create-scheduled-scan-title" initialFocusRef={nameRef} panelClassName="max-w-2xl">
         <div className="flex items-center justify-between border-b border-border pb-4">
           <div className="flex items-center gap-2.5">
             <div className="grid size-9 place-items-center rounded-xl bg-brand-soft text-brand-text">
@@ -157,6 +157,6 @@ export function CreateJobModal({
             </button>
           </div>
         </form>
-    </ScheduledOverlay>
+    </Modal>
   );
 }
