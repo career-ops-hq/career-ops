@@ -2431,6 +2431,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   const variants = new Map();
   const identityPromotableUrls = new Map();
   const listingRefreshUrls = new Map();
+  const urlRefreshLanguages = new Map();
   // Rows the age policy has released. Held rather than counted here: the two
   // sources parsed below carry no age policy of their own, so a row the TTL has
   // just freed can be re-pinned a few lines later. The count is taken at the end,
@@ -2454,6 +2455,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     // and the URL was never queued, so counting it as "eligible again" would
     // overstate what the TTL released. See OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
+    if (status === 'added') rememberUrlRefreshLanguage(urlRefreshLanguages, url, language);
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       const urlToken = seenJobKey(url);
       seen.add(urlToken);
@@ -2548,7 +2550,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   let recheckEligible = 0;
   for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
 
-  return { seen, recheckEligible, identityPromotableUrls, listingRefreshUrls, variants };
+  return { seen, recheckEligible, identityPromotableUrls, listingRefreshUrls, urlRefreshLanguages, variants };
 }
 
 // Path options mirror mergeIntoPipeline's seam below: the defaults are the
@@ -3579,6 +3581,22 @@ export function refreshListingKey(offer) {
   return token;
 }
 
+function rememberUrlRefreshLanguage(map, url, language) {
+  const key = seenJobKey(url);
+  const forms = refreshLanguage(url, language);
+  if (!key || !forms.length) return;
+  let known = map.get(key);
+  if (!known) map.set(key, (known = new Set()));
+  for (const form of forms) known.add(form);
+}
+
+function urlRefreshLanguageConflicts(map, url, language) {
+  if (!language.length || !map) return false;
+  const known = map.get(seenJobKey(url));
+  if (!known?.size) return false;
+  return !language.some((form) => known.has(form));
+}
+
 function rememberListingRefresh(map, listingKey, url, language) {
   if (!listingKey || typeof url !== 'string' || !url) return;
   let rows = map.get(listingKey);
@@ -3595,7 +3613,7 @@ function recordedListingRows(job, listingUrls) {
   return listingUrls.get(token.slice('listing:'.length)) || [];
 }
 
-export function closeRefreshUrlForSeenOffer(job, seenUrls, listingUrls) {
+export function closeRefreshUrlForSeenOffer(job, seenUrls, listingUrls, urlLanguages = null) {
   const rows = recordedListingRows(job, listingUrls);
   const language = refreshLanguage(job?.url, job?.language);
   const recorded = (rows || []).filter((row) => sameRefreshLanguage(language, row.language)).map((row) => row.url);
@@ -3607,7 +3625,9 @@ export function closeRefreshUrlForSeenOffer(job, seenUrls, listingUrls) {
   }
   if (rows?.length) return '';
   const dedupUrl = seenJobKey(job?.url);
-  return seenUrls?.has(dedupUrl) ? job.url : '';
+  if (!seenUrls?.has(dedupUrl)) return '';
+  if (urlRefreshLanguageConflicts(urlLanguages, job?.url, language)) return '';
+  return job.url;
 }
 
 export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
@@ -3751,7 +3771,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   // One parse. The four readers below walk these rows instead of splitting
   // the file again (seen URLs, posting attributes, company roles, fingerprints).
   const historyRows = parsedScanHistory(scanHistoryText);
-  const { seen, recheckEligible, identityPromotableUrls, listingRefreshUrls, variants: seenUrlVariants } = collectSeenUrls(
+  const { seen, recheckEligible, identityPromotableUrls, listingRefreshUrls, urlRefreshLanguages, variants: seenUrlVariants } = collectSeenUrls(
     { scanHistoryText, pipelineText, applicationsText, historyRows },
     policy,
     { extraTokensFor: (_url, _portal, listingKey) => listingKey ? `listing:${listingKey}` : null },
@@ -3774,7 +3794,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
     locatedLanguagesByBase,
   });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText, historyRows);
-  return { seen, identityPromotableUrls, listingRefreshUrls, recheckEligible, seenUrlVariants, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
+  return { seen, identityPromotableUrls, listingRefreshUrls, urlRefreshLanguages, recheckEligible, seenUrlVariants, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -5358,7 +5378,7 @@ async function main() {
             siblingsByUrl.get(dedupUrl),
           );
           if (!newLanguageVersion) {
-            const refreshUrl = dryRun ? '' : closeRefreshUrlForSeenOffer(job, seenUrls, dedupSnapshot.listingRefreshUrls);
+            const refreshUrl = dryRun ? '' : closeRefreshUrlForSeenOffer(job, seenUrls, dedupSnapshot.listingRefreshUrls, dedupSnapshot.urlRefreshLanguages);
             const closeDay = refreshUrl ? (closesAtIso(job.closesAt) || closesAtIso(job)) : '';
             if (closeDay) {
               const rest = { ...job, url: refreshUrl, source: sourceName, fingerprint: '' };

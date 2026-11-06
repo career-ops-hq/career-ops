@@ -466,4 +466,22 @@ test('an expired history row still blocks a different language on its URL', () =
   assert.equal(closeRefreshUrlForSeenOffer(other, new Set([seenJobKey(other.url)]), released.listingRefreshUrls), other.url);
 });
 
+test('an aged row without a listing key blocks a different language', () => {
+  const url = 'https://jobs.example/acme';
+  const history = historyRow({
+    url,
+    status: 'added',
+    first_seen: '2026-01-01',
+    language: 'en',
+  });
+  const released = collectSeenUrls({ scanHistoryText: history }, { recheckAfterDays: 30, today: '2026-11-05' });
+  assert.equal(released.seen.has(seenJobKey(url)), false);
+  const tracked = new Set([seenJobKey(url)]);
+  const french = { url, language: 'fr' };
+  assert.equal(closeRefreshUrlForSeenOffer(french, tracked, released.listingRefreshUrls, released.urlRefreshLanguages), '');
+  assert.equal(closeRefreshUrlForSeenOffer({ url, language: 'en' }, tracked, released.listingRefreshUrls, released.urlRefreshLanguages), url);
+  const other = { url: 'https://jobs.example/other', language: 'fr' };
+  assert.equal(closeRefreshUrlForSeenOffer(other, new Set([seenJobKey(other.url)]), new Map(), released.urlRefreshLanguages), other.url);
+});
+
 
