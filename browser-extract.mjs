@@ -51,6 +51,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { classifyLiveness } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { HTML_TAG_RE } from './providers/_html-to-text.mjs';
 import { isWorkModelOnly } from './providers/greenhouse.mjs';
 import { buildLocation } from './providers/hirehive.mjs';
 import { isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
@@ -182,8 +183,8 @@ const BLOCK_END_RE = /<\/(p|div|ul|ol|h[1-6]|tr|section|article|blockquote)\s*>/
  * payloads and hard-caps at 4000 chars while collapsing ALL whitespace
  * (newlines included) into single spaces. A JD read for evaluation wants the
  * full body up to `--max-chars`, with its paragraph and bullet breaks intact.
- * The entity decoder itself IS shared, so the two cannot drift on the thing
- * that has actually drifted historically (#1555/#1639/#2623).
+ * The entity decoder and the tag matcher ARE shared, so the two cannot drift on
+ * the thing that has actually drifted historically (#1555/#1639/#2623).
  *
  * Double-decode for the same reason htmlToText does: payloads often carry
  * entity-escaped markup (`&lt;p&gt;`), and text-level entities only become
@@ -199,7 +200,7 @@ export function jdHtmlToText(html) {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<li[^>]*>/gi, '\n- ')
     .replace(BLOCK_END_RE, '\n')
-    .replace(/<[^>]+>/g, ' ');
+    .replace(HTML_TAG_RE, ' ');
   return decodeEntities(stripped)
     .replace(/[ \t\u00a0]+/g, ' ')
     .replace(/ *\n */g, '\n')

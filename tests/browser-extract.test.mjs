@@ -165,6 +165,18 @@ try {
   } else {
     fail(`jdHtmlToText escaped => ${JSON.stringify(jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
   }
+  const comparison = jdHtmlToText('<p>Teams of &lt; 5 people, &gt; 2 years of experience, &lt;10 engineers and &gt;150k users.</p>');
+  if (comparison === 'Teams of < 5 people, > 2 years of experience, <10 engineers and >150k users.') {
+    pass('jdHtmlToText keeps comparison text between decoded angle brackets');
+  } else {
+    fail(`jdHtmlToText comparison => ${JSON.stringify(comparison)}`);
+  }
+  const quotedAttr = jdHtmlToText('<p title="a > b">Text</p>');
+  if (quotedAttr === 'Text') {
+    pass('jdHtmlToText strips a whole tag whose quoted attribute holds an angle bracket');
+  } else {
+    fail(`jdHtmlToText quoted attribute => ${JSON.stringify(quotedAttr)}`);
+  }
   if (jdHtmlToText(null) === '' && jdHtmlToText('') === '' && jdHtmlToText(42) === '') {
     pass('jdHtmlToText returns "" for a non-string / empty body');
   } else {
