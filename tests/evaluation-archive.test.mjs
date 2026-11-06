@@ -859,3 +859,50 @@ for (const change of [{ status: 403 }, { role: 'Unrelated Accountant' }, { reloa
     });
   }));
 }
+
+
+// Numeric hosts bypass an Agent's DNS lookup. Exercise the actual default URL
+// guard and default transport selection, replacing only resolver/transport I/O.
+for (const [host, blocked] of [
+  ['100.64.0.1', true],
+  ['198.18.0.1', true],
+  ['[::ffff:100.64.0.1]', true],
+  ['127.0.0.1', true],
+  ['8.8.8.8', false],
+]) test(`archive literal address: default transport ${blocked ? 'blocks' : 'allows'} ${host}`, async () => {
+  const { isIP } = await import('node:net');
+  const { setHostResolver } = await import('../liveness-browser.mjs');
+  const url = `http://${host}/jobs/2468`;
+  const address = new URL(url).hostname.replace(/^\[|\]$/g, '');
+  const state = { lookup: 0, fetch: 0, sent: 0, destroyed: 0 };
+  const restore = setHostResolver(async () => [address]);
+  const previous = globalThis.fetch;
+  globalThis.fetch = () => { throw new Error('unexpected global transport in literal-IP fixture'); };
+  class Agent {
+    constructor(options) { this.lookup = options.connect.lookup; }
+    async destroy() { state.destroyed++; }
+  }
+  try {
+    const operation = () => capturePostingSource({ url, num: '061', slug: 'exampleco', role: 'Product Manager', privateDir: '/unused' }, {
+      lookupFn: (_host, _options, callback) => { state.lookup++; callback(new Error('numeric hosts must not resolve DNS')); },
+      httpTransportLoader: async () => ({ Agent, fetch: async (target, init) => {
+        state.fetch++; assert.equal(target, url); assert.ok(init.dispatcher instanceof Agent);
+        const hostname = new URL(target).hostname.replace(/^\[|\]$/g, '');
+        // Model native connector semantics: literal IPs skip lookup entirely.
+        if (!isIP(hostname)) await new Promise((resolve, reject) => init.dispatcher.lookup(hostname, {}, error => error ? reject(error) : resolve()));
+        state.sent++;
+        return new Response(`<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', url, title: 'Product Manager', description: JD })}</script>`, { status: 200 });
+      } }),
+    });
+    if (blocked) {
+      await assert.rejects(operation, host === '127.0.0.1' ? /restricted archive URL/ : /non-public address/);
+      assert.equal(state.fetch, 0, 'the default fetch is never invoked for a blocked literal');
+      assert.equal(state.sent, 0);
+    } else {
+      const result = await operation();
+      assert.equal(result.complete, true); assert.equal(result.sourceUrl, url); assert.equal(result.settledUrl, url);
+      assert.equal(state.fetch, 1); assert.equal(state.sent, 1);
+    }
+    assert.equal(state.lookup, 0); assert.equal(state.destroyed, 1);
+  } finally { restore(); globalThis.fetch = previous; }
+});
