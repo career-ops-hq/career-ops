@@ -78,7 +78,8 @@ Options:
     return;
   }
 
-  // The page's own structured data says the posting is closed. Say so with a
+  // The posting's own data says it is closed: the page's JobPosting, its visible
+  // text, or an ATS API flag such as Ashby's isListed: false. Say so with a
   // distinct exit code instead of a plain miss, so a caller does not fall back
   // to a fetch that could return the JD from the visible page and score it.
   if (result.closed) {

@@ -361,6 +361,9 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
     url: postingUrl,
     title: compactText(str(job.title), 300),
     text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    // The board says the posting is no longer listed: carry that as closure, so a
+    // caller can stop instead of reading the marker out of the text.
+    ...(job.isListed === false ? { closed: true, evidence: 'Ashby isListed: false' } : {}),
   };
 }
 
@@ -1069,7 +1072,7 @@ function emitJd(result, maxChars) {
   }
   // bodyText exists only for jdFailure(); drop it so the documented success
   // shape `{ url, title, text }` is unchanged.
-  const { bodyText: _bodyText, ...emitted } = result;
+  const { bodyText: _bodyText, closed: _closed, evidence: _evidence, ...emitted } = result;
   process.stdout.write(JSON.stringify(emitted));
 }
 

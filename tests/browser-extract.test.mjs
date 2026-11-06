@@ -287,7 +287,8 @@ try {
     'https://jobs.ashbyhq.com/acme/x',
   );
   if (delisted && delisted.text.includes('Not currently listed (isListed: false)')) {
-    pass('normalizeAshbyJob surfaces isListed: false');
+    if (delisted.closed === true && delisted.evidence === 'Ashby isListed: false') pass('normalizeAshbyJob surfaces isListed: false');
+    else fail(`normalizeAshbyJob did not flag the delisted posting as closed: ${JSON.stringify(delisted)}`);
   } else {
     fail(`normalizeAshbyJob isListed => ${JSON.stringify(delisted)}`);
   }
