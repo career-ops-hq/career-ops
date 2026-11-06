@@ -1,10 +1,12 @@
 // tests/session-title-rule.test.mjs — the router's host-optional session-title
-// rule (#5303).
+// rule (#5303), and the progress titles that extend it to scans and single
+// evaluations.
 //
 // Hosts that title sessions automatically name them after the invocation, so a
 // week of `/career-ops <url>` runs leaves a sidebar of identical "Career ops
-// LinkedIn job" titles. The router now tells an interactive single-posting mode
-// to rename the session `{Role}, {Company}` once the JD is read.
+// LinkedIn job" titles. The router tells an interactive single-posting mode to
+// rename the session `{Role}, {Company}` once the JD is read. A scan or a single
+// evaluation also shows its stage, and a scan a `{remaining}/{found}` counter.
 //
 // These are prompt-contract assertions: they pin the rule's guardrails in the
 // text an agent reads, not proof that any given model obeys it. The guardrails
@@ -36,13 +38,45 @@ check('opt-out key is documented in the rule', section.includes('`session_title:
 
 const scopeLine = section.match(/^- \*\*Scope:\*\* (.*)$/m)?.[1] ?? '';
 const [inScope, outOfScope] = scopeLine.split('Skip');
-for (const mode of ['auto-pipeline', 'oferta', 'pdf', 'apply', 'contacto', 'interview-prep']) {
+for (const mode of ['auto-pipeline', 'oferta', 'pdf', 'apply', 'contacto', 'interview-prep', 'scan', 'pipeline']) {
   check(`\`${mode}\` is in scope`, (inScope ?? '').includes(`\`${mode}\``));
 }
-for (const mode of ['scan', 'pipeline', 'batch', 'ofertas']) {
-  check(`multi-posting \`${mode}\` is skipped`, (outOfScope ?? '').includes(`\`${mode}\``));
+for (const mode of ['batch', 'ofertas']) {
+  check(`\`${mode}\` is skipped`, (outOfScope ?? '').includes(`\`${mode}\``));
 }
+check('a multi-URL `pipeline` that did not follow a scan is skipped',
+  /a `pipeline` run on 2\+ URLs that did not follow a scan/.test(outOfScope ?? ''));
 check('delegated/headless workers never rename', /worker never renames anything/.test(outOfScope ?? ''));
+
+// The progress titles. The strings and numbers are the design's own examples,
+// so a rewording that loses one changes what the user sees in the sidebar.
+const bullet = (name) => section.match(new RegExp(`^- \\*\\*${name}\\*\\*.*(?:\\n  - .*)*`, 'm'))?.[0] ?? '';
+const single = bullet('Single evaluation');
+const scan = bullet('Scan');
+for (const title of ['`Career-ops eval (fetching)`', '`{Role}, {Company} (evaluating)`', '`{Role}, {Company} (CV)`',
+  'end on plain `{Role}, {Company}`', '`{Role}, {Company} (on hold)`']) {
+  check(`single evaluation title ${title}`, single.includes(title));
+}
+for (const title of ['`Career-ops scan (scanning)`', '`{remaining}/{found}`', '`Career-ops scan (checking, 5/15)`',
+  '`Career-ops scan (evaluating, 3/15)`', '`Career-ops scan (none left, 0/15)`', '`Career-ops scan (3/15)`']) {
+  check(`scan title ${title}`, scan.includes(title));
+}
+check('`found` stays fixed for the run', /`found` is every posting that passed the scanner's filters, plus every search hit taken forward for checking\. It stays fixed for the run\./.test(scan));
+check('an evaluated posting stays counted', scan.includes('An evaluated posting stays counted.'));
+check('one posting left switches to its own title', /When `remaining` reaches 1, switch to that job's `\{Role\}, \{Company\}`/.test(scan));
+
+// Guardrails on how often and how long. Each lost one costs the user: a flood
+// of approval prompts, a truncated sidebar, or a rename loop after a decline.
+check('renames only when the stage or the count changes', /only when the stage or the count changes/.test(section));
+check('titles stay under 60 characters', /under 60 characters, stage included/.test(section));
+check('a declined or failed rename stops renaming for the rest of the run',
+  /After a rename errors or is declined, stop renaming for the rest of the run/.test(section));
+check('approval prompts are bounded by the decline rule and the opt-out',
+  /\*\*Approval prompts:\*\*.*The first decline ends renaming for the run, and `session_title: off` ends it for good/.test(section));
+check('an open agency question titles the role alone, never the agency',
+  section.includes('While that question is open, the title is the role alone: `{Role} (on hold)`'));
+check('the parent renames at the points it can see in a delegated run',
+  /a worker cannot rename its parent's session, so the parent renames at the points it can see/.test(section));
 
 // `apply` is in scope but runs in a worker when Playwright drives the form, so
 // the parent has to get the role and employer back or nothing ever renames.
@@ -54,6 +88,18 @@ check('delegated `apply` also returns the agency, and the parent waits for its c
   /and any agency the posting came through/.test(delegated)
     && /parent then applies \*\*Session Title\*\* from those values, after any agency confirmation has resolved/.test(delegated));
 check('delegated `apply` worker never renames', /The worker never renames anything itself/.test(delegated));
+check('delegated `scan` and `pipeline` workers return their counts to the parent',
+  /For `scan` and `pipeline`, ask the worker to return `found` and `remaining`/.test(delegated)
+    && /Give a `pipeline` worker that follows a scan the scan's `found`/.test(delegated));
+
+// A worker gets the mode file, not the router, so the count hand-back has to
+// be in the mode files too.
+check('modes/scan.md ends its summary with the title counts',
+  read('modes/scan.md').includes('end the summary with `Title counts: {remaining}/{found}`'));
+const pipelineMode = read('modes/pipeline.md').split('## Session title')[1]?.split('\n## ')[0] ?? '';
+check('modes/pipeline.md keeps the scan counter and returns the title counts',
+  pipelineMode.includes('**Session Title** rule') && pipelineMode.includes('`Title counts: {remaining}/{found}`')
+    && /never renames anything/.test(pipelineMode));
 
 // The point in the flow where the role and employer first become known.
 // Each pointer must also keep the agency deferral, or it reads as "title at
@@ -61,6 +107,9 @@ check('delegated `apply` worker never renames', /The worker never renames anythi
 for (const mode of ['modes/auto-pipeline.md', 'modes/oferta.md']) {
   const pointer = read(mode).match(/^\*\*Session title:\*\*.*$/m)?.[0] ?? '';
   check(`${mode} points at the router rule`, pointer.includes('**Session Title** rule'));
+  check(`${mode} names the progress titles`,
+    pointer.includes('`Career-ops eval (fetching)`') && pointer.includes('`{Role}, {Company} (evaluating)`')
+      && pointer.includes('`(on hold)`'));
   check(`${mode} defers an agency title to the confirmation handoff`,
     pointer.includes('`{Role}, via {Agency}`') && pointer.includes('**Agency confirmation handoff**'));
 }
