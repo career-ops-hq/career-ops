@@ -106,13 +106,18 @@ check('delegated `apply` also returns the agency, and the parent waits for its c
     && /parent then applies \*\*Session Title\*\* from those values, after any agency confirmation has resolved/.test(delegated));
 check('delegated `apply` worker never renames', /The worker never renames anything itself/.test(delegated));
 check('delegated `scan` and `pipeline` workers return their counts to the parent',
-  /For `scan` and `pipeline`, ask the worker to return `found` and `remaining`/.test(delegated)
-    && /Give a `pipeline` worker that follows a scan the scan's `found` and the URLs it counted/.test(delegated));
+  /Ask the worker to return both counts alongside its result/.test(delegated)
+    && /Give a `pipeline` worker that follows a scan the scan's `found` and the URLs it counted/.test(delegated)
+    && /A `scan` worker also returns the URLs of the postings still counted/.test(delegated)
+    && /put the `found` and `remaining` definitions from \*\*Session Title\*\* in the worker prompt/.test(delegated));
 
 // A worker gets the mode file, not the router, so the count hand-back has to
 // be in the mode files too.
-check('modes/scan.md ends its summary with the title counts',
-  read('modes/scan.md').includes('end the summary with `Title counts: {remaining}/{found}`'));
+const scanCounts = read('modes/scan.md').match(/^\*\*Session title counts:\*\*.*$/m)?.[0] ?? '';
+check('modes/scan.md ends its summary with the title counts and the counted URLs',
+  scanCounts.includes('end the summary with `Title counts: {remaining}/{found}` and the URLs of the postings still counted'));
+check('modes/scan.md defines `found` and `remaining` for a worker that never reads the router',
+  /`found` is every posting that passed the scanner's filters/.test(scanCounts) && /`remaining` is `found` less each one removed/.test(scanCounts));
 const pipelineMode = read('modes/pipeline.md').split('## Session title')[1]?.split('\n## ')[0] ?? '';
 check('modes/pipeline.md keeps the scan counter and returns the title counts',
   pipelineMode.includes('**Session Title** rule') && pipelineMode.includes('`Title counts: {remaining}/{found}`')
