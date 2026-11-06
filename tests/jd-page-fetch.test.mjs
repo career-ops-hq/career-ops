@@ -391,3 +391,13 @@ test('NODE_USE_ENV_PROXY without CAREER_OPS_TRUST_PROXY_EGRESS fails closed', as
   const run = (env) => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '', ...env }, encoding: 'utf8' }).stdout.trim());
   assert.deepEqual(run({ NODE_USE_ENV_PROXY: '1', CAREER_OPS_TRUST_PROXY_EGRESS: '' }), { out: null, hit: 0 });
 });
+
+test('hostile markup cannot make the visible-text closure check slow', async () => {
+  const hostile = ['<'.repeat(1_500_000), '<!--'.repeat(750_000), '<script '.repeat(375_000)];
+  for (const body of hostile) {
+    const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body })));
+    const t0 = Date.now();
+    try { await fetchJdFromPage('https://careers.example.com/job/1'); } finally { net.restore(); }
+    assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
+  }
+});

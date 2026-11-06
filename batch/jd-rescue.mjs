@@ -117,6 +117,37 @@ function htmlToText(html) {
 
 export const wordCount = (t) => t.split(/\s+/).filter(Boolean).length;
 
+/**
+ * Contents of every `<script type="application/ld+json">` block, found with
+ * forward indexOf scans only. A lazy `[^>]*`/`[\s\S]*?` regex rescans to the end
+ * of the page for each unclosed `<script`, which is quadratic on hostile input.
+ *
+ * @param {string} html
+ * @returns {string[]}
+ */
+export function ldJsonBlocks(html) {
+  const src = String(html ?? '');
+  const lower = src.toLowerCase();
+  const blocks = [];
+  let i = 0;
+  for (;;) {
+    const start = lower.indexOf('<script', i);
+    if (start === -1) break;
+    const gt = src.indexOf('>', start);
+    if (gt === -1) break; // no later '>' exists either
+    const tag = lower.slice(start, gt);
+    i = gt + 1;
+    if (!/type\s*=\s*["']application\/ld\+json["']/.test(tag)) continue;
+    const close = lower.indexOf('</script', i);
+    if (close === -1) break;
+    blocks.push(src.slice(i, close));
+    const closeGt = src.indexOf('>', close);
+    if (closeGt === -1) break;
+    i = closeGt + 1;
+  }
+  return blocks;
+}
+
 /** Assemble a JD document from the structured fields an ATS exposes. */
 function composeJd({ title, company, location, description, employmentType }) {
   const head = [
@@ -140,17 +171,15 @@ function composeJd({ title, company, location, description, employmentType }) {
  * and only JobPosting nodes are kept.
  */
 export function fromLdJson(html) {
-  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script[^>]*>/gi;
   // Collect every distinct JobPosting on the page. A listing page can carry
   // several, and taking the first would hand the worker some other job's JD, so
   // a rescue is only offered when exactly one posting qualifies.
   const candidates = new Map();
-  let m;
-  while ((m = re.exec(html)) !== null) {
+  for (const block of ldJsonBlocks(html)) {
     let parsed;
     // A malformed block is normal (trailing commas, HTML comments wrapping the
     // JSON). Skip it and keep looking rather than aborting the whole strategy.
-    try { parsed = JSON.parse(m[1].trim()); } catch { continue; }
+    try { parsed = JSON.parse(block.trim()); } catch { continue; }
 
     const queue = [parsed];
     while (queue.length) {
