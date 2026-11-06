@@ -83,7 +83,7 @@ import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHist
 import { closesAtIso, refreshOfferForSeenUrl, selectCloseDateRefreshes } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { canonicalJobKey, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
+import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
@@ -1870,12 +1870,12 @@ function sameRefreshLanguage(left, right) {
   return left.some((language) => right.includes(language));
 }
 
-function rememberRefreshUrl(urls, url, language) {
+function rememberRefreshUrl(urls, url, language, primary = true) {
   const key = normalizeUrlForDedup(url);
   if (!key || typeof url !== 'string' || !url) return;
   let rows = urls.get(key);
   if (!rows) urls.set(key, (rows = []));
-  rows.push({ url, language });
+  rows.push({ url, language, primary });
 }
 
 function pinningRefreshUrls(historyText, policy) {
@@ -1904,17 +1904,33 @@ function trackerRefreshUrls(pipelineText, applicationsText) {
     if (url) rememberRefreshUrl(urls, url, refreshLanguage(url));
   }
   for (const match of applications.matchAll(/https?:\/\/[^\s|)]+/g)) {
-    rememberRefreshUrl(urls, match[0], refreshLanguage(match[0]));
+    rememberRefreshUrl(urls, match[0], refreshLanguage(match[0]), false);
   }
   return urls;
+}
+
+function pickRefreshUrl(rows, offer, language) {
+  const matches = (rows || []).filter((row) => sameRefreshLanguage(language, row.language));
+  if (!matches.length) return { decided: false, url: '' };
+  const offerKey = normalizeUrl(offer?.url);
+  const primaries = matches.filter((row) => row.primary);
+  const exactPrimary = primaries.find((row) => normalizeUrl(row.url) === offerKey);
+  if (exactPrimary) return { decided: true, url: exactPrimary.url };
+  if (primaries.length === 1) return { decided: true, url: primaries[0].url };
+  if (primaries.length > 1) return { decided: true, url: '' };
+  const exact = matches.find((row) => normalizeUrl(row.url) === offerKey);
+  if (exact) return { decided: true, url: exact.url };
+  if (matches.length === 1) return { decided: true, url: matches[0].url };
+  return { decided: true, url: '' };
 }
 
 function originalRefreshUrl(offer, historyUrls, trackerUrls) {
   const key = normalizeUrlForDedup(offer?.url);
   if (!key) return '';
   const language = refreshLanguage(offer?.url, offer?.language);
-  const pick = (rows) => rows?.find((row) => sameRefreshLanguage(language, row.language))?.url || '';
-  return pick(historyUrls.get(key)) || pick(trackerUrls.get(key));
+  const fromHistory = pickRefreshUrl(historyUrls.get(key), offer, language);
+  if (fromHistory.decided) return fromHistory.url;
+  return pickRefreshUrl(trackerUrls.get(key), offer, language).url;
 }
 
 export function alignCloseRefreshOffers(offers, historyText, policy = {}, sources = {}) {
@@ -2411,6 +2427,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   // isUnseenLanguageVersion under scan_history.dedup_include_language.
   const variants = new Map();
   const identityPromotableUrls = new Map();
+  const listingRefreshUrls = new Map();
   // Rows the age policy has released. Held rather than counted here: the two
   // sources parsed below carry no age policy of their own, so a row the TTL has
   // just freed can be re-pinned a few lines later. The count is taken at the end,
@@ -2445,7 +2462,10 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       // with the same provider identity. (A missing Apply control never gets
       // here: its row is observational and pins nothing, see above.)
       const identityMayPromote = status === 'added' || status.startsWith('cooldown:');
-      if (identityMayPromote) addIdentityPromotableUrl(urlToken, listingKey);
+      if (identityMayPromote) {
+        addIdentityPromotableUrl(urlToken, listingKey);
+        if (listingKey) rememberListingRefresh(listingRefreshUrls, listingKey, url, refreshLanguage(url, language));
+      }
       if (extraTokensFor && identityMayPromote) {
         for (const token of [].concat(extraTokensFor(url, portal, listingKey) || [])) {
           if (token) seen.add(token);
@@ -2522,7 +2542,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   let recheckEligible = 0;
   for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
 
-  return { seen, recheckEligible, identityPromotableUrls, variants };
+  return { seen, recheckEligible, identityPromotableUrls, listingRefreshUrls, variants };
 }
 
 // Path options mirror mergeIntoPipeline's seam below: the defaults are the
@@ -3553,6 +3573,32 @@ export function refreshListingKey(offer) {
   return token;
 }
 
+function rememberListingRefresh(map, listingKey, url, language) {
+  if (!listingKey || typeof url !== 'string' || !url) return;
+  let rows = map.get(listingKey);
+  if (!rows) map.set(listingKey, (rows = []));
+  const key = normalizeUrl(url);
+  const forms = language.join(',');
+  if (rows.some((row) => normalizeUrl(row.url) === key && row.language.join(',') === forms)) return;
+  rows.push({ url, language });
+}
+
+function recordedListingUrls(job, listingUrls) {
+  const token = listingIdentityToken(job);
+  if (!token || !listingUrls) return [];
+  const rows = listingUrls.get(token.slice('listing:'.length)) || [];
+  const language = refreshLanguage(job?.url, job?.language);
+  return rows.filter((row) => sameRefreshLanguage(language, row.language)).map((row) => row.url);
+}
+
+export function closeRefreshUrlForSeenOffer(job, seenUrls, listingUrls) {
+  const recorded = recordedListingUrls(job, listingUrls);
+  if (recorded.length === 1) return recorded[0];
+  if (recorded.length > 1) return '';
+  const dedupUrl = seenJobKey(job?.url);
+  return seenUrls?.has(dedupUrl) ? job.url : '';
+}
+
 export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
   const urlToken = seenJobKey(offer?.url);
   const identityToken = listingIdentityToken(offer);
@@ -3694,7 +3740,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   // One parse. The four readers below walk these rows instead of splitting
   // the file again (seen URLs, posting attributes, company roles, fingerprints).
   const historyRows = parsedScanHistory(scanHistoryText);
-  const { seen, recheckEligible, identityPromotableUrls, variants: seenUrlVariants } = collectSeenUrls(
+  const { seen, recheckEligible, identityPromotableUrls, listingRefreshUrls, variants: seenUrlVariants } = collectSeenUrls(
     { scanHistoryText, pipelineText, applicationsText, historyRows },
     policy,
     { extraTokensFor: (_url, _portal, listingKey) => listingKey ? `listing:${listingKey}` : null },
@@ -3717,7 +3763,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
     locatedLanguagesByBase,
   });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText, historyRows);
-  return { seen, identityPromotableUrls, recheckEligible, seenUrlVariants, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
+  return { seen, identityPromotableUrls, listingRefreshUrls, recheckEligible, seenUrlVariants, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -5284,11 +5330,10 @@ async function main() {
             siblingsByUrl.get(dedupUrl),
           );
           if (!newLanguageVersion) {
-            const closeDay = !dryRun && seenUrls.has(dedupUrl)
-              ? (closesAtIso(job.closesAt) || closesAtIso(job))
-              : '';
+            const refreshUrl = dryRun ? '' : closeRefreshUrlForSeenOffer(job, seenUrls, dedupSnapshot.listingRefreshUrls);
+            const closeDay = refreshUrl ? (closesAtIso(job.closesAt) || closesAtIso(job)) : '';
             if (closeDay) {
-              const rest = { ...job, source: sourceName, fingerprint: '' };
+              const rest = { ...job, url: refreshUrl, source: sourceName, fingerprint: '' };
               delete rest.description;
               closeRefreshOffers.push(rest);
             }

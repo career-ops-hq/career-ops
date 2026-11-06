@@ -4,7 +4,8 @@ import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closeDateForUrl, closeDatesByUrl, closesAtIso, refreshOfferForSeenUrl, selectCloseDateRefreshes } from '../lib/posting-close.mjs';
-import { alignCloseRefreshOffers } from '../scan.mjs';
+import { alignCloseRefreshOffers, closeRefreshUrlForSeenOffer, collectSeenUrls } from '../scan.mjs';
+import { computeListingFingerprint } from '../listing-fingerprint.mjs';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -309,6 +310,54 @@ test('a notes link ahead of the URL column does not replace the posting URL', ()
     { url: 'https://jobs.example/acme', closesAt: '2026-06-06' },
   ], '', {}, { applicationsText: applications });
   assert.equal(aligned[0].url, 'https://jobs.example/Acme');
+});
+
+test('two stored path-case URLs keep their own close days', () => {
+  const history = [
+    historyRow({ url: 'https://jobs.example/Acme', closes_at: '2026-01-01', status: 'added', first_seen: '2026-10-01' }),
+    historyRow({ url: 'https://jobs.example/acme', closes_at: '2026-02-02', status: 'added', first_seen: '2026-10-01' }),
+  ].join('\n');
+  const aligned = alignCloseRefreshOffers([
+    { url: 'https://jobs.example/Acme', closesAt: '2026-06-06' },
+    { url: 'https://jobs.example/acme', closesAt: '2026-07-07' },
+    { url: 'https://jobs.example/ACME', closesAt: '2026-08-08' },
+  ], history);
+  assert.equal(aligned[0].url, 'https://jobs.example/Acme');
+  assert.equal(aligned[1].url, 'https://jobs.example/acme');
+  assert.equal(aligned[2].url, 'https://jobs.example/ACME');
+  const selected = selectCloseDateRefreshes(aligned, history);
+  const next = [
+    history,
+    ...selected.map((offer) => historyRow({ url: offer.url, closes_at: closesAtIso(offer.closesAt) })),
+  ].join('\n');
+  const index = closeDatesByUrl(next);
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/Acme'), '2026-06-06');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme'), '2026-07-07');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/ACME'), '2026-08-08');
+});
+
+test('one accepted listing identity refreshes its recorded URL', () => {
+  const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
+  const recorded = 'https://boards.greenhouse.io/acme/jobs/4012345';
+  const key = computeListingFingerprint({ strong: identity }).listing_key;
+  const history = historyRow({
+    url: recorded,
+    status: 'added',
+    first_seen: '2026-10-01',
+    listing_key: key,
+    closes_at: '2026-01-01',
+  });
+  const job = { url: 'https://jobs.example.test/same-identity', listingIdentity: identity };
+  const { listingRefreshUrls } = collectSeenUrls({ scanHistoryText: history });
+  assert.equal(closeRefreshUrlForSeenOffer(job, new Set(), listingRefreshUrls), recorded);
+  const other = historyRow({
+    url: 'https://jobs.example.test/other-copy',
+    status: 'added',
+    first_seen: '2026-10-01',
+    listing_key: key,
+  });
+  const ambiguous = collectSeenUrls({ scanHistoryText: `${history}\n${other}` });
+  assert.equal(closeRefreshUrlForSeenOffer(job, new Set(), ambiguous.listingRefreshUrls), '');
 });
 
 
