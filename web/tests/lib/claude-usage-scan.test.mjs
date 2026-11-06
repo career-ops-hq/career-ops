@@ -254,3 +254,19 @@ test("a message logged several times, across files, is counted once", async () =
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("the copy kept is the largest one inside each window", async () => {
+  const root = setup();
+  try {
+    const at = (ms, out) =>
+      JSON.stringify({ timestamp: new Date(NOW - ms).toISOString(), requestId: "r1", message: { id: "m1", usage: { input_tokens: 0, output_tokens: out } } }) + "\n";
+    // The largest copy is 6h old (outside 5h, inside 7d); a smaller copy is
+    // 1h old. The message still counts in both windows.
+    writeFileSync(join(root, "proj-a", "s1.jsonl"), at(6 * HOUR, 100) + at(HOUR, 40));
+    const r = await createUsageScanner({ root, now: () => NOW }).compute();
+    assert.deepEqual(r.window5h, { tokens: 40, messages: 1 });
+    assert.deepEqual(r.window7d, { tokens: 100, messages: 1 });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

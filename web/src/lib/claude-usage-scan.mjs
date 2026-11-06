@@ -153,10 +153,16 @@ export function createUsageScanner({ root, now = Date.now, fs = fsPromises }) {
     let t7 = 0;
     let m5 = 0;
     let m7 = 0;
-    // One event per message: the copies differ only in how far the streamed
-    // usage had got, so keep the largest.
-    const byKey = new Map();
-    const unkeyed = [];
+    // One event per message and window: the copies differ only in how far the
+    // streamed usage had got, so keep the largest copy that falls inside the
+    // window. Picked per window, so a large copy outside the 5-hour window
+    // does not hide a smaller copy inside it.
+    const by7 = new Map();
+    const by5 = new Map();
+    const keep = (map, e) => {
+      const prev = map.get(e.key);
+      if (!prev || e.tokens > prev.tokens) map.set(e.key, e);
+    };
     for (const [file, entry] of files) {
       if (!present.has(file)) {
         files.delete(file); // gone, or untouched for over a week
@@ -165,20 +171,26 @@ export function createUsageScanner({ root, now = Date.now, fs = fsPromises }) {
       entry.events = entry.events.filter((e) => e.ts >= w7);
       for (const e of entry.events) {
         if (!e.key) {
-          unkeyed.push(e);
+          // No id to match copies on: counted as before.
+          t7 += e.tokens;
+          m7 += 1;
+          if (e.ts >= w5) {
+            t5 += e.tokens;
+            m5 += 1;
+          }
           continue;
         }
-        const prev = byKey.get(e.key);
-        if (!prev || e.tokens > prev.tokens) byKey.set(e.key, e);
+        keep(by7, e);
+        if (e.ts >= w5) keep(by5, e);
       }
     }
-    for (const e of [...byKey.values(), ...unkeyed]) {
+    for (const e of by7.values()) {
       t7 += e.tokens;
       m7 += 1;
-      if (e.ts >= w5) {
-        t5 += e.tokens;
-        m5 += 1;
-      }
+    }
+    for (const e of by5.values()) {
+      t5 += e.tokens;
+      m5 += 1;
     }
     return { window5h: { tokens: t5, messages: m5 }, window7d: { tokens: t7, messages: m7 }, computedAt: t };
   }
