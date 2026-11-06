@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeDateForUrl, closeDatesByUrl, closesAtIso, stripQuery } from '../lib/posting-close.mjs';
+import { closeDateForUrl, closeDatesByUrl, closesAtIso } from '../lib/posting-close.mjs';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -126,7 +126,7 @@ function historyRow(cells) {
   return SCAN_HISTORY_COLUMNS.map((name) => byName[name]).join('\t');
 }
 
-test('scan history indexes a close day by exact URL and by URL without the query', () => {
+test('scan history indexes a close day by the posting URL key', () => {
   const header = SCAN_HISTORY_COLUMNS.join('\t');
   const text = [
     header,
@@ -141,9 +141,19 @@ test('scan history indexes a close day by exact URL and by URL without the query
       closes_at: '',
     }),
     historyRow({
-      url: 'https://jobs.example/northwind?src=board',
+      url: 'https://jobs.example/northwind?utm_source=board',
       company: 'Northwind Traders',
       closes_at: '2026-09-15',
+    }),
+    historyRow({
+      url: 'https://jobs.example/one?gh_jid=111',
+      company: 'Acme',
+      closes_at: '2026-03-03',
+    }),
+    historyRow({
+      url: 'https://jobs.example/one?gh_jid=222',
+      company: 'Acme',
+      closes_at: '2026-04-04',
     }),
     historyRow({
       url: 'https://jobs.example/blank',
@@ -158,14 +168,28 @@ test('scan history indexes a close day by exact URL and by URL without the query
   ].join('\n');
   const index = closeDatesByUrl(text);
   assert.equal(index.get('https://jobs.example/acme-exact'), '2026-10-03');
-  assert.equal(index.get('https://jobs.example/northwind?src=board'), '2026-09-15');
   assert.equal(index.get('https://jobs.example/northwind'), '2026-09-15');
+  assert.equal(index.has('https://jobs.example/northwind?utm_source=board'), false);
   assert.equal(index.has('https://jobs.example/blank'), false);
   assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact'), '2026-10-03');
-  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?src=email'), '2026-10-03');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?utm_source=email'), '2026-10-03');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?src=email'), '');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/northwind'), '2026-09-15');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=111'), '2026-03-03');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=222'), '2026-04-04');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/one'), '');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/other'), '');
   assert.equal(closeDateForUrl(index, ''), '');
+});
+
+test('a later scan replaces the day for the same posting, including a tracking variant', () => {
+  const text = [
+    historyRow({ url: 'https://jobs.example/acme?utm_source=board', closes_at: '2026-01-01' }),
+    historyRow({ url: 'https://jobs.example/acme', closes_at: '2026-04-04' }),
+  ].join('\n');
+  const index = closeDatesByUrl(text);
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme?utm_source=board'), '2026-04-04');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme'), '2026-04-04');
 });
 
 test('a later scan-history day replaces an earlier one for the same URL', () => {
@@ -176,10 +200,4 @@ test('a later scan-history day replaces an earlier one for the same URL', () => 
   assert.equal(closeDatesByUrl(text).get('https://jobs.example/acme'), '2026-04-04');
 });
 
-test('stripQuery removes the query and keeps the hash', () => {
-  assert.equal(stripQuery('https://jobs.example/acme?src=board'), 'https://jobs.example/acme');
-  assert.equal(stripQuery('https://jobs.example/acme#apply'), 'https://jobs.example/acme#apply');
-  assert.equal(stripQuery('https://jobs.example/acme'), 'https://jobs.example/acme');
-  assert.equal(stripQuery(''), '');
-});
 

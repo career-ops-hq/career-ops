@@ -282,6 +282,20 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
   }, '2026-09-28'));
   check(badClose.closes_at === '',
     'formatScanHistoryRow: an impossible close day is an empty cell');
+  const sharedClose = parseScanHistoryLine(formatScanHistoryRow({
+    url: EN_URL, source: 'platsbanken', title: 'Senior QA Manager', company: 'Acme',
+    closesAt: '', validThrough: '2026-08-08',
+  }, '2026-09-28'));
+  check(sharedClose.closes_at === '2026-08-08',
+    'formatScanHistoryRow: an empty closesAt uses a valid shared close field',
+    `got ${JSON.stringify(sharedClose.closes_at)}`);
+  const invalidShared = parseScanHistoryLine(formatScanHistoryRow({
+    url: EN_URL, source: 'platsbanken', title: 'Senior QA Manager', company: 'Acme',
+    closesAt: 'nope', validThrough: '2026-08-09',
+  }, '2026-09-28'));
+  check(invalidShared.closes_at === '2026-08-09',
+    'formatScanHistoryRow: an invalid closesAt uses a valid shared close field',
+    `got ${JSON.stringify(invalidShared.closes_at)}`);
   const bare = parseScanHistoryLine(formatScanHistoryRow({ url: EN_URL, source: 's', title: 't', company: 'c' }, '2026-09-28'));
   check(bare.requisition_id === '' && bare.language === '' && bare.closes_at === '',
     'formatScanHistoryRow: a provider without the fields writes empty cells');

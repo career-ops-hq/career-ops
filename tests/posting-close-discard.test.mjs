@@ -62,7 +62,7 @@ function sandbox() {
     SCAN_HISTORY_COLUMNS.join('\t'),
     historyRow({ url: 'https://jobs.example/acme-exact', company: 'Acme', closes_at: '2026-10-03' }),
     historyRow({ url: 'https://jobs.example/acme-exact', company: 'Acme', closes_at: '' }),
-    historyRow({ url: 'https://jobs.example/northwind?src=board', company: 'Northwind Traders', closes_at: '2026-09-15' }),
+    historyRow({ url: 'https://jobs.example/northwind?utm_source=board', company: 'Northwind Traders', closes_at: '2026-09-15' }),
     historyRow({ url: 'https://jobs.example/acme-applied', company: 'Acme', closes_at: '2026-01-02' }),
     historyRow({ url: 'https://jobs.example/acme-future', company: 'Acme', closes_at: '2026-01-01' }),
     historyRow({ url: 'https://jobs.example/acme-tbd', company: 'Acme', closes_at: '2026-07-07' }),
