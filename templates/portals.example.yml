@@ -3819,3 +3819,22 @@ job_boards:
     careers_url: https://www.magneto365.com/co/trabajos/buscar/tecnologia
     enabled: false
     notes: "Colombia. 'tecnologia' search; swap the last path segment for another search."
+
+  # ── Jobgether (remote job platform on Lever) ───────────────────────
+  # A real board that needs two per-entry settings. It returns about 4,800
+  # postings in one response of about 50 MB:
+  # - max_response_mb, because the response is over the 10 MB default.
+  # - timeout_ms, because the board takes about 15 seconds alone, but often needs
+  #   more than Lever's 30 seconds when the scan runs other requests at the same
+  #   time.
+  # This entry shows the settings only and is not recommended: its postings do
+  # not name the real employer, which is a posting legitimacy signal. Left
+  # `enabled: false`.
+
+  - name: Jobgether
+    careers_url: https://jobs.lever.co/jobgether
+    aggregator: true
+    max_response_mb: 64
+    timeout_ms: 60000
+    enabled: false
+    notes: "Brussels, Belgium. AI-matching remote job platform that screens applications and sends a shortlist to the hiring company. Remote roles, mostly in Europe, the US, Canada, India and Brazil."
