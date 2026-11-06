@@ -111,6 +111,21 @@ try {
     pass('remotive.fetch() defaults company to "Remotive" when company_name and entry.name are both missing');
   else fail(`remotive.fetch() default company = ${JSON.stringify(noName[0]?.company)}`);
 
+  // description: every job in the feed carries the posting's HTML. Dropped, it
+  // left content_filter, country_eligibility_filter and visa_filter nothing to
+  // read for any Remotive posting, and the scan-history fingerprint empty.
+  const row = (slug, description) => ({ title: 'Data Engineer', company_name: 'Acme', url: `https://remotive.com/remote-jobs/${slug}`, description });
+  const described = await remotive.fetch({ provider: 'remotive' }, { fetchJson: async () => ({ jobs: [
+    row('d1', '<p>You will write <strong>Python</strong> &amp; dbt.</p>'),
+    row('d2'), row('d3', ''), row('d4', '   '), row('d5', null), row('d6', 42), row('d7', '<p></p>'),
+  ] }) });
+  if (described[0]?.description === 'You will write Python & dbt.')
+    pass('remotive.fetch() passes the description through as plain text');
+  else fail(`remotive.fetch() description = ${JSON.stringify(described[0]?.description)}`);
+  if (described.length === 7 && described.slice(1).every((j) => !('description' in j)))
+    pass('remotive.fetch() omits description when it is absent, empty, whitespace, non-string or markup-only');
+  else fail(`remotive.fetch() description presence = ${JSON.stringify(described.map((j) => j.description))}`);
+
   let badResponseThrew = false;
   try {
     await remotive.fetch(
