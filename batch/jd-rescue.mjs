@@ -53,6 +53,7 @@
  */
 
 import fs from 'node:fs';
+import { isMainModule } from '../lib/is-main-module.mjs';
 
 const HTML_ENTITIES = {
   nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'",
@@ -62,7 +63,17 @@ const HTML_ENTITIES = {
 
 /** Strip HTML to visible text, matching the runner's own normalization. */
 function htmlToText(html) {
-  return String(html ?? '')
+  // Some boards (Phenom, observed on careers.roberthalf.com) ship the JobPosting
+  // description as entity-ESCAPED markup (`&lt;div&gt;&lt;p&gt;…`). The tag strip
+  // below cannot see those as tags, and the entity pass then turns them back into
+  // literal `<div><p>` in the JD. Unescape the angle brackets first, only when
+  // escaped tags are actually present, so a JD that merely mentions `&lt;` in
+  // prose is left alone.
+  const raw = String(html ?? '');
+  const markup = /&lt;\/?[a-z][^&<>]{0,200}&gt;/i.test(raw)
+    ? raw.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    : raw;
+  return markup
     .replace(/<script[\s\S]*?<\/script[^>]*>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style[^>]*>/gi, ' ')
     // Keep block boundaries as line breaks so requirement lists do not run
@@ -85,7 +96,7 @@ function htmlToText(html) {
     .trim();
 }
 
-const wordCount = (t) => t.split(/\s+/).filter(Boolean).length;
+export const wordCount = (t) => t.split(/\s+/).filter(Boolean).length;
 
 /** Assemble a JD document from the structured fields an ATS exposes. */
 function composeJd({ title, company, location, description, employmentType }) {
@@ -109,7 +120,7 @@ function composeJd({ title, company, location, description, employmentType }) {
  * a block may itself be an array or an @graph wrapper, so every shape is walked
  * and only JobPosting nodes are kept.
  */
-function fromLdJson(html) {
+export function fromLdJson(html) {
   const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script[^>]*>/gi;
   // Collect every distinct JobPosting on the page. A listing page can carry
   // several, and taking the first would hand the worker some other job's JD, so
@@ -189,7 +200,7 @@ async function fromKnownApi(url) {
  * directly (a bare `description` key is too generic: it also labels unrelated
  * page content) and take the longest — the JD is by a wide margin the biggest such field on the page.
  */
-function fromEmbeddedDescription(html) {
+export function fromEmbeddedDescription(html) {
   const re = /"(descriptionHtml|descriptionPlainText|jobDescriptionHtml)"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
   let best = '';
   let m;
@@ -204,7 +215,20 @@ function fromEmbeddedDescription(html) {
 }
 
 async function main() {
-  const [url, rawFile, outFile, strippedArg] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`Usage:
+  node batch/jd-rescue.mjs <url> <raw-html-file> <out-file> [stripped-words]
+  node batch/jd-rescue.mjs --help
+
+Recover a JD from a page's structured data (JSON-LD, ATS API, embedded payload)
+when its visible text is too thin. Prints "<words>\\t<method>"; exit 0 on success.
+
+Options:
+  --help, -h  Print this usage block and exit`);
+    process.exit(0);
+  }
+  const [url, rawFile, outFile, strippedArg] = args;
   const minWords = Number(process.env.JD_RESCUE_MIN_WORDS || 80);
   const strippedWords = Number.isFinite(Number(strippedArg)) ? Number(strippedArg) : 0;
   const thin = strippedWords < minWords;
@@ -266,7 +290,11 @@ async function main() {
   process.stdout.write(`${words}\t${found.method}\n`);
 }
 
-main().catch(() => {
-  process.stdout.write('0\terror\n');
-  process.exit(1);
-});
+// Importable for fetch-jd.mjs's page tier, so the parsers have one copy. The CLI
+// tail runs only when this file is the process entry.
+if (isMainModule(import.meta.url)) {
+  main().catch(() => {
+    process.stdout.write('0\terror\n');
+    process.exit(1);
+  });
+}

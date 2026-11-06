@@ -1,0 +1,50 @@
+// Tests for the server-side JD prefetch that runs before an evaluate worker.
+//
+// Run:  node --test tests/lib/jd-prefetch.test.mjs
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { prefetchJd, postingUrlFrom, MIN_PREFETCH_JD_CHARS } from "../../src/lib/jd-prefetch.mjs";
+
+const JD = "Responsibilities include building and operating services. ".repeat(20);
+const ok = (stdout) => async () => ({ code: 0, stdout, timedOut: false, spawnFailed: false });
+
+test("postingUrlFrom accepts http(s) URLs only", () => {
+  assert.equal(postingUrlFrom("https://careers.example.com/job/1"), "https://careers.example.com/job/1");
+  assert.equal(postingUrlFrom("  http://example.com/j  "), "http://example.com/j");
+  for (const bad of ["018", "local:jds/acme.md", "file:///etc/passwd", "javascript:alert(1)", "", null, undefined, 7]) {
+    assert.equal(postingUrlFrom(bad), null, String(bad));
+  }
+});
+
+test("prefetchJd runs fetch-jd with the URL as a single argv entry and returns the text", async () => {
+  const seen = [];
+  const jd = await prefetchJd("https://careers.example.com/job/1?x=1&y=$(id)", async (script, args) => {
+    seen.push([script, args]);
+    return { code: 0, stdout: `${JD}\n`, timedOut: false, spawnFailed: false };
+  });
+  assert.equal(jd, JD.trim());
+  assert.deepEqual(seen, [["fetch-jd", ["https://careers.example.com/job/1?x=1&y=$(id)"]]]);
+});
+
+test("prefetchJd does not run anything for a non-URL input", async () => {
+  let called = false;
+  assert.equal(await prefetchJd("018", async () => { called = true; return { code: 0, stdout: JD }; }), null);
+  assert.equal(called, false);
+});
+
+test("prefetchJd returns null on a miss, so the worker falls back to WebFetch", async () => {
+  const url = "https://careers.example.com/job/1";
+  assert.equal(await prefetchJd(url, async () => ({ code: 1, stdout: "" })), null);
+  assert.equal(await prefetchJd(url, async () => ({ code: 0, stdout: JD, timedOut: true })), null);
+  assert.equal(await prefetchJd(url, async () => ({ code: -1, stdout: "", spawnFailed: true })), null);
+});
+
+test("prefetchJd refuses a stub shorter than the floor", async () => {
+  const url = "https://careers.example.com/job/1";
+  assert.equal(await prefetchJd(url, ok("x".repeat(MIN_PREFETCH_JD_CHARS - 1))), null);
+  assert.ok(await prefetchJd(url, ok("x".repeat(MIN_PREFETCH_JD_CHARS))));
+});
+
+test("prefetchJd never throws", async () => {
+  assert.equal(await prefetchJd("https://careers.example.com/job/1", async () => { throw new Error("boom"); }), null);
+});

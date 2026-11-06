@@ -21,13 +21,18 @@
  * Coverage is JD_TEXT_API_ATS (liveness-api.mjs), including company careers
  * pages that carry only a Greenhouse `?gh_jid=`, and canonical/share-link
  * Workable postings (description, requirements and benefits).
- * Every fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
+ * When no API covers the host, the page's own schema.org JobPosting (JSON-LD)
+ * is read next (lib/jd-page-fetch.mjs, behind the same egress guard). Phenom and
+ * bespoke career sites render the JD from script data, so their visible HTML is
+ * a shell that any text conversion, WebFetch included, reports as empty.
+ * Every API fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
  * — the same dispatch its own `jd` mode uses — so this script and the
  * interactive extractor cannot drift on which ATS is API-fetchable.
  */
 
 import { fetchJdViaKnownApi } from './browser-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { fetchJdFromPage } from './lib/jd-page-fetch.mjs';
 
 const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget reason to cap tighter
 const TIMEOUT_MS = 15_000;
@@ -51,7 +56,11 @@ Options:
     process.exit(1);
   }
 
-  const result = await fetchJdViaKnownApi(url, TEXT_CAP, TIMEOUT_MS);
+  // Tier 1: the ATS's public API. Tier 2: the page's own JSON-LD JobPosting, for
+  // template-driven boards no API covers (Phenom, bespoke sites) whose visible
+  // HTML carries no JD at all.
+  const result = (await fetchJdViaKnownApi(url, TEXT_CAP, TIMEOUT_MS))
+    ?? (await fetchJdFromPage(url, TEXT_CAP, TIMEOUT_MS));
   // No stderr, by design: the caller's browser/WebFetch fallback is the
   // intended next step, and warning on every non-covered host would make the
   // normal path look broken.

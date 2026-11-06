@@ -17,6 +17,8 @@ import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { prefetchJd } from "@/lib/jd-prefetch.mjs";
+import { runCoreCli } from "@/lib/core-cli";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
@@ -179,6 +181,11 @@ export async function POST(req: Request) {
   const userTemplatesDir = dataRoot
     ? await resolveUserTemplatesDir(codeRoot, dataRoot)
     : undefined;
+  // Read the JD here, not in the worker: WebFetch drops script content, so a
+  // board that renders its JD from script data looks like an empty shell to the
+  // worker and the run ends as "Needs review" on a live posting. null (plain
+  // boards, any miss) leaves the worker on its WebFetch path.
+  const prefetchedJd = kind === "evaluate" ? await prefetchJd(input, runCoreCli) : null;
   const prompt = buildPrompt({
     kind,
     input,
@@ -194,6 +201,7 @@ export async function POST(req: Request) {
     coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
     profile: profileRef(careerOpsRoot()),
     evaluationInstructions,
+    prefetchedJd,
   });
 
   const isClaude = cliId === "claude";
