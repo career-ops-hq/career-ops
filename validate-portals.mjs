@@ -10,6 +10,7 @@
  *   node validate-portals.mjs --help
  */
 
+import { buildWorkplacePolicy } from './providers/_country.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -18,7 +19,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { barePrefixDomainKeywords } from './title-keywords.mjs';
+import { barePrefixDomainKeywords, compileContentTraits } from './title-keywords.mjs';
 import { nearestKey } from './validate-profile.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -125,6 +126,22 @@ function validateKeywordList(value, path, errors) {
     if (item.trim() === '') {
       add(errors, `${path}[${idx}]`, 'keyword must not be empty');
     }
+  }
+}
+
+// content_filter `min_match` (#6020): an integer from 1 to the number of
+// distinct positive traits, counted the way scan.mjs counts them (" | "
+// alternatives are one trait, case-insensitive duplicates are one trait).
+// scan.mjs refuses to start on the same shapes, so this only reports them
+// earlier.
+function validateContentMinMatch(rule, path, errors) {
+  if (rule.min_match === undefined) return;
+  const traits = compileContentTraits(rule.positive).length;
+  const minMatch = rule.min_match;
+  if (traits === 0) {
+    add(errors, `${path}.min_match`, `needs a non-empty ${path}.positive list`);
+  } else if (!Number.isInteger(minMatch) || minMatch < 1 || minMatch > traits) {
+    add(errors, `${path}.min_match`, `must be an integer from 1 to ${traits} (the number of distinct ${path}.positive entries)`);
   }
 }
 
@@ -387,6 +404,16 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
     } else {
+      if (config.location_filter.workplace_policy !== undefined) {
+        const policy = config.location_filter.workplace_policy;
+        if (!isObject(policy)) add(errors, 'location_filter.workplace_policy', 'must be an object');
+        else {
+          for (const key of ['onsite_locations', 'onsite_countries', 'remote_countries', 'remote_regions']) {
+            validateKeywordList(policy[key], 'location_filter.workplace_policy.' + key, errors);
+          }
+          try { buildWorkplacePolicy(policy); } catch (error) { add(errors, 'location_filter.workplace_policy', error.message); }
+        }
+      }
       validateKeywordList(config.location_filter.always_allow, 'location_filter.always_allow', errors);
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
@@ -406,6 +433,13 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     } else {
       validateKeywordList(config.content_filter.positive, 'content_filter.positive', errors);
       validateKeywordList(config.content_filter.negative, 'content_filter.negative', errors);
+      validateContentMinMatch(config.content_filter, 'content_filter', errors);
+      const rescue = config.content_filter.rescue_title_misses;
+      if (rescue !== undefined && typeof rescue !== 'boolean') {
+        add(errors, 'content_filter.rescue_title_misses', 'must be a boolean when set');
+      } else if (rescue === true && compileContentTraits(config.content_filter.positive).length === 0) {
+        add(errors, 'content_filter.rescue_title_misses', 'needs a non-empty content_filter.positive list: a title miss is kept only on a positive match');
+      }
       if (config.content_filter.by_title_keyword !== undefined) {
         if (!isObject(config.content_filter.by_title_keyword)) {
           add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive (or title_filter_full.positive) keyword');
@@ -430,6 +464,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
             }
             validateKeywordList(rule.positive, `${path}.positive`, errors);
             validateKeywordList(rule.negative, `${path}.negative`, errors);
+            validateContentMinMatch(rule, path, errors);
           }
         }
       }

@@ -229,3 +229,33 @@ for (const phase of ['fetch', 'body']) {
     assert.deepEqual(calls, [SHORT, API]);
   });
 }
+
+test('a share-link redirect whose body never ends still lets the posting through', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const calls = [];
+  let redirectEnded = false;
+  let reading;
+  const draining = new Promise(resolve => { reading = resolve; });
+  const result = await mocked(async (url, { signal }) => {
+    calls.push(url);
+    if (signal.aborted) throw signal.reason; // as fetch does with a spent budget
+    if (url !== SHORT) return response();
+    const body = new ReadableStream({
+      start(stream) {
+        signal.addEventListener('abort', () => { redirectEnded = true; stream.error(signal.reason); }, { once: true });
+      },
+      pull() { reading(); return new Promise(() => {}); },
+      cancel() { redirectEnded = true; },
+    }, { highWaterMark: 0 });
+    return new Response(body, { status: 302, headers: { location: '/fictional-employer/j/FIXTURE123' } });
+  }, async () => {
+    const pending = fetchJdViaKnownApi(SHORT, 20000, 100);
+    await Promise.race([draining, pending]);
+    t.mock.timers.tick(100); // The shared budget runs out while the redirect's body is read.
+    return pending;
+  });
+  assert.equal(result?.ats, 'workable-short');
+  assert.match(result.text, /BENEFITS_MARKER/);
+  assert.deepEqual(calls, [SHORT, API]);
+  assert.equal(redirectEnded, true); // and the body was not left open
+});
