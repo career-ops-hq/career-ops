@@ -99,6 +99,25 @@ async function blockedTriggerHref(page: Page, href: string | null): Promise<stri
   return hit ? hit.postingUrl : null;
 }
 
+async function blockedOpenPage(page: Page): Promise<string | null> {
+  const opened = page.context().pages();
+  const pages = opened.length ? [page, ...opened] : [page];
+  const seen = new Set<string>();
+  for (const candidate of pages) {
+    let landed = "";
+    try {
+      landed = candidate.url();
+    } catch {
+      continue;
+    }
+    if (!landed || seen.has(landed)) continue;
+    seen.add(landed);
+    const blocked = await blockedTriggerHref(page, landed);
+    if (blocked) return blocked;
+  }
+  return null;
+}
+
 /** SPA / apply-behind-a-button: if no form yet, click the first visible Apply CTA
  *  (NEVER a submit) to reveal the form. If it's an <a> with an application href,
  *  NAVIGATE there directly (robust vs popups). Returns true if it acted.
@@ -114,6 +133,8 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
         const blocked = await blockedTriggerHref(page, href);
         if (blocked) return { blocked };
         await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+        const landed = await blockedOpenPage(page);
+        if (landed) return { blocked: landed };
         return true;
       }
     }
@@ -130,6 +151,8 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
       const blocked = await blockedTriggerHref(page, href);
       if (blocked) return { blocked };
       await t.click({ timeout: 3000 }).catch(() => {});
+      const landed = await blockedOpenPage(page);
+      if (landed) return { blocked: landed };
       return true;
     }
   } catch {

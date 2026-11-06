@@ -5,10 +5,14 @@
 // Run (from web/): node --experimental-strip-types --test tests/lib/apply-unsupported-ats.test.mjs
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { register } from "node:module";
+import { tmpdir } from "node:os";
 import { after, before, describe, test } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import "../helpers/web-ts-alias-loader.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -80,6 +84,7 @@ function pageForTrigger({ atsHref = null, applyHref = null } = {}) {
     clicks,
     page: {
       url: () => "https://careers.acme.test/jobs/1",
+      context: () => ({ pages: () => [] }),
       goto: async (href) => {
         gotos.push(href);
       },
@@ -269,17 +274,31 @@ test("sessionFollowUp stops drive and prefill for an unsupported body", () => {
   assert.equal(sessionFollowUp(null).kind, "continue");
 });
 
-function careerPage(careerUrl, blockedHref, closed) {
+function careerPage(careerUrl, blockedHref, closed, options = {}) {
+  let current = careerUrl;
+  const popupPages = [];
   const frame = {
-    url: () => careerUrl,
+    url: () => current,
     evaluate: async () => {
       throw new Error("document is not defined");
     },
     waitForSelector: async () => null,
   };
+  const context = {
+    route: async () => {},
+    routeWebSocket: async () => {},
+    setDefaultTimeout() {},
+    pages: () => popupPages,
+    newPage: async () => page,
+    close: async () => { closed.push(true); },
+  };
   const page = {
-    url: () => careerUrl,
-    goto: async () => ({ status: () => 200, headers: () => ({}) }),
+    url: () => current,
+    context: () => context,
+    goto: async (href) => {
+      if (options.redirectOn && href === options.redirectOn) current = options.redirectTo;
+      return { status: () => 200, headers: () => ({}) };
+    },
     waitForLoadState: async () => {},
     waitForTimeout: async () => {},
     screenshot: async () => Buffer.from("career"),
@@ -290,7 +309,7 @@ function careerPage(careerUrl, blockedHref, closed) {
     frames: () => [frame],
     mainFrame: () => frame,
     locator(selector) {
-      const hit = /myworkdayjobs|myworkdaysite|icims\.com|ultipro/.test(String(selector));
+      const hit = !options.noAtsLink && /myworkdayjobs|myworkdaysite|icims\.com|ultipro/.test(String(selector));
       const node = {
         count: async () => (hit ? 1 : 0),
         getAttribute: async () => (hit ? blockedHref : null),
@@ -300,13 +319,16 @@ function careerPage(careerUrl, blockedHref, closed) {
       };
       return { first: () => node };
     },
-    getByRole() {
+    getByRole(_role, roleOptions) {
+      const wantsApply = Boolean(options.applyClick) && /apply/i.test(String(roleOptions?.name ?? ""));
       const node = {
-        count: async () => 0,
-        isVisible: async () => false,
-        innerText: async () => "",
+        count: async () => (wantsApply ? 1 : 0),
+        isVisible: async () => wantsApply,
+        innerText: async () => "Apply",
         getAttribute: async () => null,
-        click: async () => {},
+        click: async () => {
+          if (wantsApply && options.popupUrl) popupPages.push({ url: () => options.popupUrl });
+        },
         first() { return this; },
         or() { return this; },
       };
@@ -315,13 +337,7 @@ function careerPage(careerUrl, blockedHref, closed) {
   };
   return {
     isConnected: () => false,
-    newContext: async () => ({
-      route: async () => {},
-      routeWebSocket: async () => {},
-      setDefaultTimeout() {},
-      newPage: async () => page,
-      close: async () => { closed.push(true); },
-    }),
+    newContext: async () => context,
   };
 }
 
@@ -357,4 +373,112 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
       assert.equal(result.message, MESSAGE[label]);
     });
   }
+
+  test("a generic apply link that lands on Workday is refused", async () => {
+    const career = "https://careers.example.com/jobs/1";
+    const applyHref = "https://careers.example.com/jobs/1/apply";
+    const landed = "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role";
+    const closed = [];
+    globalThis.__applyCareerPage = () => careerPage(career, applyHref, closed, { redirectOn: applyHref, redirectTo: landed });
+    const before = globalThis.__applyLaunchAttempts;
+    const result = await openSession(career);
+    assert.equal(globalThis.__applyLaunchAttempts, before + 1);
+    assert.deepEqual(closed, [true]);
+    assert.equal(result.unsupported.vendor, "workday");
+    assert.equal(result.unsupported.postingUrl, landed);
+    assert.equal(result.message, MESSAGE.Workday);
+  });
+
+  test("an Apply click that opens an iCIMS popup is refused", async () => {
+    const career = "https://careers.example.com/jobs/1";
+    const popup = "https://careers-acme.icims.com/jobs/9";
+    const closed = [];
+    globalThis.__applyCareerPage = () => careerPage(career, null, closed, { noAtsLink: true, applyClick: true, popupUrl: popup });
+    const before = globalThis.__applyLaunchAttempts;
+    const result = await openSession(career);
+    assert.equal(globalThis.__applyLaunchAttempts, before + 1);
+    assert.deepEqual(closed, [true]);
+    assert.equal(result.unsupported.vendor, "icims");
+    assert.equal(result.unsupported.postingUrl, popup);
+    assert.equal(result.message, MESSAGE.iCIMS);
+  });
+});
+
+const execFileAsync = promisify(execFile);
+
+async function runChild(source) {
+  const dir = await mkdtemp(join(tmpdir(), "apply-ats-"));
+  const file = join(dir, "child.mjs");
+  try {
+    await writeFile(file, source);
+    const { stdout } = await execFileAsync(process.execPath, ["--experimental-strip-types", file], {
+      cwd: join(here, "../.."),
+      timeout: 30_000,
+    });
+    return JSON.parse(stdout.trim().split("\n").filter(Boolean).pop());
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("a failed vendor import succeeds on the next call", async () => {
+  const vendor = pathToFileURL(join(here, "../../src/lib/apply/unsupported-ats.mjs")).href;
+  const missing = join(here, "../fixtures");
+  const url = "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role";
+  const result = await runChild(`
+    process.env.CAREER_OPS_CODE_ROOT = ${JSON.stringify(missing)};
+    const { unsupportedInAppAts } = await import(${JSON.stringify(vendor)});
+    const url = ${JSON.stringify(url)};
+    let rejected = false;
+    try {
+      await unsupportedInAppAts(url);
+    } catch {
+      rejected = true;
+    }
+    delete process.env.CAREER_OPS_CODE_ROOT;
+    const hit = await unsupportedInAppAts(url);
+    console.log(JSON.stringify({ rejected, vendor: hit && hit.vendor, postingUrl: hit && hit.postingUrl }));
+  `);
+  assert.equal(result.rejected, true);
+  assert.equal(result.vendor, "workday");
+  assert.equal(result.postingUrl, url);
+});
+
+test("POST /api/apply/session returns a controlled error when the vendor file cannot load", async () => {
+  const route = pathToFileURL(join(here, "../../src/app/api/apply/session/route.ts")).href;
+  const alias = pathToFileURL(join(here, "../helpers/web-ts-alias-loader.mjs")).href;
+  const liveness = pathToFileURL(join(root, "liveness-browser.mjs")).href;
+  const missing = join(here, "../fixtures");
+  const result = await runChild(`
+    import { register } from "node:module";
+    register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(`
+      export async function resolve(specifier, context, nextResolve) {
+        if (specifier === "playwright-core") {
+          return { url: ${JSON.stringify(stubUrl)}, shortCircuit: true };
+        }
+        return nextResolve(specifier, context);
+      }
+    `)}`)}, import.meta.url);
+    await import(${JSON.stringify(alias)});
+    process.env.CAREER_OPS_CODE_ROOT = ${JSON.stringify(missing)};
+    const { setHostResolver } = await import(${JSON.stringify(liveness)});
+    setHostResolver(async () => ["93.184.216.34"]);
+    const { POST } = await import(${JSON.stringify(route)});
+    const res = await POST(new Request("http://fixture.invalid/api/apply/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role" }),
+    }));
+    const body = await res.json();
+    console.log(JSON.stringify({
+      status: res.status,
+      hasError: typeof body.error === "string" && body.error.length > 0,
+      unsupported: body.unsupported === true,
+      launch: globalThis.__applyLaunchAttempts || 0,
+    }));
+  `);
+  assert.equal(result.status, 500);
+  assert.equal(result.hasError, true);
+  assert.equal(result.unsupported, false);
+  assert.equal(result.launch, 0);
 });

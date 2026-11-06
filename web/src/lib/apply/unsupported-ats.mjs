@@ -33,7 +33,14 @@ function atsVendorFile() {
 function loadAtsVendor() {
   if (!vendorModule) {
     const file = atsVendorFile();
-    vendorModule = import(/* webpackIgnore: true */ /* turbopackIgnore: true */ pathToFileURL(file).href);
+    const pending = import(/* webpackIgnore: true */ /* turbopackIgnore: true */ pathToFileURL(file).href).then(
+      (mod) => mod,
+      (err) => {
+        if (vendorModule === pending) vendorModule = null;
+        throw err;
+      },
+    );
+    vendorModule = pending;
   }
   return vendorModule;
 }
