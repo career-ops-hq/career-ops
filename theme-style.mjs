@@ -234,8 +234,18 @@ export function cvPageBudgetFrom(cv) {
  * @returns {string}
  */
 export function buildThemeStyleBlock(tokens) {
-  const decls = Object.entries(tokens || {})
-    .filter(([, v]) => typeof v === 'string' && v.trim() && !/[;{}<>]/.test(v))
+  const entries = Object.entries(tokens || {})
+    .filter(([, v]) => typeof v === 'string' && v.trim() && !/[;{}<>]/.test(v));
+  // --font-family always resolves (every template defines it on :root), so a
+  // template rule cannot tell the user's font from its own Latin default by
+  // reading it. --font-family-override exists only when the profile set
+  // font_family, so a script block whose default must stay its own curated
+  // stack (Arabic: Segoe UI / Tahoma, which the Latin default would otherwise
+  // displace for Arabic glyphs) can still let the profile font lead:
+  // `var(--font-family-override, 'Segoe UI'), 'Segoe UI', Tahoma, ...`.
+  const font = entries.find(([cssVar]) => cssVar === '--font-family');
+  if (font) entries.push(['--font-family-override', font[1]]);
+  const decls = entries
     .map(([cssVar, v]) => `${cssVar}: ${v.trim()};`)
     .join(' ');
   if (!decls) return '';

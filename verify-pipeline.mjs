@@ -37,7 +37,7 @@ import {
   normalizeTextKey, normalizeVia, unwrapReportUrlToken, parseMarkdownLinks,
   extractReqNumber,
 } from './tracker-parse.mjs';
-import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor } from './tracker-utils.mjs';
+import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor, corporateFormTokensMatch, MIN_STEM_CHARS } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
@@ -186,6 +186,7 @@ if (badStatuses === 0) ok('All statuses are canonical');
 
 // --- Check 2: Duplicates ---
 const companyRoleMap = new Map();
+const roleMap = new Map();
 let dupes = 0;
 for (const e of entries) {
   // Unicode-aware (#2393): an [a-z0-9] strip erases non-Latin scripts outright,
@@ -199,6 +200,16 @@ for (const e of entries) {
     : normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
+  if (String(e.company || '').trim() !== '?') {
+    const roleKey = normalizeTextKey(e.role);
+    const companyKey = normalizeTextKey(e.company);
+    const tokens = normalizeTextKey(e.company, ' ').split(' ').filter(Boolean);
+    if (!roleMap.has(roleKey)) roleMap.set(roleKey, new Map());
+    const buckets = roleMap.get(roleKey);
+    const bucketKey = companyKey.slice(0, MIN_STEM_CHARS);
+    if (!buckets.has(bucketKey)) buckets.set(bucketKey, []);
+    buckets.get(bucketKey).push({ entry: e, companyKey, tokens });
+  }
 }
 for (const [key, group] of companyRoleMap) {
   if (group.length > 1) {
@@ -220,6 +231,30 @@ for (const [key, group] of companyRoleMap) {
 
     if (hasPossibleDuplicate) {
       warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`,
+        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
+      dupes++;
+    }
+  }
+}
+// Exact groups above retain their existing warnings. Compare different company
+// keys pairwise as well: corporate-form twins otherwise never meet (#4421).
+// Do not cluster these matches: "Acme" matches both "Acme Solutions" and
+// "Acme Technologies", but the latter two must never be reported as one group.
+// The matcher guarantees matching names share this normalized prefix.
+// Cache keys and tokens once per row, then compare only within that bucket.
+for (const group of [...roleMap.values()].flatMap(buckets => [...buckets.values()])) {
+  for (let i = 0; i < group.length; i++) {
+    for (let j = i + 1; j < group.length; j++) {
+      const left = group[i];
+      const right = group[j];
+      if (left.companyKey === right.companyKey
+          || !corporateFormTokensMatch(left.tokens, right.tokens)) continue;
+      const a = left.entry;
+      const b = right.entry;
+      const reqA = extractReqNumber(a.notes);
+      const reqB = extractReqNumber(b.notes);
+      if (reqA && reqB && reqA !== reqB) continue;
+      warn(`Possible duplicates: #${a.num}, #${b.num} (${a.company} — ${a.role})`,
         "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
       dupes++;
     }

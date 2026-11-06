@@ -29,6 +29,7 @@ import {
   sleep,
 } from './liveness-browser.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
+import { robotsAllows } from './robots-check.mjs';
 import { planExpiredHistoryRows, trackerLivenessTargets, DEFAULT_TRACKER_STATUSES, planExpiredDiscards, postingClosedNote, DEFAULT_DISCARD_STATUSES, discardableExpiredUrls } from './liveness-core.mjs';
 import { appendToScanHistory, normalizeUrlForDedup, SCAN_HISTORY_PATH } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -41,6 +42,7 @@ import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const USAGE = `Usage:
   node check-liveness.mjs [--no-fallback] [--throttle[=ms]] [--no-record] <url1> [url2] ...
@@ -318,7 +320,7 @@ async function main() {
   async function ensureBrowser() {
     if (browser) return;
     const { chromium } = await import('playwright');
-    const launched = await chromium.launch({ headless: true });
+    const launched = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       page = await newLivenessPage(launched);
       headed = noFallback ? null : createHeadedPageProvider(chromium);
@@ -363,7 +365,7 @@ async function main() {
         if (wait) await sleep(wait);
         const getHeadedPage = headed ? () => headed.get() : undefined;
         try {
-          ({ result, reason, code } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage }));
+          ({ result, reason, code } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage, robotsGate: robotsAllows }));
         } finally {
           // A failed visit counts too: that is when a WAF is most likely involved.
           spacer.visited(url);

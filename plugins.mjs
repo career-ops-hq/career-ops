@@ -44,7 +44,12 @@ const DATA_ROOT = getCareerOpsRoot();
 // The same read resolution as set-status.mjs and every other tracker reader:
 // CAREER_OPS_TRACKER, then data/applications.md, then the legacy root copy.
 const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
-const PIPELINE_PATH = path.join(DATA_ROOT, 'data', 'pipeline.md');
+// The same resolution as scan.mjs's PIPELINE_PATH, so the CAREER_OPS_PIPELINE
+// lane is honored by the de-dup read, the export snapshot, the write and the
+// log line alike (#6353). Passed to appendToPipeline() explicitly rather than
+// left to its default, so all four always agree on one file.
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data', 'pipeline.md');
+const PIPELINE_LABEL = process.env.CAREER_OPS_PIPELINE ? PIPELINE_PATH : 'data/pipeline.md';
 
 // A misbehaving plugin's stray rejection should be attributed and not silently
 // crash the host (the engine's per-hook try/catch handles the common case; this
@@ -104,7 +109,7 @@ function trackerSnapshotRows(md) {
   return rows;
 }
 
-/** URLs already present in data/pipeline.md, for additive de-duplication. */
+/** URLs already present in the pipeline (data/pipeline.md or the CAREER_OPS_PIPELINE lane), for additive de-duplication. */
 function existingPipelineUrls() {
   const urls = new Set();
   if (!existsSync(PIPELINE_PATH)) return urls;
@@ -261,6 +266,18 @@ async function cmdRun(args) {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
     const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, hook);
+    const failed = results.filter(r => !r.ok);
+    if (failed.length) {
+      for (const r of failed) console.error(`${r.id} ${hook} failed: ${r.error}`);
+      process.exit(1);
+    }
+    // export and notify return a non-array on success. Only ingest and search promise Job[].
+    const notJobs = results.filter(r => !Array.isArray(r.result));
+    if (notJobs.length) {
+      for (const r of notJobs) console.error(`${r.id} ${hook} failed: expected an array of jobs`);
+      process.exit(1);
+    }
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     const { jobs, counts } = admitPluginJobs(found, {
       id,
@@ -272,12 +289,12 @@ async function cmdRun(args) {
     console.log(`${id} ${hook}: ${found.length} found, ${jobs.length} new${skipped ? ` (skipped: ${skipped})` : ''}.`);
     if (dryRun) { jobs.slice(0, 20).forEach(j => console.log(`  • ${j.title} — ${j.url}`)); console.log('(--dry-run: pipeline not written)'); return; }
     if (jobs.length) {
-      await appendToPipeline(jobs);
+      await appendToPipeline(jobs, { pipelinePath: PIPELINE_PATH });
       // Recorded so the next ingest, and every scanner, sees these as known.
       // Only postings: an interview event in scan-history would read as a
       // scanned job everywhere scan-history is counted.
       if (manifest.jobPostings) await appendToScanHistory(jobs, localToday(), 'added');
-      console.log(`→ Appended ${jobs.length} to data/pipeline.md. Run /career-ops pipeline to evaluate.`);
+      console.log(`→ Appended ${jobs.length} to ${PIPELINE_LABEL}. Run /career-ops pipeline to evaluate.`);
     }
     return;
   }
@@ -290,19 +307,43 @@ async function cmdRun(args) {
     const rowCount = snapshot.applications.length;
     const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
     const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dataRoot: DATA_ROOT, dryRun, timeoutMs, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, 'export');
+    let failed = false;
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
-      else console.log(`${r.id} export: failed — ${r.error}`);
+      else {
+        console.error(`${r.id} export failed: ${r.error}`);
+        failed = true;
+      }
     }
+    if (failed) process.exit(1);
     return;
   }
 
   if (hook === 'notify') {
     const message = positional.slice(hookArgStart).join(' ') || '(career-ops notification)';
     const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
-    for (const r of results) console.log(r.ok ? `${r.id} notify: sent.` : `${r.id} notify: failed — ${r.error}`);
+    exitIfPluginDidNotRun(results, id, 'notify');
+    let failed = false;
+    for (const r of results) {
+      if (r.ok) console.log(`${r.id} notify: sent.`);
+      else {
+        console.error(`${r.id} notify failed: ${r.error}`);
+        failed = true;
+      }
+    }
+    if (failed) process.exit(1);
     return;
   }
+}
+
+// An empty result list means the selected plugin never ran. The integrity
+// gate and a failed import already printed why. A hook that ran and returned
+// no jobs is a one-element ok result, not an empty list.
+function exitIfPluginDidNotRun(results, id, hook) {
+  if (results.length > 0) return;
+  console.error(`${id} ${hook} did not run.`);
+  process.exit(1);
 }
 
 function findManifest(id) {
@@ -686,7 +727,7 @@ async function main() {
 
 // Named exports for the test suite — not part of the CLI API.
 export const _testPaths = Object.freeze({ APPLICATIONS_PATH, PIPELINE_PATH });
-export { buildSnapshot as _testBuildSnapshot };
+export { buildSnapshot as _testBuildSnapshot, existingPipelineUrls as _testExistingPipelineUrls };
 
 if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });
