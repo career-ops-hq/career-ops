@@ -444,4 +444,26 @@ test('a different language does not refresh the seen URL of the same listing', (
   assert.equal(closeRefreshUrlForSeenOffer({ ...job, language: 'en' }, seen, listingRefreshUrls), url);
 });
 
+test('an expired history row still blocks a different language on its URL', () => {
+  const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
+  const key = computeListingFingerprint({ strong: identity }).listing_key;
+  const url = 'https://jobs.example/acme';
+  const history = historyRow({
+    url,
+    status: 'added',
+    first_seen: '2026-01-01',
+    listing_key: key,
+    language: 'en',
+  });
+  const policy = { recheckAfterDays: 30, today: '2026-11-05' };
+  const released = collectSeenUrls({ scanHistoryText: history }, policy);
+  assert.equal(released.seen.has(seenJobKey(url)), false);
+  const job = { url, listingIdentity: identity, language: 'fr' };
+  const tracked = new Set([seenJobKey(url)]);
+  assert.equal(closeRefreshUrlForSeenOffer(job, tracked, released.listingRefreshUrls), '');
+  assert.equal(closeRefreshUrlForSeenOffer({ ...job, language: 'en' }, tracked, released.listingRefreshUrls), url);
+  const other = { url: 'https://jobs.example/other', language: 'fr' };
+  assert.equal(closeRefreshUrlForSeenOffer(other, new Set([seenJobKey(other.url)]), released.listingRefreshUrls), other.url);
+});
+
 

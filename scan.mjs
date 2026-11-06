@@ -2477,7 +2477,10 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     } else {
       const urlToken = seenJobKey(url);
       recheckCandidates.add(urlToken);
-      if (status === 'added' && listingKey) recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+      if (status === 'added' && listingKey) {
+        recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+        rememberListingRefresh(listingRefreshUrls, listingKey, url, refreshLanguage(url, language));
+      }
     }
   }
 
