@@ -198,6 +198,24 @@ test('supervisor: present only with a named department; incomplete text is not e
   assert.deepEqual(incomplete.points.find((p) => p.id === 'supervisor').evidence, []);
 });
 
+test('supervisor: a "Reports to:" label line names the reporting line', () => {
+  for (const line of [
+    'Reports to: Head of ML Platform',
+    'Reporting to: Head of ML Platform',
+    'Reports to - Head of ML Platform',
+    'Reports to – Head of ML Platform',
+  ]) {
+    const p = analyzeRoleClarity(line).points.find((x) => x.id === 'supervisor');
+    assert.equal(p.status, 'partial', line);
+    assert.deepEqual(p.evidence, [line]);
+  }
+  assert.equal(status(analyzeRoleClarity('Reports to: Head of ML Platform in the Engineering Department.'), 'supervisor'), 'present');
+  // The label form keeps the article guard, and a bare label is not evidence.
+  for (const line of ['Reports to: the.', 'Reports to - the.', 'Reports to:', 'Reports toward the goal.']) {
+    assert.deepEqual(analyzeRoleClarity(line).points.find((x) => x.id === 'supervisor').evidence, [], line);
+  }
+});
+
 test('success: a measure and a horizon in unrelated sentences are only partial', () => {
   const unrelated = analyzeRoleClarity('The first 90 days are onboarding. Annual KPIs determine bonuses.');
   assert.equal(status(unrelated, 'success'), 'partial');
