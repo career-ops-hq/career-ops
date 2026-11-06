@@ -228,13 +228,15 @@ test('lever stops at the aggregate size bound and marks the result truncated', a
   const warns = [];
   const origWarn = console.warn;
   console.warn = (m) => warns.push(String(m));
-  const big = 'x'.repeat(700 * 1024);
+  const big = 'x'.repeat(300 * 1024);
   const ctx = {
     sleep: async () => {},
-    fetchJson: async (url) => {
+    fetchJson: async (url, opts) => {
       const u = new URL(url);
       if (!u.searchParams.has('limit')) throw tooLarge();
       const limit = Number(u.searchParams.get('limit'));
+      // Model response bytes: a page over the per-response cap is refused, as the real helper does.
+      if (limit * big.length > opts.maxBytes) throw tooLarge();
       return Array.from({ length: limit }, (_, i) => ({ id: `p${u.searchParams.get('skip')}-${i}`, text: 'T', hostedUrl: 'https://jobs.lever.co/x/1', categories: {}, descriptionPlain: big }));
     },
   };
