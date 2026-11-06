@@ -76,14 +76,39 @@ async function fromKnownApi(url) {
     const { fetchJdViaKnownApi } = await import('../browser-extract.mjs');
     const result = await fetchJdViaKnownApi(url, 20_000, 15_000);
     if (!result?.text) return null;
-    // A delisted/closed posting is not a JD to rescue: decline, so the closure reaches
-    // fetch-jd.mjs's exit 3 and the runner skips the offer instead of scoring it.
-    if (result.closed) return null;
+    // A delisted/closed posting is not a JD to rescue: report closure so the chain
+    // stops and the runner skips the offer instead of scoring other text from the page.
+    if (result.closed) return { closed: true, evidence: result.evidence };
     const text = result.title ? `${result.title}\n\n${result.text}` : result.text;
     return { text, method: `ats-api:${result.ats}` };
   } catch {
     return null;
   }
+}
+
+/**
+ * Run the rescue strategies in order. A closed ATS posting ends the chain at once
+ * (`{ closed, evidence }`), so text another source holds for the same page is never
+ * rescued into a JD for a role the board has delisted. Otherwise the first candidate
+ * that clears the word floor, and (for a non-thin page) beats the page's own text, wins.
+ * @param {Array<() => Promise<any>|any>} runners
+ */
+export async function runRescueChain(runners, { minWords, strippedWords, thin }) {
+  let found = null;
+  let thinFound = null;
+  let notBetter = null;
+  for (const run of runners) {
+    const candidate = await run();
+    if (!candidate) continue;
+    if (candidate.closed) return { closed: true, evidence: candidate.evidence };
+    const w = wordCount(candidate.text);
+    if (w < minWords) { thinFound ??= candidate; continue; }
+    // Never replace a page that already had more JD than the rescue found.
+    if (!thin && w <= strippedWords) { notBetter ??= candidate; continue; }
+    found = candidate;
+    break;
+  }
+  return { found, thinFound, notBetter };
 }
 
 async function main() {
@@ -116,27 +141,16 @@ Options:
     process.exit(1);
   }
 
-  // First strategy whose text clears the word floor AND, when the page is not
-  // thin, is longer than the page's own text, wins. A candidate that fails
-  // either test must not stop the chain: a later source may hold the full JD.
-  let found = null;
-  let thinFound = null;
-  let notBetter = null;
-  for (const run of [
-    () => fromLdJson(html),
-    () => fromKnownApi(url),
-    () => fromEmbeddedDescription(html),
-  ]) {
-    const candidate = await run();
-    if (!candidate) continue;
-    const w = wordCount(candidate.text);
-    if (w < minWords) { thinFound ??= candidate; continue; }
-    // Never replace a page that already had more JD than the rescue found —
-    // see "WHEN A RESCUE IS ACCEPTED" above.
-    if (!thin && w <= strippedWords) { notBetter ??= candidate; continue; }
-    found = candidate;
-    break;
+  const chain = await runRescueChain(
+    [() => fromLdJson(html), () => fromKnownApi(url), () => fromEmbeddedDescription(html)],
+    { minWords, strippedWords, thin },
+  );
+  if (chain.closed) {
+    // Terminal: exit 3 with the evidence on one line, whatever the other sources hold.
+    process.stdout.write(`0\tclosed:${String(chain.evidence ?? '').replace(/\s+/g, ' ').slice(0, 160)}\n`);
+    process.exit(3);
   }
+  const { found, thinFound, notBetter } = chain;
 
   if (!found) {
     // A rescue that yields another thin page is not a rescue. Reporting it as

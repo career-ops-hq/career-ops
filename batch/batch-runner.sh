@@ -1232,6 +1232,7 @@ process_offer() {
   # requirements, which together exceed 80 stripped words.
   local prefetch_min_words=80
   local jd_prefetch_words=0
+  local jd_rescue_closed_note=""
   local jd_raw_file=""
   local curl_status=0
   if command -v curl >/dev/null 2>&1; then
@@ -1338,7 +1339,14 @@ process_offer() {
       # is thin or the rescued JD is longer, and it fails open (any failure leaves
       # the stripped text as is, and the checks below decide as before).
       if [[ -f "$BATCH_DIR/jd-rescue.mjs" && -s "$jd_raw_file" ]]; then
-        if _rs_line=$(node "$BATCH_DIR/jd-rescue.mjs" "$url" "$jd_raw_file" "$jd_file" "$jd_prefetch_words" 2>/dev/null); then
+        local _rs_rc=0
+        _rs_line=$(node "$BATCH_DIR/jd-rescue.mjs" "$url" "$jd_raw_file" "$jd_file" "$jd_prefetch_words" 2>/dev/null) || _rs_rc=$?
+        if [[ "$_rs_rc" -eq 3 ]]; then
+          # The ATS says the posting is closed: terminal, even though the page text may look like a JD.
+          jd_rescue_closed_note="posting closed (jd-rescue): $(printf '%s' "${_rs_line#*$'\t'}" | tr -c '[:print:]' ' ' | sed 's/^closed://; s/  */ /g')"
+          : > "$jd_file"
+          jd_prefetch_words=0
+        elif [[ "$_rs_rc" -eq 0 ]]; then
           IFS=$'\t' read -r _rs_words _rs_method <<< "$_rs_line"
           _rs_words="${_rs_words//[^0-9]/}"
           _rs_words="${_rs_words:-0}"
@@ -1366,9 +1374,9 @@ process_offer() {
   # text inside a shell command the worker composes. fetch-jd.mjs only talks to
   # the known ATS API hosts it resolves from the URL, so a private or unknown
   # host is a miss (exit 1), not a request.
-  local jd_closed_note=""
+  local jd_closed_note="$jd_rescue_closed_note"
   local jd_api_words=0
-  if [[ ! -s "$jd_file" && -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
+  if [[ -z "$jd_closed_note" && ! -s "$jd_file" && -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
     local jd_api_tmp jd_api_rc=0
     jd_api_tmp="$(mktemp "${TMPDIR:-/tmp}/batch-jd-api.XXXXXX")"
     node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_api_tmp" 2>/dev/null || jd_api_rc=$?

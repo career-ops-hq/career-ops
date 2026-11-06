@@ -403,8 +403,20 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
 }
 
 {
-  // Source-level guard: a closed ATS result must not be rescued as a JD.
+  // Control flow: a closed ATS result ends the chain, whatever the other sources hold,
+  // and the runner turns the CLI's exit 3 into a terminal skip.
+  const { runRescueChain } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+  const long = { text: Array.from({ length: 200 }, (_, n) => `w${n}`).join(' '), method: 'embedded' };
+  const opts = { minWords: 80, strippedWords: 500, thin: false };
+  const closed = await runRescueChain([() => null, () => ({ closed: true, evidence: 'Ashby isListed: false' }), () => long], opts);
+  if (closed.closed === true && closed.evidence === 'Ashby isListed: false' && !closed.found) pass('a closed ATS result stops the rescue chain before later sources are used');
+  else fail(`closed result did not end the chain: ${JSON.stringify(closed)}`);
+  const thinClosed = await runRescueChain([() => long, () => ({ closed: true, evidence: 'x' })], { ...opts, strippedWords: 0, thin: true });
+  if (thinClosed.found) pass('without a closure signal the first adequate source still wins');
+  else fail('a normal rescue stopped working');
   const src = readFileSync(join(ROOT, 'batch/jd-rescue.mjs'), 'utf8');
-  if (/if \(result\.closed\) return null;/.test(src)) pass('jd-rescue declines a closed ATS posting instead of rescuing its text');
-  else fail('jd-rescue fromKnownApi does not decline closed postings');
+  const runner = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf8');
+  if (/return \{ closed: true, evidence: result\.evidence \}/.test(src) && /process\.exit\(3\)/.test(src)
+      && /_rs_rc" -eq 3/.test(runner) && /jd_closed_note="\$jd_rescue_closed_note"/.test(runner)) pass('jd-rescue exits 3 on closure and the runner skips the offer on it');
+  else fail('closure is not propagated from jd-rescue to the runner');
 }
