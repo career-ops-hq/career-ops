@@ -100,24 +100,57 @@ function logNums(dir) {
 test('--apply reads a newer close day under the history lock', { timeout: 30000 }, async () => {
   const box = sandbox();
   const { acquirePipelineLock } = await import('../pipeline-lock.mjs');
+  const probe = join(box.dir, 'lock-attempt');
+  const hook = join(box.dir, 'lock-probe.mjs');
+  writeFileSync(hook, [
+    "import { createRequire } from 'node:module';",
+    "const fs = createRequire(import.meta.url)('fs');",
+    'const target = `${process.env.CAREER_OPS_SCAN_HISTORY}.lock`;',
+    'const original = fs.mkdirSync;',
+    'fs.mkdirSync = function (path, options) {',
+    "  if (path === target) fs.appendFileSync(process.env.CAREER_OPS_LOCK_PROBE, '1');",
+    '  return original.call(this, path, options);',
+    '};',
+    '',
+  ].join('\n'));
   const lock = await acquirePipelineLock(box.history);
+  let child;
   try {
-    const child = spawn(process.execPath, [join(ROOT, 'closing-soon.mjs'), '--discard-passed', '--apply', '--today', TODAY], {
+    child = spawn(process.execPath, [join(ROOT, 'closing-soon.mjs'), '--discard-passed', '--apply', '--today', TODAY], {
       cwd: box.dir,
-      env: box.env,
+      env: {
+        ...box.env,
+        CAREER_OPS_LOCK_PROBE: probe,
+        NODE_OPTIONS: `--import ${pathToFileURL(hook).href}`,
+      },
     });
+    let output = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
     const done = new Promise((resolve, reject) => {
       child.on('error', reject);
       child.on('close', (code) => resolve(code));
     });
+    const started = Date.now();
+    while (!existsSync(probe)) {
+      if (child.exitCode !== null) assert.fail(`child exited ${child.exitCode} before the history lock\n${output}`);
+      if (Date.now() - started > 5000) {
+        child.kill();
+        assert.fail(`child never attempted the history lock\n${output}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
     const text = readFileSync(box.history, 'utf-8');
     writeFileSync(box.history, `${text}${historyRow({ url: 'https://jobs.example/acme-exact', company: 'Acme', closes_at: '2026-12-01' })}\n`);
     lock.release();
-    assert.equal(await done, 0);
+    assert.equal(await done, 0, output);
     const tracker = readFileSync(box.tracker, 'utf-8');
     assert.equal(statusOf(tracker, 3), 'Evaluated');
     assert.equal(statusOf(tracker, 1), 'Discarded');
   } finally {
+    child?.kill();
     lock.release();
     box.cleanup();
   }
