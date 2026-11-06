@@ -154,7 +154,10 @@ language:
 
 # (Optional) Rename the session after the posting it handles, e.g.
 # "VP Infrastructure, Acme Health", in hosts that let the agent set its own
-# session title. Single-posting modes only; a no-op elsewhere. Default: auto.
+# session title. Scans and single evaluations also show their progress, e.g.
+# "Career-ops scan (checking, 5/15)" or "VP Infrastructure, Acme Health (CV)".
+# Skipped in batch and ofertas, in headless runs, and in hosts with no rename
+# tool. Default: auto.
 # Set to off to keep your own titles.
 # session_title: auto
 

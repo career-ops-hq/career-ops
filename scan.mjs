@@ -37,7 +37,7 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
-import { buildWorkplacePolicy } from './providers/_country.mjs';
+import { buildWorkplacePolicy, isCountryKeyword } from './providers/_country.mjs';
 import {
   closeSync,
   existsSync,
@@ -115,6 +115,7 @@ const parseYaml = loadYaml;
 import { resolveTrackerPath } from './path-resolver.mjs';
 import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-launch.mjs';
 import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
+import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 export { applyEntryResponseCap };
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
@@ -157,13 +158,31 @@ const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 // module must stay side-effect free: a sibling that only reads a constant used
 // to leave a stray data/ in whatever cwd it ran from.
 
-// A morning scan of mixed ATS hosts was waiting on 10 slots while the CPU
-// sat idle. 32 is the global cap. 10 per hostname keeps a single-ATS list
-// at today's parallelism, so one Greenhouse board does not get a bigger
-// burst than it did before. Verify stays at 10. It hammers one URL at a
-// time and is not the morning-scan wait.
-export const SCAN_CONCURRENCY = 32;
-export const HOST_CONCURRENCY = 10;
+// A board response can be tens of megabytes, and a request's timer also covers
+// reading the body. More requests in flight can therefore make a healthy board
+// miss its timeout on a slower connection. CAREER_OPS_SCAN_CONCURRENCY caps the
+// whole company scan, and CAREER_OPS_SCAN_HOST_CONCURRENCY caps one hostname
+// inside it. Verify has its own fixed limit. It hammers one URL at a time and is
+// not the morning-scan wait.
+export const DEFAULT_CONCURRENCY = 10;
+
+/**
+ * A concurrency limit from an env value. Anything but a positive integer falls
+ * back to the default: a typo should not stop a scan, and parallelFetch never
+ * starts a task under a limit of 0.
+ *
+ * @param {unknown} raw - Raw env value.
+ * @param {number} [fallback=DEFAULT_CONCURRENCY] - Value used when `raw` is unusable.
+ * @returns {number}
+ */
+export function resolveConcurrency(raw, fallback = DEFAULT_CONCURRENCY) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export const SCAN_CONCURRENCY = resolveConcurrency(process.env.CAREER_OPS_SCAN_CONCURRENCY);
+export const HOST_CONCURRENCY = resolveConcurrency(process.env.CAREER_OPS_SCAN_HOST_CONCURRENCY);
 export const VERIFY_CONCURRENCY = 10;
 
 export function companyFetchHost(company) {
@@ -425,9 +444,10 @@ export function matchedTitleKeywords(title, titleFilter) {
 //     matches, so block: [Dublin] does not drop "Dublin, OH".
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
-//   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
-//     an explicit remote marker (see titleSignalsRemote below), unless
-//     `remote_title_fallback: false` disables that final rescue.
+//   - `allow` non-empty → must match a keyword, an exact worldwide label when
+//     non-strict and both allow-lists contain only countries (#6413), OR the
+//     TITLE carries an explicit remote marker (see titleSignalsRemote below),
+//     unless `remote_title_fallback: false` disables that final title rescue.
 
 // Normalize a keyword list from portals.yml: tolerates a bare string
 // (wrapped to a 1-item array), null/undefined (→ []), and non-string
@@ -674,6 +694,14 @@ export function titleSignalsRemote(title) {
   return REMOTE_TITLE_RE.test(lower);
 }
 
+// Whole labels only: a substring must not promote qualified or negated
+// geography ("Worldwide except Canada", "Not worldwide") to worldwide.
+const WORLDWIDE_LOCATION_LABELS = new Set([
+  'worldwide',
+  'anywhere in the world',
+  'remote (worldwide)',
+]);
+
 // `url` and `title` are optional. Callers that omit them get the original
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
@@ -689,7 +717,12 @@ export function buildLocationFilter(locationFilter) {
   if (usExpansion) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
-  const allow = compileLocationKeywordList(locationFilter.allow);
+  const allowKeywords = normalizeKeywordList(locationFilter.allow);
+  const allow = allowKeywords.map(compileLocationKeyword);
+  // Do not widen city-only or mixed city/country targeting. Reuse the shared
+  // country vocabulary rather than introducing a second country-name list.
+  const countryOnlyAllow = allowKeywords.length > 0
+    && [...alwaysAllowKeywords, ...allowKeywords].every(isCountryKeyword);
   // Only a list the user already filled: an empty `allow` means "everything not
   // blocked passes", and adding a matcher to it would reject every other place.
   if (usExpansion && allow.length > 0) {
@@ -735,6 +768,7 @@ export function buildLocationFilter(locationFilter) {
     if (block.length > 0 && block.some(matches)) return false;
     if (allow.length === 0) return true;
     if (allow.some(matches)) return true;
+    if (!strict && countryOnlyAllow && WORLDWIDE_LOCATION_LABELS.has(lower)) return true;
     // Last resort only. Deliberately placed AFTER `block` so a remote title can
     // never rescue a blocked location — "Program Manager - Remote" in Bengaluru
     // stays rejected. This widens `allow`, never `block`.
@@ -4847,6 +4881,7 @@ async function main() {
       idCache: idCaches.forProvider(provider.id),
     };
     applyEntryResponseCap(ctx, company);
+    applyEntryTimeout(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     const recordError = err => {
       failedTargets++;

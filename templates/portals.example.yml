@@ -1352,6 +1352,7 @@ search_queries:
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
+#   remote-com      apply.remote.com  (Remote's own ATS, single company; any path, the board is always read whole)
 #   hirehive        <tenant>.hirehive.com  (any path, including a posting link; the board is always read from /api/v2/jobs)
 #   trakstar        <client>.hire.trakstar.com or <client>.recruiterbox.com
 #                   (or api: https://jsapi.recruiterbox.com/v1/openings?client_name=<client>)
@@ -1772,6 +1773,11 @@ search_queries:
 #   careers_url: https://www.heckler-koch.com/de/Karriere/Stellenangebote
 #   provider: hecklerkoch                 # optional — heckler-koch.com host also auto-detects
 #   enabled: true
+#
+# - name: Remote                          # single-company; Remote's own ATS, public JSON list
+#   careers_url: https://apply.remote.com/jobs   # auto-detects on apply.remote.com
+#   provider: remote-com                  # optional — apply.remote.com host also auto-detects
+#   enabled: true                         # location keeps the region codes: "Remote · EMEA (Europe, Middle East & Africa)"
 #
 # - name: Rheinmetall                     # single-company; SSR Nuxt vacancy list
 #   careers_url: https://www.rheinmetall.com/en/career/vacancies
@@ -2311,6 +2317,17 @@ search_queries:
 #     careers_url: https://jobs.ashbyhq.com/bigco
 #     max_response_mb: 20
 
+# ── timeout_ms (optional, per entry) ──────────────────────────────────
+# A request has a limited time, which also covers reading the response body. A
+# board that returns its whole catalogue in one response can need more, and the
+# scan then reports "This operation was aborted" for it. Raise the timeout for
+# that entry only, in milliseconds. The value wins over any timeout the provider
+# sets; every other entry keeps its timeout.
+#
+#   - name: BigCo
+#     careers_url: https://jobs.lever.co/bigco
+#     timeout_ms: 60000
+
 tracked_companies:
 
   - name: YMCA of Greater Toronto
@@ -2707,6 +2724,11 @@ tracked_companies:
   - name: Shiji Group
     careers_url: https://shijigroup.zohorecruit.com/jobs/Careers
     notes: "Katowice / Barcelona. International hubs of a Beijing-based hospitality technology group."
+    enabled: true
+
+  - name: Remote
+    careers_url: https://apply.remote.com/jobs
+    notes: "Fully remote. Employer-of-record / global HR platform. Each posting names its hiring regions (EMEA, NORAM, LATAM, APAC)."
     enabled: true
 
   - name: AMCS Group
@@ -3504,6 +3526,13 @@ tracked_companies:
     careers_url: https://careers.smartrecruiters.com/freshworks
     notes: "SmartRecruiters. 123 postings when checked."
     enabled: true
+
+  # -- Middle East & Pakistan --
+  - name: Careem
+    careers_url: https://jobs.careem.com/
+    api: https://boards-api.greenhouse.io/v1/boards/careem/jobs
+    notes: "Greenhouse. Technology and operations roles in Pakistan and the Middle East."
+    enabled: false
 
 # ── Job Boards ────────────────────────────────────────────────────────
 # Multi-employer aggregators. Unlike tracked_companies (one entry = one employer),

@@ -24,7 +24,7 @@ If the input is a **URL** (not pasted JD text), follow this strategy to extract 
 
 **If the input is JD text** (not a URL): use directly, without needing to fetch.
 
-**Session title:** once a real JD is read and the role and employer are known, apply the router's **Session Title** rule (`SKILL.md`, #5303): rename an interactive session to `{Role}, {Company}` when the host allows it. An undisclosed-employer agency posting waits for Step 1's **Agency confirmation handoff**, then becomes `{Role}, via {Agency}`.
+**Session title:** apply the router's **Session Title** rule (`SKILL.md`, #5303) in an interactive session when the host allows it. The session is `Career-ops eval (fetching)` while this step reads the JD. Once a real JD gives the role and employer, rename it to `{Role}, {Company} (evaluating)`, then to `{Role}, {Company} (CV)` at Step 3, and end on plain `{Role}, {Company}` after Step 5. A gate that stops the run (Steps 0.5 to 0.7, or Step 1's agency question) ends it on `(on hold)` instead. An undisclosed-employer agency posting waits for Step 1's **Agency confirmation handoff**, then becomes `{Role}, via {Agency}`. Inside a scan's `pipeline` run, the scan's counter title applies until one posting remains.
 
 ## Step 0.5 — Liveness gate
 
