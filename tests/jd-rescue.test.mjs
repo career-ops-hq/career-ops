@@ -391,3 +391,13 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   if (r.ok && /See\s+the benefits page/.test(out) && !/<\/?a[\s>]|href|&amp;/.test(out) && /(?:&lt;|<) 50 ms/.test(out)) pass('an escaped link with &amp; in its URL is stripped, and prose "< 50 ms" is kept');
   else fail(`escaped &amp; attribute mishandled: ${JSON.stringify(out.slice(-140))}`);
 }
+
+{
+  // An unclosed <script>/<style> inside a description is payload, not prose: the
+  // rest of the description must not leak into the JD text.
+  const words = Array.from({ length: 100 }, (_, i) => `w${i}`).join(' ');
+  const r = rescue(ldJson(jobPosting({ description: `<p>${words}</p><script>var leaked = "SECRET-PAYLOAD"; never closed` })));
+  const out = r.out ?? '';
+  if (r.ok && out.includes('w99') && !/SECRET-PAYLOAD|leaked/.test(out)) pass('an unclosed script in a description drops its payload instead of leaking it as text');
+  else fail(`unclosed script payload leaked: ${JSON.stringify(out.slice(-120))}`);
+}

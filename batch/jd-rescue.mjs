@@ -138,7 +138,7 @@ function stripMarkup(markup) {
     if (name === 'script' || name === 'style') {
       const close = lower.indexOf(`</${name}`, gt + 1);
       const closeGt = close === -1 ? -1 : src.indexOf('>', close);
-      if (closeGt === -1) { out.push(' '); i = gt + 1; continue; } // unclosed: drop just the tag, as before
+      if (closeGt === -1) { out.push(' '); break; } // unclosed: the rest is script/style payload, not text
       out.push(' ');
       i = closeGt + 1;
       continue;
