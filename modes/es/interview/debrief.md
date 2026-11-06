@@ -252,17 +252,24 @@ Reglas para la transcripción:
 
 ## Step 10 — Record the call on the tracker
 
-Después de guardar el análisis, registra los hechos confirmados en la candidatura. Relaciona un hecho nuevo con un factor decisivo (dealbreaker) que el usuario ya haya escrito en `modes/_profile.md` o `config/profile.yml`. Muestra el hecho y la frase del perfil. Pregunta `Record this dealbreaker on the report and the tracker? [y/N]`. Si responde que sí, pasa esa frase como `--dealbreaker`. Si responde que no, omítelo.
+Después de guardar el análisis, registra los hechos confirmados en la candidatura. Relaciona cada hecho nuevo con un factor decisivo (dealbreaker) que el usuario ya haya escrito en `modes/_profile.md` o `config/profile.yml`. Pregunta por cada coincidencia por separado: muestra el hecho y la frase del perfil, y luego pregunta `Record this dealbreaker on the report and the tracker? [y/N]`. Conserva cada frase que el usuario confirme. Descarta cada frase que el usuario rechace.
 
 Para cada persona nombrada, pregunta `Save this contact to data/contacts.tsv? [y/N]`. Si responde que sí, pasa el nombre, el correo electrónico si se dio uno, y el tipo si el usuario nombró uno.
 
 Si el siguiente paso nombra un único día claro del calendario, pasa `--next YYYY-MM-DD` sin una segunda pregunta. Resuelve un día de la semana a partir del día del calendario local, y hoy cuenta. Si la frase no tiene día, omite `--next`. Si es ambigua (`next week`, dos días), pide una sola fecha y luego pásala.
 
-Ejecuta `node debrief-sync.mjs` con esos flags. Después, si se guardó un contacto, ejecuta `node contacts.mjs --summary`. Si se fijó un día, ejecuta `node followup-cadence.mjs --summary`.
+Ejecuta `node debrief-sync.mjs --app <tracker#>` con esos flags, donde `<tracker#>` es el `#` de la candidatura en el tracker (no su número de informe). `--dealbreaker` admite una sola frase y solo puede aparecer una vez por llamada, así que ejecuta un comando por cada frase confirmada. Nunca unas dos frases en un solo valor: el script rechaza el punto y coma. Pon los flags de contacto y `--next` solo en el primer comando. Cada comando siguiente pasa `--app <tracker#>` y un único `--dealbreaker`, nada más:
 
-No cambies el estado a menos que el usuario nombre un nuevo estado. Eso es una llamada aparte a `set-status.mjs`, antes de este comando.
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+```
 
-Una segunda ejecución del mismo comando es segura.
+Si un comando falla, detente, corrígelo y vuelve a ejecutar la lista desde el primer comando. Si no hay dealbreaker, contacto ni día `--next` que pasar, omite el comando: el script rechaza una llamada sin nada que registrar. Después del último comando, si se guardó un contacto, ejecuta `node contacts.mjs --summary`. Si se fijó un día, ejecuta `node followup-cadence.mjs --summary`.
+
+No cambies el estado a menos que el usuario nombre un nuevo estado. Eso es una llamada aparte a `set-status.mjs`, antes de estos comandos.
+
+Una segunda ejecución de los mismos comandos es segura: una frase, un contacto o una fecha ya registrados no se vuelven a escribir.
 
 ---
 

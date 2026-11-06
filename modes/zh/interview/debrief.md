@@ -252,17 +252,24 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 
 ## Step 10 — Record the call on the tracker
 
-复盘保存后，把已确认的事实记录到这条申请上。把新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。展示该事实与画像中的那句话。询问 `Record this dealbreaker on the report and the tracker? [y/N]`。若回答是，把那句话作为 `--dealbreaker` 传入。若回答否，就省略。
+复盘保存后，把已确认的事实记录到这条申请上。把每个新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。每一处对应都单独询问：展示该事实与画像中的那句话，然后询问 `Record this dealbreaker on the report and the tracker? [y/N]`。保留用户确认的每一句，舍弃用户拒绝的每一句。
 
 对每位点到名的人，询问 `Save this contact to data/contacts.tsv? [y/N]`。若回答是，传入姓名、给出的邮箱（如有），以及用户点明的类型（如有）。
 
 若下一步指明了唯一明确的日历日，直接传 `--next YYYY-MM-DD`，不再追问。星期几按本地日历日换算，今天也算。若说法里没有具体日期，省略 `--next`。若有歧义（`next week`、两个日期），先请用户给出一个日期，再传入。
 
-带着这些参数运行 `node debrief-sync.mjs`。之后，若保存了联系人，运行 `node contacts.mjs --summary`。若钉住了日期，运行 `node followup-cadence.mjs --summary`。
+带着这些参数运行 `node debrief-sync.mjs --app <tracker#>`，其中 `<tracker#>` 是该申请在 tracker 中的 `#`（不是报告编号）。`--dealbreaker` 只接受一句话，且每次调用只能出现一次，所以每条已确认的句子各运行一条命令。不要把两句话合并成一个值：脚本会拒绝分号。联系人参数和 `--next` 只放在第一条命令里。之后的每条命令只传 `--app <tracker#>` 和一个 `--dealbreaker`，别的都不传：
 
-除非用户点明新状态，否则不要改状态。那是另一次 `set-status.mjs` 调用，在本命令之前执行。
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+```
 
-同一命令再跑一次是安全的。
+若某条命令失败，先停下修正，再从第一条命令起重新运行整个列表。若没有要传的 dealbreaker、联系人或 `--next` 日期，就不运行命令：脚本会拒绝没有内容可记录的调用。最后一条命令之后，若保存了联系人，运行 `node contacts.mjs --summary`。若钉住了日期，运行 `node followup-cadence.mjs --summary`。
+
+除非用户点明新状态，否则不要改状态。那是另一次 `set-status.mjs` 调用，在这些命令之前执行。
+
+同样的命令再跑一次是安全的：已经记录的句子、联系人或日期不会重复写入。
 
 ---
 

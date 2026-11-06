@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
@@ -224,6 +224,7 @@ function refuses(label, args, mutate = {}) {
 refuses('a weekday --next writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--next', 'Thursday']);
 refuses('an impossible --next writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--next', '2026-02-31']);
 refuses('an unknown flag writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--bogus']);
+refuses('a repeated --dealbreaker writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--dealbreaker', 'No equity-only compensation']);
 refuses('a dealbreaker with a semicolon writes nothing', ['--app', '7', '--dealbreaker', 'No on-site; relocation']);
 refuses('a Machine Summary holding only comments writes nothing', ['--app', '7', '--dealbreaker', SENTENCE], {
   report: reportText('4.2', 'Apply', '[]').replace(/```yaml\n[\s\S]*?```/, '```yaml\n# summary pending\n```'),
@@ -370,8 +371,116 @@ check('Step 10 tells the agent how to record the call', () => {
     'node followup-cadence.mjs --summary',
     'set-status.mjs',
     'Do not change status unless the user names a new status',
-    'A second run of the same command is safe',
+    'one command per confirmed sentence',
+    'on the first command only',
+    'Drop every sentence the user declines',
+    'run the list again from the first command',
+    'A second run of the same commands is safe',
   ]) {
     assert.ok(section.includes(phrase), `missing ${phrase}`);
   }
 });
+
+// The Step 10 example is the documented multi-dealbreaker flow (#6542). Run it
+// as written: every line must be a call the CLI accepts, together they must
+// record each confirmed sentence, and running them again must change nothing.
+const MODE_DIR = join(ROOT, 'modes');
+
+// Translations localize the Step 10 heading, so find the example by content:
+// the bash fence whose commands call debrief-sync.mjs.
+function stepTenBlock(text) {
+  const fence = [...text.matchAll(/```bash\n([\s\S]*?)```/g)].find((m) => m[1].includes('node debrief-sync.mjs'));
+  return fence ? fence[1] : null;
+}
+
+function debriefModes() {
+  const out = [['modes/interview/debrief.md', join(MODE_DIR, 'interview', 'debrief.md')]];
+  for (const lang of readdirSync(MODE_DIR, { withFileTypes: true })) {
+    const path = join(MODE_DIR, lang.name, 'interview', 'debrief.md');
+    if (lang.isDirectory() && existsSync(path)) out.push([`modes/${lang.name}/interview/debrief.md`, path]);
+  }
+  return out;
+}
+
+function shellWords(line) {
+  return [...line.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => (m[1] !== undefined ? m[1] : m[2]));
+}
+
+const englishBlock = stepTenBlock(readFileSync(join(MODE_DIR, 'interview', 'debrief.md'), 'utf8'));
+
+check('Step 10 shows one debrief-sync command per confirmed dealbreaker', () => {
+  assert.ok(englishBlock, 'Step 10 has no bash example');
+  const commands = englishBlock.trim().split('\n');
+  assert.ok(commands.length >= 2, 'the example needs at least two dealbreakers');
+  for (const [i, line] of commands.entries()) {
+    const words = shellWords(line);
+    assert.deepEqual(words.slice(0, 2), ['node', 'debrief-sync.mjs']);
+    const flags = words.filter((w) => w.startsWith('--'));
+    assert.equal(flags.filter((f) => f === '--dealbreaker').length, 1, `line ${i + 1} must pass exactly one --dealbreaker`);
+    if (i > 0) assert.deepEqual(flags, ['--app', '--dealbreaker'], `line ${i + 1} must pass only --app and --dealbreaker`);
+  }
+});
+
+check('every translated Step 10 carries the same multi-dealbreaker example', () => {
+  for (const [rel, path] of debriefModes()) {
+    const text = readFileSync(path, 'utf8');
+    if (!text.includes('node debrief-sync.mjs')) continue;
+    assert.equal(stepTenBlock(text), englishBlock, `${rel} Step 10 example differs from the English one`);
+  }
+});
+
+check('no debrief mode passes a debrief-sync flag twice in one command', () => {
+  for (const [rel, path] of debriefModes()) {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      if (!/^node debrief-sync\.mjs /.test(line.trim())) continue;
+      const flags = shellWords(line).filter((w) => w.startsWith('--') && !/^--contact-/.test(w));
+      assert.equal(new Set(flags).size, flags.length, `${rel}: ${line}`);
+    }
+  }
+});
+
+if (englishBlock) {
+  const root = freshRoot();
+  const FIRST = SENTENCE;
+  const SECOND = 'No equity-only compensation';
+  const DECLINED = 'No travel above 25 percent';
+  const commands = englishBlock.trim().split('\n').map((line) => shellWords(
+    line
+      .replaceAll('<tracker#>', '7')
+      .replaceAll('<sentence 1>', FIRST)
+      .replaceAll('<sentence 2>', SECOND)
+      .replaceAll('<name>', 'Avery Quinn')
+      .replaceAll('YYYY-MM-DD', FUTURE),
+  ).slice(2));
+  try {
+    writeFixture(root);
+    const results = commands.map((args) => run(root, args));
+    check('the Step 10 example records both confirmed dealbreakers, the contact, and the pin', () => {
+      for (const result of results) assert.equal(result.status, 0, describeSpawn(result));
+      const report = machineSummary(readRoot(root, REPORT_REL));
+      assert.equal(report.final_decision, 'Skip');
+      assert.deepEqual(report.hard_stops, [FIRST, SECOND]);
+      const tracker = readRoot(root, 'data/applications.md');
+      assert.equal((tracker.match(new RegExp(`Dealbreaker: ${FIRST}`, 'g')) || []).length, 1);
+      assert.equal((tracker.match(new RegExp(`Dealbreaker: ${SECOND}`, 'g')) || []).length, 1);
+      assert.match(tracker, /\| Interview \|/);
+      assert.ok(!tracker.includes(DECLINED) && !readRoot(root, REPORT_REL).includes(DECLINED));
+      assert.equal((readRoot(root, 'data/contacts.tsv').match(/Avery Quinn/g) || []).length, 1);
+      const pins = readRoot(root, 'data/follow-ups.md');
+      assert.equal((pins.match(/^- next #7 /gm) || []).length, 1);
+      assert.ok(pins.includes(`- next #7 ${FUTURE} `));
+    });
+
+    const before = snapshot(root);
+    const again = commands.map((args) => run(root, args));
+    check('running the Step 10 example again writes nothing', () => {
+      for (const result of again) {
+        assert.equal(result.status, 0, describeSpawn(result));
+        assert.equal(JSON.parse(result.stdout).wrote, false);
+      }
+      assert.deepEqual(snapshot(root), before);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}

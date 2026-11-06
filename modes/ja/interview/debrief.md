@@ -252,17 +252,24 @@ stated_priorities:        # トランスクリプト入力のみ。何も述べ�
 
 ## Step 10 — Record the call on the tracker
 
-デブリーフを保存したら、確認された事実を応募に記録する。新しい事実を、ユーザーが `modes/_profile.md` または `config/profile.yml` にすでに書いている譲れない条件（dealbreaker）と照らし合わせる。その事実とプロファイルの該当文を示し、`Record this dealbreaker on the report and the tracker? [y/N]` と尋ねる。yes なら、その文を `--dealbreaker` として渡す。no なら省略する。
+デブリーフを保存したら、確認された事実を応募に記録する。新しい事実を一つずつ、ユーザーが `modes/_profile.md` または `config/profile.yml` にすでに書いている譲れない条件（dealbreaker）と照らし合わせる。一致したものは一つずつ個別に確認する：その事実とプロファイルの該当文を示し、`Record this dealbreaker on the report and the tracker? [y/N]` と尋ねる。ユーザーが確認した文はすべて残し、断った文はすべて除く。
 
 名前が挙がった人ごとに、`Save this contact to data/contacts.tsv? [y/N]` と尋ねる。yes なら、氏名、伝えられていればメールアドレス、ユーザーが種別を挙げていればその種別を渡す。
 
 次のステップが明確な暦日を 1 日だけ示しているなら、2 度目の質問はせずに `--next YYYY-MM-DD` を渡す。曜日はローカルの暦日から解決し、今日も含める。その表現に日付がなければ `--next` は省略する。曖昧な場合（`next week`、2 つの日付など）は、日付を 1 つ尋ねてから渡す。
 
-それらのフラグを付けて `node debrief-sync.mjs --app <tracker#>` を実行する。`<tracker#>` はトラッカーにおけるその応募の `#` である（レポート番号ではない）。渡す dealbreaker、連絡先、`--next` の日付がどれもなければ、コマンドは実行しない：記録するものがない呼び出しをスクリプトは拒否する。そのあと、連絡先を保存した場合は `node contacts.mjs --summary` を、日付を確定した場合は `node followup-cadence.mjs --summary` を実行する。
+それらのフラグを付けて `node debrief-sync.mjs --app <tracker#>` を実行する。`<tracker#>` はトラッカーにおけるその応募の `#` である（レポート番号ではない）。`--dealbreaker` は文を一つだけ受け取り、1 回の呼び出しに一度しか指定できない。そのため、確認された文ごとにコマンドを 1 つ実行する。2 つの文を 1 つの値にまとめてはならない：スクリプトはセミコロンを拒否する。連絡先のフラグと `--next` は最初のコマンドにだけ付ける。2 つ目以降のコマンドには `--app <tracker#>` と `--dealbreaker` を 1 つだけ渡し、それ以外は付けない：
 
-ユーザーが新しいステータスを挙げない限り、ステータスは変更しない。それは別の `set-status.mjs` の呼び出しであり、このコマンドより前に行う。
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+```
 
-同じコマンドを 2 回実行しても安全である。
+コマンドが失敗したら、そこで止めて原因を直し、最初のコマンドからリストを実行し直す。渡す dealbreaker、連絡先、`--next` の日付がどれもなければ、コマンドは実行しない：記録するものがない呼び出しをスクリプトは拒否する。最後のコマンドのあと、連絡先を保存した場合は `node contacts.mjs --summary` を、日付を確定した場合は `node followup-cadence.mjs --summary` を実行する。
+
+ユーザーが新しいステータスを挙げない限り、ステータスは変更しない。それは別の `set-status.mjs` の呼び出しであり、これらのコマンドより前に行う。
+
+同じコマンドを 2 回実行しても安全である：すでに記録された文、連絡先、日付は二重に書き込まれない。
 
 ---
 

@@ -192,6 +192,29 @@ Règles pour la transcription :
 
 ---
 
+## Step 10 — Record the call on the tracker
+
+Une fois le débriefing enregistré, consignez les faits confirmés sur la candidature. Associez chaque fait nouveau à un critère rédhibitoire (dealbreaker) que l'utilisateur a déjà écrit dans `modes/_profile.md` ou `config/profile.yml`. Posez la question pour chaque correspondance séparément : montrez le fait et la phrase du profil, puis demandez `Record this dealbreaker on the report and the tracker? [y/N]`. Gardez chaque phrase que l'utilisateur confirme. Écartez chaque phrase que l'utilisateur refuse.
+
+Pour chaque personne nommée, demandez `Save this contact to data/contacts.tsv? [y/N]`. En cas de oui, passez le nom, l'e-mail s'il a été donné, et le type si l'utilisateur en a nommé un. `--contact-type` n'accepte que `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` ou `other`, en minuscules. Faites correspondre le mot de l'utilisateur à la valeur qu'il désigne, dans n'importe quelle langue (un « talent partner » est `recruiter`, « mon futur responsable » est `hiring-manager`). Si le mot ne correspond clairement à aucune valeur, omettez `--contact-type` et enregistrez quand même le contact. `debrief-sync.mjs` rejette toute autre valeur, ce qui arrête tout l'appel, dealbreaker et `--next` compris.
+
+Si l'étape suivante nomme un seul jour calendaire clair, passez `--next YYYY-MM-DD` sans poser de deuxième question. Déduisez un jour de la semaine à partir du jour calendaire local, aujourd'hui compris. Si la formulation ne contient pas de jour, omettez `--next`. Si elle est ambiguë (`next week`, deux jours), demandez une seule date, puis passez-la.
+
+Exécutez `node debrief-sync.mjs --app <tracker#>` avec ces flags, où `<tracker#>` est le `#` de la candidature dans le tracker (et non son numéro de rapport). `--dealbreaker` prend une seule phrase et ne peut apparaître qu'une fois par appel : exécutez donc une commande par phrase confirmée. Ne fusionnez jamais deux phrases en une seule valeur : le script rejette le point-virgule. Mettez les flags de contact et `--next` sur la première commande uniquement. Chaque commande suivante passe `--app <tracker#>` et un seul `--dealbreaker`, rien d'autre :
+
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+```
+
+Si une commande échoue, arrêtez-vous, corrigez-la et relancez la liste depuis la première commande. S'il n'y a ni dealbreaker, ni contact, ni jour `--next` à passer, sautez la commande : le script refuse un appel sans rien à enregistrer. Après la dernière commande, si un contact a été enregistré, exécutez `node contacts.mjs --summary`. Si un jour a été fixé, exécutez `node followup-cadence.mjs --summary`.
+
+Ne changez pas le statut sauf si l'utilisateur nomme un nouveau statut. C'est un appel `set-status.mjs` distinct, avant ces commandes.
+
+Relancer les mêmes commandes est sans risque : une phrase, un contact ou une date déjà enregistrés ne sont pas réécrits.
+
+---
+
 ## Rules
 
 - **Débriefez immédiatement.** Le souvenir des détails de l'entretien se dégrade vite — en quelques heures, les questions et réactions spécifiques sont oubliées. Exécutez cette compétence le même jour.

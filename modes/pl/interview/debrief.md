@@ -252,17 +252,24 @@ Zasady dotyczące zapisu:
 
 ## Step 10 — Record the call on the tracker
 
-Po zapisaniu debriefu zapisz potwierdzone fakty przy aplikacji. Dopasuj nowy fakt do deal-breakera, który użytkownik już zapisał w `modes/_profile.md` lub `config/profile.yml`. Pokaż fakt i zdanie z profilu. Zapytaj `Zapisać ten deal-breaker w raporcie i trackerze? [y/N]`. Przy odpowiedzi „tak" przekaż to zdanie jako `--dealbreaker`. Przy „nie" pomiń tę flagę.
+Po zapisaniu debriefu zapisz potwierdzone fakty przy aplikacji. Dopasuj każdy nowy fakt do deal-breakera, który użytkownik już zapisał w `modes/_profile.md` lub `config/profile.yml`. O każde dopasowanie pytaj osobno: pokaż fakt i zdanie z profilu, a potem zapytaj `Zapisać ten deal-breaker w raporcie i trackerze? [y/N]`. Zachowaj każde zdanie, które użytkownik potwierdzi. Pomiń każde zdanie, które odrzuci.
 
 Dla każdej wymienionej z imienia osoby zapytaj `Zapisać ten kontakt w data/contacts.tsv? [y/N]`. Przy „tak" przekaż imię i nazwisko, adres e-mail, jeśli go podano, oraz typ, jeśli użytkownik go wskazał.
 
 Jeśli następny krok wskazuje jeden jednoznaczny dzień w kalendarzu, przekaż `--next YYYY-MM-DD` bez dodatkowego pytania. Dzień tygodnia rozwiązuj według lokalnego kalendarza, przy czym dzisiejszy dzień się liczy. Jeśli sformułowanie nie wskazuje dnia, pomiń `--next`. Jeśli jest niejednoznaczne (`next week`, dwa dni), poproś o jedną datę, a potem ją przekaż.
 
-Uruchom `node debrief-sync.mjs` z tymi flagami. Następnie, jeśli zapisano kontakt, uruchom `node contacts.mjs --summary`. Jeśli przypięto dzień, uruchom `node followup-cadence.mjs --summary`.
+Uruchom `node debrief-sync.mjs --app <tracker#>` z tymi flagami, gdzie `<tracker#>` to `#` aplikacji w trackerze (nie numer raportu). `--dealbreaker` przyjmuje jedno zdanie i może wystąpić tylko raz w wywołaniu, więc uruchom jedno polecenie na każde potwierdzone zdanie. Nigdy nie łącz dwóch zdań w jedną wartość: skrypt odrzuca średnik. Flagi kontaktu i `--next` dodaj tylko do pierwszego polecenia. Każde kolejne polecenie przekazuje `--app <tracker#>` i jedno `--dealbreaker`, nic więcej:
 
-Nie zmieniaj statusu, chyba że użytkownik wskaże nowy status. To osobne wywołanie `set-status.mjs`, wykonywane przed tym poleceniem.
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+```
 
-Ponowne uruchomienie tego samego polecenia jest bezpieczne.
+Jeśli polecenie się nie powiedzie, zatrzymaj się, popraw je i uruchom listę ponownie od pierwszego polecenia. Jeśli nie ma deal-breakera, kontaktu ani dnia `--next` do przekazania, pomiń polecenie: skrypt odrzuca wywołanie, które nie ma nic do zapisania. Po ostatnim poleceniu, jeśli zapisano kontakt, uruchom `node contacts.mjs --summary`. Jeśli przypięto dzień, uruchom `node followup-cadence.mjs --summary`.
+
+Nie zmieniaj statusu, chyba że użytkownik wskaże nowy status. To osobne wywołanie `set-status.mjs`, wykonywane przed tymi poleceniami.
+
+Ponowne uruchomienie tych samych poleceń jest bezpieczne: zdanie, kontakt ani dzień, które już zapisano, nie zostaną zapisane drugi raz.
 
 ---
 

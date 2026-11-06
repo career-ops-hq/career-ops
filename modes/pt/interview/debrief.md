@@ -252,17 +252,24 @@ Regras para a transcrição:
 
 ## Step 10 — Record the call on the tracker
 
-Após salvar o debrief, registre os fatos confirmados na candidatura. Compare um novo fato a um dealbreaker que o usuário já escreveu em `modes/_profile.md` ou `config/profile.yml`. Mostre o fato e a frase do perfil. Pergunte `Registrar este dealbreaker no relatório e no tracker? [y/N]`. Se sim, passe essa frase como `--dealbreaker`. Se não, omita.
+Após salvar o debrief, registre os fatos confirmados na candidatura. Compare cada novo fato a um dealbreaker que o usuário já escreveu em `modes/_profile.md` ou `config/profile.yml`. Pergunte sobre cada correspondência separadamente: mostre o fato e a frase do perfil e então pergunte `Registrar este dealbreaker no relatório e no tracker? [y/N]`. Mantenha cada frase que o usuário confirmar. Descarte cada frase que o usuário recusar.
 
 Para cada pessoa nomeada, pergunte `Salvar este contato em data/contacts.tsv? [y/N]`. Se sim, passe o nome, o e-mail se foi fornecido e o tipo se o usuário nomeou um.
 
 Se o próximo passo nomear um dia claro no calendário, passe `--next YYYY-MM-DD` sem uma segunda pergunta. Resolva o dia da semana a partir do dia do calendário local, e hoje conta. Se a frase não tiver dia, omita `--next`. Se for ambígua (`próxima semana`, dois dias), peça uma data e então passe-a.
 
-Execute `node debrief-sync.mjs` com essas flags. Em seguida, quando um contato for salvo, execute `node contacts.mjs --summary`. Quando um dia for definido, execute `node followup-cadence.mjs --summary`.
+Execute `node debrief-sync.mjs --app <tracker#>` com essas flags, onde `<tracker#>` é o `#` da candidatura no tracker (não o número do relatório). `--dealbreaker` recebe uma única frase e só pode aparecer uma vez por chamada, então execute um comando por frase confirmada. Nunca junte duas frases em um só valor: o script rejeita ponto e vírgula. Coloque as flags de contato e `--next` apenas no primeiro comando. Cada comando seguinte passa `--app <tracker#>` e um único `--dealbreaker`, nada mais:
 
-Não altere o status a menos que o usuário nomeie um novo status. Essa é uma chamada separada de `set-status.mjs`, antes deste comando.
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+```
 
-Uma segunda execução do mesmo comando é segura.
+Se um comando falhar, pare, corrija-o e execute a lista de novo a partir do primeiro comando. Se não houver dealbreaker, contato nem dia `--next` para passar, pule o comando: o script recusa uma chamada sem nada para registrar. Depois do último comando, quando um contato for salvo, execute `node contacts.mjs --summary`. Quando um dia for definido, execute `node followup-cadence.mjs --summary`.
+
+Não altere o status a menos que o usuário nomeie um novo status. Essa é uma chamada separada de `set-status.mjs`, antes destes comandos.
+
+Uma segunda execução dos mesmos comandos é segura: uma frase, um contato ou uma data já registrados não são gravados de novo.
 
 ---
 
