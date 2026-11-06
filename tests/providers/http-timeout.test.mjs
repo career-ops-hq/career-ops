@@ -161,12 +161,24 @@ const isAbort = (err) => { const e = err?.cause ?? err; return e?.name === 'Abor
     const script = `
       await import(${JSON.stringify(pathToFileURL(join(ROOT, 'scan.mjs')).href)});
       const { fetchJson } = await import(${JSON.stringify(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href)});
-      globalThis.fetch = (_url, { signal }) => new Promise((_, reject) => {
-        signal.addEventListener('abort', () => reject(signal.reason));
-      });
+      let fetchCalled = false;
+      globalThis.fetch = (_url, { signal }) => {
+        fetchCalled = true;
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason));
+        });
+      };
       const t0 = Date.now();
-      await fetchJson('https://stalls.example.test/').catch(() => {});
-      console.log(Date.now() - t0);
+      let error;
+      try {
+        await fetchJson('https://stalls.example.test/');
+      } catch (err) {
+        error = err;
+      }
+      const elapsed = Date.now() - t0;
+      if (!fetchCalled) throw new Error('the request never reached fetch: ' + error?.message);
+      if (error?.name !== 'AbortError') throw new Error('expected an abort, got: ' + (error?.message ?? 'no error'));
+      console.log(elapsed);
     `;
     const env = { ...process.env, CAREER_OPS_ROOT: dataRoot };
     delete env.CAREER_OPS_HTTP_TIMEOUT_MS;
