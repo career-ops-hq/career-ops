@@ -274,3 +274,30 @@ test('unrelated eligible-country prose is not a new geographic target', () => {
     assert.equal(andorra('Remote Europe', '', { description }).eligible, true, description);
   }
 });
+
+
+test('explicit eligibility qualifiers cannot hide a narrower country list', () => {
+  const qualifiers = ['restricted to ', 'limited to ', 'only ', 'currently limited to ', 'open only to ', 'allowed in ', 'allowed only in ', 'permitted from ', 'available in ', 'currently only restricted to ', 'only currently limited to '];
+  for (const qualifier of qualifiers) {
+    for (const [home, countries, expected] of [['AD', 'France', false], ['AD', 'AND or France', true], ['AD', 'France or Portugal', false], ['FR', 'France or Portugal', true]]) {
+      const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [home], remote_regions: ['Europe'] });
+      const description = `Candidates must be based in AND or France and eligible countries are ${qualifier}${countries}`;
+      assert.equal(policy('Remote Europe', '', { description }).eligible, expected, `${home}: ${description}`);
+    }
+  }
+});
+
+test('qualified eligible locations retain genuine alternatives and independent restrictions', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and eligible locations are restricted to France.' }).eligible, false);
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and eligible locations are only AND or France.' }).eligible, true);
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and eligible locations are allowed in AND or France and must be located in AU.' }).eligible, false);
+});
+
+test('eligibility qualifier grammar does not scan through nongeographic prose', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const tail of ['considered during onboarding', 'reviewed annually', 'only considered during onboarding', 'currently reviewed annually', 'allowed by company policy']) {
+    const description = `Candidates must be based in AND or France and eligible countries are ${tail}.`;
+    assert.equal(andorra('Remote Europe', '', { description }).eligible, true, description);
+  }
+});

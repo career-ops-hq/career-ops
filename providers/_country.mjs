@@ -214,6 +214,9 @@ export function buildWorkplacePolicy(policy) {
   const explicitHomeGeography = text => [...geographyText(text).matchAll(/\b(based|located|reside|live|work remotely|work remote|remote work|remote role|work from home|work)\s+(?:in|from|within)\s+([^.!?;\n]+)/g)]
     .some(match => [...geographyTarget(match[2], { allowAmbiguousCodes: /^(?:based|located|reside|live)$/.test(match[1]) }).codes].some(c => homeCodes.has(c)));
   const supportsHomeGeography = text => supportsHomeProse(geographyText(text)) || explicitHomeGeography(text);
+  // Only immediate, explicit geography qualifiers are grammar here. Do not
+  // scan through considered/reviewed prose to discover a country elsewhere.
+  const eligibilityTargetText = text => text.trim().replace(/^(?:(?:currently|only)\s+|(?:restricted|limited|open)\s+(?:only\s+)?to\s+|(?:allowed|permitted|available)\s+(?:only\s+)?(?:in|from)\s+)+/, '');
   const restricted = (text, codes = false) => {
     const found = countries(text, codes);
     return found.size > 0 && ![...found].some(c => homeCodes.has(c));
@@ -259,7 +262,7 @@ export function buildWorkplacePolicy(policy) {
       // Each explicit eligibility list is another restriction, not a union
       // with earlier worker-location alternatives in the same clause.
       for (const match of workerClause.matchAll(/\beligible (?:countries|locations) are\s+/g)) {
-        const required = geographyTarget(workerClause.slice(match.index + match[0].length)).codes;
+        const required = geographyTarget(eligibilityTargetText(workerClause.slice(match.index + match[0].length))).codes;
         if (!required.size) continue;
         if (![...required].some(c => homeCodes.has(c))) return fail('description_country_restricted');
         for (const code of required) targetCountries.add(code);
