@@ -285,6 +285,7 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
   let applyClicked = false;
   let pendingLate = false;
   let popupHref = "";
+  let popupWaits = 0;
   let initialWait = true;
   const popupPages = [];
   const extraPages = options.extraPages ?? [];
@@ -329,6 +330,14 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
       if (pendingLate) {
         current = options.redirectTo;
         pendingLate = false;
+      }
+      if (applyClicked && options.popupBlankAfterSettle) {
+        if (popupPages.length === 0) {
+          popupHref = "about:blank";
+          popupPages.push({ url: () => popupHref });
+        }
+        popupWaits += 1;
+        if (popupWaits >= 3 && popupHref === "about:blank") popupHref = options.popupBlankAfterSettle;
       }
       if (applyClicked && options.popupBlankThen) {
         if (popupPages.length === 0) {
@@ -492,6 +501,23 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     assert.equal(result.unsupported.vendor, "workday");
     assert.equal(result.unsupported.postingUrl, landed);
     assert.equal(result.message, CLOSED.Workday);
+  });
+
+  test("an Apply click whose popup is still blank after the form wait and then lands on iCIMS is refused", async () => {
+    const career = "https://careers.example.com/jobs/1";
+    const popup = "https://careers-acme.icims.com/jobs/9";
+    const closed = [];
+    globalThis.__applyCareerPage = () => careerPage(career, null, closed, {
+      noAtsLink: true,
+      applyClick: true,
+      popupBlankAfterSettle: popup,
+    });
+    const result = await openSession(career);
+    assert.deepEqual(closed, [true]);
+    assert.equal(result.id, undefined);
+    assert.equal(result.unsupported.vendor, "icims");
+    assert.equal(result.unsupported.postingUrl, popup);
+    assert.equal(result.message, CLOSED.iCIMS);
   });
 
   test("an Apply click whose popup is blank at the first look and lands on iCIMS later is refused", async () => {

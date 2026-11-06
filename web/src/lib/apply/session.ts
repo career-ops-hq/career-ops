@@ -5,7 +5,7 @@ import { chromium, type Browser, type BrowserContext, type Page, type Frame, typ
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
-import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
+import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
@@ -300,6 +300,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
       await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
       await page.waitForTimeout(800);
       await dropNewTabs(page);
+      await waitForBlankPopup(page, trigger.followed);
       const lateUrl = await blockedAfterAction(page, trigger.followed, false);
       const lateAts = lateUrl ? await unsupportedInAppAts(lateUrl) : null;
       if (lateAts) {

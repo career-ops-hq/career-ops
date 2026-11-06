@@ -158,6 +158,21 @@ export async function blockedAfterAction(page: Page, before: Map<OpenPage, strin
   return read();
 }
 
+export async function waitForBlankPopup(page: Page, before: Map<OpenPage, string>): Promise<void> {
+  const pending = () => {
+    const seen = new Set<OpenPage>();
+    for (const candidate of contextPages(page)) {
+      if (seen.has(candidate) || candidate === page || before.has(candidate)) continue;
+      seen.add(candidate);
+      const landed = pageUrl(candidate);
+      if (!landed || landed === "about:blank") return true;
+    }
+    return false;
+  };
+  if (!pending()) return;
+  await page.waitForTimeout(1000).catch(() => {});
+}
+
 /** SPA / apply-behind-a-button: if no form yet, click the first visible Apply CTA
  *  (NEVER a submit) to reveal the form. If it's an <a> with an application href,
  *  NAVIGATE there directly (robust vs popups). Returns true if it acted.
