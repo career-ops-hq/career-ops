@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  politeFetch, parseRetryAfter, slugify, decodeHtml,
+  slugify, decodeHtml,
   createLocalGate, writeRunLog,
 } from '../scan-local-lib.mjs';
 import { buildSeekUrl, parseSeekPage, extractReduxJson, loadSearches as seekSearches } from '../scan-seek.mjs';
@@ -25,55 +25,6 @@ const SEEK_HTML = `<html><script>window.SEEK_REDUX_DATA = ${JSON.stringify({
   ] }, other: 'a } brace in a string', missing: undefined },
 })};</script></html>`;
 
-const res = (status, body = '', headers = {}) => ({
-  ok: status >= 200 && status < 300,
-  status,
-  headers: { get: (k) => headers[k.toLowerCase()] ?? null },
-  text: async () => body,
-});
-
-// ── scan-local-lib ───────────────────────────────────────────────────
-
-test('politeFetch retries 429 honoring Retry-After, then succeeds', async () => {
-  const waits = [];
-  const replies = [res(429, '', { 'retry-after': '7' }), res(503), res(200, 'ok')];
-  const body = await politeFetch('https://x.test', {
-    fetchImpl: async () => replies.shift(),
-    sleepImpl: async (ms) => waits.push(ms),
-    backoffMs: 100,
-  });
-  assert.strictEqual(body, 'ok');
-  assert.deepStrictEqual(waits, [7000, 200]);
-});
-
-test('politeFetch does not retry 403/404 and gives up after the retry budget', async () => {
-  let calls = 0;
-  await assert.rejects(
-    politeFetch('https://x.test', { fetchImpl: async () => { calls++; return res(403); }, sleepImpl: async () => {} }),
-    (e) => e.status === 403,
-  );
-  assert.strictEqual(calls, 1);
-  calls = 0;
-  await assert.rejects(
-    politeFetch('https://x.test', { retries: 2, fetchImpl: async () => { calls++; return res(429); }, sleepImpl: async () => {} }),
-    (e) => e.status === 429,
-  );
-  assert.strictEqual(calls, 3);
-});
-
-test('politeFetch sends an identifying User-Agent and no credentials', async () => {
-  let init;
-  await politeFetch('https://x.test', { fetchImpl: async (_u, i) => { init = i; return res(200, ''); } });
-  assert.match(init.headers['User-Agent'], /career-ops/);
-  assert.ok(!('Cookie' in init.headers) && !('Authorization' in init.headers));
-});
-
-test('parseRetryAfter reads seconds and dates', () => {
-  assert.strictEqual(parseRetryAfter('5'), 5000);
-  assert.strictEqual(parseRetryAfter('', 0), null);
-  assert.strictEqual(parseRetryAfter(new Date(10000).toUTCString(), 4000), 6000);
-});
-
 test('slugify and decodeHtml', () => {
   assert.strictEqual(slugify('Data  Analyst / BI'), 'data-analyst-bi');
   assert.strictEqual(slugify('Māori Liaison'), 'maori-liaison');
@@ -82,44 +33,6 @@ test('slugify and decodeHtml', () => {
   assert.strictEqual(decodeHtml('&amp;lt;'), '&lt;');
   // out-of-range numeric entity is left as-is (no RangeError)
   assert.strictEqual(decodeHtml('&#99999999;'), '&#99999999;');
-});
-
-test('politeFetch retries network-level errors with back-off', async () => {
-  const waits = [];
-  let attempt = 0;
-  const networkErr = new TypeError('fetch failed');
-  const body = await politeFetch('https://x.test', {
-    fetchImpl: async () => {
-      if (attempt++ < 2) throw networkErr;
-      return { ok: true, status: 200, text: async () => 'recovered' };
-    },
-    sleepImpl: async (ms) => waits.push(ms),
-    backoffMs: 100,
-    timeoutMs: 5000,
-  });
-  assert.strictEqual(body, 'recovered');
-  assert.strictEqual(waits.length, 2);
-});
-
-test('politeFetch retries stalled body reads (res.text() inside try)', async () => {
-  const waits = [];
-  let attempt = 0;
-  const stalledErr = new DOMException('The operation was aborted', 'AbortError');
-  const body = await politeFetch('https://x.test', {
-    fetchImpl: async () => ({
-      ok: true,
-      status: 200,
-      text: async () => {
-        if (attempt++ < 2) throw stalledErr;
-        return 'body arrived';
-      },
-    }),
-    sleepImpl: async (ms) => waits.push(ms),
-    backoffMs: 100,
-    timeoutMs: 5000,
-  });
-  assert.strictEqual(body, 'body arrived');
-  assert.strictEqual(waits.length, 2);
 });
 
 test('local gate: title, seen URL, same-role dedup within and across runs', () => {
@@ -176,17 +89,13 @@ test('writeRunLog appends a scan-runs.tsv row stats.mjs can read by header name'
 
 // ── scan-seek ────────────────────────────────────────────────────────
 
-test('seek URL is the SEO path with canonical in-All-<Location> segment and no query string by default', () => {
+test('seek URL is the SEO path with canonical in-All-<Location> segment and never a query string', () => {
   assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'Wellington' }),
     'https://nz.seek.com/data-analyst-jobs/in-All-Wellington');
   assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'in-All-Auckland' }),
     'https://nz.seek.com/data-analyst-jobs/in-All-Auckland');
   assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: '' }), 'https://nz.seek.com/devops-jobs');
   assert.ok(!buildSeekUrl({ keyword: 'a', location: 'b' }).includes('?'));
-});
-
-test('seek daterange is the only query string and is opt-in', () => {
-  assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: '' }, 7), 'https://nz.seek.com/devops-jobs?daterange=7');
   assert.throws(() => buildSeekUrl({ keyword: '!!!', location: '' }));
 });
 
@@ -230,13 +139,14 @@ test('seek searches config: minimal { keyword, location? } schema', () => {
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
-test('scan-seek.mjs: --help exits 0 without scanning; unknown flag, missing operand and invalid --daterange exit 1', () => {
+test('scan-seek.mjs: --help exits 0 without scanning; unknown flag (incl. removed --daterange) and missing operand exit 1', () => {
   const run = (...args) => spawnSync(process.execPath, [join(ROOT, 'scan-seek.mjs'), ...args], { cwd: ROOT, encoding: 'utf-8', timeout: 30000 });
   const help = run('--help');
   assert.strictEqual(help.status, 0, help.stderr);
   assert.match(help.stdout, /Usage:/);
+  assert.ok(!help.stdout.includes('daterange'));
   assert.strictEqual(run('--dryrun').status, 1);
   assert.strictEqual(run('--delay-ms').status, 1);
-  assert.strictEqual(run('--daterange', '0').status, 1);
+  assert.strictEqual(run('--daterange', '7').status, 1);
 });
 

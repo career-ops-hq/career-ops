@@ -15,9 +15,9 @@
  *   - run log: scan.mjs's appendScanRunSummary into data/scan-runs.tsv, the
  *     file stats.mjs reads, written under the same lock.
  *
- * Network access goes through politeFetch: one request at a time, a pause
- * between requests, per-attempt timeout, and Retry-After-aware back-off on
- * 429/5xx and transient network errors.
+ * Network access is not done here: scanners fetch through providers/_http.mjs's
+ * fetchTextWithRetry (shared timeout, Retry-After-aware back-off on 429/5xx and
+ * transient network errors) and pace requests with `sleep` below.
  */
 
 import path from 'node:path';
@@ -31,70 +31,7 @@ import {
   appendScanRunSummary,
 } from './scan.mjs';
 
-export const USER_AGENT = 'career-ops-scanner (personal job search; low volume)';
-
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Seconds or HTTP-date Retry-After header to milliseconds, or null. */
-export function parseRetryAfter(value, now = Date.now()) {
-  if (value === null || value === undefined || value === '') return null;
-  const secs = Number(value);
-  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
-  const at = Date.parse(value);
-  return Number.isNaN(at) ? null : Math.max(0, at - now);
-}
-
-/**
- * GET a URL politely. Retries 429, 5xx, and network-level errors up to
- * `retries` times, waiting for Retry-After when the server sends it, otherwise
- * backing off exponentially. Each attempt is cancelled after `timeoutMs` ms.
- * Resolves to the body text, or throws once retries are exhausted or on any
- * other non-2xx status (a 403/404 is not retried).
- *
- * @param {string} url
- * @param {object} [options]
- * @param {typeof fetch} [options.fetchImpl]
- * @param {number} [options.retries]
- * @param {number} [options.backoffMs]
- * @param {number} [options.maxWaitMs] - Cap on any single wait.
- * @param {number} [options.timeoutMs] - Per-attempt timeout in ms (default 30 s).
- * @param {(ms: number) => Promise<void>} [options.sleepImpl]
- */
-export async function politeFetch(url, {
-  fetchImpl = fetch,
-  retries = 3,
-  backoffMs = 2000,
-  maxWaitMs = 60000,
-  timeoutMs = 30000,
-  sleepImpl = sleep,
-  headers = {},
-} = {}) {
-  let lastStatus = 0;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    let res;
-    try {
-      res = await fetchImpl(url, {
-        headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'en', ...headers },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      // Read body inside the try so a stalled body read uses the same retry budget.
-      if (res.ok) return await res.text();
-    } catch (networkErr) {
-      // Network-level failure (DNS, reset, timeout, stalled body): retry with back-off.
-      if (attempt === retries) throw networkErr;
-      await sleepImpl(Math.min(maxWaitMs, backoffMs * 2 ** attempt));
-      continue;
-    }
-    lastStatus = res.status;
-    const retryable = res.status === 429 || res.status >= 500;
-    if (!retryable || attempt === retries) break;
-    const hinted = parseRetryAfter(res.headers?.get?.('retry-after'));
-    await sleepImpl(Math.min(maxWaitMs, hinted ?? backoffMs * 2 ** attempt));
-  }
-  const err = new Error(`HTTP ${lastStatus} for ${url}`);
-  err.status = lastStatus;
-  throw err;
-}
 
 /** Lowercase, hyphen-separated slug for the SEEK SEO path. */
 export function slugify(text) {
