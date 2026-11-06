@@ -45,7 +45,7 @@ check('canonical keeps the practice-session omission rule', /practice-session fi
 // (backslash-escape ingredient, inner-double-quote ingredient, intact-value promise)
 const locales = [
   ['de', /Backslashes zuerst escapen/, /innere doppelte Anführungszeichen/, /zwei Zeichen/],
-  ['es', /barras invertidas/, /comillas dobles internas/, /dos caracteres/],
+  ['es', /barras invertidas antes/, /comillas dobles internas/, /dos caracteres/],
   ['it', /barre rovesciate/, /virgolette doppie interne/, /due caratteri/],
   ['ja', /バックスラッシュをエスケープ/, /内側のダブルクォート/, /2 文字/],
   ['ko', /역슬래시/, /큰따옴표/, /두 글자/],
