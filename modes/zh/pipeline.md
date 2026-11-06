@@ -64,7 +64,7 @@
 
 单独列出 `needs_confirmation` 项，附上 URL 和问题，不要把它们算作已评估、失败或已丢弃。
 
-当 JD 正文读不到时，同样单独列出 `unreadable` 项，附上 URL 和原因代码：`insufficient_content`（只有导航栏/页脚）、`bot_challenge`、`access_blocked`、`redirected_off_posting`（这些是 `liveness-core.mjs` 的存活代码），或 `iframe_unreadable`（正文在一个读不到的 iframe 里，例如跨域）。`unreadable` 条目保持 `- [ ]` 留在 Pending，并附一行说明（`unreadable: {reason code}`）；它永远不会被标记为失效或移入 Processed，也不算已评估、失败或已丢弃：它是未确认，不是已关闭（见 `modes/auto-pipeline.md` Step 0.5）。请候选人提供 JD 文本，或稍后再检查。和 `needs_confirmation` 一样，下次搜索待处理项时跳过它们。每次派发都必须附带 **Agency confirmation handoff** 约定，以及用户针对该岗位的明确答复；仅有批量授权不等于确认。
+当 JD 正文读不到时，同样单独列出 `unreadable` 项，附上 URL 和原因代码：`insufficient_content`（只有导航栏/页脚）、`bot_challenge`、`access_blocked`、`redirected_off_posting`（这些是 `liveness-core.mjs` 的存活代码），或 `iframe_unreadable`（正文在一个读不到的 iframe 里，例如跨域）。`unreadable` 条目保持 `- [ ]` 留在 Pending，并附一行说明（`unreadable: {reason code}`）；它永远不会被标记为失效或移入 Processed，也不算已评估、失败或已丢弃：它是未确认，不是已关闭（见 `modes/auto-pipeline.md` Step 0.5）。请候选人提供 JD 文本，或稍后再检查。和 `needs_confirmation` 一样，下次搜索待处理项时跳过它们。每次派发都必须附带 **Agency confirmation handoff** 约定；如果用户已经针对该岗位给出过明确答复，也一并附上。仅有批量授权不等于确认。
 
 ```
 | # | 公司名称 | 岗位名称 | 评分 | PDF | 建议操作 |
