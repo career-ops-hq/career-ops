@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
@@ -189,23 +189,27 @@ test('notes that name two close dates are left alone', () => {
 
 test('a relative --tracker is the file in the caller directory', () => {
   const box = sandbox();
-  const relative = 'close-discard-tracker.md';
-  const checkoutCopy = join(ROOT, relative);
+  let owned;
   try {
-    writeFileSync(join(box.dir, relative), readFileSync(box.tracker, 'utf-8'));
+    // The child runs in the checkout. An unresolved relative path would be
+    // written under this directory, which the test creates and then removes.
+    owned = mkdtempSync(join(ROOT, 'close-discard-owned-'));
+    const trackerName = relative(ROOT, join(owned, 'tracker.md'));
+    mkdirSync(join(box.dir, dirname(trackerName)));
+    writeFileSync(join(box.dir, trackerName), readFileSync(box.tracker, 'utf-8'));
     const result = spawnSync(process.execPath, [
       join(ROOT, 'closing-soon.mjs'),
-      '--discard-passed', '--apply', '--today', TODAY, '--tracker', relative,
+      '--discard-passed', '--apply', '--today', TODAY, '--tracker', trackerName,
     ], {
       cwd: box.dir,
       encoding: 'utf-8',
       env: { ...box.env, CAREER_OPS_TRACKER: join(ROOT, 'not-the-tracker.md') },
     });
     assert.equal(result.status, 0, describeSpawn(result));
-    assert.equal(statusOf(readFileSync(join(box.dir, relative), 'utf-8'), 1), 'Discarded');
-    assert.equal(existsSync(checkoutCopy), false);
+    assert.equal(statusOf(readFileSync(join(box.dir, trackerName), 'utf-8'), 1), 'Discarded');
+    assert.equal(existsSync(join(owned, 'tracker.md')), false);
   } finally {
-    if (existsSync(checkoutCopy)) rmSync(checkoutCopy);
+    if (owned) rmSync(owned, { recursive: true, force: true });
     box.cleanup();
   }
 });
