@@ -287,13 +287,34 @@ export function deriveSlugCandidates(name, { firstWordSuffixes = true } = {}) {
 // one, hence the wording in the output.
 
 /** Hosts that aggregate many employers. `site:jobs.ashbyhq.com` is a
- *  cross-company search — its host names no company worth promoting. */
+ *  cross-company search — its host names no company worth promoting.
+ *
+ *  One host per line, in alphabetical order: PRs that add different hosts then
+ *  touch different lines, which reduces merge conflicts. */
 const AGGREGATOR_HOSTS = [
-  'greenhouse.io', 'ashbyhq.com', 'lever.co', 'myworkdayjobs.com', 'workday.com',
-  'smartrecruiters.com', 'jobvite.com', 'icims.com', 'bamboohr.com', 'gem.com',
-  'recruitee.com', 'teamtailor.com', 'personio.com', 'workable.com', 'breezy.hr',
-  'paylocity.com', 'join.com', 'hirehive.com', 'linkedin.com', 'indeed.com',
-  'glassdoor.com', 'ycombinator.com', 'wellfound.com',
+  'ashbyhq.com',
+  'bamboohr.com',
+  'breezy.hr',
+  'gem.com',
+  'glassdoor.com',
+  'greenhouse.io',
+  'hirehive.com',
+  'icims.com',
+  'indeed.com',
+  'jobvite.com',
+  'join.com',
+  'lever.co',
+  'linkedin.com',
+  'myworkdayjobs.com',
+  'paylocity.com',
+  'personio.com',
+  'recruitee.com',
+  'smartrecruiters.com',
+  'teamtailor.com',
+  'wellfound.com',
+  'workable.com',
+  'workday.com',
+  'ycombinator.com',
 ];
 
 /** Subdomain labels that describe a careers site rather than the company. */

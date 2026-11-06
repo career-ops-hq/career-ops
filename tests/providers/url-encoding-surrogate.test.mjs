@@ -383,10 +383,36 @@ try {
   // Every provider that routes a job-URL segment through the helper. Each must
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
+  //
+  // One provider per line, in alphabetical order: PRs that add different
+  // providers then touch different lines, which reduces merge conflicts.
   const CONVERTED = [
-    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'darwinbox.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
-    'kalibrr.mjs', 'keka.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
-    'polymer.mjs', 'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'trakstar.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
+    'alibaba.mjs',
+    'apple.mjs',
+    'arbeitsagentur.mjs',
+    'bamboohr.mjs',
+    'bulldogjob.mjs',
+    'darwinbox.mjs',
+    'deel.mjs',
+    'dover.mjs',
+    'feishu-jobs.mjs',
+    'garena.mjs',
+    'jibeapply.mjs',
+    'kalibrr.mjs',
+    'keka.mjs',
+    'manfred.mjs',
+    'meituan.mjs',
+    'mokahr.mjs',
+    'paylocity.mjs',
+    'phenom.mjs',
+    'platsbanken.mjs',
+    'polymer.mjs',
+    'techinasia.mjs',
+    'thehub.mjs',
+    'tkms.mjs',
+    'trakstar.mjs',
+    'vdab.mjs',
+    'zoho-recruit.mjs',
   ];
 
   // Bare `encodeURIComponent` on a url line that is reviewed as safe: the value
