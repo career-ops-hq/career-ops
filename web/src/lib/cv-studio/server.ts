@@ -38,15 +38,20 @@ function originalOf(htmlPath: string) {
 }
 
 /**
- * The tailored HTML for a report: the sibling of the PDF recorded in
- * data/pdf-index.tsv when there is one, else the newest output/ HTML for the
- * report's company. An edited copy is never a source, because edits are always
- * made against the original the tailor wrote.
+ * The tailored HTML for a report: the HTML path recorded in data/pdf-index.tsv
+ * when it sits inside output/, else the sibling of the recorded PDF, else the
+ * newest output/ HTML for the report's company. An edited copy is never a
+ * source, because edits are always made against the original the tailor wrote.
  */
 async function findTailoredHtml(reportNum: string, slug: string): Promise<string | null> {
   const dir = path.join(careerOpsRoot(), "output");
   const indexed = await pdfPathStatusForReport(reportNum);
   if (indexed.status === "found") {
+    if (indexed.html) {
+      const candidate = originalOf(indexed.html);
+      const name = path.basename(candidate).toLowerCase();
+      if (name.endsWith(".html") && !name.endsWith(`${EDITED_SUFFIX}.html`) && isRegularContainedFile(candidate, dir)) return candidate;
+    }
     const sibling = originalOf(indexed.path.replace(/\.pdf$/i, ".html"));
     if (isRegularContainedFile(sibling, dir)) return sibling;
   }
@@ -129,7 +134,7 @@ export async function loadStudio(n: string): Promise<StudioLoad> {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   const { edits, stale } = parseEdits(raw, sourceHash) ?? { edits: emptyEdits(sourceHash), stale: false };
-  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.basename(file), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
+  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.relative(path.join(careerOpsRoot(), "output"), file).split(path.sep).join("/"), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
 }
 
 export function saveEdits(reportNum: string, edits: StudioEdits) {

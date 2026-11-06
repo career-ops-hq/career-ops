@@ -579,10 +579,20 @@ function placesWithoutCountryCode(lower) {
   });
 }
 
+// A state name that is also a country cannot beat the user's own `block`:
+// "Tbilisi, Georgia" is the country, and reading "Georgia" as always_allow let
+// it through a filter that blocked "Tbilisi". Such a name counts at the `allow`
+// tier instead, so "Atlanta, Georgia" still passes and a blocked Georgian city
+// does not. The 2-letter code is unambiguous and stays in always_allow, so
+// "Dublin, GA" still beats a blocked "Dublin".
+const US_STATE_NAMES_ALSO_COUNTRIES = new Set(['georgia']);
+
 const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
-  compileLocationKeyword(name),
+  ...(US_STATE_NAMES_ALSO_COUNTRIES.has(name) ? [] : [compileLocationKeyword(name)]),
   compileUsStateAbbrev(abbr),
 ]);
+
+const US_STATE_ALLOW_MATCHERS = [...US_STATE_NAMES_ALSO_COUNTRIES].map(compileLocationKeyword);
 
 // Some providers report a rolled-up display string ("5 Locations", "2 Locations")
 // while the canonical URL still names the real primary location. Workday is the
@@ -675,10 +685,16 @@ export function buildLocationFilter(locationFilter) {
   // in block. "Dublin, OH" does not contain "United States", so without this
   // expansion block: [Dublin] rejects a real US job. Opt-in on the country
   // token — configs with no US always_allow entry are unchanged.
-  if (alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k))) {
+  const usExpansion = alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k));
+  if (usExpansion) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
   const allow = compileLocationKeywordList(locationFilter.allow);
+  // Only a list the user already filled: an empty `allow` means "everything not
+  // blocked passes", and adding a matcher to it would reject every other place.
+  if (usExpansion && allow.length > 0) {
+    allow.push(...US_STATE_ALLOW_MATCHERS);
+  }
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
   // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
@@ -4784,6 +4800,11 @@ async function main() {
   // Values providers resolve once and reuse on later scans (provider-id-cache.mjs).
   const idCaches = openProviderIdCache(path.join(DATA_ROOT, PROVIDER_ID_CACHE_DIR));
 
+  // Fetch every target concurrently, but filter board copies only after all
+  // employers have made their location decisions for this scan's URLs.
+  const deferredBoards = [];
+  const employerLocationRejected = new Set();
+  const employerLocationAccepted = new Set();
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
@@ -4827,6 +4848,15 @@ async function main() {
     };
     applyEntryResponseCap(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
+    const recordError = err => {
+      failedTargets++;
+      errors.push({
+        company: company.name,
+        error: err.message,
+        kind: classifyFetchError(err),
+        status: err.status ?? observation.lastStatus,
+      });
+    };
     try {
       let jobs;
       try {
@@ -4853,6 +4883,7 @@ async function main() {
         else unverifiedZeroTargets.push(company.name);
       }
 
+      const processJobs = () => {
       // This fetch's language versions of each posting, in provider order and
       // before any filter: a seen row is matched against every version, also
       // those a filter rejects (a German title can fail a title filter that its
@@ -4952,11 +4983,16 @@ async function main() {
         }
         // job.title is passed so a role whose remoteness is stated in the title
         // ("Program Manager - Remote") isn't rejected for a city-only location.
-        if (!locationFilter(job.location, job.url, job.title, job)) {
+        const locationUrl = normalizeUrlForDedup(job.url);
+        const employerRejected = company._isBoard && employerLocationRejected.has(locationUrl)
+          && !employerLocationAccepted.has(locationUrl);
+        if (employerRejected || !locationFilter(job.location, job.url, job.title, job)) {
+          if (!company._isBoard) employerLocationRejected.add(locationUrl);
           totalFilteredLocation++;
           if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
+        if (!company._isBoard) employerLocationAccepted.add(locationUrl);
         if (!postingAgeFilter(job.postedAt)) {
           totalFilteredPostingAge++;
           if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
@@ -5078,14 +5114,18 @@ async function main() {
           key, baseKey, requisition, language, newLanguageVersion,
         });
       }
+      };
+      if (company._isBoard) {
+        // Never await an employer barrier inside a fetch worker: enough fast
+        // boards could occupy every worker before the employer can start.
+        deferredBoards.push(() => {
+          try { processJobs(); } catch (err) { recordError(err); }
+        });
+      } else {
+        processJobs();
+      }
     } catch (err) {
-      failedTargets++;
-      errors.push({
-        company: company.name,
-        error: err.message,
-        kind: classifyFetchError(err),
-        status: err.status ?? observation.lastStatus,
-      });
+      recordError(err);
     }
   });
 
@@ -5111,6 +5151,7 @@ async function main() {
       process.stderr.write(`scan: ${parts.join(', and ')}. Set CAREER_OPS_HTTP_CACHE=0 to always download.\n`);
     });
   }
+  for (const processBoard of deferredBoards) processBoard();
   // --dry-run leaves no trace, this cache included.
   if (!dryRun) {
     try {

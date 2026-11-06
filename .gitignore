@@ -270,6 +270,10 @@ documents/*
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+# Intake snapshots — the full extracted text of each committed source, so the
+# whole master CV. data/* already covers it; named here as well, like the
+# ledger above, so a hand-trimmed .gitignore still keeps it out. #5779
+data/intake-snapshots/
 data/agent-inbox.md
 
 # Older installs keep unanchored scaffold negations because reconcileGitignore()
