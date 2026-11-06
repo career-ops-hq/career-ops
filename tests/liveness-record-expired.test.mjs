@@ -43,7 +43,8 @@ const historyPath = join(sandbox, 'scan-history.tsv');
 process.env.CAREER_OPS_SCAN_HISTORY = historyPath;
 
 const { planExpiredHistoryRows } = await import('../liveness-core.mjs');
-const { normalizeUrlForDedup, shouldDedupScanHistoryRow } = await import('../scan.mjs');
+const { normalizeUrlForDedup, seenJobKey, shouldDedupScanHistoryRow } = await import('../scan.mjs');
+const { localToday } = await import('../lib/local-today.mjs');
 // web/ is not in every checkout, and an unguarded import of it crashes the whole
 // suite there rather than skipping one case (#3269). The core half of this file
 // does not need web/ at all; only the end-to-end feed assertion does.
@@ -301,6 +302,25 @@ test('a re-confirmed dead posting stops resurfacing in the web feed', { skip: HA
 
   // Idempotent: sweeping the same dead posting again writes nothing more.
   assert.equal(await recordExpiredVerdicts([{ url: DEAD, result: 'expired' }]), 0);
+});
+
+test('a pinned expired alias is not counted as a newly written row', async () => {
+  const live = 'https://boards.greenhouse.io/acme/jobs/123';
+  const dead = 'https://job-boards.greenhouse.io/acme/jobs/123';
+  const day = localToday();
+  const lines = [
+    HEADER,
+    `${live}\t${day}\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote`,
+    `${dead}\t${day}\tgreenhouse\tStaff Engineer\tAcme\tskipped_expired\tRemote`,
+  ];
+  const planned = planExpiredHistoryRows(lines.join('\n'), [{ url: live, result: 'expired' }], seenJobKey);
+  assert.equal(planned.length, 1);
+  assert.equal(planned[0].url, live);
+
+  const before = `${lines.join('\n')}\n`;
+  writeFileSync(historyPath, before, 'utf-8');
+  assert.equal(await recordExpiredVerdicts([{ url: live, result: 'expired' }]), 0);
+  assert.equal(readFileSync(historyPath, 'utf-8'), before);
 });
 
 test('the history read happens inside the lock, so a concurrent scan cannot cause a duplicate', async () => {
