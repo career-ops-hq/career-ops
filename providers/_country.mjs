@@ -217,6 +217,39 @@ export function buildWorkplacePolicy(policy) {
   // Only immediate, explicit geography qualifiers are grammar here. Do not
   // scan through considered/reviewed prose to discover a country elsewhere.
   const eligibilityTargetText = text => text.trim().replace(/^(?:(?:currently|only)\s+|(?:restricted|limited|open)\s+(?:only\s+)?to\s+|(?:allowed|permitted|available)\s+(?:only\s+)?(?:in|from)\s+)+/, '');
+  // Preserve commas only within an explicit, country-only eligibility list.
+  // Unknown tails and independent restrictions remain separate clauses.
+  const completeCountryList = text => {
+    let rest = text.trim();
+    while (rest) {
+      const match = rest.match(geographyAtom);
+      if (!match || !countries(countryValue(match[1]), true).size) return false;
+      const tail = rest.slice(match[0].length);
+      if (!tail.trim()) return true;
+      const separator = tail.match(/^\s*(?:,|\/|\band\b|\bor\b)\s*/);
+      if (!separator) return false;
+      rest = tail.slice(separator[0].length);
+    }
+    return false;
+  };
+  const descriptionClauses = text => text.split(/[.!?;\n]+|\s+(?:but|however)\s+/).flatMap(sentence => {
+    const clauses = [];
+    let eligibleList = false;
+    for (const part of sentence.split(/,|\s+and\s+(?=(?:eligible (?:countries|locations) are\b|must\b|(?:candidates?|applicants?|residents?) (?:must|need to)\b))/)) {
+      let continuation = part;
+      if (eligibleList) {
+        const coordinated = part.replace(/^\s*(?:and|or)\s+/, '');
+        if (coordinated !== part && completeCountryList(coordinated)) continuation = coordinated;
+      }
+      if (eligibleList && completeCountryList(continuation)) clauses[clauses.length - 1] += ',' + continuation;
+      else {
+        clauses.push(part);
+        const list = [...part.matchAll(/\beligible (?:countries|locations) are\s+/g)].at(-1);
+        eligibleList = !!list && completeCountryList(eligibilityTargetText(part.slice(list.index + list[0].length)));
+      }
+    }
+    return clauses;
+  });
   const restricted = (text, codes = false) => {
     const found = countries(text, codes);
     return found.size > 0 && ![...found].some(c => homeCodes.has(c));
@@ -249,7 +282,7 @@ export function buildWorkplacePolicy(policy) {
     }
     // Narrow eligibility clauses, not arbitrary country mentions. A company
     // describing its London office must not erase a worldwide-remote listing.
-    for (const clause of description.split(/[.!?;,\n]+|\s+(?:but|however)\s+/)) {
+    for (const clause of descriptionClauses(description)) {
       if (/\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based) (?:role|position)(?: is)? (?:based |located )?in\b/.test(clause) && !has(clause, onsite)) return fail('description_onsite_restricted');
       if (!/\b(?:only|must (?:be |currently )?(?:based|located|reside|live)|(?:candidates?|applicants?|residents?) (?:must|need to)|restricted to|eligible (?:countries|locations)|hiring (?:only )?in|open (?:only )?to)\b/.test(clause)) continue;
       const targetCountries = new Set(), workerClause = geographyText(clause);
