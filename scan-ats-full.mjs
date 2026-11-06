@@ -50,6 +50,7 @@
  *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
+import { captureWorkplaceEvidence } from './providers/_country.mjs';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
 import { createHash } from 'crypto';
 import path from 'path';
@@ -828,7 +829,7 @@ export function passesFilters(job, { titleFilter, locationFilter, contentFilter,
   // job.url is passed so the location filter can fall back to the URL's own
   // location segment when the provider reports a rolled-up "N Locations" string;
   // job.title so a title-stated remote role survives a city-only location.
-  if (!locationFilter(job.location, job.url, job.title)) return false;
+  if (!locationFilter(job.location, job.url, job.title, job)) return false;
   if (contentFilter && !contentFilter(job.description, matchedTitleKeywords(job.title, titleFilterConfig))) return false;
   return true;
 }
@@ -882,6 +883,7 @@ export function formatLiveOfferLine(job, source) {
     title: job.title,
     url: job.url,
     location: job.location || null,
+    ...(job.geographyEvidence ? { geographyEvidence: job.geographyEvidence } : {}),
     postedAt,
     source: source || job.source || '',
   });
@@ -909,7 +911,7 @@ export function emitLiveOffer(job, source, { json } = {}) {
 }
 
 export function keepAndMaybeEmit(job, source, sink, blacklist, opts) {
-  const kept = { ...job, source, dateStatus: job.postedAt ? 'dated' : 'unknown' };
+  const kept = { ...job, ...(opts.workplacePolicy ? { geographyEvidence: captureWorkplaceEvidence(job) } : {}), source, dateStatus: job.postedAt ? 'dated' : 'unknown' };
   sink.push(kept);
   const live = filterBlacklistedOffers([kept], blacklist, { includeBlacklisted: opts.includeBlacklisted });
   if (live.offers.length) emitLiveOffer(live.offers[0], source, { json: opts.json });
@@ -1288,6 +1290,7 @@ async function main() {
   const titleFilterOverrides = buildTitleFilterOverrides(config?.title_filter_overrides);
   const titleFilter = buildTitleFilterWithOverrides(fullTitleFilterConfig, titleFilterOverrides);
   const locationFilter = buildLocationFilter(config?.location_filter);
+  opts.workplacePolicy = config?.location_filter?.workplace_policy;
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
   const contentFilter = buildContentFilterOrExit(config?.content_filter);
@@ -1466,6 +1469,7 @@ async function main() {
           title: o.title,
           url: o.url,
           location: o.location || null,
+          ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
           postedAt: isoDay(o.postedAt),
           dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
           source: o.source,
@@ -1536,7 +1540,7 @@ async function main() {
       // posting stale, --since was silently ignored for the entire source.
       // Enrich first, then let the undated policy decide.
       if (dateClass === 'undated' && provider.enrichDate
-          && titleFilter(job.title, companySlug) && locationFilter(job.location, job.url, job.title)) {
+          && titleFilter(job.title, companySlug) && locationFilter(job.location, job.url, job.title, job)) {
         try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
         if (!shouldContinue()) return;
         dateClass = classifyPostingDate(job, cutoff);
@@ -1547,7 +1551,7 @@ async function main() {
       // job.url is passed so the location filter can fall back to the URL's own
       // location segment when the provider reports a rolled-up "N Locations" string;
       // job.title so a title-stated remote role survives a city-only location.
-      if (!locationFilter(job.location, job.url, job.title)) continue;
+      if (!locationFilter(job.location, job.url, job.title, job)) continue;
       if (!contentFilter(job.description, matchedTitleKeywords(job.title, fullTitleFilterConfig))) { droppedContent++; continue; }
       const dedupToken = dedupTokenFor(job, provider);
       if (seenUrls.has(dedupToken)) continue;
@@ -1999,6 +2003,7 @@ async function main() {
         title: o.title,
         url: o.url,
         location: o.location || null,
+        ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
         postedAt: o.postedAt ? new Date(o.postedAt).toISOString().slice(0, 10) : null,
         dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
         blacklisted: Boolean(o.blacklisted),

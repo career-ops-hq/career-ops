@@ -555,7 +555,7 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
     // in between that drops it first books it as its own.
     const verdict = titleGate(title);
     if (verdict === 'reject') { titleSkipped.push(skipped); continue; }
-    if (!filters.locationFilter(listLocation, url, title)) { locationSkipped.push(skipped); continue; }
+    if (!filters.locationFilter(listLocation, url, title, { description: listDescription })) { locationSkipped.push(skipped); continue; }
     if (verdict === 'rescue') {
       if (!filters.contentFilter(listDescription, [], { titleMissed: true })) { titleSkipped.push(skipped); continue; }
     } else if (!filters.contentFilter(listDescription, filters.matchedTitleKeywords(title))) { contentSkipped.push(skipped); continue; }
@@ -572,12 +572,18 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
 
     const description = buildJobDescriptionText(detail.jobPostingContent) || item.listDescription;
     const location = joinLocations(detail.postingLocations) || item.listLocation;
+    const title = decodeEntities(String(detail.jobTitle || item.title));
+    const detailPolicy = filters.locationFilter.workplacePolicyOnly;
+    if (typeof detailPolicy === 'function' && !detailPolicy(location, item.url, title, { description })) {
+      locationSkipped.push({ title, url: item.url, location });
+      continue;
+    }
     const postedAt = detail.postingStartTimestampUTC ? Date.parse(detail.postingStartTimestampUTC) : undefined;
 
     found.push({
       url: item.url,
       company: boardCfg.name,
-      title: decodeEntities(String(detail.jobTitle || item.title)),
+      title,
       location,
       source: 'dayforce',
       description,
