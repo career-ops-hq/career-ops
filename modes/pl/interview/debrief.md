@@ -258,7 +258,7 @@ Dla każdej wymienionej z imienia osoby zapytaj `Zapisać ten kontakt w data/con
 
 Jeśli następny krok wskazuje jeden jednoznaczny dzień w kalendarzu, przekaż `--next YYYY-MM-DD` bez dodatkowego pytania. Dzień tygodnia rozwiązuj według lokalnego kalendarza, przy czym dzisiejszy dzień się liczy. Jeśli sformułowanie nie wskazuje dnia, pomiń `--next`. Jeśli jest niejednoznaczne (`next week`, dwa dni), poproś o jedną datę, a potem ją przekaż.
 
-Uruchom `node debrief-sync.mjs` z tymi flagami. Następnie, jeśli zapisano kontakt, uruchom `node contacts.mjs --summary`. Jeśli przypięto dzień, uruchom `node followup-cadence.mjs --summary`.
+Uruchom `node debrief-sync.mjs --app <tracker#>` z tymi flagami, gdzie `<tracker#>` to `#` aplikacji w trackerze (nie numer raportu). Jeśli nie ma dealbreakera, kontaktu ani dnia `--next` do przekazania, pomiń polecenie: skrypt odrzuca wywołanie bez czegokolwiek do zapisania. Następnie, jeśli zapisano kontakt, uruchom `node contacts.mjs --summary`. Jeśli przypięto dzień, uruchom `node followup-cadence.mjs --summary`.
 
 Nie zmieniaj statusu, chyba że użytkownik wskaże nowy status. To osobne wywołanie `set-status.mjs`, wykonywane przed tym poleceniem.
 

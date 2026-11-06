@@ -257,7 +257,7 @@ Per ogni persona nominata, chiedi `Save this contact to data/contacts.tsv? [y/N]
 
 Se il passo successivo indica un giorno di calendario chiaro, passa `--next YYYY-MM-DD` senza una seconda domanda. Risolvi un giorno della settimana a partire dal giorno di calendario locale; oggi conta. Se la frase non contiene un giorno, ometti `--next`. Se è ambigua (`la prossima settimana`, due giorni), chiedi una sola data e poi passala.
 
-Esegui `node debrief-sync.mjs` con quei flag. Poi, se è stato salvato un contatto, esegui `node contacts.mjs --summary`. Se è stato fissato un giorno, esegui `node followup-cadence.mjs --summary`.
+Esegui `node debrief-sync.mjs --app <tracker#>` con quei flag, dove `<tracker#>` è il `#` della candidatura nel tracker (non il numero del report). Se non ci sono dealbreaker, contatti o giorno di `--next` da passare, salta il comando: lo script rifiuta una chiamata senza nulla da registrare. Poi, se è stato salvato un contatto, esegui `node contacts.mjs --summary`. Se è stato fissato un giorno, esegui `node followup-cadence.mjs --summary`.
 
 Non cambiare lo stato a meno che l'utente non indichi un nuovo stato. Quella è una chiamata separata a `set-status.mjs`, da fare prima di questo comando.
 

@@ -258,7 +258,7 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 
 若下一步指明了唯一明确的日历日，直接传 `--next YYYY-MM-DD`，不再追问。星期几按本地日历日换算，今天也算。若说法里没有具体日期，省略 `--next`。若有歧义（`next week`、两个日期），先请用户给出一个日期，再传入。
 
-带着这些参数运行 `node debrief-sync.mjs`。之后，若保存了联系人，运行 `node contacts.mjs --summary`。若钉住了日期，运行 `node followup-cadence.mjs --summary`。
+带着这些参数运行 `node debrief-sync.mjs --app <tracker#>`，其中 `<tracker#>` 是申请在追踪表中的 `#`（不是报告编号）。若没有需要传递的 dealbreaker、联系人或 `--next` 日期，则跳过该命令：脚本会拒绝没有可记录内容的调用。之后，若保存了联系人，运行 `node contacts.mjs --summary`。若钉住了日期，运行 `node followup-cadence.mjs --summary`。
 
 除非用户点明新状态，否则不要改状态。那是另一次 `set-status.mjs` 调用，在本命令之前执行。
 

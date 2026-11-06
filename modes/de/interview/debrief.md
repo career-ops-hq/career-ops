@@ -258,7 +258,7 @@ Frag für jede genannte Person `Save this contact to data/contacts.tsv? [y/N]`. 
 
 Nennt der nächste Schritt einen eindeutigen Kalendertag, übergib `--next YYYY-MM-DD` ohne zweite Frage. Löse einen Wochentag ausgehend vom lokalen Kalendertag auf, wobei heute mitzählt. Enthält die Formulierung keinen Tag, lass `--next` weg. Ist sie mehrdeutig (`next week`, zwei Tage), frag nach einem Datum und übergib es dann.
 
-Führe `node debrief-sync.mjs` mit diesen Flags aus. Wurde ein Kontakt gespeichert, führe danach `node contacts.mjs --summary` aus. Wurde ein Tag festgelegt, führe `node followup-cadence.mjs --summary` aus.
+Führe `node debrief-sync.mjs --app <tracker#>` mit diesen Flags aus, wobei `<tracker#>` die `#` der Bewerbung im Tracker ist (nicht die Berichtsnummer). Gibt es keinen Dealbreaker, keinen Kontakt und keinen `--next`-Tag zu übergeben, überspringe den Befehl: Das Skript lehnt einen Aufruf ohne Inhalt ab. Wurde ein Kontakt gespeichert, führe danach `node contacts.mjs --summary` aus. Wurde ein Tag festgelegt, führe `node followup-cadence.mjs --summary` aus.
 
 Ändere den Status nicht, es sei denn, der Nutzer nennt einen neuen Status. Das ist ein separater `set-status.mjs`-Aufruf vor diesem Befehl.
 
