@@ -7,7 +7,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 import { SCRATCH_PREFIX } from '../lib/scratch-dirs.mjs';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TODAY = '2026-11-05';
@@ -103,7 +103,7 @@ test('--apply leaves a row that is no longer Evaluated', () => {
     const flip = join(box.dir, 'flip-status.mjs');
     writeFileSync(flip, [
       "import { readFileSync, writeFileSync } from 'node:fs';",
-      "const script = process.argv[1] || '';",
+      "const script = (process['argv'] || [])[1] || '';",
       "if (script.endsWith('set-status.mjs')) {",
       '  const path = process.env.CAREER_OPS_TRACKER;',
       "  const text = readFileSync(path, 'utf8');",
@@ -119,7 +119,7 @@ test('--apply leaves a row that is no longer Evaluated', () => {
       encoding: 'utf-8',
       env: { ...box.env, NODE_OPTIONS: `--import ${flip}` },
     });
-    assert.notEqual(result.status, 0, describeSpawn(result));
+    assert.ok(exitedNonZero(result), describeSpawn(result, 'a row that left Evaluated is refused'));
     assert.match(`${result.stderr}\n${result.stdout}`, /now Applied, not Evaluated/);
     const after = readFileSync(box.tracker, 'utf-8');
     assert.equal(statusOf(after, 1), 'Applied');
