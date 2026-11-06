@@ -245,7 +245,7 @@ stated_priorities:        # 트랜스크립트 입력에만. 밝힌 우선순위
 - **답변마다 태그를 답니다.** 각 `**Candidate:**` 줄 바로 윗줄에 `<!-- competency: tag[, tag...] -->`를 씁니다 — 소문자 kebab-case, 여러 역량에 걸친 답변은 쉼표로 구분합니다(예: `system-design`, `people-leadership`, `incident-response`). Step 2에서 이미 각 답변을 평가했으므로, 다시 읽지 말고 그 평가를 기준으로 태그를 답니다. 태그는 자유 형식이며, 질문이 실제로 검증한 역량을 고릅니다.
 - **후보자의 턴은 충실하게 재구성합니다.** 이상적인 답변이 아니라 Step 1에서 후보자가 말했다고 한 내용을 사용합니다. Step 2의 "correct/complete answer"는 디브리프 파일에만 들어가고 트랜스크립트에는 절대 들어가지 않습니다 — 트랜스크립트는 실제로 일어난 일을 기록합니다.
 - **`source: debrief`.**
-- **`stated_priorities`는 front matter에 넣습니다** (Step 1c). 스크립트와 `interview/plan`이 본문을 파싱하지 않고 읽을 수 있도록 `speaker` + `quote` 항목의 YAML 리스트로 씁니다. front matter가 유효한 YAML로 남도록 모든 `quote`를 큰따옴표로 감싸고 안쪽 큰따옴표는 이스케이프합니다. 각 항목의 라운드와 날짜는 파일 자체의 `round`와 `date`입니다. 밝힌 것이 없을 때와 `input_source: recall`일 때는 항상 이 필드를 생략합니다. 연습 세션 파일에는 실제 면접관이 없으므로 우선순위를 절대 넣지 않습니다.
+- **`stated_priorities`는 front matter에 넣습니다** (Step 1c). 스크립트와 `interview/plan`이 본문을 파싱하지 않고 읽을 수 있도록 `speaker` + `quote` 항목의 YAML 리스트로 씁니다. front matter가 유효한 YAML로 남도록 모든 `quote`를 큰따옴표로 감싸고, 파싱 후에도 발언 그대로 복원되도록 합니다. 수동으로 이스케이프할 때는 안쪽 큰따옴표보다 역슬래시를 먼저 이스케이프합니다. 그래야 인용 안의 리터럴 `\n`이 두 글자 그대로 남고 개행 문자로 바뀌지 않습니다. 각 항목의 라운드와 날짜는 파일 자체의 `round`와 `date`입니다. 밝힌 것이 없을 때와 `input_source: recall`일 때는 항상 이 필드를 생략합니다. 연습 세션 파일에는 실제 면접관이 없으므로 우선순위를 절대 넣지 않습니다.
 - 세션 파일은 gitignore된 디렉터리에 저장되므로(실명이나 회사명이 버전 관리에 들어가지 않음), 가리지 않고 그대로 씁니다.
 
 ---
