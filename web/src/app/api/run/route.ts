@@ -185,7 +185,9 @@ export async function POST(req: Request) {
   // board that renders its JD from script data looks like an empty shell to the
   // worker and the run ends as "Needs review" on a live posting. null (plain
   // boards, any miss) leaves the worker on its WebFetch path.
-  const prefetch = kind === "evaluate" ? await prefetchJd(input, runCoreCli) : null;
+  const prefetch = kind === "evaluate" ? await prefetchJd(input, runCoreCli, req.signal) : null;
+  // The caller went away while the JD was being read: do not start a worker for nobody.
+  if (req.signal.aborted) return new Response(null, { status: 499 });
   const prefetchedJd = prefetch?.text ?? null;
   const closedThrough = prefetch?.closedThrough ?? null;
   const prompt = buildPrompt({

@@ -61,3 +61,16 @@ test("prefetchJd ignores an exit 3 whose output is not the closed-posting line",
   assert.deepEqual(await prefetchJd(url, async () => ({ code: 3, stdout: "something else" })), { text: null, closedThrough: null });
   assert.deepEqual(await prefetchJd(url, async () => ({ code: 3, stdout: "" })), { text: null, closedThrough: null });
 });
+
+test("prefetchJd does not start when the request is already aborted, and passes the signal to the child", async () => {
+  const url = "https://careers.example.com/job/1";
+  const aborted = AbortSignal.abort();
+  let ran = false;
+  assert.deepEqual(await prefetchJd(url, async () => { ran = true; return { code: 0, stdout: JD }; }, aborted), { text: null, closedThrough: null });
+  assert.equal(ran, false);
+
+  const controller = new AbortController();
+  let received;
+  await prefetchJd(url, async (_s, _a, opts) => { received = opts?.signal; return { code: 0, stdout: JD }; }, controller.signal);
+  assert.equal(received, controller.signal, "the run must be able to kill the child on abort");
+});

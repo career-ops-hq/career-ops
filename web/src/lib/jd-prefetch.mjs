@@ -32,17 +32,18 @@ export function postingUrlFrom(input) {
 
 /**
  * @param {unknown} input - the run input (a posting URL for evaluate runs)
- * @param {(script: string, args: string[]) => Promise<{code: number, stdout: string, timedOut?: boolean, spawnFailed?: boolean}>} run
+ * @param {(script: string, args: string[], opts?: {signal?: AbortSignal}) => Promise<{code: number, stdout: string, timedOut?: boolean, spawnFailed?: boolean}>} run
+ * @param {AbortSignal} [signal] the request's abort signal; an abort kills the child and is a miss
  * @returns {Promise<Prefetch>} `text` is the JD, or null when the worker should
  *   WebFetch; `closedThrough` is set when the page's own data says the posting
  *   closed (fetch-jd exit 3), which the worker must not score past.
  */
-export async function prefetchJd(input, run) {
+export async function prefetchJd(input, run, signal) {
   const miss = { text: null, closedThrough: null };
   const url = postingUrlFrom(input);
-  if (!url) return miss;
+  if (!url || signal?.aborted) return miss;
   try {
-    const result = await run("fetch-jd", [url]);
+    const result = await run("fetch-jd", [url], { signal });
     if (result.timedOut || result.spawnFailed) return miss;
     const out = String(result.stdout ?? "").trim();
     if (result.code === 3) {

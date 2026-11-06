@@ -292,3 +292,13 @@ test('fetchJdFromPage fails closed when the connect-time lookup guard is opted o
   assert.equal(off.stdout.trim(), 'null', off.stderr);
   assert.doesNotMatch(off.stdout, /FETCHED/, 'no request may be made without the guard');
 });
+
+test('a full posting next to a description-less one is ambiguous, so the JSON-LD description is not used', () => {
+  const stub = { '@type': 'JobPosting', title: 'Other Job', url: 'https://careers.example.com/job/other' };
+  assert.equal(jdFromPageHtml(page(`<p>${BODY}</p>`, { extraLd: [stub] }), NOW), null);
+});
+
+test('an unrelated expired posting on the page is not reported as the requested posting closing', () => {
+  const expired = { '@type': 'JobPosting', title: 'Old Job', description: '<p>Gone.</p>', validThrough: '2020-01-01T00:00:00Z' };
+  assert.equal(jdFromPageHtml(page(`<p>${BODY}</p>`, { extraLd: [expired] }), NOW), null, 'ambiguous expiry must be a miss, not a closure');
+});
