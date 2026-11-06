@@ -95,10 +95,12 @@ function collapse(text) {
 }
 
 // The named entities a generated CV actually carries: the Latin-1 letters an
-// accented heading is written with, plus the five markup ones. Anything else
-// arrives numeric, which is handled generically below.
+// accented heading is written with, plus the five markup ones, plus the curly
+// quotes a CV written by hand or exported from an editor spells by name.
+// Anything else arrives numeric, which is handled generically below.
 const NAMED_ENTITIES = {
   nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
   agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
   ccedil: 'ç', egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë',
   igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï', ntilde: 'ñ',
@@ -247,16 +249,10 @@ function stripNonContentRegions(html) {
  * @returns {string}
  */
 function extractVisibleText(html) {
-  return collapse(
-    stripNonContentRegions(html)
-      .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      // &amp; is decoded LAST: doing it earlier could turn "&amp;lt;" into "&lt;"
-      // and then into "<", double-unescaping text that was never an entity.
-      .replace(/&amp;/gi, '&')
-  );
+  // decodeEntities is one pass, so "&amp;lt;" stays the text "&lt;". All of them
+  // matter here: build-cv-html writes every apostrophe as &#39;, so a keyword
+  // like "Master's degree" read as missing from a CV that says it.
+  return collapse(decodeEntities(stripNonContentRegions(html).replace(/<\/?[a-zA-Z][^>]*>/g, ' ')));
 }
 
 /**
