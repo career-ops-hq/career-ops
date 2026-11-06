@@ -3586,22 +3586,23 @@ function rememberListingRefresh(map, listingKey, url, language) {
   rows.push({ url, language });
 }
 
-function recordedListingUrls(job, listingUrls) {
+function recordedListingRows(job, listingUrls) {
   const token = listingIdentityToken(job);
-  if (!token || !listingUrls) return [];
-  const rows = listingUrls.get(token.slice('listing:'.length)) || [];
-  const language = refreshLanguage(job?.url, job?.language);
-  return rows.filter((row) => sameRefreshLanguage(language, row.language)).map((row) => row.url);
+  if (!token || !listingUrls) return null;
+  return listingUrls.get(token.slice('listing:'.length)) || [];
 }
 
 export function closeRefreshUrlForSeenOffer(job, seenUrls, listingUrls) {
-  const recorded = recordedListingUrls(job, listingUrls);
+  const rows = recordedListingRows(job, listingUrls);
+  const language = refreshLanguage(job?.url, job?.language);
+  const recorded = (rows || []).filter((row) => sameRefreshLanguage(language, row.language)).map((row) => row.url);
   if (recorded.length > 1) return '';
   if (recorded.length === 1) {
     const offerKey = normalizeUrlForDedup(job?.url);
     if (offerKey && normalizeUrlForDedup(recorded[0]) === offerKey) return job.url;
     return recorded[0];
   }
+  if (rows?.length) return '';
   const dedupUrl = seenJobKey(job?.url);
   return seenUrls?.has(dedupUrl) ? job.url : '';
 }

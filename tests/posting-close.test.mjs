@@ -425,4 +425,23 @@ test('a listing refresh follows the offer language, and a seen URL stands alone'
   assert.equal(closeRefreshUrlForSeenOffer(plain, new Set([seenJobKey(plain.url)]), new Map()), plain.url);
 });
 
+test('a different language does not refresh the seen URL of the same listing', () => {
+  const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
+  const key = computeListingFingerprint({ strong: identity }).listing_key;
+  const url = 'https://jobs.example/acme';
+  const history = historyRow({
+    url,
+    status: 'added',
+    first_seen: '2026-10-01',
+    listing_key: key,
+    language: 'en',
+    closes_at: '2026-01-01',
+  });
+  const { listingRefreshUrls } = collectSeenUrls({ scanHistoryText: history });
+  const seen = new Set([seenJobKey(url)]);
+  const job = { url, listingIdentity: identity, language: 'fr' };
+  assert.equal(closeRefreshUrlForSeenOffer(job, seen, listingRefreshUrls), '');
+  assert.equal(closeRefreshUrlForSeenOffer({ ...job, language: 'en' }, seen, listingRefreshUrls), url);
+});
+
 
