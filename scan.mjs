@@ -1911,17 +1911,17 @@ function trackerRefreshUrls(pipelineText, applicationsText) {
 
 function pickRefreshUrl(rows, offer, language) {
   const matches = (rows || []).filter((row) => sameRefreshLanguage(language, row.language));
-  if (!matches.length) return { decided: false, url: '' };
+  if (!matches.length) return { decided: false, exact: false, url: '' };
   const offerKey = normalizeUrl(offer?.url);
   const primaries = matches.filter((row) => row.primary);
   const exactPrimary = primaries.find((row) => normalizeUrl(row.url) === offerKey);
-  if (exactPrimary) return { decided: true, url: exactPrimary.url };
-  if (primaries.length === 1) return { decided: true, url: primaries[0].url };
-  if (primaries.length > 1) return { decided: true, url: '' };
+  if (exactPrimary) return { decided: true, exact: true, url: exactPrimary.url };
+  if (primaries.length === 1) return { decided: true, exact: false, url: primaries[0].url };
+  if (primaries.length > 1) return { decided: true, exact: false, url: '' };
   const exact = matches.find((row) => normalizeUrl(row.url) === offerKey);
-  if (exact) return { decided: true, url: exact.url };
-  if (matches.length === 1) return { decided: true, url: matches[0].url };
-  return { decided: true, url: '' };
+  if (exact) return { decided: true, exact: true, url: exact.url };
+  if (matches.length === 1) return { decided: true, exact: false, url: matches[0].url };
+  return { decided: true, exact: false, url: '' };
 }
 
 function originalRefreshUrl(offer, historyUrls, trackerUrls) {
@@ -1929,8 +1929,11 @@ function originalRefreshUrl(offer, historyUrls, trackerUrls) {
   if (!key) return '';
   const language = refreshLanguage(offer?.url, offer?.language);
   const fromHistory = pickRefreshUrl(historyUrls.get(key), offer, language);
+  const fromTracker = pickRefreshUrl(trackerUrls.get(key), offer, language);
+  if (fromHistory.exact) return fromHistory.url;
+  if (fromTracker.exact) return fromTracker.url;
   if (fromHistory.decided) return fromHistory.url;
-  return pickRefreshUrl(trackerUrls.get(key), offer, language).url;
+  return fromTracker.url;
 }
 
 export function alignCloseRefreshOffers(offers, historyText, policy = {}, sources = {}) {

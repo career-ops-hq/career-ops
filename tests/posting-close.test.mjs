@@ -336,6 +336,27 @@ test('two stored path-case URLs keep their own close days', () => {
   assert.equal(closeDateForUrl(index, 'https://jobs.example/ACME'), '2026-08-08');
 });
 
+test('an exact tracker path case wins over a different history case', () => {
+  const history = historyRow({
+    url: 'https://jobs.example/Acme',
+    closes_at: '2026-01-01',
+    status: 'added',
+    first_seen: '2026-10-01',
+  });
+  const applications = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | URL | Notes |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| 1 | 2026-10-01 | Acme | Analyst | 4/5 | Evaluated | | | https://jobs.example/Acme | |',
+    '| 2 | 2026-10-01 | Acme | Other | 4/5 | Evaluated | | | https://jobs.example/acme | |',
+  ].join('\n');
+  const aligned = alignCloseRefreshOffers([
+    { url: 'https://jobs.example/acme', closesAt: '2026-07-07' },
+    { url: 'https://jobs.example/Acme', closesAt: '2026-06-06' },
+  ], history, {}, { applicationsText: applications });
+  assert.equal(aligned[0].url, 'https://jobs.example/acme');
+  assert.equal(aligned[1].url, 'https://jobs.example/Acme');
+});
+
 test('one accepted listing identity refreshes its recorded URL', () => {
   const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
   const recorded = 'https://boards.greenhouse.io/acme/jobs/4012345';
