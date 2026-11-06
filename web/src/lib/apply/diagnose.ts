@@ -239,7 +239,7 @@ export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue
   }
   const blockedAts = (await unsupportedInAppAts(landedUrl)) || (await unsupportedInAppAts(url));
   if (blockedAts) {
-    return { level: "block", code: blockedAts.vendor, message: unsupportedAtsMessage(blockedAts.label) };
+    return { level: "block", code: blockedAts.vendor, message: unsupportedAtsMessage(blockedAts.label, true) };
   }
   if (/^(jobs|careers|empleos|empregos|all jobs|open (positions|roles)|search jobs|current openings)/i.test(sig.t) || /\/(jobs|careers|search|positions)\/?(\?|$)/.test(u)) {
     return { level: "block", code: "listing-page", message: "This looks like the careers listing, not a single application — the posting may have moved or closed. Open the specific job and paste its “Apply” URL." };

@@ -48,6 +48,11 @@ const MESSAGE = {
   iCIMS: "This posting is on iCIMS. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app, so no browser was opened.",
   UKG: "This posting is on UKG. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app, so no browser was opened.",
 };
+const CLOSED = {
+  Workday: "This posting is on Workday. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app. The window was closed.",
+  iCIMS: "This posting is on iCIMS. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app. The window was closed.",
+  UKG: "This posting is on UKG. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app. The window was closed.",
+};
 
 const BLOCKED = [
   ["https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role", "workday", "Workday"],
@@ -172,7 +177,7 @@ describe("classifyEmpty uses the same refusal when no form is present", () => {
       const issue = await classifyEmpty(quietPage(), url);
       assert.equal(issue.level, "block");
       assert.equal(issue.code, vendor);
-      assert.equal(issue.message, MESSAGE[label]);
+      assert.equal(issue.message, CLOSED[label]);
     });
   }
 
@@ -184,13 +189,13 @@ describe("classifyEmpty uses the same refusal when no form is present", () => {
   test("a redirect onto Workday is the ATS block", async () => {
     const issue = await classifyEmpty(quietPage("https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role"), "https://careers.acme.test/role");
     assert.equal(issue.code, "workday");
-    assert.equal(issue.message, MESSAGE.Workday);
+    assert.equal(issue.message, CLOSED.Workday);
   });
 
   test("a Workday jobs index is the ATS block, not a listing page", async () => {
     const issue = await classifyEmpty(quietPage(), "https://acme.wd1.myworkdayjobs.com/jobs");
     assert.equal(issue.code, "workday");
-    assert.equal(issue.message, MESSAGE.Workday);
+    assert.equal(issue.message, CLOSED.Workday);
   });
 
   for (const url of ["https://boards.greenhouse.io/acme/jobs/123", "https://jobs.lever.co/acme/role", "https://jobs.ashbyhq.com/acme/role"]) {
@@ -408,7 +413,7 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
       assert.equal(result.unsupported.vendor, vendor);
       assert.equal(result.unsupported.label, label);
       assert.equal(result.unsupported.postingUrl, href);
-      assert.equal(result.message, MESSAGE[label]);
+      assert.equal(result.message, CLOSED[label]);
     });
   }
 
@@ -424,7 +429,7 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     assert.deepEqual(closed, [true]);
     assert.equal(result.unsupported.vendor, "workday");
     assert.equal(result.unsupported.postingUrl, landed);
-    assert.equal(result.message, MESSAGE.Workday);
+    assert.equal(result.message, CLOSED.Workday);
   });
 
   test("an Apply click that opens an iCIMS popup is refused", async () => {
@@ -438,7 +443,7 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     assert.deepEqual(closed, [true]);
     assert.equal(result.unsupported.vendor, "icims");
     assert.equal(result.unsupported.postingUrl, popup);
-    assert.equal(result.message, MESSAGE.iCIMS);
+    assert.equal(result.message, CLOSED.iCIMS);
   });
 
   test("a Workday tab that was already open does not refuse Apply", async () => {
@@ -467,7 +472,7 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     assert.equal(result.id, undefined);
     assert.equal(result.unsupported.vendor, "workday");
     assert.equal(result.unsupported.postingUrl, landed);
-    assert.equal(result.message, MESSAGE.Workday);
+    assert.equal(result.message, CLOSED.Workday);
   });
 
   test("a generic apply link that reaches Workday during the form wait is refused", async () => {
@@ -486,7 +491,7 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     assert.equal(result.id, undefined);
     assert.equal(result.unsupported.vendor, "workday");
     assert.equal(result.unsupported.postingUrl, landed);
-    assert.equal(result.message, MESSAGE.Workday);
+    assert.equal(result.message, CLOSED.Workday);
   });
 
   test("an Apply click whose popup is blank at the first look and lands on iCIMS later is refused", async () => {
@@ -503,7 +508,7 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     assert.equal(result.id, undefined);
     assert.equal(result.unsupported.vendor, "icims");
     assert.equal(result.unsupported.postingUrl, popup);
-    assert.equal(result.message, MESSAGE.iCIMS);
+    assert.equal(result.message, CLOSED.iCIMS);
   });
 
   test("an Apply click that opens an iCIMS popup after the click is refused", async () => {
@@ -520,7 +525,7 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     assert.deepEqual(closed, [true]);
     assert.equal(result.unsupported.vendor, "icims");
     assert.equal(result.unsupported.postingUrl, popup);
-    assert.equal(result.message, MESSAGE.iCIMS);
+    assert.equal(result.message, CLOSED.iCIMS);
   });
 });
 

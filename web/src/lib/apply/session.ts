@@ -253,7 +253,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (landedAts) {
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
-    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts.label) };
+    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts.label, true) };
   }
   await snap(); // first paint
   const sBlock = statusBlock(resp?.status(), resp ? resp.headers() : {});
@@ -272,7 +272,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (settledAts) {
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
-    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts.label) };
+    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts.label, true) };
   }
   await snap(); // settled
 
@@ -295,7 +295,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
       const hit = await unsupportedInAppAts(trigger.blocked);
       await context.close().catch(() => {});
       if (SESSIONS.size === 0) scheduleIdleClose();
-      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit.label) };
+      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit.label, true) };
     } else if (trigger && typeof trigger === "object" && "followed" in trigger) {
       await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
       await page.waitForTimeout(800);
@@ -305,7 +305,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
       if (lateAts) {
         await context.close().catch(() => {});
         if (SESSIONS.size === 0) scheduleIdleClose();
-        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts.label) };
+        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts.label, true) };
       }
       ({ frame, form } = await pickFormFrame(page));
       await snap();

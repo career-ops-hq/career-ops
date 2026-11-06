@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     const refused = await unsupportedInAppAts(url);
     if (refused) return Response.json(unsupportedSessionJson(refused, body.n));
     const session = await openSession(url, cliId, body.agent, body._noApplyBtn);
-    if ("unsupported" in session) return Response.json(unsupportedSessionJson(session.unsupported, body.n));
+    if ("unsupported" in session) return Response.json(unsupportedSessionJson(session.unsupported, body.n, true));
     if (substitution) session.issues.push({ level: "info", code: "cli-substituted", message: substitution });
     return Response.json(session);
   } catch (e) {

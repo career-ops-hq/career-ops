@@ -47,9 +47,11 @@ function loadAtsVendor() {
 
 /**
  * @param {string} label
+ * @param {boolean} [opened] True when a window was opened and then closed.
  */
-export function unsupportedAtsMessage(label) {
-  return `This posting is on ${label}. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app, so no browser was opened.`;
+export function unsupportedAtsMessage(label, opened = false) {
+  const lead = `This posting is on ${label}. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app`;
+  return opened ? `${lead}. The window was closed.` : `${lead}, so no browser was opened.`;
 }
 
 /**
@@ -85,15 +87,16 @@ export async function unsupportedInAppAts(url) {
  *
  * @param {{ vendor: string, label: string, postingUrl: string }} hit
  * @param {unknown} applicationNumber
+ * @param {boolean} [opened] True when a window was opened and then closed.
  */
-export function unsupportedSessionJson(hit, applicationNumber) {
+export function unsupportedSessionJson(hit, applicationNumber, opened = false) {
   /** @type {{ unsupported: true, vendor: string, label: string, postingUrl: string, message: string, checklistHref?: string }} */
   const body = {
     unsupported: true,
     vendor: hit.vendor,
     label: hit.label,
     postingUrl: hit.postingUrl,
-    message: unsupportedAtsMessage(hit.label),
+    message: unsupportedAtsMessage(hit.label, opened),
   };
   const checklistHref = checklistHrefFor(applicationNumber);
   if (checklistHref) body.checklistHref = checklistHref;
