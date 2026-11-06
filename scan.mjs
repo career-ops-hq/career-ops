@@ -4335,7 +4335,11 @@ every target it tried failed (with --json: when any target failed).`;
 
 async function main() {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // --throttle=<ms> cannot join VALUE_FLAGS (see above), and validateFlags
+  // refuses `=` on any flag outside that list, so the documented form is checked
+  // here: a positive number passes as the bare flag, anything else stays refused.
+  const flagsToValidate = args.map((a) => (/^--throttle=0*[1-9]\d*$/.test(a) ? '--throttle' : a));
+  validateFlags(flagsToValidate, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
   const jsonMode = args.includes('--json');
   if (jsonMode) console.log = console.error.bind(console);
