@@ -105,8 +105,8 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 - **Project context:** `pi` reads `AGENTS.md` from the repo root automatically; there is no wrapper file to keep in sync.
 - **Skill:** Pi discovers the shared router at `.agents/skills/career-ops/SKILL.md`, exposed as `/skill:career-ops`. If a Pi build gates project resources behind a trust decision, run `/trust` once in the repo, then restart `pi` before `/skill:career-ops` (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
 - **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
-- **Headless:** `pi -p "prompt"` for one-shot workers; `pi --mode json -p "prompt"` when the caller parses events.
-- **Examples:** `pi -p "Run career-ops tracker mode"`, `pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
+- **Headless:** `pi -a -p "prompt"` for one-shot workers; `pi -a --mode json -p "prompt"` when the caller parses events. `-a` trusts project resources for that one run only, so a headless worker on a Pi build that gates them behind a trust decision still loads the skill (see `docs/SUPPORTED_CLIS.md`).
+- **Examples:** `pi -a -p "Run career-ops tracker mode"`, `pi -a -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
 
 ### Oh My Pi (omp) invocation
 
@@ -145,6 +145,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `audit-portals.mjs` | Content audit of `portals.yml` — the companion to `verify-portals.mjs`, which answers "does this board answer?" but never "*whose* postings are these?". Fetches each enabled board through the same `providers/` modules `scan.mjs` uses and reports provider + posting count + sample titles/locations per entry, verdicts worst-first: `no-provider` (enabled but nothing claims it, so `scan.mjs` skips it silently — the highest-value check), `error`, `empty`, `small`, `ok`. `--baseline prev.json` compares against an earlier `--json` run and flags boards that lost ≥50% of their postings, the shape an ATS migration takes. **It cannot detect a well-formed board belonging to the wrong entity** — a parent company's board is full of real jobs — so it surfaces the evidence a reader needs instead of pretending to a verdict (JSON, `--summary`, `--strict`) |
 | `scan-dayforce.mjs` | Playwright browser scanner for Dayforce (Ceridian) Recruiting career sites (jobs.dayforcehcm.com — Cloudflare + NextAuth CSRF gated, no bare-HTTP-reachable API); reads `dayforce_boards` from `portals.yml` |
 | `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text). An `expired` verdict is recorded back into `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead once stops resurfacing in the web "new matches this week" feed (#3891). Only URLs the history already knows are written, once each; `uncertain` is never recorded, and `--no-record` makes the run leave no trace |
+| `robots-check.mjs` | robots.txt gate on the headed liveness retry (#5776): `robotsAllows(url)` reads the host's `robots.txt` once per process as `career-ops` (RFC 9309: the `career-ops` group, else `*`; longest match, Disallow wins a tie) and fails closed, so `check-liveness.mjs` and `scan --verify --headed-fallback` skip the headed retry unless it permits the path. A skip keeps the headless `uncertain` verdict and never records anything as expired; the first headless request is not gated |
 | `fetch-jd.mjs` | JD text for a posting whose ATS is in `liveness-api.mjs`'s `JD_TEXT_API_ATS`, no browser needed. Prints the JD on stdout and exits 0 on a hit; exits 1 with empty stdout otherwise, so the caller's existing browser/WebFetch fallback is the next step. Backed by `browser-extract.mjs`'s `fetchJdViaKnownApi()`, the same dispatch its `jd` mode uses |
 | `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs --report <report#> <State>`, or `<tracker#\|company>` as the first argument (a bare number is the tracker `#`, not the report number); `[--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
 | `fix-report-links.mjs` | Repairs tracker rows whose Report link points at a missing file: rewrites only that cell to `—` (single-link cells only; others listed for hand review), same broken-link rule as `verify-pipeline.mjs` Check 3 via `findDeadReportLink()` in `tracker-utils.mjs`; `--dry-run` previews, otherwise `.bak` backup + locked atomic write; idempotent |
@@ -586,7 +587,7 @@ Headless worker command per CLI:
 |-----|---------|
 | Claude Code | `claude -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
-| Pi | `pi -p "prompt"` |
+| Pi | `pi -a -p "prompt"` |
 | Copilot CLI | `copilot -p "prompt"` |
 | Codex | `codex exec "prompt"` |
 | Qwen | `qwen -p "prompt"` |
