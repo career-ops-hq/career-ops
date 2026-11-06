@@ -84,10 +84,11 @@ function cleanUrl(value) {
  * - pubDate
  * - job_listing:company
  * - job_listing:location
+ * - content:encoded (the full post, which becomes `description`)
  *
  * The RSS link is used as the dedup key.
  * @param {string} xml - raw RSS feed body
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number, description?: string}>}
  */
 export function parseJobspressoFeed(xml) {
   if (typeof xml !== "string") return [];
