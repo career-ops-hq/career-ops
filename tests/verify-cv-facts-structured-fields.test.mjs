@@ -317,3 +317,27 @@ test('a reference definition title on the next line is not evidence', () => {
   assert.ok(flagged.some(value => /director/.test(value)), 'the title text is not claimed as the role');
   assert.deepEqual(flagged.filter(value => /fabrikam/.test(value)), []);
 });
+
+for (const [label, linked] of [
+  ['a nested-parenthesis target', '[Fabrikam](https://fabrikam.example/x_(Director))'],
+  ['an inline link title', '[Fabrikam](https://fabrikam.example/ "Director")'],
+  ['a same-line reference-definition title', '[Fabrikam][ml]\n\n[ml]: https://fabrikam.example/ "Director"'],
+]) {
+  test(`a role that appears only in ${label} is not evidence`, () => {
+    const source = join(tmp, `cv-meta-${Math.random().toString(36).slice(2)}.md`);
+    writeFileSync(source, `${CV}\n## Previous Experience\n${linked}\n`);
+    const html = build('build-cv-html.mjs', {
+      candidate: { name: 'Jane Doe' },
+      summary: 'Engineer.',
+      experience: [
+        { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2019 – 2024', bullets: ['Led a team of 4 engineers.'] },
+        { company: 'Fabrikam', role: 'Director', dates: '', bullets: [] },
+      ],
+      skills: [{ category: 'Languages', items: 'Python, Go' }],
+    }, 'html');
+    const result = verifyFacts(html, { sourcePaths: [source], configPath: join(tmp, 'none.json') });
+    const flagged = [...result.unsupportedFacts, ...result.advisoryFacts].map(({ value }) => value);
+    assert.ok(flagged.some(value => /director/.test(value)), 'the metadata-only role is flagged');
+    assert.deepEqual(flagged.filter(value => /fabrikam/.test(value)), []);
+  });
+}

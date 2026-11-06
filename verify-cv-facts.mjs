@@ -582,7 +582,7 @@ function latexBody(text) {
 }
 
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
-export function stripMarkup(text, { keepLineBreaks = false } = {}) {
+export function stripMarkup(text, { keepLineBreaks = false, keepBlankLines = false } = {}) {
   text = latexBody(text);
   // An entity is the character it encodes, and a default-ignorable character
   // (zero-width space, joiner, soft hyphen, directional mark, variation
@@ -656,7 +656,8 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     // scan. Horizontal whitespace still collapses, and every claim pattern spans a
     // newline through `\s`, so extraction is unaffected either way.
     .replace(keepLineBreaks ? /[^\S\n]+/g : /\s+/g, ' ')
-    .replace(/ *\n+ */g, keepLineBreaks ? '\n' : ' ')
+    // keepBlankLines keeps each newline of a run, so a blank line stays a blank line.
+    .replace(keepLineBreaks && keepBlankLines ? / *\n */g : / *\n+ */g, keepLineBreaks ? '\n' : ' ')
     .trim();
 }
 
@@ -2417,10 +2418,10 @@ export function verifyFacts(targetText, {
   // Each file is stripped on its own. Bold may span a wrapped line, so an unpaired `**` at
   // the end of one file paired with the first `**` of the next and left a stray `*` in the
   // name beside it ("fabrikam* (director)").
-  // stripMarkup folds a run of newlines into one, so a blank line is marked first: a reference
-  // definition takes a title only from the line right after it, never across a blank line.
+  // A reference definition takes a title only from the line right after it, never across a
+  // blank line, so blank lines are kept while the links collapse.
   const sourceLookup = normalizeFact(sourceTexts
-    .map(text => collapseMarkdownLinks(stripMarkup(text.replace(/\n[^\S\n]*(?=\n)/g, '\n\u0001'), { keepLineBreaks: true })).replace(/\u0001/g, ''))
+    .map(text => collapseMarkdownLinks(stripMarkup(text, { keepLineBreaks: true, keepBlankLines: true })))
     .join('\n'));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
   const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
