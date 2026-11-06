@@ -277,11 +277,15 @@ test("sessionFollowUp stops drive and prefill for an unsupported body", () => {
 function careerPage(careerUrl, blockedHref, closed, options = {}) {
   let current = careerUrl;
   let applyClicked = false;
+  let pendingLate = false;
   const popupPages = [];
   const extraPages = options.extraPages ?? [];
   const frame = {
     url: () => current,
     evaluate: async () => {
+      if (options.formAfterRedirect && String(current).includes("myworkdayjobs")) {
+        return { title: "Role", fields: [{ id: "co0", type: "email", label: "Email", required: true }] };
+      }
       throw new Error("document is not defined");
     },
     waitForSelector: async () => null,
@@ -298,11 +302,22 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
     url: () => current,
     context: () => context,
     goto: async (href) => {
-      if (options.redirectOn && href === options.redirectOn) current = options.redirectTo;
+      if (options.redirectOn && href === options.redirectOn) {
+        if (options.redirectAfterWait) {
+          current = href;
+          pendingLate = true;
+        } else {
+          current = options.redirectTo;
+        }
+      }
       return { status: () => 200, headers: () => ({}) };
     },
     waitForLoadState: async () => {},
     waitForTimeout: async () => {
+      if (pendingLate) {
+        current = options.redirectTo;
+        pendingLate = false;
+      }
       if (applyClicked && options.popupOnWait && options.popupUrl && popupPages.length === 0) {
         popupPages.push({ url: () => options.popupUrl });
       }
@@ -421,6 +436,25 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     });
     await assert.rejects(() => openSession(career), /Couldn't find a fillable form/);
     assert.deepEqual(closed, [true]);
+  });
+
+  test("a generic apply link that reaches Workday during the form wait is refused", async () => {
+    const career = "https://careers.example.com/jobs/1";
+    const applyHref = "https://careers.example.com/jobs/1/apply";
+    const landed = "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role";
+    const closed = [];
+    globalThis.__applyCareerPage = () => careerPage(career, applyHref, closed, {
+      redirectOn: applyHref,
+      redirectTo: landed,
+      redirectAfterWait: true,
+      formAfterRedirect: true,
+    });
+    const result = await openSession(career);
+    assert.deepEqual(closed, [true]);
+    assert.equal(result.id, undefined);
+    assert.equal(result.unsupported.vendor, "workday");
+    assert.equal(result.unsupported.postingUrl, landed);
+    assert.equal(result.message, MESSAGE.Workday);
   });
 
   test("an Apply click that opens an iCIMS popup after the click is refused", async () => {

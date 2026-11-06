@@ -294,6 +294,12 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
       await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
       await page.waitForTimeout(800);
       await dropNewTabs(page);
+      const lateAts = await unsupportedInAppAts(page.url());
+      if (lateAts) {
+        await context.close().catch(() => {});
+        if (SESSIONS.size === 0) scheduleIdleClose();
+        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts.label) };
+      }
       ({ frame, form } = await pickFormFrame(page));
       await snap();
     }
