@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseScanHistoryLine } from '../lib/scan-history-columns.mjs';
 import { closeDateForUrl, closeDatesByUrl } from '../lib/posting-close.mjs';
+import { computeListingFingerprint } from '../listing-fingerprint.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -152,6 +153,68 @@ test('a seen posting keeps a later close day and stays out of the pipeline', () 
     assert.equal(cleared.status, 0, describeSpawn(cleared));
     assert.equal(dataRows(historyText(box.dir)).length, 3);
     assert.equal(closeDateForUrl(closeDatesByUrl(historyText(box.dir)), URL), '2026-11-01');
+  } finally {
+    box.cleanup();
+  }
+});
+
+const CASE_UPPER = 'https://boards.example.com/fixture/Acme';
+const CASE_LOWER = 'https://boards.example.com/fixture/acme';
+const CASE_IDENTITY = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
+
+const CASE_PORTALS = `title_filter:
+  positive:
+    - "Strategic Finance"
+tracked_companies:
+  - name: Fixture Defense
+    careers_url: https://boards.example.com/fixture
+    parser:
+      command: node
+      script: tests/fixtures/close-date-case-board.mjs
+`;
+
+test('a scan keeps an exact tracker path case when listing identity matches', { timeout: 60000 }, () => {
+  const box = sandbox();
+  try {
+    writeFileSync(join(box.dir, 'portals.yml'), CASE_PORTALS);
+    const first = spawnSync(process.execPath, [join(ROOT, 'scan.mjs')], {
+      cwd: box.dir,
+      encoding: 'utf-8',
+      env: { ...childEnv(box.dir, '2026-10-03'), FIXTURE_JOB_URL: CASE_UPPER },
+    });
+    assert.equal(first.status, 0, describeSpawn(first));
+    const added = dataRows(historyText(box.dir));
+    assert.equal(added.length, 1);
+    assert.equal(added[0].url, CASE_UPPER);
+    assert.equal(added[0].listing_key, computeListingFingerprint({ strong: CASE_IDENTITY }).listing_key);
+    writeFileSync(box.tracker, `${TRACKER_HEADER}| 1 | 2026-10-01 | Fixture Defense | Strategic Finance Manager | 4/5 | Evaluated | | | ${CASE_UPPER} | |
+| 2 | 2026-10-01 | Fixture Defense | Other Analyst | 4/5 | Evaluated | | | ${CASE_LOWER} | |
+`);
+    const second = spawnSync(process.execPath, [join(ROOT, 'scan.mjs')], {
+      cwd: box.dir,
+      encoding: 'utf-8',
+      env: { ...childEnv(box.dir, '2026-12-01'), FIXTURE_JOB_URL: CASE_LOWER },
+    });
+    assert.equal(second.status, 0, describeSpawn(second));
+    const rows = dataRows(historyText(box.dir));
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1].status, 'skipped_close_refresh');
+    assert.equal(rows[1].url, CASE_LOWER);
+    assert.equal(rows[1].closes_at, '2026-12-01');
+    const index = closeDatesByUrl(historyText(box.dir));
+    assert.equal(closeDateForUrl(index, CASE_LOWER), '2026-12-01');
+    assert.equal(closeDateForUrl(index, CASE_UPPER), '2026-10-03');
+    const pipeline = readFileSync(join(box.dir, 'data', 'pipeline.md'), 'utf-8');
+    let upper = 0;
+    let lower = 0;
+    for (const line of pipeline.split('\n')) {
+      const match = /^- \[[ x]\]\s+(\S+)/.exec(line);
+      if (!match) continue;
+      if (match[1] === CASE_UPPER) upper += 1;
+      if (match[1] === CASE_LOWER) lower += 1;
+    }
+    assert.equal(upper, 1);
+    assert.equal(lower, 0);
   } finally {
     box.cleanup();
   }

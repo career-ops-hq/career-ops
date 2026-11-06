@@ -357,6 +357,33 @@ test('an exact tracker path case wins over a different history case', () => {
   assert.equal(aligned[1].url, 'https://jobs.example/Acme');
 });
 
+test('a listing identity keeps the offer path case for the tracker match', () => {
+  const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
+  const key = computeListingFingerprint({ strong: identity }).listing_key;
+  const history = historyRow({
+    url: 'https://jobs.example/Acme',
+    status: 'added',
+    first_seen: '2026-10-01',
+    listing_key: key,
+  });
+  const applications = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | URL | Notes |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| 1 | 2026-10-01 | Acme | Analyst | 4/5 | Evaluated | | | https://jobs.example/Acme | |',
+    '| 2 | 2026-10-01 | Acme | Other | 4/5 | Evaluated | | | https://jobs.example/acme | |',
+  ].join('\n');
+  const job = { url: 'https://jobs.example/acme', listingIdentity: identity, closesAt: '2026-07-07' };
+  const { listingRefreshUrls } = collectSeenUrls({ scanHistoryText: history });
+  const refreshUrl = closeRefreshUrlForSeenOffer(job, new Set(), listingRefreshUrls);
+  const aligned = alignCloseRefreshOffers(
+    [{ ...job, url: refreshUrl }],
+    history,
+    {},
+    { applicationsText: applications },
+  );
+  assert.equal(aligned[0].url, 'https://jobs.example/acme');
+});
+
 test('one accepted listing identity refreshes its recorded URL', () => {
   const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
   const recorded = 'https://boards.greenhouse.io/acme/jobs/4012345';

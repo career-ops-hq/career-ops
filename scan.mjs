@@ -3596,8 +3596,12 @@ function recordedListingUrls(job, listingUrls) {
 
 export function closeRefreshUrlForSeenOffer(job, seenUrls, listingUrls) {
   const recorded = recordedListingUrls(job, listingUrls);
-  if (recorded.length === 1) return recorded[0];
   if (recorded.length > 1) return '';
+  if (recorded.length === 1) {
+    const offerKey = normalizeUrlForDedup(job?.url);
+    if (offerKey && normalizeUrlForDedup(recorded[0]) === offerKey) return job.url;
+    return recorded[0];
+  }
   const dedupUrl = seenJobKey(job?.url);
   return seenUrls?.has(dedupUrl) ? job.url : '';
 }
