@@ -302,3 +302,9 @@ test('an unrelated expired posting on the page is not reported as the requested 
   const expired = { '@type': 'JobPosting', title: 'Old Job', description: '<p>Gone.</p>', validThrough: '2020-01-01T00:00:00Z' };
   assert.equal(jdFromPageHtml(page(`<p>${BODY}</p>`, { extraLd: [expired] }), NOW), null, 'ambiguous expiry must be a miss, not a closure');
 });
+
+test('same-title description-less postings at different employers or locations are separate postings', () => {
+  const at = (org, city) => ({ '@type': 'JobPosting', title: 'Engineer', hiringOrganization: { name: org }, jobLocation: { address: { addressLocality: city } } });
+  const out = jdFromPageHtml(page('<p>Short teaser.</p>', { posting: { title: 'Engineer', description: undefined, hiringOrganization: { name: 'A' }, jobLocation: { address: { addressLocality: 'Paris' } } }, extraLd: [at('B', 'Paris'), at('A', 'Berlin')], body: embedded(long('unrelated', 300)) }), NOW);
+  assert.equal(out, null);
+});
