@@ -3,7 +3,7 @@
 // Run:  node --test tests/lib/jd-prefetch.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { prefetchJd, postingUrlFrom, MIN_PREFETCH_JD_CHARS } from "../../src/lib/jd-prefetch.mjs";
+import { prefetchJd, postingUrlFrom, isTruncatedJd, MIN_PREFETCH_JD_CHARS } from "../../src/lib/jd-prefetch.mjs";
 
 const JD = "Responsibilities include building and operating services. ".repeat(20);
 const ok = (stdout) => async () => ({ code: 0, stdout, timedOut: false, spawnFailed: false });
@@ -54,6 +54,17 @@ test("prefetchJd carries a closed posting (fetch-jd exit 3) instead of treating 
   const url = "https://careers.example.com/job/1";
   const closed = await prefetchJd(url, async () => ({ code: 3, stdout: "CLOSED_POSTING JobPosting validThrough 2026-10-01T00:00:00Z" }));
   assert.deepEqual(closed, { text: null, closedEvidence: "JobPosting validThrough 2026-10-01T00:00:00Z" });
+});
+
+test("prefetchJd accepts closure evidence that contains a newline", async () => {
+  const out = await prefetchJd("https://careers.example.com/job/1", async () => ({ code: 3, stdout: "CLOSED_POSTING page text: line one\nline two" }));
+  assert.equal(out.closedEvidence, "page text: line one\nline two");
+});
+
+test("isTruncatedJd spots the cut notice and nothing else", () => {
+  assert.equal(isTruncatedJd("text\n\n[Job description truncated here: the posting is longer than 20000 characters. This text is NOT the complete job description.]"), true);
+  assert.equal(isTruncatedJd("a full description"), false);
+  assert.equal(isTruncatedJd(null), false);
 });
 
 test("prefetchJd ignores an exit 3 whose output is not the closed-posting line", async () => {

@@ -92,14 +92,7 @@ function htmlToText(html) {
     ESCAPED_TAG_RE,
     (_m, name, attrs) => `<${name}${String(attrs).replace(/&quot;/gi, '"')}>`,
   );
-  return markup
-    .replace(/<script[\s\S]*?<\/script[^>]*>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style[^>]*>/gi, ' ')
-    // Keep block boundaries as line breaks so requirement lists do not run
-    // together into one unreadable paragraph for the worker.
-    .replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
+  return stripMarkup(markup)
     .replace(/&([a-z]+|#x?[0-9a-f]+);/gi, (m, e) => {
       const k = e.toLowerCase();
       if (HTML_ENTITIES[k] !== undefined) return HTML_ENTITIES[k];
@@ -117,6 +110,61 @@ function htmlToText(html) {
 
 export const wordCount = (t) => t.split(/\s+/).filter(Boolean).length;
 
+const BLOCK_END_TAG = /^\/(p|div|li|h[1-6]|tr|section|article)$/;
+
+/**
+ * Remove `<script>`/`<style>` elements and every tag, in one forward pass.
+ * Block-closing tags and `<br>` become line breaks so requirement lists do not
+ * run together into one paragraph for the worker. Each step moves forward with
+ * indexOf, so hostile input (many unclosed `<script`, or `<` with no `>`) stays
+ * linear where the lazy-regex form rescanned the remainder per start.
+ *
+ * @param {string} markup
+ * @returns {string}
+ */
+function stripMarkup(markup) {
+  const src = String(markup);
+  const lower = src.toLowerCase();
+  const out = [];
+  let i = 0;
+  let noMoreGt = false;
+  while (i < src.length) {
+    const lt = src.indexOf('<', i);
+    if (lt === -1) { out.push(src.slice(i)); break; }
+    out.push(src.slice(i, lt));
+    const gt = noMoreGt ? -1 : src.indexOf('>', lt + 1);
+    if (gt === -1) { noMoreGt = true; out.push(src.slice(lt)); break; }
+    const name = /^\/?[a-z][a-z0-9]*|^br(?=[\s/])/.exec(lower.slice(lt + 1, lt + 12))?.[0] ?? '';
+    if (name === 'script' || name === 'style') {
+      const close = lower.indexOf(`</${name}`, gt + 1);
+      const closeGt = close === -1 ? -1 : src.indexOf('>', close);
+      if (closeGt === -1) { out.push(' '); i = gt + 1; continue; } // unclosed: drop just the tag, as before
+      out.push(' ');
+      i = closeGt + 1;
+      continue;
+    }
+    out.push(name === 'br' || BLOCK_END_TAG.test(name) ? '\n' : ' ');
+    i = gt + 1;
+  }
+  return out.join('');
+}
+
+/**
+ * End of an opening tag, skipping any `>` inside a quoted attribute value. Bounded
+ * to 4 KB so an unmatched quote cannot make every later `<script` rescan the page.
+ */
+function scriptTagEnd(src, start) {
+  let quote = '';
+  const stop = Math.min(src.length, start + 4096);
+  for (let i = start; i < stop; i += 1) {
+    const ch = src[i];
+    if (quote) { if (ch === quote) quote = ''; }
+    else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '>') return i;
+  }
+  return -1;
+}
+
 /**
  * Contents of every `<script type="application/ld+json">` block, found with
  * forward indexOf scans only. A lazy `[^>]*`/`[\s\S]*?` regex rescans to the end
@@ -130,11 +178,16 @@ export function ldJsonBlocks(html) {
   const lower = src.toLowerCase();
   const blocks = [];
   let i = 0;
+  let nextGt = -2;
   for (;;) {
     const start = lower.indexOf('<script', i);
     if (start === -1) break;
-    const gt = src.indexOf('>', start);
-    if (gt === -1) break; // no later '>' exists either
+    if (nextGt < start) nextGt = src.indexOf('>', start);
+    if (nextGt === -1) break; // no later '>' exists
+    // A tag whose first '>' is far away is not worth a quote-aware scan; this
+    // also keeps a run of unclosed `<script` starts from rescanning the page.
+    const gt = nextGt - start > 4096 ? -1 : scriptTagEnd(src, start);
+    if (gt === -1) { i = start + 7; continue; }
     const tag = lower.slice(start, gt);
     i = gt + 1;
     if (!/type\s*=\s*["']application\/ld\+json["']/.test(tag)) continue;

@@ -17,7 +17,7 @@ import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
-import { prefetchJd } from "@/lib/jd-prefetch.mjs";
+import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
 import { runCoreCli } from "@/lib/core-cli";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
@@ -200,6 +200,12 @@ export async function POST(req: Request) {
     if (req.signal.aborted) {
       if (writeToken !== null) releaseTrackerWrite(writeToken);
       return new Response(null, { status: 499 });
+    }
+    // A partial JD must not reach a worker that could score and save it as the
+    // whole posting, so refuse here instead of trusting the prompt to stop it.
+    if (isTruncatedJd(prefetch?.text)) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Paste the full job text instead. No AI run was started." }, { status: 422 });
     }
     const prefetchedJd = prefetch?.text ?? null;
     const closedEvidence = prefetch?.closedEvidence ?? null;

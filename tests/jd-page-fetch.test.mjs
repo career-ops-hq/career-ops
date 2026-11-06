@@ -127,11 +127,11 @@ test('fetchJdFromPage guards every redirect hop, not just the first URL', async 
 });
 
 test('fetchJdFromPage follows a safe redirect', async () => {
-  const net = stubNetwork((url) => url.endsWith('/old')
-    ? new Response(null, { status: 301, headers: { location: '/new' } })
+  const net = stubNetwork((url) => url.startsWith('https://careers.')
+    ? new Response(null, { status: 301, headers: { location: 'https://www.careers.example.com/job/1/' } })
     : html(page(`<p>${BODY}</p>`)));
   try {
-    assert.ok(await fetchJdFromPage('https://careers.example.com/old'));
+    assert.ok(await fetchJdFromPage('https://careers.example.com/job/1'));
   } finally { net.restore(); }
 });
 
@@ -200,11 +200,11 @@ test('every hop runs inside the connect-time address guard (DNS-rebinding defenc
   const seen = [];
   const net = stubNetwork((url) => {
     seen.push([url, inProviderFetch()]);
-    return url.endsWith('/old') ? new Response(null, { status: 301, headers: { location: '/new' } }) : html(page(`<p>${BODY}</p>`));
+    return url === 'https://careers.example.com/job/1' ? new Response(null, { status: 301, headers: { location: '/job/1/' } }) : html(page(`<p>${BODY}</p>`));
   });
   try {
-    assert.ok(await fetchJdFromPage('https://careers.example.com/old'));
-    assert.deepEqual(seen, [['https://careers.example.com/old', true], ['https://careers.example.com/new', true]]);
+    assert.ok(await fetchJdFromPage('https://careers.example.com/job/1'));
+    assert.deepEqual(seen, [['https://careers.example.com/job/1', true], ['https://careers.example.com/job/1/', true]]);
     assert.equal(inProviderFetch(), false, 'the guard context must not leak out of the fetch');
   } finally { net.restore(); }
 });
@@ -398,6 +398,42 @@ test('hostile markup cannot make the visible-text closure check slow', async () 
     const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body })));
     const t0 = Date.now();
     try { await fetchJdFromPage('https://careers.example.com/job/1'); } finally { net.restore(); }
+    assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
+  }
+});
+
+test('a closure banner written with numeric entities is still recognised', async () => {
+  const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<p>This job is no longer available &#8212; it&#39;s closed.</p>' })));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.equal(out.closed, true);
+  } finally { net.restore(); }
+});
+
+test('a job URL that redirects to a different page is a miss, not that page\'s posting', async () => {
+  const net = stubNetwork((u) => new URL(u).pathname === '/job/1'
+    ? new Response(null, { status: 302, headers: { location: 'https://careers.example.com/job/2' } })
+    : html(page(`<p>${BODY}</p>`)));
+  try {
+    assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null);
+  } finally { net.restore(); }
+});
+
+test('conditional text before a closure banner does not hide the banner', async () => {
+  const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<div>Sign in to apply</div><div>This job is no longer available.</div>' })));
+  try { assert.equal((await fetchJdFromPage('https://careers.example.com/job/1')).closed, true); } finally { net.restore(); }
+});
+
+test('a ">" inside a quoted script attribute does not hide the ld+json block', () => {
+  const ld = JSON.stringify({ '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Eng', description: `<p>${BODY}</p>`, hiringOrganization: { name: 'Acme' } });
+  const out = jdFromPageHtml(`<html><head><script data-x="a>b" type="application/ld+json">${ld}</script></head><body></body></html>`);
+  assert.ok(out && out.method === 'ld+json');
+});
+
+test('hostile markup in a JSON-LD description stays linear', () => {
+  for (const junk of ['<script '.repeat(300_000), '<style '.repeat(300_000), '<'.repeat(1_500_000)]) {
+    const t0 = Date.now();
+    jdFromPageHtml(page(`<p>${BODY}</p>${junk}`));
     assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
   }
 });
