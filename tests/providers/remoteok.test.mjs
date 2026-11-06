@@ -98,6 +98,22 @@ try {
     pass('remoteok.fetch() yields empty location for a non-string location value');
   else fail(`remoteok.fetch() row 1 location = ${JSON.stringify(fetched[1]?.location)}`);
 
+  // description: every row of the feed carries the posting's HTML. Dropped, it
+  // left content_filter, country_eligibility_filter and visa_filter nothing to
+  // read for any RemoteOK posting, and the scan-history fingerprint empty.
+  const row = (slug, description) => ({ position: 'Data Engineer', company: 'Acme', url: `https://remoteok.com/remote-jobs/${slug}`, description });
+  const described = await remoteok.fetch({ provider: 'remoteok' }, { fetchJson: async () => [
+    { last_updated: 1751500000 },
+    row('d1', '<p style="min-height:1.5em">You will write <strong>Python</strong> &amp; dbt.</p>'),
+    row('d2'), row('d3', ''), row('d4', '   '), row('d5', null), row('d6', 42), row('d7', '<p></p>'),
+  ] });
+  if (described[0]?.description === 'You will write Python & dbt.')
+    pass('remoteok.fetch() passes the description through as plain text');
+  else fail(`remoteok.fetch() description = ${JSON.stringify(described[0]?.description)}`);
+  if (described.length === 7 && described.slice(1).every((j) => !('description' in j)))
+    pass('remoteok.fetch() omits description when it is absent, empty, whitespace, non-string or markup-only');
+  else fail(`remoteok.fetch() description presence = ${JSON.stringify(described.map((j) => j.description))}`);
+
   // company default when both the row's company and entry.name are missing → 'RemoteOK'.
   const noName = await remoteok.fetch(
     {},
