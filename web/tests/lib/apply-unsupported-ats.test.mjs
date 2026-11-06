@@ -276,7 +276,9 @@ test("sessionFollowUp stops drive and prefill for an unsupported body", () => {
 
 function careerPage(careerUrl, blockedHref, closed, options = {}) {
   let current = careerUrl;
+  let applyClicked = false;
   const popupPages = [];
+  const extraPages = options.extraPages ?? [];
   const frame = {
     url: () => current,
     evaluate: async () => {
@@ -288,7 +290,7 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
     route: async () => {},
     routeWebSocket: async () => {},
     setDefaultTimeout() {},
-    pages: () => popupPages,
+    pages: () => [...extraPages, ...popupPages],
     newPage: async () => page,
     close: async () => { closed.push(true); },
   };
@@ -300,7 +302,11 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
       return { status: () => 200, headers: () => ({}) };
     },
     waitForLoadState: async () => {},
-    waitForTimeout: async () => {},
+    waitForTimeout: async () => {
+      if (applyClicked && options.popupOnWait && options.popupUrl && popupPages.length === 0) {
+        popupPages.push({ url: () => options.popupUrl });
+      }
+    },
     screenshot: async () => Buffer.from("career"),
     title: async () => "Acme role",
     evaluate: async () => {
@@ -327,7 +333,9 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
         innerText: async () => "Apply",
         getAttribute: async () => null,
         click: async () => {
-          if (wantsApply && options.popupUrl) popupPages.push({ url: () => options.popupUrl });
+          if (!wantsApply) return;
+          applyClicked = true;
+          if (options.popupUrl && !options.popupOnWait) popupPages.push({ url: () => options.popupUrl });
         },
         first() { return this; },
         or() { return this; },
@@ -397,6 +405,35 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     const before = globalThis.__applyLaunchAttempts;
     const result = await openSession(career);
     assert.equal(globalThis.__applyLaunchAttempts, before + 1);
+    assert.deepEqual(closed, [true]);
+    assert.equal(result.unsupported.vendor, "icims");
+    assert.equal(result.unsupported.postingUrl, popup);
+    assert.equal(result.message, MESSAGE.iCIMS);
+  });
+
+  test("a Workday tab that was already open does not refuse Apply", async () => {
+    const career = "https://careers.example.com/jobs/1";
+    const closed = [];
+    globalThis.__applyCareerPage = () => careerPage(career, null, closed, {
+      noAtsLink: true,
+      applyClick: true,
+      extraPages: [{ url: () => "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role" }],
+    });
+    await assert.rejects(() => openSession(career), /Couldn't find a fillable form/);
+    assert.deepEqual(closed, [true]);
+  });
+
+  test("an Apply click that opens an iCIMS popup after the click is refused", async () => {
+    const career = "https://careers.example.com/jobs/1";
+    const popup = "https://careers-acme.icims.com/jobs/9";
+    const closed = [];
+    globalThis.__applyCareerPage = () => careerPage(career, null, closed, {
+      noAtsLink: true,
+      applyClick: true,
+      popupOnWait: true,
+      popupUrl: popup,
+    });
+    const result = await openSession(career);
     assert.deepEqual(closed, [true]);
     assert.equal(result.unsupported.vendor, "icims");
     assert.equal(result.unsupported.postingUrl, popup);

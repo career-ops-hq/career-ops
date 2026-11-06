@@ -99,23 +99,63 @@ async function blockedTriggerHref(page: Page, href: string | null): Promise<stri
   return hit ? hit.postingUrl : null;
 }
 
-async function blockedOpenPage(page: Page): Promise<string | null> {
-  const opened = page.context().pages();
-  const pages = opened.length ? [page, ...opened] : [page];
+type OpenPage = { url: () => string };
+
+function pageUrl(candidate: OpenPage): string {
+  try {
+    return candidate.url() || "";
+  } catch {
+    return "";
+  }
+}
+
+function contextPages(page: Page): OpenPage[] {
+  try {
+    const opened = page.context().pages();
+    return Array.isArray(opened) ? opened : [];
+  } catch {
+    return [];
+  }
+}
+
+function urlSnapshot(page: Page): Map<OpenPage, string> {
+  const snap = new Map<OpenPage, string>();
+  snap.set(page, pageUrl(page));
+  for (const opened of contextPages(page)) snap.set(opened, pageUrl(opened));
+  return snap;
+}
+
+async function blockedAmong(page: Page, candidates: OpenPage[]): Promise<string | null> {
   const seen = new Set<string>();
-  for (const candidate of pages) {
-    let landed = "";
-    try {
-      landed = candidate.url();
-    } catch {
-      continue;
-    }
+  for (const candidate of candidates) {
+    const landed = pageUrl(candidate);
     if (!landed || seen.has(landed)) continue;
     seen.add(landed);
     const blocked = await blockedTriggerHref(page, landed);
     if (blocked) return blocked;
   }
   return null;
+}
+
+// Consent can leave another tab open. Only the main page, a new tab, or a tab
+// whose URL changed during this Apply action can refuse the posting. A click
+// can open its popup after click() returns, so that path looks a second time.
+async function blockedAfterAction(page: Page, before: Map<OpenPage, string>, retry: boolean): Promise<string | null> {
+  const read = () => {
+    const now = [page, ...contextPages(page)];
+    const seen = new Set<OpenPage>();
+    const changed: OpenPage[] = [];
+    for (const candidate of now) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      if (candidate === page || !before.has(candidate) || before.get(candidate) !== pageUrl(candidate)) changed.push(candidate);
+    }
+    return blockedAmong(page, changed);
+  };
+  const first = await read();
+  if (first || !retry) return first;
+  await page.waitForTimeout(400).catch(() => {});
+  return read();
 }
 
 /** SPA / apply-behind-a-button: if no form yet, click the first visible Apply CTA
@@ -132,8 +172,9 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
       if (href && /^https?:\/\//i.test(href) && !/submit/i.test(href)) {
         const blocked = await blockedTriggerHref(page, href);
         if (blocked) return { blocked };
+        const before = urlSnapshot(page);
         await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-        const landed = await blockedOpenPage(page);
+        const landed = await blockedAfterAction(page, before, false);
         if (landed) return { blocked: landed };
         return true;
       }
@@ -150,8 +191,9 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
       const href = await t.getAttribute("href").catch(() => null);
       const blocked = await blockedTriggerHref(page, href);
       if (blocked) return { blocked };
+      const before = urlSnapshot(page);
       await t.click({ timeout: 3000 }).catch(() => {});
-      const landed = await blockedOpenPage(page);
+      const landed = await blockedAfterAction(page, before, true);
       if (landed) return { blocked: landed };
       return true;
     }
