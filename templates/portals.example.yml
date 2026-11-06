@@ -2022,8 +2022,12 @@ search_queries:
 #   provider: workingnomads
 #   enabled: true
 #
-# - name: Jobicy
+# - name: Jobicy                          # remote-only board; walks its whole 7-day feed
 #   provider: jobicy
+#   # geo: latam            # optional: a geoSlug from https://jobicy.com/api/v2/remote-jobs?get=locations
+#   # industry: engineering # optional: an industrySlug from https://jobicy.com/api/v2/remote-jobs?get=industries
+#   # tag: python           # optional: keyword matched against the job title
+#   # max_pages: 25         # optional page cap (100 postings/page, default 25, max 100)
 #   enabled: true
 #
 # - name: getManfred                      # Spanish/EU tech roles, salary ranges published
