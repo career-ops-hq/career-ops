@@ -437,3 +437,11 @@ test('hostile markup in a JSON-LD description stays linear', () => {
     assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
   }
 });
+
+test('a closure banner that only matches once &#39; is decoded is recognised', async () => {
+  const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<p>You can&#39;t view this job because it&#39;s not available</p>' })));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.equal(out.closed, true);
+  } finally { net.restore(); }
+});
