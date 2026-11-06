@@ -257,4 +257,46 @@ test('a path-case change refreshes the stored posting and leaves a different pat
   assert.equal(closeDateForUrl(index, 'https://jobs.example/other-role'), '');
 });
 
+test('two seen language versions keep their own close days', () => {
+  const history = [
+    historyRow({ url: 'https://jobs.example/Acme?lang=en', closes_at: '2026-01-01', status: 'added', first_seen: '2026-10-01' }),
+    historyRow({ url: 'https://jobs.example/Acme?lang=fr', closes_at: '2026-02-02', status: 'added', first_seen: '2026-10-01' }),
+  ].join('\n');
+  const aligned = alignCloseRefreshOffers([
+    { url: 'https://jobs.example/acme?lang=fr', closesAt: '2026-06-06', language: 'fr' },
+    { url: 'https://jobs.example/acme?lang=en', closesAt: '2026-07-07', language: 'en' },
+    { url: 'https://jobs.example/acme?lang=de', closesAt: '2026-08-08', language: 'de' },
+  ], history);
+  assert.equal(aligned[0].url, 'https://jobs.example/Acme?lang=fr');
+  assert.equal(aligned[1].url, 'https://jobs.example/Acme?lang=en');
+  assert.equal(aligned[2].url, 'https://jobs.example/acme?lang=de');
+  const selected = selectCloseDateRefreshes(aligned, history);
+  const next = [
+    history,
+    ...selected.map((offer) => historyRow({ url: offer.url, closes_at: closesAtIso(offer.closesAt) })),
+  ].join('\n');
+  const index = closeDatesByUrl(next);
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/Acme?lang=en'), '2026-07-07');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/Acme?lang=fr'), '2026-06-06');
+});
+
+test('a tracker URL with no history pin receives the path-case refresh', () => {
+  const history = historyRow({ url: 'https://jobs.example/Other', closes_at: '2026-02-02', status: 'added', first_seen: '2026-10-01' });
+  const applications = '| 1 | 2026-10-01 | Acme | Analyst | 4/5 | Evaluated | | | https://jobs.example/Acme | |';
+  const aligned = alignCloseRefreshOffers([
+    { url: 'https://jobs.example/acme', closesAt: '2026-06-06' },
+    { url: 'https://jobs.example/other-role', closesAt: '2026-07-07' },
+  ], history, {}, { applicationsText: applications });
+  assert.equal(aligned[0].url, 'https://jobs.example/Acme');
+  assert.equal(aligned[1].url, 'https://jobs.example/other-role');
+  const selected = selectCloseDateRefreshes(aligned, history);
+  const next = [
+    history,
+    historyRow({ url: selected[0].url, closes_at: '2026-06-06' }),
+  ].join('\n');
+  const index = closeDatesByUrl(next);
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/Acme'), '2026-06-06');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/other-role'), '');
+});
+
 

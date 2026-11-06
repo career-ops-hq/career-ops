@@ -1825,26 +1825,61 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
   return ageDays < recheckAfterDays;
 }
 
-export function pinnedUrlByDedupKey(historyText, policy = {}) {
+function refreshLanguage(url, recorded) {
+  const fromRecord = languageFormsForDedup(recorded);
+  if (fromRecord.length) return fromRecord;
+  return languageFormsFromUrl(url);
+}
+
+function sameRefreshLanguage(left, right) {
+  if (left.length === 0 || right.length === 0) return left.length === right.length;
+  return left.some((language) => right.includes(language));
+}
+
+function rememberRefreshUrl(urls, url, language) {
+  const key = normalizeUrlForDedup(url);
+  if (!key || typeof url !== 'string' || !url) return;
+  let rows = urls.get(key);
+  if (!rows) urls.set(key, (rows = []));
+  rows.push({ url, language });
+}
+
+function pinningRefreshUrls(historyText, policy) {
   const urls = new Map();
   for (const line of scanHistoryDataLines(historyText)) {
     const row = parseScanHistoryLine(line);
     if (!row.url) continue;
-    const dedupKey = normalizeUrlForDedup(row.url);
-    if (!dedupKey || urls.has(dedupKey)) continue;
     const status = row.status || 'added';
     if (!shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy)) continue;
-    urls.set(dedupKey, row.url);
+    rememberRefreshUrl(urls, row.url, refreshLanguage(row.url, row.language));
   }
   return urls;
 }
 
-export function alignCloseRefreshOffers(offers, historyText, policy = {}) {
-  const urls = pinnedUrlByDedupKey(historyText, policy);
-  return offers.map((offer) => {
-    const dedupKey = normalizeUrlForDedup(offer?.url);
-    return refreshOfferForSeenUrl(offer, dedupKey ? urls.get(dedupKey) : '');
-  });
+function trackerRefreshUrls(pipelineText, applicationsText) {
+  const urls = new Map();
+  for (const match of String(applicationsText || '').matchAll(/https?:\/\/[^\s|)]+/g)) {
+    rememberRefreshUrl(urls, match[0], refreshLanguage(match[0]));
+  }
+  for (const line of String(pipelineText || '').split('\n')) {
+    const url = extractPipelineUrl(line);
+    if (url) rememberRefreshUrl(urls, url, refreshLanguage(url));
+  }
+  return urls;
+}
+
+function originalRefreshUrl(offer, historyUrls, trackerUrls) {
+  const key = normalizeUrlForDedup(offer?.url);
+  if (!key) return '';
+  const language = refreshLanguage(offer?.url, offer?.language);
+  const pick = (rows) => rows?.find((row) => sameRefreshLanguage(language, row.language))?.url || '';
+  return pick(historyUrls.get(key)) || pick(trackerUrls.get(key));
+}
+
+export function alignCloseRefreshOffers(offers, historyText, policy = {}, sources = {}) {
+  const historyUrls = pinningRefreshUrls(historyText, policy);
+  const trackerUrls = trackerRefreshUrls(sources.pipelineText, sources.applicationsText);
+  return offers.map((offer) => refreshOfferForSeenUrl(offer, originalRefreshUrl(offer, historyUrls, trackerUrls)));
 }
 
 function scanHistoryPolicy(config = {}) {
@@ -5305,7 +5340,10 @@ async function main() {
   if (!dryRun && closeRefreshOffers.length > 0) {
     const historyText = readIfExists(SCAN_HISTORY_PATH);
     const refreshed = selectCloseDateRefreshes(
-      alignCloseRefreshOffers(closeRefreshOffers, historyText, scanHistoryPolicy(config)),
+      alignCloseRefreshOffers(closeRefreshOffers, historyText, scanHistoryPolicy(config), {
+        pipelineText: readIfExists(PIPELINE_PATH),
+        applicationsText: readIfExists(APPLICATIONS_PATH),
+      }),
       historyText,
     );
     if (refreshed.length > 0) {
