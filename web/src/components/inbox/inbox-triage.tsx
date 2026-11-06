@@ -172,10 +172,20 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
 
   const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
-  const capped = !showAll && !anyFacet;
+  // Keep the batch cap with filters on too: filters sit under the list, so an
+  // uncapped match set pushes what the filter did off screen.
+  const capped = !showAll;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
+  const listTopRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    setShowAll(false);
+  }, [within, sources, seniorities, locQ, kw]);
+  useEffect(() => {
+    if (!anyFacet) return;
+    listTopRef.current?.scrollIntoView({ block: "nearest" });
+  }, [anyFacet, within, sources, seniorities, locQ, kw]);
   useEffect(() => {
     setCursor((index) => (visible.length === 0 ? -1 : index < 0 ? index : Math.min(index, visible.length - 1)));
   }, [visible.length]);
@@ -377,10 +387,10 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {writeError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-400">{writeError}</p>}
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
-      {/* batch header: fresh slice by default, or the full filtered set */}
-      <div className="mt-4 flex items-baseline justify-between gap-3">
+      {/* batch header: fresh/filtered slice by default; "See all" lifts the cap */}
+      <div ref={listTopRef} className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
-          {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
+          {anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : capped ? "Fresh — worth a look" : "All roles"}
         </p>
         {hiddenCount > 0 && (
           <button type="button" onClick={() => void restoreHidden()} disabled={restoring} aria-busy={restoring} className="text-xs text-faint transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]">
@@ -431,14 +441,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         </div>
       )}
 
-      {/* "See all N" — only when the fresh batch is capping a larger list */}
+      {/* "See all N" — when the batch is capping a larger (optionally filtered) list */}
       {capped && ordered.length > BATCH && (
         <button
           type="button"
           onClick={() => setShowAll(true)}
           className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
         >
-          See all {ordered.length} in inbox →
+          See all {ordered.length}{anyFacet ? " matches" : " in inbox"} →
         </button>
       )}
 
