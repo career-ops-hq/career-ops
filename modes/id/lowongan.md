@@ -205,9 +205,6 @@ Nama field di header (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`) 
 
 ---
 
-## Machine Summary
-(blok YAML untuk skrip -- lihat ketentuan di bawah)
-
 ## A) Ringkasan role
 (isi lengkap blok A)
 
@@ -251,11 +248,14 @@ Nama field di header (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`) 
 
 ## Job Description (archived verbatim)
 (teks lengkap lowongan, ditempel kata per kata -- lihat ketentuan di bawah)
+
+## Machine Summary
+(blok YAML untuk skrip -- lihat ketentuan di bawah)
 ```
 
 **Baris keputusan (wajib):** `**Keputusan:**` adalah `final_decision` dari Machine Summary, dan baris di bawah header adalah kalimat dari `## Kesimpulan (lead)`, disalin kata per kata. Isi keduanya paling akhir. Jangan pernah memakai `Verdict:` sebagai nama field: aplikasi web membaca `VERDICT:` pertama sebagai baris score.
 
-**Machine Summary (wajib):** blok YAML tepat setelah header, dengan skema, nama field yang persis, dan aturan dari `batch/batch-prompt.md` (sumbernya; jangan diduplikasi di sini). Berisi `advertised_comp` (angka gaji dari lowongan kata per kata, atau `null`), `risk_summary`, dan `requirement_importance` (Blok B baris per baris; batas `inferred` juga berlaku di sini).
+**Machine Summary (wajib):** blok YAML di akhir report, setelah `## Job Description (archived verbatim)`, dengan skema, nama field yang persis, dan aturan dari `batch/batch-prompt.md` (sumbernya; jangan diduplikasi di sini). Berisi `advertised_comp` (angka gaji dari lowongan kata per kata, atau `null`), `risk_summary`, dan `requirement_importance` (Blok B baris per baris; batas `inferred` juga berlaku di sini).
 
 **Arsip lowongan (wajib, #2789):** setiap report WAJIB memiliki bagian `## Job Description (archived verbatim)` berisi teks lengkap lowongan, tidak pernah diringkas atau diparafrasekan. Judulnya tetap dalam bahasa Inggris: `check-jd-archive.mjs` mencarinya berdasarkan nama. Baris pertama adalah tanggal posting yang terlihat (`Posted: {tanggal atau teks relatif}`, atau `Posted: not visible in source`), tidak pernah tanggal file report. Jika lowongan terlalu panjang atau tidak bisa dikutip utuh, simpan dengan `archive-posting.mjs` (perintah di bawah) dan tulis di bagian itu **persis** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, tanpa teks lain. Jika tidak ada cara menyimpan secara otomatis (mis. teks panjang yang ditempel tanpa URL), ganti judul bagian itu menjadi `## Job Description (not archived)` dan jelaskan alasannya. Jangan pernah parafrase sebagai gantinya; aturan lengkapnya ada di `modes/oferta.md` (**JD archival**).
 

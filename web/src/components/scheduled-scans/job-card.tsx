@@ -132,7 +132,7 @@ export function JobCard({
           <span
             className={cn(
               "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-medium",
-              isFull ? "border-brand/30 bg-brand-soft/60 text-brand-text" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              isFull ? "border-brand/30 bg-brand-soft/60 text-brand-text" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400"
             )}
           >
             {isFull ? <Globe className="size-3" /> : <Zap className="size-3" />}
@@ -143,7 +143,7 @@ export function JobCard({
             className={cn(
               "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-medium",
               isActive
-                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
                 : "border-border bg-surface-hover text-muted"
             )}
           >
@@ -172,7 +172,7 @@ export function JobCard({
               <span className="truncate">Last error: {job.lastError}</span>
             </p>
           ) : job.lastRunAt ? (
-            <p className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+            <p className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-400">
               <CheckCircle2 className="size-3.5 shrink-0" />
               Last run {new Date(job.lastRunAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·{" "}
               {job.rolesFoundCount || 0} roles found
@@ -201,7 +201,7 @@ export function JobCard({
           onClick={() => onToggleStatus(job.id, job.status)}
           className={cn(
             "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-            isActive ? "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand-text" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            isActive ? "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand-text" : "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400"
           )}
         >
           {isActive ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}

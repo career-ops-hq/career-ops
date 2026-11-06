@@ -186,7 +186,12 @@ Değerlendirmenin tamamını `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` olar
 
 ## Job Description (archived verbatim)
 (the posting's full text, pasted verbatim — see requirement below)
+
+## Machine Summary
+(sonraki betikler için YAML bloğu — aşağıdaki gereksinime bakın)
 ```
+
+**Machine Summary (zorunlu):** raporun sonunda, `## Job Description (archived verbatim)` bölümünden sonra gelen bir YAML bloğu. Betikler onu konumuyla değil başlığıyla bulur; bu yüzden okuyucu ile Blok A arasına girmemesi için en sona konur. Şema, alan adlarının tam yazımı ve kurallar `batch/batch-prompt.md` içindedir (kaynak orasıdır; burada tekrarlamayın). `## Machine Summary` başlığı ve alan adları İngilizce kalır. `advertised_comp` (ilandaki maaş rakamı olduğu gibi, yoksa `null`), `risk_summary` (Risk Summary bloğunun eşlem hali) ve `requirement_importance` (Blok B satır satır; ilan kullanılabilir bir gereksinim listesi vermiyorsa `[]`) alanlarını içerir.
 
 **JD arşivi (zorunlu, #2789):** Her rapor, ilanın tam metnini olduğu gibi içeren bir `## Job Description (archived verbatim)` bölümü taşır; metin asla özetlenmez, asla başka sözcüklerle yeniden yazılmaz. Başlık İngilizce kalır, çünkü `check-jd-archive.mjs` bölümü adıyla arar. `**URL:**` alanı bir arşiv değildir: ilan kapandığında bağlantı çalışmaz olur ve özgün gereksinimleri geri getirmenin bir yolu kalmaz. Bölümün ilk satırı, kaynakta göründüğü haliyle yayın tarihidir (`Posted: {tarih ya da göründüğü gibi göreli ifade}`, gerçekten görünmüyorsa `Posted: not visible in source`); bu satır asla rapor dosyasının tarihiyle doldurulmaz. İlan çok uzunsa ya da tamamı alıntılanamıyorsa, `archive-posting.mjs` (aşağıdaki komut) ile kaydedin ve bölüme başka hiçbir metin eklemeden **tam olarak** şu cümleyi yazın: `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` Metnin yerine başka sözcüklerle yazılmış bir özet konmaz; kuralın tamamı `modes/oferta.md` içinde (**JD archival**).
 

@@ -30,7 +30,7 @@ version: 1.0.0
   :root {
     --accent-color: #000000;
     /* The original compiles in a Computer Modern / Times-class serif. */
-    --font-family: "Liberation Serif", 'Times New Roman', Georgia, 'DejaVu Serif', serif;
+    --font-family: "Liberation Serif", 'Times New Roman', Georgia, 'DejaVu Serif', 'Arial Unicode MS', serif;
     --font-size: 10.5px;
     /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
        appended later by injectPrintPageCss reading this same variable. */
@@ -363,12 +363,12 @@ version: 1.0.0
 
   /* === CJK fallback === */
   html[lang="ja"] body {
-    font-family: "Liberation Serif", 'Times New Roman', 'Hiragino Mincho ProN',
+    font-family: "Liberation Serif", 'Times New Roman', 'Arial Unicode MS', 'Hiragino Mincho ProN',
       'Yu Mincho', 'Noto Serif CJK JP', 'MS PMincho', serif;
   }
   html[lang="zh-CN"] body,
   html[lang="zh"] body {
-    font-family: "Liberation Serif", 'Times New Roman', 'Songti SC',
+    font-family: "Liberation Serif", 'Times New Roman', 'Arial Unicode MS', 'Songti SC',
       'SimSun', 'Noto Serif CJK SC', serif;
     line-break: strict;
     word-break: normal;

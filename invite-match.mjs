@@ -94,39 +94,51 @@ const USAGE = `Usage:
 // silent-ignore failure mode this issue exists to close, just moved to a
 // different spelling. Leaving them out means that form is rejected loudly
 // as an unrecognized flag instead.
+// These are read only when this file is the process entry point. They used to
+// be assigned (and process.exit) at import time. check-liveness.mjs imports
+// scan.mjs, which imports normalizeCompanyName from here, so
+// `node check-liveness.mjs --file` died with "invite-match: --file requires a
+// path argument" before check-liveness looked at its own argv.
+let summaryMode = false;
+let selfTestMode = false;
+let noClarificationDraft = false;
+let filePathArg = null;
+let applyMode = false;
+let idArg = null;
+
 if (isMainModule(import.meta.url)) {
   validateFlags(args, KNOWN_FLAGS, USAGE);
-}
 
-const summaryMode = args.includes('--summary');
-const selfTestMode = args.includes('--self-test');
-const noClarificationDraft = args.includes('--no-clarification-draft');
-const fileIdx = args.indexOf('--file');
-// Treat a following recognized flag (e.g. `--file --summary`) the same as a
-// missing value — otherwise it's silently accepted as the path and produces
-// a confusing "file not found: --summary" instead of the clearer error below.
-if (fileIdx !== -1 && (args[fileIdx + 1] === undefined || args[fileIdx + 1].startsWith('--'))) {
-  console.error('invite-match: --file requires a path argument');
-  process.exit(1);
-}
-const filePathArg = fileIdx !== -1 ? args[fileIdx + 1] : null;
+  summaryMode = args.includes('--summary');
+  selfTestMode = args.includes('--self-test');
+  noClarificationDraft = args.includes('--no-clarification-draft');
+  const fileIdx = args.indexOf('--file');
+  // Treat a following recognized flag (e.g. `--file --summary`) the same as a
+  // missing value — otherwise it's silently accepted as the path and produces
+  // a confusing "file not found: --summary" instead of the clearer error below.
+  if (fileIdx !== -1 && (args[fileIdx + 1] === undefined || args[fileIdx + 1].startsWith('--'))) {
+    console.error('invite-match: --file requires a path argument');
+    process.exit(1);
+  }
+  filePathArg = fileIdx !== -1 ? args[fileIdx + 1] : null;
 
-// --apply advances a matched tracker row's status to Rejected — scoped to
-// that transition only (see issue #2098). It is deliberately NOT the general
-// #1960 "advance to Interview" flag: that issue is unclaimed and unimplemented
-// here, so an invite-classified match is never auto-applied by this flag.
-const applyMode = args.includes('--apply');
-const idIdx = args.indexOf('--id');
-if (idIdx !== -1 && (args[idIdx + 1] === undefined || args[idIdx + 1].startsWith('--'))) {
-  console.error('invite-match: --id requires a tracker # argument');
-  process.exit(1);
+  // --apply advances a matched tracker row's status to Rejected — scoped to
+  // that transition only (see issue #2098). It is deliberately NOT the general
+  // #1960 "advance to Interview" flag: that issue is unclaimed and unimplemented
+  // here, so an invite-classified match is never auto-applied by this flag.
+  applyMode = args.includes('--apply');
+  const idIdx = args.indexOf('--id');
+  if (idIdx !== -1 && (args[idIdx + 1] === undefined || args[idIdx + 1].startsWith('--'))) {
+    console.error('invite-match: --id requires a tracker # argument');
+    process.exit(1);
+  }
+  const idArgRaw = idIdx !== -1 ? args[idIdx + 1] : null;
+  if (idArgRaw !== null && !/^\d+$/.test(idArgRaw)) {
+    console.error('invite-match: --id must be a tracker # (integer)');
+    process.exit(1);
+  }
+  idArg = idArgRaw !== null ? parseInt(idArgRaw, 10) : null;
 }
-const idArgRaw = idIdx !== -1 ? args[idIdx + 1] : null;
-if (idArgRaw !== null && !/^\d+$/.test(idArgRaw)) {
-  console.error('invite-match: --id must be a tracker # (integer)');
-  process.exit(1);
-}
-const idArg = idArgRaw !== null ? parseInt(idArgRaw, 10) : null;
 
 // Statuses ranked above others when disambiguating same-company candidates —
 // an active application is a far more likely invite match than one already

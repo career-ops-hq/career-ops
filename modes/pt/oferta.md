@@ -676,9 +676,6 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ---
 
-## Machine Summary
-(cerca YAML para scripts downstream — veja requisito abaixo)
-
 ## A) Resumo da Vaga
 (conteúdo completo do bloco A)
 
@@ -722,9 +719,12 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ## Job Description (archived verbatim)
 (o texto completo da vaga, colado verbatim — veja requisito abaixo)
+
+## Machine Summary
+(cerca YAML para scripts downstream — veja requisito abaixo)
 ```
 
-**Machine Summary (obrigatório):** todo report carrega uma cerca YAML `## Machine Summary` diretamente após o cabeçalho — mesmo schema, nomes exatos de campos e regras do bloco "Machine Summary" em `batch/batch-prompt.md` (não duplique o schema aqui; aquele arquivo é a fonte da verdade). Inclui `advertised_comp`: o valor salarial do próprio JD **verbatim** (ex.: `"80-90k EUR"`), ou `null` quando o JD não declara nada — nunca estimado, nunca substituído por dados de mercado pesquisados. Esta chave alimenta a observação de salário anunciado lida por `node salary-gap.mjs`. Também inclui `risk_summary`: o bloco Risk Summary espelhado como um mapa (schema e valores de enum em `batch/batch-prompt.md`), e `requirement_importance`: a tabela do Bloco B espelhada linha por linha, carregando o tier de evidência, banda de importância e match de cada linha (`[]` quando o JD não gera lista de requisitos utilizável). O limite `inferred` do gate do Bloco B vale no YAML também — `importance` nunca é `critical` ou `high` quando `evidence: inferred`.
+**Machine Summary (obrigatório):** todo report carrega uma cerca YAML `## Machine Summary` no fim do report, após `## Job Description (archived verbatim)` — mesmo schema, nomes exatos de campos e regras do bloco "Machine Summary" em `batch/batch-prompt.md` (não duplique o schema aqui; aquele arquivo é a fonte da verdade). Inclui `advertised_comp`: o valor salarial do próprio JD **verbatim** (ex.: `"80-90k EUR"`), ou `null` quando o JD não declara nada — nunca estimado, nunca substituído por dados de mercado pesquisados. Esta chave alimenta a observação de salário anunciado lida por `node salary-gap.mjs`. Também inclui `risk_summary`: o bloco Risk Summary espelhado como um mapa (schema e valores de enum em `batch/batch-prompt.md`), e `requirement_importance`: a tabela do Bloco B espelhada linha por linha, carregando o tier de evidência, banda de importância e match de cada linha (`[]` quando o JD não gera lista de requisitos utilizável). O limite `inferred` do gate do Bloco B vale no YAML também — `importance` nunca é `critical` ou `high` quando `evidence: inferred`.
 
 **Arquivamento do JD (obrigatório, #2789):** todo report DEVE carregar uma seção `## Job Description (archived verbatim)` com o texto completo da vaga colado como está — nunca resumido, nunca parafraseado. Um cabeçalho `**URL:**` sozinho não é um arquivo: é um ponteiro vivo que apodrece quando a vaga fecha ou é removida, o que confiavelmente acontece em algum momento nas semanas entre a candidatura e uma rodada posterior de entrevista, e não há como recuperar os requisitos originais depois disso. Este é o mecanismo primário, não um fallback — o report é o único artefato garantido de ser escrito e rastreado, diferentemente de um arquivo separado `jds/`. Se o JD for muito longo, ou você não puder citá-lo na íntegra (limite de citação de ferramenta de fetch ou guarda de copyright), não o parafraseie. Capture-o por máquina com `archive-posting.mjs` pelo comando abaixo (`company` = o slug no nome do arquivo do report, incluindo `confidential-{agency-slug}`) (`fetch-jd.mjs` imprime o texto de uma vaga de ATS conhecido) e, no lugar do texto, coloque nesta seção **exatamente** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` — `check-jd-archive.mjs` apenas credita esta frase de ponteiro canônica quando ela resolve de volta para o número daquele report via `findCaptureForReport`; uma captura `jds/{slug}.md` apenas com slug sem número de report não valida aqui. Este fraseado exato importa: a verificação apenas trata uma seção como ponteiro (exigindo resolução) quando a seção não é nada além desta frase — qualquer prosa adicional ao lado dela é lida como o próprio texto arquivado, não um ponteiro, então não misture os dois. Capturas apenas com slug permanecem válidas para `jd-skill-gap.mjs` executado standalone, fora de uma avaliação completa, onde não há report para vincular de volta. `check-jd-archive.mjs` valida que todo `reports/*.md` tem uma forma ou outra e está conectado em `test-all.mjs` — um report sem ambas é uma falha de teste. Uma reformulação não é um arquivo: `check-jd-archive.mjs` não credita...
 

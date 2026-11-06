@@ -33,7 +33,7 @@ Claude буде читати файли з цього каталогу. Якщо
 
 ```yaml
 language:
-  primary: ua
+  output: uk
   modes_dir: modes/ua
 ```
 

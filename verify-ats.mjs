@@ -335,6 +335,33 @@ function extractInlineStyles(html) {
   return [...html.matchAll(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map(m => m[1] ?? m[2]);
 }
 
+// UTF-16 code units for the punctuation `cssDeclarations` reacts to.
+const BACKSLASH = 0x5c;
+const SLASH = 0x2f;
+const STAR = 0x2a;
+const SEMICOLON = 0x3b;
+const DOUBLE_QUOTE = 0x22;
+const SINGLE_QUOTE = 0x27;
+const LPAREN = 0x28;
+const RPAREN = 0x29;
+const LBRACKET = 0x5b;
+const RBRACKET = 0x5d;
+const LBRACE = 0x7b;
+const RBRACE = 0x7d;
+const LF = 0x0a;
+const CR = 0x0d;
+const FF = 0x0c;
+// Lowercase ASCII letters, for the `| 32` case fold that finds `url`.
+const LOWER_U = 0x75;
+const LOWER_R = 0x72;
+const LOWER_L = 0x6c;
+// CSS whitespace is five characters, not `\s`: U+00A0 is whitespace to
+// JavaScript and an ordinary character to CSS.
+const isCssSpaceCode = c => c === 0x20 || c === 0x09 || c === LF || c === CR || c === FF;
+// What may not immediately precede `url` for it to name the function: a
+// character that would make it part of a longer identifier.
+const URL_TAIL_BREAK = /[\w\u0080-\uffff-]/;
+
 /**
  * Split an inline style into its declarations the way a browser reads them. A
  * `;` ends a declaration only outside a quoted string, a comment, and any open
@@ -349,53 +376,93 @@ function extractInlineStyles(html) {
  */
 function cssDeclarations(style) {
   const declarations = [];
-  const closers = [];
-  const isCssSpace = ch => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f';
-  let current = '';
-  let quote = null;
-  for (let i = 0; i < style.length; i++) {
-    const c = style[i];
-    if (c === '\\' && i + 1 < style.length) {
-      const escaped = style[i + 1] === '\r' && style[i + 2] === '\n' ? '\r\n' : style[i + 1];
-      current += c + escaped;
-      i += escaped.length;
+  // Characters are compared as UTF-16 code units, not as one-character strings.
+  // `style[i]` allocates a fresh string per position; on the 400,000-character
+  // run the self-test uses, comparing strings and the `current += c` that
+  // followed each one were the bulk of the check's cost (38% of the audit in
+  // the loop, 29% in GC, before this rewrite).
+  const n = style.length;
+  // Open `(`/`[`/`{` as a depth-indexed stack of the code unit that closes each
+  // one. `Array#push`/`#pop` on this input cost 22 ms of the audit's 33 ms even
+  // though the stack only ever grows, so it is a preallocated buffer with an
+  // integer depth instead. Nothing can nest deeper than the string is long.
+  const closers = new Uint8Array(n + 1);
+  let depth = 0;
+  // The declaration being read is a run of characters copied verbatim. It ends
+  // only where something must be substituted: a `;` that closes a declaration,
+  // or a comment, which collapses to one space. So the scan keeps `start` and
+  // pushes slices instead of appending per character. `parts` stays null until
+  // the first substitution, and the common no-substitution case is one slice.
+  let start = 0;
+  let parts = null;
+  let quote = 0;
+  for (let i = 0; i < n; i++) {
+    const c = style.charCodeAt(i);
+    if (c === BACKSLASH && i + 1 < n) {
+      i += style.charCodeAt(i + 1) === CR && style.charCodeAt(i + 2) === LF ? 2 : 1;
       continue;
     }
     if (quote) {
-      current += c;
-      if (c === quote || c === '\n' || c === '\r' || c === '\f') quote = null;
+      if (c === quote || c === LF || c === CR || c === FF) quote = 0;
       continue;
     }
-    if (c === '/' && style[i + 1] === '*') {
+    if (c === SLASH && style.charCodeAt(i + 1) === STAR) {
       const end = style.indexOf('*/', i + 2);
-      i = end === -1 ? style.length : end + 1;
-      current += ' ';
+      parts ??= [];
+      if (i > start) parts.push(style.slice(start, i));
+      parts.push(' ');
+      i = end === -1 ? n : end + 1;
+      start = i + 1;
       continue;
     }
-    if (c === ';' && closers.length === 0) {
-      declarations.push(current);
-      current = '';
+    if (c === SEMICOLON && depth === 0) {
+      if (parts === null) {
+        declarations.push(style.slice(start, i));
+      } else {
+        if (i > start) parts.push(style.slice(start, i));
+        declarations.push(parts.join(''));
+        parts = null;
+      }
+      start = i + 1;
       continue;
     }
-    if (c === '(' && /(?:^|[^\w\u0080-\uffff-])url$/i.test(style.slice(Math.max(0, i - 4), i))) {
+    // A `(` opening an unquoted `url(`. The three letters before it are
+    // compared directly, with `| 32` folding ASCII case: the regex this
+    // replaces allocated a four-character slice and entered the regex engine
+    // for every open paren, which is the other half of the paren check's cost.
+    if (
+      c === LPAREN && i >= 3
+      && (style.charCodeAt(i - 1) | 32) === LOWER_L
+      && (style.charCodeAt(i - 2) | 32) === LOWER_R
+      && (style.charCodeAt(i - 3) | 32) === LOWER_U
+      && (i - 4 < 0 || !URL_TAIL_BREAK.test(style[i - 4]))
+    ) {
       let bodyStart = i + 1;
-      while (bodyStart < style.length && isCssSpace(style[bodyStart])) bodyStart++;
-      if (style[bodyStart] !== '"' && style[bodyStart] !== "'") {
+      while (bodyStart < n && isCssSpaceCode(style.charCodeAt(bodyStart))) bodyStart++;
+      const bodyFirst = style.charCodeAt(bodyStart);
+      if (bodyFirst !== DOUBLE_QUOTE && bodyFirst !== SINGLE_QUOTE) {
         let end = i + 1;
-        while (end < style.length && style[end] !== ')') end += style[end] === '\\' ? 2 : 1;
-        current += style.slice(i, end + 1);
-        i = Math.min(end, style.length - 1);
+        while (end < n && style.charCodeAt(end) !== RPAREN) {
+          end += style.charCodeAt(end) === BACKSLASH ? 2 : 1;
+        }
+        // The body is copied through as it stands, so `start` stays where it is
+        // and the run simply skips past it.
+        i = Math.min(end, n - 1);
         continue;
       }
     }
-    if (c === '"' || c === "'") quote = c;
-    else if (c === '(') closers.push(')');
-    else if (c === '[') closers.push(']');
-    else if (c === '{') closers.push('}');
-    else if (c === closers[closers.length - 1]) closers.pop();
-    current += c;
+    if (c === DOUBLE_QUOTE || c === SINGLE_QUOTE) quote = c;
+    else if (c === LPAREN) closers[depth++] = RPAREN;
+    else if (c === LBRACKET) closers[depth++] = RBRACKET;
+    else if (c === LBRACE) closers[depth++] = RBRACE;
+    else if (depth > 0 && c === closers[depth - 1]) depth--;
   }
-  declarations.push(current);
+  if (parts === null) {
+    declarations.push(style.slice(start));
+  } else {
+    if (n > start) parts.push(style.slice(start));
+    declarations.push(parts.join(''));
+  }
   return declarations;
 }
 

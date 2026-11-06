@@ -22,12 +22,14 @@ try {
         url: 'https://remotive.com/remote-jobs/acme-staff-ai-engineer',
         company_name: 'Acme Corp',
         candidate_required_location: 'Worldwide',
+        publication_date: '2026-10-27T12:56:13',             // no offset → read as UTC
       },
       {
         title: '  Platform Engineer  ',                 // leading/trailing space → trimmed
         url: '  https://remotive.com/remote-jobs/beta-platform-engineer  ',
         company_name: '',                               // empty → falls back to entry.name
         // candidate_required_location omitted → location ''
+        publication_date: 'not a date',                // unparseable → no postedAt
       },
       {
         title: '',                                       // dropped: empty title
@@ -61,10 +63,24 @@ try {
     pass('remotive.fetch() keeps 2 valid jobs (drops empty-title + non-absolute-url rows)');
   else fail(`remotive.fetch() returned ${fetched.length} jobs (expected 2)`);
 
-  // Normalized shape: exactly { title, url, company, location }.
-  if (fetched[0] && Object.keys(fetched[0]).sort().join(',') === 'company,location,title,url')
-    pass('remotive.fetch() returns the normalized { title, url, company, location } shape');
-  else fail(`remotive.fetch() row 0 keys = ${JSON.stringify(fetched[0] && Object.keys(fetched[0]))}`);
+  // Normalized shape: { title, url, company, location }, plus postedAt when the
+  // row carries a parseable `publication_date` (row 0 does, row 1's is junk).
+  if (fetched[0] && Object.keys(fetched[0]).sort().join(',') === 'company,location,postedAt,title,url'
+      && fetched[1] && Object.keys(fetched[1]).sort().join(',') === 'company,location,title,url')
+    pass('remotive.fetch() returns { title, url, company, location } and postedAt only when dated');
+  else fail(`remotive.fetch() keys = ${JSON.stringify(fetched.map((j) => Object.keys(j)))}`);
+
+  const { toEpochMs } = await import(pathToFileURL(join(ROOT, 'providers/remotive.mjs')).href);
+  if (toEpochMs('2026-10-27T12:56:13Z') === Date.UTC(2026, 9, 27, 12, 56, 13)
+      && toEpochMs('2026-10-27T12:56:13+02:00') === Date.UTC(2026, 9, 27, 10, 56, 13)
+      && toEpochMs('2026-10-27') === Date.UTC(2026, 9, 27)
+      && toEpochMs('') === undefined && toEpochMs(null) === undefined && toEpochMs('soon') === undefined)
+    pass('remotive toEpochMs keeps an explicit offset, reads a bare date as UTC, rejects junk');
+  else fail('remotive toEpochMs mishandles an offset, a bare date or junk');
+
+  if (fetched[0]?.postedAt === Date.UTC(2026, 9, 27, 12, 56, 13))
+    pass('remotive.fetch() reads `publication_date` into postedAt (epoch ms)');
+  else fail(`remotive.fetch() row 0 postedAt = ${JSON.stringify(fetched[0]?.postedAt)}`);
 
   if (fetched[0]?.title === 'Staff AI Engineer'
       && fetched[0]?.url === 'https://remotive.com/remote-jobs/acme-staff-ai-engineer'

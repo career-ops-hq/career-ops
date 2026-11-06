@@ -75,6 +75,28 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
   );
 
+  // keka.parseKekaResponse — for…of over the top-level jobs array.
+  const { parseKekaResponse } = await load('keka.mjs');
+  check(
+    'keka.parseKekaResponse',
+    () => parseKekaResponse(
+      [{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 5, title: 'Good Id' }],
+      'X', 'https://x.keka.com',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.keka.com/careers/jobdetails/5',
+  );
+
+  // darwinbox.parseDarwinboxResponse — for…of over the data array.
+  const { parseDarwinboxResponse } = await load('darwinbox.mjs');
+  check(
+    'darwinbox.parseDarwinboxResponse',
+    () => parseDarwinboxResponse(
+      { status: 'success', data: [{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 'a5', title: 'Good Id' }] },
+      'X', { origin: 'https://x.darwinbox.in', companyId: 'main' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.darwinbox.in/ms/candidatev2/main/careers/jobDetails/a5',
+  );
+
   // jibeapply.parseJibeapplyResponse — .map().filter(Boolean) over one page.
   const { parseJibeapplyResponse } = await load('jibeapply.mjs');
   const jibeEntry = { name: 'Acme', careers_url: 'https://acme.jibeapply.com/jobs' };
@@ -305,6 +327,22 @@ try {
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/101',
   );
+
+  // trakstar.parseTrakstarPage — an off-host hosted_url is rebuilt from the
+  // opening id, so a lone surrogate in that id drops one row.
+  const { parseTrakstarPage } = await load('trakstar.mjs');
+  check(
+    'trakstar.parseTrakstarPage',
+    () => parseTrakstarPage(
+      { meta: { total: 2 }, objects: [
+        { id: `${LONE}bad`, title: 'Bad Id', hosted_url: 'https://evil.example/nope' },
+        { id: 'good1', title: 'Good Id', hosted_url: 'https://evil.example/nope' },
+      ] },
+      'Acme',
+      'acme',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.hire.trakstar.com/jobs/good1/',
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -330,8 +368,8 @@ try {
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
   const CONVERTED = [
-    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
-    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
+    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'darwinbox.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
+    'kalibrr.mjs', 'keka.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs', 'trakstar.mjs',
     'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
 

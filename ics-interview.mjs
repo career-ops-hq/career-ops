@@ -26,9 +26,11 @@
  *   - `;TZID=Area/City`          wall time in that zone, converted to an instant
  *   - no zone and no `Z`         floating: a wall time with NO zone; not converted
  *   - `;VALUE=DATE`              all-day: reported as a date, never as a time
- *   - a TZID that is not an IANA zone (e.g. a Windows zone name) is reported as
- *     `unknown-tzid` and not converted
+ *   - a TZID that is not an IANA zone (e.g. Outlook's "Eastern Standard Time")
+ *     is converted with the file's own VTIMEZONE block; without a readable
+ *     one it is reported as `unknown-tzid` and not converted
  *   - RRULE is ignored (only the first occurrence is read; a warning says so)
+ *   - a cancellation (METHOD:CANCEL or STATUS:CANCELLED) gets no row
  *
  * Display zone: --tz, else config/profile.yml `location.timezone` (when it is
  * a valid IANA name), else this machine's zone.
@@ -139,37 +141,165 @@ export function parseIcsDate(value, params = {}) {
 }
 
 /**
- * Parse the FIRST VEVENT of an .ics body.
- * @returns {{ props: Array<{name:string, params:object, value:string}> } | null}
+ * Parse the FIRST VEVENT of an .ics body, plus the calendar's METHOD.
+ * @returns {{ props: Array<{name:string, params:object, value:string}>, method: string|null } | null}
  */
 export function firstEvent(text) {
   const lines = unfoldLines(text);
   let depth = 0;
   let inEvent = false;
+  let method = null;
   const props = [];
   for (const line of lines) {
     const p = parseContentLine(line);
     if (!p) continue;
     if (p.name === 'BEGIN') {
+      if (!inEvent && p.value.toUpperCase() === 'VCALENDAR') { method = null; continue; }
       if (!inEvent && p.value.toUpperCase() === 'VEVENT') { inEvent = true; depth = 0; continue; }
       if (inEvent) depth += 1;
       continue;
     }
     if (p.name === 'END') {
-      if (inEvent && depth === 0 && p.value.toUpperCase() === 'VEVENT') return { props };
+      if (inEvent && depth === 0 && p.value.toUpperCase() === 'VEVENT') return { props, method };
       if (inEvent) depth -= 1;
       continue;
     }
+    if (!inEvent && p.name === 'METHOD') method = p.value.trim().toUpperCase();
     // Properties of nested components (e.g. VALARM) are not the event's.
     if (inEvent && depth === 0) props.push(p);
   }
   // A truncated file that never closes the VEVENT still yields what it had.
-  return inEvent ? { props } : null;
+  return inEvent ? { props, method } : null;
 }
 
 // ---------------------------------------------------------------------------
-// Time zones (Intl only)
+// Time zones (Intl, else the file's own VTIMEZONE)
 // ---------------------------------------------------------------------------
+
+const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+function parseUtcOffset(value) {
+  const m = /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(String(value ?? '').trim());
+  if (!m) return null;
+  // Hours stop at 23, minutes at 59, and seconds at 60. A minute of 60 would
+  // still convert and hide a broken zone.
+  const hour = Number(m[2]);
+  const minute = Number(m[3]);
+  const second = Number(m[4] ?? 0);
+  if (hour > 23 || minute > 59 || second > 60) return null;
+  const sign = m[1] === '-' ? -1 : 1;
+  return sign * (hour * 60 + minute + second / 60);
+}
+
+// Seconds make the minute count fractional. Round so the instant lands on a whole millisecond.
+function offsetMinutesToMs(minutes) {
+  return Math.round(minutes * 60000);
+}
+
+/**
+ * One STANDARD or DAYLIGHT block. Only the yearly BYMONTH + BYDAY rule that
+ * Outlook, Exchange and most generators write is read; anything else is null.
+ */
+function parseObservance(props) {
+  const get = (name) => props.find((p) => p.name === name)?.value;
+  const start = parseIcsDate(get('DTSTART'));
+  const from = parseUtcOffset(get('TZOFFSETFROM'));
+  const to = parseUtcOffset(get('TZOFFSETTO'));
+  if (!start || start.kind !== 'floating' || from === null || to === null) return null;
+  // RDATE lists transitions this parser does not read. Treating the block as
+  // one onset at DTSTART would apply the wrong offset and still look converted.
+  if (props.some((p) => p.name === 'RDATE')) return null;
+  const rrule = get('RRULE');
+  if (!rrule) return { start, from, to, rule: null };
+  const parts = Object.fromEntries(rrule.split(';').map((kv) => kv.split('=').map((x) => x.trim().toUpperCase())));
+  const allowed = new Set(['FREQ', 'INTERVAL', 'BYMONTH', 'BYDAY', 'UNTIL', 'WKST']);
+  if (parts.FREQ !== 'YEARLY' || (parts.INTERVAL ?? '1') !== '1' || Object.keys(parts).some((k) => !allowed.has(k))) return null;
+  const day = /^([+-]?[1-5])(SU|MO|TU|WE|TH|FR|SA)$/.exec(parts.BYDAY ?? '');
+  const month = Number(parts.BYMONTH);
+  if (!day || !Number.isInteger(month) || month < 1 || month > 12) return null;
+  const until = parts.UNTIL ? parseIcsDate(parts.UNTIL) : null;
+  if (parts.UNTIL && !until) return null;
+  return { start, from, to, rule: { month, nth: Number(day[1]), weekday: WEEKDAYS.indexOf(day[2]), until } };
+}
+
+/** Every VTIMEZONE in the body, keyed by TZID. A zone with any unreadable block is left out. */
+export function parseVtimezones(text) {
+  const zones = new Map();
+  let tzid = null;
+  let blocks = null;
+  let block = null;
+  for (const line of unfoldLines(text)) {
+    const p = parseContentLine(line);
+    if (!p) continue;
+    const value = p.value.trim().toUpperCase();
+    if (p.name === 'BEGIN' && value === 'VTIMEZONE') { tzid = null; blocks = []; continue; }
+    if (!blocks) continue;
+    if (p.name === 'BEGIN' && (value === 'STANDARD' || value === 'DAYLIGHT')) { block = []; continue; }
+    if (p.name === 'END' && block && (value === 'STANDARD' || value === 'DAYLIGHT')) { blocks.push(parseObservance(block)); block = null; continue; }
+    if (p.name === 'END' && value === 'VTIMEZONE') {
+      if (tzid && blocks.length > 0 && blocks.every(Boolean)) zones.set(tzid, blocks);
+      blocks = null;
+      continue;
+    }
+    if (block) block.push(p);
+    else if (p.name === 'TZID') tzid = p.value.trim();
+  }
+  return zones;
+}
+
+/** Wall-clock ms (the wall time read as if it were UTC) when an observance starts in `year`, or null. */
+function onsetIn(obs, year) {
+  const { start, rule } = obs;
+  const at = (y, mo, d) => Date.UTC(y, mo - 1, d, start.h, start.mi, start.s);
+  const first = at(start.y, start.mo, start.d);
+  if (!rule) return first;
+  let day;
+  if (rule.nth > 0) {
+    const firstWeekday = new Date(Date.UTC(year, rule.month - 1, 1)).getUTCDay();
+    day = 1 + ((rule.weekday - firstWeekday + 7) % 7) + (rule.nth - 1) * 7;
+  } else {
+    const last = new Date(Date.UTC(year, rule.month, 0)).getUTCDate();
+    const lastWeekday = new Date(Date.UTC(year, rule.month - 1, last)).getUTCDay();
+    day = last - ((lastWeekday - rule.weekday + 7) % 7) + (rule.nth + 1) * 7;
+  }
+  if (day < 1 || day > new Date(Date.UTC(year, rule.month, 0)).getUTCDate()) return null;
+  const onset = at(year, rule.month, day);
+  if (onset < first) return null;
+  if (rule.until) {
+    const u = rule.until;
+    const untilMs = Date.UTC(u.y, u.mo - 1, u.d, u.h, u.mi, u.s) + (u.kind === 'utc' ? offsetMinutesToMs(obs.from) : 0);
+    if (onset > untilMs) return null;
+  }
+  return onset;
+}
+
+/**
+ * Wall-clock time -> epoch ms through a VTIMEZONE, with the same overlap and
+ * gap rules as wallToInstant. Null when no observance covers the time.
+ */
+export function vtimezoneToInstant(d, observances) {
+  const wallMs = Date.UTC(d.y, d.mo - 1, d.d, d.h, d.mi, d.s);
+  let best = null;
+  for (const obs of observances) {
+    // A yearly rule can fire its last onset many years before the event.
+    // Walk back to the year it started. The first onset that already applies
+    // is the latest one, so an earlier year cannot replace it.
+    const firstYear = obs.rule ? obs.start.y : d.y;
+    for (let year = d.y; year >= firstYear; year -= 1) {
+      const onset = onsetIn(obs, year);
+      if (onset === null || onset > wallMs) continue;
+      if (!best || onset > best.onset) best = { onset, obs };
+      break;
+    }
+  }
+  if (!best) return null;
+  const { onset, obs } = best;
+  // Inside a spring-forward gap the pre-gap offset applies (RFC 5545 3.3.5).
+  const fromMs = offsetMinutesToMs(obs.from);
+  const toMs = offsetMinutesToMs(obs.to);
+  const appliedMs = wallMs < onset + (toMs - fromMs) ? fromMs : toMs;
+  return wallMs - appliedMs;
+}
 
 export function isValidZone(zone) {
   if (typeof zone !== 'string' || !zone.trim()) return false;
@@ -227,14 +357,18 @@ const wallString = (d) => `${d.y}-${pad(d.mo)}-${pad(d.d)}T${pad(d.h)}:${pad(d.m
  * Describe one parsed DTSTART/DTEND: the time as stated, plus its instant when
  * one can be established without assuming anything.
  */
-function describeTime(t, warnings, label) {
+function describeTime(t, warnings, label, vtimezones = new Map()) {
   if (!t) return null;
   const out = { raw: t.raw, kind: t.kind, tzid: t.tzid, local: t.kind === 'date' ? `${t.y}-${pad(t.mo)}-${pad(t.d)}` : wallString(t), utc: null, epochMs: null };
   if (t.kind === 'utc') {
     out.epochMs = Date.UTC(t.y, t.mo - 1, t.d, t.h, t.mi, t.s);
   } else if (t.kind === 'zoned') {
+    const viaVtimezone = isValidZone(t.tzid) ? null : vtimezones.get(t.tzid);
+    const fromVtimezone = viaVtimezone ? vtimezoneToInstant(t, viaVtimezone) : null;
     if (isValidZone(t.tzid)) {
       out.epochMs = wallToInstant(t, t.tzid);
+    } else if (fromVtimezone !== null) {
+      out.epochMs = fromVtimezone;
     } else {
       out.kind = 'unknown-tzid';
       warnings.push({ code: 'unknown-tzid', message: `${label} TZID "${t.tzid}" is not an IANA time zone this tool can read; the time is shown as written and not converted.` });
@@ -286,15 +420,19 @@ export function parseIcs(text, { displayZone } = {}) {
   const get = (name) => ev.props.find((p) => p.name === name);
   const text_ = (name) => { const p = get(name); return p ? unescapeText(p.value).trim() || null : null; };
 
+  // A cancellation carries the same start and end as the invite it cancels.
+  const cancelled = ev.method === 'CANCEL' || text_('STATUS')?.toUpperCase() === 'CANCELLED';
+  if (cancelled) warnings.push({ code: 'cancelled', message: 'This .ics cancels the event. There is no row to paste; update the existing row in data/active-interviews.md instead.' });
   if (get('RRULE')) warnings.push({ code: 'rrule-ignored', message: 'RRULE present and ignored; only the first occurrence is read.' });
 
+  const vtimezones = parseVtimezones(text);
   const dtstartProp = get('DTSTART');
-  const start = describeTime(dtstartProp ? parseIcsDate(dtstartProp.value, dtstartProp.params) : null, warnings, 'DTSTART');
+  const start = describeTime(dtstartProp ? parseIcsDate(dtstartProp.value, dtstartProp.params) : null, warnings, 'DTSTART', vtimezones);
   if (!start) warnings.push({ code: 'no-start', message: dtstartProp ? `DTSTART "${dtstartProp.value}" is not readable.` : 'No DTSTART.' });
 
   const dtendProp = get('DTEND');
   const durProp = get('DURATION');
-  let end = describeTime(dtendProp ? parseIcsDate(dtendProp.value, dtendProp.params) : null, warnings, 'DTEND');
+  let end = describeTime(dtendProp ? parseIcsDate(dtendProp.value, dtendProp.params) : null, warnings, 'DTEND', vtimezones);
   if (dtendProp && !end) warnings.push({ code: 'bad-end', message: `DTEND "${dtendProp.value}" is not readable.` });
 
   let durationMinutes = null;
@@ -348,6 +486,7 @@ export function parseIcs(text, { displayZone } = {}) {
       organizer,
       attendees,
       allDay,
+      cancelled,
       start: strip(start),
       end: strip(end),
       durationMinutes: allDay ? null : durationMinutes,
@@ -385,7 +524,7 @@ export function dateTimeCell(event) {
  * supplying Company and Role; otherwise those stay em dashes.
  */
 export function buildRow(event, tracker = null) {
-  if (!event) return null;
+  if (!event || event.cancelled) return null;
   const notes = [];
   if (event.durationMinutes !== null && event.durationMinutes !== undefined) notes.push(`${event.durationMinutes} min`);
   if (event.start?.tzid && event.start.kind !== 'unknown-tzid') notes.push(`invite zone ${event.start.tzid}`);
