@@ -59,6 +59,18 @@ try {
     fail(`Unknown model fallback failed: expected null, got ${unknownCost}`);
   }
 
+  // 5b. An OpenAI-compatible run with a model that has no rate is not priced
+  // as gpt-4o-mini: a local server's model would otherwise show a cost.
+  const localCost = estimateCost('local-model-example', usage, 'openai');
+  const accLocal = new TokenAccumulator();
+  accLocal.record('evaluation', { prompt_tokens: 1000, completion_tokens: 500, total_tokens: 1500 });
+  const localBreakdown = formatBreakdown(accLocal, 'local-model-example', 'openai');
+  if (localCost === null && localBreakdown.includes('est. cost n/a')) {
+    pass('openai provider with an unknown model reports est. cost n/a');
+  } else {
+    fail(`openai unknown model should be n/a, got ${localCost}:\n${localBreakdown}`);
+  }
+
   // 6. formatBreakdown renders "est. cost n/a" (not $0.0000) when cost is null
   const accNull = new TokenAccumulator();
   accNull.record('evaluation', { prompt_tokens: 1000, completion_tokens: 500, total_tokens: 1500 });

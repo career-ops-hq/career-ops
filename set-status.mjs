@@ -90,7 +90,7 @@
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
  *
  * Two rules the reader enforces that this writer never has to think about,
- * because it always has a real prior status and always writes its own source.
+ * because it canonicalizes the prior status and always writes its own source.
  * Any other producer does have to, so they are stated here:
  *   - An unknown from- or to-state is the sentinel "-", never an empty cell.
  *     funnel-velocity.mjs reads the two columns differently: a from of "-"
@@ -119,8 +119,8 @@ import { extractTrackerReportNumbers, parseMarkdownLinks, soleMarkdownLink, reso
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
-  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
-  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
+  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate,
+  prependNote, hasNoteEntry, normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
   appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot, resolveTrackerPathForWrite } from './path-resolver.mjs';
@@ -700,6 +700,11 @@ const oldStatus = target.status;
 // written rather than refused, so the caller still gets "status changed" and
 // not a usage error for a row it was right to show.
 const statusKey = value => resolveCanonicalState(value, states) ?? String(value ?? '').trim();
+// The ledger takes a canonical state or "-", and a row with anything else is
+// dropped by its readers. A legacy cell (`Applied 2026-01-02`) is a known state
+// once its date is off; copied raw, the change was lost to the funnel and to
+// --undo. dedup-tracker.mjs logs its promotions the same way.
+const ledgerState = value => resolveCanonicalState(stripStatusDecoration(value), states) ?? '-';
 
 // The change --undo takes back is the one a retraction line would pop: the
 // last surviving entry of this row's ledger replay. Read under the lock, so no
@@ -800,6 +805,15 @@ try {
   statusChanged = parts[colmap.status].trim() !== newStatus;
   if (statusChanged) replaceCellValue(colmap.status, newStatus);
 
+  // Text after a date in the old cell is no part of any state, and replacing the
+  // cell would lose it. It moves to Notes, as normalize-statuses.mjs moves it,
+  // unless a whole Notes entry already holds it.
+  if (statusChanged && colmap.notes != null && statusTextAfterDate(oldStatus)) {
+    const kept = (parts[colmap.notes] ?? '').trim();
+    const moved = oldStatus.trim();
+    if (!hasNoteEntry(kept, moved)) replaceCellValue(colmap.notes, prependNote(kept, moved));
+  }
+
   if (note) {
     if (colmap.notes == null) {
       failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
@@ -829,11 +843,7 @@ try {
       // suppress a genuinely new note. Matching the full note text at entry
       // boundaries (instead of splitting the field into segments) keeps retries
       // idempotent even when the note itself contains "; ".
-      const hasNote = existing === note
-        || existing.startsWith(`${note}; `)
-        || existing.endsWith(`; ${note}`)
-        || existing.includes(`; ${note}; `);
-      if (!hasNote) {
+      if (!hasNoteEntry(existing, note)) {
         replaceCellValue(colmap.notes, existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note);
         noteChanged = true;
       }
@@ -898,7 +908,7 @@ try {
     statusLogged = appendStatusTransition(APPS_FILE, {
       num: target.num,
       date: flags.on ?? localToday(),
-      from: oldStatus,
+      from: ledgerState(oldStatus),
       to: newStatus,
       source: flags.source ?? 'set-status',
     });

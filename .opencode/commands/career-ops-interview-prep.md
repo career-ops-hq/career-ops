@@ -1,4 +1,5 @@
 ---
+name: career-ops-interview-prep
 description: Full interview prep package for a specific company and role
 ---
 

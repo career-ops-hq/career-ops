@@ -92,7 +92,7 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## What is career-ops
 
-AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
+AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Oh My Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
 
 ### Codex invocation
 
@@ -107,6 +107,14 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 - **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
 - **Headless:** `pi -p "prompt"` for one-shot workers; `pi --mode json -p "prompt"` when the caller parses events.
 - **Examples:** `pi -p "Run career-ops tracker mode"`, `pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
+
+### Oh My Pi (omp) invocation
+
+- **Project context:** `.omp/AGENTS.md` imports `AGENTS.md` (`@../AGENTS.md`) so OMP's `native` provider loads the root contract without being shadowed by `.github/copilot-instructions.md`.
+- **Skill:** OMP discovers the shared router at `.agents/skills/career-ops/SKILL.md` automatically via its `agents` discovery provider, exposed as `/skill:career-ops`.
+- **Interactive:** run `omp` in the repo root, then `/skill:career-ops <mode>`.
+- **Headless:** `omp -p "prompt"` for one-shot workers.
+- **Examples:** `omp -p "Run career-ops tracker mode"`, `omp -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
 
 
 ### Main Files
@@ -137,6 +145,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `audit-portals.mjs` | Content audit of `portals.yml` — the companion to `verify-portals.mjs`, which answers "does this board answer?" but never "*whose* postings are these?". Fetches each enabled board through the same `providers/` modules `scan.mjs` uses and reports provider + posting count + sample titles/locations per entry, verdicts worst-first: `no-provider` (enabled but nothing claims it, so `scan.mjs` skips it silently — the highest-value check), `error`, `empty`, `small`, `ok`. `--baseline prev.json` compares against an earlier `--json` run and flags boards that lost ≥50% of their postings, the shape an ATS migration takes. **It cannot detect a well-formed board belonging to the wrong entity** — a parent company's board is full of real jobs — so it surfaces the evidence a reader needs instead of pretending to a verdict (JSON, `--summary`, `--strict`) |
 | `scan-dayforce.mjs` | Playwright browser scanner for Dayforce (Ceridian) Recruiting career sites (jobs.dayforcehcm.com — Cloudflare + NextAuth CSRF gated, no bare-HTTP-reachable API); reads `dayforce_boards` from `portals.yml` |
 | `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text). An `expired` verdict is recorded back into `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead once stops resurfacing in the web "new matches this week" feed (#3891). Only URLs the history already knows are written, once each; `uncertain` is never recorded, and `--no-record` makes the run leave no trace |
+| `robots-check.mjs` | robots.txt gate on the headed liveness retry (#5776): `robotsAllows(url)` reads the host's `robots.txt` once per process as `career-ops` (RFC 9309: the `career-ops` group, else `*`; longest match, Disallow wins a tie) and fails closed, so `check-liveness.mjs` and `scan --verify --headed-fallback` skip the headed retry unless it permits the path. A skip keeps the headless `uncertain` verdict and never records anything as expired; the first headless request is not gated |
 | `fetch-jd.mjs` | JD text for a posting whose ATS is in `liveness-api.mjs`'s `JD_TEXT_API_ATS`, no browser needed. Prints the JD on stdout and exits 0 on a hit; exits 1 with empty stdout otherwise, so the caller's existing browser/WebFetch fallback is the next step. Backed by `browser-extract.mjs`'s `fetchJdViaKnownApi()`, the same dispatch its `jd` mode uses |
 | `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs --report <report#> <State>`, or `<tracker#\|company>` as the first argument (a bare number is the tracker `#`, not the report number); `[--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
 | `fix-report-links.mjs` | Repairs tracker rows whose Report link points at a missing file: rewrites only that cell to `—` (single-link cells only; others listed for hand review), same broken-link rule as `verify-pipeline.mjs` Check 3 via `findDeadReportLink()` in `tracker-utils.mjs`; `--dry-run` previews, otherwise `.bak` backup + locked atomic write; idempotent |
@@ -291,6 +300,7 @@ JSON
   - "Remote" and "Hybrid" are not places, and the writer refuses them, because an allow-list entry like that admits every country.
   - A posting labeled only "Remote" (no country) will not match a US `always_allow` / `allow` list. Tell the candidate that limitation during onboarding; do not add "Remote" as an unconditional country match. Titles that themselves signal remote work can still match on the title filter.
 - `candidate.years_of_experience` is optional. When they give it, also ask whether the scanner should check postings whose JD states a minimum above it, by how much they would stretch (default 1 year), and whether to mark those rows (the default) or drop them. A yes becomes `portals.experience_filter: { "stretch_years": 1 }` (add `"action": "drop"` only if they want those rows removed: a wrong drop silently costs a real job, a wrong label costs one glance). It reads each new posting's JD, marks (or with `drop`, removes) only a clearly stated minimum above the band, and keeps unclear or unread ones unmarked; it is independent of `skip_tiers`, which reads the title.
+- When `candidate.years_of_experience` is under 2 (or, when they gave none, `cv.md` shows under 2 years of work), or the archetypes they target are entry level (`level` Entry, Junior or Graduate), also ask whether every CV should fit on one page. A yes becomes `"cv": { "max_pages": 1 }`. Add `"strict_pages": true` only if they want a CV that runs over to fail rather than warn. Never set it without asking: with no answer, a CV may run to two pages with a warning past that.
 - `max_posting_age_days` defaults to 45. Tell them it also hides long-open roles on a company's own board. Set 0 only when they ask for older postings.
 - Contact fields they did not give are blanked, so the example person never reaches a CV.
 - Existing files are kept. Pass `--force` only when the user asks to redo setup. `node onboard-write.mjs --help` shows every field.
@@ -664,7 +674,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 
 **Row order (#3515):** `merge-tracker.mjs` writes the table sorted by `#` **ascending** — matching how rows are referred to ("row 42") and how `reports/` is numbered on disk. The sort runs over the whole table on every write, so a tracker left in merge-batch order by an older version is repaired in place on the next merge; no migration flag is needed. Rows whose `#` is a backfill sentinel (`N/A` / `—` / `-`) sort to the end of the table in their existing relative order.
 
-**Req/posting ID in notes disambiguates same-title postings (#1524, #2009):** when a company posts two genuinely different requisitions whose titles fuzzy-match (e.g. a leveled variant and its bare title, or two sibling team roles), put the req/job/posting ID in the **notes** column on both rows. `merge-tracker.mjs` reads it (`REQ_NUMBER_RE`) and treats rows carrying *different* recognizable IDs as distinct openings, overriding fuzzy title matching. Recognized forms are a `job id` / `posting id` / `requisition` / `req` / `jr` / `job` / `posting` / `ref` / `r_` label followed by an alphanumeric ID containing at least one digit — e.g. `req JR-10423`, `job id 88214`, `ref R_2291`. Prefer this whenever the JD exposes an ID; it is the only signal that survives near-identical titles.
+**Req/posting ID in notes disambiguates same-title postings (#1524, #2009):** when a company posts two genuinely different requisitions whose titles fuzzy-match (e.g. a leveled variant and its bare title, or two sibling team roles), put the req/job/posting ID in the **notes** column on both rows. `merge-tracker.mjs`, `dedup-tracker.mjs` and `verify-pipeline.mjs` read it (`REQ_NUMBER_RE` in `tracker-parse.mjs`) and treat rows carrying *different* recognizable IDs as distinct openings, blocking the title-based duplicate decision each one would otherwise make. Recognized forms are a `job id` / `posting id` / `requisition` / `req` / `jr` / `job` / `posting` / `ref` / `r_` label followed by an alphanumeric ID containing at least one digit — e.g. `req JR-10423`, `job id 88214`, `ref R_2291`. Prefer this whenever the JD exposes an ID; it is the only signal that survives near-identical titles.
 
 ### Pipeline Integrity
 

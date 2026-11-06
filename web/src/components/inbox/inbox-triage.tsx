@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
+import { evaluationGateForJob } from "@/lib/job-gate.mjs";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
@@ -133,7 +134,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     }
     const m = new Map<string, RowScore>();
     for (const [url, j] of best) {
-      m.set(url, { score: j.result?.score ?? null, tone: j.result?.tone ?? "muted", jobId: j.id, running: j.status === "running", reportN: j.reportN });
+      m.set(url, { score: j.result?.score ?? null, tone: j.result?.tone ?? "muted", jobId: j.id, running: j.status === "running", reportN: j.reportN, needsReview: j.status === "gated" || Boolean(evaluationGateForJob(j)) });
     }
     return m;
   }, [jobs]);

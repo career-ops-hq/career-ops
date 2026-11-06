@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as yaml from "js-yaml";
 import { careerOpsRoot, findApplication, pdfPathStatusForReport } from "@/lib/career-ops";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
 import { reportNumberFromCell } from "./cv-selection.mjs";
+import { cvUploadName } from "./upload-name.mjs";
 
 /**
  * Locate the tailored CV PDF for an application. When the tracker application
@@ -84,4 +87,20 @@ export function companyFromTitle(title?: string): string {
   const atWord = t.match(/\bat\s+([A-Z][\w&.\- ]+?)\s*$/);
   if (atWord) return atWord[1].trim();
   return "";
+}
+
+/**
+ * The name the uploaded CV carries (#6399), from the profile's full name and
+ * the tracker row's role, else the form title. See upload-name.mjs.
+ */
+export function uploadNameForCv(opts: { application?: string; title?: string }): string {
+  let fullName = "";
+  try {
+    const profile = yaml.load(fs.readFileSync(getProfilePath(careerOpsRoot()), "utf8")) as { candidate?: { full_name?: string } } | null;
+    fullName = profile?.candidate?.full_name ?? "";
+  } catch {
+    // No or unreadable profile: upload without a name rather than fail the fill.
+  }
+  const role = (opts.application ? findApplication(opts.application)?.role : undefined) || opts.title || "";
+  return cvUploadName({ fullName, role });
 }
