@@ -91,9 +91,11 @@ export function caseCollisions(paths) {
 }
 
 // Device names Windows reserves in every directory, with or without an
-// extension (`nul.txt` is as unusable as `nul`). The superscript digits are
-// reserved too: Windows treats COM¹ like COM1.
-const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(\..*)?$/i;
+// extension (`nul.txt` is as unusable as `nul`), and with spaces before the
+// extension (`nul .txt`). The list is Microsoft's ("Naming Files, Paths, and
+// Namespaces"): COM0 and LPT0 and the superscript digits count, since Windows
+// treats COM¹ like COM1. CONIN$ and CONOUT$ name the console the same way.
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³]) *(\..*)?$/i;
 // Characters NTFS rejects in a name, plus the ASCII control range. A backslash
 // is an ordinary character to git on Linux and a path separator on Windows.
 const WINDOWS_ILLEGAL_CHAR = /[<>:"|?*\\\u0000-\u001f]/;
@@ -216,7 +218,8 @@ test('control: caseCollisions flags files and directories', () => {
 
 test('control: windowsUnsafePaths flags reserved names, bad characters and trailing dots', () => {
   assert.deepEqual(windowsUnsafePaths(['docs/console.md', 'lib/aux-tools.mjs', 'com10.txt']), []);
-  assert.deepEqual(windowsUnsafePaths(['docs/nul', 'Aux.md', 'x/LPT1.txt']).length, 3);
+  assert.deepEqual(windowsUnsafePaths(['docs/nul', 'Aux.md', 'x/LPT1.txt', 'COM0', 'nul .txt']).length, 5);
+  assert.deepEqual(windowsUnsafePaths(['CONIN$', 'conout$.log', 'conin$x.md']).length, 2);
   assert.deepEqual(windowsUnsafePaths(['a:b.md', 'q?.md', 'back\\slash.md', 'tab\there.md']).length, 4);
   assert.deepEqual(windowsUnsafePaths(['trailing./x.md', 'space .md ']).length, 2);
 });

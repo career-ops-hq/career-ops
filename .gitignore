@@ -3,9 +3,11 @@ cv.md
 article-digest.md
 # A CV exported or saved at the repo root (cv.pdf, resume.docx). The repo
 # tracks no PDF or DOCX anywhere; the rules are root-anchored so a fixture or
-# doc added under a subdirectory later is not silently ignored (#6535).
-/*.pdf
-/*.docx
+# doc added under a subdirectory later is not silently ignored (#6535). The
+# brackets match any casing (CV.PDF), which git compares case-sensitively on a
+# case-sensitive filesystem.
+/*.[pP][dD][fF]
+/*.[dD][oO][cC][xX]
 local/
 # Data-root marker (DATA_CONTRACT.md "Custom Data Directory"). It holds a path
 # on this machine only, so committing it would point every other clone at a
