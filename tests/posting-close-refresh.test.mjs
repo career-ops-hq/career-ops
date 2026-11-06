@@ -86,7 +86,14 @@ function dataRows(text) {
 
 function pendingCount(dir) {
   const text = readFileSync(join(dir, 'data', 'pipeline.md'), 'utf-8');
-  return text.split('\n').filter((line) => line.includes(URL)).length;
+  // The posting is its own token. includes(URL) matches that string anywhere
+  // in the line, which is the check CodeQL rejects.
+  let count = 0;
+  for (const line of text.split('\n')) {
+    const match = /^- \[[ x]\]\s+(\S+)/.exec(line);
+    if (match && match[1] === URL) count += 1;
+  }
+  return count;
 }
 
 test('a seen posting keeps a later close day and stays out of the pipeline', () => {
