@@ -76,7 +76,7 @@ export function PipelineView({
   const [bulkError, setBulkError] = useState("");
   const [appliedAsk, setAppliedAsk] = useState<Application[] | null>(null);
   const appliedAskYesRef = useRef<HTMLButtonElement>(null);
-  const appliedAskScope = useRef<{ selection: string; cursor: number } | null>(null);
+  const appliedAskScope = useRef<{ selection: string; cursor: number; cursorKey: string } | null>(null);
   const [cursor, setCursor] = useState(-1);
   const [views, setViews] = useState<SavedView[]>([]);
   const [naming, setNaming] = useState(false);
@@ -455,6 +455,7 @@ export function PipelineView({
       appliedAskScope.current = {
         selection: appliedSelectionToken(selectedRows.map((row) => applicationKey(row))),
         cursor,
+        cursorKey: cursor >= 0 && filtered[cursor] ? applicationKey(filtered[cursor]) : "",
       };
       setAppliedAsk(rows);
       return;
@@ -471,17 +472,20 @@ export function PipelineView({
     requestRef.current = requestStatus;
   });
   const selectionToken = appliedSelectionToken(selectedRows.map((row) => applicationKey(row)));
+  const cursorKey = cursor >= 0 && filtered[cursor] ? applicationKey(filtered[cursor]) : "";
   useEffect(() => {
     if (!appliedAsk || !appliedAskScope.current) return;
     if (!appliedPromptStale({
       askedSelection: appliedAskScope.current.selection,
       askedCursor: appliedAskScope.current.cursor,
+      askedCursorKey: appliedAskScope.current.cursorKey,
       selection: selectionToken,
       cursor,
+      cursorKey,
     })) return;
     appliedAskScope.current = null;
     setAppliedAsk(null);
-  }, [appliedAsk, selectionToken, cursor]);
+  }, [appliedAsk, selectionToken, cursor, cursorKey]);
   useEffect(() => {
     if (!appliedAsk || appliedAsk.length === 0) return;
     appliedAskYesRef.current?.focus();

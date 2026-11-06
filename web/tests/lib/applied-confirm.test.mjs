@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { APPLIED_CONFIRM_PROMPT, APPLIED_CONFIRM_YES, appliedPromptStale, appliedSelectionToken, appliedWriteAllowed } from "../../src/lib/applied-confirm.mjs";
+import { APPLIED_CONFIRM_PROMPT, APPLIED_CONFIRM_YES, appliedPromptStale, appliedSelectionToken, appliedWriteAllowed, statusEditAction } from "../../src/lib/applied-confirm.mjs";
 
 test("Applied does not write until the user confirms they submitted", () => {
   const blocked = appliedWriteAllowed({ status: "Applied", confirmed: false });
@@ -26,6 +26,23 @@ test("the Applied prompt goes stale when the checked rows change", () => {
 });
 
 test("a cursor move makes a cursor-only Applied prompt stale", () => {
-  assert.equal(appliedPromptStale({ askedSelection: "", askedCursor: 2, selection: "", cursor: 2 }), false);
-  assert.equal(appliedPromptStale({ askedSelection: "", askedCursor: 2, selection: "", cursor: 3 }), true);
+  assert.equal(appliedPromptStale({ askedSelection: "", askedCursor: 2, askedCursorKey: "a", selection: "", cursor: 2, cursorKey: "a" }), false);
+  assert.equal(appliedPromptStale({ askedSelection: "", askedCursor: 2, askedCursorKey: "a", selection: "", cursor: 3, cursorKey: "b" }), true);
+});
+
+test("a different row at the same cursor index makes a cursor-only Applied prompt stale", () => {
+  assert.equal(appliedPromptStale({
+    askedSelection: "",
+    askedCursor: 2,
+    askedCursorKey: "alpha",
+    selection: "",
+    cursor: 2,
+    cursorKey: "beta",
+  }), true);
+});
+
+test("the row editor asks before it saves Applied and saves every other status", () => {
+  assert.equal(statusEditAction("Applied", "Evaluated"), "ask");
+  assert.equal(statusEditAction("Interview", "Evaluated"), "save");
+  assert.equal(statusEditAction("Evaluated", "Evaluated"), "keep");
 });

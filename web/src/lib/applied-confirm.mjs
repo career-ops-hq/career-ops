@@ -10,12 +10,32 @@ export function appliedSelectionToken(keys) {
 }
 
 /**
- * @param {{ askedSelection?: string, askedCursor?: number, selection?: string, cursor?: number }} [input]
+ * @param {{ askedSelection?: string, askedCursor?: number, askedCursorKey?: string, selection?: string, cursor?: number, cursorKey?: string }} [input]
  * @returns {boolean}
  */
-export function appliedPromptStale({ askedSelection = "", askedCursor = -1, selection = "", cursor = -1 } = {}) {
+export function appliedPromptStale({
+  askedSelection = "",
+  askedCursor = -1,
+  askedCursorKey = "",
+  selection = "",
+  cursor = -1,
+  cursorKey = "",
+} = {}) {
   if (selection !== askedSelection) return true;
-  return selection === "" && cursor !== askedCursor;
+  if (selection !== "") return false;
+  if (cursor !== askedCursor) return true;
+  return cursorKey !== askedCursorKey;
+}
+
+/**
+ * @param {string} next
+ * @param {string} prev
+ * @returns {"keep" | "ask" | "save"}
+ */
+export function statusEditAction(next, prev) {
+  if (next === prev) return "keep";
+  if (!appliedWriteAllowed({ status: next, confirmed: false }).write) return "ask";
+  return "save";
 }
 
 /**
