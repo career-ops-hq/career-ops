@@ -3,12 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildLocationFilter } from '../scan.mjs';
 import { parseHimalayasResponse } from '../providers/himalayas.mjs';
+import { isCountryKeyword } from '../providers/_country.mjs';
 
 const worldwideLabels = [
   'Worldwide',
   'Anywhere in the World',
   'Remote (worldwide)',
-  'Worldwide (Himalayas: no country restriction)',
 ];
 const countryFilter = {
   always_allow: ['United States', 'USA'],
@@ -64,7 +64,8 @@ test('unrecognized or qualified labels do not acquire worldwide eligibility', ()
     'Remote', 'Unknown', 'Anywhere', 'Global', 'Canada',
     'Not worldwide', 'Worldwide except Canada', 'Worldwide (US only)',
     'Worldwide, Europe', 'Remote (worldwide) - US only',
-    'Anywhere  in the World', 'Worldwide (Himalayas: no country restriction) - extra',
+    'Anywhere  in the World', 'Worldwide - extra',
+    'Worldwide (Himalayas: no country restriction)',
   ]) {
     assert.equal(accepts(location, '', 'Software Engineer'), false, location);
   }
@@ -116,4 +117,28 @@ test('Himalayas explicit empty restrictions are worldwide, not unknown, through 
   const blocked = buildLocationFilter({ ...countryFilter, block: ['Worldwide'] });
   assert.equal(blocked(known.location, known.url, known.title), false);
   assert.equal(blocked(unknown.location, unknown.url, unknown.title), true);
+});
+
+test('Himalayas worldwide output does not match a strict Norway allow-list', () => {
+  const [job] = parseHimalayasResponse({ jobs: [{
+    title: 'Software Engineer',
+    applicationLink: 'https://himalayas.app/companies/fixture/jobs/engineer',
+    locationRestrictions: [],
+  }] });
+  for (const country of ['NO', 'Norway']) {
+    const accepts = buildLocationFilter({ allow: [country], strict: true, remote_title_fallback: false });
+    assert.equal(accepts(job.location, job.url, job.title), false, country);
+    assert.equal(accepts(country, '', job.title), true, 'explicit country matches still work');
+  }
+});
+
+test('Himalayas worldwide label contains no country name, alias or ISO token', () => {
+  const [job] = parseHimalayasResponse({ jobs: [{
+    title: 'Software Engineer',
+    applicationLink: 'https://himalayas.app/companies/fixture/jobs/engineer',
+    locationRestrictions: [],
+  }] });
+  const words = job.location.match(/[\p{L}\p{N}.]+/gu) ?? [];
+  assert.ok(words.length > 0, 'the worldwide label must not be empty');
+  assert.deepEqual(words.filter(isCountryKeyword), [], job.location);
 });

@@ -51,7 +51,7 @@ function cleanHimalayasUrl(value) {
 function locationText(value) {
   if (!Array.isArray(value)) return '';
   // Explicit [] means no country restriction; timezone restrictions are separate.
-  if (value.length === 0) return 'Worldwide (Himalayas: no country restriction)';
+  if (value.length === 0) return 'Worldwide';
   return value
     .filter(v => typeof v === 'string' && v.trim())
     .map(v => v.trim())

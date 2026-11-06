@@ -668,7 +668,6 @@ const WORLDWIDE_LOCATION_LABELS = new Set([
   'worldwide',
   'anywhere in the world',
   'remote (worldwide)',
-  'worldwide (himalayas: no country restriction)',
 ]);
 
 // `url` and `title` are optional. Callers that omit them get the original
