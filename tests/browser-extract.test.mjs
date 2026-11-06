@@ -165,6 +165,18 @@ try {
   } else {
     fail(`jdHtmlToText escaped => ${JSON.stringify(jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
   }
+  const comparison = jdHtmlToText('<p>Teams of &lt; 5 people, &gt; 2 years of experience, &lt;10 engineers and &gt;150k users.</p>');
+  if (comparison === 'Teams of < 5 people, > 2 years of experience, <10 engineers and >150k users.') {
+    pass('jdHtmlToText keeps comparison text between decoded angle brackets');
+  } else {
+    fail(`jdHtmlToText comparison => ${JSON.stringify(comparison)}`);
+  }
+  const quotedAttr = jdHtmlToText('<p title="a > b">Text</p>');
+  if (quotedAttr === 'Text') {
+    pass('jdHtmlToText strips a whole tag whose quoted attribute holds an angle bracket');
+  } else {
+    fail(`jdHtmlToText quoted attribute => ${JSON.stringify(quotedAttr)}`);
+  }
   if (jdHtmlToText(null) === '' && jdHtmlToText('') === '' && jdHtmlToText(42) === '') {
     pass('jdHtmlToText returns "" for a non-string / empty body');
   } else {
@@ -594,6 +606,7 @@ try {
     ['zoho-recruit', 'https://acme.zohorecruit.com/jobs/Careers/100000000001853029/Senior-Engineer'],
     ['ultipro', 'https://recruiting.ultipro.com/EXA1000EXCO/JobBoard/0c8a6f9e-2b1d-4e57-9a3c-5d7f1e2b4c60/OpportunityDetail?opportunityId=5e0c2b9a-7f41-4d2e-8b6a-1c9d3e7f2a10'],
     ['hirehive', 'https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd'],
+    ['hibob', 'https://acme.careers.hibob.com/jobs/0b1c2d3e-0000-4000-8000-000000000001'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);

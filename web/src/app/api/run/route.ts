@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { localISODate } from "@/lib/followups";
-import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, noOutputError, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
@@ -572,14 +572,8 @@ export async function POST(req: Request) {
         // pdfRunOutcome's noOutputMessage — because a CLI that produced no output at
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
-        const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) {
-            const detail = stderrErrorSnippet ? ` (${stderrErrorSnippet})` : "";
-            return `The CLI exited with an error — is it installed and authenticated?${detail}`;
-          }
-          if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
-          return null;
-        };
+        const noOutputMessage = (): string | null =>
+          noOutputError({ emittedText, sawError, cleanExit, stderrSnippet: stderrErrorSnippet });
 
         if (kind === "pdf") {
           // Release any text the filter was still holding, so the log keeps the
@@ -592,7 +586,7 @@ export async function POST(req: Request) {
           const envelope = cvFilter?.result();
           const outcome = pdfRunOutcome({
             envelope,
-            noOutputMessage: noOutputError(),
+            noOutputMessage: noOutputMessage(),
             sawError,
             cleanExit,
             hasPaths: pdfPaths !== undefined,
@@ -624,7 +618,7 @@ export async function POST(req: Request) {
           const envelope = reportFilter?.result();
           const outcome = evaluateRunOutcome({
             envelope,
-            noOutputMessage: noOutputError(),
+            noOutputMessage: noOutputMessage(),
             sawError,
             cleanExit,
             text: evaluationText,
@@ -644,7 +638,7 @@ export async function POST(req: Request) {
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit
         // and real output. Anything else is surfaced. An errored run must never be
         // banked as a confident score.
-        const baseErr = noOutputError();
+        const baseErr = noOutputMessage();
         if (baseErr) {
           send({ type: "error", msg: baseErr });
         } else if (!cleanExit || sawError) {
