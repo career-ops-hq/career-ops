@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
+import { SCRATCH_PREFIX } from '../lib/scratch-dirs.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -193,7 +194,7 @@ test('a relative --tracker is the file in the caller directory', () => {
   try {
     // The child runs in the checkout. An unresolved relative path would be
     // written under this directory, which the test creates and then removes.
-    owned = mkdtempSync(join(ROOT, 'close-discard-owned-'));
+    owned = mkdtempSync(join(ROOT, `${SCRATCH_PREFIX}close-discard-owned-`));
     const trackerName = relative(ROOT, join(owned, 'tracker.md'));
     mkdirSync(join(box.dir, dirname(trackerName)));
     writeFileSync(join(box.dir, trackerName), readFileSync(box.tracker, 'utf-8'));
