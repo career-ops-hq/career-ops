@@ -252,7 +252,7 @@ stated_priorities:        # 트랜스크립트 입력에만. 밝힌 우선순위
 
 ## Step 10 — Record the call on the tracker
 
-디브리프를 저장한 뒤, 확인된 사실을 지원 건에 기록합니다. 새로운 사실을 사용자가 이미 `modes/_profile.md`나 `config/profile.yml`에 적어 둔 dealbreaker와 대조합니다. 그 사실과 프로필 문장을 보여줍니다. `Record this dealbreaker on the report and the tracker? [y/N]`라고 묻습니다. yes라면 그 문장을 `--dealbreaker`로 넘깁니다. no라면 생략합니다.
+디브리프를 저장한 뒤, 확인된 사실을 지원 건에 기록합니다. 새로운 사실을 사용자가 이미 `modes/_profile.md`나 `config/profile.yml`에 적어 둔 dealbreaker와 대조합니다. 그 사실과 프로필 문장을 보여줍니다. `debrief-sync.mjs`는 세미콜론(`;`), 탭, 줄바꿈이 들어 있는 `--dealbreaker` 값을 거부하며, 그러면 호출 전체가 중단됩니다. 문장에 이런 문자가 있으면 어떤 문자인지 사용자에게 알리고, 그 문자 없이 같은 뜻을 담은 한 줄짜리 문장을 요청합니다. 문자를 직접 지우거나 문장을 직접 고쳐 쓰지 않습니다. 사용자가 준 문장도 세 문자 모두에 대해 확인하고, 하나도 남지 않을 때까지 다시 요청합니다. 그다음 `Record this dealbreaker on the report and the tracker? [y/N]`라고 묻습니다. yes라면 그 문장(또는 사용자가 준 한 줄 문장)을 `--dealbreaker`로 넘깁니다. no라면 생략합니다.
 
 이름이 나온 사람마다 `Save this contact to data/contacts.tsv? [y/N]`라고 묻습니다. yes라면 이름, 이메일(주어졌다면), 사용자가 유형을 말했다면 그 유형을 넘깁니다.
 

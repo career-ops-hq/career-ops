@@ -251,7 +251,7 @@ Regole per il resoconto testuale:
 
 ## Passo 10 — Registra l'esito della chiamata nel tracker
 
-Dopo aver salvato il debriefing, registra i fatti confermati sulla candidatura. Associa un fatto nuovo a un fattore escludente (dealbreaker) che l'utente ha già scritto in `modes/_profile.md` o `config/profile.yml`. Mostra il fatto e la frase del profilo. Chiedi `Record this dealbreaker on the report and the tracker? [y/N]`. Se sì, passa quella frase come `--dealbreaker`. Se no, omettilo.
+Dopo aver salvato il debriefing, registra i fatti confermati sulla candidatura. Associa un fatto nuovo a un fattore escludente (dealbreaker) che l'utente ha già scritto in `modes/_profile.md` o `config/profile.yml`. Mostra il fatto e la frase del profilo. `debrief-sync.mjs` rifiuta un valore di `--dealbreaker` che contiene un punto e virgola (`;`), una tabulazione o un a capo, e questo blocca l'intera chiamata. Se la frase ne contiene uno, di' all'utente quale carattere è e chiedi una versione su una sola riga, senza quel carattere, che mantenga il significato. Non rimuovere il carattere e non riformulare la frase da solo. Controlla la versione dell'utente per tutti e tre i caratteri e chiedine un'altra finché non ne contiene nessuno. Poi chiedi `Record this dealbreaker on the report and the tracker? [y/N]`. Se sì, passa la frase, o la versione su una riga dell'utente, come `--dealbreaker`. Se no, omettilo.
 
 Per ogni persona nominata, chiedi `Save this contact to data/contacts.tsv? [y/N]`. Se sì, passa il nome, l'email se è stata fornita e il tipo se l'utente ne ha indicato uno.
 

@@ -252,7 +252,7 @@ stated_priorities:        # トランスクリプト入力のみ。何も述べ�
 
 ## Step 10 — Record the call on the tracker
 
-デブリーフを保存したら、確認された事実を応募に記録する。新しい事実を、ユーザーが `modes/_profile.md` または `config/profile.yml` にすでに書いている譲れない条件（dealbreaker）と照らし合わせる。その事実とプロファイルの該当文を示し、`Record this dealbreaker on the report and the tracker? [y/N]` と尋ねる。yes なら、その文を `--dealbreaker` として渡す。no なら省略する。
+デブリーフを保存したら、確認された事実を応募に記録する。新しい事実を、ユーザーが `modes/_profile.md` または `config/profile.yml` にすでに書いている譲れない条件（dealbreaker）と照らし合わせる。その事実とプロファイルの該当文を示す。`debrief-sync.mjs` はセミコロン（`;`）、タブ、改行を含む `--dealbreaker` の値を拒否し、その場合は呼び出し全体が止まる。該当文にこれらの文字が含まれていれば、どの文字かをユーザーに伝え、その文字を含まず意味を保った1行の文を求める。文字を自分で削ったり、文を自分で言い換えたりしない。ユーザーが示した文も3種類すべての文字について確認し、1つも含まなくなるまで改めて求める。そのうえで `Record this dealbreaker on the report and the tracker? [y/N]` と尋ねる。yes なら、その文（またはユーザーが示した1行の文）を `--dealbreaker` として渡す。no なら省略する。
 
 名前が挙がった人ごとに、`Save this contact to data/contacts.tsv? [y/N]` と尋ねる。yes なら、氏名、伝えられていればメールアドレス、ユーザーが種別を挙げていればその種別を渡す。
 
