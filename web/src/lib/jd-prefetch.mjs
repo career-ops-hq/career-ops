@@ -27,7 +27,7 @@ export function postingUrlFrom(input) {
 }
 
 /**
- * @typedef {{text: string|null, closedThrough: string|null}} Prefetch
+ * @typedef {{text: string|null, closedEvidence: string|null}} Prefetch
  */
 
 /**
@@ -35,11 +35,11 @@ export function postingUrlFrom(input) {
  * @param {(script: string, args: string[], opts?: {signal?: AbortSignal}) => Promise<{code: number, stdout: string, timedOut?: boolean, spawnFailed?: boolean}>} run
  * @param {AbortSignal} [signal] the request's abort signal; an abort kills the child and is a miss
  * @returns {Promise<Prefetch>} `text` is the JD, or null when the worker should
- *   WebFetch; `closedThrough` is set when the page's own data says the posting
+ *   WebFetch; `closedEvidence` is set when the page's own data says the posting
  *   closed (fetch-jd exit 3), which the worker must not score past.
  */
 export async function prefetchJd(input, run, signal) {
-  const miss = { text: null, closedThrough: null };
+  const miss = { text: null, closedEvidence: null };
   const url = postingUrlFrom(input);
   if (!url || signal?.aborted) return miss;
   try {
@@ -47,11 +47,11 @@ export async function prefetchJd(input, run, signal) {
     if (result.timedOut || result.spawnFailed) return miss;
     const out = String(result.stdout ?? "").trim();
     if (result.code === 3) {
-      const m = /^CLOSED_POSTING validThrough=(.{1,64})$/.exec(out);
-      return m ? { text: null, closedThrough: m[1] } : miss;
+      const m = /^CLOSED_POSTING (.{1,200})$/.exec(out);
+      return m ? { text: null, closedEvidence: m[1] } : miss;
     }
     if (result.code !== 0) return miss;
-    return { text: out.length >= MIN_PREFETCH_JD_CHARS ? out : null, closedThrough: null };
+    return { text: out.length >= MIN_PREFETCH_JD_CHARS ? out : null, closedEvidence: null };
   } catch {
     return miss;
   }

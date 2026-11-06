@@ -214,7 +214,7 @@ const NOW = Date.parse('2026-11-06T12:00:00Z');
 test('jdFromPageHtml reports a posting whose validThrough is past as closed, with no JD text', () => {
   const out = jdFromPageHtml(page(`<p>${BODY}</p>`, { posting: { validThrough: '2026-10-01T00:00:00Z' } }), NOW);
   assert.equal(out.closed, true);
-  assert.equal(out.validThrough, '2026-10-01T00:00:00Z');
+  assert.match(out.evidence, /validThrough 2026-10-01/);
   assert.equal(out.text, '', 'a closed posting must never hand its text to a scorer');
 });
 
@@ -225,7 +225,7 @@ test('fetchJdFromPage passes the closure on even when the visible page still sho
     const out = await fetchJdFromPage('https://careers.example.com/job/1');
     assert.equal(out.closed, true);
     assert.equal(out.text, '');
-    assert.equal(out.validThrough, '2020-01-01T00:00:00Z');
+    assert.match(out.evidence, /validThrough 2020-01-01/);
   } finally { net.restore(); }
 });
 
@@ -352,11 +352,42 @@ test('rebinding over a real socket: public pre-check, loopback at connect time, 
     setHostResolver(async () => ['93.184.216.34']);
     const { fetchJdFromPage } = await import('./lib/jd-page-fetch.mjs');
     const out = await fetchJdFromPage('http://rebind.example.com:' + server.address().port + '/job', 20000, 4000);
-    console.log(JSON.stringify({ out, hits }));
+    // The guard itself, not just the end result: a lookup for the target made
+    // inside the fetch context must be refused as a blocked address.
+    const { providerFetchContext } = await import('./providers/_ip-guard.mjs');
+    const code = await new Promise((resolve) => providerFetchContext.run({ url: 'http://rebind.example.com/job', targetHost: 'rebind.example.com' }, () => {
+      dns.lookup('rebind.example.com', (err) => resolve(err ? err.code : null));
+    }));
+    console.log(JSON.stringify({ out, hits, code }));
     server.close();`;
   const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    cwd: root, encoding: 'utf8', timeout: 30000, env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '' },
+    cwd: root, encoding: 'utf8', timeout: 30000, env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '', NO_PROXY: '*', no_proxy: '*' },
   });
   assert.equal(run.status, 0, run.stderr);
-  assert.deepEqual(JSON.parse(run.stdout.trim().split('\n').pop()), { out: null, hits: 0 }, 'the loopback server must receive no request');
+  assert.deepEqual(JSON.parse(run.stdout.trim().split('\n').pop()), { out: null, hits: 0, code: 'ECAREEROPS_BLOCKED_ADDRESS' }, 'the loopback server must receive no request');
+});
+
+test('a visible closure banner makes the page closed even with no JSON-LD expiry', async () => {
+  const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<p>This job is no longer available.</p>' })));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.equal(out.closed, true);
+    assert.equal(out.text, '', 'a closed page must not hand its JD to a scorer');
+    assert.match(out.evidence, /^page text:/);
+  } finally { net.restore(); }
+});
+
+test('closure wording inside a script or style is not visible page text', async () => {
+  const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<script>var m="This job is no longer available.";</script><style>.x::after{content:"job is no longer available"}</style>' })));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.ok(out && !out.closed, 'only text a reader sees counts');
+  } finally { net.restore(); }
+});
+
+test('NODE_USE_ENV_PROXY without CAREER_OPS_TRUST_PROXY_EGRESS fails closed', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const code = `import { fetchJdFromPage } from './lib/jd-page-fetch.mjs'; let hit=0; globalThis.fetch=async()=>{hit++;throw new Error('x')}; const out=await fetchJdFromPage('https://careers.example.com/job/1'); console.log(JSON.stringify({out,hit}));`;
+  const run = (env) => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '', ...env }, encoding: 'utf8' }).stdout.trim());
+  assert.deepEqual(run({ NODE_USE_ENV_PROXY: '1', CAREER_OPS_TRUST_PROXY_EGRESS: '' }), { out: null, hit: 0 });
 });

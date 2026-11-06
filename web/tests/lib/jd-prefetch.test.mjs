@@ -23,7 +23,7 @@ test("prefetchJd runs fetch-jd with the URL as a single argv entry and returns t
     return { code: 0, stdout: `${JD}\n`, timedOut: false, spawnFailed: false };
   });
   assert.equal(jd.text, JD.trim());
-  assert.equal(jd.closedThrough, null);
+  assert.equal(jd.closedEvidence, null);
   assert.deepEqual(seen, [["fetch-jd", ["https://careers.example.com/job/1?x=1&y=$(id)"]]]);
 });
 
@@ -47,26 +47,26 @@ test("prefetchJd refuses a stub shorter than the floor", async () => {
 });
 
 test("prefetchJd never throws", async () => {
-  assert.deepEqual(await prefetchJd("https://careers.example.com/job/1", async () => { throw new Error("boom"); }), { text: null, closedThrough: null });
+  assert.deepEqual(await prefetchJd("https://careers.example.com/job/1", async () => { throw new Error("boom"); }), { text: null, closedEvidence: null });
 });
 
 test("prefetchJd carries a closed posting (fetch-jd exit 3) instead of treating it as a plain miss", async () => {
   const url = "https://careers.example.com/job/1";
-  const closed = await prefetchJd(url, async () => ({ code: 3, stdout: "CLOSED_POSTING validThrough=2026-10-01T00:00:00Z" }));
-  assert.deepEqual(closed, { text: null, closedThrough: "2026-10-01T00:00:00Z" });
+  const closed = await prefetchJd(url, async () => ({ code: 3, stdout: "CLOSED_POSTING JobPosting validThrough 2026-10-01T00:00:00Z" }));
+  assert.deepEqual(closed, { text: null, closedEvidence: "JobPosting validThrough 2026-10-01T00:00:00Z" });
 });
 
 test("prefetchJd ignores an exit 3 whose output is not the closed-posting line", async () => {
   const url = "https://careers.example.com/job/1";
-  assert.deepEqual(await prefetchJd(url, async () => ({ code: 3, stdout: "something else" })), { text: null, closedThrough: null });
-  assert.deepEqual(await prefetchJd(url, async () => ({ code: 3, stdout: "" })), { text: null, closedThrough: null });
+  assert.deepEqual(await prefetchJd(url, async () => ({ code: 3, stdout: "something else" })), { text: null, closedEvidence: null });
+  assert.deepEqual(await prefetchJd(url, async () => ({ code: 3, stdout: "" })), { text: null, closedEvidence: null });
 });
 
 test("prefetchJd does not start when the request is already aborted, and passes the signal to the child", async () => {
   const url = "https://careers.example.com/job/1";
   const aborted = AbortSignal.abort();
   let ran = false;
-  assert.deepEqual(await prefetchJd(url, async () => { ran = true; return { code: 0, stdout: JD }; }, aborted), { text: null, closedThrough: null });
+  assert.deepEqual(await prefetchJd(url, async () => { ran = true; return { code: 0, stdout: JD }; }, aborted), { text: null, closedEvidence: null });
   assert.equal(ran, false);
 
   const controller = new AbortController();

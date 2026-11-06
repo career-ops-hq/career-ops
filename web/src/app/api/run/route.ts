@@ -202,7 +202,7 @@ export async function POST(req: Request) {
       return new Response(null, { status: 499 });
     }
     const prefetchedJd = prefetch?.text ?? null;
-    const closedThrough = prefetch?.closedThrough ?? null;
+    const closedEvidence = prefetch?.closedEvidence ?? null;
     prompt = buildPrompt({
       kind,
       input,
@@ -219,7 +219,7 @@ export async function POST(req: Request) {
       profile: profileRef(careerOpsRoot()),
       evaluationInstructions,
       prefetchedJd,
-      closedThrough,
+      closedEvidence,
     });
 
     isClaude = cliId === "claude";

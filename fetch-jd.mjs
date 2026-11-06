@@ -14,8 +14,9 @@
  *   node fetch-jd.mjs <url>
  *
  * JD text on stdout, exit 0, when a known ATS answers with real content.
- * Exit 3 with `CLOSED_POSTING validThrough=<date>` on stdout when the page's
- * own JobPosting data says the posting is past its validThrough date.
+ * Exit 3 with `CLOSED_POSTING <evidence>` on stdout when the page itself says the
+ * posting is closed: a JobPosting past its validThrough date, or closure text
+ * in the visible page.
  * Exit 1 with empty stdout and no stderr noise otherwise — a miss is the
  * expected "fall back to the browser path" case, not an error condition, and
  * a visible miss is the whole point: never a fabricated JD.
@@ -81,7 +82,7 @@ Options:
   // distinct exit code instead of a plain miss, so a caller does not fall back
   // to a fetch that could return the JD from the visible page and score it.
   if (result.closed) {
-    process.stdout.write(`CLOSED_POSTING validThrough=${result.validThrough}`);
+    process.stdout.write(`CLOSED_POSTING ${result.evidence}`);
     process.exitCode = 3;
     return;
   }
