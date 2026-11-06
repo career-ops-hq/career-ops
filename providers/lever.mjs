@@ -191,8 +191,17 @@ export default {
         if (page.length === 0) { lastPageFull = false; ended = true; break; }
         // A server that ignores `limit` must not amplify the total: refuse the page.
         if (page.length > limit) throw new Error(`lever: ${entry.name} returned ${page.length} postings for limit=${limit}`);
+        // UTF-8 bytes of the serialized page, checked before the page is retained, so the
+        // aggregate bound is never exceeded by the page that crosses it.
+        const pageBytes = Buffer.byteLength(JSON.stringify(page), 'utf8');
+        if (totalBytes + pageBytes > MAX_TOTAL_BYTES) {
+          console.warn(`[lever] ${entry.name}: stopped at the ${MAX_TOTAL_BYTES / (1024 * 1024)} MiB aggregate size bound (${all.length} postings); the board may have more.`);
+          truncated = 'cap';
+          lastPageFull = false;
+          break;
+        }
         for (const posting of page) all.push(posting);
-        totalBytes += JSON.stringify(page).length;
+        totalBytes += pageBytes;
         lastPageFull = page.length === limit;
         if (!lastPageFull) { ended = true; break; }
         if (probing) break;

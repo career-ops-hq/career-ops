@@ -224,31 +224,48 @@ test('lever lets a smaller page use the full per-response cap', async () => {
   assert.equal(out.leverTruncated, undefined);
 });
 
-test('lever stops at the aggregate size bound and marks the result truncated', async () => {
-  const warns = [];
-  const origWarn = console.warn;
-  console.warn = (m) => warns.push(String(m));
-  const big = 'x'.repeat(300 * 1024);
-  const ctx = {
-    sleep: async () => {},
-    fetchJson: async (url, opts) => {
-      const u = new URL(url);
-      if (!u.searchParams.has('limit')) throw tooLarge();
-      const limit = Number(u.searchParams.get('limit'));
-      // Model response bytes: a page over the per-response cap is refused, as the real helper does.
-      if (limit * big.length > opts.maxBytes) throw tooLarge();
-      return Array.from({ length: limit }, (_, i) => ({ id: `p${u.searchParams.get('skip')}-${i}`, text: 'T', hostedUrl: 'https://jobs.lever.co/x/1', categories: {}, descriptionPlain: big }));
-    },
-  };
-  try {
-    const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
-    assert.equal(out.leverTruncated, 'cap');
-    assert.ok(out.length < 3000);
-    assert.ok(warns.some((w) => /aggregate size bound/.test(w)));
-  } finally {
-    console.warn = origWarn;
-  }
-});
+for (const [label, ch, charsPerPosting] of [['ascii', 'x', 300 * 1024], ['multibyte (3-byte chars)', '€', 100 * 1024]]) {
+  test(`lever stops at the aggregate size bound without retaining the crossing page (${label})`, async () => {
+    const LIMIT = 64 * 1024 * 1024;
+    const warns = [];
+    const origWarn = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    const big = ch.repeat(charsPerPosting);
+    const pages = [];
+    const ctx = {
+      sleep: async () => {},
+      fetchJson: async (url, opts) => {
+        const u = new URL(url);
+        if (!u.searchParams.has('limit')) throw tooLarge();
+        const limit = Number(u.searchParams.get('limit'));
+        const page = Array.from({ length: limit }, (_, i) => ({ id: `p${u.searchParams.get('skip')}-${i}`, text: 'T', hostedUrl: 'https://jobs.lever.co/x/1', categories: {}, descriptionPlain: big }));
+        // Model response bytes: a page over the per-response cap is refused, as the real helper does.
+        const bytes = Buffer.byteLength(JSON.stringify(page), 'utf8');
+        if (bytes > opts.maxBytes) throw tooLarge();
+        pages.push({ bytes, count: limit });
+        return page;
+      },
+    };
+    try {
+      const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
+      // Retained = the leading served pages whose running total stays within the bound.
+      let running = 0;
+      let retained = 0;
+      for (const pg of pages) {
+        if (running + pg.bytes > LIMIT) break;
+        running += pg.bytes;
+        retained += pg.count;
+      }
+      assert.equal(out.length, retained);
+      assert.ok(running <= LIMIT);
+      assert.ok(retained < pages.reduce((n, pg) => n + pg.count, 0), 'the crossing page was served but not kept');
+      assert.equal(out.leverTruncated, 'cap');
+      assert.ok(warns.some((w) => /aggregate size bound/.test(w)));
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+}
 
 test('lever warns and marks truncated when shrink retries spend the request budget', async () => {
   const warns = [];
