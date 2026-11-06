@@ -23,6 +23,7 @@ export function MarkPdfReadyButton({
 
   if (reportNum == null) return null;
   const settled = ready && trackerMarked;
+  const markedWithoutFile = (trackerMarked || saved) && !ready;
 
   async function mark() {
     if (busy || settled || saved) return;
@@ -50,21 +51,25 @@ export function MarkPdfReadyButton({
 
   return (
     <span className="inline-flex flex-col items-start gap-1">
-      <button
-        type="button"
-        onClick={mark}
-        disabled={busy || settled || saved}
-        className={
-          settled
-            ? `${PILL} border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400`
-            : `${PILL} border-border text-muted hover:border-brand/40 hover:text-brand-text`
-        }
-      >
-        {settled && <Check className="size-3.5" />}
-        {busy ? "Saving…" : settled ? "PDF ready" : saved ? "Tracker marked" : "Mark PDF ready"}
-      </button>
-      {saved && !ready && (
-        <span className="text-xs text-muted">The tracker is marked. PDF ready stays off until the file is in output/.</span>
+      {markedWithoutFile ? (
+        <span className={`${PILL} border-border text-muted`}>Tracker marked</span>
+      ) : (
+        <button
+          type="button"
+          onClick={mark}
+          disabled={busy || settled || saved}
+          className={
+            settled
+              ? `${PILL} border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400`
+              : `${PILL} border-border text-muted hover:border-brand/40 hover:text-brand-text`
+          }
+        >
+          {settled && <Check className="size-3.5" />}
+          {busy ? "Saving…" : settled ? "PDF ready" : saved ? "Tracker marked" : "Mark PDF ready"}
+        </button>
+      )}
+      {markedWithoutFile && (
+        <span className="text-xs text-muted">Generate the tailored CV for this report. Marking the tracker again does not add that file.</span>
       )}
       {error && <span className="text-xs text-red-500">{error}</span>}
     </span>

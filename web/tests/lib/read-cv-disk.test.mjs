@@ -44,3 +44,26 @@ test("the CV disk check uses the report number, not the tracker row", async () =
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("an untagged cover row is not a CV on disk, and an untagged cv row is", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cv-disk-cover-"));
+  try {
+    await mkdir(join(root, "output"), { recursive: true });
+    await mkdir(join(root, "data"), { recursive: true });
+    await writeFile(join(root, "output", "cover-acme.pdf"), "%PDF-1.1\n");
+    await writeFile(join(root, "output", "cv-acme.pdf"), "%PDF-1.1\n");
+    process.env.CAREER_OPS_ROOT = root;
+    process.env.CAREER_OPS_PDF_INDEX = join(root, "data", "pdf-index.tsv");
+    process.env.CAREER_OPS_CODE_ROOT = repo;
+
+    await writeFile(join(root, "data", "pdf-index.tsv"), "12\toutput/cover-acme.pdf\t\t\t2026-11-06\n");
+    const cover = await readCvDiskForRows([{ n: "3", company: "Other Co", reportNumber: 12 }]);
+    assert.equal(cover["3"].exists, false);
+
+    await writeFile(join(root, "data", "pdf-index.tsv"), "12\toutput/cv-acme.pdf\t\t\t2026-11-06\n");
+    const cv = await readCvDiskForRows([{ n: "3", company: "Other Co", reportNumber: 12 }]);
+    assert.equal(cv["3"].exists, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

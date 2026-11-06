@@ -10,8 +10,10 @@ const src = readFileSync(
 );
 
 test("PDF ready is the label only when the file is on disk and the tracker is already marked", () => {
-  assert.match(src, /settled \? "PDF ready" : saved \? "Tracker marked"/);
+  assert.match(src, /settled \? "PDF ready"/);
   assert.match(src, /const settled = ready && trackerMarked/);
+  assert.match(src, /const markedWithoutFile = \(trackerMarked \|\| saved\) && !ready/);
+  assert.match(src, /Generate the tailored CV for this report/);
   assert.doesNotMatch(src, /setMarked|ready \|\| marked/);
 });
 

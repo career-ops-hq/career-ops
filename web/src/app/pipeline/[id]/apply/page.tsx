@@ -73,7 +73,8 @@ export default async function ApplyPage({
 
   const suffix = query ? `?${query}` : "";
   const company = app?.company || parseReport(report?.content ?? "").title || `Report #${id}`;
-  const disk = await readCvDiskState(id, company, (app?.pdf ?? "").includes("✅"), reportNum);
+  const trackerMarked = (app?.pdf ?? "").includes("✅");
+  const disk = await readCvDiskState(id, company, trackerMarked, reportNum);
   return (
     <ApplyChecklist
       company={company}
@@ -92,8 +93,8 @@ export default async function ApplyPage({
       reportNum={reportNum}
       status={app?.status ?? ""}
       pdfReady={resume !== null}
-      trackerMarked={(app?.pdf ?? "").includes("✅")}
-      pdfNote={disk.note}
+      trackerMarked={trackerMarked}
+      pdfNote={trackerMarked && resume === null ? null : disk.note}
     />
   );
 }
