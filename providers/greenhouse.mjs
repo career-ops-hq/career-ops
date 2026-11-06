@@ -217,7 +217,20 @@ export default {
     const listHref = assertGreenhouseUrl(listUrl.href);
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertGreenhouseUrl above it guarantees the final hostname stays in the allowlist.
-    const json = /** @type {any} */ (await ctx.fetchJson(listHref, { redirect: 'error' }));
+    let json;
+    try {
+      json = /** @type {any} */ (await ctx.fetchJson(listHref, { redirect: 'error' }));
+    } catch (err) {
+      // A board with thousands of postings (SpaceX, Anduril) exceeds the body cap
+      // once every posting body is embedded. Fall back to titles, URLs and dates
+      // only: the same list without content=true. The scan keeps working; it just
+      // has no description text for these boards.
+      if (/** @type {any} */ (err)?.code !== 'response_too_large') throw err;
+      const bare = new URL(apiUrl);
+      bare.searchParams.delete('content');
+      console.warn(`[greenhouse] ${entry.name}: board too large for content=true; read without descriptions, so description-based filters (content_filter, visa, country eligibility) cannot judge these postings.`);
+      json = /** @type {any} */ (await ctx.fetchJson(assertGreenhouseUrl(bare.href), { redirect: 'error' }));
+    }
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
     const usable = jobs.filter(/** @param {any} j */ j => j.absolute_url);
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v1\/boards\/([^/]+)\/jobs\/?$/)?.[1] || '';

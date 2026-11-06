@@ -79,7 +79,9 @@ try {
   ]);
 } catch (err) {
   let missing = [];
-  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: rethrow below */ }
+  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: the error still names the package */ }
+  const name = /Cannot find package '((?:@[^/'\\:]+\/)?[^/'\\:]+)'/.exec(err?.message)?.[1];
+  if (name && !missing.includes(name)) missing.unshift(name);
   if (err?.code !== 'ERR_MODULE_NOT_FOUND' || missing.length === 0) throw err;
   console.error(`career-ops dependencies are not installed in ${__dirname} (missing: ${missing.join(', ')}), so doctor cannot run its checks.\nFix: run \`npm install\` in ${__dirname}, then run doctor again.`);
   process.exit(1);
@@ -575,14 +577,16 @@ const MCP_CONFIGS = [
   // there, and JSON.parse throwing on them used to read as "no MCP server
   // configured" (#2252).
   { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'], userFiles: () => opencodeUserConfigFiles() },
+  { cli: 'omp',      files: ['.omp/mcp.json', '.omp/.mcp.json', 'mcp.json', '.mcp.json'] },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package,
 // or the `mcp-server-playwright` binary that package installs. nixpkgs ships
 // the binary on its own (pkgs.playwright-mcp, in the flake dev shell), so a
 // NixOS config names the command and never mentions the npm package.
-function isPlaywrightServer(server) {
+function isPlaywrightServer(server, { allowDisabled = false } = {}) {
   if (!server || typeof server !== 'object') return false;
+  if (!allowDisabled && (server.enabled === false || server.enabled === 'false')) return false;
   const blob = JSON.stringify(server).toLowerCase();
   return blob.includes('@playwright/mcp') || blob.includes('mcp-server-playwright');
 }
@@ -671,6 +675,247 @@ function hasPlaywrightInMergedOpenCode(configs) {
     .some((def) => def && def.enabled !== false && isPlaywrightServer(def));
 }
 
+// Resolve OMP's active agent directory using supported selectors:
+// named profile ($OMP_PROFILE / $PI_PROFILE), explicit $PI_CODING_AGENT_DIR
+// override, or the default ~/.omp/agent directory (docs/settings.md).
+// Honors $PI_CONFIG_DIR when set, and treats 'default' as the default profile.
+function ompAgentDir() {
+  const profile = (process.env.OMP_PROFILE || process.env.PI_PROFILE || '').trim();
+  const configDirName = process.env.PI_CONFIG_DIR || '.omp';
+  if (profile && profile !== 'default') {
+    return join(homedir(), configDirName, 'profiles', profile, 'agent');
+  }
+  if (process.env.PI_CODING_AGENT_DIR) {
+    return process.env.PI_CODING_AGENT_DIR;
+  }
+  return join(homedir(), configDirName, 'agent');
+}
+
+// OMP's USER-level config sources for settings (docs/settings.md):
+// active agent directory (config.yml > config.yaml > settings.json).
+function ompUserConfigFiles() {
+  const dir = ompAgentDir();
+  const configYml = join(dir, 'config.yml');
+  const configYaml = join(dir, 'config.yaml');
+  if (existsSync(configYml)) return [configYml];
+  if (existsSync(configYaml)) return [configYaml];
+  return [join(dir, 'settings.json')];
+}
+
+function ompConfigEnableProjectState(cfg) {
+  if (!cfg || typeof cfg !== 'object') return undefined;
+  if (isExplicitlyDisabled(cfg['mcp.enableProjectConfig'])) return false;
+  if (isExplicitlyEnabled(cfg['mcp.enableProjectConfig'])) return true;
+  if (cfg.mcp && typeof cfg.mcp === 'object') {
+    if (isExplicitlyDisabled(cfg.mcp.enableProjectConfig)) return false;
+    if (isExplicitlyEnabled(cfg.mcp.enableProjectConfig)) return true;
+  }
+  return undefined;
+}
+
+// OMP allows disabling project MCP configuration via mcp.enableProjectConfig: false
+// in project settings (.omp/config.yml, .omp/settings.json) or user settings
+// (~/.omp/agent/config.yml, ~/.omp/settings.json). When false, project-level MCP
+// Active project-level settings files for OMP (docs/settings.md).
+// Excludes inactive variants like .omp/config.yaml that OMP does not load.
+function ompProjectConfigFiles(root) {
+  if (!root) return [];
+  return [
+    join(root, '.omp', 'config.yml'),
+    join(root, '.omp', 'settings.json'),
+  ];
+}
+
+// OMP honors mcp.enableProjectConfig (boolean)
+// in project settings (.omp/config.yml, .omp/settings.json) or user settings
+// (~/.omp/agent/config.yml, ~/.omp/settings.json). When false, project-level MCP
+// sources are excluded from discovery (docs/mcp-config.md). Defaults to true.
+function isOmpProjectMcpEnabled(root) {
+  for (const file of ompProjectConfigFiles(root)) {
+    const state = ompConfigEnableProjectState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state;
+  }
+  for (const file of ompUserConfigFiles()) {
+    const state = ompConfigEnableProjectState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state;
+  }
+  return true;
+}
+
+// OMP gates user-level Claude Code MCP discovery behind enabledProviders ('claude'),
+// but setting CLAUDE_CONFIG_DIR implicitly enables it unless disabledProviders lists it.
+function isOmpClaudeUserProviderEnabled(root) {
+  const configs = [
+    ...ompProjectConfigFiles(root),
+    ...ompUserConfigFiles(),
+  ].map(readOmpConfigIfPresent).filter(Boolean);
+
+  const listFor = (key) => {
+    const cfg = configs.find((entry) => Array.isArray(entry[key]));
+    return cfg ? cfg[key].map((p) => String(p).toLowerCase()) : [];
+  };
+  if (listFor('disabledProviders').includes('claude')) return false;
+  if (listFor('enabledProviders').includes('claude')) return true;
+
+  return Boolean(process.env.CLAUDE_CONFIG_DIR);
+}
+
+// OMP merges MCP definitions across user agent directory and project files.
+// Project definitions override/shadow user definitions with the same name.
+// User-level disabledServers acts as an explicit denylist across all sources (docs/mcp-config.md).
+// User-level enabledServers force-enables a server definition unless disabledServers also lists it.
+function getOmpEffectivePlaywright(root) {
+  const projectEnabled = isOmpProjectMcpEnabled(root);
+  const claudeUserEnabled = isOmpClaudeUserProviderEnabled(root);
+
+  const claudeHome = process.env.CLAUDE_CONFIG_DIR ? process.env.CLAUDE_CONFIG_DIR : homedir();
+
+  const sources = [
+    // 1. Imported Claude user configs (gated on effective Claude user provider)
+    ...(claudeUserEnabled ? [
+      { file: join(claudeConfigDir(), 'mcp.json'), source: 'the Claude user mcp.json' },
+      { file: join(claudeHome, '.claude.json'), source: 'the Claude user .claude.json' },
+    ] : []),
+    // 2. Project root fallback files (ascending precedence: .mcp.json, then mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.mcp.json'), source: '.mcp.json' },
+      { file: join(root, 'mcp.json'), source: 'mcp.json' },
+    ] : (projectEnabled ? [
+      { file: '.mcp.json', source: '.mcp.json' },
+      { file: 'mcp.json', source: 'mcp.json' },
+    ] : [])),
+    // 3. Imported Claude project configs (.claude/.mcp.json, then .claude/mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.claude', '.mcp.json'), source: '.claude/.mcp.json' },
+      { file: join(root, '.claude', 'mcp.json'), source: '.claude/mcp.json' },
+    ] : []),
+    // 4. Native OMP user files (ascending precedence: .mcp.json, then mcp.json)
+    { file: join(ompAgentDir(), '.mcp.json'), source: 'the OMP user mcp.json' },
+    { file: join(ompAgentDir(), 'mcp.json'), source: 'the OMP user mcp.json', userOverrides: true },
+    // 5. Native OMP project files (ascending precedence: .omp/.mcp.json, then .omp/mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.omp', '.mcp.json'), source: '.omp/.mcp.json' },
+      { file: join(root, '.omp', 'mcp.json'), source: '.omp/mcp.json' },
+    ] : (projectEnabled ? [
+      { file: join('.omp', '.mcp.json'), source: '.omp/.mcp.json' },
+      { file: join('.omp', 'mcp.json'), source: '.omp/mcp.json' },
+    ] : [])),
+  ];
+
+  const disabledServers = new Set();
+  const forcedEnabled = new Set();
+  const effectiveServers = new Map();
+
+  for (const { file, cfg: directCfg, source, userOverrides } of sources) {
+    const cfg = directCfg ?? (file ? readConfigIfPresent(file) : null);
+    if (!cfg || typeof cfg !== 'object') continue;
+
+    if (userOverrides && Array.isArray(cfg.disabledServers)) {
+      for (const s of cfg.disabledServers) {
+        if (typeof s === 'string' && s.trim()) {
+          disabledServers.add(s.trim().toLowerCase());
+        }
+      }
+    }
+    if (userOverrides && Array.isArray(cfg.enabledServers)) {
+      for (const s of cfg.enabledServers) {
+        if (typeof s === 'string' && s.trim()) {
+          forcedEnabled.add(s.trim().toLowerCase());
+        }
+      }
+    }
+
+    const buckets = [cfg.mcpServers, cfg.mcp].filter((b) => b && typeof b === 'object');
+    for (const bucket of buckets) {
+      for (const [name, def] of Object.entries(bucket)) {
+        if (def && typeof def === 'object') {
+          effectiveServers.set(name.toLowerCase(), { name, def, source });
+        }
+      }
+    }
+  }
+
+  for (const [name, entry] of effectiveServers.entries()) {
+    if (disabledServers.has(name)) continue;
+    const forced = forcedEnabled.has(name);
+    if (!forced && (entry.def.enabled === false || entry.def.enabled === 'false')) continue;
+    if (isPlaywrightServer(entry.def, { allowDisabled: forced })) {
+      return entry;
+    }
+  }
+
+  return null;
+}
+
+
+function readOmpConfigIfPresent(file) {
+  if (!existsSync(file)) return null;
+  try {
+    const content = readFileSync(file, 'utf8');
+    if (file.endsWith('.json') || file.endsWith('.jsonc')) {
+      try {
+        return parseConfigByExtension(file, content);
+      } catch {
+        return loadYaml(content);
+      }
+    }
+    return loadYaml(content) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isExplicitlyDisabled(val) {
+  if (val === false) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'false' || s === 'off' || s === 'disabled' || s === 'no';
+  }
+  return false;
+}
+
+function isExplicitlyEnabled(val) {
+  if (val === true) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === 'on' || s === 'enabled' || s === 'yes';
+  }
+  return false;
+}
+
+// Inspect a parsed OMP config object for its native browser setting.
+// Returns false if browser is explicitly disabled, true if explicitly enabled,
+// or undefined if unspecified.
+function ompConfigBrowserState(cfg) {
+  if (!cfg || typeof cfg !== 'object') return undefined;
+  if (isExplicitlyDisabled(cfg.browser)) return false;
+  if (isExplicitlyEnabled(cfg.browser)) return true;
+  if (isExplicitlyDisabled(cfg['browser.enabled'])) return false;
+  if (isExplicitlyEnabled(cfg['browser.enabled'])) return true;
+  if (cfg.browser && typeof cfg.browser === 'object') {
+    if (isExplicitlyDisabled(cfg.browser.enabled)) return false;
+    if (isExplicitlyEnabled(cfg.browser.enabled)) return true;
+  }
+  return undefined;
+}
+
+// OMP drops recognized browser MCP servers (playwright, puppeteer, etc.) by
+// default when its native browser prelude is active (browser.enabled defaults
+// to true). A Playwright MCP definition is only usable if the native browser
+// is explicitly disabled in project settings (.omp/config.yml, .omp/settings.json)
+// or user settings (~/.omp/agent/config.yml, ~/.omp/settings.json).
+function isOmpBrowserDisabled(root) {
+  for (const file of ompProjectConfigFiles(root)) {
+    const state = ompConfigBrowserState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state === false;
+  }
+  for (const file of ompUserConfigFiles()) {
+    const state = ompConfigBrowserState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state === false;
+  }
+  return false;
+}
+
 // A Claude Code plugin declares its MCP servers in its own .mcp.json, which
 // lives under the user's config dir - never in the project root. The
 // project-root scan below therefore reports "not detected" on a machine where
@@ -751,6 +996,10 @@ function isPlaywrightMcpConfigured(root, activeCli) {
       ...entry.files.map((rel) => join(root, ...rel.split('/'))),
     ].map(readConfigIfPresent).filter(Boolean);
     return hasPlaywrightInMergedOpenCode(configs);
+  }
+  if (activeCli === 'omp') {
+    const effective = getOmpEffectivePlaywright(root);
+    return effective !== null && isOmpBrowserDisabled(root);
   }
   const inProject = entry.files.some((rel) => {
     const file = join(root, ...rel.split('/'));
@@ -896,7 +1145,20 @@ function checkPlaywrightMcp(root, activeCli) {
   if (isPlaywrightMcpConfigured(root, activeCli)) {
     return { pass: true, label: `Playwright MCP server configured (${activeCli})` };
   }
-  // Active CLI is known (flag/env/.env) but its MCP isn't configured.
+  // Active CLI is known (flag/env/.env) but its MCP isn't configured or is filtered.
+  if (activeCli === 'omp') {
+    const effective = getOmpEffectivePlaywright(root);
+    if (effective) {
+      return {
+        warn: true,
+        label: `Playwright MCP server defined in ${effective.source}, but filtered by OMP native browser`,
+        fix: [
+          'OMP drops browser MCP servers by default when its native browser is active.',
+          'To use Playwright MCP in OMP, disable the built-in browser by setting "browser": { "enabled": false } in .omp/settings.json or .omp/config.yml (or run "omp config set browser.enabled false").',
+        ],
+      };
+    }
+  }
   return {
     warn: true,
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
@@ -906,7 +1168,9 @@ function checkPlaywrightMcp(root, activeCli) {
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (project; see opencode.example.json) or to the global ~/.config/opencode/opencode.json[c] (or $OPENCODE_CONFIG), or pass --cli <name> if you actually run a different CLI.'
-        : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
+        : activeCli === 'omp'
+          ? 'Add the Playwright MCP server to .omp/mcp.json, or pass --cli <name> if you actually run a different CLI.'
+          : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
     ],
   };
 }

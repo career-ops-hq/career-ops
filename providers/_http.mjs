@@ -59,7 +59,6 @@ export function resolveDefaultTimeoutMs(raw, fallback = 10_000) {
   return parsed;
 }
 
-const DEFAULT_TIMEOUT_MS = resolveDefaultTimeoutMs(process.env.CAREER_OPS_HTTP_TIMEOUT_MS);
 let proxyAgent;
 let proxySignature;
 
@@ -142,6 +141,10 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
 // server-side redirect could point the request at a private address after the
 // ip guard already passed the original host (#4079). Callers that really need
 // to follow redirects opt in explicitly.
+//
+// The default timeout is read on each request, not when this module loads: an
+// entry script such as scan.mjs imports this file statically, so the module is
+// evaluated before that script loads the data root's .env.
 /**
  * @param {string} url
  * @param {FetchOptions} [opts]
@@ -151,7 +154,7 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
  * @param {typeof fetch} [fetchImpl] undici's fetch when a proxy dispatcher is used; global fetch otherwise.
  * @returns {Promise<any>}
  */
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse, acceptNotModified = false } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
+async function fetchInContext(url, { timeoutMs = resolveDefaultTimeoutMs(process.env.CAREER_OPS_HTTP_TIMEOUT_MS), headers = {}, method = 'GET', body = null, redirect = 'error', onResponse, acceptNotModified = false } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -243,6 +246,17 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     // (this froze full-directory sweeps silently — 20 workers all stuck on
     // stalled reads with the abort timer already cleared).
     return await consume(res);
+  } catch (err) {
+    // The per-request timer already fired. A retry spends that same budget
+    // again on a board that is still hung (measured: one Ashby board, 30s
+    // timeout, 2 retries, about 94s). A board-watchdog abort is a different
+    // signal, and withRetry already stops when that signal is aborted, so
+    // leave it untagged. A fast reset or DNS failure never trips this timer.
+    if (controller.signal.aborted && !currentAbortSignal()?.aborted
+      && err !== null && (typeof err === 'object' || typeof err === 'function')) {
+      err.timedOut = true;
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -639,8 +653,13 @@ export function isRefusedRedirectError(err) {
 
 /**
  * Whether a failed request is worth retrying: 429, any 5xx, or a transport
- * error (no status — timeout/abort/DNS). A 4xx other than 429 is the server
- * telling us the request itself is wrong, and retrying it just burns time.
+ * error (no status — DNS, connection reset, or an abort that did not spend
+ * this request's own timer). A 4xx other than 429 is the server telling us
+ * the request itself is wrong, and retrying it just burns time.
+ *
+ * A timeout that already ran for the full `timeoutMs` is tagged `timedOut`
+ * by fetchInContext. Retrying it waits that long again and gets the same
+ * abort. Fast transport errors are not tagged, so they still retry.
  *
  * A refused redirect (redirect:'error' meeting a 3xx) surfaces as a bare
  * TypeError with no .status — the same shape as a transient network error —
@@ -660,7 +679,9 @@ export function isRetryableError(err) {
   // third time. The size error carries no status, so without this it would
   // fall through to the network-error case below.
   if (err?.code === 'response_too_large') return false;
-  return status === undefined; // network error / timeout / abort — no status set
+  // Checked after 429 / 5xx so a status the server actually sent still wins.
+  if (err?.timedOut === true) return false;
+  return status === undefined; // network error / abort that did not spend the timer
 }
 
 /**

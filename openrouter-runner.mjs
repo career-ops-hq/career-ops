@@ -43,7 +43,9 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
-import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
+import { classifyLiveness, isUnreadableVerdict, JOB_ID_PATTERN } from './liveness-core.mjs';
+import { fetchJdViaKnownApi } from './browser-extract.mjs';
+import { HYDRATING_CODES, extractApplyControls, postingIdentity } from './liveness-browser.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
@@ -726,8 +728,94 @@ export function unreadableJobPage({ status = 0, requestedUrl = '', finalUrl = ''
   return null;
 }
 
-async function fetchJobPage(url) {
+// What the page read strips before the text is taken: it is not job content.
+const NON_CONTENT_SELECTOR = 'script,style,nav,footer,header';
+
+// Most text the runner keeps of one job description. Handed to the API fetcher
+// too, so it does not cut the text short of what the slices below would keep.
+const JD_TEXT_CAP = 16_000;
+
+// Wait for a single-page app to render its job description, at most 15 s. The
+// wait ends once the text the read will keep (the main content, minus
+// nav/header/footer and what is not shown) holds more than 1500 chars. Counting
+// the whole body let a long nav or a consent panel pass while the description
+// still said "Loading...". The count leaves the live DOM alone; the read strips
+// it afterwards. A page that stays shorter (a short posting) ends the wait at
+// the first decisive liveness verdict instead, the rule liveness-browser.mjs
+// polls by: any code outside HYDRATING_CODES. A decisive verdict ends it only
+// for a closed posting, or when the text the read keeps passes
+// unreadableJobPage: an apply control above a "Loading..." description is
+// decisive but not yet readable. Not when the text stops changing, as a
+// spinner holds it constant on a live page. An HTTP error status (`status` >=
+// 400) has nothing to wait for; the caller reads the status.
+export async function waitForJobText(page, { status = 0, url = '' } = {}) {
+  if (status >= 400) return;
+  const deadline = Date.now() + 15_000;
+  const requested = url ? postingIdentity(url) : { postingId: null };
+  for (;;) {
+    try {
+      const reading = await page.evaluate((selector) => {
+        const root = document.querySelector('main, [role="main"], article') || document.body || document;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let length = 0;
+        const parts = [];
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const el = node.parentElement;
+          if (!el || el.closest(selector) || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) continue;
+          length += node.nodeValue.trim().length;
+          if (length > 1500) return { long: true };
+          parts.push(node.nodeValue);
+        }
+        return { long: false, bodyText: document.body?.innerText ?? '', kept: parts.join(' ') };
+      }, NON_CONTENT_SELECTOR);
+      if (reading.long) return;
+      // The apply controls are read as liveness-browser's readPage reads them,
+      // with the same posting identity.
+      const finalUrl = page.url();
+      const landed = postingIdentity(finalUrl);
+      const anotherPosting = requested.postingId && landed.postingId !== requested.postingId;
+      const applyControls = await page.evaluate(extractApplyControls, {
+        ...(anotherPosting ? { postingId: null, postingSegment: null } : landed),
+        pageUrl: finalUrl,
+        idPattern: JOB_ID_PATTERN,
+      });
+      const { bodyText, kept } = reading;
+      const verdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
+      if (!HYDRATING_CODES.has(verdict.code)) {
+        // An apply control is a decisive verdict even over a description that
+        // still says "Loading...": the wait ends only on a closed posting or
+        // once the text the read keeps is readable.
+        if (verdict.result === 'expired') return;
+        const text = kept.replace(/\s+/g, ' ').trim();
+        if (!unreadableJobPage({ status, requestedUrl: url, finalUrl, text })) return;
+      }
+    } catch {
+      // the page navigated or rebuilt its DOM mid-read; try again
+    }
+    if (Date.now() + 250 > deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+// `fetchApi` is a test seam for the ATS API fetch; the default is the real one.
+export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) {
   assertSafeRemoteUrl(url);
+  const viaApi = await fetchApi(url, JD_TEXT_CAP);
+  if (viaApi?.text) {
+    const { title, text } = viaApi;
+    // The title leads the content, as fetch-jd.mjs prints it: the normalizers
+    // keep it apart from the text and a description need not repeat it.
+    const unreadable = unreadableJobPage({ status: 200, requestedUrl: url, finalUrl: url, text });
+    if (!unreadable) return (title ? `${title}\n\n${text}` : text).slice(0, JD_TEXT_CAP);
+    // The ATS says the posting is closed (Workday canApply, SmartRecruiters
+    // active): a browser read would only lose that. Any other unreadable
+    // reason (too short ...) still falls through to the page.
+    if (classifyLiveness({ status: 200, requestedUrl: url, finalUrl: url, bodyText: text }).result === 'expired') {
+      // Left pending in pipeline.md like any unreadable page (#5814): cmdPipeline
+      // marks a row done only when cmdEvaluate returns a report.
+      throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
+    }
+  }
   let chromium;
   if (!process.env.CAREER_OPS_NO_PLAYWRIGHT) {
     try {
@@ -747,13 +835,13 @@ async function fetchJobPage(url) {
       ));
       const page = await browser.newPage();
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForTimeout(2000); // wait for SPA render
-      const text = await page.evaluate(() => {
-        document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
+      await waitForJobText(page, { status: response?.status() ?? 0, url }); // wait for SPA render
+      const text = await page.evaluate((selector) => {
+        document.querySelectorAll(selector).forEach(el => el.remove());
         return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
-      });
+      }, NON_CONTENT_SELECTOR);
       unreadable = unreadableJobPage({ status: response?.status() ?? 0, requestedUrl: url, finalUrl: page.url(), text });
-      if (!unreadable) return text.slice(0, 16_000);
+      if (!unreadable) return text.slice(0, JD_TEXT_CAP);
     } catch (e) {
       console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
     } finally {
@@ -773,7 +861,7 @@ async function fetchJobPage(url) {
     const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
     if (unreadable) throw new Error(`no job description (${unreadable})`);
-    return text.slice(0, 16_000);
+    return text.slice(0, JD_TEXT_CAP);
   } catch (e) {
     throw new Error(`Could not fetch job page: ${e.message}`);
   }

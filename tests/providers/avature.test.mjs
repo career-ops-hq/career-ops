@@ -55,6 +55,15 @@ try {
   if (parseArticles('<div>no articles</div>', origin).length === 0) pass('parseArticles returns [] when no articles present');
   else fail('parseArticles should return [] for markup with no articles');
 
+  // Deloitte USI renders `article--result` without the leading `article` class.
+  const bareResult = `
+    <article class="article--result " data-total="573">
+      <h3 class="article__header__text__title"><a href="https://usijobs.deloitte.com/en_US/careersUSI/JobDetail/USI-Data-Engineer/374504" class="link">Data Engineer</a></h3>
+    </article>`;
+  const bArts = parseArticles(bareResult, 'https://usijobs.deloitte.com');
+  if (bArts.length === 1 && bArts[0].id === '374504' && bArts[0].title === 'Data Engineer') pass('parseArticles reads an article--result card with no leading article class');
+  else fail(`parseArticles bare article--result wrong: ${JSON.stringify(bArts)}`);
+
   // Protocol-relative (//host/...) hrefs must resolve like a browser does —
   // string concatenation would produce "https://acme.avature.net//other/...".
   // A href new URL cannot resolve is dropped instead of emitted broken.
