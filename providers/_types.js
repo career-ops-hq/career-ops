@@ -227,6 +227,10 @@
  * @typedef {object} Provider
  * @property {string} id                                                       Unique across all loaded providers.
  * @property {((entry: PortalEntry) => (DetectHit | null))} [detect]           Optional auto-detection.
+ * @property {(entry: PortalEntry) => (string | undefined)} [fetchHost]        Optional.
+ *   Hostname that fetch() requests, when that host is not detect().url.
+ *   scan.mjs uses the string as the per-host concurrency key. Omit it when
+ *   detect().url, api, or careers_url already names that host.
  * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
  * @property {((job: Job) => (string | null))} [dedupKey]                     Optional. A
  *   provider-scoped identifier for a job, precise where URL normalization

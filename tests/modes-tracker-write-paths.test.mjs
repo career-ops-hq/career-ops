@@ -182,7 +182,10 @@ function mergeOnto(status, tsvRow, fn, company = 'Acme') {
     ].join('\n'));
     writeFileSync(join(dir, 'batch', 'tracker-additions', '042-acme.tsv'),
       `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvRow}\n`);
-    const r = spawnSync(NODE, [join(ROOT, 'merge-tracker.mjs')], { encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: dir } });
+    // The fixture's own batch-state: the default is the checkout's, whose
+    // failed rows would decide whether this TSV merges.
+    const r = spawnSync(NODE, [join(ROOT, 'merge-tracker.mjs')], { encoding: 'utf-8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_BATCH_STATE: join(dir, 'batch', 'batch-state.tsv') } });
     assert.equal(r.status, 0, describeSpawn(r, `merge-tracker exited ${r.status}`));
     const rows = readFileSync(join(dir, 'data', 'applications.md'), 'utf-8').split('\n').filter(l => /^\|\s*\d+\s*\|/.test(l));
     fn(rows.map(row => row.split('|').map(c => c.trim())));

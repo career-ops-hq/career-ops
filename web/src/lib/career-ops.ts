@@ -4,7 +4,8 @@ import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { resolveDataRoot } from "@/lib/core/data-root.mjs";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
-import { readTrackerFile, trackerLinkDirs } from "@/lib/core/tracker-files.mjs";
+import { readTrackerFile, resolveTrackerPath, trackerLinkDirs } from "@/lib/core/tracker-files.mjs";
+import { cachedFileValue } from "@/lib/stat-file-cache.mjs";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { classifyTracker, parseApplications } from "@/lib/tracker-table.mjs";
 import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
@@ -104,9 +105,14 @@ export type InboxJob = { url: string; company: string; role: string; location?: 
 /** Parse data/pipeline.md. The row grammar and its labeled-segment handling
  *  live in pipeline-table.mjs — see there for the column rules (#1015, #1017). */
 export function readInbox(applications: Pick<Application, "url">[] = readApplications()): InboxJob[] {
-  const md = read("data/pipeline.md");
-  if (!md) return [];
-  return reconcileInbox(parseInbox(md), applications);
+  const file = path.join(careerOpsRoot(), "data", "pipeline.md");
+  // A missing pipeline.md is null here. Any other read error throws, so an
+  // unreadable inbox does not show up as an empty one (web/AGENTS.md).
+  const jobs = cachedFileValue(file, "inbox", (text) => parseInbox(text));
+  if (!jobs) return [];
+  // Copy each cached row before reconcile. reconcileInbox passes unmatched
+  // jobs through as-is, so a caller editing one would edit the cache.
+  return reconcileInbox(jobs.map((job) => ({ ...job })), applications);
 }
 
 /**
@@ -118,21 +124,32 @@ export function readInbox(applications: Pick<Application, "url">[] = readApplica
  * a malformed row is skipped, never thrown (missing ≠ corrupt).
  */
 export function readScanDates(): Map<string, string> {
-  const tsv = read("data/scan-history.tsv");
-  const dates = new Map<string, string>();
-  if (!tsv) return dates;
-  const lines = splitLines(tsv);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line || (i === 0 && line.startsWith("url\t"))) continue; // skip header
-    const tab = line.indexOf("\t");
-    if (tab < 1) continue;
-    const url = line.slice(0, tab);
-    const firstSeen = line.slice(tab + 1).split("\t")[0]?.trim();
-    // keep the EARLIEST first_seen if a url recurs (it's "first" seen, after all)
-    if (/^\d{4}-\d{2}-\d{2}$/.test(firstSeen) && !dates.has(url)) dates.set(url, firstSeen);
-  }
-  return dates;
+  const file = path.join(careerOpsRoot(), "data", "scan-history.tsv");
+  // Missing file: null, so an empty map. Other read errors throw.
+  const dates = cachedFileValue(file, "scan-dates", (tsv) => {
+    const parsed = new Map<string, string>();
+    const lines = splitLines(tsv);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line || (i === 0 && line.startsWith("url\t"))) continue;
+      const tab = line.indexOf("\t");
+      if (tab < 1) continue;
+      const url = line.slice(0, tab);
+      const firstSeen = line.slice(tab + 1).split("\t")[0]?.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(firstSeen) && !parsed.has(url)) parsed.set(url, firstSeen);
+    }
+    return parsed;
+  });
+  // Copy so a caller that mutates the Map cannot poison the cache.
+  return dates ? new Map(dates) : new Map();
+}
+
+/** Raw scan-history lines, reused until the file's mtime or size changes.
+ *  null when the file is absent. Other read errors throw, so a caller can
+ *  tell a missing history from a broken one. */
+export function readScanHistoryLines(): string[] | null {
+  const file = path.join(careerOpsRoot(), "data", "scan-history.tsv");
+  return cachedFileValue(file, "scan-lines", (text) => text.split("\n"));
 }
 
 export type Application = {
@@ -166,15 +183,24 @@ export type Application = {
  * to the running system checkout for that system-layer alias table.
  */
 export function readApplications(): Application[] {
-  const md = readTrackerFile(careerOpsRoot());
-  if (!md) return [];
-  // parseApplications derives each row from WEB_FIELD (tracker-table.mjs), so
-  // its keys are exactly this type's field names by construction — adding a
-  // tracker column is the two edits described there (WEB_FIELD + Application),
-  // never a hand-written return-shape list that the two could drift from. The
-  // third argument is the running system checkout, so a data-only root (no
-  // tracker-aliases.json of its own) still resolves headers correctly.
-  return parseApplications(md, careerOpsRoot(), path.resolve(process.cwd(), "..")) as Application[];
+  const root = careerOpsRoot();
+  const file = resolveTrackerPath(root);
+  const codeRoot = path.resolve(process.cwd(), "..");
+  // Parsed rows follow tracker-aliases.json as well as the tracker. A header
+  // rename in that file must not keep serving the old columns.
+  const aliasFiles = [...new Set([
+    path.resolve(root, "tracker-aliases.json"),
+    path.resolve(codeRoot, "tracker-aliases.json"),
+  ])];
+  const rows = cachedFileValue(file, "applications", (md) =>
+    parseApplications(md, root, codeRoot) as Application[],
+    aliasFiles,
+  );
+  // A new array of new row objects each call. The cache keeps the parsed rows;
+  // a caller that pushes, splices or edits a field cannot poison the next read,
+  // and each request gets its own list identity for React. Row fields are
+  // strings, so a shallow copy is enough.
+  return rows ? rows.map((row) => ({ ...row })) : [];
 }
 
 export type TrackerShape = "missing" | "empty" | "malformed" | "rows";
@@ -224,7 +250,7 @@ export async function pdfReadyForReport(n: string): Promise<boolean> {
 }
 
 export type PdfPathForReportResult =
-  | { status: "found"; path: string }
+  | { status: "found"; path: string; html: string | null }
   | { status: "not-found" }
   | { status: "invalid" }
   | { status: "rejected" };
@@ -271,7 +297,12 @@ export async function pdfPathStatusForReport(n: string, kind: "cv" | "cover" = "
   // (e.g. reports/) and pass a root-scoped realpath check — serving a file
   // this route was never meant to expose.
   if (!isRegularContainedFile(abs, outputDir)) return { status: "rejected" };
-  return { status: "found", path: abs };
+  let html: string | null = null;
+  if (entry.html) {
+    const htmlAbs = path.resolve(root, entry.html);
+    if (htmlAbs.startsWith(outputDir + path.sep) && isRegularContainedFile(htmlAbs, outputDir)) html = htmlAbs;
+  }
+  return { status: "found", path: abs, html };
 }
 
 export async function pdfPathForReport(n: string): Promise<string | null> {

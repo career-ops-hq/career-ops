@@ -37,6 +37,7 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
+import { buildWorkplacePolicy } from './providers/_country.mjs';
 import {
   closeSync,
   existsSync,
@@ -69,10 +70,10 @@ import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
 import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
-import { normalizeCompany, appendLedgerRows } from './tracker-utils.mjs';
+import { normalizeCompany, appendLedgerRows, companiesMatchIgnoringCorporateForm, LEGAL_SUFFIXES } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
-import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldTitle } from './title-keywords.mjs';
+import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldTitle, foldContentText, compileContentTraits } from './title-keywords.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -84,6 +85,7 @@ import { sectionKind } from './lib/pipeline-sections.mjs';
 import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
+import { robotsAllows } from './robots-check.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -112,6 +114,8 @@ const parseYaml = loadYaml;
 // ── Config ──────────────────────────────────────────────────────────
 import { resolveTrackerPath } from './path-resolver.mjs';
 import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-launch.mjs';
+import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
+export { applyEntryResponseCap };
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 // An explicit override wins; otherwise the root fixed above, since the .env just
@@ -153,7 +157,30 @@ const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 // module must stay side-effect free: a sibling that only reads a constant used
 // to leave a stray data/ in whatever cwd it ran from.
 
-const CONCURRENCY = 10;
+// A morning scan of mixed ATS hosts was waiting on 10 slots while the CPU
+// sat idle. 32 is the global cap. 10 per hostname keeps a single-ATS list
+// at today's parallelism, so one Greenhouse board does not get a bigger
+// burst than it did before. Verify stays at 10. It hammers one URL at a
+// time and is not the morning-scan wait.
+export const SCAN_CONCURRENCY = 32;
+export const HOST_CONCURRENCY = 10;
+export const VERIFY_CONCURRENCY = 10;
+
+export function companyFetchHost(company) {
+  try {
+    const declared = company?._provider?.fetchHost?.(company);
+    if (typeof declared === 'string' && declared.trim()) return declared.trim().toLowerCase();
+    const detected = company?._provider?.detect?.(company);
+    const raw = (detected && typeof detected.url === 'string' && detected.url)
+      || (typeof company?.api === 'string' && company.api)
+      || (typeof company?.careers_url === 'string' && company.careers_url)
+      || '';
+    if (!raw) return '';
+    return new URL(raw).hostname;
+  } catch {
+    return '';
+  }
+}
 const PROGRESS_EVERY = 25;
 
 export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
@@ -212,7 +239,7 @@ export function emitJsonReceipt(receipt, exitCode) {
 // sections 11b and 44 among them — keep resolving it from here.
 // compileContentKeyword shares the `word:`/`stem:` prefix machinery but skips
 // the title filter's short-acronym auto-anchor (#3274).
-export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
+export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldContentText, compileContentTraits };
 
 // ── Declared-field whitelists (#3438) ──────────────────────────────
 // A title whitelist cannot express "this posting is in an occupation I want"
@@ -552,10 +579,20 @@ function placesWithoutCountryCode(lower) {
   });
 }
 
+// A state name that is also a country cannot beat the user's own `block`:
+// "Tbilisi, Georgia" is the country, and reading "Georgia" as always_allow let
+// it through a filter that blocked "Tbilisi". Such a name counts at the `allow`
+// tier instead, so "Atlanta, Georgia" still passes and a blocked Georgian city
+// does not. The 2-letter code is unambiguous and stays in always_allow, so
+// "Dublin, GA" still beats a blocked "Dublin".
+const US_STATE_NAMES_ALSO_COUNTRIES = new Set(['georgia']);
+
 const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
-  compileLocationKeyword(name),
+  ...(US_STATE_NAMES_ALSO_COUNTRIES.has(name) ? [] : [compileLocationKeyword(name)]),
   compileUsStateAbbrev(abbr),
 ]);
+
+const US_STATE_ALLOW_MATCHERS = [...US_STATE_NAMES_ALSO_COUNTRIES].map(compileLocationKeyword);
 
 // Some providers report a rolled-up display string ("5 Locations", "2 Locations")
 // while the canonical URL still names the real primary location. Workday is the
@@ -641,16 +678,23 @@ export function titleSignalsRemote(title) {
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
+  const workplacePolicy = buildWorkplacePolicy(locationFilter.workplace_policy);
   const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
   const alwaysAllow = alwaysAllowKeywords.map(compileLocationKeyword);
   // US-targeted configs list the country in always_allow and foreign cities
   // in block. "Dublin, OH" does not contain "United States", so without this
   // expansion block: [Dublin] rejects a real US job. Opt-in on the country
   // token — configs with no US always_allow entry are unchanged.
-  if (alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k))) {
+  const usExpansion = alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k));
+  if (usExpansion) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
   const allow = compileLocationKeywordList(locationFilter.allow);
+  // Only a list the user already filled: an empty `allow` means "everything not
+  // blocked passes", and adding a matcher to it would reject every other place.
+  if (usExpansion && allow.length > 0) {
+    allow.push(...US_STATE_ALLOW_MATCHERS);
+  }
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
   // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
@@ -659,7 +703,8 @@ export function buildLocationFilter(locationFilter) {
   const strict = locationFilter.strict === true
     && (allow.length > 0 || block.length > 0 || blockHard.length > 0);
 
-  return (location, url, title) => {
+  const filter = (location, url, title, offer) => {
+    if (!workplacePolicy(location, title, offer).eligible) return false;
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
     // Nothing to judge on either field → pass (don't penalize missing data),
@@ -695,6 +740,11 @@ export function buildLocationFilter(locationFilter) {
     // stays rejected. This widens `allow`, never `block`.
     return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
+  // Detail readers may recheck this opt-in policy without repeating legacy
+  // location tiers. Arbitrary caller-provided filters have no such capability.
+  return Object.assign(filter, {
+    workplacePolicyOnly: (location, url, title, offer) => workplacePolicy(location, title, offer).eligible,
+  });
 }
 
 // ── Posting-age filter ──────────────────────────────────────────────
@@ -861,6 +911,12 @@ export function buildPostedDateFilter(afterIso, beforeIso) {
 // global `positive`/`negative` pair is the fallback for jobs whose matched
 // keyword(s) have no override entry.
 //
+// `min_match` (optional, the global pair and each by_title_keyword rule):
+// require that many distinct positive entries, with " | " synonym groups. See
+// "Trait matching" below. `rescue_title_misses` (optional, global only): let a
+// posting the title filter would drop still pass on its description. See
+// buildContentFilter.
+//
 // Provider support: `job.description` is populated only when the provider's
 // list API returns the description body without a per-job request (the
 // zero-token constraint). Providers that don't supply one leave it empty, and
@@ -875,25 +931,113 @@ function compileContentKeywordList(value) {
   return normalizeKeywordList(value).map(compileContentKeyword);
 }
 
+// ── Trait matching (#6020) ──────────────────────────────────────────
+// `min_match` turns a positive list into a list of TRAITS: a posting passes
+// when at least `min_match` distinct entries appear in its description, not
+// just one. It exists because the same work hides under different titles, and
+// one generic word ("demo", "customers") is a weak signal on its own while two
+// or three together describe the role. Absent `min_match`, a rule keeps the
+// any-one-keyword behaviour above, byte-for-byte.
+//
+// Only in a rule that sets `min_match`:
+//   - " | " (whitespace-delimited) separates alternative spellings of ONE
+//     trait, so "pre-sales | presales" counts once however many spellings
+//     appear. The separator needs the surrounding spaces, so a keyword such as
+//     "c|c++" stays one literal.
+//   - Entries are deduplicated case-insensitively, so "Demo" and "demo" are
+//     one trait rather than two cheap hits toward the threshold.
+//   - Both sides read the description folded the way title_filter folds a
+//     title (lowercase, accents removed, whitespace collapsed), plus the
+//     typographic hyphens JD text uses (U+2010 to U+2012) folded to "-" and
+//     soft hyphens dropped, so "customer‑facing" with a non-breaking hyphen
+//     still matches a configured "customer-facing".
+//   - Any `negative` entry present still rejects, whatever the count.
+
+// Evaluate one description against compiled traits. `matched` is the verdict;
+// the two lists say why, for tests and for any caller that wants to report it.
+export function matchContentTraits(description, { positive = [], negative = [], minMatch = 1 } = {}) {
+  const folded = foldContentText(description);
+  const negativeMatches = negative.filter(t => t.match(folded)).map(t => t.original);
+  const matchedTraits = positive.filter(t => t.match(folded)).map(t => t.original);
+  return {
+    matched: negativeMatches.length === 0 && matchedTraits.length >= minMatch,
+    matchedTraits,
+    negativeMatches,
+  };
+}
+
+// Compile one positive/negative pair (the global one or a by_title_keyword
+// rule). Throws on an unusable `min_match` rather than guessing: a threshold
+// above the number of traits can never pass and would drop every posting.
+function compileContentRule(rule, path) {
+  if (rule?.min_match === undefined) {
+    return {
+      traits: false,
+      positive: compileContentKeywordList(rule?.positive),
+      negative: compileContentKeywordList(rule?.negative),
+    };
+  }
+  const positive = compileContentTraits(rule.positive);
+  const negative = compileContentTraits(rule.negative);
+  const minMatch = rule.min_match;
+  if (!Number.isInteger(minMatch) || minMatch < 1 || minMatch > positive.length) {
+    throw new Error(positive.length === 0
+      ? `${path}.min_match needs a non-empty ${path}.positive list`
+      : `${path}.min_match must be an integer from 1 to ${positive.length} (the number of distinct ${path}.positive entries)`);
+  }
+  return { traits: true, positive, negative, minMatch };
+}
+
+function contentRuleAccepts(rule, description) {
+  if (rule.traits) return matchContentTraits(description, rule).matched;
+  const lower = description.toLowerCase();
+  if (rule.negative.length > 0 && rule.negative.some(m => m(lower))) return false;
+  if (rule.positive.length === 0) return true;
+  return rule.positive.some(m => m(lower));
+}
+
+// `rescue_title_misses: true` (#6020) lets a posting that title_filter would
+// drop still reach this check. scan.mjs consults it before booking a title
+// miss; the returned filter is then called with `{ titleMissed: true }` and is
+// stricter than for a posting whose title matched:
+//   - an empty or missing description FAILS (there is nothing to rescue on;
+//     the pass-on-empty rule exists so a title MATCH is never lost to a
+//     provider without descriptions, and does not apply to a title miss),
+//   - only the global positive/negative pair (with its min_match) decides:
+//     a title miss matched no title_filter.positive keyword, so no
+//     by_title_keyword rule is in scope,
+//   - a non-empty `positive` list is required, enforced when the filter is built.
+// The flag is exposed as `filter.rescueTitleMisses` so a caller can tell
+// whether to ask.
 export function buildContentFilter(contentFilter) {
   if (!contentFilter) return () => true;
-  const positive = compileContentKeywordList(contentFilter.positive);
-  const negative = compileContentKeywordList(contentFilter.negative);
+  const globalRule = compileContentRule(contentFilter, 'content_filter');
+
+  const rescue = contentFilter.rescue_title_misses;
+  if (rescue !== undefined && typeof rescue !== 'boolean') {
+    throw new Error('content_filter.rescue_title_misses must be true or false');
+  }
+  // Counted as traits, as validate-portals.mjs counts them, so a list holding
+  // only a bare `word:` or `stem:` is refused here too, not silently kept.
+  if (rescue === true && compileContentTraits(contentFilter.positive).length === 0) {
+    throw new Error('content_filter.rescue_title_misses needs a non-empty content_filter.positive list');
+  }
 
   const byTitleKeyword = new Map();
   if (contentFilter.by_title_keyword && typeof contentFilter.by_title_keyword === 'object' && !Array.isArray(contentFilter.by_title_keyword)) {
     for (const [kw, rule] of Object.entries(contentFilter.by_title_keyword)) {
       if (typeof kw !== 'string' || !kw.trim()) continue;
-      byTitleKeyword.set(kw.trim().toLowerCase(), {
-        positive: compileContentKeywordList(rule?.positive),
-        negative: compileContentKeywordList(rule?.negative),
-      });
+      byTitleKeyword.set(kw.trim().toLowerCase(), compileContentRule(rule, `content_filter.by_title_keyword.${kw}`));
     }
   }
 
-  return (description, matchedKeywords = []) => {
-    if (typeof description !== 'string' || description.trim() === '') return true;
-    const lower = description.toLowerCase();
+  const filter = (description, matchedKeywords = [], { titleMissed = false } = {}) => {
+    const empty = typeof description !== 'string' || description.trim() === '';
+    if (titleMissed) {
+      if (rescue !== true || empty) return false;
+      return contentRuleAccepts(globalRule, description);
+    }
+    if (empty) return true;
 
     const overrides = matchedKeywords
       .filter(k => typeof k === 'string')
@@ -901,16 +1045,46 @@ export function buildContentFilter(contentFilter) {
       .filter(Boolean);
 
     if (overrides.length > 0) {
-      return overrides.some(rule => {
-        if (rule.negative.length > 0 && rule.negative.some(m => m(lower))) return false;
-        if (rule.positive.length === 0) return true;
-        return rule.positive.some(m => m(lower));
-      });
+      return overrides.some(rule => contentRuleAccepts(rule, description));
     }
 
-    if (negative.length > 0 && negative.some(m => m(lower))) return false;
-    if (positive.length === 0) return true;
-    return positive.some(m => m(lower));
+    return contentRuleAccepts(globalRule, description);
+  };
+  filter.rescueTitleMisses = rescue === true;
+  return filter;
+}
+
+// A content_filter that cannot be honoured (a min_match above its trait
+// count, rescue_title_misses without a positive list) stops a scanner before
+// any network call: guessing would drop every posting or keep all of them
+// while the config reads as in force. Shared so every scanner that reads
+// content_filter fails the same way.
+export function buildContentFilterOrExit(contentFilter) {
+  try {
+    return buildContentFilter(contentFilter);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+// #6020. The one title decision for content_filter.rescue_title_misses, so
+// every scanner that honours the key applies the same rule:
+//   'match'  — title_filter keeps the title; content_filter judges it as usual,
+//   'rescue' — the title misses title_filter.positive and hits no
+//              title_filter.negative, and rescue_title_misses is on; the caller
+//              calls contentFilter(description, [], { titleMissed: true }) and
+//              books a failure there as a title rejection,
+//   'reject' — a title rejection, as without the key.
+// `titleFilter` defaults to buildTitleFilter(titleFilterConfig); a caller with
+// its own compiled filter (per-company overrides, declared fields) passes it.
+export function buildTitleGate(titleFilterConfig, contentFilter, titleFilter = buildTitleFilter(titleFilterConfig)) {
+  const rescue = contentFilter?.rescueTitleMisses === true;
+  const notVetoed = rescue ? buildTitleFilter({ negative: titleFilterConfig?.negative }) : null;
+  return (title) => {
+    if (titleFilter(title)) return 'match';
+    if (rescue && notVetoed(title)) return 'rescue';
+    return 'reject';
   };
 }
 
@@ -3806,38 +3980,6 @@ export async function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH
   });
 }
 
-/**
- * Apply an entry's `max_response_mb` to the ctx a provider fetches with.
- *
- * fetchJson / fetchText / fetchResponse refuse a body over
- * DEFAULT_MAX_BODY_BYTES (_http.mjs) unless the call passes `maxBytes`. A
- * board that is legitimately bigger sets `max_response_mb` on its own
- * portals.yml entry; the setting is the user's, so it wins over a `maxBytes`
- * the provider passes, and every other entry keeps the default. An entry
- * without the key leaves the ctx as it is. So does a value that is not a YAML
- * number (a quoted string, a boolean, a list) or that does not come to a whole
- * positive finite byte count, with a warning naming the entry.
- *
- * @param {object} ctx - The per-entry ctx; its fetchers are replaced in place.
- * @param {{ name?: string, max_response_mb?: unknown }} entry
- * @returns {object} The same ctx.
- */
-export function applyEntryResponseCap(ctx, entry) {
-  const raw = entry?.max_response_mb;
-  if (raw === undefined || raw === null) return ctx;
-  const maxBytes = typeof raw === 'number' ? Math.floor(raw * 1024 * 1024) : NaN;
-  if (!Number.isFinite(maxBytes) || maxBytes < 1) {
-    console.error(`⚠️  ${entry?.name}: max_response_mb must be a positive number, got ${JSON.stringify(raw)} — ignored`);
-    return ctx;
-  }
-  for (const method of ['fetchJson', 'fetchText', 'fetchResponse']) {
-    const original = ctx[method];
-    if (typeof original !== 'function') continue;
-    ctx[method] = (url, opts = {}) => original(url, { ...opts, maxBytes });
-  }
-  return ctx;
-}
-
 export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
   if (!existsSync(filePath)) return [];
   const lines = readFileSync(filePath, 'utf-8').split('\n');
@@ -3878,20 +4020,97 @@ export function emptyTargetStatus(observation) {
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
-async function parallelFetch(tasks, limit, onDone = () => {}) {
-  const results = [];
-  let i = 0;
+export async function parallelFetch(tasks, limit, onDone = () => {}, { hostOf = null, hostLimit = limit } = {}) {
+  // Verify and any other caller that does not name a host keeps the plain
+  // worker pool. Completion order of the returned array stays what it was.
+  if (typeof hostOf !== 'function') {
+    const results = [];
+    let i = 0;
 
-  async function next() {
-    while (i < tasks.length) {
-      const task = tasks[i++];
-      results.push(await task());
-      onDone();
+    async function next() {
+      while (i < tasks.length) {
+        const task = tasks[i++];
+        results.push(await task());
+        onDone();
+      }
     }
+
+    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
+    await Promise.all(workers);
+    return results;
   }
 
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
-  await Promise.all(workers);
+  const n = tasks.length;
+  if (n === 0 || !(limit > 0)) return [];
+  const perHost = Math.max(1, hostLimit);
+  const hosts = tasks.map((task, index) => {
+    try {
+      const host = hostOf(task, index);
+      return typeof host === 'string' ? host : '';
+    } catch {
+      return '';
+    }
+  });
+  const results = new Array(n);
+  const pending = hosts.map((_, index) => index);
+  const hostActive = new Map();
+  let active = 0;
+  let finished = 0;
+  let firstError = null;
+
+  function takeReady() {
+    for (let k = 0; k < pending.length; k++) {
+      const index = pending[k];
+      const host = hosts[index];
+      // An empty host is not a bucket. Unknown URLs must not share one cap.
+      if (host && (hostActive.get(host) || 0) >= perHost) continue;
+      pending.splice(k, 1);
+      return index;
+    }
+    return -1;
+  }
+
+  await new Promise((resolve, reject) => {
+    const launch = () => {
+      while (active < limit) {
+        const index = takeReady();
+        if (index < 0) break;
+        active += 1;
+        const host = hosts[index];
+        if (host) hostActive.set(host, (hostActive.get(host) || 0) + 1);
+        Promise.resolve()
+          .then(() => tasks[index]())
+          .then(
+            (value) => {
+              results[index] = value;
+              try {
+                onDone();
+              } catch (err) {
+                if (firstError === null) firstError = err;
+              }
+            },
+            (err) => {
+              if (firstError === null) firstError = err;
+            },
+          )
+          .finally(() => {
+            active -= 1;
+            finished += 1;
+            if (host) {
+              const left = (hostActive.get(host) || 1) - 1;
+              if (left <= 0) hostActive.delete(host);
+              else hostActive.set(host, left);
+            }
+            launch();
+            if (finished === n) {
+              if (firstError !== null) reject(firstError);
+              else resolve();
+            }
+          });
+      }
+    };
+    launch();
+  });
   return results;
 }
 
@@ -3911,6 +4130,8 @@ export function progressTicker(total, { every = PROGRESS_EVERY, write = (line) =
 export async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0, rediscover = false } = {}, {
   checkApi = checkLivenessViaApi,
   loadPlaywright = () => import('playwright'),
+  // Consulted before each headed retry (#5776); see robots-check.mjs.
+  robotsGate = robotsAllows,
 } = {}) {
   // These helpers do not import Playwright. In particular, apply the same URL
   // guard before the API rung: an embedded ATS id must not bless a private URL.
@@ -3936,7 +4157,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       console.warn(`  ⚠️ API verification failed for ${offer.url}; falling back to Playwright: ${err.message}`);
       verdicts[i] = null;
     }
-  }), CONCURRENCY);
+  }), VERIFY_CONCURRENCY);
 
   let browser = null, page = null, headed = null;
   let hadBrowserOffer = false;
@@ -3979,7 +4200,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
     return page;
   }
   const checkPage = (page, url) => headed
-    ? checkUrlLivenessWithFallback(page, url, { getHeadedPage: () => headed.get() })
+    ? checkUrlLivenessWithFallback(page, url, { getHeadedPage: () => headed.get(), robotsGate })
     : checkUrlLiveness(page, url);
 
   // Two permanent buckets, one observational, one transient passthrough:
@@ -4130,7 +4351,11 @@ every target it tried failed (with --json: when any target failed).`;
 
 async function main() {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // --throttle=<ms> cannot join VALUE_FLAGS (see above), and validateFlags
+  // refuses `=` on any flag outside that list, so the documented form is checked
+  // here: a positive number passes as the bare flag, anything else stays refused.
+  const flagsToValidate = args.map((a) => (/^--throttle=0*[1-9]\d*$/.test(a) ? '--throttle' : a));
+  validateFlags(flagsToValidate, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
   const jsonMode = args.includes('--json');
   if (jsonMode) console.log = console.error.bind(console);
@@ -4168,7 +4393,10 @@ async function main() {
     }
     return value;
   };
-  const filterCompany = requireValue('--company')?.toLowerCase() ?? null;
+  const filterCompanyRaw = requireValue('--company');
+  const filterCompany = filterCompanyRaw?.toLowerCase() ?? null;
+  // --company may ignore a legal suffix. It must not ignore a place name.
+  const legalSuffixes = new Set(LEGAL_SUFFIXES);
   // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
   // employer's real posting date (job.postedAt), gated against a typo since a
   // silently-ignored bound would look like "no jobs matched" instead of an error.
@@ -4268,7 +4496,12 @@ async function main() {
   const earlyStopSinceMs = resolveEarlyStopMs(effectiveAfter, config.max_posting_age_days);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
-  const contentFilter = buildContentFilter(config.content_filter);
+  const contentFilter = buildContentFilterOrExit(config.content_filter);
+  // #6020. Postings that title_filter.positive missed (and no title_filter
+  // negative vetoed) still reach the content check, and pass it only on their
+  // description. See the title gate in the scan loop.
+  const rescueTitleMisses = contentFilter.rescueTitleMisses === true;
+  const titleGate = buildTitleGate(config.title_filter, contentFilter, titleFilter);
   const candidateCountry = loadCandidateCountry();
   const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
@@ -4290,8 +4523,11 @@ async function main() {
   const targets = [];
   let skippedCount = 0;
   let boardCount = 0;
+  let companyFilterMatched = filterCompanyRaw == null;
   const resolveErrors = [];
   const agentHandoff = [];
+  const unclaimed = [];
+  const enabledWarnings = [];
 
   /**
    * Processes a list of configuration entries, resolves their appropriate data providers,
@@ -4302,16 +4538,39 @@ async function main() {
   function resolveEntries(entries, { isBoard = false } = {}) {
     for (const entry of entries) {
       if (!entry || typeof entry !== 'object') continue;
-      if (entry.enabled === false) continue;
       if (typeof entry.name !== 'string' || !entry.name.trim()) {
-        console.error(`⚠️  Skipping entry — missing or non-string 'name' field: ${JSON.stringify(entry)}`);
+        // A disabled nameless row was already skipped before this warning.
+        if (entry.enabled !== false) {
+          console.error(`⚠️  Skipping entry — missing or non-string 'name' field: ${JSON.stringify(entry)}`);
+        }
         continue;
       }
-      if (filterCompany && !entry.name.toLowerCase().includes(filterCompany)) continue;
+      // Substring, the tracker's normalized equality ("Acme Labs Inc" for
+      // "Acme Labs, Inc."), plus legal suffixes only. "Acme Labs, Inc."
+      // selects a row named "Acme Labs". A place or descriptor such as
+      // "Canada" does not, so "Acme Canada" does not select "Acme". Tracker
+      // dedup still allows those descriptors. A disabled row still counts,
+      // so --company does not say the company is missing when it is only
+      // turned off.
+      if (filterCompany && !entry.name.toLowerCase().includes(filterCompany)
+        && normalizeCompany(entry.name) !== normalizeCompany(filterCompanyRaw)
+        && !companiesMatchIgnoringCorporateForm(entry.name, filterCompanyRaw, legalSuffixes)) continue;
+      if (filterCompanyRaw != null) companyFilterMatched = true;
+      if (entry.enabled === false) continue;
+      // Only a real boolean false turns an entry off. The string "false" and
+      // YAML's old `no` stay in the run, and the count alone does not say which
+      // company. validate-portals already rejects this shape; say it here too,
+      // with the name, because scan does not run that validator.
+      if (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') {
+        enabledWarnings.push(
+          `${entry.name}: enabled is ${JSON.stringify(entry.enabled)}, not a boolean. Only boolean false turns a company off, so this one stays in the run and is scanned if a provider matches it.`,
+        );
+      }
 
       const resolved = resolveProvider(entry, providers);
       if (!resolved) {
         skippedCount++;
+        unclaimed.push(entry);
         if (entry.scan_method === 'websearch') {
           agentHandoff.push({
             company: entry.name,
@@ -4334,6 +4593,11 @@ async function main() {
 
   resolveEntries(companies);
   resolveEntries(boards, { isBoard: true });
+
+  if (filterCompanyRaw != null && !companyFilterMatched) {
+    console.error(`Error: no tracked company matches "${filterCompanyRaw}"`);
+    process.exit(1);
+  }
 
   // #3438. Startup checks for field_filters / filter_on, before any network
   // call. scan.mjs does not run validatePortalsConfig, so every rule that
@@ -4425,6 +4689,17 @@ async function main() {
   parts.push(`${skippedCount} skipped — no provider matched`);
   console.log(`Scanning ${parts.join('; ')} via providers`);
   if (dryRun) console.log('(dry run — no files will be written)\n');
+  for (const warning of enabledWarnings) console.error(`Warning: ${warning}`);
+  if (unclaimed.length > 0) {
+    console.log('No provider matched these entries. Set provider to an id this scanner loads, point careers_url at a board a provider detects, or set scan_method: websearch so the handoff list names the company:');
+    for (const entry of unclaimed) {
+      const where = typeof entry.careers_url === 'string' && entry.careers_url
+        ? entry.careers_url
+        : (typeof entry.api === 'string' && entry.api ? entry.api : '(no careers_url)');
+      const method = entry.scan_method ? ` (scan_method: ${entry.scan_method})` : '';
+      console.log(`  • ${entry.name} — ${where}${method}`);
+    }
+  }
 
   // 3.5. Load the user's do-not-apply list (#1742). Opt-in: absent file =
   // empty Map = the filter below never fires.
@@ -4479,6 +4754,9 @@ async function main() {
   let totalFilteredPostedDate = 0;
   let totalFilteredSalary = 0;
   let totalFilteredContent = 0;
+  // #6020. Title misses that content_filter.rescue_title_misses kept on their
+  // description. Summary line only: the receipt and scan-runs.tsv are unchanged.
+  let totalRescuedByContent = 0;
   let totalFilteredCountryEligibility = 0;
   let totalFilteredBlacklist = 0;
   let annotatedBlacklisted = 0;
@@ -4522,6 +4800,11 @@ async function main() {
   // Values providers resolve once and reuse on later scans (provider-id-cache.mjs).
   const idCaches = openProviderIdCache(path.join(DATA_ROOT, PROVIDER_ID_CACHE_DIR));
 
+  // Fetch every target concurrently, but filter board copies only after all
+  // employers have made their location decisions for this scan's URLs.
+  const deferredBoards = [];
+  const employerLocationRejected = new Set();
+  const employerLocationAccepted = new Set();
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
@@ -4560,11 +4843,20 @@ async function main() {
       // posting (Workday's multi-location detail GETs) and can skip postings
       // the title filter below will drop. Absent when this company's filter_on
       // leaves the title out, since then no title is dropped.
-      ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => titleFilter(title) } : {}),
+      ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => titleGate(title) === 'match' } : {}),
       idCache: idCaches.forProvider(provider.id),
     };
     applyEntryResponseCap(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
+    const recordError = err => {
+      failedTargets++;
+      errors.push({
+        company: company.name,
+        error: err.message,
+        kind: classifyFetchError(err),
+        status: err.status ?? observation.lastStatus,
+      });
+    };
     try {
       let jobs;
       try {
@@ -4591,6 +4883,7 @@ async function main() {
         else unverifiedZeroTargets.push(company.name);
       }
 
+      const processJobs = () => {
       // This fetch's language versions of each posting, in provider order and
       // before any filter: a seen row is matched against every version, also
       // those a filter rejects (a German title can fail a title filter that its
@@ -4656,9 +4949,18 @@ async function main() {
         // matching title and a rejected noc is a field rejection.
         let failedField = null;
         let sawAbsentField = false;
+        // #6020. With content_filter.rescue_title_misses, a title that misses
+        // title_filter.positive (and hits no title_filter.negative) is not
+        // rejected here: the decision moves to the content check below, where
+        // the description alone can keep it. If that check fails, the miss is
+        // booked as a title rejection (and a skipped_title row) as before. A
+        // filter between the two that drops it first books it as its own.
+        let titleMissed = false;
         for (const field of declaredFields) {
           if (field === 'title') {
-            if (!titleFilter(job.title)) { failedField = field; break; }
+            const verdict = titleGate(job.title);
+            if (verdict === 'rescue') { titleMissed = true; continue; }
+            if (verdict === 'reject') { failedField = field; break; }
           } else {
             const value = declaredFieldValue(job, field);
             if (isFieldAbsent(value)) sawAbsentField = true;
@@ -4681,11 +4983,16 @@ async function main() {
         }
         // job.title is passed so a role whose remoteness is stated in the title
         // ("Program Manager - Remote") isn't rejected for a city-only location.
-        if (!locationFilter(job.location, job.url, job.title)) {
+        const locationUrl = normalizeUrlForDedup(job.url);
+        const employerRejected = company._isBoard && employerLocationRejected.has(locationUrl)
+          && !employerLocationAccepted.has(locationUrl);
+        if (employerRejected || !locationFilter(job.location, job.url, job.title, job)) {
+          if (!company._isBoard) employerLocationRejected.add(locationUrl);
           totalFilteredLocation++;
           if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
+        if (!company._isBoard) employerLocationAccepted.add(locationUrl);
         if (!postingAgeFilter(job.postedAt)) {
           totalFilteredPostingAge++;
           if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
@@ -4699,7 +5006,14 @@ async function main() {
           totalFilteredSalary++;
           continue;
         }
-        if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
+        if (titleMissed) {
+          if (!contentFilter(job.description, [], { titleMissed: true })) {
+            totalFilteredTitle++;
+            if (!dryRun) titleFilteredOffers.push({ ...job, source: sourceName });
+            continue;
+          }
+          totalRescuedByContent++;
+        } else if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
           totalFilteredContent++;
           continue;
         }
@@ -4800,18 +5114,25 @@ async function main() {
           key, baseKey, requisition, language, newLanguageVersion,
         });
       }
+      };
+      if (company._isBoard) {
+        // Never await an employer barrier inside a fetch worker: enough fast
+        // boards could occupy every worker before the employer can start.
+        deferredBoards.push(() => {
+          try { processJobs(); } catch (err) { recordError(err); }
+        });
+      } else {
+        processJobs();
+      }
     } catch (err) {
-      failedTargets++;
-      errors.push({
-        company: company.name,
-        error: err.message,
-        kind: classifyFetchError(err),
-        status: err.status ?? observation.lastStatus,
-      });
+      recordError(err);
     }
   });
 
-  const companyFetches = () => parallelFetch(tasks, CONCURRENCY, progressTicker(tasks.length));
+  const companyFetches = () => parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
+    hostLimit: HOST_CONCURRENCY,
+    hostOf: (_task, index) => companyFetchHost(targets[index]),
+  });
   if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
     await companyFetches();
   } else {
@@ -4830,6 +5151,7 @@ async function main() {
       process.stderr.write(`scan: ${parts.join(', and ')}. Set CAREER_OPS_HTTP_CACHE=0 to always download.\n`);
     });
   }
+  for (const processBoard of deferredBoards) processBoard();
   // --dry-run leaves no trace, this cache included.
   if (!dryRun) {
     try {
@@ -5041,6 +5363,9 @@ async function main() {
   }
   if (config.content_filter || totalFilteredContent > 0) {
     console.log(`Filtered by content:   ${totalFilteredContent} removed`);
+  }
+  if (rescueTitleMisses) {
+    console.log(`Title misses kept by content: ${totalRescuedByContent}`);
   }
   if (config.country_eligibility_filter || totalFilteredCountryEligibility > 0) {
     console.log(`Filtered by country eligibility: ${totalFilteredCountryEligibility} removed`);
