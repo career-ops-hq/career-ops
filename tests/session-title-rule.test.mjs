@@ -61,7 +61,11 @@ for (const title of ['`Career-ops scan (scanning)`', '`{remaining}/{found}`', '`
   '`Career-ops scan (evaluating, 3/15)`', '`Career-ops scan (none left, 0/15)`', '`Career-ops scan (3/15)`']) {
   check(`scan title ${title}`, scan.includes(title));
 }
-check('`found` stays fixed for the run', /`found` is every posting that passed the scanner's filters, plus every search hit taken forward for checking\. It stays fixed for the run\./.test(scan));
+const foundRule = scan.match(/^  - `found` .*$/m)?.[0] ?? '';
+check('`found` counts filtered postings and search hits, and stays fixed for the run',
+  /scanner's filters/.test(foundRule) && /search hit/.test(foundRule) && /stays fixed for the run/.test(foundRule));
+check('older inbox entries never move the scan counter',
+  /removing one of them leaves `remaining` alone/.test(foundRule));
 check('an evaluated posting stays counted', scan.includes('An evaluated posting stays counted.'));
 check('one posting left switches to its own title', /When `remaining` reaches 1, switch to that job's `\{Role\}, \{Company\}`/.test(scan));
 
@@ -90,7 +94,7 @@ check('delegated `apply` also returns the agency, and the parent waits for its c
 check('delegated `apply` worker never renames', /The worker never renames anything itself/.test(delegated));
 check('delegated `scan` and `pipeline` workers return their counts to the parent',
   /For `scan` and `pipeline`, ask the worker to return `found` and `remaining`/.test(delegated)
-    && /Give a `pipeline` worker that follows a scan the scan's `found`/.test(delegated));
+    && /Give a `pipeline` worker that follows a scan the scan's `found` and the URLs it counted/.test(delegated));
 
 // A worker gets the mode file, not the router, so the count hand-back has to
 // be in the mode files too.
@@ -99,6 +103,7 @@ check('modes/scan.md ends its summary with the title counts',
 const pipelineMode = read('modes/pipeline.md').split('## Session title')[1]?.split('\n## ')[0] ?? '';
 check('modes/pipeline.md keeps the scan counter and returns the title counts',
   pipelineMode.includes('**Session Title** rule') && pipelineMode.includes('`Title counts: {remaining}/{found}`')
+    && /removal of a posting the scan counted/.test(pipelineMode)
     && /never renames anything/.test(pipelineMode));
 
 // The point in the flow where the role and employer first become known.
