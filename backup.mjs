@@ -53,14 +53,12 @@ export const BACKUP_PATHS = [
 ];
 
 /**
- * Never copied: secrets, third-party PII the contract says to delete after
- * use, rebuildable caches, and lock/temp files.
+ * Never copied: secrets, rebuildable caches, and lock/temp files.
  */
 export function isExcluded(relPath) {
   const p = relPath.split(sep).join('/');
   const name = p.slice(p.lastIndexOf('/') + 1);
   if (name === '.DS_Store' || name === '.env' || name.startsWith('.env.')) return true;
-  if (p === 'data/Connections.csv') return true;
   if (p === 'data/cache' || p.startsWith('data/cache/')) return true;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
 }

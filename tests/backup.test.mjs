@@ -17,13 +17,13 @@ try {
   };
 
   // Exclusions: secrets, third-party PII, caches, lock/temp files.
-  for (const rel of ['.env', 'data/.env', 'data/Connections.csv', 'data/cache/http/a', '.DS_Store', 'data/x.lock', 'data/y.part']) {
+  for (const rel of ['.env', 'data/.env', 'data/cache/http/a', '.DS_Store', 'data/x.lock', 'data/y.part']) {
     assert.equal(b.isExcluded(rel), true, rel);
   }
-  for (const rel of ['cv.md', 'data/applications.md', 'data/cacheable.md', 'reports/001-a.md']) {
+  for (const rel of ['cv.md', 'data/Connections.csv', 'data/applications.md', 'data/cacheable.md', 'reports/001-a.md']) {
     assert.equal(b.isExcluded(rel), false, rel);
   }
-  pass('excludes secrets, Connections.csv, caches and lock/temp files only');
+  pass('excludes secrets, caches and lock/temp files only');
 
   // Destination discovery, on a fake home.
   const home = join(tmp, 'home');
@@ -63,7 +63,7 @@ try {
   put(root, 'cv.md', 'cv');
   put(root, 'data/applications.md', 'tracker');
   put(root, 'data/.env', 'SECRET=1');
-  put(root, 'data/Connections.csv', 'pii');
+  put(root, 'data/Connections.csv', 'connections');
   put(root, 'data/cache/http/h', 'cache');
   put(root, 'reports/001-a-2026-01-01.md', 'report');
   put(root, 'node_modules/x/index.js', 'not user data');
@@ -72,21 +72,22 @@ try {
   mkdirSync(join(tmp, 'backup'));
 
   const dry = b.runBackup({ dataRoot: root, dest, dryRun: true });
-  assert.equal(dry.copied, 3);
+  assert.equal(dry.copied, 4);
   assert.equal(existsSync(dest), false);
 
   const first = b.runBackup({ dataRoot: root, dest });
-  assert.equal(first.copied, 3);
+  assert.equal(first.copied, 4);
   assert.deepEqual(first.failed, []);
   assert.equal(readFileSync(join(dest, 'data/applications.md'), 'utf8'), 'tracker');
-  for (const rel of ['data/.env', 'data/Connections.csv', 'data/cache/http/h', 'node_modules/x/index.js', 'modes/_shared.md']) {
+  for (const rel of ['data/.env', 'data/cache/http/h', 'node_modules/x/index.js', 'modes/_shared.md']) {
     assert.equal(existsSync(join(dest, rel)), false, rel);
   }
-  assert.equal(JSON.parse(readFileSync(join(dest, b.MANIFEST_NAME), 'utf8')).copied, 3);
+  assert.equal(readFileSync(join(dest, 'data/Connections.csv'), 'utf8'), 'connections');
+  assert.equal(JSON.parse(readFileSync(join(dest, b.MANIFEST_NAME), 'utf8')).copied, 4);
 
   const second = b.runBackup({ dataRoot: root, dest });
   assert.equal(second.copied, 0);
-  assert.equal(second.unchanged, 3);
+  assert.equal(second.unchanged, 4);
 
   put(root, 'cv.md', 'cv, edited');
   utimesSync(join(root, 'cv.md'), new Date(), new Date(Date.now() + 60_000));

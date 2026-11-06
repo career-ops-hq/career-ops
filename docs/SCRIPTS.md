@@ -1984,7 +1984,7 @@ Exit status: `0` success, `1` invalid option or write error, `2` missing tracker
 
 Copies the files `DATA_CONTRACT.md` lists as yours (CV, profile, `portals.yml`, everything under `data/`, `reports/`, `output/`, `jds/`, `interview-prep/`, `documents/`, `writing-samples/`, pending tracker additions) from the data root to a backup folder. It reads `CAREER_OPS_ROOT` / `.career-ops-data` like every other script. Files are copied whole, and nothing is ever deleted at the destination. Unchanged files (same size and modification time) are skipped, so a repeat run is cheap.
 
-Never copied: `.env` files, `data/Connections.csv` (third-party PII), `data/cache/`, lock and temp files, and anything outside the User Layer.
+Never copied: `.env` files, `data/cache/`, lock and temp files, and anything outside the User Layer.
 
 ```bash
 node backup.mjs                            # <Google Drive>/Backups/career-ops
