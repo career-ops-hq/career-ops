@@ -63,6 +63,7 @@
     "role-clarity": "node role-clarity.mjs",
     "closing-soon": "node closing-soon.mjs",
     "close-stale": "node close-stale.mjs",
+    "import-tracker": "node import-tracker.mjs",
     "reeval-candidates": "node reeval-candidates.mjs",
     "invite-match": "node invite-match.mjs",
     "ics-interview": "node ics-interview.mjs",
