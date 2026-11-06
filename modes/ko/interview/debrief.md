@@ -258,14 +258,14 @@ stated_priorities:        # 트랜스크립트 입력에만. 밝힌 우선순위
 
 다음 단계가 분명한 날짜 하루를 가리키면, 두 번째 질문 없이 `--next YYYY-MM-DD`를 넘깁니다. 요일은 로컬 달력 기준 날짜로 계산하며, 오늘도 포함합니다. 표현에 날짜가 없으면 `--next`를 생략합니다. 모호하다면(`next week`, 날짜가 두 개) 날짜 하나를 물어본 뒤 넘깁니다.
 
-그 플래그들로 `node debrief-sync.mjs --app <tracker#>`를 실행합니다. `<tracker#>`는 트래커에서 그 지원 건의 `#`입니다(보고서 번호가 아님). `--dealbreaker`는 문장 하나만 받으며 호출마다 한 번만 쓸 수 있으므로, 확인된 문장마다 명령을 하나씩 실행합니다. 두 문장을 하나의 값으로 합치지 않습니다: 스크립트는 세미콜론을 거부합니다. 연락처 플래그와 `--next`는 첫 번째 명령에만 넣습니다. 그 뒤의 명령에는 `--app <tracker#>`와 `--dealbreaker` 하나만 넘기고 다른 것은 넣지 않습니다. 셸이 `$`와 백틱을 그대로 넘기도록 각 값을 작은따옴표로 감쌉니다. 값 안의 작은따옴표는 `'\''`로 씁니다:
+그 플래그들로 `node debrief-sync.mjs --app <tracker#>`를 실행합니다. `<tracker#>`는 트래커에서 그 지원 건의 `#`입니다(보고서 번호가 아님). `--dealbreaker`는 문장 하나만 받으며 호출마다 한 번만 쓸 수 있으므로, 확인된 문장마다 명령을 하나씩 실행합니다. 두 문장을 하나의 값으로 합치지 않습니다: 스크립트는 세미콜론을 거부합니다. 연락처 플래그와 `--next`는 첫 번째 명령에만 넣습니다. 그 뒤의 명령에는 `--app <tracker#>`와 `--dealbreaker` 하나만 넘기고 다른 것은 넣지 않습니다. 셸이 `$`와 백틱을 그대로 넘기도록 각 값을 작은따옴표로 감쌉니다. 값 안의 작은따옴표는 Git Bash 같은 POSIX 셸에서는 `'\''`로, PowerShell에서는 `''`로 씁니다:
 
 ```bash
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
-명령이 실패하면 멈추고 고친 뒤, 첫 번째 명령부터 목록을 다시 실행합니다. 넘길 dealbreaker, 연락처, `--next` 날짜가 하나도 없으면 명령을 건너뜁니다: 기록할 것이 없는 호출은 스크립트가 거부합니다. 마지막 명령 뒤, 연락처를 저장했다면 `node contacts.mjs --summary`를 실행합니다. 날짜를 정했다면 `node followup-cadence.mjs --summary`를 실행합니다.
+명령은 하나씩 실행하고 매번 종료 상태를 확인합니다. 명령이 실패하면 멈추고 고친 뒤, 첫 번째 명령부터 목록을 다시 실행합니다. 넘길 dealbreaker, 연락처, `--next` 날짜가 하나도 없으면 명령을 건너뜁니다: 기록할 것이 없는 호출은 스크립트가 거부합니다. 마지막 명령 뒤, 연락처를 저장했다면 `node contacts.mjs --summary`를 실행합니다. 날짜를 정했다면 `node followup-cadence.mjs --summary`를 실행합니다.
 
 사용자가 새 상태를 말하지 않는 한 상태는 바꾸지 않습니다. 상태 변경은 이 명령들보다 먼저 실행하는 별도의 `set-status.mjs` 호출입니다.
 

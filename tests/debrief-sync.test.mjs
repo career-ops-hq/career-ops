@@ -375,6 +375,8 @@ check('Step 10 tells the agent how to record the call', () => {
     'on the first command only',
     'Drop every sentence the user declines',
     'run the list again from the first command',
+    'Run the commands one at a time and check each exit status',
+    "or as `''` in PowerShell",
     'A second run of the same commands is safe',
   ]) {
     assert.ok(section.includes(phrase), `missing ${phrase}`);

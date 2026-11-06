@@ -258,14 +258,14 @@ Frag für jede genannte Person `Save this contact to data/contacts.tsv? [y/N]`. 
 
 Nennt der nächste Schritt einen eindeutigen Kalendertag, übergib `--next YYYY-MM-DD` ohne zweite Frage. Löse einen Wochentag ausgehend vom lokalen Kalendertag auf, wobei heute mitzählt. Enthält die Formulierung keinen Tag, lass `--next` weg. Ist sie mehrdeutig (`next week`, zwei Tage), frag nach einem Datum und übergib es dann.
 
-Führe `node debrief-sync.mjs --app <tracker#>` mit diesen Flags aus. `<tracker#>` ist die `#` der Bewerbung im Tracker (nicht die Berichtsnummer). `--dealbreaker` nimmt genau einen Satz und darf pro Aufruf nur einmal vorkommen, also führe für jeden bestätigten Satz einen eigenen Befehl aus. Füge nie zwei Sätze zu einem Wert zusammen: Das Skript lehnt ein Semikolon ab. Setze die Kontakt-Flags und `--next` nur in den ersten Befehl. Jeder weitere Befehl übergibt `--app <tracker#>` und ein `--dealbreaker`, sonst nichts. Setze jeden Wert in einfache Anführungszeichen, damit die Shell `$` und Backticks unverändert durchreicht. Schreibe ein einfaches Anführungszeichen innerhalb eines Werts als `'\''`:
+Führe `node debrief-sync.mjs --app <tracker#>` mit diesen Flags aus. `<tracker#>` ist die `#` der Bewerbung im Tracker (nicht die Berichtsnummer). `--dealbreaker` nimmt genau einen Satz und darf pro Aufruf nur einmal vorkommen, also führe für jeden bestätigten Satz einen eigenen Befehl aus. Füge nie zwei Sätze zu einem Wert zusammen: Das Skript lehnt ein Semikolon ab. Setze die Kontakt-Flags und `--next` nur in den ersten Befehl. Jeder weitere Befehl übergibt `--app <tracker#>` und ein `--dealbreaker`, sonst nichts. Setze jeden Wert in einfache Anführungszeichen, damit die Shell `$` und Backticks unverändert durchreicht. Schreibe ein einfaches Anführungszeichen innerhalb eines Werts als `'\''` in Git Bash oder einer anderen POSIX-Shell, in PowerShell als `''`:
 
 ```bash
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
-Schlägt ein Befehl fehl, halte an, behebe den Fehler und führe die Liste ab dem ersten Befehl erneut aus. Gibt es keinen Dealbreaker, keinen Kontakt und keinen `--next`-Tag zu übergeben, lass den Befehl weg: Das Skript lehnt einen Aufruf ab, der nichts festzuhalten hat. Wurde ein Kontakt gespeichert, führe nach dem letzten Befehl `node contacts.mjs --summary` aus. Wurde ein Tag festgelegt, führe `node followup-cadence.mjs --summary` aus.
+Führe die Befehle einzeln aus und prüfe nach jedem den Exit-Status. Schlägt ein Befehl fehl, halte an, behebe den Fehler und führe die Liste ab dem ersten Befehl erneut aus. Gibt es keinen Dealbreaker, keinen Kontakt und keinen `--next`-Tag zu übergeben, lass den Befehl weg: Das Skript lehnt einen Aufruf ab, der nichts festzuhalten hat. Wurde ein Kontakt gespeichert, führe nach dem letzten Befehl `node contacts.mjs --summary` aus. Wurde ein Tag festgelegt, führe `node followup-cadence.mjs --summary` aus.
 
 Ändere den Status nicht, es sei denn, der Nutzer nennt einen neuen Status. Das ist ein separater `set-status.mjs`-Aufruf vor diesen Befehlen.
 

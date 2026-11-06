@@ -258,14 +258,14 @@ For each named person, ask `Save this contact to data/contacts.tsv? [y/N]`. On y
 
 If the next step names one clear calendar day, pass `--next YYYY-MM-DD` with no second question. Resolve a weekday from the local calendar day, and today counts. If the phrase has no day, omit `--next`. If it is ambiguous (`next week`, two days), ask for one date and then pass it.
 
-Run `node debrief-sync.mjs --app <tracker#>` with those flags, where `<tracker#>` is the application's `#` in the tracker (not its report number). `--dealbreaker` takes one sentence and may appear only once per call, so run one command per confirmed sentence. Never join two sentences into one value: the script rejects a semicolon. Put the contact flags and `--next` on the first command only. Each further command passes `--app <tracker#>` and one `--dealbreaker`, nothing else. Put each value in single quotes so the shell passes `$` and backticks through unchanged. Write a single quote inside a value as `'\''`:
+Run `node debrief-sync.mjs --app <tracker#>` with those flags, where `<tracker#>` is the application's `#` in the tracker (not its report number). `--dealbreaker` takes one sentence and may appear only once per call, so run one command per confirmed sentence. Never join two sentences into one value: the script rejects a semicolon. Put the contact flags and `--next` on the first command only. Each further command passes `--app <tracker#>` and one `--dealbreaker`, nothing else. Put each value in single quotes so the shell passes `$` and backticks through unchanged. Write a single quote inside a value as `'\''` in Git Bash or another POSIX shell, or as `''` in PowerShell:
 
 ```bash
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
-If a command fails, stop, fix it, and run the list again from the first command. If there is no dealbreaker, contact or `--next` day to pass, skip the command: the script refuses a call with nothing to record. After the last command, when a contact was saved, run `node contacts.mjs --summary`. When a day was pinned, run `node followup-cadence.mjs --summary`.
+Run the commands one at a time and check each exit status. If a command fails, stop, fix it, and run the list again from the first command. If there is no dealbreaker, contact or `--next` day to pass, skip the command: the script refuses a call with nothing to record. After the last command, when a contact was saved, run `node contacts.mjs --summary`. When a day was pinned, run `node followup-cadence.mjs --summary`.
 
 Do not change status unless the user names a new status. That is a separate `set-status.mjs` call, before these commands.
 

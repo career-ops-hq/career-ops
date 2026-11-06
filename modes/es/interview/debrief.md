@@ -258,14 +258,14 @@ Para cada persona nombrada, pregunta `Save this contact to data/contacts.tsv? [y
 
 Si el siguiente paso nombra un único día claro del calendario, pasa `--next YYYY-MM-DD` sin una segunda pregunta. Resuelve un día de la semana a partir del día del calendario local, y hoy cuenta. Si la frase no tiene día, omite `--next`. Si es ambigua (`next week`, dos días), pide una sola fecha y luego pásala.
 
-Ejecuta `node debrief-sync.mjs --app <tracker#>` con esos flags, donde `<tracker#>` es el `#` de la candidatura en el tracker (no su número de informe). `--dealbreaker` admite una sola frase y solo puede aparecer una vez por llamada, así que ejecuta un comando por cada frase confirmada. Nunca unas dos frases en un solo valor: el script rechaza el punto y coma. Pon los flags de contacto y `--next` solo en el primer comando. Cada comando siguiente pasa `--app <tracker#>` y un único `--dealbreaker`, nada más. Pon cada valor entre comillas simples para que la shell pase `$` y las comillas invertidas sin cambios. Escribe una comilla simple dentro de un valor como `'\''`:
+Ejecuta `node debrief-sync.mjs --app <tracker#>` con esos flags, donde `<tracker#>` es el `#` de la candidatura en el tracker (no su número de informe). `--dealbreaker` admite una sola frase y solo puede aparecer una vez por llamada, así que ejecuta un comando por cada frase confirmada. Nunca unas dos frases en un solo valor: el script rechaza el punto y coma. Pon los flags de contacto y `--next` solo en el primer comando. Cada comando siguiente pasa `--app <tracker#>` y un único `--dealbreaker`, nada más. Pon cada valor entre comillas simples para que la shell pase `$` y las comillas invertidas sin cambios. Escribe una comilla simple dentro de un valor como `'\''` en Git Bash u otra shell POSIX, o como `''` en PowerShell:
 
 ```bash
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
-Si un comando falla, detente, corrígelo y vuelve a ejecutar la lista desde el primer comando. Si no hay dealbreaker, contacto ni día `--next` que pasar, omite el comando: el script rechaza una llamada sin nada que registrar. Después del último comando, si se guardó un contacto, ejecuta `node contacts.mjs --summary`. Si se fijó un día, ejecuta `node followup-cadence.mjs --summary`.
+Ejecuta los comandos de uno en uno y comprueba el código de salida de cada uno. Si un comando falla, detente, corrígelo y vuelve a ejecutar la lista desde el primer comando. Si no hay dealbreaker, contacto ni día `--next` que pasar, omite el comando: el script rechaza una llamada sin nada que registrar. Después del último comando, si se guardó un contacto, ejecuta `node contacts.mjs --summary`. Si se fijó un día, ejecuta `node followup-cadence.mjs --summary`.
 
 No cambies el estado a menos que el usuario nombre un nuevo estado. Eso es una llamada aparte a `set-status.mjs`, antes de estos comandos.
 

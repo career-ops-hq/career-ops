@@ -258,14 +258,14 @@ Dla każdej wymienionej z imienia osoby zapytaj `Zapisać ten kontakt w data/con
 
 Jeśli następny krok wskazuje jeden jednoznaczny dzień w kalendarzu, przekaż `--next YYYY-MM-DD` bez dodatkowego pytania. Dzień tygodnia rozwiązuj według lokalnego kalendarza, przy czym dzisiejszy dzień się liczy. Jeśli sformułowanie nie wskazuje dnia, pomiń `--next`. Jeśli jest niejednoznaczne (`next week`, dwa dni), poproś o jedną datę, a potem ją przekaż.
 
-Uruchom `node debrief-sync.mjs --app <tracker#>` z tymi flagami, gdzie `<tracker#>` to `#` aplikacji w trackerze (nie numer raportu). `--dealbreaker` przyjmuje jedno zdanie i może wystąpić tylko raz w wywołaniu, więc uruchom jedno polecenie na każde potwierdzone zdanie. Nigdy nie łącz dwóch zdań w jedną wartość: skrypt odrzuca średnik. Flagi kontaktu i `--next` dodaj tylko do pierwszego polecenia. Każde kolejne polecenie przekazuje `--app <tracker#>` i jedno `--dealbreaker`, nic więcej. Ujmij każdą wartość w apostrofy, aby powłoka przekazała `$` i backticki bez zmian. Apostrof wewnątrz wartości zapisz jako `'\''`:
+Uruchom `node debrief-sync.mjs --app <tracker#>` z tymi flagami, gdzie `<tracker#>` to `#` aplikacji w trackerze (nie numer raportu). `--dealbreaker` przyjmuje jedno zdanie i może wystąpić tylko raz w wywołaniu, więc uruchom jedno polecenie na każde potwierdzone zdanie. Nigdy nie łącz dwóch zdań w jedną wartość: skrypt odrzuca średnik. Flagi kontaktu i `--next` dodaj tylko do pierwszego polecenia. Każde kolejne polecenie przekazuje `--app <tracker#>` i jedno `--dealbreaker`, nic więcej. Ujmij każdą wartość w apostrofy, aby powłoka przekazała `$` i backticki bez zmian. Apostrof wewnątrz wartości zapisz jako `'\''` w Git Bash lub innej powłoce POSIX, a w PowerShell jako `''`:
 
 ```bash
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
-Jeśli polecenie się nie powiedzie, zatrzymaj się, popraw je i uruchom listę ponownie od pierwszego polecenia. Jeśli nie ma deal-breakera, kontaktu ani dnia `--next` do przekazania, pomiń polecenie: skrypt odrzuca wywołanie, które nie ma nic do zapisania. Po ostatnim poleceniu, jeśli zapisano kontakt, uruchom `node contacts.mjs --summary`. Jeśli przypięto dzień, uruchom `node followup-cadence.mjs --summary`.
+Uruchamiaj polecenia po jednym i sprawdzaj kod wyjścia każdego z nich. Jeśli polecenie się nie powiedzie, zatrzymaj się, popraw je i uruchom listę ponownie od pierwszego polecenia. Jeśli nie ma deal-breakera, kontaktu ani dnia `--next` do przekazania, pomiń polecenie: skrypt odrzuca wywołanie, które nie ma nic do zapisania. Po ostatnim poleceniu, jeśli zapisano kontakt, uruchom `node contacts.mjs --summary`. Jeśli przypięto dzień, uruchom `node followup-cadence.mjs --summary`.
 
 Nie zmieniaj statusu, chyba że użytkownik wskaże nowy status. To osobne wywołanie `set-status.mjs`, wykonywane przed tymi poleceniami.
 

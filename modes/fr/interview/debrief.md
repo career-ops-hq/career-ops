@@ -200,14 +200,14 @@ Pour chaque personne nommée, demandez `Save this contact to data/contacts.tsv? 
 
 Si l'étape suivante nomme un seul jour calendaire clair, passez `--next YYYY-MM-DD` sans poser de deuxième question. Déduisez un jour de la semaine à partir du jour calendaire local, aujourd'hui compris. Si la formulation ne contient pas de jour, omettez `--next`. Si elle est ambiguë (`next week`, deux jours), demandez une seule date, puis passez-la.
 
-Exécutez `node debrief-sync.mjs --app <tracker#>` avec ces flags, où `<tracker#>` est le `#` de la candidature dans le tracker (et non son numéro de rapport). `--dealbreaker` prend une seule phrase et ne peut apparaître qu'une fois par appel : exécutez donc une commande par phrase confirmée. Ne fusionnez jamais deux phrases en une seule valeur : le script rejette le point-virgule. Mettez les flags de contact et `--next` sur la première commande uniquement. Chaque commande suivante passe `--app <tracker#>` et un seul `--dealbreaker`, rien d'autre. Mettez chaque valeur entre apostrophes pour que le shell transmette `$` et les backticks tels quels. Écrivez une apostrophe à l'intérieur d'une valeur sous la forme `'\''` :
+Exécutez `node debrief-sync.mjs --app <tracker#>` avec ces flags, où `<tracker#>` est le `#` de la candidature dans le tracker (et non son numéro de rapport). `--dealbreaker` prend une seule phrase et ne peut apparaître qu'une fois par appel : exécutez donc une commande par phrase confirmée. Ne fusionnez jamais deux phrases en une seule valeur : le script rejette le point-virgule. Mettez les flags de contact et `--next` sur la première commande uniquement. Chaque commande suivante passe `--app <tracker#>` et un seul `--dealbreaker`, rien d'autre. Mettez chaque valeur entre apostrophes pour que le shell transmette `$` et les backticks tels quels. Écrivez une apostrophe à l'intérieur d'une valeur sous la forme `'\''` dans Git Bash ou un autre shell POSIX, ou `''` dans PowerShell :
 
 ```bash
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
-Si une commande échoue, arrêtez-vous, corrigez-la et relancez la liste depuis la première commande. S'il n'y a ni dealbreaker, ni contact, ni jour `--next` à passer, sautez la commande : le script refuse un appel sans rien à enregistrer. Après la dernière commande, si un contact a été enregistré, exécutez `node contacts.mjs --summary`. Si un jour a été fixé, exécutez `node followup-cadence.mjs --summary`.
+Exécutez les commandes une par une et vérifiez le code de sortie de chacune. Si une commande échoue, arrêtez-vous, corrigez-la et relancez la liste depuis la première commande. S'il n'y a ni dealbreaker, ni contact, ni jour `--next` à passer, sautez la commande : le script refuse un appel sans rien à enregistrer. Après la dernière commande, si un contact a été enregistré, exécutez `node contacts.mjs --summary`. Si un jour a été fixé, exécutez `node followup-cadence.mjs --summary`.
 
 Ne changez pas le statut sauf si l'utilisateur nomme un nouveau statut. C'est un appel `set-status.mjs` distinct, avant ces commandes.
 
