@@ -85,7 +85,9 @@ function isSafeValue(v) {
 //                  endpoint that only answers a POST (see the `meituan` entry).
 //   `interpret`  — read the response body to decide liveness (org-level APIs
 //                  where a 200 alone doesn't prove THIS posting is live, and
-//                  per-job APIs that answer 200 for a closed posting).
+//                  per-job APIs that answer 200 for a closed posting). The third
+//                  argument is the request's abort signal, for a provider that
+//                  needs a second request to decide (see the `hibob` entry).
 //   `interpretStatuses` — the statuses whose body `interpret` reads; defaults
 //                  to [200]. A provider that answers a closed posting with an
 //                  error status carrying a recognisable body lists that status
@@ -378,9 +380,11 @@ const ATS_PROVIDERS = [
     // {tenant}.careers.hibob.com/jobs/{uuid}[/apply], the URL providers/hibob.mjs
     // writes. The posting page reads only this per-posting endpoint and, when
     // it answers 404, shows "No job openings match this URL" in place of the
-    // posting, so a 404 is the page's own verdict and a 200 is a live posting.
-    // The `companyidentifier` header names the tenant; without it, or for a
-    // label that is not a tenant, the answer is 401, which stays inconclusive.
+    // posting, and a 200 is a live posting. A label with no careers site answers
+    // 404 with the same body on its board endpoint too, so a 404 closes the
+    // posting only when the tenant's board answers 200; otherwise it stays
+    // inconclusive. The `companyidentifier` header names the tenant; without it,
+    // or for a label that is not a tenant, the answer is 401, also inconclusive.
     match(u) {
       const tenant = resolveHibobTenant(u.href);
       if (!tenant) return null;
@@ -389,6 +393,20 @@ const ATS_PROVIDERS = [
     },
     api: ({ tenant, jobId }) => `https://${tenant}.careers.hibob.com/api/job-ad/${jobId}/application-form`,
     headers: ({ tenant }) => ({ companyidentifier: tenant }),
+    interpretStatuses: [404],
+    api404Authoritative: false,
+    async interpret(res, { tenant }, signal) {
+      await res.body?.cancel().catch(() => {});
+      const board = await fetch(`https://${tenant}.careers.hibob.com/api/job-ad`, {
+        headers: { 'user-agent': DEFAULT_USER_AGENT, accept: 'application/json', companyidentifier: tenant },
+        redirect: 'error',
+        signal,
+      });
+      await board.body?.cancel().catch(() => {});
+      return board.status === 200
+        ? { result: 'expired', code: 'hibob_api_gone', reason: 'HiBob answers 404 for the posting while the tenant board answers 200' }
+        : null;
+    },
   },
   {
     id: 'arbeitsagentur',
@@ -1051,7 +1069,7 @@ export function classifyWorkday403(json) {
  * Map a posting URL to its ATS API URL, or null if it isn't a known ATS posting
  * (or any extracted segment fails the strict charset). Pure + deterministic.
  * @param {string} rawUrl
- * @returns {{ ats: string, apiUrl: string, method: string, body?: string, parts: Record<string, string>, timeoutMs?: number, throttleMs?: number, accept?: string, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>, interpretStatuses?: number[], api404Authoritative: boolean } | null}
+ * @returns {{ ats: string, apiUrl: string, method: string, body?: string, parts: Record<string, string>, timeoutMs?: number, throttleMs?: number, accept?: string, interpret?: (res: Response, parts: Record<string, string>, signal: AbortSignal) => Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>, interpretStatuses?: number[], api404Authoritative: boolean } | null}
  */
 export function resolveAtsApi(rawUrl) {
   let u;
@@ -1208,7 +1226,7 @@ export async function checkLivenessViaApi(url, { boardCache } = {}) {
       if (verdict) boardCache.set(apiUrl, json);
       return verdict;
     }
-    if (interpret && (interpretStatuses || [200]).includes(res.status)) return await interpret(res, parts);
+    if (interpret && (interpretStatuses || [200]).includes(res.status)) return await interpret(res, parts, controller.signal);
     if (res.status === 200) {
       return { result: 'active', code: `${ats}_api_ok`, reason: 'ATS API returns the posting (live)' };
     }

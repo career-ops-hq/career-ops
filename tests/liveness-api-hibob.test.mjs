@@ -6,7 +6,9 @@
 // `companyidentifier` header:
 //
 //   200 -> active (the page shows the posting)
-//   404 -> expired (the page shows "No job openings match this URL")
+//   404 -> expired when the tenant's board answers 200 (the page shows "No job
+//          openings match this URL"), otherwise null: a label with no careers
+//          site answers 404 on its board too
 //   401 -> null (the label is not a tenant; the browser decides)
 //
 // The same answer carries the posting text, so fetch-jd needs no browser.
@@ -96,11 +98,47 @@ test('a 200 answers active; the request sends the tenant header and refuses redi
   assert.deepEqual(calls, [[API, 'error', 'acme']]);
 });
 
-test('a 404 answers expired', async () => {
-  const verdict = await withFetch(async () => new Response('{"message":"Could not find resource"}', { status: 404 }),
-    () => checkLivenessViaApi(POSTING));
+const NOT_FOUND = '{"message":"Could not find resource"}';
+
+test('a 404 answers expired when the tenant board answers 200', async () => {
+  const calls = [];
+  const verdict = await withFetch(async (url, opts) => {
+    calls.push([String(url), opts.redirect, opts.headers.companyidentifier, opts.signal instanceof AbortSignal]);
+    return String(url) === API
+      ? new Response(NOT_FOUND, { status: 404 })
+      : new Response('{"jobAdDetails":[]}', { status: 200 });
+  }, () => checkLivenessViaApi(POSTING));
   assert.equal(verdict.result, 'expired');
   assert.equal(verdict.code, 'hibob_api_gone');
+  assert.deepEqual(calls, [
+    [API, 'error', 'acme', true],
+    ['https://acme.careers.hibob.com/api/job-ad', 'error', 'acme', true],
+  ]);
+});
+
+test('a 404 stays inconclusive when the board does not answer 200', async () => {
+  for (const board of [
+    async () => new Response(NOT_FOUND, { status: 404 }),
+    async () => new Response('', { status: 401 }),
+    async () => new Response('', { status: 503 }),
+    async () => { throw new TypeError('fetch failed'); },
+  ]) {
+    const verdict = await withFetch(
+      async (url) => (String(url) === API ? new Response(NOT_FOUND, { status: 404 }) : board()),
+      () => checkLivenessViaApi(POSTING),
+    );
+    assert.equal(verdict, null);
+  }
+});
+
+test('a 410 stays inconclusive and makes no board request', async () => {
+  const calls = [];
+  const verdict = await withFetch(async (url) => {
+    calls.push(String(url));
+    return new Response('', { status: 410 });
+  }, () => checkLivenessViaApi(POSTING));
+  assert.equal(verdict, null);
+  assert.deepEqual(calls, [API]);
 });
 
 test('a 401 (not a tenant), a 5xx or a network error stays inconclusive', async () => {
