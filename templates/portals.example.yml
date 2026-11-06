@@ -218,6 +218,10 @@
 #     - "Brazil"
 #     - "Australia"
 
+# Conditional office/hybrid-city + remote-country rules are also opt-in:
+# location_filter.workplace_policy (see docs/WORKPLACE_GEOGRAPHY.md). Unlike
+# an allow entry of "Remote", this checks where remote applicants may work.
+
 # -- Country-eligibility filter (optional, opt-in, #2093) --
 # location_filter only reads the ATS provider's STRUCTURED location field
 # (e.g. "Remote"). Many US companies tag every remote requisition "Remote"
@@ -379,6 +383,45 @@
 #         - "gpt"
 #         - "llm"
 #         - "claude"
+#
+# min_match (optional): require that many DISTINCT positive entries instead of
+# any one. One generic word ("demo", "customers") is a weak signal; two or
+# three together describe the role. Only in a block that sets min_match:
+#   - " | " (with spaces) separates spellings of ONE trait, so
+#     "pre-sales | presales" counts once however many spellings appear
+#   - duplicate entries ("Demo", "demo") count once
+#   - accents, case and typographic hyphens are folded (customer‑facing with a
+#     non-breaking hyphen matches "customer-facing")
+#   - any `negative` entry still rejects, whatever the count
+# min_match must be an integer from 1 to the number of distinct positive
+# entries; scan.mjs refuses to start otherwise. A by_title_keyword rule can set
+# its own min_match; it does not inherit the global one.
+#
+# rescue_title_misses (optional, default false): a posting whose title matches
+# no title_filter.positive keyword normally never reaches this filter. With
+# true, it still gets one chance on its description: it is kept only when its
+# description is non-empty and passes the global positive/negative pair (with
+# min_match). A title_filter.negative hit is never rescued, by_title_keyword
+# rules never apply to a title miss, and a non-empty `positive` list is
+# required. A title miss that this check does not keep is counted under
+# "Filtered by title" and recorded as skipped_title, as before. The summary
+# adds a "Title misses kept by content" line. Providers without a list
+# description (see above) give a title miss nothing to be rescued on.
+# scan.mjs and scan-dayforce.mjs apply it. scan-ats-full.mjs does not: it skips
+# a board by title before downloading descriptions, so it warns and drops
+# title misses as without the key.
+#
+# Example: select customer-facing technical roles whatever they are called
+# content_filter:
+#   positive:
+#     - "customer-facing"
+#     - "pre-sales | presales"
+#     - "proof of concept | poc"
+#     - "word:demo | demos"
+#   negative:
+#     - "no customer interaction"
+#   min_match: 2
+#   rescue_title_misses: true
 
 # -- Visa / work-authorization filter (optional) --
 # Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1), Singapore
@@ -1231,6 +1274,7 @@ search_queries:
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
 #   personio        <slug>.jobs.personio.(de|com)
 #   pinpoint        <slug>.pinpointhq.com
+#   polymer         jobs.polymer.co/<slug>  (or api: https://api.polymer.co/v1/hire/organizations/<slug>/jobs)
 #   clearcompany    careers-api.clearcompany.com/v1/<siteId>  (or the careers page's embed script
 #                   careers-content.clearcompany.com/js/v1/career-site.js?siteId=<siteId>)
 #   prevueaps       <tenant>.prevueaps.ca  (or api: field; domainId resolved from the tenant's /jobs/ page)
@@ -1294,6 +1338,9 @@ search_queries:
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
 #   remote-com      apply.remote.com  (Remote's own ATS, single company; any path, the board is always read whole)
+#   hirehive        <tenant>.hirehive.com  (any path, including a posting link; the board is always read from /api/v2/jobs)
+#   trakstar        <client>.hire.trakstar.com or <client>.recruiterbox.com
+#                   (or api: https://jsapi.recruiterbox.com/v1/openings?client_name=<client>)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1365,6 +1412,11 @@ search_queries:
 #                          # the board link off the careers page; the GUID is the board id
 #   enabled: true
 #
+# - name: Example HireHive Co
+#   careers_url: https://exampleco.hirehive.com/   # any <tenant>.hirehive.com host
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 100)
+#   enabled: true
+#
 # - name: Example Collage HR Co
 #   careers_url: https://secure.collage.co/jobs/exampleco      # explicit job-site address
 #   # Or pin the API directly: api: https://api.collage.co/v1/positions/exampleco
@@ -1391,6 +1443,11 @@ search_queries:
 #
 # - name: Example Pinpoint Co
 #   careers_url: https://exampleco.pinpointhq.com         # any *.pinpointhq.com host
+#   enabled: true
+#
+# - name: Example Polymer Co
+#   careers_url: https://jobs.polymer.co/exampleco       # any jobs.polymer.co/<slug> board
+#   max_pages: 20          # optional page cap (server page size, default 20, max 100)
 #   enabled: true
 #
 # - name: Example PrevueAPS Co
@@ -1421,6 +1478,11 @@ search_queries:
 #   max_pages: 50          # optional page cap (10 jobs/page, default 50, max 500) —
 #                          # raise it for a tenant with 500+ open postings (a warning
 #                          # is logged if the cap truncates real results)
+#   enabled: true
+#
+# - name: Example Trakstar Hire Co
+#   careers_url: https://exampleco.hire.trakstar.com   # any <client>.hire.trakstar.com board
+#   max_pages: 20          # optional page cap (100 openings/page, default 20, max 50)
 #   enabled: true
 #
 # - name: Example Jobvite Co
@@ -2252,6 +2314,11 @@ tracked_companies:
     provider: adp-workforcenow
     enabled: false
 
+  # Polymer's public demo tenant. Disabled so copying this file does not scan it.
+  - name: Aperture Labs
+    careers_url: https://jobs.polymer.co/aperturelabs
+    enabled: false
+
   # -- AI Labs & LLM providers --
 
   - name: Anthropic
@@ -2638,6 +2705,11 @@ tracked_companies:
     notes: "Fully remote. Employer-of-record / global HR platform. Each posting names its hiring regions (EMEA, NORAM, LATAM, APAC)."
     enabled: true
 
+  - name: AMCS Group
+    careers_url: https://amcsgroup.hirehive.com/
+    notes: "Limerick / Dublin / Berlin. Software for the waste, recycling and utilities industry."
+    enabled: true
+
   # -- DACH & European AI ecosystem --
   # All entries below have been verified against the Greenhouse / Ashby /
   # Lever / Workable APIs or live job boards. Greenhouse boards expose a
@@ -2982,6 +3054,11 @@ tracked_companies:
     notes: "Copenhagen DK. Document-generation / content-enablement platform. Moved from Greenhouse to Teamtailor (templafy.com careers links here)."
     enabled: true
 
+  # Trakstar Hire's public demo client. Disabled so copying this file does not scan the demo board.
+  - name: Trakstar demo board
+    careers_url: https://demoaccount.hire.trakstar.com
+    enabled: false
+
   # -- Iberia AI --
 
   - name: Amplemarket
@@ -3014,10 +3091,9 @@ tracked_companies:
     enabled: true
 
   - name: Runway
-    careers_url: https://job-boards.greenhouse.io/runwayml
-    api: https://boards-api.greenhouse.io/v1/boards/runwayml/jobs
-    notes: "Generative AI video and creative tooling platform."
-    enabled: false
+    careers_url: https://jobs.ashbyhq.com/runway-ml
+    notes: "Generative AI video and creative tooling platform. Moved from Greenhouse to Ashby (runway.com/careers links here); greenhouse.io/runwayml is gone."
+    enabled: true
 
   - name: Hightouch
     careers_url: https://job-boards.greenhouse.io/hightouch
