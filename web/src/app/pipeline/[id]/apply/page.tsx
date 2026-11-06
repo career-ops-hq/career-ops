@@ -73,7 +73,7 @@ export default async function ApplyPage({
 
   const suffix = query ? `?${query}` : "";
   const company = app?.company || parseReport(report?.content ?? "").title || `Report #${id}`;
-  const disk = await readCvDiskState(id, company, (app?.pdf ?? "").includes("✅"));
+  const disk = await readCvDiskState(id, company, (app?.pdf ?? "").includes("✅"), reportNum);
   return (
     <ApplyChecklist
       company={company}

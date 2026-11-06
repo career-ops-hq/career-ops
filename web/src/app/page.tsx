@@ -5,6 +5,7 @@ import type { CardReason } from "@/lib/machine-summary.mjs";
 import { todaySnapshot } from "@/lib/home/today-snapshot.mjs";
 import { homeLead, showFirstRunHome } from "@/lib/home/home-lead.mjs";
 import { scoreNum, parseReport } from "@/lib/format";
+import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { readCvDiskForRows } from "@/lib/read-cv-disk";
 import { applyPostingUrl } from "@/lib/posting-url.mjs";
 import { OnboardingBanner } from "@/components/onboarding-banner";
@@ -37,7 +38,12 @@ export default async function Home() {
     postingUrls[app.n] = applyPostingUrl(reportUrl, app.url || app.applyLink);
   }
   const disks = await readCvDiskForRows(
-    awaiting.map((app) => ({ n: app.n, company: app.company, trackerMarked: (app.pdf ?? "").includes("✅") })),
+    awaiting.map((app) => ({
+      n: app.n,
+      company: app.company,
+      trackerMarked: (app.pdf ?? "").includes("✅"),
+      reportNumber: reportNumberFor(app.n, app, null),
+    })),
   );
   const applyFacts: Record<string, { pdfOnDisk: boolean; postingUrl: string }> = {};
   for (const app of awaiting) {

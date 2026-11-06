@@ -26,7 +26,8 @@ export default async function ReportPage({ params, searchParams }: {
   const coverReady = (await resolveTailoredCover(app?.company, id)) !== null;
   // Same name the View link puts in ?company=, so a slug match here is the file that link would open.
   const companyName = app?.company || parseReport(report?.content ?? "").title || "";
-  const disk = await readCvDiskState(id, companyName, (app?.pdf ?? "").includes("✅"));
+  const reportNum = reportNumberFor(id, app, report?.file ?? null);
+  const disk = await readCvDiskState(id, companyName, (app?.pdf ?? "").includes("✅"), reportNum);
   const pdfFileReady = disk.exists;
   return (
     <ReportView
@@ -40,7 +41,7 @@ export default async function ReportPage({ params, searchParams }: {
       coverReady={coverReady}
       backHref={`/pipeline${query ? `?${query}` : ""}`}
       applyHref={`/pipeline/${encodeURIComponent(id)}/apply${query ? `?${query}` : ""}`}
-      reportNum={reportNumberFor(id, app, report?.file ?? null)}
+      reportNum={reportNum}
     />
   );
 }
