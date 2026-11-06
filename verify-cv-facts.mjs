@@ -2360,7 +2360,8 @@ function sourceSpellsFact(sourceText, value) {
  * Reduce markdown links to their visible text, so a claim that spans a link is
  * compared with the words a reader sees. Handles inline links whose target holds
  * balanced parentheses or a title (`[a](https://x/Foo_(bar) "t")`), reference
- * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`).
+ * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`, the
+ * title on the same line or on the line right after it).
  * A bracket pair with no link target after it is left alone.
  */
 function collapseMarkdownLinks(text) {
@@ -2390,7 +2391,7 @@ function collapseMarkdownLinks(text) {
   }
   return out
     .replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1')
-    .replace(/(?:^|[^\S\r\n])\[[^\][]+\]:[^\S\r\n]*\S+(?:[^\S\r\n]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[^\S\r\n]*(?=\r?$)/gm, ' ');
+    .replace(/(?:^|[^\S\r\n])\[[^\][]+\]:[^\S\r\n]*\S+(?:[^\S\r\n]+(?:"[^"]*"|'[^']*'|\([^)]*\))|\r?\n[^\S\r\n]*(?:"[^"]*"|'[^']*'|\([^)]*\)))?[^\S\r\n]*(?=\r?$)/gm, ' ');
 }
 
 export function verifyFacts(targetText, {
@@ -2409,15 +2410,17 @@ export function verifyFacts(targetText, {
   const targetClaims = metricClaims(targetText);
   const planned = plannedClaims(targetText, planTexts);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim) && !planned.has(claim));
-  // A markdown link keeps its target in the stripped source: "[MediaLink](https://…) (Director)"
-  // reads as "[medialink](https://…) (director)", so a claim that spans a link, such as
+  // A markdown link keeps its target in the stripped source: "[Fabrikam](https://…) (Director)"
+  // reads as "[fabrikam](https://…) (director)", so a claim that spans a link, such as
   // a "Previous Experience" line of linked employers and titles, never found its own
   // words in the source. Only the link text is evidence, so the lookup reads that.
   // Each file is stripped on its own. Bold may span a wrapped line, so an unpaired `**` at
   // the end of one file paired with the first `**` of the next and left a stray `*` in the
-  // name beside it ("medialink* (director)").
+  // name beside it ("fabrikam* (director)").
+  // stripMarkup folds a run of newlines into one, so a blank line is marked first: a reference
+  // definition takes a title only from the line right after it, never across a blank line.
   const sourceLookup = normalizeFact(sourceTexts
-    .map(text => collapseMarkdownLinks(stripMarkup(text, { keepLineBreaks: true })))
+    .map(text => collapseMarkdownLinks(stripMarkup(text.replace(/\n[^\S\n]*(?=\n)/g, '\n\u0001'), { keepLineBreaks: true })).replace(/\u0001/g, ''))
     .join('\n'));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
   const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
