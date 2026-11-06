@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
@@ -225,6 +225,9 @@ refuses('a weekday --next writes nothing', ['--app', '7', '--dealbreaker', SENTE
 refuses('an impossible --next writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--next', '2026-02-31']);
 refuses('an unknown flag writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--bogus']);
 refuses('a dealbreaker with a semicolon writes nothing', ['--app', '7', '--dealbreaker', 'No on-site; relocation']);
+refuses('a dealbreaker with a tab writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\trelocation']);
+refuses('a dealbreaker with a newline writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\nrelocation']);
+refuses('a dealbreaker with a carriage return writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\r\nrelocation']);
 refuses('a Machine Summary holding only comments writes nothing', ['--app', '7', '--dealbreaker', SENTENCE], {
   report: reportText('4.2', 'Apply', '[]').replace(/```yaml\n[\s\S]*?```/, '```yaml\n# summary pending\n```'),
 });
@@ -371,7 +374,39 @@ check('Step 10 tells the agent how to record the call', () => {
     'set-status.mjs',
     'Do not change status unless the user names a new status',
     'A second run of the same command is safe',
+    'a semicolon (`;`), a tab or a line break',
+    'ask for a one-line version without it that keeps the meaning',
+    'Do not remove the character or reword the sentence yourself',
+    "the user's one-line version",
   ]) {
     assert.ok(section.includes(phrase), `missing ${phrase}`);
+  }
+});
+
+// #6541: debrief-sync.mjs refuses a --dealbreaker value with a semicolon, tab
+// or line break, so every Step 10 that passes the profile sentence must check
+// it first and ask the user for a safe one-line value, before the [y/N]
+// confirmation. Translated files carry the same check: the `;` marker and the
+// script name sit in the dealbreaker paragraph ahead of the prompt.
+check('every Step 10 that passes --dealbreaker checks the delimiters before the prompt', () => {
+  const modesDir = join(ROOT, 'modes');
+  const files = ['modes/interview/debrief.md', ...readdirSync(modesDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => `modes/${d.name}/interview/debrief.md`)
+    .filter((rel) => existsSync(join(ROOT, rel)))];
+  const affected = files.filter((rel) => readFileSync(join(ROOT, rel), 'utf8').includes('--dealbreaker'));
+  assert.ok(affected.includes('modes/interview/debrief.md'));
+  assert.ok(affected.includes('modes/ja/interview/debrief.md'), 'the Japanese debrief should pass --dealbreaker');
+  for (const rel of affected) {
+    const paragraph = readFileSync(join(ROOT, rel), 'utf8')
+      .split(/\n\s*\n/)
+      .find((p) => p.includes('`--dealbreaker`') && p.includes('[y/N]'));
+    assert.ok(paragraph, `${rel}: no dealbreaker paragraph with a [y/N] prompt`);
+    const guard = paragraph.indexOf('`;`');
+    const prompt = paragraph.indexOf('[y/N]');
+    assert.ok(guard >= 0, `${rel}: the dealbreaker paragraph does not name the semicolon`);
+    assert.ok(paragraph.indexOf('debrief-sync.mjs') >= 0 && paragraph.indexOf('debrief-sync.mjs') < prompt,
+      `${rel}: the delimiter check does not name debrief-sync.mjs before the prompt`);
+    assert.ok(guard < prompt, `${rel}: the delimiter check comes after the [y/N] prompt`);
   }
 });

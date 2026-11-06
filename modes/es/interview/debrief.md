@@ -252,7 +252,7 @@ Reglas para la transcripción:
 
 ## Step 10 — Record the call on the tracker
 
-Después de guardar el análisis, registra los hechos confirmados en la candidatura. Relaciona un hecho nuevo con un factor decisivo (dealbreaker) que el usuario ya haya escrito en `modes/_profile.md` o `config/profile.yml`. Muestra el hecho y la frase del perfil. Pregunta `Record this dealbreaker on the report and the tracker? [y/N]`. Si responde que sí, pasa esa frase como `--dealbreaker`. Si responde que no, omítelo.
+Después de guardar el análisis, registra los hechos confirmados en la candidatura. Relaciona un hecho nuevo con un factor decisivo (dealbreaker) que el usuario ya haya escrito en `modes/_profile.md` o `config/profile.yml`. Muestra el hecho y la frase del perfil. `debrief-sync.mjs` rechaza un valor de `--dealbreaker` que contenga un punto y coma (`;`), un tabulador o un salto de línea, y eso detiene toda la llamada. Si la frase contiene uno, dile al usuario qué carácter es y pídele una versión en una sola línea, sin ese carácter, que conserve el sentido. No quites el carácter ni reformules la frase por tu cuenta. Después pregunta `Record this dealbreaker on the report and the tracker? [y/N]`. Si responde que sí, pasa la frase, o la versión en una línea del usuario, como `--dealbreaker`. Si responde que no, omítelo.
 
 Para cada persona nombrada, pregunta `Save this contact to data/contacts.tsv? [y/N]`. Si responde que sí, pasa el nombre, el correo electrónico si se dio uno, y el tipo si el usuario nombró uno.
 
