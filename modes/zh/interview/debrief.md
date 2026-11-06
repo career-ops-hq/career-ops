@@ -245,14 +245,14 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 - **给每次作答打标签。** 在每行 `**Candidate:**` 正上方输出 `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case，多能力用逗号分隔（例如 `system-design`、`people-leadership`、`incident-response`）。你在 Step 2 已评估过每次作答，按那次评估打标签，而不是重读。标签是自由形式；选该题实际考察的能力。
 - **忠实重建候选人回合。** 用候选人在 Step 1 报告说过的内容，而不是理想化答案。Step 2 的"correct/complete answer"属于复盘文件，绝不要进记录——记录记的是发生了什么。
 - **`source: debrief`。**
-- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，并转义内部的双引号，保证 front matter 仍是合法 YAML。条目的轮次与日期即文件自身的 `round` 与 `date`。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
 - 场次文件落在 gitignore 目录（真实姓名/公司永不进版本库）；写入时不要脱敏。
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-复盘保存后，把已确认的事实记录到这条申请上。把新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。展示该事实与画像中的那句话。询问 `Record this dealbreaker on the report and the tracker? [y/N]`。若回答是，把那句话作为 `--dealbreaker` 传入。若回答否，就省略。
+复盘保存后，把已确认的事实记录到这条申请上。把新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。展示该事实与画像中的那句话。`debrief-sync.mjs` 会拒绝含有分号（`;`）、制表符或换行的 `--dealbreaker` 值，整次调用随之中止。若那句话含有这类字符，告诉用户是哪个字符，并请用户给出不含该字符、意思不变的单行版本。不要自行删除字符或改写句子。用户给出的版本也要检查这三种字符，只要还含有其中任何一个，就再次请用户修改。然后询问 `Record this dealbreaker on the report and the tracker? [y/N]`。若回答是，把那句话（或用户给出的单行版本）作为 `--dealbreaker` 传入。若回答否，就省略。
 
 对每位点到名的人，询问 `Save this contact to data/contacts.tsv? [y/N]`。若回答是，传入姓名、给出的邮箱（如有），以及用户点明的类型（如有）。
 

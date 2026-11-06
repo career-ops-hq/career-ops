@@ -245,14 +245,14 @@ stated_priorities:        # トランスクリプト入力のみ。何も述べ�
 - **各回答にタグを付ける。** 各 `**Candidate:**` 行のすぐ上の行に `<!-- competency: tag[, tag...] -->` を出力する — lowercase-kebab-case。複数コンピテンシーの回答はカンマ区切りとする（例：`system-design`、`people-leadership`、`incident-response`）。Step 2 で各回答はすでに評価しているので、読み直すのではなくその評価からタグ付けする。タグは自由記述で、その質問が実際に試していたコンピテンシーを選ぶ。
 - **候補者の発話を忠実に再構成する。** Step 1 で候補者がこう言ったと報告した内容を使い、理想化した回答は使わない。Step 2 の「Correct/complete answer」はデブリーフファイルに属し、トランスクリプトには決して入らない — トランスクリプトは起きたことを記録するものである。
 - **`source: debrief`。**
-- **`stated_priorities` は front matter に入れる**（Step 1c）。`speaker` + `quote` の項目からなる YAML リストとして書き、スクリプトや `interview/plan` が本文を解析せずに読めるようにする。すべての `quote` をダブルクォートで囲み、内側のダブルクォートはエスケープして、front matter を有効な YAML に保つ。項目のラウンドと日付は、そのファイル自身の `round` と `date` である。何も述べられなかった場合と、`input_source: recall` の場合は、このフィールドを省略する。練習セッションのファイルには優先事項を決して入れない。そこには実在の面接官がいないからである。
+- **`stated_priorities` は front matter に入れる**（Step 1c）。`speaker` + `quote` の項目からなる YAML リストとして書き、スクリプトや `interview/plan` が本文を解析せずに読めるようにする。すべての `quote` をダブルクォートで囲み、front matter を有効な YAML に保ち、パース後に発言そのものが復元されるようにする。手動でエスケープする場合は、内側のダブルクォートより先にバックスラッシュをエスケープする。こうして引用内のリテラル `\n` は 2 文字のまま保たれ、改行文字に変わらない。項目のラウンドと日付は、そのファイル自身の `round` と `date` である。何も述べられなかった場合と、`input_source: recall` の場合は、このフィールドを省略する。練習セッションのファイルには優先事項を決して入れない。そこには実在の面接官がいないからである。
 - セッションファイルは gitignore されたディレクトリに置かれる（実名や企業名がバージョン管理に入ることはない）。墨消しせずにそのまま書く。
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-デブリーフを保存したら、確認された事実を応募に記録する。新しい事実を、ユーザーが `modes/_profile.md` または `config/profile.yml` にすでに書いている譲れない条件（dealbreaker）と照らし合わせる。その事実とプロファイルの該当文を示し、`Record this dealbreaker on the report and the tracker? [y/N]` と尋ねる。yes なら、その文を `--dealbreaker` として渡す。no なら省略する。
+デブリーフを保存したら、確認された事実を応募に記録する。新しい事実を、ユーザーが `modes/_profile.md` または `config/profile.yml` にすでに書いている譲れない条件（dealbreaker）と照らし合わせる。その事実とプロファイルの該当文を示す。`debrief-sync.mjs` はセミコロン（`;`）、タブ、改行を含む `--dealbreaker` の値を拒否し、その場合は呼び出し全体が止まる。該当文にこれらの文字が含まれていれば、どの文字かをユーザーに伝え、その文字を含まず意味を保った1行の文を求める。文字を自分で削ったり、文を自分で言い換えたりしない。ユーザーが示した文も3種類すべての文字について確認し、1つも含まなくなるまで改めて求める。そのうえで `Record this dealbreaker on the report and the tracker? [y/N]` と尋ねる。yes なら、その文（またはユーザーが示した1行の文）を `--dealbreaker` として渡す。no なら省略する。
 
 名前が挙がった人ごとに、`Save this contact to data/contacts.tsv? [y/N]` と尋ねる。yes なら、氏名、伝えられていればメールアドレス、ユーザーが種別を挙げていればその種別を渡す。
 

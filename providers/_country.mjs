@@ -112,6 +112,21 @@ const countries = (text, codes = false) => {
 // country token, unlike prose where "in", "it" or "no" are ordinary words.
 // Resolve those tokens before applying the prose ambiguity guard.
 const countryValue = value => fold(countryNameFromIso(value)) || value;
+
+// CLDR also names subdivisions, aggregates and pseudo-regions. Limit this
+// classifier to the existing assigned ISO countries/territories plus Kosovo
+// (XK), without changing the workplace policy's shared country vocabulary.
+const COUNTRY_KEYWORD_CODES = new Set([...Object.values(ALPHA3_TO_ALPHA2), 'XK']);
+
+/** Exact country name, alias or ISO token in a config list, not a city or region.
+ * @param {unknown} value
+ */
+export function isCountryKeyword(value) {
+  const name = countryValue(fold(value));
+  return COUNTRY_NAMES.some(country => COUNTRY_KEYWORD_CODES.has(country.code) && country.name === name)
+    || COUNTRY_ALIASES.some(country => country.name === name);
+}
+
 const REMOTE = /\b(?:remote|work from (?:home|anywhere)|distributed)\b/;
 // Mirror scan.mjs's titleSignalsRemote marker: "Remote Sensing" describes a
 // discipline, not a work arrangement. The policy must not convert an office

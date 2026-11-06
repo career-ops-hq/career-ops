@@ -1095,7 +1095,22 @@ export function isAtsPosting(url) {
 // for liveness only — their public endpoints answer search/status, never body
 // text — so they are deliberately excluded here; see fetch-jd.mjs / the
 // fetch*Jd() family in browser-extract.mjs for the per-provider fetchers.
-export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters', 'zoho-recruit', 'workable', 'workable-short', 'ultipro', 'hirehive']);
+//
+// One ATS per line, in alphabetical order: PRs that add different ATSes then
+// touch different lines, which reduces merge conflicts.
+export const JD_TEXT_API_ATS = new Set([
+  'ashby',
+  'greenhouse',
+  'greenhouse-embedded',
+  'hirehive',
+  'lever',
+  'smartrecruiters',
+  'ultipro',
+  'workable',
+  'workable-short',
+  'workday',
+  'zoho-recruit',
+]);
 
 /**
  * Zero-token liveness check via the posting's ATS API.
