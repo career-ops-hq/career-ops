@@ -322,10 +322,6 @@ export function normalizeGupyApiJob(j) {
 export default {
   id: 'gupy',
 
-  fetchHost() {
-    return API_HOST;
-  },
-
   detect(entry) {
     if (entry?.provider === 'gupy') return { url: API_BASE };
     for (const candidate of [entry?.careers_url, entry?.api]) {
