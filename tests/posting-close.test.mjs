@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeDateForUrl, closeDatesByUrl, closesAtIso, selectCloseDateRefreshes } from '../lib/posting-close.mjs';
+import { closeDateForUrl, closeDatesByUrl, closesAtIso, refreshOfferForSeenUrl, selectCloseDateRefreshes } from '../lib/posting-close.mjs';
+import { alignCloseRefreshOffers } from '../scan.mjs';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -227,6 +228,33 @@ test('an offer with no close day does not clear a stored day', () => {
     { url: 'https://jobs.example/acme', closesAt: '' },
     { url: 'https://jobs.example/acme', closesAt: 'nope' },
   ], history), []);
+});
+
+test('a path-case change refreshes the stored posting and leaves a different path alone', () => {
+  const history = [
+    historyRow({ url: 'https://jobs.example/Acme', closes_at: '2026-01-01', status: 'added', first_seen: '2026-10-01' }),
+    historyRow({ url: 'https://jobs.example/Other', closes_at: '2026-02-02', status: 'added', first_seen: '2026-10-01' }),
+  ].join('\n');
+  const same = refreshOfferForSeenUrl(
+    { url: 'https://jobs.example/Acme', closesAt: '2026-03-03' },
+    'https://jobs.example/Acme',
+  );
+  assert.equal(same.url, 'https://jobs.example/Acme');
+  const aligned = alignCloseRefreshOffers([
+    { url: 'https://jobs.example/acme', closesAt: '2026-06-06' },
+    { url: 'https://jobs.example/other-role', closesAt: '2026-07-07' },
+  ], history);
+  assert.equal(aligned[0].url, 'https://jobs.example/Acme');
+  assert.equal(aligned[1].url, 'https://jobs.example/other-role');
+  const selected = selectCloseDateRefreshes(aligned, history);
+  const next = [
+    history,
+    historyRow({ url: selected[0].url, closes_at: '2026-06-06' }),
+  ].join('\n');
+  const index = closeDatesByUrl(next);
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/Acme'), '2026-06-06');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/Other'), '2026-02-02');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/other-role'), '');
 });
 
 

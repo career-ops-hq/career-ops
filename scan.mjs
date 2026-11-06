@@ -80,7 +80,7 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
-import { closesAtIso, selectCloseDateRefreshes } from './lib/posting-close.mjs';
+import { closesAtIso, refreshOfferForSeenUrl, selectCloseDateRefreshes } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
@@ -1823,6 +1823,28 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
   const ageDays = daysBetweenIsoDates(firstSeen, today);
   if (ageDays == null) return true;
   return ageDays < recheckAfterDays;
+}
+
+export function pinnedUrlByDedupKey(historyText, policy = {}) {
+  const urls = new Map();
+  for (const line of scanHistoryDataLines(historyText)) {
+    const row = parseScanHistoryLine(line);
+    if (!row.url) continue;
+    const dedupKey = normalizeUrlForDedup(row.url);
+    if (!dedupKey || urls.has(dedupKey)) continue;
+    const status = row.status || 'added';
+    if (!shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy)) continue;
+    urls.set(dedupKey, row.url);
+  }
+  return urls;
+}
+
+export function alignCloseRefreshOffers(offers, historyText, policy = {}) {
+  const urls = pinnedUrlByDedupKey(historyText, policy);
+  return offers.map((offer) => {
+    const dedupKey = normalizeUrlForDedup(offer?.url);
+    return refreshOfferForSeenUrl(offer, dedupKey ? urls.get(dedupKey) : '');
+  });
 }
 
 function scanHistoryPolicy(config = {}) {
@@ -5048,7 +5070,14 @@ async function main() {
             siblingsByUrl.get(dedupUrl),
           );
           if (!newLanguageVersion) {
-            if (!dryRun && seenUrls.has(dedupUrl)) closeRefreshOffers.push({ ...job, source: sourceName });
+            const closeDay = !dryRun && seenUrls.has(dedupUrl)
+              ? (closesAtIso(job.closesAt) || closesAtIso(job))
+              : '';
+            if (closeDay) {
+              const rest = { ...job, source: sourceName, fingerprint: '' };
+              delete rest.description;
+              closeRefreshOffers.push(rest);
+            }
             totalDupes++;
             continue;
           }
@@ -5274,7 +5303,11 @@ async function main() {
   // day so closing-soon does not keep discarding from the old one. An empty
   // day, or the same day, writes nothing.
   if (!dryRun && closeRefreshOffers.length > 0) {
-    const refreshed = selectCloseDateRefreshes(closeRefreshOffers, readIfExists(SCAN_HISTORY_PATH));
+    const historyText = readIfExists(SCAN_HISTORY_PATH);
+    const refreshed = selectCloseDateRefreshes(
+      alignCloseRefreshOffers(closeRefreshOffers, historyText, scanHistoryPolicy(config)),
+      historyText,
+    );
     if (refreshed.length > 0) {
       await appendToScanHistory(
         refreshed.map((offer) => ({ ...offer, fingerprint: '' })),
