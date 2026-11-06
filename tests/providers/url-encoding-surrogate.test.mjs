@@ -344,6 +344,14 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/101',
   );
 
+  // remote-com.parseRemoteJobs — for…of over jobs[]; public_id feeds the posting URL.
+  const { parseRemoteJobs } = await load('remote-com.mjs');
+  check(
+    'remote-com.parseRemoteJobs',
+    () => parseRemoteJobs({ jobs: [{ title: 'Bad Id', public_id: `${LONE}bad` }, { title: 'Good Id', public_id: 'good-1' }] }),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://apply.remote.com/jobs/good-1',
+  );
+
   // trakstar.parseTrakstarPage — an off-host hosted_url is rebuilt from the
   // opening id, so a lone surrogate in that id drops one row.
   const { parseTrakstarPage } = await load('trakstar.mjs');
@@ -407,6 +415,7 @@ try {
     'phenom.mjs',
     'platsbanken.mjs',
     'polymer.mjs',
+    'remote-com.mjs',
     'techinasia.mjs',
     'thehub.mjs',
     'tkms.mjs',
