@@ -115,7 +115,7 @@ test('fetchJdFromPage blocks a public host that resolves into private space', as
 });
 
 test('fetchJdFromPage guards every redirect hop, not just the first URL', async () => {
-  const net = stubNetwork((url) => url.startsWith('https://careers.example.com')
+  const net = stubNetwork((url) => new URL(url).hostname === 'careers.example.com'
     ? new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data/' } })
     : html(page(`<p>${BODY}</p>`)));
   try {
@@ -182,7 +182,7 @@ test('LinkedIn hosts are recognised, and lookalikes are not', () => {
 });
 
 test('fetchJdFromPage never requests LinkedIn, directly or by redirect', async () => {
-  const net = stubNetwork((url) => url.startsWith('https://careers.example.com')
+  const net = stubNetwork((url) => new URL(url).hostname === 'careers.example.com'
     ? new Response(null, { status: 302, headers: { location: 'https://www.linkedin.com/jobs/view/4486063768/' } })
     : html(page(`<p>${BODY}</p>`)));
   try {
