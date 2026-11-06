@@ -3727,7 +3727,16 @@ export async function appendToPipeline(offers, {
       ? readFileSync(pipelinePath, 'utf-8')
       : PIPELINE_SKELETON;
     const policy = historyPolicy ?? historyPolicyFromPortals();
-    const fresh = offersMissingFromPipeline(offers, text, readIfExists(scanHistoryPath), policy);
+    // A directory at the history path is not a history. readFileSync throws
+    // EISDIR, and that throw used to land here, before the pipeline write,
+    // so a failed history update discarded the jobs about to be saved.
+    let historyText = '';
+    try {
+      historyText = readIfExists(scanHistoryPath);
+    } catch (err) {
+      if (err?.code !== 'EISDIR') throw err;
+    }
+    const fresh = offersMissingFromPipeline(offers, text, historyText, policy);
     if (fresh.length === 0) return;
 
     const headings = [...text.matchAll(/^##[ \t].*$/gm)];
