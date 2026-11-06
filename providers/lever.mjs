@@ -135,10 +135,16 @@ export default {
       const all = [];
       const PAGE = 100;
       const MIN_PAGE = 10;
+      // Per-response cap: a smaller page may use the whole 4 MiB, so a board of uniformly
+      // large postings still fits once the page is small enough (60 KiB x 50 < 4 MiB).
+      // The aggregate bytes buffered across pages are bounded separately below.
+      const PAGE_BYTES = 4 * 1024 * 1024;
+      const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+      let totalBytes = 0;
       const probing = ctx.maxPages === 1;
-      // Bounded: at most 30 pages' worth (3,000 postings), each 100-posting
-      // response capped at 4 MiB (the cap scales down with the limit), so the fallback cannot buffer more than ~120 MiB however the server
-      // behaves. A page over the 4 MiB cap is retried with a smaller limit, so
+      // Bounded: at most 30 pages' worth (3,000 postings), each response
+      // capped at 4 MiB and the total at 64 MiB, so the fallback cannot buffer more however
+      // the server behaves. A page over the 4 MiB cap is retried with a smaller limit, so
       // `requests` also bounds those shrink retries.
       const maxPages = Math.min(30, ctx.maxPages ?? 30);
       const maxPostings = maxPages * PAGE;
@@ -163,7 +169,7 @@ export default {
         pageUrl.searchParams.set('skip', String(skip));
         let page;
         try {
-          page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: Math.ceil((4 * 1024 * 1024 * limit) / PAGE) });
+          page = await fetchJsonWithRetry(ctx, assertLeverUrl(pageUrl.href), { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS, maxBytes: PAGE_BYTES });
         } catch (err) {
           // A page over the body cap: retry the same offset with a smaller limit.
           if (/** @type {any} */ (err)?.code === 'response_too_large' && pageSize > MIN_PAGE && requests < maxRequests) {
@@ -186,9 +192,16 @@ export default {
         // A server that ignores `limit` must not amplify the total: refuse the page.
         if (page.length > limit) throw new Error(`lever: ${entry.name} returned ${page.length} postings for limit=${limit}`);
         for (const posting of page) all.push(posting);
+        totalBytes += JSON.stringify(page).length;
         lastPageFull = page.length === limit;
         if (!lastPageFull) { ended = true; break; }
         if (probing) break;
+        if (totalBytes >= MAX_TOTAL_BYTES) {
+          console.warn(`[lever] ${entry.name}: stopped at the ${MAX_TOTAL_BYTES / (1024 * 1024)} MiB aggregate size bound (${all.length} postings); the board may have more.`);
+          truncated = 'cap';
+          lastPageFull = false;
+          break;
+        }
       }
       // Out of requests with nothing accepted: the board is unreadable, not empty.
       if (all.length === 0 && lastTooLarge) throw lastTooLarge;

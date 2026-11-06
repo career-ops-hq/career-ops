@@ -200,20 +200,52 @@ test('lever probe over an unreadably large first page throws instead of reading 
   await assert.rejects(() => lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx), /exceeded maxBytes/);
 });
 
-test('lever scales the per-response byte cap with the page limit', async () => {
-  const caps = [];
+test('lever lets a smaller page use the full per-response cap', async () => {
+  // 200 postings of ~60 KiB: 100 per page is ~6 MB (over 4 MiB), 50 per page is ~3 MB.
+  const BYTES = 60 * 1024;
+  const posting = (i) => ({ id: `p${i}`, text: `T${i}`, hostedUrl: `https://jobs.lever.co/x/p${i}`, categories: {} });
+  const seen = [];
   const ctx = {
     sleep: async () => {},
     fetchJson: async (url, opts) => {
       const u = new URL(url);
       if (!u.searchParams.has('limit')) throw tooLarge();
-      caps.push([Number(u.searchParams.get('limit')), opts.maxBytes]);
-      if (Number(u.searchParams.get('limit')) > 25) throw tooLarge();
-      return [];
+      const limit = Number(u.searchParams.get('limit'));
+      const skip = Number(u.searchParams.get('skip'));
+      seen.push([limit, opts.maxBytes]);
+      if (limit * BYTES > opts.maxBytes) throw tooLarge();
+      return Array.from({ length: Math.max(0, Math.min(limit, 200 - skip)) }, (_, i) => posting(skip + i));
     },
   };
-  await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
-  assert.deepEqual(caps, [[100, 4194304], [50, 2097152], [25, 1048576]]);
+  const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
+  assert.equal(out.length, 200);
+  assert.equal(seen[0][0], 100);
+  assert.ok(seen.every(([, cap]) => cap === 4 * 1024 * 1024));
+  assert.equal(out.leverTruncated, undefined);
+});
+
+test('lever stops at the aggregate size bound and marks the result truncated', async () => {
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (m) => warns.push(String(m));
+  const big = 'x'.repeat(700 * 1024);
+  const ctx = {
+    sleep: async () => {},
+    fetchJson: async (url) => {
+      const u = new URL(url);
+      if (!u.searchParams.has('limit')) throw tooLarge();
+      const limit = Number(u.searchParams.get('limit'));
+      return Array.from({ length: limit }, (_, i) => ({ id: `p${u.searchParams.get('skip')}-${i}`, text: 'T', hostedUrl: 'https://jobs.lever.co/x/1', categories: {}, descriptionPlain: big }));
+    },
+  };
+  try {
+    const out = await lever.fetch({ name: 'X', careers_url: 'https://jobs.lever.co/x' }, ctx);
+    assert.equal(out.leverTruncated, 'cap');
+    assert.ok(out.length < 3000);
+    assert.ok(warns.some((w) => /aggregate size bound/.test(w)));
+  } finally {
+    console.warn = origWarn;
+  }
 });
 
 test('lever warns and marks truncated when shrink retries spend the request budget', async () => {
