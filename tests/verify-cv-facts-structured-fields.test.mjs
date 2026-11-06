@@ -320,6 +320,7 @@ test('a reference definition title on the next line is not evidence', () => {
 
 for (const [label, linked] of [
   ['a nested-parenthesis target', '[Fabrikam](https://fabrikam.example/x_(Director))'],
+  ['an escaped-parenthesis target', '[Fabrikam](https://fabrikam.example/x\\)(Director))'],
   ['an inline link title', '[Fabrikam](https://fabrikam.example/ "Director")'],
   ['a same-line reference-definition title', '[Fabrikam][ml]\n\n[ml]: https://fabrikam.example/ "Director"'],
 ]) {

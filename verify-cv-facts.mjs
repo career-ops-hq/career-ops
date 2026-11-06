@@ -2377,6 +2377,7 @@ function collapseMarkdownLinks(text) {
         let depth = 1;
         let j = opener.lastIndex;
         while (j < text.length && depth > 0) {
+          if (text[j] === '\\') { j += 2; continue; }
           if (text[j] === '(') depth++;
           else if (text[j] === ')') depth--;
           j++;
