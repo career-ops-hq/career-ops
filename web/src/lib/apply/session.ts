@@ -268,6 +268,12 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 12_000 }).catch(() => null))).catch(() => {});
   await page.waitForTimeout(1200);
   await dropNewTabs(page); // make any "Apply" link/popup navigate in OUR tab
+  const settledAts = await unsupportedInAppAts(page.url());
+  if (settledAts) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts.label) };
+  }
   await snap(); // settled
 
   // 4) Extract from the richest frame; if nothing yet, try (a) a scroll pass to

@@ -280,6 +280,7 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
   let applyClicked = false;
   let pendingLate = false;
   let popupHref = "";
+  let initialWait = true;
   const popupPages = [];
   const extraPages = options.extraPages ?? [];
   const frame = {
@@ -316,6 +317,10 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
     },
     waitForLoadState: async () => {},
     waitForTimeout: async () => {
+      if (initialWait && options.redirectOnFirstWait) {
+        current = options.redirectOnFirstWait;
+        initialWait = false;
+      }
       if (pendingLate) {
         current = options.redirectTo;
         pendingLate = false;
@@ -446,6 +451,23 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     });
     await assert.rejects(() => openSession(career), /Couldn't find a fillable form/);
     assert.deepEqual(closed, [true]);
+  });
+
+  test("a career page that reaches Workday during the first form wait is refused", async () => {
+    const career = "https://careers.example.com/jobs/1";
+    const landed = "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role";
+    const closed = [];
+    globalThis.__applyCareerPage = () => careerPage(career, null, closed, {
+      noAtsLink: true,
+      redirectOnFirstWait: landed,
+      formAfterRedirect: true,
+    });
+    const result = await openSession(career);
+    assert.deepEqual(closed, [true]);
+    assert.equal(result.id, undefined);
+    assert.equal(result.unsupported.vendor, "workday");
+    assert.equal(result.unsupported.postingUrl, landed);
+    assert.equal(result.message, MESSAGE.Workday);
   });
 
   test("a generic apply link that reaches Workday during the form wait is refused", async () => {
