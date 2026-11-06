@@ -4784,6 +4784,11 @@ async function main() {
   // Values providers resolve once and reuse on later scans (provider-id-cache.mjs).
   const idCaches = openProviderIdCache(path.join(DATA_ROOT, PROVIDER_ID_CACHE_DIR));
 
+  // Fetch every target concurrently, but filter board copies only after all
+  // employers have made their location decisions for this scan's URLs.
+  const deferredBoards = [];
+  const employerLocationRejected = new Set();
+  const employerLocationAccepted = new Set();
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
@@ -4827,6 +4832,15 @@ async function main() {
     };
     applyEntryResponseCap(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
+    const recordError = err => {
+      failedTargets++;
+      errors.push({
+        company: company.name,
+        error: err.message,
+        kind: classifyFetchError(err),
+        status: err.status ?? observation.lastStatus,
+      });
+    };
     try {
       let jobs;
       try {
@@ -4853,6 +4867,7 @@ async function main() {
         else unverifiedZeroTargets.push(company.name);
       }
 
+      const processJobs = () => {
       // This fetch's language versions of each posting, in provider order and
       // before any filter: a seen row is matched against every version, also
       // those a filter rejects (a German title can fail a title filter that its
@@ -4952,11 +4967,16 @@ async function main() {
         }
         // job.title is passed so a role whose remoteness is stated in the title
         // ("Program Manager - Remote") isn't rejected for a city-only location.
-        if (!locationFilter(job.location, job.url, job.title, job)) {
+        const locationUrl = normalizeUrlForDedup(job.url);
+        const employerRejected = company._isBoard && employerLocationRejected.has(locationUrl)
+          && !employerLocationAccepted.has(locationUrl);
+        if (employerRejected || !locationFilter(job.location, job.url, job.title, job)) {
+          if (!company._isBoard) employerLocationRejected.add(locationUrl);
           totalFilteredLocation++;
           if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
+        if (!company._isBoard) employerLocationAccepted.add(locationUrl);
         if (!postingAgeFilter(job.postedAt)) {
           totalFilteredPostingAge++;
           if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
@@ -5078,14 +5098,18 @@ async function main() {
           key, baseKey, requisition, language, newLanguageVersion,
         });
       }
+      };
+      if (company._isBoard) {
+        // Never await an employer barrier inside a fetch worker: enough fast
+        // boards could occupy every worker before the employer can start.
+        deferredBoards.push(() => {
+          try { processJobs(); } catch (err) { recordError(err); }
+        });
+      } else {
+        processJobs();
+      }
     } catch (err) {
-      failedTargets++;
-      errors.push({
-        company: company.name,
-        error: err.message,
-        kind: classifyFetchError(err),
-        status: err.status ?? observation.lastStatus,
-      });
+      recordError(err);
     }
   });
 
@@ -5111,6 +5135,7 @@ async function main() {
       process.stderr.write(`scan: ${parts.join(', and ')}. Set CAREER_OPS_HTTP_CACHE=0 to always download.\n`);
     });
   }
+  for (const processBoard of deferredBoards) processBoard();
   // --dry-run leaves no trace, this cache included.
   if (!dryRun) {
     try {
