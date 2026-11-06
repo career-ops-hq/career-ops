@@ -9,6 +9,7 @@ import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { LinkedInPaste } from "@/components/linkedin-paste";
 import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
 import { FacetChips } from "./facet-chips";
@@ -376,25 +377,6 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {writeError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-400">{writeError}</p>}
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
-      <FacetChips
-        within={within}
-        setWithin={setWithin}
-        sources={sources}
-        toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
-        seniorities={seniorities}
-        toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
-        locQ={locQ}
-        setLocQ={setLocQ}
-        kw={kw}
-        setKw={setKw}
-        availSources={availSources}
-        availSeniorities={availSeniorities}
-        resultCount={filtered.length}
-        totalCount={enriched.length - hiddenCount}
-        anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
-      />
-
       {/* batch header: fresh slice by default, or the full filtered set */}
       <div className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
@@ -406,7 +388,6 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           </button>
         )}
       </div>
-      <p className="mt-1 text-xs text-faint">j and k move. s saves. x skips. Shift+X skips the checked rows.</p>
 
       {/* multi-select action bar */}
       {selected.size > 0 && (
@@ -465,6 +446,28 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {shortlist.length === 0 && (
         <p className="mt-4 text-center text-xs text-faint">Save roles worth a look, then score them together — one token spend.</p>
       )}
+      </div>
+      <LinkedInPaste />
+      <div hidden={inbox.length === 0}>
+      <FacetChips
+        within={within}
+        setWithin={setWithin}
+        sources={sources}
+        toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+        seniorities={seniorities}
+        toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+        locQ={locQ}
+        setLocQ={setLocQ}
+        kw={kw}
+        setKw={setKw}
+        availSources={availSources}
+        availSeniorities={availSeniorities}
+        resultCount={filtered.length}
+        totalCount={enriched.length - hiddenCount}
+        anyActive={anyFacet}
+        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
+      />
+      <p className="mt-3 text-xs text-faint">j and k move. s saves. x skips. Shift+X skips the checked rows.</p>
       </div>
 
       {/* undo toast (sits above the tray) */}
