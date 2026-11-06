@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pdfButtonState } from "../../src/lib/pdf-button-state.mjs";
+import { coverDraftButtonState, pdfButtonState } from "../../src/lib/pdf-button-state.mjs";
 
 const reason = "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify. (The agent emitted no <<cv-html>> envelope, so there is no CV to render.)";
 const failed = {
@@ -47,4 +47,27 @@ test("no job and no tracker CV is the plain Generate button", () => {
 
 test("an evaluation stop cannot make a PDF ready", () => {
   assert.deepEqual(pdfButtonState({ id: "gated", status: "gated", steps: [] }, false), { kind: "idle", failure: null });
+});
+
+test("a finished cover job is ready without a CV file on disk", () => {
+  const job = { id: "cover-1", status: "done", steps: [] };
+  assert.deepEqual(pdfButtonState(job, false), { kind: "idle", failure: null });
+  assert.deepEqual(coverDraftButtonState(job), { kind: "ready", failure: null });
+});
+
+test("a weak cover verdict is a retry, not a draft link", () => {
+  const thin = {
+    id: "cover-2",
+    status: "done",
+    steps: [],
+    result: { score: 1, summary: "Too thin." },
+  };
+  assert.deepEqual(coverDraftButtonState(thin), {
+    kind: "idle",
+    failure: { jobId: "cover-2", reason: "Too thin." },
+  });
+  assert.deepEqual(
+    coverDraftButtonState({ id: "cover-3", status: "done", steps: [], result: { score: 2, summary: "Usable." } }),
+    { kind: "ready", failure: null },
+  );
 });

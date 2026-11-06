@@ -231,6 +231,7 @@ function AppliedButton({ trackerNum, status }: { trackerNum: string | null; stat
     setError("");
     try {
       await saveStatus(trackerNum, status, "Applied");
+      setAsk(false);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not mark this Applied.");
