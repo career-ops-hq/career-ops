@@ -308,3 +308,34 @@ test('same-title description-less postings at different employers or locations a
   const out = jdFromPageHtml(page('<p>Short teaser.</p>', { posting: { title: 'Engineer', description: undefined, hiringOrganization: { name: 'A' }, jobLocation: { address: { addressLocality: 'Paris' } } }, extraLd: [at('B', 'Paris'), at('A', 'Berlin')], body: embedded(long('unrelated', 300)) }), NOW);
   assert.equal(out, null);
 });
+
+test('rebinding over a real socket: public pre-check, loopback at connect time, and the server sees nothing', () => {
+  // dns.lookup is stubbed BEFORE jd-page-fetch loads, so the connect-time guard
+  // wraps the stub and judges the address the socket would really dial. The
+  // pre-check resolver says public; only the socket-level lookup says loopback.
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const script = `
+    import dns from 'node:dns';
+    import http from 'node:http';
+    const realLookup = dns.lookup;
+    dns.lookup = function (host, opts, cb) {
+      if (typeof opts === 'function') { cb = opts; opts = {}; }
+      if (host !== 'rebind.example.com') return realLookup.call(dns, host, opts, cb);
+      if (opts && opts.all) return process.nextTick(cb, null, [{ address: '127.0.0.1', family: 4 }]);
+      return process.nextTick(cb, null, '127.0.0.1', 4);
+    };
+    let hits = 0;
+    const server = http.createServer((_req, res) => { hits++; res.end('SECRET'); }).listen(0, '127.0.0.1');
+    await new Promise((r) => server.once('listening', r));
+    const { setHostResolver } = await import('./liveness-browser.mjs');
+    setHostResolver(async () => ['93.184.216.34']);
+    const { fetchJdFromPage } = await import('./lib/jd-page-fetch.mjs');
+    const out = await fetchJdFromPage('http://rebind.example.com:' + server.address().port + '/job', 20000, 4000);
+    console.log(JSON.stringify({ out, hits }));
+    server.close();`;
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: root, encoding: 'utf8', timeout: 30000, env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '' },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout.trim().split('\n').pop()), { out: null, hits: 0 }, 'the loopback server must receive no request');
+});
