@@ -129,16 +129,27 @@ function commands(run) {
     .filter(Boolean);
 }
 
+// npm's own names for `install` (npm help install lists the aliases).
+const NPM_INSTALL = new Set(['install', 'i', 'in', 'ins', 'inst', 'insta', 'instal',
+  'isnt', 'isnta', 'isntal', 'isntall', 'add']);
+// Options that make npm print and exit before it runs any subcommand.
+const NPM_EXITS_EARLY = new Set(['-v', '--version', '-h', '--help', '--usage', '-?']);
+
 // Each global install of npm itself in `run`, as the version spec it names:
 // '' for a bare `npm`, which installs latest. `-g` and `--global` both count,
-// as do `install`, `i` and `add`.
+// in any position, and options may come before the subcommand
+// (`npm --no-fund install -g npm@latest`).
 function npmSelfInstalls(run) {
   const specs = [];
   for (const cmd of commands(run)) {
     const tokens = cmd.split(/\s+/).map(t => t.replace(/^['"]|['"]$/g, ''));
     const at = tokens.indexOf('npm');
-    if (at === -1 || !['install', 'i', 'add'].includes(tokens[at + 1])) continue;
-    const args = tokens.slice(at + 2);
+    if (at === -1) continue;
+    let sub = at + 1;
+    while (sub < tokens.length && tokens[sub].startsWith('-')) sub++;
+    if (tokens.slice(at + 1, sub).some(t => NPM_EXITS_EARLY.has(t))) continue;
+    if (!NPM_INSTALL.has(tokens[sub])) continue;
+    const args = [...tokens.slice(at + 1, sub), ...tokens.slice(sub + 1)];
     if (!args.includes('-g') && !args.includes('--global')) continue;
     for (const arg of args) {
       if (arg === 'npm') specs.push('');
@@ -168,6 +179,10 @@ test('npmSelfInstalls reads only the commands that run', () => {
   assert.deepEqual(npmSelfInstalls('echo npm@12.2.2 && npm install -g npm@latest'), ['latest']);
   assert.deepEqual(npmSelfInstalls('npm install npm@latest'), [], 'a local install is not a global upgrade');
   assert.deepEqual(npmSelfInstalls('npm install -g pnpm@9'), []);
+  assert.deepEqual(npmSelfInstalls('npm --no-fund install -g npm@latest'), ['latest'], 'an option before the subcommand');
+  assert.deepEqual(npmSelfInstalls('npm -g --no-audit i npm@latest'), ['latest'], '-g before the subcommand');
+  assert.deepEqual(npmSelfInstalls('npm inst -g npm@latest'), ['latest'], 'an install alias');
+  assert.deepEqual(npmSelfInstalls('npm --version install -g npm@latest'), [], 'npm exits before the subcommand');
 });
 
 test('exactAtLeast accepts only an exact version at or above the floor', () => {
