@@ -206,6 +206,16 @@ const mkCtx = (pages) => ({
 }
 {
   const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">[{"@type":"JobPosting","datePosted":"2026-07-19"},{"@type":"JobPosting","validThrough":"2026-01-02"}]</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-19') && !('closesAt' in job)) {
+    pass('enrichDate does not borrow a close day from a later JobPosting');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
   const detail = `<script type="application/ld+json">{"validThrough":"2026-08-08","datePosted":"2026-07-17"}</script>`;
   await icims.enrichDate(job, { fetchText: async () => detail });
   if (job.postedAt === Date.parse('2026-07-17') && job.closesAt === '2026-08-08') {

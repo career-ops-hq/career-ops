@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SCAN_HISTORY_COLUMNS } from '../lib/scan-history-columns.mjs';
 import { SCRATCH_PREFIX } from '../lib/scratch-dirs.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
@@ -117,7 +117,7 @@ test('--apply leaves a row that is no longer Evaluated', () => {
     const result = spawnSync(process.execPath, [join(ROOT, 'closing-soon.mjs'), '--discard-passed', '--apply', '--today', TODAY], {
       cwd: box.dir,
       encoding: 'utf-8',
-      env: { ...box.env, NODE_OPTIONS: `--import ${flip}` },
+      env: { ...box.env, NODE_OPTIONS: `--import ${pathToFileURL(flip).href}` },
     });
     assert.ok(exitedNonZero(result), describeSpawn(result, 'a row that left Evaluated is refused'));
     assert.match(`${result.stderr}\n${result.stdout}`, /now Applied, not Evaluated/);

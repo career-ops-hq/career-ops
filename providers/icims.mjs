@@ -259,31 +259,35 @@ function pickLocation(nodes) {
   return null;
 }
 
-// From flattened JSON-LD nodes, return the datePosted of the first JobPosting
-// node; if none carries a @type, fall back to the first node that has a
-// datePosted at all (preserves the original lenient single-object behavior).
-function pickDatePosted(nodes) {
+function jobPostingType(node) {
+  const type = node?.['@type'];
+  return type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'));
+}
+
+function datedPostingNode(nodes) {
   let fallback = null;
   for (const node of nodes) {
     if (!node || typeof node !== 'object' || !node.datePosted) continue;
-    const type = node['@type'];
-    if (type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'))) return node.datePosted;
-    if (fallback == null) fallback = node.datePosted;
+    if (jobPostingType(node)) return node;
+    if (fallback == null) fallback = node;
   }
   return fallback;
 }
 
-// A typed JobPosting wins. A page that has one does not borrow a close day
-// from a sibling. A page with no typed JobPosting keeps the first real day.
+function pickDatePosted(nodes) {
+  const node = datedPostingNode(nodes);
+  return node ? node.datePosted : null;
+}
+
 function pickClosesAt(nodes) {
+  const posted = datedPostingNode(nodes);
+  if (posted) return closesAtIso(posted) || '';
   let fallback = '';
   let sawTyped = false;
   for (const node of nodes) {
     if (!node || typeof node !== 'object') continue;
     const day = closesAtIso(node);
-    const type = node['@type'];
-    const typed = type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'));
-    if (typed) {
+    if (jobPostingType(node)) {
       sawTyped = true;
       if (day) return day;
       continue;

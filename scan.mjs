@@ -1858,12 +1858,19 @@ function pinningRefreshUrls(historyText, policy) {
 
 function trackerRefreshUrls(pipelineText, applicationsText) {
   const urls = new Map();
-  for (const match of String(applicationsText || '').matchAll(/https?:\/\/[^\s|)]+/g)) {
-    rememberRefreshUrl(urls, match[0], refreshLanguage(match[0]));
+  const applications = String(applicationsText || '');
+  const lines = applications.split('\n');
+  const columns = resolveColumns(lines, { allowTabs: true });
+  for (const line of lines) {
+    const row = parseTrackerRow(line, columns, { allowTabs: true });
+    if (row?.url) rememberRefreshUrl(urls, row.url, refreshLanguage(row.url));
   }
   for (const line of String(pipelineText || '').split('\n')) {
     const url = extractPipelineUrl(line);
     if (url) rememberRefreshUrl(urls, url, refreshLanguage(url));
+  }
+  for (const match of applications.matchAll(/https?:\/\/[^\s|)]+/g)) {
+    rememberRefreshUrl(urls, match[0], refreshLanguage(match[0]));
   }
   return urls;
 }

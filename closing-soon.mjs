@@ -56,7 +56,7 @@ import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 
-import { resolveColumns, parseTrackerRow, linkedReportNumbers } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, linkedReportNumbers, trackerRowIdentity } from './tracker-parse.mjs';
 import { findCaptureForReport, captureSlug } from './jd-capture.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -463,7 +463,8 @@ const USAGE = `Usage:
 The default report reads Notes (and jds/ captures when Notes have no closing
 marker) and writes nothing. --discard-passed prints Evaluated rows whose close
 date is before --today. Add --apply to move them to Discarded through
-set-status.mjs. node set-status.mjs <n> --undo puts the status back.
+set-status.mjs. The writer checks the selected row and that it is still
+Evaluated. node set-status.mjs <n> --undo puts the status back.
 --apply without --discard-passed is an error.`;
 
 function fail(message) {
@@ -526,6 +527,7 @@ function rowsPastClose(trackerMd, { today, index, lookup }) {
   const colmap = resolveColumns(lines);
   const matches = [];
   const conflicts = [];
+  const identities = new Map();
   for (const line of lines) {
     const row = parseTrackerRow(line, colmap);
     if (!row) continue;
@@ -539,10 +541,11 @@ function rowsPastClose(trackerMd, { today, index, lookup }) {
     }
     if (!decision.day || decision.day >= todayIso) continue;
     matches.push(row.num);
+    identities.set(row.num, trackerRowIdentity(row));
   }
   matches.sort((a, b) => a - b);
   conflicts.sort((a, b) => a.num - b.num);
-  return { matches, conflicts };
+  return { matches, conflicts, identities };
 }
 
 function printDiscardPlan(matches, todayIso, apply, conflicts = []) {
@@ -566,7 +569,7 @@ function discardPassed(args, today) {
   const historyPath = scanHistoryPath(dataRoot);
   const trackerMd = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
   const historyText = existsSync(historyPath) ? readFileSync(historyPath, 'utf-8') : '';
-  const { matches, conflicts } = rowsPastClose(trackerMd, {
+  const { matches, conflicts, identities } = rowsPastClose(trackerMd, {
     today,
     index: closeDatesByUrl(historyText),
     lookup: loadStateLookup(),
@@ -575,7 +578,13 @@ function discardPassed(args, today) {
   if (apply) {
     const moved = [];
     for (const n of matches) {
-      const child = spawnSync(process.execPath, [join(CODE_ROOT, 'set-status.mjs'), '--row', String(n), 'Discarded', '--expect-status', 'Evaluated'], {
+      const child = spawnSync(process.execPath, [
+        join(CODE_ROOT, 'set-status.mjs'),
+        '--row', String(n),
+        'Discarded',
+        '--expect-row', identities.get(n),
+        '--expect-status', 'Evaluated',
+      ], {
         cwd: CODE_ROOT,
         encoding: 'utf-8',
         env: { ...process.env, CAREER_OPS_TRACKER: trackerPath },

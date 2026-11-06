@@ -299,4 +299,16 @@ test('a tracker URL with no history pin receives the path-case refresh', () => {
   assert.equal(closeDateForUrl(index, 'https://jobs.example/other-role'), '');
 });
 
+test('a notes link ahead of the URL column does not replace the posting URL', () => {
+  const applications = [
+    '| # | Notes | Date | Company | Role | Score | Status | PDF | Report | URL |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| 1 | see https://jobs.example/acme | 2026-10-01 | Acme | Analyst | 4/5 | Evaluated | | | https://jobs.example/Acme |',
+  ].join('\n');
+  const aligned = alignCloseRefreshOffers([
+    { url: 'https://jobs.example/acme', closesAt: '2026-06-06' },
+  ], '', {}, { applicationsText: applications });
+  assert.equal(aligned[0].url, 'https://jobs.example/Acme');
+});
+
 
