@@ -89,14 +89,17 @@ test('writeRunLog appends a scan-runs.tsv row stats.mjs can read by header name'
 
 // ── scan-seek ────────────────────────────────────────────────────────
 
-test('seek URL is the SEO path with canonical in-All-<Location> segment and never a query string', () => {
+test('seek URL resolves known NZ locations and canonical in- paths, rejects unknown plain locations, and never has a query string', () => {
   assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'Wellington' }),
     'https://nz.seek.com/data-analyst-jobs/in-All-Wellington');
+  assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'Masterton' }),
+    'https://nz.seek.com/data-analyst-jobs/in-Masterton-Wellington');
   assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'in-All-Auckland' }),
     'https://nz.seek.com/data-analyst-jobs/in-All-Auckland');
   assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: '' }), 'https://nz.seek.com/devops-jobs');
-  assert.ok(!buildSeekUrl({ keyword: 'a', location: 'b' }).includes('?'));
+  assert.ok(!buildSeekUrl({ keyword: 'a', location: 'Wellington' }).includes('?'));
   assert.throws(() => buildSeekUrl({ keyword: '!!!', location: '' }));
+  assert.throws(() => buildSeekUrl({ keyword: 'devops', location: 'UnknownTown' }), /Unknown SEEK NZ location/);
 });
 
 test('seek page parsing reads SEEK_REDUX_DATA, dedups ids, decodes text', () => {

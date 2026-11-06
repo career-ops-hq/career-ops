@@ -76,9 +76,41 @@ export function loadSearches(portals) {
     .map((s) => ({ keyword: s.keyword.trim(), location: (s.location || '').trim() }));
 }
 
+const NZ_LOCATION_SLUGS = {
+  auckland: 'in-All-Auckland',
+  wellington: 'in-All-Wellington',
+  canterbury: 'in-All-Canterbury',
+  christchurch: 'in-All-Christchurch-Canterbury',
+  waikato: 'in-All-Waikato',
+  hamilton: 'in-All-Hamilton-Waikato',
+  'bay-of-plenty': 'in-All-Bay-of-Plenty',
+  tauranga: 'in-All-Tauranga-Bay-of-Plenty',
+  rotorua: 'in-All-Rotorua-Bay-of-Plenty',
+  otago: 'in-All-Otago',
+  dunedin: 'in-All-Dunedin-Otago',
+  queenstown: 'in-Queenstown-Otago',
+  manawatu: 'in-All-Manawatu',
+  'palmerston-north': 'in-All-Palmerston-North-Manawatu',
+  'hawkes-bay': 'in-All-Hawkes-Bay',
+  napier: 'in-All-Napier-Hawkes-Bay',
+  taranaki: 'in-All-Taranaki',
+  'new-plymouth': 'in-All-New-Plymouth-Taranaki',
+  northland: 'in-All-Northland',
+  whangarei: 'in-All-Whangarei-Northland',
+  southland: 'in-All-Southland',
+  invercargill: 'in-All-Invercargill-Southland',
+  nelson: 'in-All-Nelson-Tasman',
+  tasman: 'in-All-Tasman',
+  marlborough: 'in-All-Marlborough',
+  gisborne: 'in-All-Gisborne',
+  'west-coast': 'in-All-West-Coast',
+  masterton: 'in-Masterton-Wellington',
+};
+
 /**
- * Resolve a configured location ("Wellington" or "in-All-Wellington") to
- * SEEK's canonical `in-All-<Location>` path segment, preserving required casing.
+ * Resolve a configured location ("Wellington", "Masterton", or "in-All-Wellington")
+ * to SEEK's canonical `in-...` path segment, or throw if an unmapped plain
+ * location is passed instead of guessing a broken `in-All-...` URL.
  */
 export function formatSeekLocation(location) {
   const raw = String(location ?? '')
@@ -89,10 +121,10 @@ export function formatSeekLocation(location) {
   if (/^in-[A-Za-z0-9-]+$/.test(raw)) {
     return raw.replace(/^in-(all-)?/i, (_, all) => (all ? 'in-All-' : 'in-'));
   }
-  const tokens = raw.match(/[A-Za-z0-9]+/g);
-  if (!tokens) return '';
-  const titled = tokens.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join('-');
-  return `in-All-${titled}`;
+  const key = slugify(raw);
+  if (key === 'new-zealand' || key === 'nz') return '';
+  if (NZ_LOCATION_SLUGS[key]) return NZ_LOCATION_SLUGS[key];
+  throw new Error(`Unknown SEEK NZ location ${JSON.stringify(location)}; use a known NZ region/city or a canonical "in-..." SEEK path slug`);
 }
 
 /** SEO path URL for one search: query-free, as nz.seek.com/robots.txt requires (`*?`). */
@@ -207,8 +239,9 @@ async function main(args) {
 
   for (let i = 0; i < searches.length; i++) {
     if (i > 0) await sleep(delayMs);
-    const url = buildSeekUrl(searches[i]);
+    let url = searches[i].keyword;
     try {
+      url = buildSeekUrl(searches[i]);
       const offers = parseSeekPage(await fetchTextWithRetry(ctx, url, { headers: { 'accept-language': 'en' } }));
       found += offers.length;
       for (const offer of offers) {
