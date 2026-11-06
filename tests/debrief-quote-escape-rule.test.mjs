@@ -15,7 +15,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import * as yaml from 'js-yaml';
-import { pass, fail, finish, ROOT } from './helpers.mjs';
+import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\nDebrief quote-escape rule: backslash-before-quotes keeps the exact value (#6540)');
 
@@ -71,5 +71,3 @@ check('rule-escaped quote parses back to the exact spoken value',
 const naive = yaml.load('q: "He said \\"hi\\" then wrote a\\nb"');
 check('backslash-blind serialization silently changes the value',
   naive.q === 'He said "hi" then wrote a\nb' && naive.q !== byRule.q, JSON.stringify(naive.q));
-
-finish();
