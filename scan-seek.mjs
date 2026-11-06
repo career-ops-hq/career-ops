@@ -45,6 +45,7 @@ import {
 import { normalizeCompany } from './tracker-utils.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 // Filters, role key and seen-role index shared with scan-linkedin.mjs.
 import { makeJobClassifier, loadRoleIndex } from './scan-local-lib.mjs';
 
@@ -63,10 +64,16 @@ const CURSOR_PATH = path.join(DATA_ROOT, 'data/scan-seek-cursor.json');
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
 const INCLUDE_BLACKLISTED = args.includes('--include-blacklisted');
-const LIMIT = (() => {
-  const i = args.indexOf('--limit');
-  return i >= 0 && args[i + 1] ? parseInt(args[i + 1], 10) : Infinity;
-})();
+
+// Absent flag means no cap; anything but a positive whole number is an error.
+function parseLimit(argv) {
+  if (!hasFlag(argv, '--limit')) return Infinity;
+  const raw = String(flagValue(argv, '--limit') ?? '').trim();
+  if (!/^[1-9]d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new Error(`--limit expects a positive whole number, got ${raw ? `"${raw}"` : 'no value'}`);
+  }
+  return Number(raw);
+}
 
 function printHelp() {
   console.log(`Usage: node scan-seek.mjs [options]
@@ -100,6 +107,15 @@ Cursor (data/scan-seek-cursor.json):
 if (args.includes('--help') || args.includes('-h')) {
   printHelp();
   process.exit(0);
+}
+
+// Validated before any file read or request.
+let LIMIT;
+try {
+  LIMIT = parseLimit(args);
+} catch (e) {
+  console.error(`Error: ${e.message}`);
+  process.exit(1);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -271,7 +287,12 @@ async function fetchQuery(query, location) {
       total: null,
     };
   }
-  const html = await res.text();
+  let html;
+  try {
+    html = await res.text();
+  } catch (e) {
+    return { url, error: `network: ${e.message}`, rateLimited: false, jobs: [], total: null };
+  }
   const redux = extractRedux(html);
   if (!redux) return { url, error: 'no-redux-blob', jobs: [], total: null };
   const arr = findJobArray(redux);
@@ -375,10 +396,13 @@ async function main() {
 
     if (toAdd.length && !DRY_RUN) {
       const today = localToday();
-      await appendToScanHistory(toAdd, today);
+      // Pipeline first: scan-history is what marks a role seen on the next run.
       await appendToPipeline(toAdd);
+      await appendToScanHistory(toAdd, today);
       counters.newAdded += toAdd.length;
     }
+    // Only after the write above: a throw there leaves these roles unseen.
+    for (const j of toAdd) classifier.commit(j);
     const label = DRY_RUN ? 'would add' : 'added';
     console.log(`    ${toAdd.length ? label : 'no new'} ${toAdd.length} (found ${result.jobs.length})`);
     await pace();
@@ -410,4 +434,4 @@ if (isMainModule(import.meta.url)) {
   main().catch((e) => { console.error(e); process.exit(1); });
 }
 
-export { fetchQuery, normalizeJob, extractRedux, findJobArray, sliceBalancedObject, slugifyQuery };
+export { parseLimit, fetchQuery, normalizeJob, extractRedux, findJobArray, sliceBalancedObject, slugifyQuery };

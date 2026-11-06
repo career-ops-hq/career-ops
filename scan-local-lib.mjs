@@ -207,24 +207,25 @@ export function parseSalaryCeiling(label) {
  * Per-listing verdict shared by both local scanners, in order: repost (tracker,
  * history, pipeline, earlier in this run) → title → location → blacklist →
  * non-permanent → salary floor → keep. URL/id dedup stays in each scanner.
+ * A kept role is not remembered until the caller runs `classifier.commit(job)`
+ * after persisting it, so a failed write leaves it eligible for the next run.
  * `related` lists tracker rows at the same employer, as a triage hint.
  */
 export function makeJobClassifier({ cfg = {}, index, isBlacklisted, salaryFloor = null, includeBlacklisted = false }) {
   const titleOk = makeTitleFilter(cfg.title_filter);
   const locationOk = makeLocationFilter(cfg.location_filter);
   const run = new Set();
-  return (j) => {
+  const classify = (j) => {
     const key = roleKey(j.company, j.title);
     if (key) {
       const trackerNum = index.tracker.get(key);
       if (trackerNum != null) return { verdict: 'repost', trackerNum };
       if (index.seen.has(key) || run.has(key)) return { verdict: 'repost' };
-      run.add(key);
     }
     if (!titleOk(j.title).pass) return { verdict: 'title' };
     const l = locationOk(j.location);
     if (!l.pass) return { verdict: 'location', reason: l.reason };
-    if (!includeBlacklisted && isBlacklisted(j.company)) return { verdict: 'blacklist' };
+    if (!includeBlacklisted && isBlacklisted(j.company, j.url)) return { verdict: 'blacklist' };
     if (looksContract(j.workTypes, j.salary)) return { verdict: 'contract' };
     if (salaryFloor) {
       const ceiling = parseSalaryCeiling(j.salary);
@@ -232,4 +233,9 @@ export function makeJobClassifier({ cfg = {}, index, isBlacklisted, salaryFloor 
     }
     return { verdict: 'keep', related: index.employerRows(j.company) };
   };
+  classify.commit = (j) => {
+    const key = roleKey(j.company, j.title);
+    if (key) run.add(key);
+  };
+  return classify;
 }
