@@ -117,18 +117,82 @@ test('every uses: ref is pinned to a commit SHA with a version comment', () => {
   assert.deepEqual(problems, [], `pin these to the commit of their current release, with a # vX.Y.Z comment:\n  ${problems.join('\n  ')}`);
 });
 
-test('release.yml installs an exact npm, at least the Trusted Publishing minimum', () => {
-  const wf = load(readFileSync(join(ROOT, '.github/workflows/release.yml'), 'utf8'));
-  const installs = Object.values(wf.jobs)
-    .flatMap(job => job.steps || [])
-    .map(step => step.run)
-    .filter(run => typeof run === 'string' && /\bnpm\s+(install|i)\s+-g\s+npm@/.test(run));
-  assert.ok(installs.length >= 1, 'release.yml no longer upgrades npm before publishing');
-  for (const run of installs) {
-    const m = run.match(/npm@(\S+)/);
-    assert.match(m[1], /^\d+\.\d+\.\d+$/, `npm@${m[1]} is not an exact version: the step runs with id-token: write`);
-    const [maj, min, pat] = m[1].split('.').map(Number);
-    const atLeast = maj > 11 || (maj === 11 && (min > 5 || (min === 5 && pat >= 1)));
-    assert.ok(atLeast, `npm@${m[1]} is below 11.5.1, the minimum for Trusted Publishing`);
+// The executed commands of a `run:` script, one per entry: shell comments
+// dropped, and each line split at `&&`, `||`, `;` and `|`. A version that
+// only appears in a comment, or an earlier command on the line, must not
+// stand in for the one that runs.
+function commands(run) {
+  return run.split('\n')
+    .map(line => line.replace(/(^|\s)#.*$/, ''))
+    .flatMap(line => line.split(/&&|\|\||;|\|/))
+    .map(cmd => cmd.trim())
+    .filter(Boolean);
+}
+
+// Each global install of npm itself in `run`, as the version spec it names:
+// '' for a bare `npm`, which installs latest. `-g` and `--global` both count,
+// as do `install`, `i` and `add`.
+function npmSelfInstalls(run) {
+  const specs = [];
+  for (const cmd of commands(run)) {
+    const tokens = cmd.split(/\s+/).map(t => t.replace(/^['"]|['"]$/g, ''));
+    const at = tokens.indexOf('npm');
+    if (at === -1 || !['install', 'i', 'add'].includes(tokens[at + 1])) continue;
+    const args = tokens.slice(at + 2);
+    if (!args.includes('-g') && !args.includes('--global')) continue;
+    for (const arg of args) {
+      if (arg === 'npm') specs.push('');
+      else if (arg.startsWith('npm@')) specs.push(arg.slice(4));
+    }
   }
+  return specs;
+}
+
+const runsNpmPublish = run => commands(run).some(cmd => /(^|\s)npm\s+publish\b/.test(cmd));
+
+function exactAtLeast(spec, [wantMaj, wantMin, wantPat]) {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(spec);
+  if (!m) return false;
+  const [maj, min, pat] = m.slice(1).map(Number);
+  if (maj !== wantMaj) return maj > wantMaj;
+  if (min !== wantMin) return min > wantMin;
+  return pat >= wantPat;
+}
+
+test('npmSelfInstalls reads only the commands that run', () => {
+  assert.deepEqual(npmSelfInstalls('npm install -g npm@12.2.2'), ['12.2.2']);
+  assert.deepEqual(npmSelfInstalls('npm i --global npm@latest'), ['latest']);
+  assert.deepEqual(npmSelfInstalls('npm install -g npm'), ['']);
+  assert.deepEqual(npmSelfInstalls('npm install --global "npm@11.5.1"'), ['11.5.1']);
+  assert.deepEqual(npmSelfInstalls('# was npm install -g npm@12.2.2\nnpm install -g npm@latest'), ['latest']);
+  assert.deepEqual(npmSelfInstalls('echo npm@12.2.2 && npm install -g npm@latest'), ['latest']);
+  assert.deepEqual(npmSelfInstalls('npm install npm@latest'), [], 'a local install is not a global upgrade');
+  assert.deepEqual(npmSelfInstalls('npm install -g pnpm@9'), []);
+});
+
+test('exactAtLeast accepts only an exact version at or above the floor', () => {
+  const floor = [11, 5, 1];
+  for (const ok of ['11.5.1', '11.6.0', '12.0.0', '12.2.2']) assert.ok(exactAtLeast(ok, floor), ok);
+  for (const bad of ['11.5.0', '10.9.9', 'latest', '', '12', '^12.2.2', '12.2.2-pre.1']) assert.ok(!exactAtLeast(bad, floor), bad);
+});
+
+test('release.yml upgrades to an exact npm, at least 11.5.1, before it publishes', () => {
+  const wf = load(readFileSync(join(ROOT, '.github/workflows/release.yml'), 'utf8'));
+  let publishes = 0;
+  for (const [name, job] of Object.entries(wf.jobs)) {
+    const steps = job.steps || [];
+    const runs = steps.map(step => (typeof step.run === 'string' ? step.run : ''));
+    // Every global npm install in the job, before or after the publish, names
+    // an exact version: this job runs with id-token: write throughout.
+    for (const spec of runs.flatMap(npmSelfInstalls)) {
+      assert.ok(exactAtLeast(spec, [11, 5, 1]),
+        `job ${name}: npm@${spec || '(bare, i.e. latest)'} must be an exact version of at least 11.5.1, the Trusted Publishing minimum`);
+    }
+    const publishAt = runs.findIndex(runsNpmPublish);
+    if (publishAt === -1) continue;
+    publishes++;
+    const before = runs.slice(0, publishAt).flatMap(npmSelfInstalls);
+    assert.ok(before.length >= 1, `job ${name}: no npm upgrade before the publish step, and setup-node's npm is too old for Trusted Publishing`);
+  }
+  assert.ok(publishes >= 1, 'release.yml no longer runs npm publish; update this test with it');
 });
