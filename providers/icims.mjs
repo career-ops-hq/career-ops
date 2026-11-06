@@ -81,8 +81,7 @@ export function parseIcimsSearchPage(html, origin, companyName) {
     if (!title || !title[1].trim()) continue;
     // `field-label` is one token in a themed class list, not reliably the last
     // one, so anchoring on the literal `field-label">` read an empty location
-    // off any tenant that appended a class. An empty location stays empty
-    // until enrichDate runs, and only for a job the scan keeps.
+    // off any tenant that appended a class.
     // The lookarounds keep `field-label` a whole token, so a longer hyphenated
     // class like `field-label-inline` still doesn't count as a match.
     // The label text has to start with the word Location. Tenants suffix it

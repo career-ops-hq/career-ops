@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -178,7 +178,36 @@ test('notes that name two close dates are left alone', () => {
     assert.match(dry.stdout, /^Would move to Discarded: #3 #12 #15 #16\n/m);
     assert.match(dry.stdout, /Left #1 alone\. Notes name more than one close date: 2026-10-01, 2026-12-01\./);
     assert.equal(statusOf(readFileSync(box.tracker, 'utf-8'), 1), 'Evaluated');
+    const applied = box.run(['--discard-passed', '--apply', '--today', TODAY]);
+    assert.equal(applied.status, 0, describeSpawn(applied));
+    assert.match(applied.stdout, /Left #1 alone\. Notes name more than one close date: 2026-10-01, 2026-12-01\./);
+    const after = readFileSync(box.tracker, 'utf-8');
+    assert.equal(statusOf(after, 1), 'Evaluated');
+    assert.equal(statusOf(after, 3), 'Discarded');
   } finally { box.cleanup(); }
+});
+
+test('a relative --tracker is the file in the caller directory', () => {
+  const box = sandbox();
+  const relative = 'close-discard-tracker.md';
+  const checkoutCopy = join(ROOT, relative);
+  try {
+    writeFileSync(join(box.dir, relative), readFileSync(box.tracker, 'utf-8'));
+    const result = spawnSync(process.execPath, [
+      join(ROOT, 'closing-soon.mjs'),
+      '--discard-passed', '--apply', '--today', TODAY, '--tracker', relative,
+    ], {
+      cwd: box.dir,
+      encoding: 'utf-8',
+      env: { ...box.env, CAREER_OPS_TRACKER: join(ROOT, 'not-the-tracker.md') },
+    });
+    assert.equal(result.status, 0, describeSpawn(result));
+    assert.equal(statusOf(readFileSync(join(box.dir, relative), 'utf-8'), 1), 'Discarded');
+    assert.equal(existsSync(checkoutCopy), false);
+  } finally {
+    if (existsSync(checkoutCopy)) rmSync(checkoutCopy);
+    box.cleanup();
+  }
 });
 
 test('the same close date written twice still discards', () => {

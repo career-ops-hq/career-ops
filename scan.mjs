@@ -5101,12 +5101,6 @@ async function main() {
             recordLanguages(locatedLanguagesByBase, baseKey, requisition, language);
           }
         }
-        // The list page can omit the close date. Ask only for a row this scan
-        // is already keeping, so a title it will drop never pays for a detail
-        // fetch. A failure leaves the list row as it arrived.
-        if (typeof provider.enrichDate === 'function' && (job.closesAt == null || job.closesAt === '')) {
-          try { await provider.enrichDate(job, ctx); } catch { }
-        }
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.

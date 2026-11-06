@@ -562,7 +562,7 @@ function printDiscardPlan(matches, todayIso, apply, conflicts = []) {
 
 function discardPassed(args, today) {
   const dataRoot = getCareerOpsRoot();
-  const trackerPath = (hasFlag(args, '--tracker') ? flagValue(args, '--tracker') : null) || resolveTrackerPath(dataRoot);
+  const trackerPath = resolve((hasFlag(args, '--tracker') ? flagValue(args, '--tracker') : null) || resolveTrackerPath(dataRoot));
   const historyPath = scanHistoryPath(dataRoot);
   const trackerMd = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
   const historyText = existsSync(historyPath) ? readFileSync(historyPath, 'utf-8') : '';
