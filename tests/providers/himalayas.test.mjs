@@ -89,7 +89,7 @@ try {
   }
 
   const locationCases = [
-    ['explicit empty array', [], 'Worldwide'],
+    ['explicit empty array', [], 'Remote (worldwide)'],
     ['missing field', undefined, ''],
     ['null field', null, ''],
     ['non-array string', 'Worldwide', ''],

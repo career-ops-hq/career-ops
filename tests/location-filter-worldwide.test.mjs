@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildLocationFilter } from '../scan.mjs';
 import { parseHimalayasResponse } from '../providers/himalayas.mjs';
-import { isCountryKeyword } from '../providers/_country.mjs';
+import { buildWorkplacePolicy, isCountryKeyword } from '../providers/_country.mjs';
 
 const worldwideLabels = [
   'Worldwide',
@@ -34,7 +34,7 @@ for (const label of worldwideLabels) {
 }
 
 test('worldwide admission recognizes shared country names, aliases and ISO codes', () => {
-  for (const country of ['Bangladesh', 'Canada', 'United Kingdom', 'U.K.', 'United States of America', 'DE', 'DEU', 'IN']) {
+  for (const country of ['Bangladesh', 'Canada', 'United Kingdom', 'U.K.', 'United States of America', 'DE', 'DEU', 'IN', 'Puerto Rico', 'PRI', 'Kosovo', 'XK']) {
     const accepts = buildLocationFilter({ allow: [country] });
     assert.equal(accepts('Worldwide', '', 'Software Engineer'), true, country);
   }
@@ -55,6 +55,26 @@ test('worldwide labels do not broaden city-only or mixed city/country allow-list
   }
   for (const allow of [['Europe'], ['EU'], ['United States or Canada']]) {
     assert.equal(buildLocationFilter({ allow })('Worldwide'), false, JSON.stringify(allow));
+  }
+});
+
+test('QO allow-list does not admit Worldwide through the country-only fallback', () => {
+  const accepts = buildLocationFilter({ allow: ['QO'], remote_title_fallback: false });
+  assert.equal(accepts('Worldwide', '', 'Software Engineer'), false);
+  assert.equal(accepts('QO', '', 'Software Engineer'), true, 'explicit region keywords still match');
+});
+
+test('country keywords exclude CLDR subdivisions, aggregates and pseudo-regions', () => {
+  for (const [code, name] of [
+    ['AC', 'Ascension Island'], ['CP', 'Clipperton Island'], ['CQ', 'Sark'],
+    ['DG', 'Diego Garcia'], ['EA', 'Ceuta & Melilla'], ['IC', 'Canary Islands'],
+    ['TA', 'Tristan da Cunha'], ['QO', 'Outlying Oceania'],
+    ['XA', 'Pseudo-Accents'], ['XB', 'Pseudo-Bidi'],
+    ['EU', 'European Union'], ['EZ', 'Eurozone'], ['UN', 'United Nations'],
+    ['ZZ', 'Unknown Region'],
+  ]) {
+    assert.equal(isCountryKeyword(code), false, code);
+    assert.equal(isCountryKeyword(name), false, name);
   }
 });
 
@@ -113,10 +133,42 @@ test('Himalayas explicit empty restrictions are worldwide, not unknown, through 
   const known = parseHimalayasResponse({ jobs: [{ ...item, locationRestrictions: [] }] })[0];
   const unknown = parseHimalayasResponse({ jobs: [item] })[0];
   const accepts = buildLocationFilter(countryFilter);
+  assert.equal(known.location, 'Remote (worldwide)');
   assert.equal(accepts(known.location, known.url, known.title), true);
   const blocked = buildLocationFilter({ ...countryFilter, block: ['Worldwide'] });
   assert.equal(blocked(known.location, known.url, known.title), false);
   assert.equal(blocked(unknown.location, unknown.url, unknown.title), true);
+});
+
+test('Himalayas worldwide output retains the remote signal for keyword filters', () => {
+  const [job] = parseHimalayasResponse({ jobs: [{
+    title: 'Software Engineer',
+    applicationLink: 'https://himalayas.app/companies/fixture/jobs/engineer',
+    locationRestrictions: [],
+  }] });
+  for (const allow of [['Remote'], ['Remote', 'United States']]) {
+    const accepts = buildLocationFilter({ allow, remote_title_fallback: false });
+    assert.equal(accepts(job.location, job.url, job.title), true, JSON.stringify(allow));
+  }
+});
+
+test('Himalayas worldwide output is remote, not onsite, under workplace_policy', () => {
+  const [job] = parseHimalayasResponse({ jobs: [{
+    title: 'Software Engineer',
+    applicationLink: 'https://himalayas.app/companies/fixture/jobs/engineer',
+    locationRestrictions: [],
+  }] });
+  const policy = {
+    onsite_locations: ['New York'],
+    remote_countries: ['United States'],
+    remote_regions: ['Worldwide'],
+  };
+  assert.deepEqual(buildWorkplacePolicy(policy)(job.location, job.title, job), {
+    eligible: true,
+    reason: 'remote_region_allowed',
+  });
+  const accepts = buildLocationFilter({ ...countryFilter, workplace_policy: policy });
+  assert.equal(accepts(job.location, job.url, job.title, job), true);
 });
 
 test('Himalayas worldwide output does not match a strict Norway allow-list', () => {
