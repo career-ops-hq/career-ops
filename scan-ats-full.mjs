@@ -71,7 +71,8 @@ import paylocity, { boardUrl as paylocityBoardUrl } from './providers/paylocity.
 import join, { parseCompanySitemap } from './providers/join.mjs';
 import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
-import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilterOrExit, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, BROWSER_PROCESS_ENV, DATA_ROOT as SCAN_DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilterOrExit, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, alignCloseRefreshOffers, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, BROWSER_PROCESS_ENV, DATA_ROOT as SCAN_DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { closesAtIso, selectCloseDateRefreshes } from './lib/posting-close.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
@@ -845,6 +846,15 @@ export function dedupTokenFor(job, provider) {
   return provider?.dedupKey?.(job) || normalizeUrlForDedup(job.url);
 }
 
+export function queueSeenCloseRefresh(bucket, job, sourceName, dryRun) {
+  if (dryRun) return;
+  const day = closesAtIso(job?.closesAt) || closesAtIso(job);
+  if (!day) return;
+  const rest = { ...job, source: sourceName, fingerprint: '' };
+  delete rest.description;
+  bucket.push(rest);
+}
+
 // Resolve an offer's provider from its recorded `source` string — shared by
 // the checkpoint-resume reseed below and by loadSeenUrls' extraTokensFor
 // hook. `source` is "{sourcesKey}-full" for the main sweep and
@@ -1497,6 +1507,7 @@ async function main() {
   }
 
 
+  const closeRefreshOffers = [];
   const snapshotCounters = () => ({
     totalCompaniesScanned, totalErrors, totalRetiredBoardsSkipped,
     droppedNoDate, droppedContent,
@@ -1554,7 +1565,10 @@ async function main() {
       if (!locationFilter(job.location, job.url, job.title, job)) continue;
       if (!contentFilter(job.description, matchedTitleKeywords(job.title, fullTitleFilterConfig))) { droppedContent++; continue; }
       const dedupToken = dedupTokenFor(job, provider);
-      if (seenUrls.has(dedupToken)) continue;
+      if (seenUrls.has(dedupToken)) {
+        queueSeenCloseRefresh(closeRefreshOffers, job, `${sourceName}-full`, opts.dryRun);
+        continue;
+      }
       seenUrls.add(dedupToken); // intra-scan dedup
       keepAndMaybeEmit(job, `${sourceName}-full`, newOffers, blacklist, opts);
     }
@@ -1956,6 +1970,17 @@ async function main() {
       } catch (err) {
         console.error(`⚠️  Could not write markdown digest: ${err.message}`);
       }
+    }
+  }
+
+  if (!opts.dryRun && closeRefreshOffers.length > 0) {
+    const historyText = existsSync(SCAN_HISTORY_PATH) ? readFileSync(SCAN_HISTORY_PATH, 'utf-8') : '';
+    const refreshed = selectCloseDateRefreshes(
+      alignCloseRefreshOffers(closeRefreshOffers, historyText),
+      historyText,
+    );
+    if (refreshed.length > 0) {
+      await appendToScanHistory(refreshed.map((offer) => ({ ...offer, fingerprint: '' })), date, 'skipped_close_refresh');
     }
   }
 

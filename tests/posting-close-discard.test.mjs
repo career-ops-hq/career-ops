@@ -97,6 +97,36 @@ function logNums(dir) {
   return text.split('\n').filter((line) => line && !line.startsWith('num\t')).map((line) => Number(line.split('\t')[0]));
 }
 
+test('--apply leaves a row that is no longer Evaluated', () => {
+  const box = sandbox();
+  try {
+    const flip = join(box.dir, 'flip-status.mjs');
+    writeFileSync(flip, [
+      "import { readFileSync, writeFileSync } from 'node:fs';",
+      "const script = process.argv[1] || '';",
+      "if (script.endsWith('set-status.mjs')) {",
+      '  const path = process.env.CAREER_OPS_TRACKER;',
+      "  const text = readFileSync(path, 'utf8');",
+      '  const next = text.split(\'\\n\').map((line) => line.startsWith(\'| 1 |\')',
+      "    ? line.replace('| Evaluated |', '| Applied |')",
+      "    : line).join('\\n');",
+      '  writeFileSync(path, next);',
+      '}',
+      '',
+    ].join('\n'));
+    const result = spawnSync(process.execPath, [join(ROOT, 'closing-soon.mjs'), '--discard-passed', '--apply', '--today', TODAY], {
+      cwd: box.dir,
+      encoding: 'utf-8',
+      env: { ...box.env, NODE_OPTIONS: `--import ${flip}` },
+    });
+    assert.notEqual(result.status, 0, describeSpawn(result));
+    assert.match(`${result.stderr}\n${result.stdout}`, /now Applied, not Evaluated/);
+    const after = readFileSync(box.tracker, 'utf-8');
+    assert.equal(statusOf(after, 1), 'Applied');
+    assert.equal(statusOf(after, 3), 'Evaluated');
+  } finally { box.cleanup(); }
+});
+
 test('--apply without --discard-passed does not write', () => {
   const box = sandbox();
   try {

@@ -124,6 +124,7 @@ try {
 // posting once by other means; an entry that stops matching fails below.
 const DIRECT_SKIP_WRITERS = new Map([
   ['scan.mjs', 'routes its title/location/age/no-apply buckets through unrecordedOffers itself (#2695); its expired, cooldown and guard rows go to URLs the seen set then skips; a changed close day on a seen URL is appended only when the stored day differs'],
+  ['scan-ats-full.mjs', 'a changed close day on a seen URL is appended only when the stored day differs'],
   ['check-liveness.mjs', 'planExpiredHistoryRows writes each URL once, under the lock'],
 ]);
 const SKIP_APPEND = /appendToScanHistory\([^\n]*['"`](?:skipped_[a-z_]+|cooldown:)/;
@@ -138,7 +139,7 @@ for (const abs of trackedFiles(ROOT, (rel) => rel.endsWith('.mjs') && !rel.start
 const unexplained = [...direct].filter((f) => !DIRECT_SKIP_WRITERS.has(f));
 const stale = [...DIRECT_SKIP_WRITERS.keys()].filter((f) => !direct.has(f));
 if (direct.has('check-liveness.mjs') && unexplained.length === 0 && stale.length === 0) {
-  pass('only scan.mjs and check-liveness.mjs append a skip status straight; every other scanner goes through appendUnrecordedToScanHistory');
+  pass('only scan.mjs, scan-ats-full.mjs and check-liveness.mjs append a skip status straight; every other scanner goes through appendUnrecordedToScanHistory');
 } else {
   fail(`skip-status writers: unexplained ${JSON.stringify(unexplained)} (use appendUnrecordedToScanHistory), stale allowlist entries ${JSON.stringify(stale)}`);
 }

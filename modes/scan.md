@@ -338,7 +338,7 @@ Cells are stored with reversible spreadsheet-formula escaping: tabs and line bre
 
 The scanner writes the other statuses in that list itself: `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` comes from the agent workflow above, which also writes `skipped_title` for the titles it filters.
 
-`skipped_close_refresh` is written by `scan.mjs` when a URL it already recorded comes back with a different close day. The posting is not added to `pipeline.md`. The row carries no dedup weight. A scan that brings no close day, or the same day, writes nothing, so the stored day stays.
+`skipped_close_refresh` is written by `scan.mjs` and `scan-ats-full.mjs` when a URL already recorded comes back with a different close day. The posting is not added to `pipeline.md`. The row carries no dedup weight. A scan that brings no close day, or the same day, writes nothing, so the stored day stays.
 
 ```tsv
 url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language	listing_key	closes_at

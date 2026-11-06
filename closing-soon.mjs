@@ -575,7 +575,7 @@ function discardPassed(args, today) {
   if (apply) {
     const moved = [];
     for (const n of matches) {
-      const child = spawnSync(process.execPath, [join(CODE_ROOT, 'set-status.mjs'), '--row', String(n), 'Discarded'], {
+      const child = spawnSync(process.execPath, [join(CODE_ROOT, 'set-status.mjs'), '--row', String(n), 'Discarded', '--expect-status', 'Evaluated'], {
         cwd: CODE_ROOT,
         encoding: 'utf-8',
         env: { ...process.env, CAREER_OPS_TRACKER: trackerPath },
