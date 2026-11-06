@@ -3617,7 +3617,14 @@ export function closeRefreshUrlForSeenOffer(job, seenUrls, listingUrls, urlLangu
   const rows = recordedListingRows(job, listingUrls);
   const language = refreshLanguage(job?.url, job?.language);
   const recorded = (rows || []).filter((row) => sameRefreshLanguage(language, row.language)).map((row) => row.url);
-  if (recorded.length > 1) return '';
+  if (recorded.length > 1) {
+    const offerNorm = normalizeUrl(job?.url);
+    if (offerNorm && recorded.some((url) => normalizeUrl(url) === offerNorm)) return job.url;
+    const offerKey = normalizeUrlForDedup(job?.url);
+    const siblings = offerKey ? recorded.filter((url) => normalizeUrlForDedup(url) === offerKey) : [];
+    if (siblings.length === 1) return job.url;
+    return '';
+  }
   if (recorded.length === 1) {
     const offerKey = normalizeUrlForDedup(job?.url);
     if (offerKey && normalizeUrlForDedup(recorded[0]) === offerKey) return job.url;

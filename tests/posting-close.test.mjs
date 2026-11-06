@@ -484,4 +484,34 @@ test('an aged row without a listing key blocks a different language', () => {
   assert.equal(closeRefreshUrlForSeenOffer(other, new Set([seenJobKey(other.url)]), new Map(), released.urlRefreshLanguages), other.url);
 });
 
+test('an exact current alias refreshes when an older alias has expired', () => {
+  const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
+  const key = computeListingFingerprint({ strong: identity }).listing_key;
+  const oldUrl = 'https://jobs.example/acme-old';
+  const current = 'https://jobs.example/acme';
+  const history = [
+    historyRow({
+      url: oldUrl,
+      status: 'added',
+      first_seen: '2026-01-01',
+      listing_key: key,
+      language: 'en',
+      closes_at: '2026-02-01',
+    }),
+    historyRow({
+      url: current,
+      status: 'added',
+      first_seen: '2026-11-01',
+      listing_key: key,
+      language: 'en',
+      closes_at: '2026-03-01',
+    }),
+  ].join('\n');
+  const released = collectSeenUrls({ scanHistoryText: history }, { recheckAfterDays: 30, today: '2026-11-05' });
+  const job = { url: current, listingIdentity: identity, language: 'en' };
+  assert.equal(closeRefreshUrlForSeenOffer(job, released.seen, released.listingRefreshUrls, released.urlRefreshLanguages), current);
+  const third = { url: 'https://jobs.example/acme-third', listingIdentity: identity, language: 'en' };
+  assert.equal(closeRefreshUrlForSeenOffer(third, released.seen, released.listingRefreshUrls, released.urlRefreshLanguages), '');
+});
+
 
