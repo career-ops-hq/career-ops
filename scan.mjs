@@ -1870,12 +1870,12 @@ function sameRefreshLanguage(left, right) {
   return left.some((language) => right.includes(language));
 }
 
-function rememberRefreshUrl(urls, url, language, primary = true) {
+function rememberRefreshUrl(urls, url, language, primary = true, aged = false) {
   const key = normalizeUrlForDedup(url);
   if (!key || typeof url !== 'string' || !url) return;
   let rows = urls.get(key);
   if (!rows) urls.set(key, (rows = []));
-  rows.push({ url, language, primary });
+  rows.push({ url, language, primary, aged });
 }
 
 function pinningRefreshUrls(historyText, policy) {
@@ -1886,7 +1886,7 @@ function pinningRefreshUrls(historyText, policy) {
     const status = row.status || 'added';
     const pinned = shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy);
     if (!pinned && !RECHECKABLE_SCAN_HISTORY_STATUSES.has(status)) continue;
-    rememberRefreshUrl(urls, row.url, refreshLanguage(row.url, row.language));
+    rememberRefreshUrl(urls, row.url, refreshLanguage(row.url, row.language), true, !pinned && status === 'added');
   }
   return urls;
 }
@@ -1916,15 +1916,15 @@ function pickRefreshUrl(rows, offer, language) {
   const exactPrimary = all.find((row) => row.primary
     && normalizeUrl(row.url) === offerKey
     && (!row.language.length || sameRefreshLanguage(language, row.language)));
-  if (exactPrimary) return { decided: true, exact: true, url: exactPrimary.url };
+  if (exactPrimary) return { decided: true, exact: true, url: exactPrimary.url, aged: !!exactPrimary.aged };
   const matches = all.filter((row) => sameRefreshLanguage(language, row.language));
   if (!matches.length) return { decided: false, exact: false, url: '' };
   const primaries = matches.filter((row) => row.primary);
-  if (primaries.length === 1) return { decided: true, exact: false, url: primaries[0].url };
+  if (primaries.length === 1) return { decided: true, exact: false, url: primaries[0].url, aged: !!primaries[0].aged };
   if (primaries.length > 1) return { decided: true, exact: false, url: '' };
   const exact = matches.find((row) => normalizeUrl(row.url) === offerKey);
-  if (exact) return { decided: true, exact: true, url: exact.url };
-  if (matches.length === 1) return { decided: true, exact: false, url: matches[0].url };
+  if (exact) return { decided: true, exact: true, url: exact.url, aged: !!exact.aged };
+  if (matches.length === 1) return { decided: true, exact: false, url: matches[0].url, aged: !!matches[0].aged };
   return { decided: true, exact: false, url: '' };
 }
 
@@ -1936,7 +1936,7 @@ function originalRefreshUrl(offer, historyUrls, trackerUrls) {
   const fromTracker = pickRefreshUrl(trackerUrls.get(key), offer, language);
   if (fromHistory.exact) return fromHistory.url;
   if (fromTracker.exact) return fromTracker.url;
-  if (fromHistory.decided) return fromHistory.url;
+  if (fromHistory.decided && fromHistory.url && !(fromHistory.aged && fromTracker.url)) return fromHistory.url;
   return fromTracker.url;
 }
 

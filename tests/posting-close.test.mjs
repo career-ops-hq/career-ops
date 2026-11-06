@@ -576,37 +576,87 @@ test('an aged skipped_expired URL keeps its own close day', () => {
     historyRow({
       url: sibling,
       status: 'added',
-      first_seen: '2026-01-01',
+      first_seen: '2026-11-01',
       language: 'en',
       closes_at: '2026-03-01',
     }),
   ].join('\n');
-  const aligned = alignCloseRefreshOffers(
-    [{ url: exact, language: 'en', closesAt: '2026-07-07' }],
-    history,
-    policy,
-  );
+  const offer = { url: exact, language: 'en', closesAt: '2026-07-07' };
+  const aligned = alignCloseRefreshOffers([offer], history, policy);
   assert.equal(aligned[0].url, exact);
+  const exactDays = closeDatesByUrl([
+    history,
+    historyRow({ url: aligned[0].url, closes_at: closesAtIso(aligned[0].closesAt) }),
+  ].join('\n'));
+  assert.equal(closeDateForUrl(exactDays, exact), '2026-07-07');
+  assert.equal(closeDateForUrl(exactDays, sibling), '2026-03-01');
   const otherLanguage = [
     historyRow({
       url: exact,
       status: 'skipped_expired',
       first_seen: '2026-01-01',
       language: 'fr',
+      closes_at: '2026-02-01',
+    }),
+    historyRow({
+      url: sibling,
+      status: 'added',
+      first_seen: '2026-11-01',
+      language: 'en',
+      closes_at: '2026-03-01',
+    }),
+  ].join('\n');
+  const kept = alignCloseRefreshOffers([offer], otherLanguage, policy);
+  assert.equal(kept[0].url, sibling);
+  const siblingDays = closeDatesByUrl([
+    otherLanguage,
+    historyRow({ url: kept[0].url, closes_at: closesAtIso(kept[0].closesAt) }),
+  ].join('\n'));
+  assert.equal(closeDateForUrl(siblingDays, sibling), '2026-07-07');
+  assert.equal(closeDateForUrl(siblingDays, exact), '2026-02-01');
+});
+
+test('an aged added sibling does not replace a non-exact tracker URL', () => {
+  const exact = 'https://jobs.example/acme';
+  const sibling = 'https://jobs.example/Acme';
+  const tracked = 'https://jobs.example/ACME';
+  const policy = { recheckAfterDays: 30, today: '2026-11-05' };
+  const history = [
+    historyRow({
+      url: exact,
+      status: 'skipped_expired',
+      first_seen: '2026-01-01',
+      closes_at: '2026-02-01',
     }),
     historyRow({
       url: sibling,
       status: 'added',
       first_seen: '2026-01-01',
-      language: 'en',
+      closes_at: '2026-03-01',
     }),
   ].join('\n');
-  const kept = alignCloseRefreshOffers(
-    [{ url: exact, language: 'en', closesAt: '2026-07-07' }],
-    otherLanguage,
-    policy,
-  );
-  assert.equal(kept[0].url, sibling);
+  const applications = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | URL | Notes |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    `| 1 | 2026-10-01 | Acme | Analyst | 4/5 | Evaluated | | | ${tracked} | |`,
+  ].join('\n');
+  const offer = { url: exact, closesAt: '2026-07-07' };
+  const exactMatch = alignCloseRefreshOffers([offer], history, policy, { applicationsText: applications });
+  assert.equal(exactMatch[0].url, exact);
+  const withoutExpired = historyRow({
+    url: sibling,
+    status: 'added',
+    first_seen: '2026-01-01',
+    closes_at: '2026-03-01',
+  });
+  const onTracker = alignCloseRefreshOffers([offer], withoutExpired, policy, { applicationsText: applications });
+  assert.equal(onTracker[0].url, tracked);
+  const days = closeDatesByUrl([
+    withoutExpired,
+    historyRow({ url: onTracker[0].url, closes_at: closesAtIso(onTracker[0].closesAt) }),
+  ].join('\n'));
+  assert.equal(closeDateForUrl(days, tracked), '2026-07-07');
+  assert.equal(closeDateForUrl(days, sibling), '2026-03-01');
 });
 
 
