@@ -4885,7 +4885,7 @@ async function main() {
         else unverifiedZeroTargets.push(company.name);
       }
 
-      const processJobs = () => {
+      const processJobs = async () => {
       // This fetch's language versions of each posting, in provider order and
       // before any filter: a seen row is matched against every version, also
       // those a filter rejects (a German title can fail a title filter that its
@@ -5101,6 +5101,12 @@ async function main() {
             recordLanguages(locatedLanguagesByBase, baseKey, requisition, language);
           }
         }
+        // The list page can omit the close date. Ask only for a row this scan
+        // is already keeping, so a title it will drop never pays for a detail
+        // fetch. A failure leaves the list row as it arrived.
+        if (typeof provider.enrichDate === 'function' && (job.closesAt == null || job.closesAt === '')) {
+          try { await provider.enrichDate(job, ctx); } catch { }
+        }
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.
@@ -5120,11 +5126,11 @@ async function main() {
       if (company._isBoard) {
         // Never await an employer barrier inside a fetch worker: enough fast
         // boards could occupy every worker before the employer can start.
-        deferredBoards.push(() => {
-          try { processJobs(); } catch (err) { recordError(err); }
+        deferredBoards.push(async () => {
+          try { await processJobs(); } catch (err) { recordError(err); }
         });
       } else {
-        processJobs();
+        await processJobs();
       }
     } catch (err) {
       recordError(err);
@@ -5153,7 +5159,7 @@ async function main() {
       process.stderr.write(`scan: ${parts.join(', and ')}. Set CAREER_OPS_HTTP_CACHE=0 to always download.\n`);
     });
   }
-  for (const processBoard of deferredBoards) processBoard();
+  for (const processBoard of deferredBoards) await processBoard();
   // --dry-run leaves no trace, this cache included.
   if (!dryRun) {
     try {

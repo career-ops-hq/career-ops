@@ -510,10 +510,14 @@ function scanHistoryPath(dataRoot) {
   return process.env.CAREER_OPS_SCAN_HISTORY || join(dataRoot, 'data/scan-history.tsv');
 }
 
-function closeDayForRow(row, today, index) {
+function closeDecisionForRow(row, today, index) {
   const found = extractClosingDates(row.notes, today);
-  if (found.dates.length) return found.dates.map((item) => item.date).sort()[0];
-  return closeDateForUrl(index, row.url);
+  const days = [...new Set(found.dates.map((item) => item.date))].sort();
+  // Two different days in Notes can be an extension. The earliest one is the
+  // right warning, and the wrong day to discard on.
+  if (days.length > 1) return { conflict: days };
+  if (days.length === 1) return { day: days[0] };
+  return { day: closeDateForUrl(index, row.url) };
 }
 
 function rowsPastClose(trackerMd, { today, index, lookup }) {
@@ -521,29 +525,39 @@ function rowsPastClose(trackerMd, { today, index, lookup }) {
   const lines = String(trackerMd || '').replace(/\r\n/g, '\n').split('\n');
   const colmap = resolveColumns(lines);
   const matches = [];
+  const conflicts = [];
   for (const line of lines) {
     const row = parseTrackerRow(line, colmap);
     if (!row) continue;
     const rawStatus = String(row.status || '').replace(/\*\*/g, '').trim();
     const status = lookup.get(rawStatus.toLowerCase()) ?? rawStatus;
     if (status !== 'Evaluated') continue;
-    const day = closeDayForRow(row, today, index);
-    if (!day || day >= todayIso) continue;
+    const decision = closeDecisionForRow(row, today, index);
+    if (decision.conflict) {
+      conflicts.push({ num: row.num, days: decision.conflict });
+      continue;
+    }
+    if (!decision.day || decision.day >= todayIso) continue;
     matches.push(row.num);
   }
   matches.sort((a, b) => a - b);
-  return matches;
+  conflicts.sort((a, b) => a.num - b.num);
+  return { matches, conflicts };
 }
 
-function printDiscardPlan(matches, todayIso, apply) {
+function printDiscardPlan(matches, todayIso, apply, conflicts = []) {
   if (!matches.length) {
     console.log(`No Evaluated row has a close date before ${todayIso}.`);
   } else if (apply) {
     console.log(`Moved to Discarded: ${matches.map((n) => `#${n}`).join(' ')}`);
+    console.log('node set-status.mjs <n> --undo puts the status back.');
   } else {
     console.log(`Would move to Discarded: ${matches.map((n) => `#${n}`).join(' ')}`);
+    console.log('Run node closing-soon.mjs --discard-passed --apply to move them. node set-status.mjs <n> --undo puts the status back.');
   }
-  console.log('Run node closing-soon.mjs --discard-passed --apply to move them. node set-status.mjs <n> --undo puts the status back.');
+  for (const conflict of conflicts) {
+    console.log(`Left #${conflict.num} alone. Notes name more than one close date: ${conflict.days.join(', ')}.`);
+  }
 }
 
 function discardPassed(args, today) {
@@ -552,27 +566,30 @@ function discardPassed(args, today) {
   const historyPath = scanHistoryPath(dataRoot);
   const trackerMd = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
   const historyText = existsSync(historyPath) ? readFileSync(historyPath, 'utf-8') : '';
-  const matches = rowsPastClose(trackerMd, {
+  const { matches, conflicts } = rowsPastClose(trackerMd, {
     today,
     index: closeDatesByUrl(historyText),
     lookup: loadStateLookup(),
   });
   const apply = hasFlag(args, '--apply');
   if (apply) {
+    const moved = [];
     for (const n of matches) {
       const child = spawnSync(process.execPath, [join(CODE_ROOT, 'set-status.mjs'), '--row', String(n), 'Discarded'], {
         cwd: CODE_ROOT,
         encoding: 'utf-8',
-        env: process.env,
+        env: { ...process.env, CAREER_OPS_TRACKER: trackerPath },
       });
       if (child.status !== 0) {
         const detail = (child.stderr || child.stdout || '').trim();
+        if (moved.length) console.error(`Already moved to Discarded: ${moved.map((num) => `#${num}`).join(' ')}`);
         console.error(detail || `set-status exited ${child.status} for #${n}`);
         process.exit(child.status || 1);
       }
+      moved.push(n);
     }
   }
-  printDiscardPlan(matches, isoDay(today), apply);
+  printDiscardPlan(matches, isoDay(today), apply, conflicts);
 }
 
 if (isMainModule(import.meta.url)) {

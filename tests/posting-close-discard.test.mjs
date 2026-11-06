@@ -137,6 +137,8 @@ test('--discard-passed moves only Evaluated rows past their close date, and undo
     const applied = box.run(['--discard-passed', '--apply', '--today', TODAY]);
     assert.equal(applied.status, 0, describeSpawn(applied));
     assert.match(applied.stdout, /^Moved to Discarded: #1 #3 #12 #15 #16\n/m);
+    assert.match(applied.stdout, /set-status\.mjs <n> --undo/);
+    assert.doesNotMatch(applied.stdout, /Run node closing-soon\.mjs --discard-passed --apply/);
     const after = readFileSync(box.tracker, 'utf-8');
     for (const n of MOVED) assert.equal(statusOf(after, n), 'Discarded', `#${n}`);
     for (const n of KEPT) assert.equal(rowLine(after, n), kept[n], `#${n} bytes changed`);
@@ -146,6 +148,7 @@ test('--discard-passed moves only Evaluated rows past their close date, and undo
     const again = box.run(['--discard-passed', '--apply', '--today', TODAY]);
     assert.equal(again.status, 0, describeSpawn(again));
     assert.match(again.stdout, /No Evaluated row has a close date before 2026-11-05/);
+    assert.doesNotMatch(again.stdout, /Run node closing-soon\.mjs --discard-passed --apply/);
     assert.equal(readFileSync(box.tracker, 'utf-8'), after);
     assert.deepEqual(logNums(box.dir), MOVED);
 
@@ -159,5 +162,55 @@ test('--discard-passed moves only Evaluated rows past their close date, and undo
     assert.equal(statusOf(restored, 1), 'Evaluated');
     assert.equal(rowLine(restored, 2), kept[2]);
     assert.equal(statusOf(restored, 15), 'Discarded');
+  } finally { box.cleanup(); }
+});
+
+test('notes that name two close dates are left alone', () => {
+  const box = sandbox();
+  try {
+    const text = readFileSync(box.tracker, 'utf-8').replace(
+      'closes 2026-10-22',
+      'closes 2026-10-01, extended: apply by 2026-12-01',
+    );
+    writeFileSync(box.tracker, text);
+    const dry = box.run(['--discard-passed', '--today', TODAY]);
+    assert.equal(dry.status, 0, describeSpawn(dry));
+    assert.match(dry.stdout, /^Would move to Discarded: #3 #12 #15 #16\n/m);
+    assert.match(dry.stdout, /Left #1 alone\. Notes name more than one close date: 2026-10-01, 2026-12-01\./);
+    assert.equal(statusOf(readFileSync(box.tracker, 'utf-8'), 1), 'Evaluated');
+  } finally { box.cleanup(); }
+});
+
+test('the same close date written twice still discards', () => {
+  const box = sandbox();
+  try {
+    const text = readFileSync(box.tracker, 'utf-8').replace(
+      'closes 2026-10-22',
+      'closes 2026-10-01 and deadline 2026-10-01',
+    );
+    writeFileSync(box.tracker, text);
+    const dry = box.run(['--discard-passed', '--today', TODAY]);
+    assert.equal(dry.status, 0, describeSpawn(dry));
+    assert.match(dry.stdout, /^Would move to Discarded: #1 #3 #12 #15 #16\n/m);
+    assert.doesNotMatch(dry.stdout, /Left #1 alone/);
+  } finally { box.cleanup(); }
+});
+
+test('--tracker is the file set-status writes when CAREER_OPS_TRACKER names another', () => {
+  const box = sandbox();
+  try {
+    const other = join(box.dir, 'other-applications.md');
+    writeFileSync(other, readFileSync(box.tracker, 'utf-8'));
+    const result = spawnSync(process.execPath, [
+      join(ROOT, 'closing-soon.mjs'),
+      '--discard-passed', '--apply', '--today', TODAY, '--tracker', box.tracker,
+    ], {
+      cwd: box.dir,
+      encoding: 'utf-8',
+      env: { ...box.env, CAREER_OPS_TRACKER: other },
+    });
+    assert.equal(result.status, 0, describeSpawn(result));
+    assert.equal(statusOf(readFileSync(box.tracker, 'utf-8'), 1), 'Discarded');
+    assert.equal(statusOf(readFileSync(other, 'utf-8'), 1), 'Evaluated');
   } finally { box.cleanup(); }
 });
