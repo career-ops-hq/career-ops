@@ -730,6 +730,7 @@ for (const [label, extra] of [["official", {}], ["user-selected", { evaluationIn
     assert.match(prompt, /Two stops still do/);
     assert.match(prompt, /closed-posting rule/);
     assert.match(prompt, /Job description truncated/);
+    assert.match(prompt, /do not emit a report envelope, do not archive it as the JD/, "a truncated JD must block report output, not just scoring");
   });
 
   test(`buildPrompt (${label}): without a prefetched JD the WebFetch path is unchanged`, () => {

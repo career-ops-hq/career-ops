@@ -64,7 +64,9 @@ const HTML_ENTITIES = {
 // An entity-escaped tag: `&lt;p&gt;`, `&lt;/p&gt;`, `&lt;br /&gt;`, `&lt;a href=&quot;x&quot;&gt;`.
 // Known tags only, and attributes must be name=value pairs (see htmlToText).
 const ESCAPED_TAG_NAMES = 'p|br|hr|div|span|b|i|u|em|strong|ul|ol|li|h[1-6]|a|table|thead|tbody|tr|td|th|section|article|blockquote|font|sup|sub|pre|code|small|big';
-const ESCAPED_ATTR = String.raw`\s+[a-z_:][\w:.-]*=(?:"[^"<>&]*"|'[^'<>&]*'|&quot;[^<>&]*?&quot;|[^\s"'<>&=]+)`;
+// `&amp;` is the one entity that legitimately sits inside a quoted value (a URL's
+// query string), so it is allowed there while any other `&` keeps the prose guard.
+const ESCAPED_ATTR = String.raw`\s+[a-z_:][\w:.-]*=(?:"(?:[^"<>&]|&amp;)*"|'(?:[^'<>&]|&amp;)*'|&quot;(?:[^<>&]|&amp;)*?&quot;|[^\s"'<>&=]+)`;
 const ESCAPED_TAG_RE = new RegExp(String.raw`&lt;(/?(?:${ESCAPED_TAG_NAMES}))((?:${ESCAPED_ATTR})*)\s*/?&gt;`, 'gi');
 
 // `&#99999999;` is out of range and String.fromCodePoint throws on it, which

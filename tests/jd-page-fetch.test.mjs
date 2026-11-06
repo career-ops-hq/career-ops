@@ -9,6 +9,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { jdFromPageHtml, fetchJdFromPage, capJdText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { inProviderFetch } from '../providers/_ip-guard.mjs';
 import { setHostResolver } from '../liveness-browser.mjs';
 
@@ -257,4 +259,36 @@ test('jdFromPageHtml counts a posting with no description when deciding the page
   const stub = { '@type': 'JobPosting', title: 'Other Job' }; // no description at all
   const out = jdFromPageHtml(page('<p>Short teaser.</p>', { extraLd: [stub], body: embedded(long('unrelated', 300)) }), NOW);
   assert.equal(out, null, 'a described and a description-less posting are two postings: no borrowing');
+});
+
+test('a date-only validThrough is valid through that whole day', () => {
+  const sameDay = jdFromPageHtml(page(`<p>${BODY}</p>`, { posting: { validThrough: '2026-11-06' } }), NOW);
+  assert.ok(sameDay && !sameDay.closed, 'on the stated date the posting is still open');
+  const dayAfter = jdFromPageHtml(page(`<p>${BODY}</p>`, { posting: { validThrough: '2026-11-05' } }), Date.parse('2026-11-06T00:30:00Z'));
+  assert.equal(dayAfter.closed, true, 'the day after, it is closed');
+});
+
+test('description-less postings with no title still count as separate postings', () => {
+  const a = { '@type': 'JobPosting', url: 'https://careers.example.com/job/a' };
+  const b = { '@type': 'JobPosting', url: 'https://careers.example.com/job/b' };
+  const out = jdFromPageHtml(page('<p>Short teaser.</p>', { posting: { title: undefined, description: undefined, url: 'https://careers.example.com/job/c' }, extraLd: [a, b], body: embedded(long('unrelated', 300)) }), NOW);
+  assert.equal(out, null);
+});
+
+test('one posting written twice (same fields) is still a single posting', () => {
+  const dup = { '@type': 'JobPosting', title: 'Staff Engineer', description: '<p>Short teaser.</p>', hiringOrganization: { name: 'Acme' } };
+  const out = jdFromPageHtml(page('<p>Short teaser.</p>', { extraLd: [dup], body: embedded(long('full', 200)) }), NOW);
+  assert.ok(out, 'a duplicate representation must not make the page ambiguous');
+});
+
+test('fetchJdFromPage fails closed when the connect-time lookup guard is opted out', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const script = `
+    globalThis.fetch = async () => { console.log('FETCHED'); return new Response('<html></html>', { headers: { 'content-type': 'text/html' } }); };
+    const { fetchJdFromPage } = await import('./lib/jd-page-fetch.mjs');
+    console.log(String(await fetchJdFromPage('https://careers.example.com/job/1')));`;
+  const run = (env) => spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 20000 });
+  const off = run({ CAREER_OPS_NO_DNS_CACHE: '1' });
+  assert.equal(off.stdout.trim(), 'null', off.stderr);
+  assert.doesNotMatch(off.stdout, /FETCHED/, 'no request may be made without the guard');
 });

@@ -381,3 +381,13 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   if (r.ok && (r.out ?? '').includes('then real text.')) pass('invalid numeric entities read as spaces and do not abort the extraction');
   else fail(`invalid numeric entity aborted the rescue: ${JSON.stringify(r)}`);
 }
+
+{
+  // An escaped link whose URL carries `&amp;` used to miss the tag pattern, so the raw tag
+  // reached the JD text. The `&lt; 50 ms` prose case must still survive.
+  const words = Array.from({ length: 100 }, (_, i) => `w${i}`).join(' ');
+  const r = rescue(ldJson(jobPosting({ description: `<p>${words} See &lt;a href="https://x.example/p?a=1&amp;b=2"&gt;the benefits page&lt;/a&gt;. Latency is &lt; 50 ms.</p>` })));
+  const out = r.out ?? '';
+  if (r.ok && /See\s+the benefits page/.test(out) && !/<\/?a[\s>]|href|&amp;/.test(out) && /(?:&lt;|<) 50 ms/.test(out)) pass('an escaped link with &amp; in its URL is stripped, and prose "< 50 ms" is kept');
+  else fail(`escaped &amp; attribute mishandled: ${JSON.stringify(out.slice(-140))}`);
+}
