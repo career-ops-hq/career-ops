@@ -2297,6 +2297,17 @@ search_queries:
 #     careers_url: https://jobs.ashbyhq.com/bigco
 #     max_response_mb: 20
 
+# ── timeout_ms (optional, per entry) ──────────────────────────────────
+# A request has a limited time, which also covers reading the response body. A
+# board that returns its whole catalogue in one response can need more, and the
+# scan then reports "This operation was aborted" for it. Raise the timeout for
+# that entry only, in milliseconds. The value wins over any timeout the provider
+# sets; every other entry keeps its timeout.
+#
+#   - name: BigCo
+#     careers_url: https://jobs.lever.co/bigco
+#     timeout_ms: 60000
+
 tracked_companies:
 
   - name: YMCA of Greater Toronto
