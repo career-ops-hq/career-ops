@@ -1827,6 +1827,17 @@ function scanHistoryPolicy(config = {}) {
   };
 }
 
+function historyPolicyFromPortals() {
+  try {
+    if (!PORTALS_PATH || !existsSync(PORTALS_PATH)) return {};
+    const raw = parseYaml(readFileSync(PORTALS_PATH, 'utf-8'));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return scanHistoryPolicy(raw);
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Read the opt-in `scan_history.dedup_include_location` switch.
  *
@@ -2272,6 +2283,23 @@ function scanHistoryRows(text, rows) {
   return rows ?? parsedScanHistory(text);
 }
 
+// Heading depth decides which pipeline rows are finished work. `## Processed`
+// and a checked box are finished. A deeper heading is a subdivision, and a
+// shallower heading ends the section. collectSeenUrls and the pipeline write
+// share this so a row one of them releases is a row the other can write.
+const PIPELINE_SECTION_LEVEL = 2;
+
+function processedSectionAfter(line, inProcessed) {
+  const heading = line.match(/^(#+)\s+(.*)$/);
+  if (!heading || heading[1].length > PIPELINE_SECTION_LEVEL) return inProcessed;
+  return heading[1].length === PIPELINE_SECTION_LEVEL
+    && /^processed\b/i.test(heading[2].trim());
+}
+
+function pipelineRowIsFinished(line, inProcessed) {
+  return inProcessed || /^\s*- \[x\]/i.test(line);
+}
+
 export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '', historyRows = null } = sources;
   const seen = new Set();
@@ -2358,19 +2386,13 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   // Both failures are the same failure: a row that is still queued gets handed
   // back to the scanner, which appends a second copy of a job already on the
   // list. That duplication is what this function exists to prevent.
-  const SECTION_LEVEL = 2;
   let inProcessed = false;
   for (const line of pipelineText.split('\n')) {
-    const heading = line.match(/^(#+)\s+(.*)$/);
-    if (heading && heading[1].length <= SECTION_LEVEL) {
-      inProcessed = heading[1].length === SECTION_LEVEL
-        && /^processed\b/i.test(heading[2].trim());
-    }
+    inProcessed = processedSectionAfter(line, inProcessed);
     const url = extractPipelineUrl(line);
     if (!url) continue;
     const key = seenJobKey(url);
-    const done = /^\s*- \[x\]/i.test(line);
-    if ((done || inProcessed) && recheckCandidates.has(key)) continue;
+    if (pipelineRowIsFinished(line, inProcessed) && recheckCandidates.has(key)) continue;
     seen.add(key);
     recordUrlVariant(variants, key, languageFormsFromUrl(url), extractPipelineCompanyRole(line)?.role);
     // A stale history row is still pinned while its actionable pipeline entry
@@ -3609,19 +3631,42 @@ function sameJobWriteKey(url) {
   return canonicalJobKey(url) || url;
 }
 
-function keysInPipeline(text) {
+// Keys whose history rows no longer pin. A still-pinning row of the same
+// posting wins, so an older released row cannot un-pin a newer one.
+function releasedHistoryKeys(historyText, policy) {
+  const pinned = new Set();
+  const released = new Set();
+  for (const row of scanHistoryRows(historyText)) {
+    const status = row.status || 'added';
+    if (!row.url || OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
+    const key = sameJobWriteKey(row.url);
+    if (!key) continue;
+    if (shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy)) pinned.add(key);
+    else released.add(key);
+  }
+  for (const key of pinned) released.delete(key);
+  return released;
+}
+
+function keysInPipeline(text, released = new Set()) {
   const keys = new Set();
+  let inProcessed = false;
   for (const line of String(text ?? '').split('\n')) {
+    inProcessed = processedSectionAfter(line, inProcessed);
     const url = extractPipelineUrl(line);
     if (!url) continue;
     const key = sameJobWriteKey(url);
-    if (key) keys.add(key);
+    if (!key) continue;
+    // An open `- [ ]` stays pinned even when history released the posting.
+    // Releasing it would queue a second copy of a job still on the list.
+    if (pipelineRowIsFinished(line, inProcessed) && released.has(key)) continue;
+    keys.add(key);
   }
   return keys;
 }
 
-function offersMissingFromPipeline(offers, pipelineText) {
-  const keys = keysInPipeline(pipelineText);
+function offersMissingFromPipeline(offers, pipelineText, historyText = '', policy = {}) {
+  const keys = keysInPipeline(pipelineText, releasedHistoryKeys(historyText, policy));
   const fresh = [];
   for (const offer of offers) {
     const key = sameJobWriteKey(offer?.url);
@@ -3632,19 +3677,24 @@ function offersMissingFromPipeline(offers, pipelineText) {
   return fresh;
 }
 
-function keysInScanHistory(text, status) {
+function keysInScanHistory(text, status, policy = {}) {
   const keys = new Set();
+  // `added` and `skipped_expired` stop blocking once the recheck window
+  // releases them. Every other status blocks on any earlier row, so a skip
+  // bucket and a permanent rejection stay one row.
+  const recheckable = RECHECKABLE_SCAN_HISTORY_STATUSES.has(status);
   for (const line of scanHistoryDataLines(text)) {
     const row = parseScanHistoryLine(line);
     if (row.status !== status || !row.url) continue;
+    if (recheckable && !shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy)) continue;
     const key = sameJobWriteKey(row.url);
     if (key) keys.add(key);
   }
   return keys;
 }
 
-function offersMissingFromHistory(offers, status, historyText) {
-  const keys = keysInScanHistory(historyText, status);
+function offersMissingFromHistory(offers, status, historyText, policy = {}) {
+  const keys = keysInScanHistory(historyText, status, policy);
   const fresh = [];
   for (const offer of offers) {
     const key = sameJobWriteKey(offer?.url);
@@ -3664,7 +3714,11 @@ function offersMissingFromHistory(offers, status, historyText) {
 // The read that decides "already here" happens inside the lock. Two scans can
 // both decide a posting is new before either writes; the second write sees the
 // first's row and skips that key.
-export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } = {}) {
+export async function appendToPipeline(offers, {
+  pipelinePath = PIPELINE_PATH,
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  historyPolicy = null,
+} = {}) {
   if (offers.length === 0) return;
 
   await withPipelineLock(pipelinePath, async () => {
@@ -3672,7 +3726,8 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
     let text = existsSync(pipelinePath)
       ? readFileSync(pipelinePath, 'utf-8')
       : PIPELINE_SKELETON;
-    const fresh = offersMissingFromPipeline(offers, text);
+    const policy = historyPolicy ?? historyPolicyFromPortals();
+    const fresh = offersMissingFromPipeline(offers, text, readIfExists(scanHistoryPath), policy);
     if (fresh.length === 0) return;
 
     const headings = [...text.matchAll(/^##[ \t].*$/gm)];
@@ -3716,7 +3771,10 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
 // so such a caller cannot simply wrap this call; it takes the lock itself and
 // passes true. Everything else must leave it alone: true with no lock actually
 // held reintroduces both races described above.
-export async function appendToScanHistory(offers, date, status = 'added', { alreadyLocked = false } = {}) {
+export async function appendToScanHistory(offers, date, status = 'added', {
+  alreadyLocked = false,
+  historyPolicy = null,
+} = {}) {
   const write = () => {
     // Ensure file + header exist. The header is SCAN_HISTORY_COLUMNS, the same
     // list the row writer (formatScanHistoryRow) emits in order. Written ONLY
@@ -3727,9 +3785,11 @@ export async function appendToScanHistory(offers, date, status = 'added', { alre
     }
 
     // Re-read under the lock (the caller holds it, or withPipelineLock does).
-    // A row already stored under this status is skipped. A different status
-    // still writes, so a later verdict is recorded.
-    const fresh = offersMissingFromHistory(offers, status, readIfExists(SCAN_HISTORY_PATH));
+    // A same-status row still blocks a duplicate while it pins. `added` and
+    // `skipped_expired` stop blocking once the recheck window releases them,
+    // so a later scan can record the posting coming back or closing again.
+    const policy = historyPolicy ?? historyPolicyFromPortals();
+    const fresh = offersMissingFromHistory(offers, status, readIfExists(SCAN_HISTORY_PATH), policy);
     if (fresh.length === 0) return 0;
 
     const lines = fresh.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
