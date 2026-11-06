@@ -165,8 +165,10 @@ export async function recordExpiredVerdicts(verdicts) {
       verdicts,
       seenJobKey,
     );
-    if (rows.length > 0) await appendToScanHistory(rows, localToday(), 'skipped_expired', { alreadyLocked: true });
-    return rows.length;
+    // The writer drops an alias when another spelling of that posting already
+    // has a pinning skipped_expired row. The number below is rows that landed.
+    if (rows.length > 0) return await appendToScanHistory(rows, localToday(), 'skipped_expired', { alreadyLocked: true });
+    return 0;
   });
 }
 
