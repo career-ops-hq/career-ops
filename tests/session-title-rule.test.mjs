@@ -36,6 +36,8 @@ check('JD-derived title text is treated as untrusted data',
   section.includes('Untrusted External Content') && /skip the rename/.test(section));
 check('opt-out key is documented in the rule', section.includes('`session_title: off`'));
 
+const bullet = (name) => section.match(new RegExp(`^- \\*\\*${name}\\*\\*.*(?:\\n  - .*)*`, 'm'))?.[0] ?? '';
+
 const scopeLine = section.match(/^- \*\*Scope:\*\* (.*)$/m)?.[1] ?? '';
 const [inScope, outOfScope] = scopeLine.split('Skip');
 for (const mode of ['auto-pipeline', 'oferta', 'pdf', 'apply', 'contacto', 'interview-prep', 'scan', 'pipeline']) {
@@ -48,9 +50,20 @@ check('a multi-URL `pipeline` that did not follow a scan is skipped',
   /a `pipeline` run on 2\+ URLs that did not follow a scan/.test(outOfScope ?? ''));
 check('delegated/headless workers never rename', /worker never renames anything/.test(outOfScope ?? ''));
 
+// Whose session. Hosts such as the Claude desktop app take a session id, so a
+// parent could retitle its children or a child its parent; and a session that
+// another session started is still one the user opens and talks to.
+const whose = bullet('Whose session:');
+check('renames only its own session, never another by id',
+  /rename only your own session/.test(whose) && /never another session by its id/.test(whose));
+check('a session started by another session titles itself, and its starter leaves it alone',
+  /counts as interactive even when another session started it/.test(whose)
+    && /the session that started it leaves that title alone/.test(whose));
+check('a subagent or headless run has no session of its own and returns its values',
+  /has no session of its own/.test(whose) && /returns its values to the session that runs it/.test(whose));
+
 // The progress titles. The strings and numbers are the design's own examples,
 // so a rewording that loses one changes what the user sees in the sidebar.
-const bullet = (name) => section.match(new RegExp(`^- \\*\\*${name}\\*\\*.*(?:\\n  - .*)*`, 'm'))?.[0] ?? '';
 const single = bullet('Single evaluation');
 const scan = bullet('Scan');
 for (const title of ['`Career-ops eval (fetching)`', '`{Role}, {Company} (evaluating)`', '`{Role}, {Company} (CV)`',
