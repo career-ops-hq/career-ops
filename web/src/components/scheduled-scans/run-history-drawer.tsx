@@ -4,7 +4,7 @@ import { CheckCircle2, XCircle, Clock, X, TerminalSquare, Loader2, Ban } from "l
 import { useRef } from "react";
 import type { JobRun } from "@/lib/scheduled-jobs";
 import { cn } from "@/lib/cn";
-import { ScheduledOverlay } from "./scheduled-overlay";
+import { Modal } from "@/components/ui/modal";
 import { runStatusTone } from "@/lib/scheduled-run-status.mjs";
 
 export function RunHistoryDrawer({
@@ -20,7 +20,7 @@ export function RunHistoryDrawer({
   if (!isOpen) return null;
 
   return (
-    <ScheduledOverlay isOpen={isOpen} onClose={onClose} titleId="run-history-title" initialFocusRef={closeRef} overlayClassName="justify-end" panelClassName="!my-0 !mr-0 !h-full !max-h-none max-w-md rounded-none rounded-l-2xl border-y-0 border-r-0 p-0 flex flex-col">
+    <Modal isOpen={isOpen} onClose={onClose} labelledBy="run-history-title" initialFocusRef={closeRef} overlayClassName="justify-end" panelClassName="!my-0 !mr-0 !h-full !max-h-none max-w-md rounded-none rounded-l-2xl border-y-0 border-r-0 p-0 flex flex-col">
         <div className="flex items-center justify-between border-b border-border p-4">
           <div className="flex items-center gap-2">
             <TerminalSquare className="size-5 text-brand-text" />
@@ -94,6 +94,6 @@ export function RunHistoryDrawer({
             })
           )}
         </div>
-    </ScheduledOverlay>
+    </Modal>
   );
 }
