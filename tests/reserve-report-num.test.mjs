@@ -26,7 +26,9 @@ async function peekIn(files) {
   );
   for (const f of files) writeFileSync(join(dir, 'reports', f), '# x\n');
   try {
-    const nums = await reserveReportNumbers(1, { rootDir: dir });
+    // The fixture's own batch-state: the default is the checkout's, and a failed
+    // row there would move the number this asserts on.
+    const nums = await reserveReportNumbers(1, { rootDir: dir, batchStateFile: join(dir, 'batch', 'batch-state.tsv') });
     await releaseReportNumbers(nums, { rootDir: dir });
     return String(nums[0]).padStart(3, '0');
   } finally {

@@ -33,6 +33,16 @@ export const NODE = process.execPath;
 // CAREER_OPS_PIPELINE). A test that needs the override sets its own.
 process.env.CAREER_OPS_TRACKER = '';
 
+// The same discipline for browser auto-detection (lib/browser-launch.mjs). A
+// developer's data-root .env may switch it on so career-ops runs on an OS the
+// bundled Chromium has dropped — correct for their own use, wrong for the
+// suite, where doctor's bundled-Chromium checks would then probe that system
+// browser instead and the result would vary by machine. Blanked rather than
+// deleted because the resolver treats a PRESENT-but-empty shell variable as
+// "off" and does not fall through to .env. PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+// is deliberately left alone: the tests that care set it themselves.
+process.env.CAREER_OPS_BROWSER_AUTODETECT = '';
+
 // A shell that opted into the shared PDF painter must not make the suite
 // attach to that painter or start one. Blanked rather than deleted, same as
 // the tracker override above. A test that wants the painter sets it itself.

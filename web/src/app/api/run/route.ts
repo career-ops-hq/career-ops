@@ -15,7 +15,7 @@ import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
-import { persistEvaluation, evaluateRunOutcome } from "@/lib/report-persist.mjs";
+import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
@@ -377,6 +377,10 @@ export async function POST(req: Request) {
       // for the backend while holding the body out of the run log.
       const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
       const reportFilter = kind === "evaluate" ? createReportEnvelopeFilter() : null;
+      // Assistant-authored text only, before report-body filtering. Tools/JDs
+      // cannot directly declare a gated outcome. Process integrity is checked
+      // first at close, before this text can be treated as a terminal stop.
+      let evaluationText = "";
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -386,6 +390,7 @@ export async function POST(req: Request) {
       // the stream never idles during the filtered phase. Unknown event types are
       // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
+        if (kind === "evaluate") evaluationText += text;
         const filter = cvFilter ?? reportFilter;
         const visible = filter ? filter.push(text) : text;
         if (visible) send({ type: "text", text: visible });
@@ -622,9 +627,11 @@ export async function POST(req: Request) {
             noOutputMessage: noOutputError(),
             sawError,
             cleanExit,
+            text: evaluationText,
           });
           if (!outcome.ok) {
-            send({ type: "error", msg: outcome.message });
+            const event = evaluationOutcomeEvent(outcome, { tokens: lastTokens, costUsd: lastCostUsd });
+            if (event) send(event);
           } else if (envelope?.ok !== true) {
             send({ type: "error", msg: "Internal error: the evaluate run passed its gate with no report to save — please report this." });
           } else {

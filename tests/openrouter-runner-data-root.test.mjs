@@ -52,7 +52,9 @@ function makeDataRoot() {
 
 // CAREER_OPS_TRACKER and CAREER_OPS_REPORTS_DIR are cleared: both outrank the
 // resolved root, so leaving a developer's own exports in place would mask the bug
-// and point the allocator at their real reports directory (#3988).
+// and point the allocator at their real reports directory (#3988). The batch
+// state is the fixture's: by default the allocator reads the checkout's, where a
+// failed row would move the number these cases assert on.
 function env(dir, extra = {}) {
   return {
     ...process.env,
@@ -60,6 +62,7 @@ function env(dir, extra = {}) {
     CAREER_OPS_ROOT: '',
     CAREER_OPS_TRACKER: '',
     CAREER_OPS_REPORTS_DIR: '',
+    CAREER_OPS_BATCH_STATE: join(dir, 'batch', 'batch-state.tsv'),
     ...extra,
   };
 }
