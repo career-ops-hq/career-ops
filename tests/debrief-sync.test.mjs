@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { replaceNextPin } from '../followup-seed.mjs';
 import { ROOT, pass, fail } from './helpers.mjs';
@@ -402,8 +402,18 @@ function debriefModes() {
   return out;
 }
 
+// Split a documented command the way a POSIX shell would for the forms Step 10
+// uses: single-quoted segments, the '\\'' escape, and bare words.
 function shellWords(line) {
-  return [...line.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => (m[1] !== undefined ? m[1] : m[2]));
+  const words = [];
+  for (const token of line.match(/(?:'[^']*'|\\.|[^\s'\\])+/g) || []) {
+    words.push([...token.matchAll(/'([^']*)'|\\(.)|([^'\\]+)/g)].map((m) => m[1] ?? m[2] ?? m[3]).join(''));
+  }
+  return words;
+}
+
+function shellQuoteValue(value) {
+  return value.replaceAll("'", "'\\''");
 }
 
 const englishBlock = stepTenBlock(readFileSync(join(MODE_DIR, 'interview', 'debrief.md'), 'utf8'));
@@ -424,7 +434,7 @@ check('Step 10 shows one debrief-sync command per confirmed dealbreaker', () => 
 check('every translated Step 10 carries the same multi-dealbreaker example', () => {
   for (const [rel, path] of debriefModes()) {
     const text = readFileSync(path, 'utf8');
-    if (!text.includes('node debrief-sync.mjs')) continue;
+    assert.ok(stepTenBlock(text), `${rel} has no Step 10 debrief-sync example`);
     assert.equal(stepTenBlock(text), englishBlock, `${rel} Step 10 example differs from the English one`);
   }
 });
@@ -442,37 +452,48 @@ check('no debrief mode passes a debrief-sync flag twice in one command', () => {
 if (englishBlock) {
   const root = freshRoot();
   const FIRST = SENTENCE;
-  const SECOND = 'No equity-only compensation';
+  // A shell would expand $ and run backticks inside double quotes. The example
+  // uses single quotes, so these values must reach the CLI unchanged.
+  const SECOND = "No recruiter's pay below $120,000 or `whoami` pitch";
+  const NAME = "Avery O'Quinn";
   const DECLINED = 'No travel above 25 percent';
-  const commands = englishBlock.trim().split('\n').map((line) => shellWords(
-    line
-      .replaceAll('<tracker#>', '7')
-      .replaceAll('<sentence 1>', FIRST)
-      .replaceAll('<sentence 2>', SECOND)
-      .replaceAll('<name>', 'Avery Quinn')
-      .replaceAll('YYYY-MM-DD', FUTURE),
-  ).slice(2));
+  const lines = englishBlock.trim().split('\n').map((line) => line
+    .replaceAll('<tracker#>', '7')
+    .replaceAll('<sentence 1>', shellQuoteValue(FIRST))
+    .replaceAll('<sentence 2>', shellQuoteValue(SECOND))
+    .replaceAll('<name>', shellQuoteValue(NAME))
+    .replaceAll('YYYY-MM-DD', FUTURE));
+  // Run each line through /bin/sh where there is one, so the quoting rule is
+  // what the test checks; on Windows, split it the same way and spawn directly.
+  const runLine = (line) => (process.platform === 'win32'
+    ? run(root, shellWords(line).slice(2))
+    : spawnSync('/bin/sh', ['-c', line], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: { ...childEnv(root), PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ''}` },
+    }));
+  const count = (text, needle) => text.split(needle).length - 1;
   try {
     writeFixture(root);
-    const results = commands.map((args) => run(root, args));
+    const results = lines.map(runLine);
     check('the Step 10 example records both confirmed dealbreakers, the contact, and the pin', () => {
       for (const result of results) assert.equal(result.status, 0, describeSpawn(result));
       const report = machineSummary(readRoot(root, REPORT_REL));
       assert.equal(report.final_decision, 'Skip');
       assert.deepEqual(report.hard_stops, [FIRST, SECOND]);
       const tracker = readRoot(root, 'data/applications.md');
-      assert.equal((tracker.match(new RegExp(`Dealbreaker: ${FIRST}`, 'g')) || []).length, 1);
-      assert.equal((tracker.match(new RegExp(`Dealbreaker: ${SECOND}`, 'g')) || []).length, 1);
+      assert.equal(count(tracker, `Dealbreaker: ${FIRST}`), 1);
+      assert.equal(count(tracker, `Dealbreaker: ${SECOND}`), 1);
       assert.match(tracker, /\| Interview \|/);
       assert.ok(!tracker.includes(DECLINED) && !readRoot(root, REPORT_REL).includes(DECLINED));
-      assert.equal((readRoot(root, 'data/contacts.tsv').match(/Avery Quinn/g) || []).length, 1);
+      assert.equal(count(readRoot(root, 'data/contacts.tsv'), NAME), 1);
       const pins = readRoot(root, 'data/follow-ups.md');
       assert.equal((pins.match(/^- next #7 /gm) || []).length, 1);
       assert.ok(pins.includes(`- next #7 ${FUTURE} `));
     });
 
     const before = snapshot(root);
-    const again = commands.map((args) => run(root, args));
+    const again = lines.map(runLine);
     check('running the Step 10 example again writes nothing', () => {
       for (const result of again) {
         assert.equal(result.status, 0, describeSpawn(result));

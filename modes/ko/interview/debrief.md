@@ -254,15 +254,15 @@ stated_priorities:        # 트랜스크립트 입력에만. 밝힌 우선순위
 
 디브리프를 저장한 뒤, 확인된 사실을 지원 건에 기록합니다. 새로운 사실을 하나씩, 사용자가 이미 `modes/_profile.md`나 `config/profile.yml`에 적어 둔 dealbreaker와 대조합니다. 일치하는 항목은 하나씩 따로 묻습니다: 그 사실과 프로필 문장을 보여준 뒤 `Record this dealbreaker on the report and the tracker? [y/N]`라고 묻습니다. 사용자가 확인한 문장은 모두 남기고, 거절한 문장은 모두 뺍니다.
 
-이름이 나온 사람마다 `Save this contact to data/contacts.tsv? [y/N]`라고 묻습니다. yes라면 이름, 이메일(주어졌다면), 사용자가 유형을 말했다면 그 유형을 넘깁니다.
+이름이 나온 사람마다 `Save this contact to data/contacts.tsv? [y/N]`라고 묻습니다. yes라면 이름, 이메일(주어졌다면), 사용자가 유형을 말했다면 그 유형을 넘깁니다. `--contact-type`은 소문자 `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral`, `other`만 받습니다. 사용자가 쓴 말은 어떤 언어든 그 뜻에 맞는 값으로 옮깁니다("탤런트 파트너"는 `recruiter`, "앞으로의 상사"는 `hiring-manager`). 어느 값에도 분명히 맞지 않으면 `--contact-type`은 빼고 연락처는 그대로 저장합니다. `debrief-sync.mjs`는 다른 값을 거부하며, 그러면 dealbreaker와 `--next`를 포함한 호출 전체가 중단됩니다.
 
 다음 단계가 분명한 날짜 하루를 가리키면, 두 번째 질문 없이 `--next YYYY-MM-DD`를 넘깁니다. 요일은 로컬 달력 기준 날짜로 계산하며, 오늘도 포함합니다. 표현에 날짜가 없으면 `--next`를 생략합니다. 모호하다면(`next week`, 날짜가 두 개) 날짜 하나를 물어본 뒤 넘깁니다.
 
-그 플래그들로 `node debrief-sync.mjs --app <tracker#>`를 실행합니다. `<tracker#>`는 트래커에서 그 지원 건의 `#`입니다(보고서 번호가 아님). `--dealbreaker`는 문장 하나만 받으며 호출마다 한 번만 쓸 수 있으므로, 확인된 문장마다 명령을 하나씩 실행합니다. 두 문장을 하나의 값으로 합치지 않습니다: 스크립트는 세미콜론을 거부합니다. 연락처 플래그와 `--next`는 첫 번째 명령에만 넣습니다. 그 뒤의 명령에는 `--app <tracker#>`와 `--dealbreaker` 하나만 넘기고 다른 것은 넣지 않습니다:
+그 플래그들로 `node debrief-sync.mjs --app <tracker#>`를 실행합니다. `<tracker#>`는 트래커에서 그 지원 건의 `#`입니다(보고서 번호가 아님). `--dealbreaker`는 문장 하나만 받으며 호출마다 한 번만 쓸 수 있으므로, 확인된 문장마다 명령을 하나씩 실행합니다. 두 문장을 하나의 값으로 합치지 않습니다: 스크립트는 세미콜론을 거부합니다. 연락처 플래그와 `--next`는 첫 번째 명령에만 넣습니다. 그 뒤의 명령에는 `--app <tracker#>`와 `--dealbreaker` 하나만 넘기고 다른 것은 넣지 않습니다. 셸이 `$`와 백틱을 그대로 넘기도록 각 값을 작은따옴표로 감쌉니다. 값 안의 작은따옴표는 `'\''`로 씁니다:
 
 ```bash
-node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
-node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
 명령이 실패하면 멈추고 고친 뒤, 첫 번째 명령부터 목록을 다시 실행합니다. 넘길 dealbreaker, 연락처, `--next` 날짜가 하나도 없으면 명령을 건너뜁니다: 기록할 것이 없는 호출은 스크립트가 거부합니다. 마지막 명령 뒤, 연락처를 저장했다면 `node contacts.mjs --summary`를 실행합니다. 날짜를 정했다면 `node followup-cadence.mjs --summary`를 실행합니다.

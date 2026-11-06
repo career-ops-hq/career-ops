@@ -254,15 +254,15 @@ Regeln für das Transkript:
 
 Wenn der Debrief gespeichert ist, halte bestätigte Fakten bei der Bewerbung fest. Ordne jeden neuen Fakt einem Dealbreaker zu, den der Nutzer bereits in `modes/_profile.md` oder `config/profile.yml` geschrieben hat. Frag zu jeder Übereinstimmung einzeln: Zeige den Fakt und den Satz aus dem Profil, dann frag `Record this dealbreaker on the report and the tracker? [y/N]`. Behalte jeden Satz, den der Nutzer bestätigt. Lass jeden Satz weg, den der Nutzer ablehnt.
 
-Frag für jede genannte Person `Save this contact to data/contacts.tsv? [y/N]`. Bei Ja übergib den Namen, die E-Mail-Adresse, falls eine genannt wurde, und den Typ, falls der Nutzer einen genannt hat.
+Frag für jede genannte Person `Save this contact to data/contacts.tsv? [y/N]`. Bei Ja übergib den Namen, die E-Mail-Adresse, falls eine genannt wurde, und den Typ, falls der Nutzer einen genannt hat. `--contact-type` nimmt nur `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` oder `other` an, in Kleinbuchstaben. Ordne das Wort des Nutzers dem Wert zu, den es meint, in jeder Sprache (ein „Talent Partner“ ist `recruiter`, „meine künftige Chefin“ ist `hiring-manager`). Passt das Wort nicht eindeutig zu einem Wert, lass `--contact-type` weg und speichere den Kontakt trotzdem. `debrief-sync.mjs` lehnt jeden anderen Wert ab, und das stoppt den ganzen Aufruf, Dealbreaker und `--next` eingeschlossen.
 
 Nennt der nächste Schritt einen eindeutigen Kalendertag, übergib `--next YYYY-MM-DD` ohne zweite Frage. Löse einen Wochentag ausgehend vom lokalen Kalendertag auf, wobei heute mitzählt. Enthält die Formulierung keinen Tag, lass `--next` weg. Ist sie mehrdeutig (`next week`, zwei Tage), frag nach einem Datum und übergib es dann.
 
-Führe `node debrief-sync.mjs --app <tracker#>` mit diesen Flags aus. `<tracker#>` ist die `#` der Bewerbung im Tracker (nicht die Berichtsnummer). `--dealbreaker` nimmt genau einen Satz und darf pro Aufruf nur einmal vorkommen, also führe für jeden bestätigten Satz einen eigenen Befehl aus. Füge nie zwei Sätze zu einem Wert zusammen: Das Skript lehnt ein Semikolon ab. Setze die Kontakt-Flags und `--next` nur in den ersten Befehl. Jeder weitere Befehl übergibt `--app <tracker#>` und ein `--dealbreaker`, sonst nichts:
+Führe `node debrief-sync.mjs --app <tracker#>` mit diesen Flags aus. `<tracker#>` ist die `#` der Bewerbung im Tracker (nicht die Berichtsnummer). `--dealbreaker` nimmt genau einen Satz und darf pro Aufruf nur einmal vorkommen, also führe für jeden bestätigten Satz einen eigenen Befehl aus. Füge nie zwei Sätze zu einem Wert zusammen: Das Skript lehnt ein Semikolon ab. Setze die Kontakt-Flags und `--next` nur in den ersten Befehl. Jeder weitere Befehl übergibt `--app <tracker#>` und ein `--dealbreaker`, sonst nichts. Setze jeden Wert in einfache Anführungszeichen, damit die Shell `$` und Backticks unverändert durchreicht. Schreibe ein einfaches Anführungszeichen innerhalb eines Werts als `'\''`:
 
 ```bash
-node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
-node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
 Schlägt ein Befehl fehl, halte an, behebe den Fehler und führe die Liste ab dem ersten Befehl erneut aus. Gibt es keinen Dealbreaker, keinen Kontakt und keinen `--next`-Tag zu übergeben, lass den Befehl weg: Das Skript lehnt einen Aufruf ab, der nichts festzuhalten hat. Wurde ein Kontakt gespeichert, führe nach dem letzten Befehl `node contacts.mjs --summary` aus. Wurde ein Tag festgelegt, führe `node followup-cadence.mjs --summary` aus.

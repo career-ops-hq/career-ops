@@ -254,15 +254,15 @@ Reglas para la transcripción:
 
 Después de guardar el análisis, registra los hechos confirmados en la candidatura. Relaciona cada hecho nuevo con un factor decisivo (dealbreaker) que el usuario ya haya escrito en `modes/_profile.md` o `config/profile.yml`. Pregunta por cada coincidencia por separado: muestra el hecho y la frase del perfil, y luego pregunta `Record this dealbreaker on the report and the tracker? [y/N]`. Conserva cada frase que el usuario confirme. Descarta cada frase que el usuario rechace.
 
-Para cada persona nombrada, pregunta `Save this contact to data/contacts.tsv? [y/N]`. Si responde que sí, pasa el nombre, el correo electrónico si se dio uno, y el tipo si el usuario nombró uno.
+Para cada persona nombrada, pregunta `Save this contact to data/contacts.tsv? [y/N]`. Si responde que sí, pasa el nombre, el correo electrónico si se dio uno, y el tipo si el usuario nombró uno. `--contact-type` solo admite `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` u `other`, en minúsculas. Asigna la palabra del usuario al valor que significa, en cualquier idioma (una «talent partner» es `recruiter`, «mi futura jefa» es `hiring-manager`). Si la palabra no coincide claramente con un valor, omite `--contact-type` y guarda el contacto de todos modos. `debrief-sync.mjs` rechaza cualquier otro valor, y eso detiene toda la llamada, incluidos el dealbreaker y `--next`.
 
 Si el siguiente paso nombra un único día claro del calendario, pasa `--next YYYY-MM-DD` sin una segunda pregunta. Resuelve un día de la semana a partir del día del calendario local, y hoy cuenta. Si la frase no tiene día, omite `--next`. Si es ambigua (`next week`, dos días), pide una sola fecha y luego pásala.
 
-Ejecuta `node debrief-sync.mjs --app <tracker#>` con esos flags, donde `<tracker#>` es el `#` de la candidatura en el tracker (no su número de informe). `--dealbreaker` admite una sola frase y solo puede aparecer una vez por llamada, así que ejecuta un comando por cada frase confirmada. Nunca unas dos frases en un solo valor: el script rechaza el punto y coma. Pon los flags de contacto y `--next` solo en el primer comando. Cada comando siguiente pasa `--app <tracker#>` y un único `--dealbreaker`, nada más:
+Ejecuta `node debrief-sync.mjs --app <tracker#>` con esos flags, donde `<tracker#>` es el `#` de la candidatura en el tracker (no su número de informe). `--dealbreaker` admite una sola frase y solo puede aparecer una vez por llamada, así que ejecuta un comando por cada frase confirmada. Nunca unas dos frases en un solo valor: el script rechaza el punto y coma. Pon los flags de contacto y `--next` solo en el primer comando. Cada comando siguiente pasa `--app <tracker#>` y un único `--dealbreaker`, nada más. Pon cada valor entre comillas simples para que la shell pase `$` y las comillas invertidas sin cambios. Escribe una comilla simple dentro de un valor como `'\''`:
 
 ```bash
-node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 1>" --contact-name "<name>" --next YYYY-MM-DD
-node debrief-sync.mjs --app <tracker#> --dealbreaker "<sentence 2>"
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
 ```
 
 Si un comando falla, detente, corrígelo y vuelve a ejecutar la lista desde el primer comando. Si no hay dealbreaker, contacto ni día `--next` que pasar, omite el comando: el script rechaza una llamada sin nada que registrar. Después del último comando, si se guardó un contacto, ejecuta `node contacts.mjs --summary`. Si se fijó un día, ejecuta `node followup-cadence.mjs --summary`.
