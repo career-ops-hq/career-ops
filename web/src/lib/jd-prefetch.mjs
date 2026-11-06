@@ -27,19 +27,31 @@ export function postingUrlFrom(input) {
 }
 
 /**
+ * @typedef {{text: string|null, closedThrough: string|null}} Prefetch
+ */
+
+/**
  * @param {unknown} input - the run input (a posting URL for evaluate runs)
  * @param {(script: string, args: string[]) => Promise<{code: number, stdout: string, timedOut?: boolean, spawnFailed?: boolean}>} run
- * @returns {Promise<string|null>} JD text, or null when the worker should WebFetch
+ * @returns {Promise<Prefetch>} `text` is the JD, or null when the worker should
+ *   WebFetch; `closedThrough` is set when the page's own data says the posting
+ *   closed (fetch-jd exit 3), which the worker must not score past.
  */
 export async function prefetchJd(input, run) {
+  const miss = { text: null, closedThrough: null };
   const url = postingUrlFrom(input);
-  if (!url) return null;
+  if (!url) return miss;
   try {
     const result = await run("fetch-jd", [url]);
-    if (result.code !== 0 || result.timedOut || result.spawnFailed) return null;
-    const text = String(result.stdout ?? "").trim();
-    return text.length >= MIN_PREFETCH_JD_CHARS ? text : null;
+    if (result.timedOut || result.spawnFailed) return miss;
+    const out = String(result.stdout ?? "").trim();
+    if (result.code === 3) {
+      const m = /^CLOSED_POSTING validThrough=(.{1,64})$/.exec(out);
+      return m ? { text: null, closedThrough: m[1] } : miss;
+    }
+    if (result.code !== 0) return miss;
+    return { text: out.length >= MIN_PREFETCH_JD_CHARS ? out : null, closedThrough: null };
   } catch {
-    return null;
+    return miss;
   }
 }

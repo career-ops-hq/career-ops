@@ -209,8 +209,22 @@ test('every hop runs inside the connect-time address guard (DNS-rebinding defenc
 
 const NOW = Date.parse('2026-11-06T12:00:00Z');
 
-test('jdFromPageHtml refuses a posting whose validThrough is past (closed per its own data)', () => {
-  assert.equal(jdFromPageHtml(page(`<p>${BODY}</p>`, { posting: { validThrough: '2026-10-01T00:00:00Z' } }), NOW), null);
+test('jdFromPageHtml reports a posting whose validThrough is past as closed, with no JD text', () => {
+  const out = jdFromPageHtml(page(`<p>${BODY}</p>`, { posting: { validThrough: '2026-10-01T00:00:00Z' } }), NOW);
+  assert.equal(out.closed, true);
+  assert.equal(out.validThrough, '2026-10-01T00:00:00Z');
+  assert.equal(out.text, '', 'a closed posting must never hand its text to a scorer');
+});
+
+test('fetchJdFromPage passes the closure on even when the visible page still shows the JD', async () => {
+  const visible = `<p>${BODY}</p>`;
+  const net = stubNetwork(() => html(page(visible, { posting: { validThrough: '2020-01-01T00:00:00Z' }, body: `<article>${BODY}</article>` })));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.equal(out.closed, true);
+    assert.equal(out.text, '');
+    assert.equal(out.validThrough, '2020-01-01T00:00:00Z');
+  } finally { net.restore(); }
 });
 
 test('jdFromPageHtml accepts a future, absent or unparseable validThrough', () => {
@@ -237,4 +251,10 @@ test('jdFromPageHtml still uses a single embedded description when the structure
   const out = jdFromPageHtml(page('<p>Short teaser.</p>', { body: embedded(long('full', 200)) }), NOW);
   assert.ok(out);
   assert.equal(out.method, 'embedded-description');
+});
+
+test('jdFromPageHtml counts a posting with no description when deciding the page is ambiguous', () => {
+  const stub = { '@type': 'JobPosting', title: 'Other Job' }; // no description at all
+  const out = jdFromPageHtml(page('<p>Short teaser.</p>', { extraLd: [stub], body: embedded(long('unrelated', 300)) }), NOW);
+  assert.equal(out, null, 'a described and a description-less posting are two postings: no borrowing');
 });

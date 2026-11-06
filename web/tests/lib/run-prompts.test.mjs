@@ -758,3 +758,21 @@ test("buildPrompt: a prefetched JD is ignored for kinds that do not read posting
     assert.doesNotMatch(prompt, /posting_text/, kind);
   }
 });
+
+test("buildPrompt: a posting its own data calls closed is not fetched or scored", () => {
+  for (const extra of [{}, { evaluationInstructions: "Run the focused evaluation." }]) {
+    const prompt = buildPrompt({ kind: "evaluate", input: PREFETCH_URL, memory: "", today: "2026-08-04", closedThrough: "2026-10-01T00:00:00Z", ...extra });
+    assert.match(prompt, /structured data, and it says the posting closed/);
+    assert.ok(prompt.includes(JSON.stringify({ validThrough: "2026-10-01T00:00:00Z" })), "the date is JSON-encoded data");
+    assert.match(prompt, /closed-posting rule/);
+    assert.match(prompt, /Do NOT WebFetch/);
+    assert.doesNotMatch(prompt, /Use WebFetch to read the posting/);
+  }
+});
+
+test("buildPrompt: prefetched text wins over a closure note, and neither changes the plain path", () => {
+  const both = buildPrompt({ kind: "evaluate", input: PREFETCH_URL, memory: "", today: "2026-08-04", prefetchedJd: PREFETCHED, closedThrough: "2026-10-01T00:00:00Z" });
+  assert.ok(both.includes(JSON.stringify({ posting_text: PREFETCHED })));
+  const plain = buildPrompt({ kind: "evaluate", input: PREFETCH_URL, memory: "", today: "2026-08-04", closedThrough: null });
+  assert.match(plain, /Use WebFetch to read the posting/);
+});

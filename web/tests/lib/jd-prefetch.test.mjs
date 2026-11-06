@@ -22,29 +22,42 @@ test("prefetchJd runs fetch-jd with the URL as a single argv entry and returns t
     seen.push([script, args]);
     return { code: 0, stdout: `${JD}\n`, timedOut: false, spawnFailed: false };
   });
-  assert.equal(jd, JD.trim());
+  assert.equal(jd.text, JD.trim());
+  assert.equal(jd.closedThrough, null);
   assert.deepEqual(seen, [["fetch-jd", ["https://careers.example.com/job/1?x=1&y=$(id)"]]]);
 });
 
 test("prefetchJd does not run anything for a non-URL input", async () => {
   let called = false;
-  assert.equal(await prefetchJd("018", async () => { called = true; return { code: 0, stdout: JD }; }), null);
+  assert.equal((await prefetchJd("018", async () => { called = true; return { code: 0, stdout: JD }; })).text, null);
   assert.equal(called, false);
 });
 
 test("prefetchJd returns null on a miss, so the worker falls back to WebFetch", async () => {
   const url = "https://careers.example.com/job/1";
-  assert.equal(await prefetchJd(url, async () => ({ code: 1, stdout: "" })), null);
-  assert.equal(await prefetchJd(url, async () => ({ code: 0, stdout: JD, timedOut: true })), null);
-  assert.equal(await prefetchJd(url, async () => ({ code: -1, stdout: "", spawnFailed: true })), null);
+  assert.equal((await prefetchJd(url, async () => ({ code: 1, stdout: "" }))).text, null);
+  assert.equal((await prefetchJd(url, async () => ({ code: 0, stdout: JD, timedOut: true }))).text, null);
+  assert.equal((await prefetchJd(url, async () => ({ code: -1, stdout: "", spawnFailed: true }))).text, null);
 });
 
 test("prefetchJd refuses a stub shorter than the floor", async () => {
   const url = "https://careers.example.com/job/1";
-  assert.equal(await prefetchJd(url, ok("x".repeat(MIN_PREFETCH_JD_CHARS - 1))), null);
-  assert.ok(await prefetchJd(url, ok("x".repeat(MIN_PREFETCH_JD_CHARS))));
+  assert.equal((await prefetchJd(url, ok("x".repeat(MIN_PREFETCH_JD_CHARS - 1)))).text, null);
+  assert.ok((await prefetchJd(url, ok("x".repeat(MIN_PREFETCH_JD_CHARS)))).text);
 });
 
 test("prefetchJd never throws", async () => {
-  assert.equal(await prefetchJd("https://careers.example.com/job/1", async () => { throw new Error("boom"); }), null);
+  assert.deepEqual(await prefetchJd("https://careers.example.com/job/1", async () => { throw new Error("boom"); }), { text: null, closedThrough: null });
+});
+
+test("prefetchJd carries a closed posting (fetch-jd exit 3) instead of treating it as a plain miss", async () => {
+  const url = "https://careers.example.com/job/1";
+  const closed = await prefetchJd(url, async () => ({ code: 3, stdout: "CLOSED_POSTING validThrough=2026-10-01T00:00:00Z" }));
+  assert.deepEqual(closed, { text: null, closedThrough: "2026-10-01T00:00:00Z" });
+});
+
+test("prefetchJd ignores an exit 3 whose output is not the closed-posting line", async () => {
+  const url = "https://careers.example.com/job/1";
+  assert.deepEqual(await prefetchJd(url, async () => ({ code: 3, stdout: "something else" })), { text: null, closedThrough: null });
+  assert.deepEqual(await prefetchJd(url, async () => ({ code: 3, stdout: "" })), { text: null, closedThrough: null });
 });
