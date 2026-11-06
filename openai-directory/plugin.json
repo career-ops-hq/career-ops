@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "career-ops",
-  "version": "1.38.0",
+  "version": "1.39.0",
   "description": "Open-source AI job search agent: finds openings at the companies you choose, scores each job posting against your CV (1-5, A-H report), tailors your CV and cover letter, preps interviews and tracks applications. Runs locally; you press Submit.",
   "author": {
     "name": "santifer",

@@ -30,6 +30,7 @@ export function parsePdfManifestRows(indexText) {
     const columns = line.split("\t");
     const reportId = columns[0]?.trim() ?? "";
     const pdf = columns[1]?.trim() ?? "";
+    const html = columns[2]?.trim() ?? "";
     const format = columns[3]?.trim() ?? "";
     const date = columns[4]?.trim() ?? "";
     const rawKind = (columns[5] ?? "").trim().toLowerCase();
@@ -41,6 +42,7 @@ export function parsePdfManifestRows(indexText) {
     rows.push({
       reportId,
       pdf,
+      html,
       format,
       date,
       kind,
@@ -63,15 +65,15 @@ export function parsePdfManifestRows(indexText) {
  *  existed, so reading it as unknown would strand every pre-#3959 artifact.
  */
 export function pdfIndexEntryForReport(indexText, reportNumber, kind = "cv") {
-  if (!Number.isInteger(reportNumber)) return { found: false, path: null };
+  if (!Number.isInteger(reportNumber)) return { found: false, path: null, html: null };
   const wanted = kind === "cover" ? "cover" : "cv";
   const rows = parsePdfManifestRows(indexText);
   for (const row of rows) {
     if (!/^\d+$/.test(row.reportId) || Number(row.reportId) !== reportNumber) continue;
     if (row.kind !== wanted) continue;
-    return { found: true, path: row.pdf || null };
+    return { found: true, path: row.pdf || null, html: row.html || null };
   }
-  return { found: false, path: null };
+  return { found: false, path: null, html: null };
 }
 
 /** Resolve the exact PDF path recorded for a report in pdf-index.tsv. */
