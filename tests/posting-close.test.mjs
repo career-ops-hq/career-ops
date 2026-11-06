@@ -514,4 +514,51 @@ test('an exact current alias refreshes when an older alias has expired', () => {
   assert.equal(closeRefreshUrlForSeenOffer(third, released.seen, released.listingRefreshUrls, released.urlRefreshLanguages), '');
 });
 
+test('an expired path-case sibling still receives the close day', () => {
+  const identity = { ats_provider: 'greenhouse', board_slug: 'acme', posting_id: '4012345' };
+  const key = computeListingFingerprint({ strong: identity }).listing_key;
+  const stored = 'https://jobs.example/Acme';
+  const current = 'https://jobs.example/acme';
+  const history = [
+    historyRow({
+      url: stored,
+      status: 'added',
+      first_seen: '2026-01-01',
+      listing_key: key,
+      language: 'en',
+      closes_at: '2026-02-01',
+    }),
+    historyRow({
+      url: 'https://jobs.example/other',
+      status: 'added',
+      first_seen: '2026-11-01',
+      listing_key: key,
+      language: 'en',
+    }),
+  ].join('\n');
+  const policy = { recheckAfterDays: 30, today: '2026-11-05' };
+  const tracker = (url) => [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | URL | Notes |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    `| 1 | 2026-10-01 | Acme | Analyst | 4/5 | Evaluated | | | ${url} | |`,
+  ].join('\n');
+  const released = collectSeenUrls({ scanHistoryText: history }, policy);
+  const job = { url: current, listingIdentity: identity, language: 'en', closesAt: '2026-07-07' };
+  const refreshUrl = closeRefreshUrlForSeenOffer(job, released.seen, released.listingRefreshUrls, released.urlRefreshLanguages);
+  const onStored = alignCloseRefreshOffers(
+    [{ ...job, url: refreshUrl }],
+    history,
+    policy,
+    { applicationsText: tracker(stored) },
+  );
+  assert.equal(onStored[0].url, stored);
+  const onExact = alignCloseRefreshOffers(
+    [{ ...job, url: refreshUrl }],
+    history,
+    policy,
+    { applicationsText: tracker(current) },
+  );
+  assert.equal(onExact[0].url, current);
+});
+
 

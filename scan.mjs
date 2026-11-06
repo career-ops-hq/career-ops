@@ -1884,7 +1884,8 @@ function pinningRefreshUrls(historyText, policy) {
     const row = parseScanHistoryLine(line);
     if (!row.url) continue;
     const status = row.status || 'added';
-    if (!shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy)) continue;
+    const pinned = shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy);
+    if (!pinned && status !== 'added') continue;
     rememberRefreshUrl(urls, row.url, refreshLanguage(row.url, row.language));
   }
   return urls;
@@ -1910,12 +1911,15 @@ function trackerRefreshUrls(pipelineText, applicationsText) {
 }
 
 function pickRefreshUrl(rows, offer, language) {
-  const matches = (rows || []).filter((row) => sameRefreshLanguage(language, row.language));
-  if (!matches.length) return { decided: false, exact: false, url: '' };
+  const all = rows || [];
   const offerKey = normalizeUrl(offer?.url);
-  const primaries = matches.filter((row) => row.primary);
-  const exactPrimary = primaries.find((row) => normalizeUrl(row.url) === offerKey);
+  const exactPrimary = all.find((row) => row.primary
+    && normalizeUrl(row.url) === offerKey
+    && (!row.language.length || sameRefreshLanguage(language, row.language)));
   if (exactPrimary) return { decided: true, exact: true, url: exactPrimary.url };
+  const matches = all.filter((row) => sameRefreshLanguage(language, row.language));
+  if (!matches.length) return { decided: false, exact: false, url: '' };
+  const primaries = matches.filter((row) => row.primary);
   if (primaries.length === 1) return { decided: true, exact: false, url: primaries[0].url };
   if (primaries.length > 1) return { decided: true, exact: false, url: '' };
   const exact = matches.find((row) => normalizeUrl(row.url) === offerKey);
