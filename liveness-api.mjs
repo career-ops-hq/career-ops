@@ -38,6 +38,7 @@
 
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { parseWwrFeed } from './providers/weworkremotely.mjs';
+import { hireHiveTenantOf } from './providers/hirehive.mjs';
 import { ZOHO_HOST_RE, isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
 import { HOST_RE as ULTIPRO_HOST_RE, extractCandidateOpportunityDetail } from './providers/ultipro.mjs';
 import { VEJ_KEY_MONITOR } from './providers/vdab.mjs';
@@ -310,6 +311,33 @@ const ATS_PROVIDERS = [
       let html;
       try { html = await res.text(); } catch { return null; }
       return classifyZohoPostingPage(html, id);
+    },
+  },
+  {
+    id: 'hirehive',
+    // <tenant>.hirehive.com/<title-slug>-<shortid> reads the tenant's per-posting
+    // v2 API (`job_<shortid>`); /job/<number>[/<title-slug>] reads the v1 API by
+    // that number. Both answer 200 with the posting and 404 with a JSON
+    // `message`. The posting page says "This job is no longer available." for
+    // an unpublished posting, which is the API's "Job is not published"; the
+    // other messages ("Job not found", "Company not found", "Job does not match
+    // company") do not prove a posting closed, so they stay inconclusive.
+    match(u) {
+      const tenant = hireHiveTenantOf(u.hostname);
+      if (!tenant) return null;
+      const host = `${tenant}.hirehive.com`;
+      const byNumber = u.pathname.match(/^\/job\/(\d+)(?:\/[^/]*)?\/?$/);
+      if (byNumber) return { host, version: 'v1', id: byNumber[1] };
+      const bySlug = u.pathname.match(/^\/[^/]*-([A-Za-z0-9]+)\/?$/);
+      return bySlug ? { host, version: 'v2', id: `job_${bySlug[1]}` } : null;
+    },
+    api: ({ host, version, id }) => `https://${host}/api/${version}/jobs/${id}`,
+    interpretStatuses: [200, 404],
+    api404Authoritative: false,
+    async interpret(res, { id }) {
+      let json;
+      try { json = await res.json(); } catch { return null; }
+      return classifyHireHivePosting(json, id, res.status);
     },
   },
   {
@@ -893,6 +921,23 @@ export function classifyVdabVacancy(json, id, httpStatus = 200) {
 }
 
 /**
+ * Classify one HireHive per-posting API answer (see the `hirehive` entry).
+ * A 200 counts only when the body is the posting the URL names.
+ * @param {any} json
+ * @param {string} id - `job_<shortid>` (v2) or the posting number (v1)
+ * @param {number} httpStatus
+ */
+export function classifyHireHivePosting(json, id, httpStatus = 200) {
+  if (httpStatus === 404) {
+    return json?.message === 'Job is not published'
+      ? { result: 'expired', code: 'hirehive_unpublished', reason: 'HireHive API: "Job is not published" (the posting page says the job is no longer available)' }
+      : null;
+  }
+  if (httpStatus !== 200 || !json || String(json.id) !== String(id) || typeof json.title !== 'string' || !json.title.trim()) return null;
+  return { result: 'active', code: 'hirehive_api_ok', reason: 'HireHive API returns the published posting (live)' };
+}
+
+/**
  * Decide liveness for one Zoho Recruit posting from its own page.
  * Pure + deterministic (no I/O), mirroring classifyAshbyBoard.
  *
@@ -1045,11 +1090,12 @@ export function isAtsPosting(url) {
 // `Description`.
 // Workable canonical and share links expose description, requirements and benefits
 // on the per-posting v2 API, after the existing guarded account-resolution hop.
+// HireHive's per-posting API carries the description HTML.
 // Microsoft and LinkedIn are on ATS_PROVIDERS
 // for liveness only — their public endpoints answer search/status, never body
 // text — so they are deliberately excluded here; see fetch-jd.mjs / the
 // fetch*Jd() family in browser-extract.mjs for the per-provider fetchers.
-export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters', 'zoho-recruit', 'workable', 'workable-short', 'ultipro']);
+export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters', 'zoho-recruit', 'workable', 'workable-short', 'ultipro', 'hirehive']);
 
 /**
  * Zero-token liveness check via the posting's ATS API.
