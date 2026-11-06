@@ -140,7 +140,7 @@ async function blockedAmong(page: Page, candidates: OpenPage[]): Promise<string 
 // Consent can leave another tab open. Only the main page, a new tab, or a tab
 // whose URL changed during this Apply action can refuse the posting. A click
 // can open its popup after click() returns, so that path looks a second time.
-async function blockedAfterAction(page: Page, before: Map<OpenPage, string>, retry: boolean): Promise<string | null> {
+export async function blockedAfterAction(page: Page, before: Map<OpenPage, string>, retry: boolean): Promise<string | null> {
   const read = () => {
     const now = [page, ...contextPages(page)];
     const seen = new Set<OpenPage>();
@@ -162,7 +162,7 @@ async function blockedAfterAction(page: Page, before: Map<OpenPage, string>, ret
  *  (NEVER a submit) to reveal the form. If it's an <a> with an application href,
  *  NAVIGATE there directly (robust vs popups). Returns true if it acted.
  *  A Workday, iCIMS, or UKG href is returned as `{ blocked }` and is not opened. */
-export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: string }> {
+export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: string } | { followed: Map<OpenPage, string> }> {
   try {
     // 1) Most reliable: an <a> linking straight to a known ATS application (e.g.
     //    openai.com → jobs.ashbyhq.com/…/application). Navigate there in-tab.
@@ -176,7 +176,7 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
         await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
         const landed = await blockedAfterAction(page, before, false);
         if (landed) return { blocked: landed };
-        return true;
+        return { followed: before };
       }
     }
     // 2) Otherwise click a visible Apply CTA (never a submit). dropNewTabs() has
@@ -195,7 +195,7 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
       await t.click({ timeout: 3000 }).catch(() => {});
       const landed = await blockedAfterAction(page, before, true);
       if (landed) return { blocked: landed };
-      return true;
+      return { followed: before };
     }
   } catch {
     /* ignore */

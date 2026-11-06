@@ -5,7 +5,7 @@ import { chromium, type Browser, type BrowserContext, type Page, type Frame, typ
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
-import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
+import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
@@ -285,16 +285,17 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     const trigger = await tryApplyTrigger(page);
     // The Apply control points at Workday, iCIMS, or UKG. Close this window
     // instead of following it or handing the page to the drive agent.
-    if (trigger && typeof trigger === "object") {
+    if (trigger && typeof trigger === "object" && "blocked" in trigger) {
       const hit = await unsupportedInAppAts(trigger.blocked);
       await context.close().catch(() => {});
       if (SESSIONS.size === 0) scheduleIdleClose();
       if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit.label) };
-    } else if (trigger) {
+    } else if (trigger && typeof trigger === "object" && "followed" in trigger) {
       await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
       await page.waitForTimeout(800);
       await dropNewTabs(page);
-      const lateAts = await unsupportedInAppAts(page.url());
+      const lateUrl = await blockedAfterAction(page, trigger.followed, false);
+      const lateAts = lateUrl ? await unsupportedInAppAts(lateUrl) : null;
       if (lateAts) {
         await context.close().catch(() => {});
         if (SESSIONS.size === 0) scheduleIdleClose();

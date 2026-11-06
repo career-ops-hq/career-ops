@@ -223,7 +223,8 @@ test("tryApplyTrigger still opens a Greenhouse application link", async () => {
   const greenhouse = "https://boards.greenhouse.io/acme/jobs/123";
   const { page, gotos, clicks } = pageForTrigger({ atsHref: greenhouse });
   const acted = await tryApplyTrigger(page);
-  assert.equal(acted, true);
+  assert.equal(acted.blocked, undefined);
+  assert.ok(acted.followed);
   assert.deepEqual(gotos, [greenhouse]);
   assert.deepEqual(clicks, []);
 });
@@ -278,6 +279,7 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
   let current = careerUrl;
   let applyClicked = false;
   let pendingLate = false;
+  let popupHref = "";
   const popupPages = [];
   const extraPages = options.extraPages ?? [];
   const frame = {
@@ -317,6 +319,14 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
       if (pendingLate) {
         current = options.redirectTo;
         pendingLate = false;
+      }
+      if (applyClicked && options.popupBlankThen) {
+        if (popupPages.length === 0) {
+          popupHref = "about:blank";
+          popupPages.push({ url: () => popupHref });
+        } else if (popupHref === "about:blank") {
+          popupHref = options.popupBlankThen;
+        }
       }
       if (applyClicked && options.popupOnWait && options.popupUrl && popupPages.length === 0) {
         popupPages.push({ url: () => options.popupUrl });
@@ -455,6 +465,23 @@ describe("openSession closes a career page whose Apply link is a blocked ATS", {
     assert.equal(result.unsupported.vendor, "workday");
     assert.equal(result.unsupported.postingUrl, landed);
     assert.equal(result.message, MESSAGE.Workday);
+  });
+
+  test("an Apply click whose popup is blank at the first look and lands on iCIMS later is refused", async () => {
+    const career = "https://careers.example.com/jobs/1";
+    const popup = "https://careers-acme.icims.com/jobs/9";
+    const closed = [];
+    globalThis.__applyCareerPage = () => careerPage(career, null, closed, {
+      noAtsLink: true,
+      applyClick: true,
+      popupBlankThen: popup,
+    });
+    const result = await openSession(career);
+    assert.deepEqual(closed, [true]);
+    assert.equal(result.id, undefined);
+    assert.equal(result.unsupported.vendor, "icims");
+    assert.equal(result.unsupported.postingUrl, popup);
+    assert.equal(result.message, MESSAGE.iCIMS);
   });
 
   test("an Apply click that opens an iCIMS popup after the click is refused", async () => {
