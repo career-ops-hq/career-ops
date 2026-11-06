@@ -31,12 +31,12 @@ export function parsePlanUsage(text) {
 }
 
 /**
- * Candidate binaries, in order: `claude` on PATH, then the newest binary the
- * Claude desktop app bundles (macOS layout:
- * ~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app/Contents/MacOS/claude).
+ * The binaries the Claude desktop app bundles, newest version first (macOS
+ * layout: ~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app/Contents/MacOS/claude).
+ * Finding `claude` itself is the caller's job: findBin() in clis.ts.
  */
-export async function candidateBinaries({ fs = fsPromises, home = os.homedir() } = {}) {
-  const out = ["claude"];
+export async function desktopBinaries({ fs = fsPromises, home = os.homedir() } = {}) {
+  const out = [];
   const base = path.join(home, "Library", "Application Support", "Claude", "claude-code");
   try {
     const versions = (await fs.readdir(base)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
@@ -61,28 +61,6 @@ export async function candidateBinaries({ fs = fsPromises, home = os.homedir() }
     /* no desktop app */
   }
   return out;
-}
-
-/**
- * Resolve a bare command name to a file on PATH, honouring PATHEXT on Windows,
- * so prepareCliLaunch can see the npm shim (or native .exe) it must unwrap.
- * Resolves to null when nothing matches.
- */
-export async function resolveOnPath(name, { env = process.env, platform = process.platform, fs = fsPromises } = {}) {
-  if (path.isAbsolute(name)) return name;
-  const exts = platform === "win32" ? ["", ...(env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";")] : [""];
-  for (const dir of (env.PATH || "").split(path.delimiter).filter(Boolean)) {
-    for (const ext of exts) {
-      const file = path.join(dir, name + ext);
-      try {
-        await fs.access(file);
-        return file;
-      } catch {
-        /* keep looking */
-      }
-    }
-  }
-  return null;
 }
 
 // This spawns directly rather than through spawnHeadlessCli, like
@@ -120,14 +98,12 @@ async function run(bin, { exec = execFile } = {}) {
 }
 
 /**
- * Ask the Claude CLI for plan usage. Resolves to the parsed rows, or null when
- * no binary answers or the output is not recognised (API-key users, for one).
+ * Ask the Claude CLI for plan usage, trying each candidate path in order.
+ * Resolves to the parsed rows, or null when no binary answers or the output is not recognised (API-key users, for one).
  */
-export async function readPlanUsage({ candidates, exec, resolve = resolveOnPath } = {}) {
-  for (const candidate of candidates ?? (await candidateBinaries())) {
+export async function readPlanUsage({ candidates, exec } = {}) {
+  for (const bin of candidates ?? (await desktopBinaries())) {
     try {
-      const bin = await resolve(candidate);
-      if (!bin) continue;
       const stdout = await run(bin, { exec });
       const parsed = parsePlanUsage(JSON.parse(stdout)?.result);
       if (parsed) return parsed;

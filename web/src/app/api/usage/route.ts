@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import os from "node:os";
 import path from "node:path";
 import { createUsageScanner } from "@/lib/claude-usage-scan.mjs";
-import { readPlanUsage } from "@/lib/claude-plan-usage.mjs";
+import { desktopBinaries, readPlanUsage } from "@/lib/claude-plan-usage.mjs";
+import { findBin } from "@/lib/clis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +33,10 @@ const PLAN_GRACE_MS = 1500;
 async function plan(): Promise<Plan> {
   if (planCache && Date.now() - planCache.at < PLAN_TTL_MS) return planCache.plan;
   if (!planInFlight) {
-    planInFlight = readPlanUsage()
+    // `claude` via the same lookup the run routes use (PATH plus the usual install
+    // dirs, PATHEXT on Windows), then the binary the Claude desktop app bundles.
+    planInFlight = desktopBinaries()
+      .then((desktop: string[]) => readPlanUsage({ candidates: [findBin("claude"), ...desktop].filter((b): b is string => !!b) }))
       .then((p: Plan) => {
         planCache = { at: Date.now(), plan: p };
         return p;

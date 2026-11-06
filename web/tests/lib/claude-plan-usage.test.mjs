@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parsePlanUsage, candidateBinaries, readPlanUsage, resolveOnPath } from "../../src/lib/claude-plan-usage.mjs";
+import { parsePlanUsage, desktopBinaries, readPlanUsage } from "../../src/lib/claude-plan-usage.mjs";
 
 const SAMPLE = [
   "You are currently using your subscription to power your Claude Code usage",
@@ -34,7 +34,7 @@ test("unrecognised or non-string output is null", () => {
   assert.equal(parsePlanUsage(undefined), null);
 });
 
-test("finds the newest desktop-bundled binary after PATH", async () => {
+test("finds the desktop-bundled binaries, newest first", async () => {
   const home = mkdtempSync(join(tmpdir(), "co-plan-"));
   try {
     for (const v of ["2.1.9", "2.1.317"]) {
@@ -42,19 +42,19 @@ test("finds the newest desktop-bundled binary after PATH", async () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "claude"), "");
     }
-    const c = await candidateBinaries({ home });
-    assert.equal(c[0], "claude");
-    assert.match(c[1], /2\.1\.317/);
-    assert.match(c[2], /2\.1\.9/);
+    const c = await desktopBinaries({ home });
+    assert.equal(c.length, 2);
+    assert.match(c[0], /2\.1\.317/);
+    assert.match(c[1], /2\.1\.9/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("no desktop app: only PATH is tried", async () => {
+test("no desktop app: no candidates", async () => {
   const home = mkdtempSync(join(tmpdir(), "co-plan-"));
   try {
-    assert.deepEqual(await candidateBinaries({ home }), ["claude"]);
+    assert.deepEqual(await desktopBinaries({ home }), []);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -63,25 +63,8 @@ test("no desktop app: only PATH is tried", async () => {
 test("falls through a missing binary to the next, and to null when none answer", async () => {
   const exec = (bin, _a, _o, cb) =>
     bin === "claude" ? cb(Object.assign(new Error("not found"), { code: "ENOENT" })) : cb(null, JSON.stringify({ result: SAMPLE }));
-  const got = await readPlanUsage({ candidates: ["claude", "/desktop/claude"], exec, resolve: (b) => b });
+  const got = await readPlanUsage({ candidates: ["claude", "/desktop/claude"], exec });
   assert.equal(got.rows.length, 3);
-  const none = await readPlanUsage({ candidates: ["claude"], exec: (_b, _a, _o, cb) => cb(new Error("x")), resolve: (b) => b });
+  const none = await readPlanUsage({ candidates: ["claude"], exec: (_b, _a, _o, cb) => cb(new Error("x")) });
   assert.equal(none, null);
-});
-
-test("resolves a bare name on PATH, with PATHEXT on Windows, and skips an unresolved candidate", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "co-path-"));
-  try {
-    writeFileSync(join(dir, "claude"), "");
-    writeFileSync(join(dir, "other.cmd"), "");
-    assert.equal(await resolveOnPath("claude", { env: { PATH: dir }, platform: "linux" }), join(dir, "claude"));
-    assert.equal(await resolveOnPath("other", { env: { PATH: dir, PATHEXT: ".exe;.cmd" }, platform: "win32" }), join(dir, "other.cmd"));
-    assert.equal(await resolveOnPath("missing", { env: { PATH: dir }, platform: "linux" }), null);
-    let ran = false;
-    const got = await readPlanUsage({ candidates: ["missing"], resolve: () => null, exec: () => { ran = true; } });
-    assert.equal(got, null);
-    assert.equal(ran, false);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 });
