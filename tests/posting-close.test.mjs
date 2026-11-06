@@ -49,6 +49,7 @@ test('a naive close instant stays on its date in a zone that would shift it', ()
 test('Z and a numeric offset use the UTC calendar day', () => {
   assert.equal(closesAtIso('2026-11-11T23:59:59Z'), '2026-11-11');
   assert.equal(closesAtIso('2026-11-11T23:59:59.000Z'), '2026-11-11');
+  assert.equal(closesAtIso('2026-11-11T23:59:59.9995Z'), '2026-11-11');
   assert.equal(closesAtIso('2026-11-11T23:59:59+00:00'), '2026-11-11');
   assert.equal(closesAtIso('2026-11-12T00:30:00+02:00'), '2026-11-11');
   assert.equal(closesAtIso('2026-11-12T00:30+02:00'), '2026-11-11');
