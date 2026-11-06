@@ -252,7 +252,7 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 
 ## Step 10 — Record the call on the tracker
 
-复盘保存后，把已确认的事实记录到这条申请上。把新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。展示该事实与画像中的那句话。`debrief-sync.mjs` 会拒绝含有分号（`;`）、制表符或换行的 `--dealbreaker` 值，整次调用随之中止。若那句话含有这类字符，告诉用户是哪个字符，并请用户给出不含该字符、意思不变的单行版本。不要自行删除字符或改写句子。然后询问 `Record this dealbreaker on the report and the tracker? [y/N]`。若回答是，把那句话（或用户给出的单行版本）作为 `--dealbreaker` 传入。若回答否，就省略。
+复盘保存后，把已确认的事实记录到这条申请上。把新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。展示该事实与画像中的那句话。`debrief-sync.mjs` 会拒绝含有分号（`;`）、制表符或换行的 `--dealbreaker` 值，整次调用随之中止。若那句话含有这类字符，告诉用户是哪个字符，并请用户给出不含该字符、意思不变的单行版本。不要自行删除字符或改写句子。用户给出的版本也要检查这三种字符，只要还含有其中任何一个，就再次请用户修改。然后询问 `Record this dealbreaker on the report and the tracker? [y/N]`。若回答是，把那句话（或用户给出的单行版本）作为 `--dealbreaker` 传入。若回答否，就省略。
 
 对每位点到名的人，询问 `Save this contact to data/contacts.tsv? [y/N]`。若回答是，传入姓名、给出的邮箱（如有），以及用户点明的类型（如有）。
 

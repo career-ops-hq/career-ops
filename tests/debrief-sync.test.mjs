@@ -385,9 +385,24 @@ check('Step 10 tells the agent how to record the call', () => {
 
 // #6541: debrief-sync.mjs refuses a --dealbreaker value with a semicolon, tab
 // or line break, so every Step 10 that passes the profile sentence must check
-// it first and ask the user for a safe one-line value, before the [y/N]
-// confirmation. Translated files carry the same check: the `;` marker and the
-// script name sit in the dealbreaker paragraph ahead of the prompt.
+// it first, ask the user for a safe one-line value, and check that value
+// again, all before the [y/N] confirmation. Each file names the three
+// characters, the one-line request and the re-check in its own language; a
+// new translation that passes --dealbreaker has to be added here.
+const DELIMITER_GUARD = {
+  'modes/interview/debrief.md': ['a tab', 'a line break', 'one-line version', 'ask again until it has none'],
+  'modes/de/interview/debrief.md': ['Tabulator', 'Zeilenumbruch', 'einzeilige Fassung', 'frag erneut'],
+  'modes/es/interview/debrief.md': ['tabulador', 'salto de línea', 'una sola línea', 'vuelve a pedirla'],
+  'modes/it/interview/debrief.md': ['tabulazione', 'a capo', 'una sola riga', "chiedine un'altra"],
+  'modes/ja/interview/debrief.md': ['タブ', '改行', '1行の文', '改めて求める'],
+  'modes/ko/interview/debrief.md': ['탭', '줄바꿈', '한 줄짜리', '다시 요청합니다'],
+  'modes/pl/interview/debrief.md': ['tabulator', 'nowej linii', 'jednowierszową', 'proś ponownie'],
+  'modes/pt/interview/debrief.md': ['tabulação', 'quebra de linha', 'uma única linha', 'peça de novo'],
+  'modes/ru/interview/debrief.md': ['табуляцией', 'переводом строки', 'однострочный', 'проси снова'],
+  'modes/ua/interview/debrief.md': ['табуляцією', 'новий рядок', 'однорядковий', 'просіть знову'],
+  'modes/zh/interview/debrief.md': ['制表符', '换行', '单行版本', '再次请用户修改'],
+};
+
 check('every Step 10 that passes --dealbreaker checks the delimiters before the prompt', () => {
   const modesDir = join(ROOT, 'modes');
   const files = ['modes/interview/debrief.md', ...readdirSync(modesDir, { withFileTypes: true })
@@ -395,18 +410,18 @@ check('every Step 10 that passes --dealbreaker checks the delimiters before the 
     .map((d) => `modes/${d.name}/interview/debrief.md`)
     .filter((rel) => existsSync(join(ROOT, rel)))];
   const affected = files.filter((rel) => readFileSync(join(ROOT, rel), 'utf8').includes('--dealbreaker'));
-  assert.ok(affected.includes('modes/interview/debrief.md'));
-  assert.ok(affected.includes('modes/ja/interview/debrief.md'), 'the Japanese debrief should pass --dealbreaker');
+  assert.deepEqual([...affected].sort(), Object.keys(DELIMITER_GUARD).sort(),
+    'every debrief that passes --dealbreaker needs an entry in DELIMITER_GUARD');
   for (const rel of affected) {
     const paragraph = readFileSync(join(ROOT, rel), 'utf8')
       .split(/\n\s*\n/)
       .find((p) => p.includes('`--dealbreaker`') && p.includes('[y/N]'));
     assert.ok(paragraph, `${rel}: no dealbreaker paragraph with a [y/N] prompt`);
-    const guard = paragraph.indexOf('`;`');
     const prompt = paragraph.indexOf('[y/N]');
-    assert.ok(guard >= 0, `${rel}: the dealbreaker paragraph does not name the semicolon`);
-    assert.ok(paragraph.indexOf('debrief-sync.mjs') >= 0 && paragraph.indexOf('debrief-sync.mjs') < prompt,
-      `${rel}: the delimiter check does not name debrief-sync.mjs before the prompt`);
-    assert.ok(guard < prompt, `${rel}: the delimiter check comes after the [y/N] prompt`);
+    for (const phrase of ['debrief-sync.mjs', '`;`', ...DELIMITER_GUARD[rel]]) {
+      const at = paragraph.indexOf(phrase);
+      assert.ok(at >= 0, `${rel}: the dealbreaker paragraph is missing ${phrase}`);
+      assert.ok(at < prompt, `${rel}: ${phrase} comes after the [y/N] prompt`);
+    }
   }
 });
