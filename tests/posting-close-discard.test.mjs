@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -96,6 +96,32 @@ function logNums(dir) {
   try { text = readFileSync(path, 'utf-8'); } catch { return []; }
   return text.split('\n').filter((line) => line && !line.startsWith('num\t')).map((line) => Number(line.split('\t')[0]));
 }
+
+test('--apply reads a newer close day under the history lock', { timeout: 30000 }, async () => {
+  const box = sandbox();
+  const { acquirePipelineLock } = await import('../pipeline-lock.mjs');
+  const lock = await acquirePipelineLock(box.history);
+  try {
+    const child = spawn(process.execPath, [join(ROOT, 'closing-soon.mjs'), '--discard-passed', '--apply', '--today', TODAY], {
+      cwd: box.dir,
+      env: box.env,
+    });
+    const done = new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', (code) => resolve(code));
+    });
+    const text = readFileSync(box.history, 'utf-8');
+    writeFileSync(box.history, `${text}${historyRow({ url: 'https://jobs.example/acme-exact', company: 'Acme', closes_at: '2026-12-01' })}\n`);
+    lock.release();
+    assert.equal(await done, 0);
+    const tracker = readFileSync(box.tracker, 'utf-8');
+    assert.equal(statusOf(tracker, 3), 'Evaluated');
+    assert.equal(statusOf(tracker, 1), 'Discarded');
+  } finally {
+    lock.release();
+    box.cleanup();
+  }
+});
 
 test('--apply leaves a row that is no longer Evaluated', () => {
   const box = sandbox();

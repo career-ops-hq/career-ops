@@ -62,6 +62,7 @@ import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { parseDate } from './lib/parse-date.mjs';
 import { closeDateForUrl, closeDatesByUrl } from './lib/posting-close.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { parseActiveInterviews, findColumn } from './process-quality.mjs';
@@ -563,42 +564,47 @@ function printDiscardPlan(matches, todayIso, apply, conflicts = []) {
   }
 }
 
-function discardPassed(args, today) {
+async function discardPassed(args, today) {
   const dataRoot = getCareerOpsRoot();
   const trackerPath = resolve((hasFlag(args, '--tracker') ? flagValue(args, '--tracker') : null) || resolveTrackerPath(dataRoot));
   const historyPath = scanHistoryPath(dataRoot);
-  const trackerMd = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
-  const historyText = existsSync(historyPath) ? readFileSync(historyPath, 'utf-8') : '';
-  const { matches, conflicts, identities } = rowsPastClose(trackerMd, {
-    today,
-    index: closeDatesByUrl(historyText),
-    lookup: loadStateLookup(),
-  });
   const apply = hasFlag(args, '--apply');
-  if (apply) {
-    const moved = [];
-    for (const n of matches) {
-      const child = spawnSync(process.execPath, [
-        join(CODE_ROOT, 'set-status.mjs'),
-        '--row', String(n),
-        'Discarded',
-        '--expect-row', identities.get(n),
-        '--expect-status', 'Evaluated',
-      ], {
-        cwd: CODE_ROOT,
-        encoding: 'utf-8',
-        env: { ...process.env, CAREER_OPS_TRACKER: trackerPath },
-      });
-      if (child.status !== 0) {
-        const detail = (child.stderr || child.stdout || '').trim();
-        if (moved.length) console.error(`Already moved to Discarded: ${moved.map((num) => `#${num}`).join(' ')}`);
-        console.error(detail || `set-status exited ${child.status} for #${n}`);
-        process.exit(child.status || 1);
+  const once = () => {
+    const trackerMd = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
+    const historyText = existsSync(historyPath) ? readFileSync(historyPath, 'utf-8') : '';
+    const { matches, conflicts, identities } = rowsPastClose(trackerMd, {
+      today,
+      index: closeDatesByUrl(historyText),
+      lookup: loadStateLookup(),
+    });
+    if (apply) {
+      const moved = [];
+      for (const n of matches) {
+        const child = spawnSync(process.execPath, [
+          join(CODE_ROOT, 'set-status.mjs'),
+          '--row', String(n),
+          'Discarded',
+          '--expect-row', identities.get(n),
+          '--expect-status', 'Evaluated',
+        ], {
+          cwd: CODE_ROOT,
+          encoding: 'utf-8',
+          env: { ...process.env, CAREER_OPS_TRACKER: trackerPath },
+        });
+        if (child.status !== 0) {
+          const detail = (child.stderr || child.stdout || '').trim();
+          if (moved.length) console.error(`Already moved to Discarded: ${moved.map((num) => `#${num}`).join(' ')}`);
+          console.error(detail || `set-status exited ${child.status} for #${n}`);
+          return child.status || 1;
+        }
+        moved.push(n);
       }
-      moved.push(n);
     }
-  }
-  printDiscardPlan(matches, isoDay(today), apply, conflicts);
+    printDiscardPlan(matches, isoDay(today), apply, conflicts);
+    return 0;
+  };
+  if (!apply) return once();
+  return withPipelineLock(historyPath, once);
 }
 
 if (isMainModule(import.meta.url)) {
@@ -654,8 +660,7 @@ if (isMainModule(import.meta.url)) {
   }
 
   if (hasFlag(args, '--discard-passed')) {
-    discardPassed(args, today);
-    process.exit(0);
+    process.exit(await discardPassed(args, today));
   }
 
   const dataRoot = getCareerOpsRoot();
