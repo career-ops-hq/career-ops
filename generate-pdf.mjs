@@ -58,6 +58,7 @@ import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, pageFormatForCountry, resolvePageFormat } from './lib/page-format.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
@@ -1651,7 +1652,7 @@ async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
   const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
   const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
-  const date = new Date().toISOString().slice(0, 10);
+  const date = localToday();
 
   mkdirSync(dirname(manifestPath), { recursive: true });
   // Read, supersede and write under one lock, and publish atomically. Every
