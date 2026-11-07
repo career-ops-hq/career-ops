@@ -89,7 +89,7 @@ test("loading transitions keep context and only latest requests settle Today", {
 
   await t.test("Follow-ups query transition retains page context", async (subtest) => {
     await page.goto(`${origin.origin}/followups`);
-    await page.locator("tbody tr").first().waitFor();
+    await page.locator('tbody[aria-busy="false"]').waitFor();
     const pending = gate();
     let held = false;
     subtest.after(async () => { pending.release(); await page.unrouteAll({ behavior: "wait" }); });

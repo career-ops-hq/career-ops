@@ -151,7 +151,7 @@ function codeRootNames(src) {
 function userLayerJoins(src) {
   const names = [...codeRootNames(src)].map((n) => n.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')).join('|');
   const USER_LAYER = new RegExp(
-    `(?:^|[^\\w$.])(?:path\\.)?(?:join|resolve)\\(\\s*(?:${names})\\s*,\\s*['"\`](?:data|interview-prep|reports|output|jds|documents)[/'"\`]`,
+    `(?:^|[^\\w$.])(?:path\\.)?(?:join|resolve)\\(\\s*(?:${names})\\s*,\\s*['"\`](?:data|interview-prep|reports|output|jds|documents|config)[/'"\`]`,
   );
   return src.split('\n').filter((line) => USER_LAYER.test(line));
 }
@@ -165,6 +165,8 @@ test('the code-root detector finds the binding whatever it is named', () => {
   // The data root and a system file under the code root are both fine.
   assert.equal(flagged("const DATA_ROOT = getCareerOpsRoot();\nconst T = join(DATA_ROOT, 'data', 'applications.md');"), 0);
   assert.equal(flagged("const ROOT = dirname(fileURLToPath(import.meta.url));\nconst S = join(ROOT, 'templates/states.yml');"), 0);
+  assert.equal(flagged("const ROOT = dirname(fileURLToPath(import.meta.url));\nconst P = join(ROOT, 'config', 'profile.yml');"), 1);
+  assert.equal(flagged("const DATA_ROOT = getCareerOpsRoot();\nconst P = join(DATA_ROOT, 'config', 'profile.yml');"), 0);
 });
 
 test('no analysis script derives a data path from its own directory', () => {

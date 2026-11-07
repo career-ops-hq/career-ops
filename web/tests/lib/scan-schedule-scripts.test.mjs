@@ -293,3 +293,54 @@ test("install creates data/ and does not run a tick", { skip }, () => withSandbo
   assert.ok(fs.statSync(dataDir).isDirectory());
   assert.equal(fs.existsSync(tick), false);
 }));
+
+// A Homebrew `node` reports a versioned Cellar path as process.execPath; `brew upgrade` deletes that folder.
+function fakeBrewNode(sb, { optVersion }) {
+  const prefix = path.join(fs.realpathSync(sb.dir), "brew");
+  const versions = ["1.0", "2.0"];
+  const execPaths = {};
+  for (const version of versions) {
+    const bin = path.join(prefix, "Cellar", "node", version, "bin");
+    fs.mkdirSync(bin, { recursive: true });
+    execPaths[version] = path.join(bin, "node");
+    // Reports its own Cellar path for the execPath probe and defers everything else to the real node.
+    fs.writeFileSync(
+      execPaths[version],
+      `#!/bin/sh\nif [ "$1" = "-e" ]; then printf '%s' '${execPaths[version]}'; else exec '${process.execPath}' "$@"; fi\n`,
+      { mode: 0o755 },
+    );
+  }
+  if (optVersion) {
+    fs.mkdirSync(path.join(prefix, "opt"), { recursive: true });
+    fs.symlinkSync(path.join(prefix, "Cellar", "node", optVersion), path.join(prefix, "opt", "node"));
+  }
+  const shim = path.join(sb.dir, "brew-shim");
+  fs.mkdirSync(shim);
+  fs.symlinkSync(execPaths["1.0"], path.join(shim, "node"));
+  return { prefix, cellarNode: execPaths["1.0"], optNode: path.join(prefix, "opt", "node", "bin", "node"), PATH: `${shim}${path.delimiter}${path.join(sb.dir, "bin")}${path.delimiter}${process.env.PATH}` };
+}
+
+test("install pins the Homebrew opt path so a brew upgrade does not break the schedule", { skip }, () => withSandbox((sb) => {
+  const brew = fakeBrewNode(sb, { optVersion: "1.0" });
+  const result = sb.run(sb.installScript, { PATH: brew.PATH });
+  assert.equal(result.status, 0, result.out);
+  const [line] = sb.cronLines();
+  assert.ok(line.includes(`'${brew.optNode}' 'web/scripts/scheduled-jobs-runner.mjs'`), line);
+  assert.ok(!line.includes("/Cellar/"), line);
+}));
+
+test("install keeps the Cellar path when the opt link points at another version", { skip }, () => withSandbox((sb) => {
+  const brew = fakeBrewNode(sb, { optVersion: "2.0" });
+  const result = sb.run(sb.installScript, { PATH: brew.PATH });
+  assert.equal(result.status, 0, result.out);
+  const [line] = sb.cronLines();
+  assert.ok(line.includes(`'${brew.cellarNode}' 'web/scripts/scheduled-jobs-runner.mjs'`), line);
+}));
+
+test("install keeps the Cellar path when there is no opt link", { skip }, () => withSandbox((sb) => {
+  const brew = fakeBrewNode(sb, { optVersion: null });
+  const result = sb.run(sb.installScript, { PATH: brew.PATH });
+  assert.equal(result.status, 0, result.out);
+  const [line] = sb.cronLines();
+  assert.ok(line.includes(`'${brew.cellarNode}' 'web/scripts/scheduled-jobs-runner.mjs'`), line);
+}));

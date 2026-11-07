@@ -5,9 +5,13 @@
 // `_registry.mjs` from loading this file as a provider.
 //
 // Each <item> carries <title>, <link>, <pubDate> and the plugin's own
-// <job_listing:company> / <job_listing:location>. The feed is small, flat XML,
-// so a tag extractor is enough; no XML dependency.
+// <job_listing:company> / <job_listing:location>, plus WordPress's
+// <description> (an excerpt) and <content:encoded> (the full post). The feed
+// is flat XML, so a tag extractor is enough; no XML dependency.
 import { decodeEntities } from './_html-entities.mjs';
+import { htmlToText } from './_html-to-text.mjs';
+
+/** @typedef {{title: string, url: string, company: string, location: string, postedAt?: number, description?: string}} WpJobFeedJob */
 
 // NaN-safe Date.parse - `|| undefined` would also coerce a valid epoch 0.
 function toEpochMs(value) {
@@ -41,7 +45,7 @@ export function wpJobFeedItems(xml) {
  * rejects (returns '') or that has no title is skipped.
  * @param {string[]} blocks - from wpJobFeedItems()
  * @param {(raw: string) => string} resolveUrl - validated absolute URL, or ''
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {WpJobFeedJob[]}
  */
 export function parseWpJobFeedItems(blocks, resolveUrl) {
   const jobs = [];
@@ -54,13 +58,25 @@ export function parseWpJobFeedItems(blocks, resolveUrl) {
     const company = tagText(item, "job_listing:company") || "";
     const location = tagText(item, "job_listing:location");
 
-    jobs.push({
+    /** @type {WpJobFeedJob} */
+    const job = {
       title,
       company,
       location,
       url,
       postedAt: toEpochMs(tagText(item, "pubDate")),
-    });
+    };
+    // The full post is in this same feed, so it costs no request.
+    // content_filter, country_eligibility_filter and visa_filter read it, and
+    // formatScanHistoryRow() fingerprints it. <description> is not a fallback:
+    // WordPress fills it with an excerpt (the post's first 55 words by
+    // default), and content_filter drops a posting whose text lacks a required
+    // keyword while it passes one with no text, so an excerpt would drop
+    // postings that name the keyword further down. Omitted when no text
+    // remains, the "no signal" path each of those filters handles.
+    const description = htmlToText(tagText(item, "content:encoded"));
+    if (description) job.description = description;
+    jobs.push(job);
   }
   return jobs;
 }

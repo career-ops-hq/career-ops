@@ -28,20 +28,35 @@
  */
 
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
+import { validateFlags } from './lib/cli-flags.mjs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia, unwrapReportUrlToken, parseMarkdownLinks,
+  extractReqNumber,
 } from './tracker-parse.mjs';
-import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor } from './tracker-utils.mjs';
+import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor, corporateFormTokensMatch, MIN_STEM_CHARS } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
-import { loadCanonicalStates } from './tracker-utils.mjs';
+import { loadCanonicalStates, stripStatusDecoration } from './tracker-utils.mjs';
 import { checkJdArchive } from './check-jd-archive.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
+
+const USAGE = `Usage: node verify-pipeline.mjs [--no-hints]
+
+Checks the tracker, reports and pipeline for integrity problems, and removes
+stale report-number reservations as it goes.
+
+  --no-hints   Leave out the one-line fix hint under each finding.
+  --help, -h   Show this help and exit without checking anything.`;
+
+// Before anything else: this script deletes stale sentinels as it checks, so
+// a run asked only for help, or started with a mistyped flag, must not reach it.
+validateFlags(process.argv.slice(2), ['--no-hints', '--help', '-h'], USAGE);
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
@@ -143,9 +158,9 @@ console.log(`\n📊 Checking ${entries.length} entries in applications.md\n`);
 // --- Check 1: Canonical statuses ---
 let badStatuses = 0;
 for (const e of entries) {
-  const clean = e.status.replace(/\*\*/g, '').trim().toLowerCase();
-  // Strip trailing dates
-  const statusOnly = clean.replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
+  // The bold and the date have checks of their own below. This one asks whether
+  // the state under them is known, as every reader resolves it.
+  const statusOnly = stripStatusDecoration(e.status).toLowerCase();
 
   if (!CANONICAL_STATUSES.has(statusOnly) && !ALIASES[statusOnly]) {
     error(`#${e.num}: Non-canonical status "${e.status}"`,
@@ -171,20 +186,78 @@ if (badStatuses === 0) ok('All statuses are canonical');
 
 // --- Check 2: Duplicates ---
 const companyRoleMap = new Map();
+const roleMap = new Map();
 let dupes = 0;
 for (const e of entries) {
   // Unicode-aware (#2393): an [a-z0-9] strip erases non-Latin scripts outright,
   // so every Japanese company and every Japanese role keyed to '' and unrelated
   // rows were reported as "possible duplicates".
-  const key = normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
+  // Company '?' (unknown end employer, #1596) means company+role alone cannot
+  // tell two postings apart: fold in Via (the agency), the only field that
+  // separates genuinely different anonymous openings.
+  const key = String(e.company || '').trim() === '?'
+    ? normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role) + '::' + normalizeTextKey(e.via)
+    : normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
+  if (String(e.company || '').trim() !== '?') {
+    const roleKey = normalizeTextKey(e.role);
+    const companyKey = normalizeTextKey(e.company);
+    const tokens = normalizeTextKey(e.company, ' ').split(' ').filter(Boolean);
+    if (!roleMap.has(roleKey)) roleMap.set(roleKey, new Map());
+    const buckets = roleMap.get(roleKey);
+    const bucketKey = companyKey.slice(0, MIN_STEM_CHARS);
+    if (!buckets.has(bucketKey)) buckets.set(bucketKey, []);
+    buckets.get(bucketKey).push({ entry: e, companyKey, tokens });
+  }
 }
 for (const [key, group] of companyRoleMap) {
   if (group.length > 1) {
-    warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`,
-      "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
-    dupes++;
+    let hasPossibleDuplicate = false;
+
+    for (let i = 0; i < group.length && !hasPossibleDuplicate; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const reqA = extractReqNumber(group[i].notes);
+        const reqB = extractReqNumber(group[j].notes);
+
+        // Distinct known requisition IDs mean distinct openings.
+        // Missing IDs are not enough to rule out a duplicate.
+        if (!reqA || !reqB || reqA === reqB) {
+          hasPossibleDuplicate = true;
+          break;
+        }
+      }
+    }
+
+    if (hasPossibleDuplicate) {
+      warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`,
+        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
+      dupes++;
+    }
+  }
+}
+// Exact groups above retain their existing warnings. Compare different company
+// keys pairwise as well: corporate-form twins otherwise never meet (#4421).
+// Do not cluster these matches: "Acme" matches both "Acme Solutions" and
+// "Acme Technologies", but the latter two must never be reported as one group.
+// The matcher guarantees matching names share this normalized prefix.
+// Cache keys and tokens once per row, then compare only within that bucket.
+for (const group of [...roleMap.values()].flatMap(buckets => [...buckets.values()])) {
+  for (let i = 0; i < group.length; i++) {
+    for (let j = i + 1; j < group.length; j++) {
+      const left = group[i];
+      const right = group[j];
+      if (left.companyKey === right.companyKey
+          || !corporateFormTokensMatch(left.tokens, right.tokens)) continue;
+      const a = left.entry;
+      const b = right.entry;
+      const reqA = extractReqNumber(a.notes);
+      const reqB = extractReqNumber(b.notes);
+      if (reqA && reqB && reqA !== reqB) continue;
+      warn(`Possible duplicates: #${a.num}, #${b.num} (${a.company} — ${a.role})`,
+        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
+      dupes++;
+    }
   }
 }
 if (dupes === 0) ok('No exact duplicates found');
@@ -322,7 +395,7 @@ const normalizeKey = normalizeTextKey;
 // skipped rather than grouped by company alone, which would false-positive
 // on two different roles at the same company.
 function extractRole(reportContent) {
-  const fence = reportContent.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+  const fence = machineSummarySection(reportContent).match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (fence) {
     const m = fence[1].match(/^role:\s*["']?(.+?)["']?\s*$/m);
     if (m && m[1].trim()) return m[1].trim();

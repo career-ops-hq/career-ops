@@ -262,12 +262,16 @@ export function parseCsbDate(raw, locale) {
 // jobLocationShort is an array of strings like "Karlovy Vary, CZE, 36004<br/>"
 // (one per work location). Strip the trailing <br/> and any other markup, drop
 // empties, and join multiple locations with " / ".
+//
+// The jobs API also appends a comma after the last field ("Bend, OR, USA, ").
+// clean() is shared with titles, which may legitimately end in a comma, so
+// the extra comma comes off here only. Interior commas and a postal code stay.
 /** @param {unknown} raw */
 export function cleanCsbLocation(raw) {
   const parts = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   const cleaned = [];
   for (const p of parts) {
-    const s = clean(String(p));
+    const s = clean(String(p)).replace(/,+$/, '').trim();
     if (s && !cleaned.includes(s)) cleaned.push(s);
   }
   return cleaned.join(' / ');

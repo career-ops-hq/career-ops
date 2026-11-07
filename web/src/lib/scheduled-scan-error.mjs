@@ -4,12 +4,14 @@
  * The scanners write progress to stderr before they fail (scan-ats-full.mjs
  * sends every human line there in --json mode, starting with its run header),
  * so the first stderr line is almost never the cause. The cause is the last
- * `Error:` / `Fatal:` / `SomethingError:` line; failing that, the last line
- * that is not a stack frame or Node's trailing version banner.
+ * `Error:` / `Fatal:` / `SomethingError:` line, with or without the bracketed
+ * code Node puts in its own errors (`Error [ERR_MODULE_NOT_FOUND]: ...`);
+ * failing that, the last line that is not a stack frame or Node's trailing
+ * version banner.
  */
 
 const MAX_LENGTH = 300;
-const CAUSE_LINE = /^(?:Fatal|[A-Za-z]*Error)\b\s*:/;
+const CAUSE_LINE = /^(?:Fatal|[A-Za-z]*Error)\b(?:\s*\[[A-Z][A-Z0-9_]*\])?\s*:/;
 const NOISE_LINE = /^\s+at\s|^Node\.js v\d/;
 
 export function stderrCause(stderr) {

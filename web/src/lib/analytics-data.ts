@@ -1,5 +1,6 @@
 import { parseReport } from "@/lib/format";
-import { readReport, type Application } from "@/lib/career-ops";
+import { requestReportReader, type Application } from "@/lib/career-ops";
+import { machineSummarySection } from "@/lib/machine-summary-section.mjs";
 
 export type AnalyticsApplication = Application & {
   archetype: string;
@@ -78,7 +79,9 @@ function fallbackLocation(text: string): string {
 
 function reportArchetype(content: string, fallbackArchetype: string): string {
   const meta = parseReport(content);
-  const machine = content.match(/##\s+Machine Summary[\s\S]*?```(?:yaml)?\s*([\s\S]*?)```/i)?.[1] ?? content;
+  // No summary, no YAML to read: the rest of the report includes the archived
+  // JD, whose own "archetype:" line is not the report's.
+  const machine = machineSummarySection(content).match(/^##\s+Machine Summary[\s\S]*?```(?:yaml)?\s*([\s\S]*?)```/i)?.[1] ?? "";
   const archetypeTable = content.match(/\*\*(?:Archetype detected|Archetype)\*\*\s*\|\s*([^|\n]+)/i)?.[1]?.replace(/\*+/g, "").trim() ?? "";
   return scalar(machine, "archetype_primary") || scalar(machine, "archetype") || archetypeTable || meta.fields.find((field) => field.label === "Archetype")?.value || fallbackArchetype;
 }
@@ -104,11 +107,8 @@ export function enrichAnalyticsApplication(app: Application, reportContent = "")
   };
 }
 
-function fromApplication(app: Application): AnalyticsApplication {
-  return enrichAnalyticsApplication(app, readReport(app.n)?.content ?? "");
-}
-
 /** Read-only enrichment of tracker rows for Analytics. */
 export function analyticsApplications(applications: Application[]): AnalyticsApplication[] {
-  return applications.map(fromApplication);
+  const readReport = requestReportReader();
+  return applications.map((app) => enrichAnalyticsApplication(app, readReport(app)?.content ?? ""));
 }

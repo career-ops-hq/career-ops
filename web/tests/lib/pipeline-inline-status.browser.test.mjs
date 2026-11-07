@@ -59,7 +59,8 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
     await edit(11).focus();
     await page.keyboard.press("Enter");
     assert.equal(await select(11).evaluate((element) => document.activeElement === element), true);
-    assert.equal(await page.getByRole("combobox").count(), 1);
+    // One editor open in the table. The score-floor menu above it is a combobox too.
+    assert.equal(await page.locator("tbody").getByRole("combobox").count(), 1);
     await select(11).selectOption("Evaluated");
     await row(11).getByRole("button", { name: /^Cancel editing/ }).click();
     await edit(11).waitFor();
@@ -89,6 +90,7 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
     });
     await edit(11).click();
     await select(11).selectOption("Applied");
+    await row(11).getByRole("button", { name: "Yes, mark applied" }).click();
     assert.equal(await select(11).isDisabled(), true);
     assert.equal(await row(11).getByRole("button", { name: /^Cancel editing/ }).isDisabled(), true);
     assert.equal(await edit(12).isEnabled(), true);
@@ -118,6 +120,7 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
     });
     await edit(11).click();
     await select(11).selectOption("Applied");
+    await row(11).getByRole("button", { name: "Yes, mark applied" }).click();
     await until(() => row(11).count().then((count) => count === 0));
     await until(() => tab("EVALUATED").innerText().then((text) => /^EVALUATED\s+1$/.test(text)));
     assert.match(await tab("APPLIED").innerText(), /^APPLIED\s+2$/);

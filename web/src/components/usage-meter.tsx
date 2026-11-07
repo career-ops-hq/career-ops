@@ -4,7 +4,17 @@ import { useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
 import { cn } from "@/lib/cn";
 
-type Usage = { window5h: { tokens: number }; window7d: { tokens: number } };
+type PlanRow = { label: string; percent: number; resets: string | null };
+type Usage = { window5h: { tokens: number }; window7d: { tokens: number }; plan?: { rows: PlanRow[] } | null };
+
+// "Current session" -> "Session", "Current week (all models)" -> "Week",
+// "Current week (Fable)" -> "Week · Fable".
+function planLabel(label: string): string {
+  const m = label.replace(/^Current\s+/i, "").match(/^(\w+)\s*(?:\((.*)\))?$/);
+  if (!m) return label;
+  const head = m[1][0].toUpperCase() + m[1].slice(1);
+  return m[2] && !/^all models$/i.test(m[2]) ? `${head} · ${m[2]}` : head;
+}
 
 // Soft total-activity budgets, including Claude cache reads. Persisted
 // `career-ops:usage-budget` values remain authoritative, so users who calibrated
@@ -59,10 +69,27 @@ export function UsageMeter() {
   if (cli && cli !== "claude") return null;
   if (!data) return null;
 
-  const rows = [
-    { label: "5h", tokens: data.window5h?.tokens ?? 0, budget: budget.w5 },
-    { label: "7d", tokens: data.window7d?.tokens ?? 0, budget: budget.w7 },
-  ];
+  // Real plan limits when the Claude CLI answered; otherwise the token estimate.
+  const planRows = data.plan?.rows ?? [];
+  const rows = planRows.length
+    ? planRows.map((r) => ({
+        label: planLabel(r.label),
+        pct: Math.min(100, Math.round(r.percent)),
+        text: `${Math.round(r.percent)}%`,
+        title: `${r.percent}% of your plan limit used${r.resets ? `, resets ${r.resets}` : ""}`,
+      }))
+    : [
+        { label: "5h", tokens: data.window5h?.tokens ?? 0, budget: budget.w5 },
+        { label: "7d", tokens: data.window7d?.tokens ?? 0, budget: budget.w7 },
+      ].map((r) => {
+        const pct = Math.min(100, Math.round((r.tokens / r.budget) * 100));
+        return {
+          label: r.label,
+          pct,
+          text: `${fmt(r.tokens)} · ${pct}%`,
+          title: `${r.tokens.toLocaleString()} tokens in the last ${r.label} (estimate; plan limits are unavailable)`,
+        };
+      });
 
   return (
     <div className="border-t border-border pt-3">
@@ -70,25 +97,20 @@ export function UsageMeter() {
         <Gauge className="size-3" /> Usage
       </div>
       <div className="space-y-2 px-1">
-        {rows.map((r) => {
-          const pct = Math.min(100, Math.round((r.tokens / r.budget) * 100));
-          return (
-            <div key={r.label} title={`${r.tokens.toLocaleString()} tokens in the last ${r.label}`}>
-              <div className="flex items-center justify-between text-[10px] text-faint">
-                <span>{r.label}</span>
-                <span className="tabular-nums">
-                  {fmt(r.tokens)} · {pct}%
-                </span>
-              </div>
-              <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-surface-hover">
-                <div
-                  className={cn("h-full rounded-full transition-all", tone(pct))}
-                  style={{ width: `${Math.max(pct, 2)}%` }}
-                />
-              </div>
+        {rows.map((r) => (
+          <div key={r.label} title={r.title}>
+            <div className="flex items-center justify-between text-[10px] text-faint">
+              <span>{r.label}</span>
+              <span className="tabular-nums">{r.text}</span>
             </div>
-          );
-        })}
+            <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-surface-hover">
+              <div
+                className={cn("h-full rounded-full transition-all", tone(r.pct))}
+                style={{ width: `${Math.max(r.pct, 2)}%` }}
+              />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

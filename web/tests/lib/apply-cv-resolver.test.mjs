@@ -80,12 +80,18 @@ async function withFixture(files, fn) {
     }
   }
   const prev = process.env.CAREER_OPS_ROOT;
+  const prevCode = process.env.CAREER_OPS_CODE_ROOT;
   process.env.CAREER_OPS_ROOT = root;
+  // The stub tracker-utils.mjs below stands in for the code checkout, where
+  // pdf-index.ts loads it from; the temp dir is both roots here.
+  process.env.CAREER_OPS_CODE_ROOT = root;
   try {
     return await fn(outputDir);
   } finally {
     if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = prev;
+    if (prevCode === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = prevCode;
     rmSync(root, { recursive: true, force: true });
   }
 }
@@ -144,6 +150,15 @@ test('generated CV uses the linked report identity when its application number d
     assert.equal(await resolveTailoredCv(undefined, '309'), first.paths.finalPdf);
     assert.equal(await resolveTailoredCv(undefined, '310'), second.paths.finalPdf);
     assert.equal(await resolveTailoredCv(undefined, '0309'), first.paths.finalPdf);
+
+    writeFileSync(join(root, 'data', 'applications.md'), [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      '| 309 | 2026-07-01 | Acme | Engineer | 4.5/5 | Evaluated | | [report](../reports/018-acme-2026-07-01.md) | |',
+      '| 310 | 2026-07-01 | Acme | Manager | 4.5/5 | Evaluated | | [report](../reports/019-acme-2026-07-01.md) | |',
+    ].join('\n'));
+    assert.equal(await resolveTailoredCv(undefined, '309'), first.paths.finalPdf);
+    assert.equal(await resolveTailoredCv(undefined, '310'), second.paths.finalPdf);
   });
 });
 
@@ -183,6 +198,35 @@ test('resolveTailoredCv: a cover-*.pdf is never returned, even if newer than the
     async (outputDir) => {
       const result = await resolveTailoredCv('Acme');
       assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    }
+  );
+});
+
+test('resolveTailoredCv: an over-budget .overflow.pdf draft is never returned, even though it is newer than the CV', async () => {
+  // generate-pdf.mjs keeps a render that ran over its page budget as a sibling
+  // {name}.overflow.pdf (then .overflow-2.pdf, ...) and writes it AFTER the
+  // deliverable, so newest-first alone would hand the apply flow the version
+  // the budget rejected.
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', -60000],
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow.pdf', 0],
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow-2.pdf', 0],
+    ],
+    async (outputDir) => {
+      const result = await resolveTailoredCv('Acme');
+      assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    }
+  );
+});
+
+test('resolveTailoredCv: a company with only an over-budget draft has no tailored CV', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow.pdf', 0],
+    ],
+    async () => {
+      assert.equal(await resolveTailoredCv('Acme'), null);
     }
   );
 });
