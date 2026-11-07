@@ -283,6 +283,17 @@ try {
   if (/lists no child sitemaps/.test(emptyIndexErr)) pass('an index with no <sitemap> entries throws (only an empty <urlset> is an empty board)');
   else fail(`empty sitemapindex err=${emptyIndexErr}`);
 
+  const stripCases = [
+    ['a<!-- x -->b', 'ab'],
+    ['a<!--<!-- x -->-->b', 'a-->b'],
+    ['a<!-- x --><!-- y -->b', 'ab'],
+    ['<<!-- -->!-- x', '<!-- x'],
+    ['a<!-- never closed <urlset>', 'a'],
+  ];
+  const stripOk = stripCases.every(([input, want]) => mod.stripXmlComments(input) === want);
+  if (stripOk) pass('stripXmlComments removes comments in one linear pass; an unterminated comment drops the rest');
+  else fail(`stripXmlComments=${JSON.stringify(stripCases.map(([i]) => mod.stripXmlComments(i)))}`);
+
   let commentErr = '';
   try { mod.parseSitemapDocument('<urlset><url><loc>https://careers.example.com/jobs/1/a/</loc></url><!-- </urlset> -->'); }
   catch (err) { commentErr = err.message; }

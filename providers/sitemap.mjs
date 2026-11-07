@@ -211,6 +211,25 @@ function locOf(block) {
 }
 
 /**
+ * Remove XML comments with a linear scan (not a regex replace, which can
+ * leave a `<!--` behind when comments abut or nest). An unterminated `<!--`
+ * drops the rest of the document, so a root it swallowed reads as truncated.
+ * @param {string} xml
+ */
+export function stripXmlComments(xml) {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = xml.indexOf('<!--', i);
+    if (open === -1) return out + xml.slice(i);
+    out += xml.slice(i, open);
+    const close = xml.indexOf('-->', open + 4);
+    if (close === -1) return out;
+    i = close + 3;
+  }
+}
+
+/**
  * Classify and read one sitemap document.
  *
  * @param {unknown} raw
@@ -226,7 +245,7 @@ export function parseSitemapDocument(raw) {
   }
   // XML comments are not markup: a `<url>` or `</urlset>` inside one must not
   // count as an entry or close a truncated root.
-  const xml = raw.replace(/<!--[\s\S]*?-->/g, '');
+  const xml = stripXmlComments(raw);
   // A root that opens but never closes is a truncated body, not a short
   // board (sitemaps.org requires the closing tag; join.mjs applies the same
   // rule to its company sitemap). A self-closing empty root is complete.
