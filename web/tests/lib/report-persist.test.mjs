@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, existsSync, mkdirSync, writeFileSync, unlinkSync, openSync, closeSync, fstatSync, lstatSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -502,15 +502,18 @@ test("persistEvaluation: a failed addition write removes the new report and rele
   const reportPath = join(root, "reports", "035-acme-ai-2026-08-04.md");
   const fsImpl = {
     mkdirSync,
-    existsSync,
+    closeSync,
+    fstatSync,
+    lstatSync,
     unlinkSync,
-    writeFileSync(file, data, enc) {
+    writeFileSync,
+    openSync(file, flags) {
       if (String(file).endsWith(".tsv")) {
         const err = new Error("tracker additions dir is not writable");
         err.code = "EACCES";
         throw err;
       }
-      writeFileSync(file, data, enc);
+      return openSync(file, flags);
     },
   };
   const { spawnFn, calls } = makeRouterSpawn({
