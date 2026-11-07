@@ -68,14 +68,16 @@ test('Explore add preserves a valid posting date in pipeline and scan history', 
   fs.copyFileSync(todayPath, path.join(tmp, 'lib', 'local-today.mjs'));
 
   const original = fs.readFileSync(sourcePath, 'utf8');
-  const alias = 'import { rootScript } from "@/lib/career-ops";';
+  const alias = 'import { careerOpsRoot, rootScript } from "@/lib/career-ops";';
+  const profileAlias = 'import { coreProfileEnv } from "@/lib/core/profile-path.mjs";';
   const codeRootAlias = 'import { resolveCodeRoot } from "@/lib/core/code-root.mjs";';
-  for (const a of [alias, codeRootAlias]) {
+  for (const a of [alias, codeRootAlias, profileAlias]) {
     assert.equal(original.split(a).length - 1, 1,
       'The web writer import changed; update this test rather than testing a mock');
   }
   assert.match(original, /export function addOffersToPipeline\(/);
-  const shim = `const resolveCodeRoot = () => ${JSON.stringify(tmp)};\n`
+  const shim = `const careerOpsRoot = () => ${JSON.stringify(tmp)};\n`
+    + `const resolveCodeRoot = () => ${JSON.stringify(tmp)};\n`
     + `const rootScript = (name) => {\n`
     + `  if (name !== "scan") throw new Error("Unexpected script name: " + name);\n`
     + `  return ${JSON.stringify(scanPath)};\n};`;
@@ -91,7 +93,7 @@ test('Explore add preserves a valid posting date in pipeline and scan history', 
     );
   }
   const runtimePath = path.join(tmp, 'pipeline-for-test.mts');
-  fs.writeFileSync(runtimePath, original.replace(alias, shim).replace(codeRootAlias, ''), 'utf8');
+  fs.writeFileSync(runtimePath, original.replace(alias, shim).replace(codeRootAlias, '').replace(profileAlias, `import { coreProfileEnv } from ${JSON.stringify(pathToFileURL(path.join(repo, 'web/src/lib/core/profile-path.mjs')).href)};`), 'utf8');
   const webWriter = await import(pathToFileURL(runtimePath).href);
   const { parseInbox } = await import(pathToFileURL(pipelineReaderPath).href);
   const { parseScanHistoryLine } = await import(pathToFileURL(historyReaderPath).href);
