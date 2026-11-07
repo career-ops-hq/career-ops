@@ -67,6 +67,24 @@ test("pdfIndexEntryForReport treats a legacy row with no kind as the CV", () => 
   assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/cv-010-acme.pdf", html: null });
 });
 
+test("an untagged cover filename is a cover, and a declared cv still wins", () => {
+  const untagged = ["010\toutput/cover-010-acme.pdf\t\thtml\t2026-08-01"].join("\n");
+  assert.deepEqual(pdfIndexEntryForReport(untagged, 10), { found: false, path: null, html: null });
+  assert.deepEqual(pdfIndexEntryForReport(untagged, 10, "cover"), { found: true, path: "output/cover-010-acme.pdf", html: null });
+
+  const suffix = ["010\toutput/acme-role-cover.pdf\t\tletter\t2026-08-01"].join("\n");
+  assert.deepEqual(pdfIndexEntryForReport(suffix, 10), { found: false, path: null, html: null });
+
+  const mid = ["010\toutput/discover-weekly-brief.pdf\t\tletter\t2026-08-01"].join("\n");
+  assert.equal(pdfPathForReport(mid, 10), "output/discover-weekly-brief.pdf");
+
+  const prefixed = ["010\toutput/cv-covered-bridge.pdf\t\tletter\t2026-08-01"].join("\n");
+  assert.equal(pdfPathForReport(prefixed, 10), "output/cv-covered-bridge.pdf");
+
+  const declared = ["010\toutput/cover-010-acme.pdf\t\thtml\t2026-08-01\tcv"].join("\n");
+  assert.equal(pdfPathForReport(declared, 10), "output/cover-010-acme.pdf");
+});
+
 // A report with only a cover row has no CV. Reporting found:true with the cover
 // path is the exact substitution this whole test group exists to stop.
 test("pdfIndexEntryForReport reports no CV when the report has only a cover row", () => {

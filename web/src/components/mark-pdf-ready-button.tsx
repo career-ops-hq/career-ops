@@ -10,20 +10,23 @@ const PILL =
 export function MarkPdfReadyButton({
   reportNum,
   ready = false,
+  trackerMarked = false,
 }: {
   reportNum: number | null;
   ready?: boolean;
+  trackerMarked?: boolean;
 }) {
   const router = useRouter();
-  const [marked, setMarked] = useState(false);
-  const done = ready || marked;
+  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   if (reportNum == null) return null;
+  const settled = ready && trackerMarked;
+  const markedWithoutFile = (trackerMarked || saved) && !ready;
 
   async function mark() {
-    if (busy || done) return;
+    if (busy || settled || saved) return;
     setBusy(true);
     setError("");
     try {
@@ -37,7 +40,7 @@ export function MarkPdfReadyButton({
         setError(typeof body?.error === "string" ? body.error : "Could not mark the PDF ready.");
         return;
       }
-      setMarked(true);
+      setSaved(true);
       router.refresh();
     } catch {
       setError("Could not mark the PDF ready.");
@@ -48,19 +51,26 @@ export function MarkPdfReadyButton({
 
   return (
     <span className="inline-flex flex-col items-start gap-1">
-      <button
-        type="button"
-        onClick={mark}
-        disabled={busy || done}
-        className={
-          done
-            ? `${PILL} border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400`
-            : `${PILL} border-border text-muted hover:border-brand/40 hover:text-brand-text`
-        }
-      >
-        {done && <Check className="size-3.5" />}
-        {busy ? "Saving…" : done ? "PDF ready" : "Mark PDF ready"}
-      </button>
+      {markedWithoutFile ? (
+        <span className={`${PILL} border-border text-muted`}>Tracker marked</span>
+      ) : (
+        <button
+          type="button"
+          onClick={mark}
+          disabled={busy || settled || saved}
+          className={
+            settled
+              ? `${PILL} border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400`
+              : `${PILL} border-border text-muted hover:border-brand/40 hover:text-brand-text`
+          }
+        >
+          {settled && <Check className="size-3.5" />}
+          {busy ? "Saving…" : settled ? "PDF ready" : saved ? "Tracker marked" : "Mark PDF ready"}
+        </button>
+      )}
+      {markedWithoutFile && (
+        <span className="text-xs text-muted">Generate the tailored CV for this report. Marking the tracker again does not add that file.</span>
+      )}
       {error && <span className="text-xs text-red-500">{error}</span>}
     </span>
   );

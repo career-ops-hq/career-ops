@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Check, X, FileText, Loader2 } from "lucide-react";
@@ -9,6 +9,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { statusWriteError } from "@/lib/home/status-result.mjs";
+import { appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
 import type { Application } from "@/lib/career-ops";
 import type { CardReason } from "@/lib/machine-summary.mjs";
 
@@ -20,15 +21,21 @@ const DECISION_TONE: Record<string, string> = {
 };
 
 // Awaiting-decision row: a scored role with no terminal status. Primary action
-// opens the report (PDF + Apply live there). Skip / Applied still write status,
-// and onDecided lets the parent offer an undo once the card is gone.
+// opens the report (PDF + Apply live there). Skip writes immediately. Applied
+// asks before it writes. onDecided lets the parent offer an undo once the card is gone.
 export function DecisionCard({ app, reason, onDecided }: { app: Application; reason?: CardReason; onDecided?: (status: "Applied" | "Discarded") => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failedStatus, setFailedStatus] = useState<"Applied" | "Discarded" | null>(null);
+  const [askApplied, setAskApplied] = useState(false);
+  const appliedYesRef = useRef<HTMLButtonElement>(null);
   const submitting = useRef(false);
+  useEffect(() => {
+    if (!askApplied) return;
+    appliedYesRef.current?.focus();
+  }, [askApplied]);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
   const company = companyPresentation(app);
@@ -105,17 +112,49 @@ export function DecisionCard({ app, reason, onDecided }: { app: Application; rea
         >
           {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Skip
         </button>
-        <button
-          type="button"
-          disabled={!!busy}
-          onClick={() => setStatus("Applied")}
-          title="Record Applied without opening the apply flow"
-          className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-faint transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
-        >
-          {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-          Applied
-        </button>
+        {!askApplied && (
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={() => {
+              const gate = appliedWriteAllowed({ status: "Applied", confirmed: false });
+              if (!gate.write) setAskApplied(true);
+            }}
+            className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-faint transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
+          >
+            <Check className="size-3.5" />
+            Applied
+          </button>
+        )}
       </div>
+      {askApplied && (
+        <div role="alert" className="rounded-md border border-border bg-surface px-3 py-2">
+          <p className="text-xs text-foreground">{appliedWriteAllowed({ status: "Applied", confirmed: false }).prompt}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              ref={appliedYesRef}
+              type="button"
+              disabled={!!busy}
+              onClick={() => {
+                const gate = appliedWriteAllowed({ status: "Applied", confirmed: true });
+                if (gate.write) void setStatus("Applied");
+              }}
+              className="inline-flex items-center justify-center gap-1 rounded-md bg-brand px-2.5 py-1.5 text-xs font-medium text-brand-foreground disabled:opacity-60 max-sm:min-h-[44px]"
+            >
+              {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              {appliedWriteAllowed({ status: "Applied", confirmed: false }).yesLabel}
+            </button>
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => setAskApplied(false)}
+              className="text-xs text-muted hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
+            >
+              Not yet
+            </button>
+          </div>
+        </div>
+      )}
       {error && (
         <div role="alert" className="flex items-start gap-2 text-xs text-red-700 dark:text-red-400">
           <p className="min-w-0 flex-1">{error}</p>

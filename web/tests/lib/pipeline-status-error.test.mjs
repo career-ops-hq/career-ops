@@ -11,8 +11,9 @@ const source = readFileSync(
 
 test("a failed status save is shown when no rows are checked", () => {
   const toolbarAt = source.indexOf('visibleTab !== "INBOX" && selectedRows.length > 0 &&');
+  const confirmAt = source.indexOf('visibleTab !== "INBOX" && appliedAsk &&');
   const alertAt = source.indexOf('visibleTab !== "INBOX" && bulkError &&');
-  assert.ok(toolbarAt > 0 && alertAt > toolbarAt);
-  assert.equal(source.slice(toolbarAt, alertAt).includes('role="alert"'), false);
+  assert.ok(toolbarAt > 0 && confirmAt > toolbarAt && alertAt > confirmAt);
+  assert.equal(source.slice(toolbarAt, confirmAt).includes('role="alert"'), false);
   assert.match(source.slice(alertAt, alertAt + 220), /role="alert"/);
 });

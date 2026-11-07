@@ -6,6 +6,7 @@ import { Check, Pencil, X } from "lucide-react";
 import { CANONICAL_STATES, statusDot } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { saveStatus } from "@/lib/pipeline-status.mjs";
+import { appliedWriteAllowed, statusEditAction } from "@/lib/applied-confirm.mjs";
 
 // Status writeback control. Updates the existing tracker row (status cell) via
 // /api/status — never adds rows. Reverts on failure; confirms with the
@@ -33,6 +34,8 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
+  const [pendingApplied, setPendingApplied] = useState(false);
+  const pendingFrom = useRef("");
   const saving = useRef(false);
   const mounted = useRef(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -43,7 +46,10 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
   const label = applicationLabel ?? `application #${n}`;
 
   useEffect(() => {
-    if (!saving.current) setStatus(current);
+    if (!saving.current) {
+      setStatus(current);
+      setPendingApplied(false);
+    }
   }, [current]);
 
   useEffect(() => {
@@ -65,17 +71,21 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
 
   function cancel() {
     if (saving.current || heldPending) return;
+    setPendingApplied(false);
     setStatus(current);
     setEditing(false);
     setError("");
     requestAnimationFrame(() => pencil.current?.focus());
   }
 
-  async function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const next = e.target.value;
-    const prev = inline ? current : status;
-    if (saving.current || heldPending || next === prev) return;
-    const hadFocus = document.activeElement === select.current;
+  function declineApplied() {
+    if (saving.current || heldPending) return;
+    setPendingApplied(false);
+    setStatus(pendingFrom.current || current);
+    setError("");
+  }
+
+  async function commitChange(next: string, prev: string, hadFocus: boolean) {
     saving.current = true;
     setStatus(next);
     setBusy(true);
@@ -120,7 +130,39 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     }
   }
 
-  const shown = heldPending ? heldPending : inline && !busy ? current : status;
+  async function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const next = e.target.value;
+    const prev = pendingApplied ? pendingFrom.current : (inline ? current : status);
+    if (saving.current || heldPending) return;
+    const action = statusEditAction(next, prev);
+    if (action === "keep") {
+      setPendingApplied(false);
+      setStatus(current);
+      return;
+    }
+    if (action === "ask") {
+      pendingFrom.current = prev;
+      setStatus(next);
+      setPendingApplied(true);
+      setError("");
+      return;
+    }
+    setPendingApplied(false);
+    await commitChange(next, prev, document.activeElement === select.current);
+  }
+
+  async function confirmApplied() {
+    if (!pendingApplied || saving.current || heldPending) return;
+    const prev = pendingFrom.current;
+    const active = document.activeElement;
+    const hadFocus = active === select.current
+      || (active instanceof HTMLElement && Boolean(active.closest("[data-status-editor]")));
+    setPendingApplied(false);
+    await commitChange("Applied", prev, hadFocus);
+  }
+
+  const shown = heldPending ? heldPending : pendingApplied ? status : inline && !busy ? current : status;
+  const appliedAsk = appliedWriteAllowed({ status: "Applied", confirmed: false });
   const known = (CANONICAL_STATES as readonly string[]).includes(shown);
   const buttonClass = "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-brand-text focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50 max-sm:size-11";
   const control = (
@@ -146,7 +188,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     </select>
   );
   return (
-    <span className="inline-flex flex-wrap items-center gap-2" aria-busy={savingNow}>
+    <span className="inline-flex flex-wrap items-center gap-2" aria-busy={savingNow} data-status-editor="">
       {inline ? (editing || heldPending !== "") ? (
         <>
           {control}
@@ -169,6 +211,17 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
           <label htmlFor={id} className="text-xs text-faint">status</label>
           {control}
         </>
+      )}
+      {pendingApplied && (
+        <span className="inline-flex items-center gap-2">
+          <span className="text-xs text-foreground">{appliedAsk.prompt}</span>
+          <button type="button" onClick={() => void confirmApplied()} disabled={savingNow} className="text-xs font-medium text-brand-text disabled:opacity-60">
+            {appliedAsk.yesLabel}
+          </button>
+          <button type="button" onClick={declineApplied} disabled={savingNow} className="text-xs text-muted hover:text-foreground disabled:opacity-60">
+            Not yet
+          </button>
+        </span>
       )}
       {savingNow && <span role="status" className="text-xs text-faint">saving…</span>}
       {saved && (

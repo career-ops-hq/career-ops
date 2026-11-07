@@ -68,6 +68,7 @@ test("answerCopyItems follows the application-answers format and skips empty val
 
 test("reportNumberFor uses the report cell, then the filename, and never the tracker id when a row exists", () => {
   assert.equal(reportNumberFor("3", { report: "[012](reports/012-example.md)" }, "099-other.md"), 12);
+  assert.equal(reportNumberFor("3", { report: "[report](../reports/008-acme.md)" }, "008-acme.md"), 8);
   assert.equal(reportNumberFor("3", { report: "—" }, "008-example.md"), 8);
   assert.equal(reportNumberFor("3", { report: "—" }, null), null);
   assert.equal(reportNumberFor("4", null, null), 4);
