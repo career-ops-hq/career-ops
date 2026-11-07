@@ -80,6 +80,10 @@ export async function fromKnownApi(url, fetchJd) {
     // A delisted/closed posting is not a JD to rescue: report closure so the chain
     // stops and the runner skips the offer instead of scoring other text from the page.
     if (result.closed) return { closed: true, evidence: result.evidence };
+    // compactText marks a cut with one trailing ellipsis past the cap. That text
+    // is not the whole posting, and accepting it would beat the page's own full
+    // JSON-LD description with a partial one, so it is a miss.
+    if (result.text.length === 20_001 && result.text.endsWith('\u2026')) return null;
     const text = result.title ? `${result.title}\n\n${result.text}` : result.text;
     return { text, method: `ats-api:${result.ats}` };
   } catch {

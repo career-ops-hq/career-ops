@@ -205,7 +205,7 @@ export async function POST(req: Request) {
     // whole posting, so refuse here instead of trusting the prompt to stop it.
     if (isTruncatedJd(prefetch?.text)) {
       if (writeToken !== null) releaseTrackerWrite(writeToken);
-      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Paste the full job text instead. No AI run was started." }, { status: 422 });
+      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Evaluate it from your agent CLI with the job text pasted in (for example /career-ops, then paste the posting). No AI run was started." }, { status: 422 });
     }
     const prefetchedJd = prefetch?.text ?? null;
     const closedEvidence = prefetch?.closedEvidence ?? null;

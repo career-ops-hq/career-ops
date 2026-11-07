@@ -431,6 +431,8 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   }
   const viaClosed = await fromKnownApi('https://jobs.ashbyhq.com/a/1', async () => ({ text: 'x y z', closed: true, evidence: 'Ashby isListed: false', ats: 'ashby' }));
   const viaOpen = await fromKnownApi('https://jobs.ashbyhq.com/a/1', async () => ({ text: 'x y z', ats: 'ashby' }));
+  const viaCapped = await fromKnownApi('https://jobs.ashbyhq.com/a/1', async () => ({ text: 'x'.repeat(20_000) + '\u2026', ats: 'ashby' }));
+  if (viaCapped === null) pass('fromKnownApi treats a capped (truncated) ATS result as a miss'); else fail(`fromKnownApi accepted a capped result: ${JSON.stringify(viaCapped)?.slice(0, 80)}`);
   if (viaClosed?.closed === true && !viaClosed.text && viaOpen?.method === 'ats-api:ashby') pass('fromKnownApi reports a closed ATS result as closure and still returns an open one');
   else fail(`fromKnownApi closure handling wrong: ${JSON.stringify({ viaClosed, viaOpen })}`);
   const src = readFileSync(join(ROOT, 'batch/jd-rescue.mjs'), 'utf8');
