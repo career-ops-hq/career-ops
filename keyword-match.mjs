@@ -31,6 +31,7 @@ import { join, isAbsolute, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { extractSkills } from './skill-extract.mjs';
+import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
 
 // A normal path stays readable. A space or other shell syntax is quoted so the
 // example stays one argument.
@@ -906,7 +907,10 @@ async function runKeywordMatch(args) {
     console.error(`Unable to read CV: ${cvPath}`);
     process.exit(1);
   }
-  const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : rawCv;
+  // The words a reader sees. htmlToText() already drops an HTML CV's hrefs; a
+  // markdown CV kept its link targets, so "[modules](https://…/terraform-modules)"
+  // counted Terraform as present in cv.md and missing in the same CV as HTML.
+  const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : collapseMarkdownLinks(rawCv);
   const sourceLabel = cvArg ? basename(cvPath) : 'cv.md (base CV, before per-role tailoring)';
 
   const result = analyzeCoverage(keywords, cvText);
