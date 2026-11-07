@@ -115,3 +115,40 @@ test("the version is checked again at write time, so a save that lost a race is 
 
   assert.throws(() => assertVersionUnchanged(checked.path, version), (e) => e instanceof TemplateRefusal && e.status === 409);
 });
+
+// A save writes through checkTemplateEdit's path, so a template whose folder or
+// file really lives outside the user's templates directory (a symlinked pack, or a
+// symlinked file) must not be offered for writing. Reading it stays allowed.
+function linkedSetup() {
+  const userDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "template-edit-link-")), "data", "templates");
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "template-edit-target-"));
+  fs.mkdirSync(userDir, { recursive: true });
+  return { userDir, target };
+}
+
+test("an edit to a template in a symlinked pack folder is refused, though reading it works", async () => {
+  const { userDir, target } = linkedSetup();
+  const file = path.join(target, "cv-template.linked.html");
+  fs.copyFileSync(path.join(CORE, "templates", "cv-template.modern.html"), file);
+  fs.symlinkSync(target, path.join(userDir, "linked"), "dir");
+  const { text, version } = await readUserTemplate(CORE, { kind: "cv", name: "linked", userDir });
+  const before = fs.readFileSync(file, "utf8");
+
+  const err = await checkTemplateEdit(CORE, { kind: "cv", name: "linked", text, version, userDir }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+  assert.ok(!err.message.includes(target), "the message names no path");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
+
+test("an edit to a template file that is itself a symlink to outside is refused", async () => {
+  const { userDir, target } = linkedSetup();
+  const file = path.join(target, "real.html");
+  fs.copyFileSync(path.join(CORE, "templates", "cv-template.modern.html"), file);
+  fs.symlinkSync(file, path.join(userDir, "cv-template.filelink.html"));
+  const { text, version } = await readUserTemplate(CORE, { kind: "cv", name: "filelink", userDir });
+
+  const err = await checkTemplateEdit(CORE, { kind: "cv", name: "filelink", text, version, userDir }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+});

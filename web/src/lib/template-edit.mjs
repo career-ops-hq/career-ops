@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { TemplateRefusal, refusalFrom } from "./template-refusal.mjs";
+import { assertInsideUserDir } from "./template-ownership.mjs";
 
 // Editing the body of one of the user's own templates (#1692). Whether the result
 // is usable stays the core's call: the candidate text is put where the resolver
@@ -56,6 +57,8 @@ export async function checkTemplateEdit(codeRoot, { kind, name, text, version, u
 
   const resolver = await loadResolver(codeRoot);
   const entry = userEntry(resolver, kind, userDir, name);
+  // The save writes through this path, so the file itself must really be ours.
+  await assertInsideUserDir(entry, userDir, { file: true });
   const current = await fs.readFile(entry.path, "utf8");
   if (versionOf(current) !== version) {
     throw new TemplateRefusal("This template changed since you opened it. Reload it, then apply your edit again.", 409);
