@@ -182,10 +182,12 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   useEffect(() => {
     setShowAll(false);
   }, [within, sources, seniorities, locQ, kw]);
+  // Chip/facet changes only — scrolling on every locQ/kw keystroke pulls the
+  // focused text input out of view while the user is still typing.
   useEffect(() => {
-    if (!anyFacet) return;
+    if (within == null && sources.size === 0 && seniorities.size === 0) return;
     listTopRef.current?.scrollIntoView({ block: "nearest" });
-  }, [anyFacet, within, sources, seniorities, locQ, kw]);
+  }, [within, sources, seniorities]);
   useEffect(() => {
     setCursor((index) => (visible.length === 0 ? -1 : index < 0 ? index : Math.min(index, visible.length - 1)));
   }, [visible.length]);
