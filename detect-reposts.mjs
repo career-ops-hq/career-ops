@@ -397,15 +397,23 @@ function detectRepostsInGroup(rows, windowDays, minSpan = MIN_REPOST_SPAN_DAYS) 
 }
 
 // The site a posting URL belongs to, for constraint 3 of the header: hostname,
-// lowercased, without `www.` or a two-letter regional prefix (`de.linkedin.com`
-// and `www.linkedin.com` are one site; a role re-listed across them is still a
-// repost). Unparseable URLs keep the raw string, so they never merge with
-// anything but themselves.
+// lowercased, without `www.`. A two-letter regional prefix is folded only on
+// sites known to serve one board under per-country subdomains
+// (`de.linkedin.com` and `www.linkedin.com` are one site), so two unrelated
+// tenants such as `ca.example.com` and `www.example.com` stay apart. Greenhouse
+// serves the same board under several hosts (the set prepare-application.mjs
+// recognises), so they fold to one. Unparseable URLs keep the raw string, so
+// they never merge with anything but themselves.
+const REGIONAL_SUBDOMAIN_SITES = new Set(['linkedin.com', 'indeed.com']);
+const GREENHOUSE_HOSTS = new Set(['boards.greenhouse.io', 'job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io', 'greenhouse.io']);
+
 export function sourceHost(url) {
   let host;
-  try { host = new URL(url).hostname.toLowerCase(); } catch { return String(url); }
+  try { host = new URL(url).hostname.toLowerCase().replace(/\.$/, ''); } catch { return String(url); }
+  if (GREENHOUSE_HOSTS.has(host)) return 'greenhouse.io';
   const labels = host.split('.');
-  if (labels.length > 2 && (labels[0] === 'www' || /^[a-z]{2}$/.test(labels[0]))) labels.shift();
+  if (labels.length > 2 && labels[0] === 'www') labels.shift();
+  else if (labels.length > 2 && /^[a-z]{2}$/.test(labels[0]) && REGIONAL_SUBDOMAIN_SITES.has(labels.slice(1).join('.'))) labels.shift();
   return labels.join('.');
 }
 
@@ -634,6 +642,9 @@ function runSelfTest() {
     'the same source re-listing the role under a new URL is still a repost',
   );
   check(sourceHost('https://de.linkedin.com/jobs/view/1') === sourceHost('https://www.linkedin.com/jobs/view/2'), 'regional subdomains are one source');
+  check(sourceHost('https://ca.example.com/jobs/1') !== sourceHost('https://www.example.com/jobs/1'), 'a two-letter subdomain of an unknown site stays its own source');
+  check(sourceHost('https://boards.greenhouse.io/acme/jobs/1') === sourceHost('https://job-boards.greenhouse.io/acme/jobs/2'), 'Greenhouse host aliases are one source');
+  check(sourceHost('https://job-boards.eu.greenhouse.io/acme/jobs/1') === 'greenhouse.io', 'the EU Greenhouse host folds too');
   check(
     detectReposts(perCountry, DEFAULT_WINDOW_DAYS, 0).length === 0,
     'a trailing country word splits the titles even with the span floor disabled',
