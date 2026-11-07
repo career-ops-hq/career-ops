@@ -102,7 +102,7 @@ try {
     ['sr-consultant-value-excellence', 'Sr Consultant Value Excellence'],
     ['staff-software-engineer-platform-cryptography', 'Staff Software Engineer Platform Cryptography'],
     ['senior-staff-inbound-product-manager-agentic-ai-platform-moveworks', 'Senior Staff Inbound Product Manager Agentic AI Platform Moveworks'],
-    ['data-scientist--emea', 'Data Scientist - EMEA'],
+    ['data-scientist--uk', 'Data Scientist - UK'],
     ['%E2%9C%93-bad-%E0%A4', '%E2%9C%93 Bad %E0%A4'],
   ];
   for (const [slug, want] of titles) {

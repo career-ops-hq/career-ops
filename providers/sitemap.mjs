@@ -60,10 +60,14 @@
 // `⚠️  sitemap:` line naming the knob to raise.
 
 import { robotsAllows } from '../robots-check.mjs';
+import { titleFromSlug } from './eploy.mjs';
 import { intInRange } from './_config-utils.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
+
+// Slug-to-title logic is eploy's; re-exported so callers of this module keep one import.
+export { titleFromSlug };
 
 /** sitemaps.org: at most 50,000 URLs per sitemap file. */
 export const MAX_URLS_PER_SITEMAP = 50_000;
@@ -156,37 +160,6 @@ export function parseSitemapConfig(entry) {
     fetchDetails: cfg.fetchDetails === true,
     detailLimit: intInRange(cfg.detailLimit, DEFAULT_DETAIL_LIMIT, 1, DETAIL_LIMIT_CAP),
   };
-}
-
-const ACRONYMS = new Map([
-  ['ai', 'AI'], ['api', 'API'], ['aws', 'AWS'], ['cfo', 'CFO'], ['cio', 'CIO'],
-  ['cto', 'CTO'], ['emea', 'EMEA'], ['apac', 'APAC'], ['eu', 'EU'], ['fp', 'FP'],
-  ['gtm', 'GTM'], ['hr', 'HR'], ['it', 'IT'], ['ml', 'ML'], ['qa', 'QA'],
-  ['sre', 'SRE'], ['svp', 'SVP'], ['evp', 'EVP'], ['uk', 'UK'], ['ui', 'UI'], ['us', 'US'],
-  ['ux', 'UX'], ['vp', 'VP'],
-]);
-
-/**
- * Readable title from a URL slug: `sr-consultant-value-excellence` →
- * `Sr Consultant Value Excellence`. A double hyphen reads as a separator.
- * @param {string} slug
- */
-export function titleFromSlug(slug) {
-  let decoded;
-  try { decoded = decodeURIComponent(slug); } catch { decoded = slug; }
-  return decoded.split(/--+/).map((segment) => segment
-    .replace(/[-_+]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .map((word) => {
-      const acronym = ACRONYMS.get(word.toLowerCase());
-      return acronym || (word ? word[0].toUpperCase() + word.slice(1) : '');
-    })
-    .join(' ')
-    .trim())
-    .filter(Boolean)
-    .join(' - ');
 }
 
 /**
