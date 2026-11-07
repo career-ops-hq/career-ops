@@ -11,7 +11,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   scrub,
   rehydrate,
-  atomicWriteFileSync,
   loadTokenMap,
   saveTokenMap,
 } from '../pii-workspace.mjs';
@@ -123,80 +122,29 @@ test('rehydrate matches numeric and legacy tokens in a single pass without re-pr
   assert.doesNotMatch(restored, /another_val/);
 });
 
-test('atomicWriteFileSync writes atomically and preserves file mode', () => {
+test('saveTokenMap cleans up temporary file on successful write', () => {
   withTempDir((dir) => {
-    const target = path.join(dir, 'test.txt');
-    fs.writeFileSync(target, 'initial', { mode: 0o644 });
-    const expectedMode = fs.statSync(target).mode & 0o777;
-
-    atomicWriteFileSync(target, 'updated', 'utf8');
-    assert.equal(fs.readFileSync(target, 'utf8'), 'updated');
-
-    // On non-Windows platforms verify mode preservation
-    if (process.platform !== 'win32') {
-      const mode = fs.statSync(target).mode & 0o777;
-      assert.equal(mode, expectedMode);
-    }
-  });
-});
-
-test('atomicWriteFileSync preserves restrictive mode (0o600) set via chmodSync', () => {
-  withTempDir((dir) => {
-    const target = path.join(dir, 'restrictive.txt');
-    fs.writeFileSync(target, 'initial');
-    try {
-      fs.chmodSync(target, 0o600);
-    } catch {
-      /* ignore on platforms where chmod is not supported */
-    }
-
-    atomicWriteFileSync(target, 'updated', 'utf8');
-    assert.equal(fs.readFileSync(target, 'utf8'), 'updated');
-
-    if (process.platform !== 'win32') {
-      const mode = fs.statSync(target).mode & 0o777;
-      assert.equal(mode, 0o600);
-    }
-  });
-});
-
-test('atomicWriteFileSync cleans up temporary file on successful write', () => {
-  withTempDir((dir) => {
-    const target = path.join(dir, 'test.txt');
-    atomicWriteFileSync(target, 'hello', 'utf8');
-    assert.equal(fs.readFileSync(target, 'utf8'), 'hello');
-    const tempFiles = fs.readdirSync(dir).filter((f) => f.startsWith('.tmp-'));
+    const target = path.join(dir, 'test.json');
+    saveTokenMap({ test: 'hello' }, target);
+    assert.deepEqual(loadTokenMap(target), { test: 'hello' });
+    const tempFiles = fs
+      .readdirSync(dir)
+      .filter((f) => f.startsWith(`.${path.basename(target)}.`) && f.endsWith('.tmp'));
     assert.equal(tempFiles.length, 0, 'no temporary files left after success');
   });
 });
 
-test('atomicWriteFileSync cleans up temporary file if write fails', () => {
+test('saveTokenMap cleans up temporary file if write fails', () => {
   withTempDir((dir) => {
-    // Pointing target to an existing directory forces renameSync to fail (EISDIR / EPERM)
+    // Pointing target to an existing directory forces write/rename to fail (EISDIR / EPERM)
     const target = path.join(dir, 'dir_as_target');
     fs.mkdirSync(target);
 
-    assert.throws(() => atomicWriteFileSync(target, 'hello', 'utf8'));
-    const tempFiles = fs.readdirSync(dir).filter((f) => f.startsWith('.tmp-'));
+    assert.throws(() => saveTokenMap({ test: 'hello' }, target));
+    const tempFiles = fs
+      .readdirSync(dir)
+      .filter((f) => f.startsWith(`.${path.basename(target)}.`) && f.endsWith('.tmp'));
     assert.equal(tempFiles.length, 0, 'no temporary files left after failed write');
-  });
-});
-
-test('atomicWriteFileSync preserves symlink target and updates destination', (t) => {
-  withTempDir((dir) => {
-    const realTarget = path.join(dir, 'real.txt');
-    const symlinkTarget = path.join(dir, 'symlink.txt');
-    fs.writeFileSync(realTarget, 'original content', 'utf8');
-    try {
-      fs.symlinkSync(realTarget, symlinkTarget);
-    } catch {
-      t.skip('symlinks not supported on this platform/privilege level');
-      return;
-    }
-
-    atomicWriteFileSync(symlinkTarget, 'updated content', 'utf8');
-    assert.equal(fs.readFileSync(realTarget, 'utf8'), 'updated content');
-    assert.equal(fs.lstatSync(symlinkTarget).isSymbolicLink(), true);
   });
 });
 

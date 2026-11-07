@@ -42,7 +42,6 @@ import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 import {
   replaceUserFile,
   writeFileAtomic,
-  userFileWriteTarget,
 } from './tracker-utils.mjs';
 
 const USER_FILES = ['cv.md', 'config/profile.yml', 'modes/_profile.md'];
@@ -77,21 +76,6 @@ function loadTokenMap(explicitPath) {
   } catch (err) {
     throw new Error(`[privacy] Error reading token map at ${mapPath}: ${err.message}`);
   }
-}
-
-function atomicWriteFileSync(targetPath, content, options = {}) {
-  const target = userFileWriteTarget(targetPath);
-  const exists = fs.existsSync(target);
-  const opts = typeof options === 'string' ? { encoding: options } : { ...options };
-  let mode = opts.mode;
-  if (mode === undefined && exists) {
-    try {
-      mode = fs.statSync(target).mode & 0o777;
-    } catch {
-      /* ignore */
-    }
-  }
-  writeFileAtomic(target, content, { mode: mode ?? 0o600 });
 }
 
 function saveTokenMap(map, explicitPath) {
@@ -296,7 +280,6 @@ export {
   USER_FILES,
   TOKEN_MAP_NAME,
   loadTokenMap,
-  atomicWriteFileSync,
   replaceUserFile,
   saveTokenMap,
   scrub,
