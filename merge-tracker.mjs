@@ -624,6 +624,29 @@ export async function mergeTracker(options = {}) {
   }
 
   /**
+   * The Notes clause for an aggregator URL that an update kept out of the URL
+   * column (#6621), or '' when the row already records it.
+   *
+   * A URL is free text to extractReqNumber(). LinkedIn builds its slug from the
+   * posting title, so a "Jr." title yields `/jobs/view/jr-data-analyst-at-acme-4001`,
+   * which reads as the label `jr` followed by an id. The row would gain a req
+   * number it never had, and a req number in Notes stops later fuzzy matches
+   * against any addition carrying a real one (#1524). The clause then names the
+   * board alone. A host can read as one too: `jobg8.com` is the label `job`
+   * followed by the id `g8`. The clause then names no board at all. The full URL
+   * is still in the linked report's URL header.
+   *
+   * @param {string} existingNotes - The row's Notes cell before this update.
+   * @param {string} url - The aggregator URL the addition carried.
+   * @returns {string}
+   */
+  function aggregatorSightingNote(existingNotes, url) {
+    const note = [`Also listed at ${url}`, `Also listed at ${new URL(url).hostname}`]
+      .find((candidate) => !extractReqNumber(candidate)) ?? 'Also listed on an aggregator board';
+    return String(existingNotes ?? '').includes(note) ? '' : note;
+  }
+
+  /**
    * True when a Score cell is a documented "no score" sentinel rather than a
    * number. AGENTS.md names `N/A`, `—` and `-` as the values a row carries when it
    * was added without an evaluation, or when a re-eval could not be scored (#1799).
@@ -2172,6 +2195,29 @@ export async function mergeTracker(options = {}) {
         const pdf = reportNum && pdfIndex.has(String(reportNum))
           ? '✅'
           : (reportChanged ? '❌' : duplicate.pdf);
+        // Which URL the row keys on after this update (#6621). The incoming URL
+        // wins by default: a re-evaluation names the posting it read, and a row
+        // that entered by an aggregator moving to the employer's own board is the
+        // direction AGENTS.md asks for. The exception is the reverse: the row
+        // already keys on an employer-controlled URL and the addition brings an
+        // aggregator listing. The employer URL is canonical ("Aggregator Listings
+        // -- Confirm at the Employer"), and an aggregator key is weaker evidence
+        // in every later merge (urlDiffers above reads it as unknown), so the row
+        // keeps its key and the aggregator URL is recorded in Notes instead.
+        //
+        // The row's key is postingUrl(), not the cell alone. A row with an empty
+        // URL cell keys on its report's URL, and this update replaces that report
+        // link, so the cell is the only place left to keep the employer URL. A
+        // tracker with no URL column has no such place, so it is left as before.
+        const rowUrl = postingUrl(duplicate);
+        const keepRowUrl = COLMAP.url != null
+          && Boolean(normalizeUrl(rowUrl)) && !isAggregatorUrl(rowUrl)
+          && isAggregatorUrl(addition.url);
+        const sightingNote = keepRowUrl ? aggregatorSightingNote(duplicate.notes, addition.url) : '';
+        if (keepRowUrl) {
+          console.log(`   ↳ kept employer URL ${rowUrl}; aggregator URL ${addition.url} not used as the key`);
+        }
+        const mergedNotes = mergeNotes(duplicate.notes, addition, oldScore, newScore, supersededNote);
         const updatedLine = buildRow({
           num: duplicate.num, date: addition.date,
           // A corporate-form match (#3665) pairs the row with a VARIANT spelling of
@@ -2192,13 +2238,15 @@ export async function mergeTracker(options = {}) {
           location: addition.location || duplicate.location || '—',
           score: addition.score, status: duplicate.status, pdf,
           report: addition.report,
-          notes: mergeNotes(duplicate.notes, addition, oldScore, newScore, supersededNote),
+          notes: sightingNote
+            ? `${mergedNotes.replace(/\s*\.\s*$/, '')}. ${sightingNote}`
+            : mergedNotes,
           // Preserve the row's unmapped custom-column cells across the rebuild.
           raw: duplicate.raw,
           // Carry the key forward. Without this the update path rewrites the row
           // with an empty URL cell and the posting loses the very key that matched
           // it, silently demoting every later merge back to the fuzzy tiers.
-          url: addition.url || duplicate.url || '',
+          url: keepRowUrl ? rowUrl : (addition.url || duplicate.url || ''),
         });
         if (replaceTrackerLine(duplicate.raw, updatedLine)) {
           // Refresh the cached row from the line just written (#2392). `raw` was
