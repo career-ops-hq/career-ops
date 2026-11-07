@@ -39,6 +39,21 @@ test("a tracker mark or a finished job with no file is a stale flag", () => {
   assert.match(stale.note, /Generate it again/);
 });
 
+test("a missing output directory is an empty list, and any other read error is thrown", () => {
+  const missing = path.join(tmpdir(), `cv-disk-missing-${process.pid}`);
+  assert.deepEqual(listOutputPdfNames(missing, isFile), []);
+  const file = path.join(tmpdir(), `cv-disk-not-a-dir-${process.pid}.pdf`);
+  writeFileSync(file, "%PDF-1.1\n");
+  try {
+    assert.throws(
+      () => listOutputPdfNames(file, isFile),
+      (err) => err && err.code === "ENOTDIR",
+    );
+  } finally {
+    rmSync(file, { force: true });
+  }
+});
+
 test("a real PDF in output counts, and deleting it leaves the tracker mark stale", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "cv-disk-"));
   try {

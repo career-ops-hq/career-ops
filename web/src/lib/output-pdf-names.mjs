@@ -10,8 +10,9 @@ export function listOutputPdfNames(outputDir, isRegularFile) {
   let names;
   try {
     names = fs.readdirSync(outputDir);
-  } catch {
-    return [];
+  } catch (err) {
+    if (err && err.code === "ENOENT") return [];
+    throw err;
   }
   return names.filter((name) => {
     if (typeof name !== "string" || !name.toLowerCase().endsWith(".pdf")) return false;
