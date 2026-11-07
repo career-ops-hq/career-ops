@@ -348,12 +348,22 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 		// the PDF path: the PDF went to a sibling .overflow.pdf draft (#6377).
 		// Opening the path would then show the previous PDF, or nothing, as
 		// "generated". A PDF this render wrote is a new file there.
-		before, _ := os.Stat(pdfAbs)
+		// Only a missing file is an expected absence; any other stat error is
+		// reported as itself rather than read as "no previous PDF" (which
+		// would open whatever the render left) or "wrote nothing".
+		before, beforeErr := os.Stat(pdfAbs)
+		if beforeErr != nil && !errors.Is(beforeErr, fs.ErrNotExist) {
+			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("cannot read the PDF path: %v", beforeErr)}
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: summarizeCmdError(err, out)}
 		}
-		if after, err := os.Stat(pdfAbs); err != nil || !pdfWrittenBetween(before, after) {
+		after, afterErr := os.Stat(pdfAbs)
+		if afterErr != nil && !errors.Is(afterErr, fs.ErrNotExist) {
+			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("cannot read the PDF path: %v", afterErr)}
+		}
+		if afterErr != nil || !pdfWrittenBetween(before, after) {
 			return screens.PipelinePDFGeneratedMsg{Err: summarizeUndelivered(out, pdfAbs)}
 		}
 		if err := openWithDefaultApp(pdfAbs); err != nil {

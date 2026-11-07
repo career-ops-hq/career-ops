@@ -45,8 +45,8 @@ func init() {
 			if os.Getenv("CAREER_OPS_TEST_PDF_OVERFLOW") == "1" {
 				draft := strings.TrimSuffix(pdfPath, ".pdf") + ".overflow.pdf"
 				_ = os.WriteFile(draft, []byte("%PDF draft"), 0o644)
-				os.Stderr.WriteString("⚠️  CV is 2 pages; the allowed maximum is 1 page. Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate. Overflow is warning-only by default; use --strict-pages to reject it.\n")
-				os.Stderr.WriteString("⚠️  Overflow draft: " + draft + " (nothing was written to the output path). Trim and rerun to write " + pdfPath + ".\n")
+				_, _ = os.Stderr.WriteString("⚠️  CV is 2 pages; the allowed maximum is 1 page. Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate. Overflow is warning-only by default; use --strict-pages to reject it.\n")
+				_, _ = os.Stderr.WriteString("⚠️  Overflow draft: " + draft + " (nothing was written to the output path). Trim and rerun to write " + pdfPath + ".\n")
 			} else {
 				_ = os.WriteFile(pdfPath, []byte("%PDF"), 0o644)
 			}
