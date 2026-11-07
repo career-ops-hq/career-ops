@@ -91,6 +91,11 @@ try {
   const jsonRun = runDoctor(dataRoot, ['--json']);
   try {
     const state = JSON.parse(jsonRun.out);
+    if (state.data_root === dataRoot && state.project_root === ROOT) {
+      pass("onboardingState() exposes data_root and project_root in --json output (#6498)");
+    } else {
+      fail(`onboardingState() did not expose expected roots: data_root=${state.data_root} (want ${dataRoot}), project_root=${state.project_root} (want ${ROOT})`);
+    }
     const warningText = (state.warnings || []).join('\n');
     if (!/stray\.md\.bak/.test(warningText)) {
       pass("onboardingState()'s checkTrackedBakFiles() does not surface the data root's tracked .bak file either");

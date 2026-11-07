@@ -38,6 +38,8 @@ try {
     // onboardingNeeded stays true so nothing proceeds on this root.
     console.log(JSON.stringify({
       onboardingNeeded: true,
+      data_root: err.root || null,
+      project_root: __dirname,
       missing: [],
       unpersonalized: [],
       warnings: [err.message],
@@ -1952,6 +1954,8 @@ function onboardingState(root) {
   } catch { plugins = []; }
   return {
     onboardingNeeded: missing.length > 0,
+    data_root: root,
+    project_root: __dirname,
     missing,
     // Non-blocking by design: career-ops is meant to work out of the box, so an
     // unedited personalization file must not gate the whole system. It DOES have
