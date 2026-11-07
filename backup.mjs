@@ -6,10 +6,9 @@
  * profile, portals, tracker and everything under data/, reports/, output/,
  * jds/ ...) from the data root to a destination folder. Nothing is ever
  * deleted at the destination, so a file you removed locally stays in the
- * backup. data/Connections.csv holds other people's contact details
- * (--include-connections) and the agent-tool settings under .claude/,
- * opencode.json and plugins.local/ can carry tokens (--include-tool-config);
- * both are left out unless you ask for them.
+ * backup. The agent-tool settings under .claude/, opencode.json and
+ * plugins.local/ can carry tokens, so they are left out unless you pass
+ * --include-tool-config.
  *
  * Nothing is chosen for you: say where the backup goes. First match wins:
  *   1. --dest <dir>                 exactly this folder
@@ -22,8 +21,8 @@
  * avoided"), so this never uses it.
  *
  * Usage: node backup.mjs (--dest <dir> | --provider <name>) [--account <text>]
- *                        [--folder <path>] [--include-connections]
- *                        [--include-tool-config] [--dry-run] [--json] [--quiet]
+ *                        [--folder <path>] [--include-tool-config]
+ *                        [--dry-run] [--json] [--quiet]
  *
  * Exit status: 0 success, 1 a file failed to copy or there was nothing to
  * copy, 2 no usable destination, invalid option or unreadable data root.
@@ -47,9 +46,6 @@ const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_FOLDER = join('Backups', 'career-ops');
 export const PROVIDERS = ['google-drive', 'dropbox', 'onedrive', 'icloud'];
 export const MANIFEST_NAME = '.career-ops-backup.json';
-
-/** The one file under data/ that holds other people's data (a LinkedIn export). */
-const CONNECTIONS_FILE = 'data/Connections.csv';
 
 /**
  * Agent-tool settings that USER_PATHS protects from the updater but that can
@@ -78,15 +74,13 @@ export function backupPaths(dataRoot, warnings = []) {
 
 /**
  * Never copied: secrets, rebuildable caches, lock/temp files, and unless asked
- * for (`includeConnections`, `includeToolConfig`) the LinkedIn export and the
- * agent-tool settings.
+ * for (`includeToolConfig`) the agent-tool settings.
  */
-export function isExcluded(relPath, { includeConnections = false, includeToolConfig = false } = {}) {
+export function isExcluded(relPath, { includeToolConfig = false } = {}) {
   const p = relPath.split(sep).join('/');
   const name = p.slice(p.lastIndexOf('/') + 1);
   if (name === '.DS_Store' || name === '.env' || name.startsWith('.env.')) return true;
   if (p === 'data/cache' || p.startsWith('data/cache/')) return true;
-  if (!includeConnections && p === CONNECTIONS_FILE) return true;
   if (!includeToolConfig && TOOL_CONFIG.some((t) => p === t || p.startsWith(`${t}/`))) return true;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
 }
@@ -272,8 +266,8 @@ const unchanged = (src, destPath) => {
  * only unchanged files.
  * @returns {{found: number, copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number, warnings: string[]}}
  */
-export function runBackup({ dataRoot, dest, dryRun = false, includeConnections = false, includeToolConfig = false }) {
-  const include = { includeConnections, includeToolConfig };
+export function runBackup({ dataRoot, dest, dryRun = false, includeToolConfig = false }) {
+  const include = { includeToolConfig };
   const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
   const fail = (path, error) => result.failed.push({ path, error: error.message });
   if (!dryRun) mkdirSync(dest, { recursive: true });
@@ -322,7 +316,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeConnections =
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-connections', '--include-tool-config', '--dry-run', '--json', '--quiet', '--help', '-h'];
+const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-tool-config', '--dry-run', '--json', '--quiet', '--help', '-h'];
 const VALUE_FLAGS = ['--dest', '--provider', '--account', '--folder'];
 
 const USAGE = `Usage:
@@ -330,7 +324,6 @@ const USAGE = `Usage:
   node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
-  node backup.mjs ... --include-connections # also copy data/Connections.csv (other people's contact details)
   node backup.mjs ... --include-tool-config # also copy .claude/, opencode.json, plugins.local/ (can hold tokens)
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
   node backup.mjs ... --json | --quiet     # machine-readable result | errors only
@@ -343,7 +336,6 @@ function main(args) {
   const json = args.includes('--json');
   const quiet = args.includes('--quiet');
   const dryRun = args.includes('--dry-run');
-  const includeConnections = args.includes('--include-connections');
   const includeToolConfig = args.includes('--include-tool-config');
   const refuse = (message) => {
     if (json) console.log(JSON.stringify({ ok: false, error: message }));
@@ -371,7 +363,7 @@ function main(args) {
 
   let result;
   try {
-    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeConnections, includeToolConfig });
+    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeToolConfig });
   } catch (error) {
     return refuse(`cannot write to ${target.dest}: ${error.message}`);
   }

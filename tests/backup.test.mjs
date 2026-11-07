@@ -20,19 +20,16 @@ try {
   for (const rel of ['.env', 'data/.env', 'data/cache/http/a', '.DS_Store', 'data/x.lock', 'data/y.part']) {
     assert.equal(b.isExcluded(rel), true, rel);
   }
-  for (const rel of ['cv.md', 'data/applications.md', 'data/cacheable.md', 'reports/001-a.md']) {
+  for (const rel of ['cv.md', 'data/Connections.csv', 'data/applications.md', 'data/cacheable.md', 'reports/001-a.md']) {
     assert.equal(b.isExcluded(rel), false, rel);
   }
-  // The LinkedIn export holds other people's contact details: opt-in only.
-  assert.equal(b.isExcluded('data/Connections.csv'), true);
-  assert.equal(b.isExcluded('data/Connections.csv', { includeConnections: true }), false);
   // Agent-tool settings can hold tokens: opt-in too.
   for (const rel of ['.claude/settings.json', '.claude/hooks/pre.sh', 'opencode.json', 'plugins.local/x/index.mjs']) {
     assert.equal(b.isExcluded(rel), true, rel);
     assert.equal(b.isExcluded(rel, { includeToolConfig: true }), false, rel);
   }
   assert.equal(b.isExcluded('data/opencode.json'), false);
-  pass('excludes secrets, caches, lock/temp files, the LinkedIn export and tool settings unless asked');
+  pass('excludes secrets, caches, lock/temp files, and tool settings unless asked');
 
   // The file list is the updater's USER_PATHS, not a second copy.
   const listed = b.backupPaths(tmp);
@@ -94,25 +91,25 @@ try {
   mkdirSync(join(tmp, 'backup'));
 
   const dry = b.runBackup({ dataRoot: root, dest, dryRun: true });
-  assert.equal(dry.copied, 4);
-  assert.equal(dry.found, 4);
+  assert.equal(dry.copied, 5);
+  assert.equal(dry.found, 5);
   assert.equal(existsSync(dest), false);
 
   const first = b.runBackup({ dataRoot: root, dest });
-  assert.equal(first.copied, 4);
-  assert.equal(first.found, 4);
+  assert.equal(first.copied, 5);
+  assert.equal(first.found, 5);
   assert.deepEqual(first.failed, []);
   assert.equal(readFileSync(join(dest, 'data/applications.md'), 'utf8'), 'tracker');
   for (const rel of ['data/.env', 'data/cache/http/h', 'node_modules/x/index.js', 'modes/_shared.md']) {
     assert.equal(existsSync(join(dest, rel)), false, rel);
   }
-  assert.equal(existsSync(join(dest, 'data/Connections.csv')), false, 'LinkedIn export is opt-in');
+  assert.equal(readFileSync(join(dest, 'data/Connections.csv'), 'utf8'), 'connections');
   assert.equal(readFileSync(join(dest, '.career-ops-web/chats.json'), 'utf8'), '{}');
-  assert.equal(JSON.parse(readFileSync(join(dest, b.MANIFEST_NAME), 'utf8')).copied, 4);
+  assert.equal(JSON.parse(readFileSync(join(dest, b.MANIFEST_NAME), 'utf8')).copied, 5);
 
   const second = b.runBackup({ dataRoot: root, dest });
   assert.equal(second.copied, 0);
-  assert.equal(second.unchanged, 4);
+  assert.equal(second.unchanged, 5);
 
   put(root, 'cv.md', 'cv, edited');
   utimesSync(join(root, 'cv.md'), new Date(), new Date(Date.now() + 60_000));
@@ -125,13 +122,10 @@ try {
   pass('copies only user files, skips unchanged, re-copies edits, never deletes');
 
   assert.equal(existsSync(join(dest, '.claude')), false, 'tool settings are opt-in');
-  const withConnections = b.runBackup({ dataRoot: root, dest, includeConnections: true });
-  assert.equal(withConnections.copied, 1);
-  assert.equal(readFileSync(join(dest, 'data/Connections.csv'), 'utf8'), 'connections');
   const withTool = b.runBackup({ dataRoot: root, dest, includeToolConfig: true });
   assert.equal(withTool.copied, 2);
   assert.equal(existsSync(join(dest, '.claude/settings.json')), true);
-  pass('--include-connections and --include-tool-config copy what they name');
+  pass('--include-tool-config copies the agent-tool settings');
 
   // Nothing found: reported, not a silent success; no manifest written.
   const empty = join(tmp, 'empty-root');
@@ -140,7 +134,7 @@ try {
   assert.equal(none.found, 0);
   assert.equal(existsSync(join(tmp, 'backup', 'empty', b.MANIFEST_NAME)), false);
   // A run of only unchanged files is not "nothing found".
-  assert.equal(b.runBackup({ dataRoot: root, dest, includeConnections: true, includeToolConfig: true }).found, 6);
+  assert.equal(b.runBackup({ dataRoot: root, dest, includeToolConfig: true }).found, 6);
   pass('a run that finds nothing says so; unchanged files still count as found');
 
   // A symlinked parent can lead out of the data root: skipped.
@@ -206,10 +200,8 @@ try {
   });
   assert.equal(emptyRun.status, 1);
   assert.match(emptyRun.stderr, /found nothing to back up/);
-  const conn = JSON.parse(cli('--dest', join(tmp, 'backup', 'cli2'), '--include-connections', '--json').stdout);
-  assert.equal(conn.found, 4);
   const tool = JSON.parse(cli('--dest', join(tmp, 'backup', 'cli3'), '--include-tool-config', '--json').stdout);
-  assert.equal(tool.found, 5);
+  assert.equal(tool.found, 6);
   pass('CLI exits 0 on success, 1 for a failed or empty run, 2 for a bad destination or option');
 } catch (e) {
   fail(`backup.mjs: ${e.message}`);
