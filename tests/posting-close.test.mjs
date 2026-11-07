@@ -200,3 +200,34 @@ test('a later scan-history day replaces an earlier one for the same URL', () => 
   ].join('\n');
   assert.equal(closeDatesByUrl(text).get('https://jobs.example/acme'), '2026-04-04');
 });
+
+test('an added close day stays when a later observational skip names another day', () => {
+  const url = 'https://jobs.example/acme';
+  const text = [
+    historyRow({ url, status: 'added', closes_at: '2026-10-03' }),
+    historyRow({ url, status: 'skipped_title', closes_at: '2026-12-01' }),
+    historyRow({ url, status: 'skipped_location', closes_at: '2026-12-15' }),
+    historyRow({ url, status: 'skipped_age', closes_at: '2027-01-02' }),
+  ].join('\n');
+  assert.equal(closeDatesByUrl(text).get(url), '2026-10-03');
+});
+
+test('a later added row still replaces the close day', () => {
+  const url = 'https://jobs.example/acme';
+  const text = [
+    historyRow({ url, status: 'skipped_title', closes_at: '2026-12-01' }),
+    historyRow({ url, status: 'added', closes_at: '2026-10-03' }),
+    historyRow({ url, status: 'added', closes_at: '2026-11-11' }),
+    historyRow({ url, status: 'skipped_experience', closes_at: '2027-01-02' }),
+  ].join('\n');
+  assert.equal(closeDatesByUrl(text).get(url), '2026-11-11');
+});
+
+test('a non-observational later row can still replace an added close day', () => {
+  const url = 'https://jobs.example/acme';
+  const text = [
+    historyRow({ url, status: 'added', closes_at: '2026-10-03' }),
+    historyRow({ url, status: 'skipped_expired', closes_at: '2026-10-04' }),
+  ].join('\n');
+  assert.equal(closeDatesByUrl(text).get(url), '2026-10-04');
+});
