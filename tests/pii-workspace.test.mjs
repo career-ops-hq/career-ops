@@ -354,4 +354,70 @@ test('restore reports deletion failure and sets nonzero exit code when token map
   });
 });
 
+test('restore retains token map when a tokenized file is absent even if all keys were restored from another file', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+
+    // Token map recorded cv.md and config/profile.yml as tokenized; both shared PRIVACY_VALUE_1
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({
+        __files__: ['cv.md', 'config/profile.yml'],
+        PRIVACY_VALUE_1: 'Alice',
+      }),
+      'utf8'
+    );
+    // cv.md is present and contains PRIVACY_VALUE_1; config/profile.yml is absent
+    fs.writeFileSync(cvFile, 'Candidate: PRIVACY_VALUE_1', 'utf8');
+
+    const res = spawnSync(process.execPath, [scriptPath, 'restore'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(res.status, 0);
+    assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Alice');
+    assert.equal(fs.existsSync(tokenMap), true, 'token map must be kept when a tokenized file is absent');
+    assert.match(res.stderr + res.stdout, /tokenized file\(s\) absent \(config\/profile\.yml\); retaining/);
+  });
+});
+
+test('scrub records tokenized files and restore removes map when all tokenized files are restored', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const configDir = path.join(dir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+
+    // Provide config/privacy.yml
+    fs.writeFileSync(
+      path.join(configDir, 'privacy.yml'),
+      'protected:\n  names:\n    - Jane Doe\n',
+      'utf8'
+    );
+    const cvFile = path.join(dir, 'cv.md');
+    fs.writeFileSync(cvFile, 'Candidate: Jane Doe', 'utf8');
+
+    // Run scrub
+    const resScrub = spawnSync(process.execPath, [scriptPath, 'scrub'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(resScrub.status, 0);
+    assert.equal(fs.existsSync(tokenMap), true);
+    const savedMap = JSON.parse(fs.readFileSync(tokenMap, 'utf8'));
+    assert.deepEqual(savedMap.__files__, ['cv.md']);
+
+    // Run restore
+    const resRestore = spawnSync(process.execPath, [scriptPath, 'restore'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(resRestore.status, 0);
+    assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Jane Doe');
+    assert.equal(fs.existsSync(tokenMap), false, 'token map should be unlinked after all tokenized files restored');
+  });
+});
+
 

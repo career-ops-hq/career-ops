@@ -105,7 +105,7 @@ function scrub(text, guard, map) {
     const re = new RegExp(escapeRe(value), 'gi');
     out = out.replace(re, (matched) => {
       // Reuse an existing token only when the spelling and casing match exactly.
-      const existing = Object.entries(map).find(([, v]) => v === matched);
+      const existing = Object.entries(map).find(([k, v]) => !k.startsWith('__') && v === matched);
       if (existing) return existing[0];
       // Use an identifier valid as an unquoted YAML scalar (no braces).
       const token = `PRIVACY_VALUE_${++index}`;
@@ -125,7 +125,7 @@ function rehydrate(text, map, restoredTokens = null) {
   // corrupting longer ones, and a single pass ensures inserted values are not
   // processed again.
   const extraTokens = Object.keys(map)
-    .filter((k) => !/^PRIVACY_VALUE_\d+$/.test(k))
+    .filter((k) => !/^PRIVACY_VALUE_\d+$/.test(k) && !k.startsWith('__'))
     .sort((a, b) => b.length - a.length);
 
   const pattern = new RegExp(
@@ -214,6 +214,8 @@ async function main() {
       if (mode === 'scrub') {
         const scrubbed = scrub(content, guard, map);
         if (scrubbed !== content) {
+          if (!map.__files__) map.__files__ = [];
+          if (!map.__files__.includes(file)) map.__files__.push(file);
           // Persist the token map immediately before each rewritten file loses its real values.
           saveTokenMap(map);
           replaceUserFile(filePath, scrubbed);
@@ -240,14 +242,20 @@ async function main() {
       }
     }
 
-    if (mode === 'scrub' && Object.keys(map).length > 0) {
+    if (mode === 'scrub' && Object.keys(map).filter((k) => !k.startsWith('__')).length > 0) {
       saveTokenMap(map);
     } else if (mode === 'restore') {
-      const mapTokens = Object.keys(map);
+      const tokenizedFiles = Array.isArray(map.__files__) ? map.__files__ : [];
+      const absentTokenized = tokenizedFiles.filter((f) => !fs.existsSync(path.join(root, f)));
+      const mapTokens = Object.keys(map).filter((k) => !k.startsWith('__'));
       const unrestored = mapTokens.filter((t) => !restoredTokens.has(t));
       if (unrestored.length > 0) {
         console.warn(
           `[privacy] WARNING: ${unrestored.length} token map entry(ies) not restored; retaining ${TOKEN_MAP_NAME}`
+        );
+      } else if (absentTokenized.length > 0) {
+        console.warn(
+          `[privacy] WARNING: ${absentTokenized.length} tokenized file(s) absent (${absentTokenized.join(', ')}); retaining ${TOKEN_MAP_NAME}`
         );
       } else if (!hasUnresolved) {
         try {
