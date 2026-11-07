@@ -559,7 +559,7 @@ test('a real closure banner next to a hidden expiry view still closes the page',
 });
 
 test('a marked void element does not swallow a closure banner after it', () => {
-  const out = pageClosureEvidence(page(`<p>${BODY}</p>`, { body: '<img class="expire-job-view" src="x"><br class="job-expire-view"><h2>This job is no longer available.</h2>' }), 'https://careers.example.com/job/1');
+  const out = pageClosureEvidence(page(`<p>${BODY}</p>`, { body: '<img class="expire-job-view" src="x"><br class="job-expire-view"><param class="expire-job-view" name="x"><h2>This job is no longer available.</h2>' }), 'https://careers.example.com/job/1');
   assert.ok(out);
 });
 
