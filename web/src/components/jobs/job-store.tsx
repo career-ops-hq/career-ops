@@ -6,8 +6,10 @@ import { resolveCliId } from "@/lib/saved-cli";
 import { createWorkerFeedback } from "@/lib/worker-feedback.mjs";
 import { readJobStream } from "@/lib/job-stream.mjs";
 import { createJobsPersister } from "@/lib/jobs-persist.mjs";
+import type { EVALUATION_GATE_REASONS } from "@/lib/evaluation-gate.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
+export type JobGate = { reason: (typeof EVALUATION_GATE_REASONS)[number]; message: string; confirmationRequired: boolean };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
 
 export type Job = {
@@ -19,7 +21,8 @@ export type Job = {
   kind?: string;
   evaluationSections?: string[];
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "gated";
+  gate?: JobGate;
   steps: JobStep[];
   text: string;
   result?: JobResult;
@@ -175,15 +178,16 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         let doneCostUsd: number | null = null;
         let doneReportN: number | null = null;
         let finished = false;
-        const finish = (status: "done" | "error", lastLabel?: string) => {
+        const finish = (status: "done" | "error" | "gated", lastLabel?: string, gate?: JobGate) => {
           if (finished) return;
           finished = true;
           feedback.current?.push({ ...job, status });
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
-          const cost = status === "done" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
+          const cost = status !== "error" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
           patch(id, (j) => ({
             ...j,
             status,
+            gate,
             result,
             cost,
             reportN: doneReportN,
@@ -191,15 +195,15 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
           // persist a readable log file so the CLI/assistant can read past runs
-          if (status === "done") {
+          if (status === "done" || status === "gated") {
             fetch("/api/runs/save", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, steps, output: text }),
+              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, status, gate, result, cost, steps, output: text }),
             }).catch(() => {});
             // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
             // worker just wrote a real tracker row / report they don't yet see.
-            if (typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
+            if (status === "done" && typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
               window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
             }
           }
@@ -237,6 +241,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           }
           doneTokens = completion.tokens ?? 0;
           doneCostUsd = completion.costUsd ?? null;
+          if (completion.status === "gated") {
+            finish("gated", "Evaluation stopped — review the reason", {
+              reason: completion.reason,
+              message: completion.message,
+              confirmationRequired: completion.confirmationRequired,
+            });
+            return;
+          }
           doneReportN = typeof completion.reportN === "number" ? completion.reportN : null;
           finish("done", "Done");
         } catch {

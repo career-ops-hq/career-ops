@@ -52,3 +52,39 @@ test("inbox keys act on the cursor row and on checked rows", { skip: liveServerS
   assert.ok(fs.readFileSync(pipeline, "utf8").includes("[ ] https://example.com/fixture-alpha"));
   assert.deepEqual(errors, []);
 });
+
+test("an unscored needs-review row keeps its review link and row-level Skip", { skip: liveServerSkip("INBOX_KEYS_TEST_URL", "INBOX_KEYS_TEST_ROOT"), timeout: 60_000 }, async (t) => {
+  const origin = new URL(url);
+  assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
+  const relative = path.relative(os.tmpdir(), fs.realpathSync(root));
+  assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  assert.equal(fs.readFileSync(path.join(root, ".inbox-undo-fixture"), "utf8").trim(), "fictional-only");
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const posting = "https://example.com/fixture-alpha";
+  await page.addInitScript(({ posting }) => {
+    localStorage.setItem("career-ops:jobs", JSON.stringify([{
+      id: "review-fixture", title: "Fictional evaluation", kind: "evaluate", input: posting,
+      status: "gated", gate: { reason: "dealbreaker", message: "Review the location rule.", confirmationRequired: true },
+      text: "", steps: [], startedAt: 1, endedAt: 2,
+    }]));
+  }, { posting });
+  const restore = () => page.request.post(`${origin.origin}/api/inbox/skip`, { data: { url: posting, done: false } });
+  assert.equal((await restore()).ok(), true);
+  t.after(async () => { try { await restore(); } finally { await browser.close(); } });
+  await page.goto(`${origin.origin}/pipeline`);
+  const row = page.locator("li").filter({ hasText: "Fixture Alpha" });
+  await row.getByRole("link", { name: "Needs review", exact: true }).waitFor();
+  assert.match(await row.innerText(), /not scored/);
+  assert.equal(await row.locator('a[href="/jobs/review-fixture"]').count(), 1);
+  const skip = row.getByRole("button", { name: /Skip Fixture Alpha/ });
+  assert.equal(await skip.count(), 1, "an unscored review row keeps its Skip button");
+  const [response] = await Promise.all([
+    page.waitForResponse(response => response.url() === `${origin.origin}/api/inbox/skip` && response.request().method() === "POST"),
+    skip.click(),
+  ]);
+  assert.equal(response.ok(), true);
+  await row.waitFor({ state: "hidden" });
+  assert.match(fs.readFileSync(path.join(root, "data/pipeline.md"), "utf8"), /\[x\] https:\/\/example\.com\/fixture-alpha/);
+});

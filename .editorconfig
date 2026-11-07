@@ -11,3 +11,8 @@ insert_final_newline = true
 [*.go]
 indent_style = tab
 indent_size = 4
+
+# Two trailing spaces are a hard line break in Markdown, so trimming them on
+# save changes how the file renders (#6535).
+[*.md]
+trim_trailing_whitespace = false
