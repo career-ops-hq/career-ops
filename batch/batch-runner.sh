@@ -1394,7 +1394,12 @@ process_offer() {
       jd_api_words=$(wc -w < "$jd_api_tmp" 2>/dev/null) || jd_api_words=0
       jd_api_words="${jd_api_words//[^0-9]/}"
       jd_api_words="${jd_api_words:-0}"
-      if [[ "$jd_api_words" -ge "$prefetch_min_words" ]]; then
+      if grep -q 'Job description truncated here: the posting is longer than' "$jd_api_tmp" 2>/dev/null; then
+        # fetch-jd.mjs marked this text as cut short. Scoring and archiving it
+        # would treat a partial JD as the whole posting, so leave the JD file
+        # empty and let the existing thin-JD handling decide what happens next.
+        echo "    ℹ️  JD prefetch: fetch-jd.mjs returned a truncated JD — not used as the full posting"
+      elif [[ "$jd_api_words" -ge "$prefetch_min_words" ]]; then
         cat "$jd_api_tmp" > "$jd_file"
         echo "    ℹ️  JD prefetch: ${jd_api_words} words from the ATS API (fetch-jd.mjs)"
       fi

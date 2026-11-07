@@ -80,6 +80,7 @@ if (!bash || !apiBlock) {
       "appendFileSync(process.env.STUB_TRACE, JSON.stringify(process.argv.slice(2)) + '\\n');",
       "const mode = process.env.STUB_MODE;",
       "if (mode === 'miss') process.exitCode = 1;",
+      "else if (mode === 'truncated') process.stdout.write(" + JSON.stringify(long + '\n\n[Job description truncated here: the posting is longer than 20000 characters. This text is NOT the complete job description.]') + ");",
       "else if (mode === 'closed') { process.stdout.write('CLOSED_POSTING page text: this job is closed'); process.exitCode = 3; }",
       `else process.stdout.write(mode === 'short' ? ${JSON.stringify(short)} : ${JSON.stringify(long)});`,
       '',
@@ -139,6 +140,10 @@ if (!bash || !apiBlock) {
       if (/STATE:skipped:posting closed/.test(sout) && /RELEASED:042/.test(sout) && !/WORKER-REACHED/.test(sout) && !/STATE:failed/.test(sout)) pass('closure note: the offer is recorded as skipped and no worker is reached');
       else fail(`closure skip is not terminal: ${sout.trim()}`);
     } else fail('could not extract the closure skip blocks from batch-runner.sh');
+
+    const truncated = run({ mode: 'truncated', url: 'https://careers.example.com/job/1' });
+    if (truncated.jd === '' && /truncated JD/.test(truncated.out)) pass('a fetch-jd result marked truncated is not written as the full JD');
+    else fail(`truncated fetch-jd result was accepted (len=${truncated.jd.length})`);
 
     const miss = run({ mode: 'miss', url: 'https://jobs.example.com/eng-42' });
     if (miss.jd === '' && miss.trace.trim() !== '') pass('API miss (exit 1): JD file stays empty, the worker falls back to WebFetch');
