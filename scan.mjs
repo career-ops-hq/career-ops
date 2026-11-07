@@ -79,10 +79,11 @@ import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { OBSERVATIONAL_SCAN_HISTORY_STATUSES, SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { closesAtIso } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { canonicalJobKey, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
+import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
@@ -1766,54 +1767,6 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
 const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
 
 /**
- * Statuses recorded for VISIBILITY only, which must never pin a URL for dedup.
- *
- * Every other skipped status describes the posting: a dead URL stays dead
- * until the configured recheck window releases it (see
- * RECHECKABLE_SCAN_HISTORY_STATUSES), a blocked host stays blocked, so pinning
- * saves a later scan the work. These four describe something else.
- *
- * `skipped_title`, `skipped_location` and `skipped_age` describe the user's
- * CONFIG — `title_filter`, `location_filter` and `max_posting_age_days` are
- * settings they edit. Pinning would mean a role dropped under the old setting
- * never resurfaces under the new one, which is the opposite of what recording
- * the drop is for: a keyword added to `title_filter.positive` has to hand back
- * the titles it now matches. For those three, not pinning is also free: each
- * cut runs on data the provider already returned, before any liveness
- * verification, so a re-scan of one of these URLs costs no extra request.
- *
- * `skipped_no_apply_control` describes the CHECK: the browser classifier did
- * not see an Apply control, which is not proof the posting is closed. On
- * boards whose button it does not recognise, pinning would drop a live posting
- * once and never offer it again (#4832). Unlike the other two, this verdict
- * comes from a browser load, so every `--verify` scan re-opens the posting for
- * as long as the provider lists it. That is the accepted price: a slower
- * `--verify` beats a posting lost for good, and it shrinks as the classifier
- * learns each board, since a posting that reads `active` gets an `added` row
- * and stops coming back.
- *
- * `skipped_content`, `skipped_visa` and `skipped_country_eligibility` are
- * scan-dayforce.mjs's rows for its `content_filter`, visa and
- * `country_eligibility_filter` cuts: CONFIG again, by the same reasoning as the
- * first three. They were missing here, so they fell through to the permanent
- * pin, and widening one of those filters never handed back a Dayforce posting
- * it had dropped. (scan.mjs counts the same cuts and records no row for them.)
- *
- * `collectSeenCompanyRoles` needs no companion change — it already seeds from
- * `added` rows alone.
- */
-const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
-  'skipped_title',
-  'skipped_location',
-  'skipped_age',
-  'skipped_no_apply_control',
-  'skipped_content',
-  'skipped_visa',
-  'skipped_country_eligibility',
-  'skipped_experience',
-]);
-
-/**
  * The offers not yet recorded under `status`, one per URL.
  *
  * The title, location and posting-age cuts run before dedup, and their rows never
@@ -1869,6 +1822,7 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
   if (ageDays == null) return true;
   return ageDays < recheckAfterDays;
 }
+
 
 function scanHistoryPolicy(config = {}) {
   const raw = config.scan_history?.recheck_after_days;
@@ -2392,7 +2346,9 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       // with the same provider identity. (A missing Apply control never gets
       // here: its row is observational and pins nothing, see above.)
       const identityMayPromote = status === 'added' || status.startsWith('cooldown:');
-      if (identityMayPromote) addIdentityPromotableUrl(urlToken, listingKey);
+      if (identityMayPromote) {
+        addIdentityPromotableUrl(urlToken, listingKey);
+      }
       if (extraTokensFor && identityMayPromote) {
         for (const token of [].concat(extraTokensFor(url, portal, listingKey) || [])) {
           if (token) seen.add(token);
@@ -2401,7 +2357,9 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     } else {
       const urlToken = seenJobKey(url);
       recheckCandidates.add(urlToken);
-      if (status === 'added' && listingKey) recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+      if (status === 'added' && listingKey) {
+        recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+      }
     }
   }
 
@@ -3469,6 +3427,7 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     requisition_id: typeof offer.requisitionId === 'string' ? offer.requisitionId : '',
     language: typeof offer.language === 'string' ? offer.language : '',
     listing_key: typeof offer.listingKey === 'string' ? offer.listingKey : '',
+    closes_at: closesAtIso(offer.closesAt) || closesAtIso(offer),
   };
   return SCAN_HISTORY_COLUMNS.map((name) => sanitizeTsvField(record[name])).join('\t');
 }
@@ -3498,6 +3457,7 @@ export function refreshListingKey(offer) {
   offer.listingKey = token ? token.slice('listing:'.length) : '';
   return token;
 }
+
 
 export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
   const urlToken = seenJobKey(offer?.url);
@@ -3743,6 +3703,7 @@ function keysInScanHistory(text, status, policy = {}) {
   }
   return keys;
 }
+
 
 function offersMissingFromHistory(offers, status, historyText, policy = {}) {
   const keys = keysInScanHistory(historyText, status, policy);
@@ -5072,7 +5033,7 @@ async function main() {
         else unverifiedZeroTargets.push(company.name);
       }
 
-      const processJobs = () => {
+      const processJobs = async () => {
       // This fetch's language versions of each posting, in provider order and
       // before any filter: a seen row is matched against every version, also
       // those a filter rejects (a German title can fail a title filter that its
@@ -5307,11 +5268,11 @@ async function main() {
       if (company._isBoard) {
         // Never await an employer barrier inside a fetch worker: enough fast
         // boards could occupy every worker before the employer can start.
-        deferredBoards.push(() => {
-          try { processJobs(); } catch (err) { recordError(err); }
+        deferredBoards.push(async () => {
+          try { await processJobs(); } catch (err) { recordError(err); }
         });
       } else {
-        processJobs();
+        await processJobs();
       }
     } catch (err) {
       recordError(err);
@@ -5340,7 +5301,7 @@ async function main() {
       process.stderr.write(`scan: ${parts.join(', and ')}. Set CAREER_OPS_HTTP_CACHE=0 to always download.\n`);
     });
   }
-  for (const processBoard of deferredBoards) processBoard();
+  for (const processBoard of deferredBoards) await processBoard();
   // --dry-run leaves no trace, this cache included.
   if (!dryRun) {
     try {

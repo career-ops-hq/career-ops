@@ -917,6 +917,9 @@ export function PipelineView({
                   <td className="px-4 py-3 text-muted">
                     <div className="flex items-center gap-2">
                       <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch} className="block max-w-72 truncate" title={r.role}>{r.role}</Link>
+                      {r.closesAt ? (
+                        <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
+                      ) : null}
                       {posting && (
                         <a
                           href={posting}
