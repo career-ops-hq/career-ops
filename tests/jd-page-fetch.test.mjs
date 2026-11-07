@@ -552,6 +552,12 @@ test('a Phenom page that ships a hidden expiry view is not closed by that banner
   assert.equal(pageClosureEvidence(page(`<p>${BODY}</p>`, { body: tpl }), 'https://careers.example.com/job/1'), null);
 });
 
+test('a real closure banner next to a hidden expiry view still closes the page', () => {
+  const tpl = '<section view="x-job-expire-view"><div class="expire-job-view"><h2>the job you are trying to apply for has been filled.</h2></div></section>';
+  const out = pageClosureEvidence(page(`<p>${BODY}</p>`, { body: `${tpl}<h2>This job is no longer available.</h2>` }), 'https://careers.example.com/job/1');
+  assert.ok(out);
+});
+
 test('an expiry-view class named only inside a script does not hide a real closure banner', () => {
   const banner = '<h2>This job is no longer available.</h2>';
   const script = '<script>var c="job-expire-view expire-job-view";</script>';
