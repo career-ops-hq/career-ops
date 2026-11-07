@@ -315,3 +315,53 @@ test("a pack with another template left keeps its sections for that one", async 
   assert.ok(fs.existsSync(path.join(s.userDir, "pack-a", "cv-template.pack-b.html")));
   assert.ok(fs.existsSync(path.join(s.userDir, "pack-a", "sections")));
 });
+
+// The core resolver follows a symlinked pack folder, so a template can be listed
+// from a directory that lives outside the user's templates directory. That
+// folder's files are not the web's to change: delete, rename and the cleanup
+// after them would all land in the symlink target.
+function linkedPack(s, name = "linked-pack") {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "template-link-target-"));
+  const file = path.join(target, `cv-template.${name}.html`);
+  fs.copyFileSync(path.join(CORE, "templates", "cv-template.modern.html"), file);
+  fs.mkdirSync(path.join(target, "sections"));
+  fs.writeFileSync(path.join(target, "sections", "experience.html"), "<section>mine</section>");
+  fs.mkdirSync(s.userDir, { recursive: true });
+  fs.symlinkSync(target, path.join(s.userDir, name), "dir");
+  return { target, file, partial: path.join(target, "sections", "experience.html") };
+}
+
+test("a template in a symlinked pack folder is listed, but delete refuses and touches nothing in the target", async () => {
+  const s = scratch();
+  const link = linkedPack(s);
+  assert.ok((await names(s)).some((t) => t.name === "linked-pack"), "the linked template lists");
+
+  const err = await deleteTemplate(CORE, { kind: "cv", name: "linked-pack", userDir: s.userDir, profilePath: s.profilePath }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+  assert.ok(!err.message.includes(link.target), "the message names no path");
+  assert.ok(fs.existsSync(link.file), "the template file in the target survives");
+  assert.ok(fs.existsSync(link.partial), "the target's sections survive");
+  assert.ok(fs.lstatSync(path.join(s.userDir, "linked-pack")).isSymbolicLink(), "the link survives");
+});
+
+test("rename refuses a template in a symlinked pack folder and writes nothing into the target", async () => {
+  const s = scratch();
+  const link = linkedPack(s);
+
+  const err = await renameTemplate(CORE, { kind: "cv", name: "linked-pack", to: "moved", userDir: s.userDir, profilePath: s.profilePath }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+  assert.ok(fs.existsSync(link.file));
+  assert.deepEqual(fs.readdirSync(link.target).sort(), ["cv-template.linked-pack.html", "sections"]);
+});
+
+test("duplicating a template from a symlinked pack folder still works and writes into the user's own directory", async () => {
+  const s = scratch();
+  const link = linkedPack(s);
+
+  await duplicateTemplate(CORE, { kind: "cv", from: "linked-pack", name: "copy-of-linked", userDir: s.userDir });
+
+  assert.ok((await names(s)).some((t) => t.name === "copy-of-linked"));
+  assert.ok(fs.existsSync(link.file), "the source is untouched");
+});
