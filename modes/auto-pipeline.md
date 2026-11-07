@@ -56,6 +56,8 @@ Execute the same as the `oferta` mode (read `modes/oferta.md` for all A-F blocks
 
 **Agency-mediated postings (#1596, #4359):** before evaluation or any tracker, report, or CV write, apply `modes/_shared.md` → **Agency confirmation handoff**. Ask which agency this posting came through and wait for an explicit answer. A delegated/headless worker instead returns `needs_confirmation` to the parent and stops without artifacts; the parent asks and resumes only with the user's explicit answer for this posting. This is a gate, not a failed step to continue past. After confirmation, record an unknown end employer as `?` (never "Confidential"), the confirmed agency in Via / `via=`, and a distinguishing descriptor in Notes — see `modes/tracker.md` for the reveal workflow.
 
+**GitHub evidence freshness:** once the gates above and the agency confirmation are resolved, run `modes/oferta.md` → **GitHub evidence freshness** once, before Block A. When it reports stale, its notice, translated into `language.output`, is the first line of the reply, followed by a localized equivalent of "Run `expand`, then re-evaluate?", and the pipeline continues through Step 5 without waiting; in an unattended run, do not ask. It never stops the pipeline, never runs `expand`, and never changes a score; the report records it (Machine Summary `evidence_freshness`, plus the `**GitHub evidence:**` header line when stale).
+
 The evaluation inherits `oferta`'s bounded research budget. Company, compensation, and hiring-signal lookup must not invoke `deep-research`, must not spawn subagents, and must stop at the shared query cap instead of escalating into open-ended research.
 
 ## Step 2 — Save Report .md
