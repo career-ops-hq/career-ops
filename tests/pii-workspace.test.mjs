@@ -13,6 +13,7 @@ import {
   rehydrate,
   loadTokenMap,
   saveTokenMap,
+  replaceUserFile,
 } from '../pii-workspace.mjs';
 
 function withTempDir(fn) {
@@ -120,6 +121,87 @@ test('rehydrate matches numeric and legacy tokens in a single pass without re-pr
   assert.equal(restored, 'Test: value with TOKEN_B inside and value with PRIVACY_VALUE_2 inside.');
   assert.doesNotMatch(restored, /replaced_val/);
   assert.doesNotMatch(restored, /another_val/);
+});
+
+test('replaceUserFile writes atomically and preserves file mode', () => {
+  withTempDir((dir) => {
+    const target = path.join(dir, 'test.txt');
+    fs.writeFileSync(target, 'initial', { mode: 0o644 });
+    const expectedMode = fs.statSync(target).mode & 0o777;
+
+    replaceUserFile(target, 'updated');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'updated');
+
+    // On non-Windows platforms verify mode preservation
+    if (process.platform !== 'win32') {
+      const mode = fs.statSync(target).mode & 0o777;
+      assert.equal(mode, expectedMode);
+    }
+  });
+});
+
+test('replaceUserFile preserves restrictive mode (0o600) set via chmodSync', () => {
+  withTempDir((dir) => {
+    const target = path.join(dir, 'restrictive.txt');
+    fs.writeFileSync(target, 'initial');
+    try {
+      fs.chmodSync(target, 0o600);
+    } catch {
+      /* ignore on platforms where chmod is not supported */
+    }
+
+    replaceUserFile(target, 'updated');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'updated');
+
+    if (process.platform !== 'win32') {
+      const mode = fs.statSync(target).mode & 0o777;
+      assert.equal(mode, 0o600);
+    }
+  });
+});
+
+test('replaceUserFile cleans up temporary file on successful write', () => {
+  withTempDir((dir) => {
+    const target = path.join(dir, 'test.txt');
+    replaceUserFile(target, 'hello');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'hello');
+    const tempFiles = fs
+      .readdirSync(dir)
+      .filter((f) => f.startsWith(`.${path.basename(target)}.`) && f.endsWith('.tmp'));
+    assert.equal(tempFiles.length, 0, 'no temporary files left after success');
+  });
+});
+
+test('replaceUserFile cleans up temporary file if write fails', () => {
+  withTempDir((dir) => {
+    // Pointing target to an existing directory forces write/rename to fail (EISDIR / EPERM)
+    const target = path.join(dir, 'dir_as_target');
+    fs.mkdirSync(target);
+
+    assert.throws(() => replaceUserFile(target, 'hello'));
+    const tempFiles = fs
+      .readdirSync(dir)
+      .filter((f) => f.startsWith(`.${path.basename(target)}.`) && f.endsWith('.tmp'));
+    assert.equal(tempFiles.length, 0, 'no temporary files left after failed write');
+  });
+});
+
+test('replaceUserFile preserves symlink target and updates destination', (t) => {
+  withTempDir((dir) => {
+    const realTarget = path.join(dir, 'real.txt');
+    const symlinkTarget = path.join(dir, 'symlink.txt');
+    fs.writeFileSync(realTarget, 'original content', 'utf8');
+    try {
+      fs.symlinkSync(realTarget, symlinkTarget);
+    } catch {
+      t.skip('symlinks not supported on this platform/privilege level');
+      return;
+    }
+
+    replaceUserFile(symlinkTarget, 'updated content');
+    assert.equal(fs.readFileSync(realTarget, 'utf8'), 'updated content');
+    assert.equal(fs.lstatSync(symlinkTarget).isSymbolicLink(), true);
+  });
 });
 
 test('saveTokenMap cleans up temporary file on successful write', () => {
