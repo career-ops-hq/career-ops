@@ -639,9 +639,11 @@ function sweepSteps(steps) {
   };
 }
 
-// The guard and the run are compared as written: unwrapping `base/` would make
-// a guard on the PR's copy look like a guard on the base copy it does not read.
-const guardsWhatItRuns = (j) => JSON.stringify(j.guardedRaw) === JSON.stringify(j.invokedRaw);
+// The guard and the run are compared before unwrapping: unwrapping `base/` would
+// make a guard on the PR's copy look like a guard on the base copy it does not
+// read. Only a leading `./` is dropped, since it names the same file.
+const asWritten = (ps) => JSON.stringify([...new Set(ps.map(dotless))].sort());
+const guardsWhatItRuns = (j) => asWritten(j.guardedRaw) === asWritten(j.invokedRaw);
 
 // Runs first on purpose. Every assertion below iterates what this sweep
 // collected. An empty collection passes all of them without reading a byte of
@@ -690,6 +692,16 @@ test('a ./ prefix on the run or on the checkout path still unwraps base/', () =>
     ]);
     assert.deepEqual(j.invoked, ['x.mjs'], `${path} / ${run}`);
     assert.deepEqual(j.guarded, ['x.mjs'], `${path} / ${run}`);
+  }
+});
+
+test('a ./ prefix on only the guard or only the run still guards what it runs', () => {
+  for (const [guard, run] of [['./base/x.mjs', 'node base/x.mjs'], ['base/x.mjs', 'node ./base/x.mjs']]) {
+    const j = sweepSteps([
+      { uses: 'actions/checkout@0000000000000000000000000000000000000000', with: { path: 'base' } },
+      { run: `if [ ! -f ${guard} ]; then exit 0; fi\n${run}` },
+    ]);
+    assert.ok(guardsWhatItRuns(j), `${guard} / ${run}`);
   }
 });
 
