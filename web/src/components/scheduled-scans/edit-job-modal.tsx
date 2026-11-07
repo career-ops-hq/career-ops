@@ -7,6 +7,7 @@ import { DEFAULT_FILTERS, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "@/components/explore/filter-builder";
 import { Modal } from "@/components/ui/modal";
 import { cadenceMinimum, cadenceValueForUnit, updateScheduledJobRequest } from "@/lib/scheduled-job-client.mjs";
+import { scanEngineLabel } from "@/lib/schedule-label.mjs";
 
 export function EditJobModal({
   job,
@@ -114,14 +115,14 @@ export function EditJobModal({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label className="mb-1 block text-[13px] font-medium text-foreground">Where to check</label>
               <select
                 value={engine}
                 onChange={(e) => setEngine(e.target.value as ScanEngine)}
                 className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
               >
-                <option value="full">Full ATS Dataset Sweep</option>
-                <option value="portals">Zero-Token Portals.yml</option>
+                <option value="full">{scanEngineLabel("full")}</option>
+                <option value="portals">{scanEngineLabel("portals")}</option>
               </select>
             </div>
 

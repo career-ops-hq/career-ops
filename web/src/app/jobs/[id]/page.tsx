@@ -5,8 +5,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, CirclePause } from "lucide-react";
 import { evaluationGateForJob, isLegacyMissingReportMessage, jobOutputForDisplay } from "@/lib/job-gate.mjs";
-import { useSearchParams } from "next/navigation";
+import { notFound, useSearchParams } from "next/navigation";
 import { useJobs } from "@/components/jobs/job-store";
+import { missingWorker } from "@/lib/job-route.mjs";
+import JobLoading from "./loading";
 import { BackLink } from "@/components/back-link";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { HeroGlow } from "@/components/hero-glow";
@@ -14,23 +16,14 @@ import { Badge } from "@/components/ui/badge";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { jobs } = useJobs();
+  const { jobs, ready } = useJobs();
   const job = jobs.find((j) => j.id === id);
   const query = pipelineQuery(useSearchParams().toString());
   const pipelineHref = `/pipeline${query ? `?${query}` : ""}`;
 
-  if (!job) {
-    return (
-      <div className="mx-auto max-w-3xl px-6 py-10">
-        <BackLink href={pipelineHref} className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text">
-          <ArrowLeft className="size-4" /> Pipeline
-        </BackLink>
-        <p className="mt-8 text-sm text-muted">
-          This worker is no longer in memory (it finished earlier or the page was reloaded).
-        </p>
-      </div>
-    );
-  }
+  if (!ready) return <JobLoading />;
+  if (missingWorker({ ready, ids: jobs.map((j) => j.id), id })) notFound();
+  if (!job) notFound();
 
   const gate = evaluationGateForJob(job);
   const displayOutput = jobOutputForDisplay(job);
