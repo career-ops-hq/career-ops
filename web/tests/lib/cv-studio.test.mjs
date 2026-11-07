@@ -11,8 +11,12 @@ import {
   buildStudioDoc,
   emptyEdits,
   parseEdits,
+  applyRecordedEdit,
+  isStudioUndoKey,
+  pushUndo,
   resolveStudio,
   studioReducer,
+  UNDO_LIMIT,
   wordDiff,
 } from "../../src/lib/cv-studio/studio.mjs";
 
@@ -128,6 +132,102 @@ test("each bullet knows its original, its change, and the keywords that drove it
   );
   assert.deepEqual(techfin.restorable, [{ text: "Ran the on-call rotation for the model serving stack", keywords: ["on-call"] }]);
   assert.equal(doc.sections[0].items[0].bullets[0].base, "Full-stack AI engineer building production ML systems.");
+});
+
+test("cmd or ctrl plus z undoes, including caps lock, and shift stays redo", () => {
+  assert.equal(isStudioUndoKey({ key: "z", metaKey: true }), true);
+  assert.equal(isStudioUndoKey({ key: "z", ctrlKey: true }), true);
+  assert.equal(isStudioUndoKey({ key: "Z", metaKey: true, shiftKey: false }), true);
+  assert.equal(isStudioUndoKey({ key: "Z", ctrlKey: true, shiftKey: false }), true);
+  assert.equal(isStudioUndoKey({ key: "z", metaKey: true, shiftKey: true }), false);
+  assert.equal(isStudioUndoKey({ key: "Z", ctrlKey: true, shiftKey: true }), false);
+  assert.equal(isStudioUndoKey({ key: "z" }), false);
+  assert.equal(isStudioUndoKey({ key: "y", metaKey: true }), false);
+  assert.equal(isStudioUndoKey(null), false);
+});
+
+test("the undo history keeps the last 30 states in order and drops the oldest", () => {
+  const states = Array.from({ length: 31 }, (_, i) => emptyEdits(`h${i}`));
+  let history = [];
+  for (const state of states) history = pushUndo(history, state);
+  assert.equal(history.length, UNDO_LIMIT);
+  assert.equal(UNDO_LIMIT, 30);
+  assert.deepEqual(history.map((e) => e.sourceHash), states.slice(1).map((e) => e.sourceHash));
+  assert.equal(history.at(-1), states.at(-1));
+  assert.deepEqual(pushUndo([states[0]], states[1], 1), [states[1]]);
+});
+
+test("a wording change recorded after a hide still undoes to the hidden CV", () => {
+  const { doc } = studio();
+  const before = emptyEdits("h1");
+  const hide = applyRecordedEdit(before, { type: "toggle", id: "s2i0b2" }, doc, []);
+  const wording = applyRecordedEdit(hide.edits, { type: "use", id: "s2i0b0", use: { kind: "base" } }, doc, hide.history);
+  assert.ok(wording.edits.hidden.includes("s2i0b2"));
+  assert.equal(wording.edits.use.s2i0b0.kind, "base");
+  const undone = wording.history.at(-1);
+  assert.ok(undone.hidden.includes("s2i0b2"));
+  assert.equal(undone.use.s2i0b0, undefined);
+});
+
+test("clicking the wording that is already selected records nothing", () => {
+  const { doc } = studio();
+  const before = emptyEdits("h1");
+  const first = applyRecordedEdit(before, { type: "use", id: "s2i0b0", use: { kind: "base" } }, doc, []);
+  assert.equal(first.recorded, true);
+  const again = applyRecordedEdit(first.edits, { type: "use", id: "s2i0b0", use: { kind: "base" } }, doc, first.history);
+  assert.equal(again.recorded, false);
+  assert.equal(again.edits, first.edits);
+  assert.equal(again.history, first.history);
+  assert.equal(again.history.at(-1).use.s2i0b0, undefined);
+  const custom = applyRecordedEdit(first.edits, { type: "use", id: "s2i0b0", use: { kind: "custom", text: "Led the model registry", keywords: ["MLOps"] } }, doc, first.history);
+  assert.equal(custom.recorded, true);
+  const sameCustom = applyRecordedEdit(custom.edits, { type: "use", id: "s2i0b0", use: { kind: "custom", text: "Led the model registry", keywords: ["MLOps"] } }, doc, custom.history);
+  assert.equal(sameCustom.recorded, false);
+  assert.equal(sameCustom.history, custom.history);
+});
+
+test("clicking the selected preset or resetting an untouched CV records nothing", () => {
+  const { doc } = studio();
+  const before = emptyEdits("h1");
+  const sameLength = applyRecordedEdit(before, { type: "preset", preset: { length: "full" } }, doc, []);
+  assert.equal(sameLength.recorded, false);
+  assert.equal(sameLength.edits, before);
+  const sameTone = applyRecordedEdit(before, { type: "preset", preset: { tone: "tailored" } }, doc, []);
+  assert.equal(sameTone.recorded, false);
+  const reset = applyRecordedEdit(before, { type: "reset" }, doc, []);
+  assert.equal(reset.recorded, false);
+  assert.equal(reset.edits, before);
+
+  const onePage = applyRecordedEdit(before, { type: "preset", preset: { length: "one-page" } }, doc, []);
+  assert.equal(onePage.recorded, true);
+  const again = applyRecordedEdit(onePage.edits, { type: "preset", preset: { length: "one-page" } }, doc, onePage.history);
+  assert.equal(again.recorded, false);
+  assert.equal(again.history, onePage.history);
+  const cleared = applyRecordedEdit(onePage.edits, { type: "reset" }, doc, onePage.history);
+  assert.equal(cleared.recorded, true);
+  assert.deepEqual(cleared.edits.preset, { length: "full", tone: "tailored" });
+});
+
+test("a wording change after undo is recorded against the restored CV", () => {
+  const { doc } = studio();
+  const before = emptyEdits("h1");
+  const hide = applyRecordedEdit(before, { type: "toggle", id: "s2i0b2" }, doc, []);
+  const restored = hide.history.at(-1);
+  const history = hide.history.slice(0, -1);
+  const wording = applyRecordedEdit(restored, { type: "use", id: "s2i0b0", use: { kind: "base" } }, doc, history);
+  assert.equal(wording.history.at(-1), restored);
+  assert.deepEqual(wording.edits.hidden, []);
+  const undone = studioReducer(wording.edits, { type: "replace", edits: wording.history.at(-1) }, doc);
+  assert.equal(undone, restored);
+  assert.deepEqual(undone.hidden, []);
+});
+
+test("undo puts back the edits from before a hide", () => {
+  const { doc } = studio();
+  const before = emptyEdits("h1");
+  const hidden = studioReducer(before, { type: "toggle", id: "s2i0b2" }, doc);
+  assert.ok(hidden.hidden.includes("s2i0b2"));
+  assert.deepEqual(studioReducer(hidden, { type: "replace", edits: before }, doc), before);
 });
 
 test("using the original wording, hiding, and restoring change the render and the coverage", () => {

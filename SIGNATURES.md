@@ -210,3 +210,11 @@ public commit with a stated reason.
 - @Priya-G-Prasad | 2026-10-25 | "Its helping me with my Job Search. Thanks" | id:174127723 | src:https://github.com/career-ops-hq/career-ops/discussions/5846 | n:162
 - @cluster2600 | Maxime Grenu | 2026-10-26 | id:69890511 | src:https://github.com/career-ops-hq/career-ops/pull/5802 | n:163
 - @ClintGallon | Clint Gallon | 2026-10-26 | "Quality over quantity" | id:12228649 | src:https://github.com/career-ops-hq/career-ops/discussions/5994 | n:164
+- @lucaci32u4 | Alexandru Iercosan-Lucaci | 2026-10-28 | "Operational excellence for the job search" | id:43639458 | src:https://github.com/career-ops-hq/career-ops/discussions/6147 | n:165
+- @LolRekkles | LolRekkles | 2026-10-29 | id:42163790 | src:https://github.com/career-ops-hq/career-ops/discussions/6194 | n:166
+- @dineshkanna113 | Dinesh Kanna | 2026-10-29 | "To get better job that pays and keep me update." | id:50012730 | src:https://github.com/career-ops-hq/career-ops/discussions/6195 | n:167
+- @lkorchnoy | Ludmila Korchnoy | 2026-10-29 | "Quality job search. Agent on your side. Future looks promising with this tool." | id:55862411 | src:https://github.com/career-ops-hq/career-ops/discussions/6248 | n:168
+- @roberttk01 | Thomas Kyle Robertson | 2026-11-01 | id:6352722 | src:https://github.com/career-ops-hq/career-ops/discussions/6388 | n:169
+- @sayyidmibrahiim | Ibrahim | 2026-11-03 | "ai ops" | id:106948724 | src:https://github.com/career-ops-hq/career-ops/discussions/6422 | n:170
+- @taattieee | 2026-11-04 | "Make job applications less monotonous!" | id:100685678 | src:https://github.com/career-ops-hq/career-ops/discussions/6487 | n:171
+- @beatrizfsvieira8 | Beatriz | 2026-11-05 | id:352906915 | src:https://github.com/career-ops-hq/career-ops/discussions/6537 | n:172

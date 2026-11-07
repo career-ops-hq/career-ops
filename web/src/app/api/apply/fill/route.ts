@@ -1,5 +1,5 @@
 import { fillSession, handoffSession, getSession } from "@/lib/apply/session";
-import { resolveSessionCv } from "@/lib/apply/cv";
+import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
 import type { ApplyField } from "@/lib/apply/extract";
 import { readJsonObject } from "@/lib/json-body";
 
@@ -28,7 +28,8 @@ export async function POST(req: Request) {
   const cvPath = (await resolveSessionCv({ company, application, title: session?.title })) ?? undefined;
 
   try {
-    const result = await fillSession(sessionId, answers, fields, cvPath);
+    const cvUploadName = cvPath ? uploadNameForCv({ application, title: session?.title }) : undefined;
+    const result = await fillSession(sessionId, answers, fields, cvPath, cvUploadName);
     if (handoff) await handoffSession(sessionId).catch(() => {});
     return Response.json({ ...result, handedOff: !!handoff, cvAttached: !!cvPath });
   } catch (e) {

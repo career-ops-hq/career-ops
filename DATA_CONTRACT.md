@@ -29,6 +29,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/offers/.gitkeep` | System-owned empty directory scaffold; the updater writes only this exact file and preserves all user files in `data/offers/` |
 | `data/parser-output/.gitkeep` | System-owned empty directory scaffold; the updater writes only this exact file and preserves all user files in `data/parser-output/` |
 | `data/intake-state.json` | Fingerprints of already-ingested intake sources (written by `node intake.mjs --commit`; makes re-runs propose only new material — safe to delete, next intake re-proposes everything) |
+| `data/intake-snapshots/` | Extracted text of each committed intake source, one `{sha256 of the documents/ path}.txt` per source (written by `node intake.mjs --commit`, read by `node intake.mjs --diff <path>` to show what changed since the last commit). A second copy of the source text, so it is as personal as `documents/*`. Safe to delete: `--diff` then prints the full text once, and the next `--commit` writes it again |
 | `portals.yml` | Your customized company list |
 | `config/plugins.yml` | Your plugin activation toggles (opt-in; seeded from `config/plugins.example.yml`) |
 | `opencode.json` | Your OpenCode project config (MCP servers, model, formatter, LSP) — gitignored, copy `opencode.example.json` to start |
@@ -44,6 +45,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/portal-health.tsv` | Consecutive reachability status for scanned portals (appended by `scan.mjs`; statuses: `reachable`, `empty`, `slug_gone`, `network`, `auth`, `server`, `unknown`, `unverified_zero` — the last four joined the vocabulary later, so older files carry only the first four; `unverified_zero` means a provider returned no jobs without any observed successful HTTP response and counts toward the failure streak) |
 | `data/dead-boards.tsv` | Boards that returned three consecutive 404s during mass reverse ATS sweeps (written by `scan-ats-full.mjs`; unlike `data/portal-health.tsv`, this does not track the user's configured portals; re-probed after 30 days — safe to delete, the next sweep rebuilds it) |
 | `data/cache/provider-ids/<provider>.json` | Values a provider resolved on one scan and reuses on the next, one JSON object per provider (written by `scan.mjs` and `scan-ats-full.mjs` through `provider-id-cache.mjs`; join.com keeps company ids here) — safe to delete, the next scan looks them up again |
+| `data/cache/http/` | Board responses saved for a few minutes so a repeat `scan` can reuse them (written by `scan.mjs` through `providers/_http-cache.mjs`). Each file name is a hash. The URL is not stored, because a query string can carry a token. Safe to delete. The next scan downloads the boards again. |
 | `data/follow-ups.md` | Your follow-up history |
 | `data/active-interviews.md` | Your active interview processes, incl. inline `[process-friction]` notes (read by `process-quality.mjs`) |
 | `data/agent-inbox.md` | Your append-only request queue drained at session start (written by `agent-inbox.mjs`) |
@@ -196,12 +198,13 @@ That is what `update-system.mjs apply` does with every system file this install 
 
 ## Custom Data Directory
 
-By default, all User Layer files reside inside the project repository root. You can configure a separate, external directory for your personal data.
+By default, a checkout keeps all User Layer files inside the project repository root. A Claude Code plugin install keeps them in `~/career-ops-data` instead (see the Plugin Install Default below). Either way, you can configure a separate, external directory for your personal data.
 
 ### Resolution Precedence:
-1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory.
+1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory. A directory inside a Claude Code plugin install copy is refused, here and in the marker file, because Claude Code replaces that copy on every plugin update.
 2. **Marker File (`.career-ops-data`):** A repository-level marker file named `.career-ops-data` containing the path (absolute or relative) to the user data directory.
-3. **Repository Default:** Defaults to the codebase/repository root directory.
+3. **Plugin Install Default (`~/career-ops-data`):** When neither is set and the code runs from a Claude Code plugin install copy (inside `~/.claude/plugins/cache/`, `marketplaces/` or `synced/`). Claude Code replaces that copy on every plugin update, so it can never hold User Layer files. See [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+4. **Repository Default:** Otherwise, defaults to the codebase/repository root directory.
 
 When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `data/`, `reports/`, `output/`, `portals.yml`, `batch/tracker-additions/`) will be resolved relative to that path. System Layer files continue to be resolved relative to the codebase/repository root, keeping code and personal data completely separate.
 

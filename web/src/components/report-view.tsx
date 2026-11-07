@@ -7,6 +7,7 @@ import {
   APPLY_LINE,
   applyCtaQuiet,
   applyLineLabel,
+  archetypeCaption,
   cleanHeading,
   isLeadSection,
   isVerdictHeading,
@@ -15,6 +16,7 @@ import {
   verdictReason,
 } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
+import { BackLink } from "@/components/back-link";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { ScoreLevers } from "@/components/score-levers";
@@ -50,7 +52,8 @@ export function ReportView({
   app,
   report,
   canDelete = false,
-  pdfReadyFromIndex = false,
+  pdfFileReady = false,
+  trackerMarkedPdf = false,
   coverReady = false,
   backHref = "/pipeline",
   applyHref,
@@ -63,7 +66,10 @@ export function ReportView({
    *  the raw .md filename is a dev artifact, not header content. */
   file?: string | null;
   canDelete?: boolean;
-  pdfReadyFromIndex?: boolean;
+  /** A tailored CV file is on disk (index or a matching cv-* name). Not the tracker mark. */
+  pdfFileReady?: boolean;
+  /** The tracker cell has a PDF mark. That mark can exist with no file. */
+  trackerMarkedPdf?: boolean;
   /** A tailored cover letter for THIS application exists in output/ (resolved by
    *  the page, see resolveTailoredCover). The page drafts letters through the
    *  cover run but does not render them, so this link only finds CLI PDFs. */
@@ -76,25 +82,26 @@ export function ReportView({
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
   const score = app?.score || field("Score");
   const date = app?.date || field("Date");
-  const archetype = field("Archetype");
+  const archetype = archetypeCaption(field("Archetype"));
   const url = field("URL");
   const decision = field("Decision");
   const line = applyLineLabel(score ?? "", meta?.legitimacy);
   const recommended = line === "Recommended";
   const quietApply = applyCtaQuiet({ score, legitimacy: meta?.legitimacy });
   const applyUrl = httpUrl(url);
-  const pdfReady = (app?.pdf ?? "").includes("✅") || pdfReadyFromIndex;
+  const pdfReady = pdfFileReady;
+  const pdfMarkedWithoutFile = trackerMarkedPdf && !pdfFileReady;
   const company = app ? companyPresentation(app) : null;
   const companyName = company?.label ?? app?.company ?? meta?.title ?? id;
 
   return (
     <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
-      <Link
+      <BackLink
         href={backHref}
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text print:hidden"
       >
         <ArrowLeft className="size-4" /> Pipeline
-      </Link>
+      </BackLink>
 
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
@@ -105,26 +112,34 @@ export function ReportView({
           </h1>
         </div>
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}
+        {meta?.fields.find((field) => field.label === "Evaluation scope") && (
+          <p className="mt-2 text-xs text-muted">{meta.fields.find((field) => field.label === "Evaluation scope")?.value}</p>
+        )}
 
-        <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <div className="mt-4 flex flex-wrap items-center gap-2.5 print:hidden">
           {app && <StatusSelect n={id} current={app.status} />}
-          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          <GeneratePdfButton n={id} company={app?.company || meta?.title || id} pdfReady={pdfReady} />
           {app && report && <CoverDraftButton n={id} company={companyName} />}
           {applyHref && (
             <Link
               href={applyHref}
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
             >
               Apply checklist
             </Link>
           )}
-          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} />
+          <MarkPdfReadyButton reportNum={reportNum} ready={pdfFileReady || trackerMarkedPdf} />
+          {pdfMarkedWithoutFile && (
+            <p className="basis-full text-sm text-muted">
+              The tracker marks a tailored CV, but there is no file in output/. Choose Generate tailored CV.
+            </p>
+          )}
           {coverReady && (
             <a
               href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-800 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
             >
               <FileText className="size-3.5" /> View cover
             </a>
@@ -132,7 +147,7 @@ export function ReportView({
         </div>
 
         {app && canDelete && (
-          <div className="mt-3">
+          <div className="mt-3 print:hidden">
             <DeleteFromTracker n={id} />
           </div>
         )}
@@ -146,7 +161,7 @@ export function ReportView({
                 href={applyUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
+                className="inline-flex items-center justify-center gap-1 text-brand-text hover:underline max-sm:min-h-[44px]"
               >
                 posting <ExternalLink className="size-3" />
               </a>
@@ -189,7 +204,7 @@ export function ReportView({
                   {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
                 </div>
                 {reason && <p className="mt-4 text-[15px] font-medium leading-relaxed text-foreground">{reason}</p>}
-                <div className="mt-4">
+                <div className="mt-4 print:hidden">
                   <ApplyButton
                     n={id}
                     url={applyUrl}
@@ -230,8 +245,8 @@ export function ReportView({
                     <details key={i} className="group mt-3 overflow-hidden rounded-xl border border-border bg-surface/30">
                       <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-hover">
                         <span className="text-sm font-medium">{cleanHeading(s.heading)}</span>
-                        <span className="hidden truncate text-xs text-faint sm:inline">{sectionPreview(s.content)}</span>
-                        <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
+                        <span className="hidden truncate text-xs text-faint sm:inline print:hidden">{sectionPreview(s.content)}</span>
+                        <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180 print:hidden" />
                       </summary>
                       <div className="report-prose border-t border-border px-4 py-3">
                         <ReportMarkdown>{s.content}</ReportMarkdown>
@@ -242,7 +257,7 @@ export function ReportView({
                 <PrepPack report={report} company={companyName} />
 
                 {machine.length > 0 && (
-                  <>
+                  <div className="print:hidden">
                     <div className="mt-6 flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-faint">
                       <span className="h-px flex-1 bg-border" />
                       Technical details · for developers
@@ -259,7 +274,7 @@ export function ReportView({
                         </div>
                       </details>
                     ))}
-                  </>
+                  </div>
                 )}
               </div>
             );
@@ -273,7 +288,9 @@ export function ReportView({
               guessing one from the report would surface another company's
               history. */}
           {app?.company && <CompanyEvidence company={app.company} />}
-          <ScoreMethodology />
+          <div className="print:hidden">
+            <ScoreMethodology />
+          </div>
         </>
       ) : (
         <div className="mt-8 flex items-center gap-3 rounded-2xl border border-dashed border-border bg-surface/30 p-5 text-sm text-muted">

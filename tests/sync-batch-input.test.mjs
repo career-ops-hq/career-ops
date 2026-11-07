@@ -9,7 +9,7 @@
 import { pass, fail, ROOT, SANDBOX_DATA_ROOT } from './helpers.mjs';
 import { join, sep } from 'path';
 import { pathToFileURL } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { mkdtempSync, rmSync, realpathSync, existsSync, writeFileSync } from 'fs';
 
 console.log('\nsync-batch-input — pipeline "Pending" -> batch-input.tsv');
@@ -149,9 +149,11 @@ try {
   check('bracketed IPv4-compatible IPv6 private is rejected', !isSafePublicHttpUrl('http://[::10.0.0.1]/'));
 
   // ── argValue() CLI validation ──
+  // Arguments go as an array to the Node running this suite: no shell
+  // re-parses the temp paths below, and no other `node` on PATH runs the CLI.
   function runCli(args, extraEnv = {}) {
     try {
-      const stdout = execSync(`node "${join(ROOT, 'sync-batch-input.mjs')}" ${args}`, {
+      const stdout = execFileSync(process.execPath, [join(ROOT, 'sync-batch-input.mjs'), ...args], {
         cwd: ROOT,
         encoding: 'utf-8',
         timeout: 15000,
@@ -163,12 +165,12 @@ try {
       return { exitCode: e.status ?? 1, stderr: (e.stderr || '').toString(), stdout: (e.stdout || '').toString() };
     }
   }
-  check('--input without value exits with error', runCli('--input --dry-run').exitCode !== 0);
-  check('--pipeline without value exits with error', runCli('--pipeline --dry-run').exitCode !== 0);
-  check('--state without value exits with error', runCli('--state --dry-run').exitCode !== 0);
-  check('--input followed by another flag exits with error', runCli('--input --dry-run').exitCode !== 0);
-  check('--pipeline followed by another flag exits with error', runCli('--pipeline --dry-run').exitCode !== 0);
-  check('--state followed by another flag exits with error', runCli('--state --state --dry-run').exitCode !== 0);
+  check('--input without value exits with error', runCli(['--input', '--dry-run']).exitCode !== 0);
+  check('--pipeline without value exits with error', runCli(['--pipeline', '--dry-run']).exitCode !== 0);
+  check('--state without value exits with error', runCli(['--state', '--dry-run']).exitCode !== 0);
+  check('--input followed by another flag exits with error', runCli(['--input', '--dry-run']).exitCode !== 0);
+  check('--pipeline followed by another flag exits with error', runCli(['--pipeline', '--dry-run']).exitCode !== 0);
+  check('--state followed by another flag exits with error', runCli(['--state', '--state', '--dry-run']).exitCode !== 0);
 
   // ── mkdirSync before writeFileSync ──
   // The fixture lives inside the sandbox data root, not beside the checkout:
@@ -183,7 +185,7 @@ try {
   writeFileSync(tmpState, 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n', 'utf-8');
   try {
     const batchDir = join(TMP, 'newsub');
-    const result = runCli(`--pipeline "${tmpPipeline}" --input "${tmpInput}" --state "${tmpState}" --dry-run`);
+    const result = runCli(['--pipeline', tmpPipeline, '--input', tmpInput, '--state', tmpState, '--dry-run']);
     check('CLI does not crash when batch directory is missing (mkdirSync)', result.exitCode === 0);
     check('dry-run does not create missing batch directory', !existsSync(batchDir));
   } finally {
@@ -206,7 +208,7 @@ try {
     // batch-runner.sh never reads.
     const batchDirMarker = `batch${sep}batch-input.tsv`;
     const extResult = runCli(
-      `--pipeline "${extPipeline}" --dry-run`,
+      ['--pipeline', extPipeline, '--dry-run'],
       { CAREER_OPS_ROOT: extDataRootTmp },
     );
     check(

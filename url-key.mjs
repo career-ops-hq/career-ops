@@ -40,7 +40,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { linkedInPathJobId } from './lib/linkedin-url.mjs';
+import { linkedInCanonicalKey, linkedInPathJobId } from './lib/linkedin-url.mjs';
 
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
@@ -462,8 +462,20 @@ export function languageSubtag(value) {
  * @returns {'no-key'|'same'|'distinct'|'one-sided-language'}
  */
 export function postingUrlRelation(rawA, rawB) {
-  const a = postingLanguageKey(rawA);
-  const b = postingLanguageKey(rawB);
+  return relatePostingLanguageKeys(postingLanguageKey(rawA), postingLanguageKey(rawB));
+}
+
+/**
+ * What two postingLanguageKey() results say about one posting.
+ *
+ * Same answers as postingUrlRelation(). A caller that already parsed both
+ * URLs compares the keys here instead of parsing them again.
+ *
+ * @param {{key: string, language: string, script: string}} a
+ * @param {{key: string, language: string, script: string}} b
+ * @returns {'no-key'|'same'|'distinct'|'one-sided-language'}
+ */
+export function relatePostingLanguageKeys(a, b) {
   if (!a.key || !b.key) return 'no-key';
   if (a.key !== b.key) return 'distinct';
   if (a.language === b.language) {
@@ -476,16 +488,88 @@ export function postingUrlRelation(rawA, rawB) {
   return a.language && b.language ? 'distinct' : 'one-sided-language';
 }
 
+const SAME_JOB_TRACKING = [
+  /^ref$/i, /^src$/i, /^source$/i,
+  /^lever-origin$/i, /^lever-source$/i, /^rltr$/i,
+];
+
+const GREENHOUSE_BOARD_HOSTS = new Set([
+  'boards.greenhouse.io',
+  'boards.eu.greenhouse.io',
+  'job-boards.greenhouse.io',
+  'job-boards.eu.greenhouse.io',
+  'boards-api.greenhouse.io',
+]);
+
 /**
- * One key per posting: the board's own posting id on a known aggregator, so a
- * LinkedIn alert link and the plain /jobs/view/ link agree, else normalizeUrl.
+ * Greenhouse's numeric posting id, or null when this URL does not carry one
+ * unambiguous id.
  *
- * @param {string} raw
- * @returns {string} '' when the input is not a usable posting URL
+ * Board hosts (`boards`, `job-boards`, the EU twins, `boards-api`) contribute
+ * the id at the end of `/jobs/{id}`. Any http(s) URL contributes `?gh_jid=`,
+ * which is how a company careers page embeds the same posting. The id is
+ * global on Greenhouse, so the company slug is not part of the key.
+ *
+ * A path id and a `gh_jid` that disagree are not one posting. Null sends the
+ * caller back to the full URL, so the two signals stay distinct.
+ *
+ * @param {URL} url - Hostname already folded.
+ * @returns {string|null}
  */
+function greenhouseJobId(url) {
+  let pathId = null;
+  if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
+    const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    if (match) pathId = match[1];
+  }
+  const query = url.searchParams.get('gh_jid');
+  const queryId = query && /^\d+$/.test(query) ? query : null;
+  if (pathId && queryId && pathId !== queryId) return null;
+  return pathId || queryId;
+}
+
+function indeedJobId(url) {
+  if (!/(^|\.)indeed\.com$/.test(url.hostname)) return null;
+  const jk = url.searchParams.get('jk') ?? url.searchParams.get('vjk');
+  return jk && /^[\w-]+$/.test(jk) ? jk : null;
+}
+
+export function canonicalJobKey(raw) {
+  if (typeof raw !== 'string') return '';
+  const s = raw.trim();
+  if (!s) return '';
+
+  const linked = linkedInCanonicalKey(s);
+  if (linked) return linked;
+
+  let u;
+  try { u = new URL(s); } catch { return ''; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+  u.hostname = foldHostname(u.hostname);
+
+  const indeed = indeedJobId(u);
+  if (indeed) return `indeed.com:${indeed}`;
+
+  const greenhouse = greenhouseJobId(u);
+  if (greenhouse) return `greenhouse:${greenhouse}`;
+
+  for (const key of [...u.searchParams.keys()]) {
+    const lower = key.toLowerCase();
+    if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
+      u.searchParams.delete(key);
+    }
+  }
+  const normalized = normalizeUrl(u.href);
+  if (!normalized) return '';
+  const out = new URL(normalized);
+  if (out.pathname.length > 1) {
+    out.pathname = out.pathname.toLowerCase().replace(/\/+$/, '') || '/';
+  }
+  return out.toString();
+}
+
 export function postingKey(raw) {
-  const agg = aggregatorPostingId(raw);
-  return agg ? `${agg.domain}:${agg.id}` : normalizeUrl(raw);
+  return canonicalJobKey(raw);
 }
 
 export default normalizeUrl;

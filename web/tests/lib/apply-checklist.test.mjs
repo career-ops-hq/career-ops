@@ -96,8 +96,8 @@ test("indexedPdf returns a workspace-relative path only when the file is under o
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("portal tips name the five boards and tell iCIMS to create an account first", () => {
-  assert.deepEqual(PORTAL_TIPS.map((tip) => tip.portal), ["Workday", "iCIMS", "Greenhouse", "Lever", "Ashby"]);
+test("portal tips name the boards and tell iCIMS to create an account first", () => {
+  assert.deepEqual(PORTAL_TIPS.map((tip) => tip.portal), ["Workday", "iCIMS", "UKG", "Greenhouse", "Lever", "Ashby"]);
   const icims = PORTAL_TIPS.find((tip) => tip.portal === "iCIMS");
   assert.match(icims.tip, /Create an account first/);
 });

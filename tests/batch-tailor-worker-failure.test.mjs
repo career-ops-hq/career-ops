@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { pass, fail } from './helpers.mjs';
+import { envWithPathOnly } from './helpers/fake-cli.mjs';
 
 function check(label, run) {
   try { run(); pass(label); } catch (error) { fail(`${label}: ${error.message}`); }
@@ -35,7 +36,9 @@ require('node:module').syncBuiltinESMExports();
 `);
       const result = spawnSync(process.execPath, ['--require', stub, 'batch-tailor.mjs'], {
         cwd: new URL('..', import.meta.url), encoding: 'utf8',
-        env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_BATCH_STATE: state },
+        // PATH is the empty sandbox: the stub above stands in for spawnSync, so
+        // a real claude on this machine must not be found and resolved instead.
+        env: envWithPathOnly(root, { CAREER_OPS_ROOT: root, CAREER_OPS_BATCH_STATE: state }),
       });
       assert.equal(result.error, undefined);
       assert.equal(readFileSync(calls, 'utf8').trim().split('\n').length, 3);

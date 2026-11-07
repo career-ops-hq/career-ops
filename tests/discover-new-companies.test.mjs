@@ -25,7 +25,7 @@
  * Issue #4181 — github.com/career-ops-hq/career-ops
  */
 
-import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -123,16 +123,23 @@ for (const args of [
 console.log('\n--- 1b. --flag=value form ---');
 
 {
+  // Each flag gets a row only it can drop: 'Recent' is inside the default
+  // 30-day window but outside --since 7; 'Once' has one row, under the
+  // default --min-rows 2 but kept by --min-rows 1.
+  const fifteenDaysAgo = new Date(Date.now() - 15 * 86_400_000).toISOString().slice(0, 10);
   const history = [
     row({ company: 'Acme', status: 'added' }),
     row({ company: 'Acme' }),
-    row({ company: 'Globex' }),
-    row({ company: 'Globex' }),
+    row({ company: 'Recent', seen: fifteenDaysAgo }),
+    row({ company: 'Recent', seen: fifteenDaysAgo }),
+    row({ company: 'Once' }),
   ];
-  const spaced = run(history, {}, ['--since', '7', '--min-rows', '1', '--json']);
-  const equals = run(history, {}, ['--since=7', '--min-rows=1', '--json']);
-  eq('--since=7 --min-rows=1 matches --since 7 --min-rows 1',
-    equals.companies.map((c) => c.name).sort(), spaced.companies.map((c) => c.name).sort());
+  const names = (res) => res.companies.map((c) => c.name).sort();
+  const spaced = names(run(history, {}, ['--since', '7', '--min-rows', '1', '--json']));
+  const equals = names(run(history, {}, ['--since=7', '--min-rows=1', '--json']));
+  eq('--since 7 --min-rows 1 returns Acme and Once only', spaced, ['Acme', 'Once']);
+  eq('--since=7 --min-rows=1 returns Acme and Once only', equals, ['Acme', 'Once']);
+  eq('--since=7 --min-rows=1 matches --since 7 --min-rows 1', equals, spaced);
 }
 
 {
@@ -143,24 +150,31 @@ console.log('\n--- 1b. --flag=value form ---');
 }
 
 {
-  let exit = 0;
-  try { run([row({ company: 'Acme' })], {}, ['--out=/tmp/dnc-out.yml', '--json']); }
-  catch (e) { exit = e.status; }
-  ok('--out=/tmp/dnc-out.yml does not break JSON output', exit === 0);
+  // No --json: with it the script prints JSON and never writes the file.
+  const outDir = mkdtempSync(join(tmpdir(), 'discover-new-out-'));
+  try {
+    const outFile = join(outDir, 'out.yml');
+    run([row({ company: 'Acme' }), row({ company: 'Acme' })], {}, [`--out=${outFile}`], { parse: 'text' });
+    const doc = yaml.load(readFileSync(outFile, 'utf-8'));
+    ok('--out=<file> writes the companies YAML to that file',
+      Array.isArray(doc.companies) && doc.companies[0] && doc.companies[0].name === 'Acme');
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
 }
 
 {
   let exit = 0;
   try { run([row({ company: 'Acme' })], {}, ['--since=', '--json']); }
   catch (e) { exit = e.status; }
-  ok('--since= (empty value) exits non-zero', exit !== 0);
+  ok('--since= (empty value) exits 1', exit === 1);
 }
 
 {
   let exit = 0;
   try { run([row({ company: 'Acme' })], {}, ['--since=abc', '--json']); }
   catch (e) { exit = e.status; }
-  ok('--since=abc exits non-zero', exit !== 0);
+  ok('--since=abc exits 1', exit === 1);
 }
 
 {
@@ -218,7 +232,7 @@ console.log('\n--- 1b. --flag=value form ---');
     rmSync(dataRoot, { recursive: true, force: true });
     rmSync(decoyCwd, { recursive: true, force: true });
   }
-  ok('missing data directory fails cleanly instead of reading cwd', missingDataExit !== 0);
+  ok('missing data directory fails cleanly instead of reading cwd', missingDataExit === 1);
 }
 
 // ── 2. Subtract already-tracked ───────────────────────────────────────────────

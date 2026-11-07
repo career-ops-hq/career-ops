@@ -1,3 +1,5 @@
+import { evaluationScopeKey } from "./evaluation-options.mjs";
+
 const MAX_SAMPLES = 10;
 
 function positiveFinite(value) {
@@ -17,10 +19,11 @@ function median(values) {
  * Estimate a future run from the user's own recent completed runs of that kind.
  * A median keeps one unusually large agent run from inflating every later warning.
  */
-export function estimateRunCost(jobs, kind, count = 1) {
+export function estimateRunCost(jobs, kind, count = 1, evaluationSections = /** @type {string[] | undefined} */ (undefined)) {
   const runCount = Number.isSafeInteger(count) && count > 0 ? count : 1;
   const samples = (Array.isArray(jobs) ? jobs : [])
     .filter((job) => job?.kind === kind && job?.status === "done" && positiveFinite(job?.cost?.tokens))
+    .filter((job) => kind !== "evaluate" || evaluationScopeKey(job.evaluationSections) === evaluationScopeKey(evaluationSections))
     .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
     .slice(0, MAX_SAMPLES);
 
