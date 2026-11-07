@@ -162,6 +162,14 @@ const CALL_SITES = [
     probe: 'run',
   },
   {
+    source: 'web/src/app/api/linkedin-import/route.ts',
+    script: 'linkedin-import.mjs',
+    // The route pipes the pasted alert on stdin. The probe sends none; the
+    // route only needs the JSON payload the paste box shows.
+    args: ['--json'],
+    probe: 'json-any-exit',
+  },
+  {
     source: 'web/src/lib/core/pipeline.ts',
     script: null,
     args: [],

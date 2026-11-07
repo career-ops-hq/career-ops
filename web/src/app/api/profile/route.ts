@@ -7,16 +7,17 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
-import { patchProfileText } from "@/lib/profile-yaml-edit.mjs";
+import { firstProfileText, patchProfileText } from "@/lib/profile-yaml-edit.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Merge-safe writer for config/profile.yml (a USER-LAYER file — DATA_CONTRACT:
 // never clobber the user's archetypes/narrative/proof-points). On first create we
-// seed from config/profile.example.yml; on an existing file we deep-merge ONLY the
-// proposed keys, write atomically (temp + rename), and only ever via the confirm-
-// gated setProfile action. The web orchestrates the real file — no parallel store.
+// seed from config/profile.example.yml, without the person it describes; on an
+// existing file we deep-merge ONLY the proposed keys, write atomically (temp +
+// rename), and only ever via the confirm-gated setProfile action. The web
+// orchestrates the real file — no parallel store.
 
 type ProfilePatch = {
   name?: string;
@@ -82,7 +83,7 @@ export async function POST(req: Request) {
   // malformed" (NEVER overwrite — that would silently destroy the user's data).
   if (!fs.existsSync(file)) {
     try {
-      source = fs.readFileSync(path.join(resolveCodeRoot(process.cwd(), process.env), "config", "profile.example.yml"), "utf8");
+      source = firstProfileText(fs.readFileSync(path.join(resolveCodeRoot(process.cwd(), process.env), "config", "profile.example.yml"), "utf8"));
       base = (yaml.load(source) as Record<string, unknown>) || {};
       seeded = Object.keys(base).length > 0;
     } catch {

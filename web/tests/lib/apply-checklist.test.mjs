@@ -68,6 +68,7 @@ test("answerCopyItems follows the application-answers format and skips empty val
 
 test("reportNumberFor uses the report cell, then the filename, and never the tracker id when a row exists", () => {
   assert.equal(reportNumberFor("3", { report: "[012](reports/012-example.md)" }, "099-other.md"), 12);
+  assert.equal(reportNumberFor("3", { report: "[report](../reports/008-acme.md)" }, "008-acme.md"), 8);
   assert.equal(reportNumberFor("3", { report: "—" }, "008-example.md"), 8);
   assert.equal(reportNumberFor("3", { report: "—" }, null), null);
   assert.equal(reportNumberFor("4", null, null), 4);
@@ -96,8 +97,8 @@ test("indexedPdf returns a workspace-relative path only when the file is under o
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("portal tips name the five boards and tell iCIMS to create an account first", () => {
-  assert.deepEqual(PORTAL_TIPS.map((tip) => tip.portal), ["Workday", "iCIMS", "Greenhouse", "Lever", "Ashby"]);
+test("portal tips name the boards and tell iCIMS to create an account first", () => {
+  assert.deepEqual(PORTAL_TIPS.map((tip) => tip.portal), ["Workday", "iCIMS", "UKG", "Greenhouse", "Lever", "Ashby"]);
   const icims = PORTAL_TIPS.find((tip) => tip.portal === "iCIMS");
   assert.match(icims.tip, /Create an account first/);
 });

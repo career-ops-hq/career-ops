@@ -22,6 +22,20 @@ function atLeast(v, min) {
   return true;
 }
 
+/**
+ * Compares full version values, treating omitted components as zero.
+ * @param {string} v Version to check.
+ * @param {string} min Minimum required version.
+ * @returns {boolean} Whether v is at least min.
+ */
+function atLeastPadded(v, min) {
+  const a = v.split('.').map(Number), b = min.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return true;
+}
+
 // ── The comparison ───────────────────────────────────────────────────
 for (const [v, min, want] of [
   ['1.23.4', '1.26.0', false],
@@ -34,6 +48,17 @@ for (const [v, min, want] of [
 ]) {
   if (atLeast(v, min) === want) pass(`${v} ${want ? 'satisfies' : 'is below'} a ${min} floor`);
   else fail(`${v} vs ${min} floor: expected ${want ? 'satisfies' : 'is below'}`);
+}
+
+// ── Full-precision comparison for human-readable minimums ────────────
+for (const [v, min, want] of [
+  ['1.26', '1.26.1', false],
+  ['1.26.1', '1.26.1', true],
+  ['1.26.2', '1.26.1', true],
+  ['1.27', '1.26.9', true],
+]) {
+  if (atLeastPadded(v, min) === want) pass(`${v} ${want ? 'satisfies' : 'is below'} a ${min} floor with padded precision`);
+  else fail(`${v} vs ${min} floor with padded precision: expected ${want ? 'satisfies' : 'is below'}`);
 }
 
 // ── The pins ─────────────────────────────────────────────────────────
@@ -72,7 +97,7 @@ if (!floor) {
   for (const rel of docs) {
     for (const m of read(rel).matchAll(/\bGo (\d+\.\d+(?:\.\d+)?)\+/g)) {
       claims++;
-      if (atLeast(m[1], floor)) pass(`${rel} says Go ${m[1]}+, which meets dashboard/go.mod's go ${floor}`);
+      if (atLeastPadded(m[1], floor)) pass(`${rel} says Go ${m[1]}+, which meets dashboard/go.mod's go ${floor}`);
       else fail(`${rel} tells users to install Go ${m[1]}+ but dashboard/go.mod requires go ${floor} — update it`);
     }
   }

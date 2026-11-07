@@ -115,6 +115,8 @@ for (const route of routes) {
       assert.equal(response.status, 200);
       assert.equal((await response.json()).ok, true);
       const expected = yaml.load(template);
+      // The seed keeps the template's settings, not the person it describes.
+      expected.candidate = { full_name: "", location: "" };
       if (route.name === "profile") expected.candidate.full_name = route.patch.name;
       else expected.followup_cadence = route.patch;
       assert.deepEqual(yaml.load(readFileSync(file, "utf8")), expected);

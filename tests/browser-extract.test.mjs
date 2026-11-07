@@ -165,6 +165,18 @@ try {
   } else {
     fail(`jdHtmlToText escaped => ${JSON.stringify(jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
   }
+  const comparison = jdHtmlToText('<p>Teams of &lt; 5 people, &gt; 2 years of experience, &lt;10 engineers and &gt;150k users.</p>');
+  if (comparison === 'Teams of < 5 people, > 2 years of experience, <10 engineers and >150k users.') {
+    pass('jdHtmlToText keeps comparison text between decoded angle brackets');
+  } else {
+    fail(`jdHtmlToText comparison => ${JSON.stringify(comparison)}`);
+  }
+  const quotedAttr = jdHtmlToText('<p title="a > b">Text</p>');
+  if (quotedAttr === 'Text') {
+    pass('jdHtmlToText strips a whole tag whose quoted attribute holds an angle bracket');
+  } else {
+    fail(`jdHtmlToText quoted attribute => ${JSON.stringify(quotedAttr)}`);
+  }
   if (jdHtmlToText(null) === '' && jdHtmlToText('') === '' && jdHtmlToText(42) === '') {
     pass('jdHtmlToText returns "" for a non-string / empty body');
   } else {
@@ -395,6 +407,22 @@ try {
   if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
   else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
 
+  // A closed posting can still ship its ad. The marker carries `active: false`
+  // with the text, the way Workday carries `canApply: false`.
+  const srAd = { sections: { jobDescription: { title: 'Job Description', text: '<p>Own the API.</p>' } } };
+  const srClosed = normalizeSmartRecruitersJob({ name: 'X', active: false, jobAd: srAd }, 'https://x/1');
+  const srOpen = normalizeSmartRecruitersJob({ name: 'X', active: true, jobAd: srAd }, 'https://x/1');
+  const srUnflagged = normalizeSmartRecruitersJob({ name: 'X', jobAd: srAd }, 'https://x/1');
+  if (srClosed?.text.startsWith('Applications closed (active: false)')
+      && srClosed.text.includes('Own the API.')
+      && srOpen?.text.includes('Own the API.')
+      && !srOpen.text.includes('Applications closed')
+      && srUnflagged?.text === srOpen.text) {
+    pass('normalizeSmartRecruitersJob keeps an inactive posting with an Applications closed marker; active or unflagged ones carry none');
+  } else {
+    fail(`normalizeSmartRecruitersJob active flag => ${JSON.stringify({ srClosed, srOpen, srUnflagged })}`);
+  }
+
   // normalizeZohoJob — Zoho Recruit has no JSON API; the posting page embeds
   // the record as a JS string literal, and its Job_Description is HTML.
   const zohoFixture = (name) => readFileSync(join(ROOT, 'tests', 'fixtures', name), 'utf8');
@@ -577,6 +605,8 @@ try {
     ['smartrecruiters', 'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer'],
     ['zoho-recruit', 'https://acme.zohorecruit.com/jobs/Careers/100000000001853029/Senior-Engineer'],
     ['ultipro', 'https://recruiting.ultipro.com/EXA1000EXCO/JobBoard/0c8a6f9e-2b1d-4e57-9a3c-5d7f1e2b4c60/OpportunityDetail?opportunityId=5e0c2b9a-7f41-4d2e-8b6a-1c9d3e7f2a10'],
+    ['hirehive', 'https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd'],
+    ['hibob', 'https://acme.careers.hibob.com/jobs/0b1c2d3e-0000-4000-8000-000000000001'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);
@@ -598,6 +628,50 @@ try {
     // is what actually reddens on a dropped ATS.
   } else {
     fail(`JD_TEXT_API_ATS routing drift => ${JSON.stringify(routed)}`);
+  }
+
+  // A fetcher that gives up on a response is done with its body before it
+  // returns. fetch-jd.mjs exits once nothing is left to run, and an unread body
+  // that is still arriving keeps its socket open, and with it the process.
+  // Every request here gets a 404 whose body starts arriving and never ends,
+  // as a real one would until the fetcher's abort timer cuts it off; the
+  // timers are shortened so that takes milliseconds. The redirect hops
+  // (greenhouse-embedded, the Workable share link) give up on a 404 too.
+  const DISCARD_PROBES = [
+    ...ATS_URL_SHAPES.map(([, url]) => url),
+    'https://apply.workable.com/fictional-employer/j/FIXTURE123/',
+    'https://apply.workable.com/j/FIXTURE123',
+  ];
+  /** @type {Record<string, {result: any, sent: number, ended: number}>} */
+  const discards = {};
+  try {
+    globalThis.setTimeout = (/** @type {any} */ fn, /** @type {any} */ ms, /** @type {any[]} */ ...rest) =>
+      realSetTimeout(fn, Math.min(ms, 20), ...rest);
+    for (const url of DISCARD_PROBES) {
+      const seen = { result: undefined, sent: 0, ended: 0 };
+      globalThis.fetch = async (/** @type {any} */ _url, /** @type {any} */ init) => {
+        seen.sent += 1;
+        const body = new ReadableStream({
+          start(stream) {
+            stream.enqueue(new TextEncoder().encode('<h1>Not Found</h1>'));
+            init?.signal?.addEventListener('abort', () => { seen.ended += 1; stream.error(init.signal.reason); });
+          },
+          cancel() { seen.ended += 1; },
+        });
+        return new Response(body, { status: 404 });
+      };
+      seen.result = await fetchJdViaKnownApi(url);
+      discards[resolveAtsApi(url)?.ats] = seen;
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    globalThis.setTimeout = realSetTimeout;
+  }
+  if (Object.keys(discards).sort().join(',') === fetcherIds
+      && Object.values(discards).every((d) => d.result === null && d.sent > 0 && d.ended === d.sent)) {
+    pass('every JD fetcher ends the body of a response it gives up on before returning');
+  } else {
+    fail(`JD fetchers left a body open => ${JSON.stringify(discards)}`);
   }
 
   // fetchAshbyJd is the one fetcher that needs a field off resolveAtsApi beyond

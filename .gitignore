@@ -1,6 +1,13 @@
 # Personal data (user fills these)
 cv.md
 article-digest.md
+# A CV exported or saved at the repo root (cv.pdf, resume.docx). The repo
+# tracks no PDF or DOCX anywhere; the rules are root-anchored so a fixture or
+# doc added under a subdirectory later is not silently ignored (#6535). The
+# brackets match any casing (CV.PDF), which git compares case-sensitively on a
+# case-sensitive filesystem.
+/*.[pP][dD][fF]
+/*.[dD][oO][cC][xX]
 local/
 # Data-root marker (DATA_CONTRACT.md "Custom Data Directory"). It holds a path
 # on this machine only, so committing it would point every other clone at a
@@ -30,6 +37,10 @@ reports/*.md
 # Kept alongside it rather than replacing it, so update-system.mjs does not
 # re-append the original pattern as "missing".
 reports/**/*.md
+# The two globs above cover markdown only, but anything else in reports/ is
+# the same evaluation: an exported PDF or HTML copy, a superseded/ folder of
+# them. Kept as a third rule for the same updater reason (#6535).
+reports/*
 !reports/.gitkeep
 /output
 !/output/
@@ -225,6 +236,9 @@ data/model-blacklist.json
 .idea/
 .vscode/
 
+# direnv local environment cache (machine-local, never shared)
+.direnv/
+
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
@@ -270,6 +284,10 @@ documents/*
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+# Intake snapshots — the full extracted text of each committed source, so the
+# whole master CV. data/* already covers it; named here as well, like the
+# ledger above, so a hand-trimmed .gitignore still keeps it out. #5779
+data/intake-snapshots/
 data/agent-inbox.md
 
 # Older installs keep unanchored scaffold negations because reconcileGitignore()
