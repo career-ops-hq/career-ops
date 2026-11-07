@@ -162,10 +162,13 @@ try {
   // cannot start an unbounded walk against an endless board.
   {
     const { ctx, calls } = recordingCtx(() => hydration(Array.from({ length: 20 }, (_, i) => row(String(i), `R${i}`)), 100000));
-    await provider.fetch({ ...ENTRY, max_pages: 3 }, ctx);
+    const capped = await provider.fetch({ ...ENTRY, max_pages: 3 }, ctx);
     calls.length === 3
       ? pass('apple.fetch() honours entry.max_pages against an endless board')
       : fail(`apple max_pages=3 made ${calls.length} requests`);
+    capped.truncated?.reason === 'page-cap' && capped.truncated?.fetched === capped.length
+      ? pass('apple.fetch() marks a page-capped board with the canonical jobs.truncated flag')
+      : fail(`apple page-cap truncated flag: ${JSON.stringify(capped.truncated)}`);
 
     const { ctx: cappedCtx, calls: cappedCalls } = recordingCtx(() => hydration(Array.from({ length: 20 }, (_, i) => row(String(i), `R${i}`)), 100000));
     await provider.fetch({ ...ENTRY, max_pages: 9999 }, cappedCtx);

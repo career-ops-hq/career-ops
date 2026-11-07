@@ -423,6 +423,25 @@ try {
     fail(`retry: attempts=${attempts}, slept=${slept}, jobs=${JSON.stringify(retried)}`);
   }
 
+  // ── a board cut short by max_pages says so (lib/board-truncation.mjs) ──
+  {
+    const cut = await oc.fetch(
+      { name: 'Capped', careers_url: careers, max_pages: 2 },
+      {
+        transport: 'http',
+        sleep: async () => {},
+        fetchText: async () => {},
+        fetchJson: async (url) => {
+          const offset = Number(new URL(url).searchParams.get('offset') || 0);
+          return { items: [{ TotalJobsCount: 1000, requisitionList: Array.from({ length: 200 }, (_, i) => ({ Id: String(offset + i), Title: `R${offset + i}` })) }], hasMore: true };
+        },
+      },
+    );
+    cut.length === 400 && cut.truncated?.reason === 'page-cap' && cut.truncated?.fetched === 400 && cut.truncated?.total === 1000
+      ? pass('oraclecloud.fetch() marks a max_pages-capped board with jobs.truncated (400 of 1000)')
+      : fail(`oraclecloud page-cap flag: ${cut.length} jobs, truncated=${JSON.stringify(cut.truncated)}`);
+  }
+
   // ── pagination: a SHORT page is not the end when a total says otherwise ──
   // American Express (egug pod, CX_1) reports TotalJobsCount 454 and serves
   // 200, 199, 54 — the middle page is one row short because ORC filters a row
@@ -466,6 +485,8 @@ try {
       },
     },
   );
+  if (pastTotal.truncated) fail(`a board read to its total was flagged truncated: ${JSON.stringify(pastTotal.truncated)}`);
+  else pass('oraclecloud.fetch() leaves a board read to its total unflagged');
   if (pastTotalRequests === 2 && pastTotal.length === 400) {
     pass('oraclecloud.fetch() stops once offset+PAGE_SIZE reaches the reported total');
   } else {

@@ -117,6 +117,7 @@ import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-l
 import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
 import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 export { applyEntryResponseCap };
+import { boardTruncation, describeTruncation } from './lib/board-truncation.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 // An explicit override wins; otherwise the root fixed above, since the .env just
@@ -4941,6 +4942,10 @@ async function main() {
   let failedTargets = 0;
   const emptyTargets = [];
   const unverifiedZeroTargets = [];
+  // Boards a provider read only partly (page cap, 429, fetch error), keyed by
+  // company: see lib/board-truncation.mjs. Logged `partial`, never `reachable`.
+  /** @type {Map<string, import('./lib/board-truncation.mjs').BoardTruncation>} */
+  const partialTargets = new Map();
 
   // Arm the failure-path row (#2643) now that the sweep is about to start and
   // every counter it reads is in scope. new_added is hardcoded 0 on a failed
@@ -5050,6 +5055,8 @@ async function main() {
         throw new Error(`${provider.id}: fetch() did not return an array`);
       }
       totalFound += jobs.length;
+      const truncation = boardTruncation(jobs);
+      if (truncation && !company._isBoard) partialTargets.set(company.name, truncation);
       if (!company._isBoard && jobs.length === 0) {
         if (emptyTargetStatus(observation) === 'empty') emptyTargets.push(company.name);
         else unverifiedZeroTargets.push(company.name);
@@ -5693,6 +5700,9 @@ async function main() {
     let status = errorKindByCompany.get(t.name) || 'reachable';
     if (status === 'reachable' && isEmpty) status = 'empty';
     if (status === 'reachable' && isUnverifiedZero) status = 'unverified_zero';
+    // A board read only partly is not healthy coverage: logged `partial`, which
+    // computeConsecutiveFailures counts toward the 🚨 streak like any failure.
+    if (status === 'reachable' && partialTargets.has(t.name)) status = 'partial';
 
     healthRecords.push({ timestamp: nowStr, company: t.name, status });
   }
@@ -5709,7 +5719,8 @@ async function main() {
   // Below threshold, only slug_gone/network keep their dedicated warnings;
   // auth/server/unknown stay in the one-off `Errors (N):` print below.
   for (const e of [...unreachableTargets, ...networkTargets, ...otherErrors.filter((x) => x.kind),
-    ...unverifiedZeroTargets.map(company => ({ company, kind: 'unverified_zero' }))]) {
+    ...unverifiedZeroTargets.map(company => ({ company, kind: 'unverified_zero' })),
+    ...[...partialTargets.keys()].map(company => ({ company, kind: 'partial' }))]) {
     const streak = currentStreaks.get(e.company) || 1;
     if (streak >= STREAK_THRESHOLD) {
       if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
@@ -5721,7 +5732,7 @@ async function main() {
   }
 
   if (persistentlyDead.length > 0) {
-    console.log(`\n🚨 FIX NEEDED: ${persistentlyDead.length} target(s) have been unreachable for ${STREAK_THRESHOLD}+ runs:`);
+    console.log(`\n🚨 FIX NEEDED: ${persistentlyDead.length} target(s) have been unreachable or only partly read for ${STREAK_THRESHOLD}+ runs:`);
     console.log(`   ${persistentlyDead.join(', ')}`);
     console.log(`   Run: node verify-portals.mjs to check if the ATS migrated, or update their board slugs.`);
   }
@@ -5731,6 +5742,11 @@ async function main() {
   }
   if (emptyTargets.length > 0) {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
+  }
+  if (partialTargets.size > 0) {
+    const parts = [...partialTargets].map(([company, t]) => describeTruncation(company, t));
+    console.log(`\n⚠️  ${partialTargets.size} board(s) only PARTLY read — postings beyond the cut were not scanned:`);
+    for (const p of parts) console.log(`   • ${p}`);
   }
   if (unverifiedZeroTargets.length > 0) {
     console.log(`⚠️  ${unverifiedZeroTargets.length} target(s) returned zero jobs without a successful HTTP response: ${unverifiedZeroTargets.join(', ')}`);
@@ -5812,6 +5828,9 @@ async function main() {
       added_urls: verifiedOffers.map(offer => offer.url),
       errors: errors.map(({ company, error }) => ({ company, error })),
       unverified_zero: unverifiedZeroTargets,
+      // Boards read only partly (lib/board-truncation.mjs), so automation can
+      // tell a short read from a complete one without parsing stdout.
+      partial: [...partialTargets].map(([company, { source: _source, ...t }]) => ({ company, ...t })),
       dry_run: dryRun,
     }, errors.length > 0 ? 2 : 0);
   }

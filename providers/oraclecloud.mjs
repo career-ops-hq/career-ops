@@ -267,6 +267,12 @@ export default {
       if (total !== null) {
         if (offset + PAGE_SIZE >= total) break;
       } else if (listLen < PAGE_SIZE) break;
+      if (page === maxPages - 1 && !ctx?.maxPages) {
+        // Walked every allowed page and the tenant still reports more: say so
+        // (lib/board-truncation.mjs) instead of returning a silent prefix.
+        console.error(`⚠️  oraclecloud: ${entry.name} stopped at max_pages=${maxPages} (${all.length}${total === null ? '' : ` of ${total}`} jobs) — the board is partial`);
+        /** @type {any} */ (all).truncated = { reason: 'page-cap', fetched: all.length, ...(total === null ? {} : { total }) };
+      }
     }
     return all;
   },
