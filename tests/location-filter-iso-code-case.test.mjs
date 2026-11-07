@@ -27,3 +27,14 @@ test('lowercase and mixed-case entries keep the case-insensitive match', () => {
     assert.equal(accepts('Pune, IN', '', 'Software Engineer'), true);
   }
 });
+
+test('combined ["IN", "in"] list keeps each entry its own case rule', () => {
+  const allow = buildLocationFilter({ allow: ['IN', 'in'], strict: true });
+  assert.equal(allow('Remote in Europe', '', 'Software Engineer'), true);
+  assert.equal(allow('Pune, IN', '', 'Software Engineer'), true);
+  assert.equal(allow('Berlin, Germany', '', 'Software Engineer'), false);
+  const block = buildLocationFilter({ block: ['IN', 'in'] });
+  assert.equal(block('Remote in Europe', '', 'Software Engineer'), false);
+  assert.equal(block('Pune, IN', '', 'Software Engineer'), false);
+  assert.equal(block('Berlin, Germany', '', 'Software Engineer'), true);
+});

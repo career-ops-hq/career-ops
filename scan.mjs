@@ -504,15 +504,17 @@ function compileLocationKeywordList(value) {
   // original-case location instead. Lowercase and mixed-case entries keep the
   // case-insensitive behavior. The lowercased URL hint carries no case, so a
   // code never matches it.
+  // Each entry is judged on its own spelling, so ['IN', 'in'] compiles one
+  // case-sensitive code and one case-insensitive word.
   const raw = value == null ? [] : (Array.isArray(value) ? value : [value]);
-  const codes = new Set(raw
-    .filter(k => typeof k === 'string' && /^[A-Z]{2}$/.test(k.trim()))
-    .map(k => k.trim().toLowerCase()));
-  return normalizeKeywordList(value).map((k) => {
-    if (!codes.has(k)) return compileLocationKeyword(k);
-    const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${k.toUpperCase()}(?![\\p{L}\\p{M}\\p{N}])`, 'u');
-    return (lower, original) => typeof original === 'string' && re.test(original);
-  });
+  return raw
+    .filter(k => typeof k === 'string' && k.trim())
+    .map((entry) => {
+      const trimmed = entry.trim();
+      if (!/^[A-Z]{2}$/.test(trimmed)) return compileLocationKeyword(trimmed.toLowerCase());
+      const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${trimmed}(?![\\p{L}\\p{M}\\p{N}])`, 'u');
+      return (lower, original) => typeof original === 'string' && re.test(original);
+    });
 }
 
 // Frozen USPS state-name + abbreviation table. Not a world gazetteer: only
