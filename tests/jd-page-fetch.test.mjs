@@ -576,6 +576,19 @@ test('a JobPosting whose own URL names a different job is rejected, aliases are 
   assert.ok(inspectPage(ld(''), Date.now(), 'https://careers.example.com/job/1').found);
 });
 
+test('shared year or version path segments do not make different job ids match', () => {
+  const ld = (url) => `<html><script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Engineer', description: `<p>${BODY}</p>`, url })}</script></html>`;
+  const { inspectPage } = awaitedModule;
+  assert.equal(inspectPage(ld('https://careers.example.com/2024/job/2'), Date.now(), 'https://careers.example.com/2024/job/1').found, null);
+  assert.ok(inspectPage(ld('https://careers.example.com/2024/job/1/Some-Title'), Date.now(), 'https://careers.example.com/2024/job/1').found);
+});
+
+test('an oversize page proves no closure from its prefix', () => {
+  const pad = ' '.repeat(3_100_000);
+  const expired = `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: 'E', description: 'x', validThrough: '2020-01-01' })}</script>`;
+  assert.equal(pageClosureEvidence(`<html>${expired}${pad}</html>`, 'https://careers.example.com/job/1'), null);
+});
+
 test('a malformed copy that differs only in whitespace does not make the page ambiguous', () => {
   const words = Array.from({ length: 200 }, (_, n) => `w${n}`).join(' ');
   const valid = `"descriptionHtml":"${words}\\nend"`;

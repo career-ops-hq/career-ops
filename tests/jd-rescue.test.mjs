@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { pass, fail, ROOT, NODE } from './helpers.mjs';
 
 const SCRIPT = join(ROOT, 'batch/jd-rescue.mjs');
@@ -405,7 +406,7 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
 {
   // Control flow: a closed ATS result ends the chain, whatever the other sources hold,
   // and the runner turns the CLI's exit 3 into a terminal skip.
-  const { runRescueChain } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+  const { runRescueChain } = await import(pathToFileURL(join(ROOT, 'batch/jd-rescue.mjs')).href);
   const long = { text: Array.from({ length: 200 }, (_, n) => `w${n}`).join(' '), method: 'embedded' };
   const opts = { minWords: 80, strippedWords: 500, thin: false };
   const closed = await runRescueChain([() => null, () => ({ closed: true, evidence: 'Ashby isListed: false' }), () => long], opts);
@@ -414,7 +415,7 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   const thinClosed = await runRescueChain([() => long, () => ({ closed: true, evidence: 'x' })], { ...opts, strippedWords: 0, thin: true });
   if (thinClosed.found) pass('without a closure signal the first adequate source still wins');
   else fail('a normal rescue stopped working');
-  const { fromKnownApi, rescueDecision, runRescueChain: chainFn } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+  const { fromKnownApi, rescueDecision, runRescueChain: chainFn } = await import(pathToFileURL(join(ROOT, 'batch/jd-rescue.mjs')).href);
   {
     // A closed ATS answer wins over an adequate JSON-LD description on the same page.
     const words = Array.from({ length: 200 }, (_, n) => `w${n}`).join(' ');
@@ -517,7 +518,7 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
     else fail(`off-document not terminal: ${JSON.stringify(off)}`);
     if (err.code === 3 || err.code === 4) pass('a redirect to an error-style URL is never rescued as this posting');
     else fail(`error redirect was rescued: ${JSON.stringify(err)}`);
-    const { rescueDecision } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+    const { rescueDecision } = await import(pathToFileURL(join(ROOT, 'batch/jd-rescue.mjs')).href);
     const two = ldJson(jobPosting({ description: `<p>${body}</p>` })) + ldJson(jobPosting({ title: 'Another role', description: `<p>${body} extra</p>` }));
     const apiJd = async () => ({ text: Array.from({ length: 120 }, (_, n) => `a${n}`).join(' '), ats: 'ashby' });
     const ambApi = await rescueDecision('https://jobs.example.com/co/abc123', two, { minWords: 80, strippedWords: 900, thin: false, fetchJd: apiJd });
@@ -531,7 +532,7 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
 
 {
   // A page over the inspection cap cannot be checked whole: unusable, ATS API still allowed.
-  const { rescueDecision } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+  const { rescueDecision } = await import(pathToFileURL(join(ROOT, 'batch/jd-rescue.mjs')).href);
   const words = Array.from({ length: 200 }, (_, n) => `w${n}`).join(' ');
   const big = `"descriptionHtml":"${words}"` + ' '.repeat(3_100_000) + `"descriptionHtml":"${words} other and longer ${words}"`;
   const o = { minWords: 80, strippedWords: 0, thin: true };
