@@ -9,6 +9,7 @@ console.log('\nProvider — apple');
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/apple.mjs')).href);
   const provider = mod.default;
+  const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   if (provider.id === 'apple') pass('apple.id is "apple"');
   else fail(`apple.id is ${JSON.stringify(provider.id)}`);
@@ -93,6 +94,54 @@ try {
     calls.every((c) => !Object.keys(c.opts?.headers || {}).some((h) => h.toLowerCase() === 'user-agent'))
       ? pass('apple.fetch() sets no provider User-Agent — _http.mjs supplies the shared identifying one')
       : fail(`apple sent its own UA: ${JSON.stringify(calls.map((c) => c.opts?.headers))}`);
+  }
+
+  // Location shapes from the live search page. A city carries its country in a
+  // separate field, and a filter that names a country sees only the joined string.
+  {
+    let id = 200613456;
+    const located = (locations) => ({ ...row(String(id++), 'Engineer'), locations });
+    const city = { name: 'Cupertino', countryName: 'United States of America', level: 5 };
+    const { ctx } = recordingCtx(() => hydration([
+      located([city]),
+      located([{ name: 'United States', countryName: 'United States of America', level: 1 }]),
+      located([{ name: 'Turkiye', countryName: 'Türkiye', level: 1 }]),
+      located([{ name: "St. John's Town Center", countryName: 'United States of America', level: 6 }]),
+      located([city, { name: 'London', countryName: 'United Kingdom', level: 5 }, city]),
+      located([{ name: 'Cupertino' }]),
+    ], 6));
+    const places = (await provider.fetch(ENTRY, ctx)).map((j) => j.location);
+    JSON.stringify(places) === JSON.stringify([
+      'Cupertino, United States of America',
+      'United States',
+      'Turkiye',
+      "St. John's Town Center, United States of America",
+      'Cupertino, United States of America; London, United Kingdom',
+      'Cupertino',
+    ])
+      ? pass('apple.fetch() joins a city to its country and leaves a country entry alone')
+      : fail(`apple location strings: ${JSON.stringify(places)}`);
+
+    // A name that is not a string reaches the location as it did before the
+    // join, instead of throwing on includes() and failing the whole page.
+    const { ctx: oddCtx } = recordingCtx(() => hydration([
+      located([{ name: 42, countryName: 'United States of America', level: 5 }]),
+      located([{ name: 'Austin', countryName: 7, level: 5 }]),
+      located([city]),
+    ], 3));
+    let odd;
+    try { odd = (await provider.fetch(ENTRY, oddCtx)).map((j) => j.location); } catch (e) { odd = `threw: ${e.message}`; }
+    JSON.stringify(odd) === JSON.stringify(['42', 'Austin', 'Cupertino, United States of America'])
+      ? pass('apple.fetch() passes a non-string location name or country through without joining')
+      : fail(`apple non-string location fields: ${JSON.stringify(odd)}`);
+
+    const usOnly = buildLocationFilter({ always_allow: ['United States', 'USA'], allow: ['United States', 'USA'] });
+    usOnly('Cupertino, United States of America') && !usOnly('London, United Kingdom')
+      ? pass('apple locations pass the US allow-list onboarding writes')
+      : fail('apple locations and the US allow-list disagree');
+    !usOnly('Cupertino')
+      ? pass('the allow-list really does refuse a bare city, which is why the country is joined')
+      : fail('a bare city passes the US allow-list, so this test no longer proves the fix');
   }
 
   // The detail URL is built from host-supplied strings: each segment is encoded,
