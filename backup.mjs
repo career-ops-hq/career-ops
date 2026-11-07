@@ -6,9 +6,7 @@
  * profile, portals, tracker and everything under data/, reports/, output/,
  * jds/ ...) from the data root to a destination folder. Nothing is ever
  * deleted at the destination, so a file you removed locally stays in the
- * backup. The agent-tool settings under .claude/, opencode.json and
- * plugins.local/ can carry tokens, so they are left out unless you pass
- * --include-tool-config.
+ * backup.
  *
  * Nothing is chosen for you: say where the backup goes. First match wins:
  *   1. --dest <dir>                 exactly this folder
@@ -21,8 +19,7 @@
  * avoided"), so this never uses it.
  *
  * Usage: node backup.mjs (--dest <dir> | --provider <name>) [--account <text>]
- *                        [--folder <path>] [--include-tool-config]
- *                        [--dry-run] [--json] [--quiet]
+ *                        [--folder <path>] [--dry-run] [--json] [--quiet]
  *
  * Exit status: 0 success, 1 a file failed to copy or there was nothing to
  * copy, 2 no usable destination, invalid option or unreadable data root.
@@ -48,13 +45,6 @@ export const PROVIDERS = ['google-drive', 'dropbox', 'onedrive', 'icloud'];
 export const MANIFEST_NAME = '.career-ops-backup.json';
 
 /**
- * Agent-tool settings that USER_PATHS protects from the updater but that can
- * hold API tokens (MCP server env, hook commands). They are opt-in for a
- * backup that may land on a cloud drive.
- */
-const TOOL_CONFIG = ['.claude', 'opencode.json', 'plugins.local'];
-
-/**
  * User Layer paths (relative to the data root, no trailing slash) a backup
  * covers. USER_PATHS is the updater's own list of what is yours, exported so
  * tools derive the same boundary; a fork's `config/local-paths.txt`
@@ -73,15 +63,13 @@ export function backupPaths(dataRoot, warnings = []) {
 }
 
 /**
- * Never copied: secrets, rebuildable caches, lock/temp files, and unless asked
- * for (`includeToolConfig`) the agent-tool settings.
+ * Never copied: secrets, rebuildable caches, and lock/temp files.
  */
-export function isExcluded(relPath, { includeToolConfig = false } = {}) {
+export function isExcluded(relPath) {
   const p = relPath.split(sep).join('/');
   const name = p.slice(p.lastIndexOf('/') + 1);
   if (name === '.DS_Store' || name === '.env' || name.startsWith('.env.')) return true;
   if (p === 'data/cache' || p.startsWith('data/cache/')) return true;
-  if (!includeToolConfig && TOOL_CONFIG.some((t) => p === t || p.startsWith(`${t}/`))) return true;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
 }
 
@@ -223,17 +211,17 @@ function hasSymlinkedParent(dataRoot, entry) {
  * `{ rel, size, mtimeMs }`. A file that cannot be read is reported through
  * `onError` and skipped, so one bad file never hides the rest.
  */
-function listEntry(dataRoot, entry, { include, onError }) {
+function listEntry(dataRoot, entry, { onError }) {
   const abs = join(dataRoot, entry);
   let st;
   try { st = lstatSync(abs); } catch { return []; }
   if (st.isSymbolicLink() || hasSymlinkedParent(dataRoot, entry)) return [];
-  if (isExcluded(entry, include)) return [];
+  if (isExcluded(entry)) return [];
   const paths = st.isDirectory()
     ? walkTree(abs, {
       // Symlinks are skipped (the default), so the backup never follows a link
       // out of the data root.
-      skip: (dirent, dir) => isExcluded(relative(dataRoot, join(dir, dirent.name)), include),
+      skip: (dirent, dir) => isExcluded(relative(dataRoot, join(dir, dirent.name))),
     })
     : [abs];
   const files = [];
@@ -266,15 +254,14 @@ const unchanged = (src, destPath) => {
  * only unchanged files.
  * @returns {{found: number, copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number, warnings: string[]}}
  */
-export function runBackup({ dataRoot, dest, dryRun = false, includeToolConfig = false }) {
-  const include = { includeToolConfig };
+export function runBackup({ dataRoot, dest, dryRun = false }) {
   const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
   const fail = (path, error) => result.failed.push({ path, error: error.message });
   if (!dryRun) mkdirSync(dest, { recursive: true });
   for (const entry of backupPaths(dataRoot, result.warnings)) {
     let files;
     try {
-      files = listEntry(dataRoot, entry, { include, onError: fail });
+      files = listEntry(dataRoot, entry, { onError: fail });
     } catch (error) {
       fail(entry, error);
       continue;
@@ -316,7 +303,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeToolConfig = 
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-tool-config', '--dry-run', '--json', '--quiet', '--help', '-h'];
+const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--dry-run', '--json', '--quiet', '--help', '-h'];
 const VALUE_FLAGS = ['--dest', '--provider', '--account', '--folder'];
 
 const USAGE = `Usage:
@@ -324,7 +311,6 @@ const USAGE = `Usage:
   node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
-  node backup.mjs ... --include-tool-config # also copy .claude/, opencode.json, plugins.local/ (can hold tokens)
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
   node backup.mjs ... --json | --quiet     # machine-readable result | errors only
   CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest
@@ -336,7 +322,6 @@ function main(args) {
   const json = args.includes('--json');
   const quiet = args.includes('--quiet');
   const dryRun = args.includes('--dry-run');
-  const includeToolConfig = args.includes('--include-tool-config');
   const refuse = (message) => {
     if (json) console.log(JSON.stringify({ ok: false, error: message }));
     else console.error(`backup: ${message}`);
@@ -363,7 +348,7 @@ function main(args) {
 
   let result;
   try {
-    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeToolConfig });
+    result = runBackup({ dataRoot, dest: target.dest, dryRun });
   } catch (error) {
     return refuse(`cannot write to ${target.dest}: ${error.message}`);
   }

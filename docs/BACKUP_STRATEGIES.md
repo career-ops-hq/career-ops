@@ -89,9 +89,9 @@ node backup.mjs --dest ~/Backups/career-ops             # run it
 node backup.mjs --provider google-drive                 # or a signed-in cloud drive
 ```
 
-It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The
-agent-tool settings (`.claude/`, `opencode.json`, `plugins.local/`) can hold API tokens, so
-they are left out unless you add `--include-tool-config`. Several signed-in accounts are
+It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). That
+includes your agent-tool settings (`.claude/`, `opencode.json`, `plugins.local/`), which can
+hold API tokens, so back up to a place only you can read. Several signed-in accounts are
 handled with `--account`; see
 [SCRIPTS.md](SCRIPTS.md#backupmjs). It keeps no history, so it protects against a lost
 machine, not against a mistaken edit. Use Pattern 1 or 3 below when you want to go back to

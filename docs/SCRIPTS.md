@@ -2018,7 +2018,7 @@ Exit status: `0` success, `1` invalid option or write error, `2` missing tracker
 
 Copies the User Layer to a backup folder. The file list is `USER_PATHS` in `update-system.mjs` (the updater's own list of what is yours: CV, profile, `portals.yml`, everything under `data/`, `reports/`, `output/`, `jds/`, `interview-prep/`, `documents/`, `writing-samples/`, the web app's `.career-ops-web/` stores and more), plus any paths a fork declares in `config/local-paths.txt`. It reads `CAREER_OPS_ROOT` / `.career-ops-data` like every other script. Files are copied whole, and nothing is ever deleted at the destination. Unchanged files (same size and modification time) are skipped, so a repeat run is cheap.
 
-Never copied: `.env` files, `data/cache/`, lock and temp files, symlinks and anything under a symlinked folder, and anything outside the User Layer. The agent-tool settings the updater also protects (`.claude/`, `opencode.json`, `plugins.local/`, which can hold API tokens) only with `--include-tool-config`.
+Never copied: `.env` files, `data/cache/`, lock and temp files, symlinks and anything under a symlinked folder, and anything outside the User Layer.
 
 Nothing is chosen for you: pass `--dest` or `--provider`, or set `CAREER_OPS_BACKUP_DIR`.
 
@@ -2027,7 +2027,6 @@ node backup.mjs --dest ~/Backups/career-ops
 node backup.mjs --provider google-drive    # <Google Drive>/Backups/career-ops; also dropbox | onedrive | icloud
 node backup.mjs --provider google-drive --account work@corp.com   # when several accounts are signed in
 node backup.mjs --provider dropbox --folder Work/career-ops       # folder under the drive (default Backups/career-ops)
-node backup.mjs --dest ~/Backups/career-ops --include-tool-config # also copy .claude/, opencode.json, plugins.local/
 node backup.mjs --dest ~/Backups/career-ops --dry-run             # list what would be copied, copy nothing
 node backup.mjs --dest ~/Backups/career-ops --json                # machine-readable result
 ```
