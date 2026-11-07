@@ -520,6 +520,34 @@ ok('a repeated aggregator sighting is recorded in Notes once', () => {
   } finally { cleanup(env); }
 });
 
+ok('a sighting already in a Re-eval clause is not noted again', () => {
+  // mergeNotes() writes an addition's own Notes as `Re-eval {date} (…): {text}`.
+  // When that text is the sighting clause, it is already recorded: in the same
+  // update, and in every later one.
+  const env = makeEnv();
+  try {
+    const aggregator = 'https://www.linkedin.com/jobs/view/4001';
+    writeTracker(env, [
+      '| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | n | https://boards.greenhouse.io/acme/jobs/7001 |',
+    ]);
+    addTsv(env, '2-acme.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌',
+      '[2](reports/2-acme.md)', `Also listed at ${aggregator}`, aggregator]);
+    runMerge(env);
+    let rows = trackerRows(env);
+    assertMerged(rows, 'employer row, sighting stated in the addition\'s Notes');
+    const count = (row) => notesCell(row).split(`Also listed at ${aggregator}`).length - 1;
+    assert.equal(count(rows[0]), 1, `same update: noted once, got: ${notesCell(rows[0])}`);
+    addTsv(env, '3-acme.tsv', ['3', '2026-06-05', 'Acme', 'Director of Marketing', 'Evaluated', '4.2/5', '❌',
+      '[3](reports/3-acme.md)', 'n', aggregator]);
+    runMerge(env);
+    rows = trackerRows(env);
+    assert.equal(rows.length, 1, `expected one row, got ${rows.length}`);
+    assert.ok(rows[0].includes('4.2/5'), 'the later sighting merged too');
+    assert.equal(count(rows[0]), 1, `later update: still noted once, got: ${notesCell(rows[0])}`);
+    assert.equal(urlHref(rows[0]), 'https://boards.greenhouse.io/acme/jobs/7001', 'the employer URL stays the key');
+  } finally { cleanup(env); }
+});
+
 ok('a sighting is recorded even when an earlier noted URL contains it', () => {
   // Notes are compared by clause, not substring: `…/jobs/view/4001` is inside
   // `…/jobs/view/40010`, and the two are different listings.

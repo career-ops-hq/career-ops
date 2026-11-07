@@ -638,17 +638,20 @@ export async function mergeTracker(options = {}) {
    *
    * "Already records it" is a whole clause, split on the '. ' separator that
    * mergeNotes() joins with, not a substring: `…/jobs/view/4001` is inside
-   * `…/jobs/view/40010`, and the two are different listings.
+   * `…/jobs/view/40010`, and the two are different listings. The clause counts
+   * bare or in the `{marker}: {text}` form mergeNotes() writes an addition's
+   * own Notes in, the same two forms its repeat check accepts.
    *
-   * @param {string} existingNotes - The row's Notes cell before this update.
+   * @param {string} notes - The row's Notes cell, after mergeNotes() for this update.
    * @param {string} url - The aggregator URL the addition carried.
    * @returns {string}
    */
-  function aggregatorSightingNote(existingNotes, url) {
+  function aggregatorSightingNote(notes, url) {
     const note = [`Also listed at ${url}`, `Also listed at ${new URL(url).hostname}`]
       .find((candidate) => !extractReqNumber(candidate)) ?? 'Also listed on an aggregator board';
-    const recorded = String(existingNotes ?? '').split(/\.\s+/).map((c) => c.replace(/\.+$/, '').trim());
-    return recorded.includes(note) ? '' : note;
+    const recorded = String(notes ?? '').split(/\.\s+/).map((c) => c.replace(/\.+$/, '').trim())
+      .some((c) => c === note || c.endsWith(`: ${note}`));
+    return recorded ? '' : note;
   }
 
   /**
@@ -2218,11 +2221,13 @@ export async function mergeTracker(options = {}) {
         const keepRowUrl = COLMAP.url != null
           && Boolean(normalizeUrl(rowUrl)) && !isAggregatorUrl(rowUrl)
           && isAggregatorUrl(addition.url);
-        const sightingNote = keepRowUrl ? aggregatorSightingNote(duplicate.notes, addition.url) : '';
         if (keepRowUrl) {
           console.log(`   ↳ kept employer URL ${rowUrl}; aggregator URL ${addition.url} not used as the key`);
         }
         const mergedNotes = mergeNotes(duplicate.notes, addition, oldScore, newScore, supersededNote);
+        // Checked against the merged Notes, so a sighting the addition's own Notes
+        // already state in this update is not written a second time.
+        const sightingNote = keepRowUrl ? aggregatorSightingNote(mergedNotes, addition.url) : '';
         const updatedLine = buildRow({
           num: duplicate.num, date: addition.date,
           // A corporate-form match (#3665) pairs the row with a VARIANT spelling of
