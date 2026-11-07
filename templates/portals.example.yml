@@ -1623,6 +1623,24 @@ search_queries:
 #                          # (default 200, max 1000). Raise it for a huge board.
 #   enabled: true
 #
+# - name: Apple
+#   # jobs.apple.com (server-rendered results; no public JSON API). An entry
+#   # needs full_board: true, or a queries: / teams: list.
+#   careers_url: https://jobs.apple.com/en-us/search
+#   apple:
+#     location: united-states-USA  # optional, this is the default
+#     # Read every posting in the location once, unsearched, and let
+#     # title_filter pick. Apple's text search also matches job descriptions,
+#     # so a few queries can cost more requests than the whole board and still
+#     # stop at max_pages. The walk stops at Apple's own total.
+#     full_board: true
+#     # Or search instead (ignored when full_board is true):
+#     # queries: ["business operations"]
+#     # teams: ["business-process-management-OPMFG-BPM"]
+#   # max_pages: 300         # 20 rows/page. full_board: default and max 300
+#                            # (~6,000 postings); queries/teams: default 2, max 50
+#   enabled: true
+#
 # - name: Example Eploy Co
 #   # Standard Eploy career site on a branded domain. The provider reads the
 #   # complete public /live-jobs.xml inventory in one anonymous request.
