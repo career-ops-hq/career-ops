@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\ncv-locked-sections (#2053)');
 
 try {
-  const { validateLockedSections } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
+  const { validateLockedSections, lockedSectionExcerpts } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
 
   // validateLockedSections tests
   const cvMarkdown = '# Education\n* Bachelor of Science\n* Foo University\n\n# Work Experience\n* Software Engineer\n';
@@ -59,6 +59,20 @@ try {
     pass('validateLockedSections throws loudly when a locked section is modified');
   } else {
     fail('validateLockedSections must throw when locked section content differs');
+  }
+
+  // A long section is excerpted around the first difference, not dumped whole
+  {
+    const common = 'x'.repeat(500);
+    const [exp, got] = lockedSectionExcerpts(`${common} bs computer science ${common}`, `${common} phd computer science ${common}`);
+    if (exp.includes('bs computer') && got.includes('phd computer') && exp.length < 220 && got.length < 220 && exp.startsWith('…') && exp.endsWith('…')) {
+      pass('lockedSectionExcerpts shows a bounded window around the first difference');
+    } else {
+      fail(`lockedSectionExcerpts window wrong: ${JSON.stringify([exp, got])}`);
+    }
+    const [shortExp] = lockedSectionExcerpts('a', 'b');
+    if (shortExp === 'a') pass('lockedSectionExcerpts leaves short sections whole');
+    else fail(`lockedSectionExcerpts altered a short section: ${shortExp}`);
   }
 
   let threwOmission = false;

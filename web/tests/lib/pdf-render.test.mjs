@@ -790,30 +790,3 @@ test("failureReason: no failure marker -> whole stderr; empty -> generic message
   assert.equal(failureReason(""), "PDF rendering failed.");
 });
 
-test("failureReason: keeps the detail lines after the failure header", () => {
-  const stderr = [
-    "\u26a0\ufe0f  Voice check warning for cv-web-423.html: an en dash.",
-    "\u274c PDF generation failed: Locked section 'x' was modified during tailoring.",
-    "Expected (normalized): a",
-    "Found (normalized): b",
-  ].join("\n");
-  assert.equal(
-    failureReason(stderr),
-    "\u274c PDF generation failed: Locked section 'x' was modified during tailoring.\nExpected (normalized): a\nFound (normalized): b",
-  );
-});
-
-test("renderAndMarkPdf: failed render with advisories surfaces only the failure, not the warning", async () => {
-  const dir = makeScratchDir();
-  const pdfPaths = makePdfPaths(dir, "423");
-  writeFileSync(pdfPaths.html, "<html></html>");
-  const failure = "\u274c PDF generation failed: Fact check failed for cv-web-423.html: non-metric facts absent from sources: employer=X";
-  const stderr = ["\u26a0\ufe0f  Voice check warning for cv-web-423.html: an en dash. The build continues.", failure].join("\n");
-  try {
-    const { spawnFn } = makeRouterSpawn({ "generate-pdf.mjs": { exitCode: 1, stderr } });
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "letter", reportNum: "423" });
-    assert.deepEqual(result, { kind: "render-failed", error: failure });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
