@@ -8,7 +8,7 @@ import { useApply } from "@/components/apply/apply-provider";
 import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs";
 import { markAppliedEnabled } from "@/lib/apply/mark-applied.mjs";
 import { reopenApplyOptions } from "@/lib/apply/reopen-options.mjs";
-import { checklistHrefFor } from "@/lib/apply/unsupported-ats.mjs";
+import { checklistHrefFor } from "@/lib/apply/checklist-href.mjs";
 import { isResumeLabel } from "@/lib/apply/resume-label.mjs";
 import type { ApplyField } from "@/lib/apply/extract";
 import { cn } from "@/lib/cn";

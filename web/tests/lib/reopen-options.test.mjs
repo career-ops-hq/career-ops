@@ -37,6 +37,8 @@ test("a failed read offers the checklist for that tracker row", () => {
   const block = src.slice(start, end);
   assert.match(block, /checklistHrefFor\(a\.n\)/);
   assert.match(src, /reopenApplyOptions\(input\.trim\(\), a\)/);
+  assert.match(src, /checklist-href\.mjs/);
+  assert.doesNotMatch(src, /unsupported-ats/);
 });
 
 test("a marked tracker with no report number still shows the missing-file note", () => {
