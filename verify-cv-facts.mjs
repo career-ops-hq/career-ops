@@ -2165,23 +2165,35 @@ function renderedBullets(text) {
  * skipped and the clause after it is the statement's first, unless the label
  * itself opens with a past-tense verb ("Led the migration: cut latency"),
  * which would otherwise hide that verb behind the colon.
+ *
+ * Each word carries `certain`. A later clause opening with a regular "-ed"
+ * word is ambiguous: "and managed the vendors" is a verb, "and automated
+ * reporting" is an adjective before a noun. It is certain only when the word
+ * is an irregular past form ("and wrote ...") or a determiner or preposition
+ * follows it, the shape a verb taking its object has. An uncertain word warns
+ * instead of blocking, the split #1411 agreed for checks that cannot yet tell
+ * a true reformulation from a fabrication.
+ *
+ * @returns {{word: string, certain: boolean}[]}
  */
 function predicateWords(statement) {
   const words = [];
   const isVerbal = word => /ed$/u.test(word) || IRREGULAR_FORMS.has(word);
+  const takesObject = (word, next) => IRREGULAR_FORMS.has(word) || (next !== undefined && DRIFT_FUNCTION_WORDS.has(next));
   const text = stripListMarker(statement);
   const label = text.match(/^([^,;:.!?]{1,60}):\s+(?=\S)/u);
   if (label) {
     const [first] = driftWords(label[1]);
-    if (first && isVerbal(first)) words.push(first);
+    if (first && isVerbal(first)) words.push({ word: first, certain: true });
   }
   scopeClauses(label ? text.slice(label[0].length) : text).forEach((clause, index) => {
     let tokens = driftWords(clause);
     while (tokens.length && (/^(?:i|we)$/u.test(tokens[0]) || /^\p{L}+ly$/u.test(tokens[0]))) tokens = tokens.slice(1);
     if (tokens[0] === 'to' && tokens.length > 1) tokens = tokens.slice(1);
-    const [first] = tokens;
+    const [first, next] = tokens;
     if (!first || DRIFT_FUNCTION_WORDS.has(first) || !/\p{L}/u.test(first)) return;
-    if (index === 0 || isVerbal(first)) words.push(first);
+    if (index === 0) words.push({ word: first, certain: true });
+    else if (isVerbal(first)) words.push({ word: first, certain: takesObject(first, next) });
   });
   return words;
 }
@@ -2206,7 +2218,7 @@ function parseSwaps(entries = []) {
  * @param {{allowSwaps?: string[], allowFacts?: string[]}} [options]
  *   allowFacts: single-word `allow_facts` entries, which the user has declared
  *   true wherever they appear, so they are allowed in predicate position too.
- * @returns {{kind: 'drift', value: string, line: string, sourceLine: string, added: string[]}[]}
+ * @returns {{kind: 'drift', value: string, line: string, sourceLine: string, added: string[], blocking: boolean}[]}
  */
 export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], allowFacts = [] } = {}) {
   const swaps = parseSwaps(allowSwaps);
@@ -2242,15 +2254,16 @@ export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], all
       if (!anchors.length || !required || best < required) continue;
       const allowedBy = (anchor, word) => hasKey(anchor.keys, word) || hasKey(declared, word)
         || swaps.some(swap => hasKey(swap.to, word) && [...swap.from].some(key => anchor.keys.has(key)));
-      const added = [...new Set(predicateWords(statement)
-        .filter(word => !anchors.some(anchor => allowedBy(anchor, word))))];
-      if (!added.length) continue;
+      const unsupported = predicateWords(statement)
+        .filter(({ word }) => !anchors.some(anchor => allowedBy(anchor, word)));
+      if (!unsupported.length) continue;
       claims.push({
         kind: 'drift',
         value: normalizeFact(statement),
         line: statement,
         sourceLine: anchors[0].statement,
-        added,
+        added: [...new Set(unsupported.map(({ word }) => word))],
+        blocking: unsupported.some(({ certain }) => certain),
       });
     }
   }
@@ -2261,9 +2274,11 @@ export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], all
 
 /** Remediation text for a drift finding, shared by assertFacts and the CLI. */
 export function driftClaimAdvice({ added = [], sourceLine = '' }) {
-  const anchorWord = driftContentWords(sourceLine)[0] ?? 'source word';
+  // The source bullet's own verb, not its first content word: a labelled
+  // source ("Billing: Used Kafka ...") would otherwise suggest a swap on a noun.
+  const anchorWord = predicateWords(sourceLine)[0]?.word ?? 'source word';
   const swap = `"${anchorWord} -> ${added[0] ?? 'cv word'}"`;
-  return `the CV adds ${added.map(word => `"${word}"`).join(', ')} where its source bullet says neither. ` +
+  return `the CV opens a clause with ${added.map(word => `"${word}"`).join(', ')}, which its source bullet does not use. ` +
     'Keep the source\'s verb, or, if the new word is true for this work, add it to cv.md ' +
     `or declare the swap in allow_swaps in config/cv-facts.json (e.g. ${swap})`;
 }
@@ -2668,7 +2683,7 @@ export function verifyFacts(targetText, {
   // so it skips a non-English document the way the scope check does.
   const driftFacts = (languageGap ? [] : bulletDriftClaims(targetText, sourceText, { allowSwaps: config.allow_swaps, allowFacts: config.allow_facts }))
     .filter(({ line }) => !scopeLines.has(line));
-  const comparedFacts = [...scopeFacts, ...driftFacts]
+  const comparedFacts = [...scopeFacts, ...driftFacts.filter(({ blocking }) => blocking)]
     .filter(({ value }) => !allowedFacts.has(value));
   // Adoption claims warn instead of block. The phrase list cannot see every
   // way a source states reach, and a block makes the PDF step tell the agent to
@@ -2676,6 +2691,8 @@ export function verifyFacts(targetText, {
   const advisoryFacts = [
     ...(languageGap ? [] : adoptionClaims(targetText, sourceText)),
     ...fieldClaims.filter(claim => !claim.blocking).map(({ kind, value, line }) => ({ kind, value, line })),
+    // A drift whose only new verb is ambiguous ("and automated reporting").
+    ...driftFacts.filter(({ blocking }) => !blocking),
   ].filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);

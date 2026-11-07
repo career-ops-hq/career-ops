@@ -2,7 +2,7 @@
 // the candidate did ("Used Kafka" -> "Led a Kafka migration") is anchored to
 // its source bullet and blocked unless every edit is an allowed one.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
-import { assertFacts, bulletDriftClaims, verifyFacts } from '../verify-cv-facts.mjs';
+import { assertFacts, bulletDriftClaims, driftClaimAdvice, verifyFacts } from '../verify-cv-facts.mjs';
 import { spawnSync } from 'child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -80,6 +80,16 @@ check('a verb that opens the label is still checked',
   drift(ul('Led the Kafka ingestion for billing: event service')).length === 1, null);
 check('-ing list nouns in later clauses are not read as verbs',
   drift(ul('Built a Python ETL pipeline for finance, marketing and engineering reporting')).length === 0, null);
+// Review on #6630: a later clause opening with a regular "-ed" word is
+// ambiguous. Before a noun it warns; before a determiner, or as an irregular
+// past form, it is a verb and blocks.
+{
+  const [adjective] = drift(ul('Built Python ETL pipelines for finance and automated reporting'));
+  check('"and automated reporting" warns instead of blocking',
+    adjective?.blocking === false && adjective.added.includes('automated'), adjective);
+  const [verb] = drift(ul('Built a Python ETL pipeline for finance reporting and managed the vendors'));
+  check('"and managed the vendors" still blocks', verb?.blocking === true, verb);
+}
 check('a bullet with no source anchor is left to the other checks',
   drift(ul('Organised the company hackathon')).length === 0, null);
 
@@ -126,6 +136,11 @@ try {
   check('verifyFacts blocks a drifted bullet', blocked.verdict === 'block'
     && blocked.unsupportedFacts.some(claim => claim.kind === 'drift'), blocked);
 
+  const ambiguous = run(ul('Built a Python ETL pipeline for finance and automated reporting'));
+  check('verifyFacts reports an ambiguous drift as advisory, not a block',
+    ambiguous.verdict === 'warn' && ambiguous.advisoryFacts.some(claim => claim.kind === 'drift')
+      && !ambiguous.unsupportedFacts.some(claim => claim.kind === 'drift'), ambiguous);
+
   check('verifyFacts passes the source bullet verbatim',
     run(ul('Used Kafka for event ingestion in the billing service')).verdict === 'pass', null);
 
@@ -158,7 +173,10 @@ try {
   try { assertFacts(ul('Rebuilt the payments service'), { sourcePaths: [source], configPath: config }); } catch (err) { message = err.message; }
   check('assertFacts names the added word, the source bullet and allow_swaps',
     /drift=rebuilt the payments service/.test(message) && /Reviewed pull requests/.test(message)
-      && /allow_swaps/.test(message) && /"rebuilt"/.test(message), message);
+      && /allow_swaps/.test(message) && /"rebuilt"/.test(message)
+      && /"reviewed -> rebuilt"/.test(message), message);
+  check('the swap example names a labelled source bullet\'s verb, not its label',
+    /"used -> led"/.test(driftClaimAdvice({ added: ['led'], sourceLine: 'Billing: Used Kafka for event ingestion' })), null);
 
   writeFileSync(html, ul('Spearheaded the 2024 repricing analysis'));
   const cli = spawnSync(NODE, [join(ROOT, 'verify-cv-facts.mjs'), html, '--source', source, '--config', config], { encoding: 'utf-8' });
