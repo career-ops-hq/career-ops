@@ -498,7 +498,23 @@ function compileLocationKeyword(keyword) {
 }
 
 function compileLocationKeywordList(value) {
-  return normalizeKeywordList(value).map(compileLocationKeyword);
+  // An entry written as two uppercase letters ("IN", "DE") is an ISO country
+  // code. Lowercased like every other keyword it would match the plain word
+  // "in" in "Anywhere in the World" (#6605), so it is matched against the
+  // original-case location instead. Lowercase and mixed-case entries keep the
+  // case-insensitive behavior. The lowercased URL hint carries no case, so a
+  // code never matches it.
+  // Each entry is judged on its own spelling, so ['IN', 'in'] compiles one
+  // case-sensitive code and one case-insensitive word.
+  const raw = value == null ? [] : (Array.isArray(value) ? value : [value]);
+  return raw
+    .filter(k => typeof k === 'string' && k.trim())
+    .map((entry) => {
+      const trimmed = entry.trim();
+      if (!/^[A-Z]{2}$/.test(trimmed)) return compileLocationKeyword(trimmed.toLowerCase());
+      const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${trimmed}(?![\\p{L}\\p{M}\\p{N}])`, 'u');
+      return (lower, original) => typeof original === 'string' && re.test(original);
+    });
 }
 
 // Frozen USPS state-name + abbreviation table. Not a world gazetteer: only
@@ -708,7 +724,7 @@ export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
   const workplacePolicy = buildWorkplacePolicy(locationFilter.workplace_policy);
   const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
-  const alwaysAllow = alwaysAllowKeywords.map(compileLocationKeyword);
+  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   // US-targeted configs list the country in always_allow and foreign cities
   // in block. "Dublin, OH" does not contain "United States", so without this
   // expansion block: [Dublin] rejects a real US job. Opt-in on the country
@@ -718,7 +734,7 @@ export function buildLocationFilter(locationFilter) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
   const allowKeywords = normalizeKeywordList(locationFilter.allow);
-  const allow = allowKeywords.map(compileLocationKeyword);
+  const allow = compileLocationKeywordList(locationFilter.allow);
   // Do not widen city-only or mixed city/country targeting. Reuse the shared
   // country vocabulary rather than introducing a second country-name list.
   const countryOnlyAllow = allowKeywords.length > 0
@@ -738,14 +754,15 @@ export function buildLocationFilter(locationFilter) {
 
   const filter = (location, url, title, offer) => {
     if (!workplacePolicy(location, title, offer).eligible) return false;
-    const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
+    const original = typeof location === 'string' ? location.trim() : '';
+    const lower = original.toLowerCase();
     const hint = locationHintFromUrl(url);
     // Nothing to judge on either field → pass (don't penalize missing data),
     // unless the config opted into strict mode: a location-restricted sweep
     // against a provider that never returns a location would otherwise let
     // every out-of-region posting through (#3276).
     if (lower === '' && hint === '') return !strict;
-    const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
+    const matches = (m) => (lower !== '' && m(lower, original)) || (hint !== '' && m(hint));
     // `block_hard` is the ONE tier always_allow cannot override. It exists because
     // a European city name can be a whole word inside a non-European location, so
     // word-boundary matching (#2087) does not catch it and always_allow's
