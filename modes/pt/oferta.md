@@ -22,7 +22,7 @@ Quando o candidato cola uma **URL** (não texto do JD), confirme que a vaga aind
 
 Não continue para o Bloco A até que este gate seja resolvido. O snapshot capturado aqui é reutilizado pelos sinais de frescor do Bloco G.
 
-**Título da sessão:** uma vez que um JD real é lido e o cargo e empregador são conhecidos, aplique a regra **Session Title** do router (`SKILL.md`, #5303): renomeie uma sessão interativa para `{Cargo}, {Empresa}` quando o host permitir. Em um handoff do `auto-pipeline` com empregador conhecido, isso já aconteceu no Step 0. Uma vaga de agência com empregador não revelado é intitulada `{Cargo}, via {Agência}` somente após o **Agency confirmation handoff** ser resolvido.
+**Título da sessão:** aplique a regra **Session Title** do router (`SKILL.md`, #5303) em uma sessão interativa quando o host permitir: `Career-ops eval (fetching)` enquanto o JD é lido, `{Cargo}, {Empresa} (evaluating)` assim que um JD real indica o cargo e o empregador, e apenas `{Cargo}, {Empresa}` quando a avaliação termina. Um gate que interrompe a execução (liveness, blacklist, dealbreaker, agência) termina em `(on hold)`. Em um handoff do `auto-pipeline`, o título é do `auto-pipeline`; não o altere. Uma vaga de agência com empregador não revelado é intitulada `{Cargo}, via {Agência}` somente após o **Agency confirmation handoff** ser resolvido.
 
 ## Local public facts reuse (#1025)
 

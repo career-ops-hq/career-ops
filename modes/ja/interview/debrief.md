@@ -245,24 +245,31 @@ stated_priorities:        # トランスクリプト入力のみ。何も述べ�
 - **各回答にタグを付ける。** 各 `**Candidate:**` 行のすぐ上の行に `<!-- competency: tag[, tag...] -->` を出力する — lowercase-kebab-case。複数コンピテンシーの回答はカンマ区切りとする（例：`system-design`、`people-leadership`、`incident-response`）。Step 2 で各回答はすでに評価しているので、読み直すのではなくその評価からタグ付けする。タグは自由記述で、その質問が実際に試していたコンピテンシーを選ぶ。
 - **候補者の発話を忠実に再構成する。** Step 1 で候補者がこう言ったと報告した内容を使い、理想化した回答は使わない。Step 2 の「Correct/complete answer」はデブリーフファイルに属し、トランスクリプトには決して入らない — トランスクリプトは起きたことを記録するものである。
 - **`source: debrief`。**
-- **`stated_priorities` は front matter に入れる**（Step 1c）。`speaker` + `quote` の項目からなる YAML リストとして書き、スクリプトや `interview/plan` が本文を解析せずに読めるようにする。すべての `quote` をダブルクォートで囲み、内側のダブルクォートはエスケープして、front matter を有効な YAML に保つ。項目のラウンドと日付は、そのファイル自身の `round` と `date` である。何も述べられなかった場合と、`input_source: recall` の場合は、このフィールドを省略する。練習セッションのファイルには優先事項を決して入れない。そこには実在の面接官がいないからである。
+- **`stated_priorities` は front matter に入れる**（Step 1c）。`speaker` + `quote` の項目からなる YAML リストとして書き、スクリプトや `interview/plan` が本文を解析せずに読めるようにする。すべての `quote` をダブルクォートで囲み、front matter を有効な YAML に保ち、パース後に発言そのものが復元されるようにする。手動でエスケープする場合は、内側のダブルクォートより先にバックスラッシュをエスケープする。こうして引用内のリテラル `\n` は 2 文字のまま保たれ、改行文字に変わらない。項目のラウンドと日付は、そのファイル自身の `round` と `date` である。何も述べられなかった場合と、`input_source: recall` の場合は、このフィールドを省略する。練習セッションのファイルには優先事項を決して入れない。そこには実在の面接官がいないからである。
 - セッションファイルは gitignore されたディレクトリに置かれる（実名や企業名がバージョン管理に入ることはない）。墨消しせずにそのまま書く。
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-デブリーフを保存したら、確認された事実を応募に記録する。新しい事実を、ユーザーが `modes/_profile.md` または `config/profile.yml` にすでに書いている譲れない条件（dealbreaker）と照らし合わせる。その事実とプロファイルの該当文を示し、`Record this dealbreaker on the report and the tracker? [y/N]` と尋ねる。yes なら、その文を `--dealbreaker` として渡す。no なら省略する。
+デブリーフを保存したら、確認された事実を応募に記録する。新しい事実を一つずつ、ユーザーが `modes/_profile.md` または `config/profile.yml` にすでに書いている譲れない条件（dealbreaker）と照らし合わせる。一致したものは一つずつ個別に確認し、その事実とプロファイルの該当文を示す。`debrief-sync.mjs` はセミコロン（`;`）、タブ、改行を含む `--dealbreaker` の値を拒否し、その場合は呼び出し全体が止まる。該当文にこれらの文字が含まれていれば、どの文字かをユーザーに伝え、その文字を含まず意味を保った1行の文を求める。文字を自分で削ったり、文を自分で言い換えたりしない。ユーザーが示した文も3種類すべての文字について確認し、1つも含まなくなるまで改めて求める。そのうえで `Record this dealbreaker on the report and the tracker? [y/N]` と尋ねる。ユーザーが確認した文（またはユーザーが示した1行の文）はすべて残し、断った文はすべて除く。
 
-名前が挙がった人ごとに、`Save this contact to data/contacts.tsv? [y/N]` と尋ねる。yes なら、氏名、伝えられていればメールアドレス、ユーザーが種別を挙げていればその種別を渡す。
+名前が挙がった人ごとに、`Save this contact to data/contacts.tsv? [y/N]` と尋ねる。yes なら、氏名、伝えられていればメールアドレス、ユーザーが種別を挙げていればその種別を渡す。`--contact-type` に指定できるのは小文字の `recruiter`、`hiring-manager`、`peer`、`interviewer`、`internal-referral`、`other` だけである。ユーザーの言葉は、どの言語であっても、それが意味する値に対応させる（「タレントパートナー」は `recruiter`、「将来の上司」は `hiring-manager`）。どの値にも明確に当てはまらなければ、`--contact-type` は付けずに連絡先だけを保存する。`debrief-sync.mjs` はそれ以外の値を拒否し、その場合は dealbreaker と `--next` を含む呼び出し全体が止まる。
 
 次のステップが明確な暦日を 1 日だけ示しているなら、2 度目の質問はせずに `--next YYYY-MM-DD` を渡す。曜日はローカルの暦日から解決し、今日も含める。その表現に日付がなければ `--next` は省略する。曖昧な場合（`next week`、2 つの日付など）は、日付を 1 つ尋ねてから渡す。
 
-それらのフラグを付けて `node debrief-sync.mjs --app <tracker#>` を実行する。`<tracker#>` はトラッカーにおけるその応募の `#` である（レポート番号ではない）。渡す dealbreaker、連絡先、`--next` の日付がどれもなければ、コマンドは実行しない：記録するものがない呼び出しをスクリプトは拒否する。そのあと、連絡先を保存した場合は `node contacts.mjs --summary` を、日付を確定した場合は `node followup-cadence.mjs --summary` を実行する。
+それらのフラグを付けて `node debrief-sync.mjs --app <tracker#>` を実行する。`<tracker#>` はトラッカーにおけるその応募の `#` である（レポート番号ではない）。`--dealbreaker` は文を一つだけ受け取り、1 回の呼び出しに一度しか指定できない。そのため、確認された文ごとにコマンドを 1 つ実行する。2 つの文を 1 つの値にまとめてはならない：スクリプトはセミコロンを拒否する。連絡先のフラグと `--next` は最初のコマンドにだけ付ける。2 つ目以降のコマンドには `--app <tracker#>` と `--dealbreaker` を 1 つだけ渡し、それ以外は付けない。シェルが `$` やバッククォートをそのまま渡すように、各値はシングルクォートで囲む。値の中のシングルクォートは、Git Bash などの POSIX シェルでは `'\''` と書く。PowerShell では `''` と書き、PowerShell は曲がった引用符（`‘`、`’`、`‚` や `‛`）も引用符として読むので、それも同じように 2 つ重ねる：
 
-ユーザーが新しいステータスを挙げない限り、ステータスは変更しない。それは別の `set-status.mjs` の呼び出しであり、このコマンドより前に行う。
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
 
-同じコマンドを 2 回実行しても安全である。
+コマンドは 1 つずつ実行し、そのたびに終了ステータスを確認する。コマンドが失敗したら、そこで止めて原因を直し、最初のコマンドからリストを実行し直す。渡す dealbreaker、連絡先、`--next` の日付がどれもなければ、コマンドは実行しない：記録するものがない呼び出しをスクリプトは拒否する。最後のコマンドのあと、連絡先を保存した場合は `node contacts.mjs --summary` を、日付を確定した場合は `node followup-cadence.mjs --summary` を実行する。
+
+ユーザーが新しいステータスを挙げない限り、ステータスは変更しない。それは別の `set-status.mjs` の呼び出しであり、これらのコマンドより前に行う。
+
+同じコマンドを 2 回実行しても安全である：すでに記録された文、連絡先、日付は二重に書き込まれない。
 
 ---
 

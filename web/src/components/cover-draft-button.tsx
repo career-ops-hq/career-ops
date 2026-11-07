@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { FileText, Loader2, Mail, RotateCcw, TriangleAlert } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
-import { pdfButtonState } from "@/lib/pdf-button-state.mjs";
+import { coverDraftButtonState } from "@/lib/pdf-button-state.mjs";
 import { COVER_TONES } from "@/lib/cover-tones.mjs";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 
@@ -33,19 +33,7 @@ export function CoverDraftButton({ n, company }: { n: string; company: string })
     () => jobs.filter((j) => j.kind === "cover" && j.input === n).sort((a, b) => b.startedAt - a.startedAt)[0],
     [jobs, n],
   );
-  // A cover run can finish with VERDICT 1/5 and no letter. Only treat a real
-  // draft as ready; weak verdicts surface as a retry failure beside the form.
-  const base = pdfButtonState(job, false);
-  const weakDraft = job?.status === "done" && job.result?.score != null && job.result.score < 2;
-  const state = weakDraft
-    ? {
-        kind: "idle" as const,
-        failure: {
-          jobId: job.id,
-          reason: job.result?.summary || "The cover run finished without a usable draft.",
-        },
-      }
-    : base;
+  const state = coverDraftButtonState(job);
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

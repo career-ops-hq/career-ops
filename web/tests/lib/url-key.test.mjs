@@ -9,10 +9,10 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeUrl as webKey } from "../../src/lib/core/url-key.mjs";
+import { canonicalJobKey as webCanonical, normalizeUrl as webKey } from "../../src/lib/core/url-key.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const { normalizeUrl: coreKey } = await import(pathToFileURL(join(ROOT, "url-key.mjs")).href);
+const { canonicalJobKey: coreCanonical, normalizeUrl: coreKey } = await import(pathToFileURL(join(ROOT, "url-key.mjs")).href);
 
 test("web mirror matches core on ordinary postings (https upgrade, hostname lowercase, trailing slash)", () => {
   const CASES = [
@@ -185,4 +185,29 @@ test("web postingUrlRelation matches core on every relation", () => {
     assert.equal(webRelation(a, b), expected, `web: ${a} vs ${b}`);
     assert.equal(webRelation(a, b), coreRelation(a, b), `parity: ${a} vs ${b}`);
   }
+});
+
+test("web canonicalJobKey matches the CLI on Greenhouse, LinkedIn, and tracking variants", () => {
+  const urls = [
+    "https://boards.greenhouse.io/acme/jobs/8028783",
+    "https://job-boards.eu.greenhouse.io/acme/jobs/8028783?gh_src=abc",
+    "https://careers.acme.example/open?gh_jid=8028783&utm_source=li",
+    "https://boards.greenhouse.io/acme/jobs/1?gh_jid=2",
+    "https://www.linkedin.com/jobs/view/senior-engineer-at-hooli-4100000001",
+    "https://www.linkedin.com/comm/jobs/view/4100000001/?trk=eml",
+    "https://www.linkedin.com/jobs/search/?currentJobId=4100000001",
+    "https://uk.indeed.com/viewjob?jk=abc123",
+    "https://Jobs.Example.com/J/7?ref=li&source=alert&lever-origin=applied",
+    "https://jobs.example.com/careers#/jobs/123",
+    "local:jds/acme.md",
+    "",
+  ];
+  for (const url of urls) {
+    assert.equal(webCanonical(url), coreCanonical(url), url);
+  }
+  assert.equal(webCanonical("https://boards.greenhouse.io/acme/jobs/8028783"), "greenhouse:8028783");
+  assert.notEqual(
+    webCanonical("https://boards.greenhouse.io/acme/jobs/1"),
+    webCanonical("https://boards.greenhouse.io/acme/jobs/2"),
+  );
 });

@@ -174,6 +174,56 @@ const mkCtx = (pages) => ({
   if (job.postedAt === undefined) pass('enrichDate tolerates malformed JSON-LD without throwing');
   else fail(`postedAt unexpectedly set: ${job.postedAt}`);
 }
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-20","validThrough":"2026-11-11T23:59:59"}</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-20') && job.closesAt === '2026-11-11') {
+    pass('enrichDate copies a real validThrough day to closesAt');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-20","validThrough":"2026-02-31"}</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-20') && !('closesAt' in job)) {
+    pass('enrichDate leaves closesAt unset when validThrough is not a calendar day');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">[{"@type":"Organization","validThrough":"2026-01-01"},{"@type":"JobPosting","datePosted":"2026-07-19"}]</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-19') && !('closesAt' in job)) {
+    pass('enrichDate does not borrow a close day from a sibling node');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">[{"@type":"JobPosting","datePosted":"2026-07-19"},{"@type":"JobPosting","validThrough":"2026-01-02"}]</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-19') && !('closesAt' in job)) {
+    pass('enrichDate does not borrow a close day from a later JobPosting');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">{"validThrough":"2026-08-08","datePosted":"2026-07-17"}</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-17') && job.closesAt === '2026-08-08') {
+    pass('enrichDate reads validThrough from an untyped JSON-LD object');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
 
 // ── attribute ordering must not change what we extract ──────────────
 // Tenants theme their portals, so `field-label` is one token in a class list,

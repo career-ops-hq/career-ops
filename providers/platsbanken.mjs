@@ -64,6 +64,7 @@
 // in the payload (`external_id` / `original_id` were null throughout), so
 // `requisitionId` and `language` are left unset rather than guessed.
 
+import { closesAtIso } from '../lib/posting-close.mjs';
 import { fetchJsonWithRetry, BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
@@ -199,7 +200,7 @@ export function rawHitCount(json) {
  *   - one malformed row (no id / no headline)                   → skipped
  *
  * @param {any} json
- * @returns {{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, externalId?: string}[]}
+ * @returns {{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, closesAt?: string, externalId?: string}[]}
  */
 export function parsePlatsbankenResponse(json) {
   const rows = json && Array.isArray(json.hits) ? json.hits : null;
@@ -222,6 +223,7 @@ export function parsePlatsbankenResponse(json) {
     const description = row.description && typeof row.description === 'object' ? row.description : null;
     const descriptionText = description && typeof description.text === 'string' ? description.text.trim() : '';
     const postedAt = toEpochMs(row.publication_date);
+    const closesAt = closesAtIso(row.application_deadline);
     const externalId = row.id === null || row.id === undefined ? '' : String(row.id).trim();
 
     jobs.push({
@@ -231,6 +233,7 @@ export function parsePlatsbankenResponse(json) {
       location: formatLocation(row.workplace_address),
       ...(descriptionText ? { description: descriptionText } : {}),
       ...(postedAt === undefined ? {} : { postedAt }),
+      ...(closesAt ? { closesAt } : {}),
       ...(externalId ? { externalId } : {}),
     });
   }
