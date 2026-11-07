@@ -95,6 +95,16 @@ try {
   } else fail(`first=${JSON.stringify(first)}`);
   if (jobs[1]?.url === 'https://www.jobs.example.com/job/engineer-2/') pass('treats the www. variant as the same board');
   else fail(`jobs[1]=${JSON.stringify(jobs[1])}`);
+  if (!('description' in first)) pass('an item with no <content:encoded> has no description');
+  else fail(`first.description=${JSON.stringify(first.description)}`);
+
+  // The full post reaches the job as plain text, through the item parser this
+  // provider shares with jobspresso.mjs.
+  const withPost = item(5).replace('</item>',
+    '<content:encoded><![CDATA[<p>Remote in Canada &amp; the US.</p>]]></content:encoded></item>');
+  const posted = parseWpJobManagerFeed(feed([withPost]), 'jobs.example.com').jobs[0];
+  if (posted?.description === 'Remote in Canada & the US.') pass('passes the full post through as plain-text description');
+  else fail(`description=${JSON.stringify(posted?.description)}`);
 
   const empty = parseWpJobManagerFeed(feed([]), 'jobs.example.com');
   if (empty.jobs.length === 0 && empty.rawCount === 0) pass('an RSS channel with no items is an empty board');

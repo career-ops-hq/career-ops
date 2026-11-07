@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { PageFrame } from "@/components/page-frame";
 import { BackLink } from "@/components/back-link";
 import { MarkPdfReadyButton } from "@/components/mark-pdf-ready-button";
+import { CvPdfFileActions } from "@/components/cv-pdf-file-actions";
 import { saveStatus } from "@/lib/pipeline-status.mjs";
+import { appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
 
 type CopyItem = { label: string; text: string };
 type PdfFile = { relativePath: string; downloadHref: string } | null;
@@ -29,10 +31,13 @@ export function ApplyChecklist({
   education,
   cvMissing,
   tips,
+  blocked = null,
   trackerNum,
   reportNum,
   status,
   pdfReady,
+  trackerMarked = false,
+  pdfNote = null,
 }: {
   company: string;
   role: string;
@@ -46,10 +51,13 @@ export function ApplyChecklist({
   education: string;
   cvMissing: boolean;
   tips: Tip[];
+  blocked?: { label: string; message: string; tip: string } | null;
   trackerNum: string | null;
   reportNum: number | null;
   status: string;
   pdfReady: boolean;
+  trackerMarked?: boolean;
+  pdfNote?: string | null;
 }) {
   return (
     <PageFrame className="max-w-3xl">
@@ -64,6 +72,23 @@ export function ApplyChecklist({
           Back to the report
         </Link>
       </header>
+
+      {blocked ? (
+        <Section title={blocked.label}>
+          <table className="w-full text-sm">
+            <caption className="sr-only">Why this portal is filled outside the app</caption>
+            <tbody>
+              <tr className="border-t border-border">
+                <td className="py-2 pr-4 align-top font-medium">{blocked.label}</td>
+                <td className="py-2 text-muted">
+                  <p>{blocked.message}</p>
+                  {blocked.tip ? <p className="mt-2">{blocked.tip}</p> : null}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </Section>
+      ) : null}
 
       <Section title="Posting">
         {postingUrl ? (
@@ -144,8 +169,9 @@ export function ApplyChecklist({
         <div className="flex flex-wrap items-start gap-2">
           <AppliedButton trackerNum={trackerNum} status={status} />
           <SeedButton trackerNum={trackerNum} />
-          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} />
+          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} trackerMarked={trackerMarked} />
         </div>
+        {pdfNote && <p className="mt-2 text-sm text-muted">{pdfNote}</p>}
         {!trackerNum && <p className="mt-2 text-xs text-faint">Applied and seed follow-up need a tracker row.</p>}
       </Section>
     </PageFrame>
@@ -183,8 +209,9 @@ function PdfRow({ label, file, empty }: { label: string; file: PdfFile; empty: s
     <div className="mb-3 flex flex-wrap items-center gap-2">
       <span className="text-sm font-medium">{label}</span>
       <a href={file.downloadHref} target="_blank" rel="noreferrer" className={PILL}>
-        Download
+        View
       </a>
+      <CvPdfFileActions viewHref={file.downloadHref} className={PILL} />
       <CopyButton text={file.relativePath} label="Copy path" />
       <span className="font-mono text-xs text-faint">{file.relativePath}</span>
     </div>
@@ -216,14 +243,23 @@ function AppliedButton({ trackerNum, status }: { trackerNum: string | null; stat
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [ask, setAsk] = useState(false);
+  const yesRef = useRef<HTMLButtonElement>(null);
   const applied = status.trim().toLowerCase() === "applied";
+  useEffect(() => {
+    if (!ask) return;
+    yesRef.current?.focus();
+  }, [ask]);
+  const pending = appliedWriteAllowed({ status: "Applied", confirmed: false });
 
   async function markApplied() {
-    if (!trackerNum || busy || applied) return;
+    const gate = appliedWriteAllowed({ status: "Applied", confirmed: true });
+    if (!trackerNum || busy || applied || !gate.write) return;
     setBusy(true);
     setError("");
     try {
       await saveStatus(trackerNum, status, "Applied");
+      setAsk(false);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not mark this Applied.");
@@ -234,9 +270,31 @@ function AppliedButton({ trackerNum, status }: { trackerNum: string | null; stat
 
   return (
     <span className="inline-flex flex-col items-start gap-1">
-      <button type="button" className={PILL} disabled={!trackerNum || busy || applied} onClick={markApplied}>
-        {busy ? "Saving…" : "Applied"}
-      </button>
+      {!ask && (
+        <button
+          type="button"
+          className={PILL}
+          disabled={!trackerNum || busy || applied}
+          onClick={() => {
+            if (!pending.write) setAsk(true);
+          }}
+        >
+          {busy ? "Saving…" : "Applied"}
+        </button>
+      )}
+      {ask && (
+        <span role="alert" className="inline-flex flex-col items-start gap-1">
+          <span className="text-xs text-foreground">{pending.prompt}</span>
+          <span className="inline-flex items-center gap-2">
+            <button ref={yesRef} type="button" className={PILL} disabled={!trackerNum || busy} onClick={() => void markApplied()}>
+              {busy ? "Saving…" : pending.yesLabel}
+            </button>
+            <button type="button" className="text-xs text-muted hover:text-foreground disabled:opacity-60" disabled={busy} onClick={() => setAsk(false)}>
+              Not yet
+            </button>
+          </span>
+        </span>
+      )}
       {error && <span className="max-w-xs text-xs text-red-500">{error}</span>}
     </span>
   );

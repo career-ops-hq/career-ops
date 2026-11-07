@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,7 @@ export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
+  const refetch = useCallback(() => {
     fetch("/api/documents")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load documents");
@@ -38,6 +37,17 @@ export default function DocumentsPage() {
         setLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    refetch();
+
+    window.addEventListener("co-job-done", refetch);
+
+    return () => {
+      window.removeEventListener("co-job-done", refetch);
+    };
+  }, [refetch]);
+
 
   if (loading) {
     return (
