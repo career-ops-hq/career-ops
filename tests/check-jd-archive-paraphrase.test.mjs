@@ -9,7 +9,40 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkJdArchive } from '../check-jd-archive.mjs';
+import { checkJdArchive, hasEmbeddedJdArchive, detectJdSectionMarker } from '../check-jd-archive.mjs';
+
+const archivedReport = (body, heading = 'Job Description (archived verbatim)') => `# Evaluation: ExampleCo — Analyst\n\n## ${heading}\n${body}\n`;
+
+test('explicit full-posting omission and incomplete archive disclosures are not embedded archives', () => {
+  for (const text of [
+    'Full reproduction of the source job description is omitted due to copyright limits.',
+    'This section is not a completed JD archive.',
+    'Full reproduction omitted due to copyright restrictions; the original source remains available at the posting URL.',
+    'The full text is not reproduced here because of the source copyright restriction.',
+    'The full job description cannot be reproduced due to a quotation limit.',
+  ]) {
+    const report = archivedReport(text);
+    assert.equal(hasEmbeddedJdArchive(report), false, text);
+    assert.equal(detectJdSectionMarker(report)?.category, 'omission', text);
+  }
+});
+
+test('a not-archived heading is an evaluator disclosure rather than a full-archive claim', () => {
+  const report = archivedReport('The source was available during evaluation, but its full text was not saved in this report.', 'Job Description (not archived)');
+  assert.equal(hasEmbeddedJdArchive(report), false);
+  assert.equal(detectJdSectionMarker(report)?.category, 'omission');
+});
+
+test('genuine JD copyright notices and archive responsibilities remain valid source content', () => {
+  for (const text of [
+    'The Analyst maintains copyright notices and archive retention duties for customer documentation. You will work with engineering and legal teams to deliver reliable records.',
+    'Full reproduction rights are granted to staff working on digitisation. You will archive incomplete historic records, manage permissions and document retention exceptions. Copyright ExampleCo.',
+  ]) {
+    const report = archivedReport(text);
+    assert.equal(hasEmbeddedJdArchive(report), true, text);
+    assert.equal(detectJdSectionMarker(report), null, text);
+  }
+});
 
 const PARAPHRASE_REPORT = [
   '# Evaluation: Acme - Director of Marketing',
