@@ -10,7 +10,7 @@ console.log('\nstats and funnel-velocity summaries while follow-ups are off');
 
 const sandboxes = [];
 
-function sandbox(followupsEnabled) {
+function sandbox(followupsEnabled, followupsMd = '# Follow-ups\n') {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-followups-off-'));
   sandboxes.push(dir);
   mkdirSync(join(dir, 'data'));
@@ -23,7 +23,7 @@ function sandbox(followupsEnabled) {
     '|---|------|---------|------|-------|--------|-----|--------|-------|',
     ...rows, '',
   ].join('\n'));
-  writeFileSync(join(dir, 'data', 'follow-ups.md'), '# Follow-ups\n');
+  writeFileSync(join(dir, 'data', 'follow-ups.md'), followupsMd);
   writeFileSync(join(dir, 'config', 'profile.yml'), `follow_ups:\n  enabled: ${followupsEnabled}\n`);
   return dir;
 }
@@ -56,6 +56,30 @@ try {
   pass('stats summary does not count Applied rows without a follow-up while follow-ups are off');
 } catch (err) {
   fail(`stats summary with follow-ups off: ${err.message}`);
+}
+
+// 'Cold' is followup-cadence's verdict on an Applied row that has had
+// applied_max_followups follow-ups (default 2) with no reply. A follow-ups.md
+// left over from before the user turned follow-ups off still carries those
+// rows, so the Tracker line must not report them cold beside a Follow-ups
+// line saying follow-ups are off.
+const twoFollowupsForRow1 = [
+  '| # | App | Date | Company | Role | Channel | Contact | Notes |',
+  '|---|-----|------|---------|------|---------|---------|-------|',
+  '| 1 | 1 | 2026-08-10 | Company 1 | Data Analyst | email | jane | f1 |',
+  '| 2 | 1 | 2026-08-20 | Company 1 | Data Analyst | email | jane | f2 |',
+  '',
+].join('\n');
+
+try {
+  assert.match(summary('stats.mjs', sandbox(true, twoFollowupsForRow1)), /25 active \(24 live, 1 cold\)/);
+  const off = summary('stats.mjs', sandbox(false, twoFollowupsForRow1));
+  assert.doesNotMatch(off, /\bcold\b/);
+  assert.match(off, /Tracker: +25 total \| 25 active/);
+  assert.match(off, /Follow-ups: turned off/);
+  pass('stats summary does not call Applied rows cold while follow-ups are off');
+} catch (err) {
+  fail(`stats summary cold breakdown with follow-ups off: ${err.message}`);
 }
 
 for (const dir of sandboxes) rmSync(dir, { recursive: true, force: true });

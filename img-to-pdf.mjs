@@ -24,11 +24,11 @@
  * the script errors out rather than silently clobbering a PDF.
  */
 
-import { chromium } from 'playwright';
 import { resolve, dirname, extname } from 'path';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const MIME_TYPES = {
   '.png': 'image/png',
@@ -99,9 +99,10 @@ function usage() {
  *
  * @param {string} inputPath - Absolute path to the source image.
  * @param {string} outputPath - Absolute path to write the PDF to.
+ * @param {{force?: boolean}} options - Whether an existing PDF may be overwritten.
  * @returns {Promise<{outputPath: string, size: number, width: number, height: number}>}
  */
-export async function convertImageToPdf(inputPath, outputPath) {
+export async function convertImageToPdf(inputPath, outputPath, { force = false } = {}) {
   const mimeType = detectMimeType(inputPath);
   if (!mimeType) {
     throw new Error(`Unsupported image type: ${extname(inputPath) || '(no extension)'}. Supported: ${Object.keys(MIME_TYPES).join(', ')}`);
@@ -126,7 +127,10 @@ export async function convertImageToPdf(inputPath, outputPath) {
 
   await mkdir(dirname(outputPath), { recursive: true });
 
-  const browser = await chromium.launch({ headless: true });
+  // After argv checks. A static import made --help and a missing path wait
+  // on playwright, and crash when the package was not installed.
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'load' });
@@ -158,7 +162,7 @@ export async function convertImageToPdf(inputPath, outputPath) {
       printBackground: true,
     });
 
-    await writeFile(outputPath, pdfBuffer);
+    await writeFile(outputPath, pdfBuffer, { flag: force ? 'w' : 'wx' });
 
     return { outputPath, size: pdfBuffer.length, width, height };
   } finally {
@@ -243,7 +247,7 @@ async function main() {
   console.log(`📁 Output: ${outputPath}`);
 
   try {
-    const result = await convertImageToPdf(inputPath, outputPath);
+    const result = await convertImageToPdf(inputPath, outputPath, { force: parsed.force });
     console.log(`✅ PDF generated: ${result.outputPath}`);
     console.log(`📐 Page size: ${result.width}x${result.height}px`);
     console.log(`📦 Size: ${(result.size / 1024).toFixed(1)} KB`);

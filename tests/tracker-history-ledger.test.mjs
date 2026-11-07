@@ -12,7 +12,7 @@
 //
 // Run:  node --test tests/tracker-history-ledger.test.mjs
 
-import { test, describe, before } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, appendFileSync } from 'node:fs';
@@ -80,6 +80,7 @@ const events = (out) => out.split('\n').filter(l => l.startsWith('  ')).map(l =>
 
 describe('tracker.mjs history: the issue\'s steps to reproduce (#5555)', SQLITE, () => {
   let sb, first, rebuilt;
+  after(() => { if (sb) rmSync(sb.dir, { recursive: true, force: true, maxRetries: 10 }); });
   before(() => {
     sb = sandbox();
     run(sb, 'tracker.mjs', ['sync']);
@@ -153,6 +154,7 @@ describe('tracker.mjs history: correction and retraction lines apply', SQLITE, (
 
 describe('tracker.mjs history: a hand edit in applications.md', SQLITE, () => {
   let sb, edited, again, withLedger, rebuilt;
+  after(() => { if (sb) rmSync(sb.dir, { recursive: true, force: true, maxRetries: 10 }); });
   before(() => {
     sb = sandbox();
     run(sb, 'tracker.mjs', ['sync']);
@@ -198,6 +200,7 @@ describe('tracker.mjs history: a hand edit in applications.md', SQLITE, () => {
 
 describe('tracker.mjs history: a hand edit reverted by hand to the ledger\'s state', SQLITE, () => {
   let sb, reverted, again;
+  after(() => { if (sb) rmSync(sb.dir, { recursive: true, force: true, maxRetries: 10 }); });
   before(() => {
     sb = sandbox();
     run(sb, 'set-status.mjs', ['1', 'Applied', '--on', '2026-10-05']);

@@ -125,6 +125,11 @@ export function scaffoldNew(root, name) {
   if (existsSync(dest)) throw new Error(`plugins.local/${name} already exists`);
   mkdirSync(path.join(root, 'plugins.local'), { recursive: true });
   cpSync(tpl, dest, { recursive: true });
+  // The template ships its skill as skill.md.template so skill catalogs that
+  // index any SKILL.md with frontmatter do not list the placeholder as a real
+  // skill; the scaffolded plugin gets the skill.md its manifest points at.
+  const skillTpl = path.join(dest, 'skill.md.template');
+  if (existsSync(skillTpl)) renameSync(skillTpl, path.join(dest, 'skill.md'));
   // Substitute {{NAME}} placeholders in shipped text files.
   const sub = (p) => { if (existsSync(p)) writeFileSync(p, readFileSync(p, 'utf8').replaceAll('{{NAME}}', name), 'utf8'); };
   for (const f of readdirSync(dest, { withFileTypes: true })) {

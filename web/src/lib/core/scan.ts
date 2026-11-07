@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { writeTempPortals, cleanupTempPortals } from "./portals";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
@@ -89,6 +90,7 @@ function ingestJsonOffer(
     company: o.company,
     title: o.title,
     location: o.location || "",
+    ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
     postedAt: o.postedAt || "",
     ats: source.replace(/-full$/, ""),
     source,
@@ -145,7 +147,7 @@ export function scannerSupportsJson(): boolean {
   }
 }
 
-type JsonOffer = { company?: string; title?: string; url?: string; location?: string | null; postedAt?: string | null; source?: string };
+type JsonOffer = { geographyEvidence?: Record<string, unknown>; company?: string; title?: string; url?: string; location?: string | null; postedAt?: string | null; source?: string };
 type ScanJson = {
   companiesAvailable?: number;
   companiesScanned?: number;
@@ -203,8 +205,11 @@ function runScanner(
     ];
 
     const child = spawn(process.execPath, args, {
-      cwd: careerOpsRoot(),
+      cwd: resolveCodeRoot(process.cwd(), process.env),
       env: { ...process.env, CAREER_OPS_PORTALS: tempPortals },
+      // windowsHide: see api/doctor/route.ts — a stale inherited console kills
+      // every child with 0xC0000142 on Windows; never inherit one.
+      windowsHide: true,
     });
 
     const { offers, seen } = sink;

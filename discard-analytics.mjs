@@ -23,6 +23,7 @@ import { readFileSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 /**
  * Parse a discard log's contents into entries.
@@ -145,16 +146,20 @@ export function renderSummary(agg, topN, firstDate, lastDate) {
 // ── CLI entry point ────────────────────────────────────────────────────────
 
 if (isMainModule(import.meta.url)) {
-  if (process.argv.includes('-h') || process.argv.includes('--help')) {
-    console.log('Usage: node discard-analytics.mjs [--log <path>] [--reason <pattern>] [--top N] [--since YYYY-MM-DD]');
-    console.log('  Analyzes the discard log for filter tuning insights.');
-    process.exit(0);
-  }
+  // Before any work. argValue() below used indexOf(), which cannot see
+  // `--log=path`, `--since=2026-08-26`, `--reason=x` or `--top=5`: the value
+  // was dropped and the run used the default log and no filter at exit 0.
+  // validateFlags rejects an unknown or valueless flag; flagValue reads both
+  // spellings.
+  const USAGE = 'Usage: node discard-analytics.mjs [--log <path>] [--reason <pattern>] [--top N] [--since YYYY-MM-DD]\n'
+    + '  Analyzes the discard log for filter tuning insights.';
+  const args = process.argv.slice(2);
+  validateFlags(args, ['--log', '--reason', '--top', '--since', '--help', '-h'], USAGE, {
+    valueFlags: ['--log', '--reason', '--top', '--since'],
+    requireOperand: true,
+  });
 
-  function argValue(flag) {
-    const i = process.argv.indexOf(flag);
-    return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : null;
-  }
+  const argValue = (flag) => flagValue(args, flag) ?? null;
 
   const filterReason = argValue('--reason');
   const parsedTopN = Number(argValue('--top') || '10');

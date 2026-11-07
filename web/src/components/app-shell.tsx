@@ -8,6 +8,7 @@ import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BackToTop } from "@/components/back-to-top";
+import { CommandPalette } from "@/components/command-palette";
 import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
 import { ApplyProvider } from "@/components/apply/apply-provider";
@@ -26,15 +27,22 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
       <PipelineProvider>
       <ApplyProvider>
       <ExploreProvider>
+      <a
+        href="#main-content"
+        className="sr-only rounded-md bg-brand text-sm font-medium text-brand-foreground focus:not-sr-only focus:fixed focus:px-3 focus:py-2 focus:left-3 focus:top-3 focus:z-[100] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50"
+      >
+        Skip to content
+      </a>
       <MobileNav followupsEnabled={followupsEnabled} />
       <div className="flex min-h-screen">
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
+        <aside className="sticky top-0 hidden print:hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
           <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
             <CoMark size={32} />
             <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
               career-ops
             </span>
           </Link>
+          <CommandPalette followupsEnabled={followupsEnabled} />
           <nav className="flex flex-col gap-1">
             {visibleNavItems(followupsEnabled).map(({ href, label, icon: Icon, chip }) => {
               const active = isActivePath(href, pathname);
@@ -63,7 +71,7 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
 
           <WorkerPills />
 
-          <div className="mt-auto space-y-3 pb-16 pt-4">
+          <div className="mt-auto space-y-3 pb-16 pt-4 md-tall:pb-40">
             <UsageMeter />
             <div className="space-y-1.5">
               <div className="flex items-center justify-between px-1">
@@ -77,11 +85,13 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
             </div>
           </div>
         </aside>
-        <main className="flex-1 overflow-x-hidden">{children}</main>
-        <AssistantConsole />
-        <BackToTop />
-        <FirstScoreView />
-        <BetaBanner />
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden focus:outline-none">{children}</main>
+        <div className="print:hidden">
+          <AssistantConsole />
+          <BackToTop />
+          <FirstScoreView />
+          <BetaBanner />
+        </div>
       </div>
       </ExploreProvider>
       </ApplyProvider>

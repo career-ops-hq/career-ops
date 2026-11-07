@@ -38,13 +38,13 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atsLint, listTemplates } from '../cv-templates.mjs';
+import { atsLint, listTemplates, DEFAULT_TEMPLATES_DIR } from '../cv-templates.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const templates = [
-  ...listTemplates('cv').map((t) => ({ path: t.path, kind: 'cv' })),
-  ...listTemplates('cover').map((t) => ({ path: t.path, kind: 'cover' })),
+  ...listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).map((t) => ({ path: t.path, kind: 'cv' })),
+  ...listTemplates('cover', { dir: DEFAULT_TEMPLATES_DIR }).map((t) => ({ path: t.path, kind: 'cover' })),
   { path: join(ROOT, 'templates', 'resume-template.html'), kind: 'cv' },
 ].filter((t) => existsSync(t.path));
 

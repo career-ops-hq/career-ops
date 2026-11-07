@@ -413,6 +413,94 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 	}
 }
 
+// The width a row must have comes from the header, as parseTrackerRow in
+// tracker-parse.mjs derives it, not from a fixed 8. Fixed, it dropped every row
+// of a narrower tracker without an error, and read a row that is missing an
+// interior cell with every later column shifted one to the left.
+func TestParseApplicationsRowWidthFollowsTheHeader(t *testing.T) {
+	narrow, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | Report |
+|---|---|---|---|---|---|---|
+| 1 | 2026-08-28 | Acme | Platform Engineer | 4.0/5 | Applied | — |
+| 2 | 2026-08-29 | Globex | Data Engineer | 4.2/5 | Evaluated | — |
+`)
+	apps := mustParseApplications(t, narrow)
+	if len(apps) != 2 {
+		t.Fatalf("7-column tracker parsed %d rows, want 2", len(apps))
+	}
+	if apps[0].Status != "Applied" || apps[1].Company != "Globex" {
+		t.Errorf("7-column tracker read as %q/%q, want Applied/Globex", apps[0].Status, apps[1].Company)
+	}
+
+	// The second row lost its Score cell: read anyway, its status would be ❌.
+	wide, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-08-28 | Acme | Platform Engineer | 4.0/5 | Applied | ❌ | — | ok | https://jobs.example.com/1 |
+| 2 | 2026-08-29 | Globex | Data Engineer | Evaluated | ❌ | — | missing score | https://jobs.example.com/2 |
+`)
+	apps = mustParseApplications(t, wide)
+	if len(apps) != 1 || apps[0].Company != "Acme" {
+		t.Fatalf("a row missing an interior cell must be skipped, got %d rows: %+v", len(apps), apps)
+	}
+
+	// The second row's Notes cell is empty and flush against the closing pipe.
+	// That row is complete, and Node reads it: a guard counting a cell short
+	// would lose it.
+	flush, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-08-28 | Acme | Platform Engineer | 4.0/5 | Applied | ❌ | — | ok |
+| 2 | 2026-08-29 | Globex | Data Engineer | 4.2/5 | Evaluated | ❌ | — ||
+`)
+	apps = mustParseApplications(t, flush)
+	if len(apps) != 2 || apps[1].Company != "Globex" || apps[1].Status != "Evaluated" {
+		t.Fatalf("a row with an empty last cell must be kept, got %d rows: %+v", len(apps), apps)
+	}
+}
+
+// A URL cell that names no posting is not a JobURL: the "—" empty-cell marker
+// a hand-added row carries, "N/A", or a local:jds/ pointer. Kept as one, it
+// switched off every enrichment tier, since each runs only for an empty
+// JobURL, so the report's own **URL:** header was never read. And the
+// pipeline's open action handed "—" to the platform opener.
+func TestParseApplicationsTreatsPlaceholderURLCellsAsAbsent(t *testing.T) {
+	tempDir, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-08-28 | Acme | Platform Engineer | 4.0/5 | Evaluated | — | [1](../reports/001-acme.md) | dash cell | — |
+| 2 | 2026-08-28 | Globex | Data Engineer | 4.2/5 | Evaluated | — | [2](../reports/002-globex.md) | n/a cell | N/A |
+| 3 | 2026-08-28 | Initech | Analyst | 3.9/5 | Evaluated | — | — | local pointer | local:jds/initech-analyst.md |
+`)
+
+	reportsDir := filepath.Join(tempDir, "reports")
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
+		t.Fatalf("mkdir reports: %v", err)
+	}
+	for name, url := range map[string]string{
+		"001-acme.md":   "https://jobs.example.com/acme",
+		"002-globex.md": "https://jobs.example.com/globex",
+	} {
+		if err := os.WriteFile(filepath.Join(reportsDir, name), []byte("**URL:** "+url+"\n"), 0o644); err != nil {
+			t.Fatalf("write report %s: %v", name, err)
+		}
+	}
+
+	apps := mustParseApplications(t, tempDir)
+	if len(apps) != 3 {
+		t.Fatalf("expected 3 applications, got %d", len(apps))
+	}
+	for i, want := range []string{"https://jobs.example.com/acme", "https://jobs.example.com/globex", ""} {
+		if got := apps[i].JobURL; got != want {
+			t.Errorf("row %d (%s) JobURL = %q, want %q", i+1, apps[i].Company, got, want)
+		}
+	}
+}
+
 // End-to-end status update on the inserted-column layout: parse, update, and
 // re-parse. Only the Status cell may change; every other cell stays intact.
 func TestUpdateApplicationStatusInsertedColumn(t *testing.T) {

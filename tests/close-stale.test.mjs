@@ -16,7 +16,7 @@ import { openTrackerTransaction } from '../tracker-utils.mjs';
 import { parseStatusLog } from '../funnel-velocity.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
 import { daysBetween, isoMinusDays, noteTag, classifyRows } from '../close-stale.mjs';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'close-stale.mjs');
@@ -142,6 +142,28 @@ test('later signals skip a row: active interview, status-log transition, open fo
   });
 });
 
+test('an active interview under another legal form of the company still skips the row', () => {
+  const rows = [
+    row(1, OLD, 'Kestrel Payments', 'Applied'),
+    row(2, OLD, 'Copperline Freight, Inc.', 'Applied'),
+    row(3, OLD, 'Kestrel Robotics', 'Applied'),
+  ];
+  const extra = {
+    'active-interviews.md': [
+      '| Company | Role | Round | Date/Time | Interviewer | Status | Notes |',
+      '|---|---|---|---|---|---|---|',
+      '| Kestrel Payments Inc. | Analyst | 1 | 2026-10-20 | x | Scheduled | |',
+      '| Copperline Freight | Analyst | 2 | 2026-10-21 | x | Scheduled | |',
+      '',
+    ].join('\n'),
+  };
+  withRoot(rows, extra, ({ root }) => {
+    const r = run(root);
+    assert.deepEqual(closedNums(r.json), [3]);
+    assert.deepEqual(r.json.skipped.map((s) => [s.num, s.reason]), [[1, 'active-interview'], [2, 'active-interview']]);
+  });
+});
+
 test('age is measured from the latest of Date, an Applied date in Notes and the ledger', () => {
   const rows = [
     row(1, OLD, 'Notes Co', 'Applied', 'Applied 2026-10-15 via Ashby'),
@@ -235,7 +257,7 @@ test('bad --days / --today / unknown flags fail without touching the tracker', (
     const before = readFileSync(tracker, 'utf-8');
     for (const args of [['--days', '0'], ['--days', 'abc'], ['--days', '-5'], ['--today', '2026-13-45'], ['--confirm', '--dryrun'], ['--json', '--summary']]) {
       const r = run(root, args);
-      assert.notEqual(r.status, 0, describeSpawn(r, `${args.join(' ')} must fail`));
+      assert.ok(exitedNonZero(r), describeSpawn(r, `${args.join(' ')} must fail`));
       assert.equal(readFileSync(tracker, 'utf-8'), before);
     }
   });

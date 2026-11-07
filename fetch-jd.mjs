@@ -55,7 +55,16 @@ Options:
   // No stderr, by design: the caller's browser/WebFetch fallback is the
   // intended next step, and warning on every non-covered host would make the
   // normal path look broken.
-  if (!result) process.exit(1);
+  // Signal the miss via exitCode, not process.exit(1). On Windows, Node 24
+  // aborts when process.exit() runs right after a request (nodejs/node#56645):
+  // it prints a libuv assertion and exits with a crash code instead of 1.
+  // Measured 2026-11-04 on Node 24.14.1: misses on Greenhouse, Workable,
+  // SmartRecruiters and Workday aborted 4 times out of 4. Returning lets the
+  // process exit 1 once the event loop drains, right after the answer.
+  if (!result) {
+    process.exitCode = 1;
+    return;
+  }
 
   const header = result.title ? `${result.title}\n\n` : '';
   process.stdout.write(header + result.text);
@@ -64,6 +73,6 @@ Options:
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`fetch-jd: unexpected error — ${err?.message || err}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given at the miss
   });
 }

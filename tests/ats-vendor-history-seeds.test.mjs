@@ -42,6 +42,10 @@ try {
     ['https://jobs.dayforcehcm.com/en-US/acme/jobs/1', 'dayforce'],
     ['https://recruiting.ultipro.com/ACM1000/jobs/1', 'ultipro'],
     ['https://acme.taleo.net/careersection/jobdetail.ftl', 'taleo'],
+    ['https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd', 'hirehive'],
+    ['https://acme.hirehive.com.evil.example/backend-engineer-Ab12Cd', 'acme.hirehive.com.evil.example'],
+    ['https://acme-641e1b39232b.careers.hibob.com/jobs/0b1c2d3e/apply', 'hibob'],
+    ['https://careers.hibob.com.evil.example/jobs/1', 'careers.hibob.com.evil.example'],
     ['https://careers.example.com/jobs/1', 'careers.example.com'],
     ['https://evil.example/https://jobs.lever.co/acme', 'evil.example'],
   ];
@@ -77,6 +81,32 @@ try {
     atsBoardUrlOf('https://acme.successfactors.eu/Brand/job/Toronto/Role/1/', 'successfactors'),
     'https://acme.successfactors.eu/Brand',
   );
+  for (const posting of [
+    'https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd?source=x',
+    'https://acme.hirehive.com/job/214176/backend-engineer',
+  ]) {
+    assert.equal(atsBoardUrlOf(posting, 'hirehive'), 'https://acme.hirehive.com', posting);
+  }
+  for (const refused of [
+    'http://acme.hirehive.com/backend-engineer-berlin-Ab12Cd',
+    'https://apply.hirehive.com/214176/apply',
+    'https://www.hirehive.com/pricing-plans',
+    'https://a.b.hirehive.com/backend-engineer-Ab12Cd',
+  ]) {
+    assert.equal(atsBoardUrlOf(refused, 'hirehive'), null, refused);
+  }
+  assert.equal(
+    atsBoardUrlOf('https://acme.careers.hibob.com/jobs/0b1c2d3e-0000-4000-8000-000000000001/apply', 'hibob'),
+    'https://acme.careers.hibob.com',
+  );
+  for (const refused of [
+    'http://acme.careers.hibob.com/jobs/1',
+    'https://careers.hibob.com/jobs/1',
+    'https://a.b.careers.hibob.com/jobs/1',
+  ]) {
+    assert.equal(atsBoardUrlOf(refused, 'hibob'), null, refused);
+  }
+  assert.equal(atsBoardUrlOf('http://acme.bamboohr.com/careers/1', 'bamboohr'), 'http://acme.bamboohr.com');
   pass('posting URLs collapse to provider-compatible board URLs without query or fragment data');
 
   const trackerWithUrl = [

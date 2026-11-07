@@ -30,6 +30,7 @@ import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { isIP } from 'net';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 
@@ -167,11 +168,11 @@ export function isSafePublicHttpUrl(raw) {
 /**
  * Extract labeled segments from a pipeline row body ("| label: value").
  * @param {string} body - Raw pipeline row body.
- * @returns {{note?: string, trust?: string, rank?: string, posted?: string}}
+ * @returns {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}}
  */
 export function extractLabels(body) {
   const labels = {};
-  const labelRe = /\|\s*(posted|trust|note|rank):\s*([^|]+)/g;
+  const labelRe = /\|\s*(posted|trust|yrs|note|rank):\s*([^|]+)/g;
   let m;
   while ((m = labelRe.exec(body)) !== null) {
     labels[m[1]] = m[2].trim();
@@ -191,7 +192,7 @@ export function lineCompany(body) {
 
 /**
  * Build the batch `notes` field from labeled segments.
- * @param {{note?: string, trust?: string, rank?: string, posted?: string}} labels - Label dictionary from extractLabels.
+ * @param {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}} labels - Label dictionary from extractLabels.
  * @returns {string}
  */
 export function buildNotes(labels) {
@@ -296,19 +297,19 @@ export function planBatchRows(pending, existingUrls, startId = 1) {
 // ── CLI entry point ────────────────────────────────────────────────────────
 
 if (isMainModule(import.meta.url)) {
-  const DRY_RUN = process.argv.includes('--dry-run');
-
-  if (process.argv.includes('-h') || process.argv.includes('--help')) {
-    console.log('Usage: node sync-batch-input.mjs [--dry-run] [--pipeline <path>] [--input <path>] [--state <path>]');
-    console.log('  Syncs pipeline.md "Pending" entries into batch/batch-input.tsv.');
-    process.exit(0);
-  }
+  const args = process.argv.slice(2);
+  const USAGE = 'Usage: node sync-batch-input.mjs [--dry-run] [--pipeline <path>] [--input <path>] [--state <path>]\n'
+    + '  Syncs pipeline.md "Pending" entries into batch/batch-input.tsv.';
+  const VALUE_FLAGS = ['--pipeline', '--input', '--state'];
+  // A mistyped --dry-run must not fall through to a real write, and --input=path
+  // must not be dropped in favour of the default file.
+  validateFlags(args, ['--dry-run', ...VALUE_FLAGS, '--help', '-h'], USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  const DRY_RUN = hasFlag(args, '--dry-run');
 
   function argValue(flag) {
-    const i = process.argv.indexOf(flag);
-    if (i < 0) return null;
-    const value = process.argv[i + 1];
-    if (value === undefined || value === '' || value.startsWith('--')) {
+    if (!hasFlag(args, flag)) return null;
+    const value = flagValue(args, flag);
+    if (value === undefined || value === '') {
       console.error(`Missing value for ${flag}`);
       process.exit(1);
     }

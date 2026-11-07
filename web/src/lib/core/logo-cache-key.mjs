@@ -30,8 +30,12 @@ import { normalizeTextKey } from "./normalize-text-key.mjs";
  *  — v2 stripped every non-ASCII letter, so "Škoda" and "Koda" hashed to the
  *  IDENTICAL key and one silently wore the other's logo forever (requirement 2,
  *  violated). Bumping discards any v2 entry poisoned this way rather than
- *  leaving it reachable under an unchanged "koda" key. */
-export const COMPANY_KEY_VERSION = "v4";
+ *  leaving it reachable under an unchanged "koda" key.
+ *  v5: a failed lookup (timeout, offline, 429, 5xx) is no longer cached as a
+ *  miss (logo-fetch.mjs). Every sentinel written by one of those under v4 is
+ *  indistinguishable on disk from a real miss, so the same reasoning as v4
+ *  applies: without a bump the fix never reaches the companies it is for. */
+export const COMPANY_KEY_VERSION = "v5";
 
 /** Cache key for a company name, or null if the name carries nothing to key on.
  *

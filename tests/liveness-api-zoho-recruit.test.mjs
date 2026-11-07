@@ -31,9 +31,18 @@ test('a Zoho Recruit posting URL resolves to its own page, with or without the s
   const resolved = resolveAtsApi(POSTING);
   assert.equal(resolved.ats, 'zoho-recruit');
   assert.equal(resolved.apiUrl, PAGE);
-  assert.deepEqual(resolved.parts, { tenant: 'exampleco', portal: 'Careers', id: ID });
+  assert.deepEqual(resolved.parts, { tenant: 'exampleco', host: 'exampleco.zohorecruit.com', portal: 'Careers', id: ID });
   assert.equal(resolveAtsApi(PAGE).apiUrl, PAGE);
   assert.equal(resolveAtsApi(`https://exampleco.zohorecruit.com/jobs/Emplois/${ID}/`).apiUrl, `https://exampleco.zohorecruit.com/jobs/Emplois/${ID}`);
+});
+
+test('a posting on each Zoho regional domain resolves to its own host', () => {
+  for (const tld of ['com', 'ca', 'eu', 'in', 'com.au', 'jp', 'sa', 'com.cn']) {
+    const host = `exampleconsulting.zohorecruit.${tld}`;
+    const resolved = resolveAtsApi(`https://${host}/jobs/Careers/${ID}/Senior-DevOps-Engineer`);
+    assert.equal(resolved?.ats, 'zoho-recruit', tld);
+    assert.equal(resolved.apiUrl, `https://${host}/jobs/Careers/${ID}`, tld);
+  }
 });
 
 test('board pages, legacy pages and lookalike hosts do not resolve', () => {
@@ -42,6 +51,9 @@ test('board pages, legacy pages and lookalike hosts do not resolve', () => {
     'https://exampleco.zohorecruit.com/recruit/Portal.na',
     `https://exampleco.zohorecruit.com.evil.test/jobs/Careers/${ID}`,
     `https://exampleco.evilzohorecruit.com/jobs/Careers/${ID}`,
+    `https://exampleconsulting.zohorecruit.ca.evil.test/jobs/Careers/${ID}`,
+    `https://evil-zohorecruit.ca/jobs/Careers/${ID}`,
+    `https://exampleconsulting.zohorecruit.xyz/jobs/Careers/${ID}`,
     `http://exampleco.zohorecruit.com/jobs/Careers/${ID}`,
     `https://exampleco.zohorecruit.com/jobs/%2e%2e/${ID}`,
     'https://exampleco.zohorecruit.com/jobs/Careers/not-an-id',

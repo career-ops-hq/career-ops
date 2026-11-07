@@ -17,6 +17,7 @@
 // only DROPS are reported so growth and new entries stay quiet.
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
+import { readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 console.log('\naudit-portals — board classification');
@@ -160,6 +161,37 @@ try {
   );
   if (observedMaxPages === 1) pass('auditCompanies() passes its page cap to providers');
   else fail(`expected maxPages=1, got ${JSON.stringify(observedMaxPages)}`);
+
+  // An entry's max_response_mb must reach the provider's fetchers, as it does in
+  // scan.mjs, and must not leak to the next entry or into a shared ctx.
+  const seenCaps = [];
+  const makeCtx = () => ({ fetchJson: async (_u, opts = {}) => { seenCaps.push(opts.maxBytes); return {}; } });
+  const sharedCtx = makeCtx();
+  const bigProvider = {
+    id: 'big',
+    detect: () => ({ url: 'x' }),
+    fetch: async (_entry, ctx) => { await ctx.fetchJson('https://example.com/board'); return many(9); },
+  };
+  await auditCompanies(
+    [
+      { name: 'Big Co', careers_url: 'https://example.com/big', max_response_mb: 20, enabled: true },
+      { name: 'Plain Co', careers_url: 'https://example.com/plain', enabled: true },
+    ],
+    { providers: new Map([['big', bigProvider]]), httpCtx: sharedCtx, concurrency: 1 },
+  );
+  if (seenCaps[0] === 20 * 1024 * 1024 && seenCaps[1] === undefined) {
+    pass('auditCompanies() applies max_response_mb per entry without leaking it');
+  } else {
+    fail(`max_response_mb drifted: ${JSON.stringify(seenCaps)}`);
+  }
+
+  // scan.mjs loads the data root's .env when imported, which can move the audit onto another
+  // portals.yml than the scanner reads; the audit takes the cap helper from lib/ instead.
+  {
+    const src = readFileSync(join(ROOT, 'audit-portals.mjs'), 'utf8');
+    if (!/from '\.\/scan\.mjs'/.test(src)) pass('audit-portals.mjs does not import scan.mjs');
+    else fail('audit-portals.mjs imports scan.mjs, which loads the data root .env as a side effect');
+  }
 
   // A provider that throws must degrade to `error`, never take the run down.
   const angry = { id: 'angry', detect: () => ({ url: 'x' }), fetch: async () => { throw new Error('429 Too Many Requests'); } };

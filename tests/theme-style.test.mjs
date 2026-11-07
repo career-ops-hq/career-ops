@@ -200,7 +200,7 @@ try {
   // declaration) must not drift between two tokens making the same promise about
   // different entries.
   {
-    const { listTemplates } = await import(pathToFileURL(join(ROOT, 'cv-templates.mjs')).href);
+    const { listTemplates, DEFAULT_TEMPLATES_DIR } = await import(pathToFileURL(join(ROOT, 'cv-templates.mjs')).href);
 
     // Innermost `selector { body }` rules of every <style> block, with
     // comments stripped (they hold braces and token names) and {{PLACEHOLDER}}s
@@ -266,7 +266,7 @@ try {
 
       // A new template must declare its default here, or the opt-in would ship
       // dead in it (template-page-breaks.test.mjs discovers templates the same way).
-      const discovered = listTemplates('cv').filter((t) => t.format === 'html')
+      const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html')
         .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
       const unlisted = discovered.filter((t) => !(t in tok.expected));
       if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared ${tok.key} default`);
@@ -360,6 +360,40 @@ try {
       pass('Traditional Chinese block leads with var(--font-family), keeps the TC fallback faces, no duplicate selectors');
     } else {
       fail(`Traditional Chinese theme contract: body=${wants(body)} headings=${wants(headings)} deadSlot=${deadSlot} dupBody=${dupBody} dupSkillCat=${dupSkillCat} bodyCount=${bodyCount}`);
+    }
+  }
+
+  // Regression (#3154 follow-up): the Arabic block was on a fixed-only stack,
+  // so an Arabic CV ignored profile.style.font_family. It cannot lead with
+  // var(--font-family) like the CJK blocks: that always resolves, and its Latin
+  // default carries Arabic glyphs, so it would displace Segoe UI / Tahoma for
+  // every Arabic CV. It reads --font-family-override instead, which the theme
+  // block declares only when the profile sets font_family.
+  {
+    const arStack = "'Segoe UI', Tahoma, Arial, sans-serif";
+    const withFont = buildThemeStyleBlock({ '--font-family': 'Amiri, serif', '--font-size': '10pt' });
+    const noFont = buildThemeStyleBlock({ '--accent-color': '#2563eb' });
+    const droppedFont = buildThemeStyleBlock({ '--font-family': 'x; } body{display:none}', '--font-size': '10pt' });
+    if (withFont.includes('--font-family: Amiri, serif;') && withFont.includes('--font-family-override: Amiri, serif;')
+        && !noFont.includes('--font-family-override') && !droppedFont.includes('--font-family-override')) {
+      pass('buildThemeStyleBlock declares --font-family-override only when a font_family survives sanitizing');
+    } else {
+      fail(`--font-family-override: withFont=${withFont} noFont=${noFont} droppedFont=${droppedFont}`);
+    }
+
+    const src = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+    const body = src.match(/html\[lang="ar"\]\s+body\s*\{[^}]*\}/s)?.[0] || '';
+    const headings = src.match(/html\[lang="ar"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const wants = (s) => s.includes(`font-family: var(--font-family-override, 'Segoe UI'), ${arStack};`);
+    // With no override, var() takes its fallback, so the stack the browser sees
+    // is the one shipped before this change (Segoe UI listed twice is harmless).
+    const resolvedNoOverride = (s) => s.match(/font-family:\s*([^;]+);/)?.[1]
+      .replace(/var\(--font-family-override,\s*('[^']+')\)/, '$1');
+    const unchanged = resolvedNoOverride(body) === `'Segoe UI', ${arStack}` && resolvedNoOverride(headings) === `'Segoe UI', ${arStack}`;
+    if (wants(body) && wants(headings) && unchanged) {
+      pass('Arabic block lets the profile font lead via --font-family-override and keeps its shipped stack without one');
+    } else {
+      fail(`Arabic theme contract: body=${wants(body)} headings=${wants(headings)} unchanged=${unchanged}`);
     }
   }
 

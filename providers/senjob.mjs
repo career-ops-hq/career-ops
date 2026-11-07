@@ -35,6 +35,9 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { visibleText } from './_html-to-text.mjs';
+
+export { visibleText } from './_html-to-text.mjs';
 
 const TRUSTED_HOST = 'senjob.com';
 const LIST_URL = 'https://senjob.com/offres-d-emploi.php';
@@ -75,24 +78,6 @@ function assertSenjobUrl(url) {
     throw new Error(`senjob: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
   }
   return url;
-}
-
-/**
- * Collapse a markup fragment to its visible text.
- * Comments are stripped FIRST: the anchor bodies carry `<!-- d ico postulez -->`
- * between the title and a spacer image, and a naive tag strip would leave the
- * comment body sitting inside the title.
- * @param {string} fragment
- * @returns {string}
- */
-export function visibleText(fragment) {
-  return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 /**

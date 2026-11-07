@@ -1,8 +1,10 @@
 // tests/browser-extract-content-root.test.mjs — readDom() picks the element
 // that holds the posting, not merely the first main/[role=main]/article.
 // Runs readDom() against fixture HTML in headless Chromium; skipped with a
-// warning when Chromium is not installed (CI installs with --ignore-scripts).
-import { pass, fail, warn, ROOT } from './helpers.mjs';
+// warning when Chromium is not installed (the test job installs with
+// --ignore-scripts), and a failure under `test-all.mjs --needs browser`, which
+// the tool-suites CI job runs.
+import { pass, fail, toolUnavailable, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -19,7 +21,7 @@ try {
   try {
     browser = await chromium.launch({ headless: true });
   } catch (e) {
-    warn(`readDom content-root tests skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
+    toolUnavailable('browser', `readDom content-root tests skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
   }
 
   if (browser) {

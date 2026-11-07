@@ -53,10 +53,10 @@ function run(src, flags = [], cwd = WEB) {
   }
 }
 
-// web/package.json allows Node >=22 (the floor `node --test` glob discovery
-// needs), but four cases below reach a .ts module, and that needs type
-// stripping on top: added behind --experimental-strip-types in 22.6, on by
-// default only from 22.18. On 22.0-22.17 the child dies with
+// web/package.json allows Node 22.13+ (the project floor), but four cases
+// below reach a .ts module, and that needs type stripping on top: added behind
+// --experimental-strip-types in 22.6, on by default only from 22.18. On
+// 22.13-22.17 without the flag the child dies with
 // ERR_UNKNOWN_FILE_EXTENSION before resolve() is ever consulted, so those four
 // would fail for a reason that has nothing to do with the hook they test.
 //
@@ -64,8 +64,7 @@ function run(src, flags = [], cwd = WEB) {
 // just this suite, and apply-planner-fencing.test.mjs and
 // apply-agent-interpret-fencing.test.mjs already take exactly this stance for
 // the same reason. run() forwards the flag when this process already has it.
-// That still cannot rescue 22.0-22.5, where the flag does not exist and
-// features.typescript stays false. CI runs 24.
+// CI runs 24.
 //
 // The gate is defined ONCE, as a function, because the positive control at the
 // bottom of this file serializes this exact source into a child process. A copy
