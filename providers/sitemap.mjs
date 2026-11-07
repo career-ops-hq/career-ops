@@ -213,17 +213,20 @@ function locOf(block) {
 /**
  * Classify and read one sitemap document.
  *
- * @param {unknown} xml
+ * @param {unknown} raw
  * @returns {{kind: 'urlset', locs: string[]} | {kind: 'index', locs: string[]}}
  * @throws when the body is empty, or neither a `<urlset>` nor a
  *   `<sitemapindex>` (a challenge or login page must not read as zero jobs).
  */
-export function parseSitemapDocument(xml) {
+export function parseSitemapDocument(raw) {
   // A 200 with no body is not a sitemap: a valid empty board is an empty
   // <urlset>, so a zero-byte answer must not read as zero jobs.
-  if (typeof xml !== 'string' || !xml.trim()) {
+  if (typeof raw !== 'string' || !raw.trim()) {
     throw new Error('sitemap: empty response (expected an XML <urlset> or <sitemapindex>)');
   }
+  // XML comments are not markup: a `<url>` or `</urlset>` inside one must not
+  // count as an entry or close a truncated root.
+  const xml = raw.replace(/<!--[\s\S]*?-->/g, '');
   // A root that opens but never closes is a truncated body, not a short
   // board (sitemaps.org requires the closing tag; join.mjs applies the same
   // rule to its company sitemap). A self-closing empty root is complete.
@@ -437,9 +440,13 @@ export function createSitemapProvider({ robotsGate = robotsAllows } = {}) {
         }
         // An index that lists children but yields no readable job sitemap is
         // broken or misconfigured (index_filter typo, every child off-host,
-        // .gz, robots-denied, failing or nested), not an empty board. An index
-        // with no <sitemap> entries at all stays a valid empty board.
-        if (root.locs.length > 0 && readable === 0) {
+        // .gz, robots-denied, failing or nested), not an empty board.
+        // An index with no <sitemap> entries is broken too: an employer with
+        // no open jobs publishes an empty <urlset>, the one valid empty board.
+        if (root.locs.length === 0) {
+          throw new Error(`sitemap: ${name}: the sitemap index at ${cfg.url.href} lists no child sitemaps`);
+        }
+        if (readable === 0) {
           throw new Error(children.length === 0
             ? `sitemap: ${name}: the sitemap index lists ${root.locs.length} child sitemaps but none is usable (same host, not .gz${cfg.indexFilter ? `, matching index_filter ${cfg.indexFilter.source}` : ''})`
             : `sitemap: ${name}: none of the ${Math.min(children.length, limit)} child sitemaps read could be used (robots-denied, failed or nested; see the warnings above)`);

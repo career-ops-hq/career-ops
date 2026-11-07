@@ -277,9 +277,19 @@ try {
     pass('an index_filter that matches no child throws instead of returning an empty board');
   } else fail(`typo err=${typoErr} calls=${typoCalls}`);
 
-  const emptyIndex = await make().fetch(ENTRY, { fetchText: async () => '<?xml version="1.0"?><sitemapindex></sitemapindex>' });
-  if (Array.isArray(emptyIndex) && emptyIndex.length === 0) pass('an index with no <sitemap> entries is a valid empty board');
-  else fail('empty sitemapindex did not return []');
+  let emptyIndexErr = '';
+  try { await make().fetch(ENTRY, { fetchText: async () => '<?xml version="1.0"?><sitemapindex></sitemapindex>' }); }
+  catch (err) { emptyIndexErr = err.message; }
+  if (/lists no child sitemaps/.test(emptyIndexErr)) pass('an index with no <sitemap> entries throws (only an empty <urlset> is an empty board)');
+  else fail(`empty sitemapindex err=${emptyIndexErr}`);
+
+  let commentErr = '';
+  try { mod.parseSitemapDocument('<urlset><url><loc>https://careers.example.com/jobs/1/a/</loc></url><!-- </urlset> -->'); }
+  catch (err) { commentErr = err.message; }
+  const commented = mod.parseSitemapDocument('<urlset><!-- <url><loc>https://careers.example.com/jobs/9/ghost/</loc></url> --><url><loc>https://careers.example.com/jobs/1/a/</loc></url></urlset>');
+  if (/truncated response/.test(commentErr) && commented.locs.length === 1 && commented.locs[0].endsWith('/jobs/1/a/')) {
+    pass('XML comments are ignored: a commented-out </urlset> does not close a truncated root, a commented-out <url> is not an entry');
+  } else fail(`comment err=${commentErr} commented=${JSON.stringify(commented)}`);
 
   // A failing child keeps the others and is reported.
   const { result: partialJobs, lines: partialWarn } = await captureWarnings(() => make().fetch(
