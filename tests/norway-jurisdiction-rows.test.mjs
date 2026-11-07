@@ -45,7 +45,7 @@ const read = (f) => readFileSync(join(ROOT, 'templates', f), 'utf8');
     no?.licensing_required_for === 'temporary_help_agency' && no?.effective === '2024-01-01' && no?.as_of === '2026-11-06',
     `${no?.licensing_required_for} / ${no?.effective} / ${no?.as_of}`);
   check('agency-licensing: NO registry is the Arbeidstilsynet register',
-    no?.registry?.url === 'https://www.arbeidstilsynet.no/godkjenninger/godkjente-bemanningsforetak/'
+    no?.registry?.url === 'https://www.arbeidstilsynet.no/bemanningsvirksomhet/'
       && (no?.registry?.what_it_shows || '').length > 0,
     String(no?.registry?.url));
   check('agency-licensing: NO legal basis cites FOR-2008-06-04-541 and the 2024 amendment',
@@ -54,8 +54,11 @@ const read = (f) => readFileSync(join(ROOT, 'templates', f), 'utf8');
   check('agency-licensing: NO client-side rule cites § 11 and arbeidsmiljøloven § 14-14',
     /§ 11/.test(no?.client_side_prohibition || '') && /§ 14-14/.test(no?.client_side_prohibition || ''),
     'client-side rule missing');
+  check('agency-licensing: NO penalties keep § 13 withdrawal apart from the § 14 penalty',
+    /§ 14/.test(no?.penalties || '') && /under § 13/.test(no?.penalties || '') && /not a penalty/.test(no?.penalties || ''),
+    String(no?.penalties));
   check('agency-licensing: NO transitional notes say the register does not answer for recruiters',
-    /privat arbeidsformidling/.test(no?.transitional_notes || '') && /expired/.test(no?.transitional_notes || ''),
+    /privat arbeidsformidling, defined in arbeidsmarkedsloven § 25/.test(no?.transitional_notes || '') && /expired/.test(no?.transitional_notes || ''),
     'recruiter scope note missing');
   check('agency-licensing: freshness check discovers the NO row with as_of',
     extractRows(doc).some((f) => f.row.jurisdiction === 'NO' && !f.missingAsOf), 'NO row not found');
