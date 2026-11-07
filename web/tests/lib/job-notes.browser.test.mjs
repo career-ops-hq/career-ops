@@ -100,16 +100,44 @@ test('add, edit, delete, undo and persist job notes without changing status or o
   fs.writeFileSync(tracker, beforeSpacing.replace(betaEmpty, betaEmpty.replace(/\| — \|$/, '| first  ;   second  ;  third |')));
   await page.reload();
   await beta().getByRole('button', { name: /^Notes for/ }).click();
+  await dialog().getByRole('button', { name: 'Edit note 2', exact: true }).click();
+  await dialog().getByLabel('Edit note', { exact: true }).fill('edited second');
+  await dialog().getByRole('button', { name: 'Save note', exact: true }).click();
+  await dialog().getByRole('list', { name: 'Saved notes' }).getByText('edited second', { exact: true }).waitFor();
+  assert.match(fs.readFileSync(tracker, 'utf8').split('\n').find(line => line.startsWith('| 12 |')), /\| first  ;   edited second  ;  third \|/);
   await dialog().getByRole('button', { name: 'Delete note 2', exact: true }).click();
-  await dialog().getByText('second', { exact: true }).waitFor({ state: 'hidden' });
+  await dialog().getByText('edited second', { exact: true }).waitFor({ state: 'hidden' });
   await dialog().getByText('first', { exact: true }).waitFor();
   await dialog().getByText('third', { exact: true }).waitFor();
   assert.match(fs.readFileSync(tracker, 'utf8').split('\n').find(line => line.startsWith('| 12 |')), /\| first  ;   third \|/);
 
+  await dialog().getByRole('button', { name: 'Close notes', exact: true }).click();
+  const duplicateBefore = fs.readFileSync(tracker, 'utf8');
+  const betaLine = duplicateBefore.split('\n').find(line => line.startsWith('| 12 |'));
+  fs.writeFileSync(tracker, duplicateBefore.replace(betaLine, betaLine.replace(/\| [^|]* \|$/, '| first; same; same; last |')));
+  await page.reload();
+  await beta().getByRole('button', { name: /^Notes for/ }).click();
+  await dialog().getByRole('button', { name: 'Edit note 3', exact: true }).click();
+  await dialog().getByLabel('Edit note', { exact: true }).fill('only third changed');
+  await dialog().getByRole('button', { name: 'Save note', exact: true }).click();
+  await dialog().getByRole('list', { name: 'Saved notes' }).getByText('only third changed', { exact: true }).waitFor();
+  assert.match(fs.readFileSync(tracker, 'utf8').split('\n').find(line => line.startsWith('| 12 |')), /\| first; same; only third changed; last \|/);
+
+  // A snapshot is captured when the pencil opens the draft, not after another edit.
+  await dialog().getByRole('button', { name: 'Edit note 2', exact: true }).click();
+  await dialog().getByLabel('Edit note', { exact: true }).fill('keep stale draft');
+  const current = fs.readFileSync(tracker, 'utf8');
+  const concurrent = current.replace('| first; same; only third changed; last |', '| concurrent; same; only third changed; last |');
+  fs.writeFileSync(tracker, concurrent);
+  await dialog().getByRole('button', { name: 'Save note', exact: true }).click();
+  await dialog().getByRole('alert').waitFor();
+  assert.equal(await dialog().getByLabel('Edit note', { exact: true }).inputValue(), 'keep stale draft');
+  assert.equal(fs.readFileSync(tracker, 'utf8'), concurrent);
+
   const beforeInvalid = fs.readFileSync(tracker, 'utf8');
   for (const action of [
     { note: 'bad\0note' },
-    { note: 'new', replaceNote: 'bad\0previous' },
+    { note: 'new', replaceNote: 'bad\0previous', noteIndex: 0, expectedNotes: 'Old note' },
     { removeNote: 'bad\0note', expectedNotes: 'first  ;   third' },
     { removeNote: 'first', expectedNotes: 'bad\0snapshot' },
   ]) {

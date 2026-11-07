@@ -63,7 +63,7 @@ test('stale snapshots cannot remove another duplicate or overwrite a concurrent 
 });
 test('missing notes and substring-only matches are refused without writing', t => {
   const f = fixture(t, 'call Alex; keep');
-  const result = run(f, '--remove-note=call');
+  const result = run(f, '--remove-note=call', '--expect-notes=call Alex; keep');
   assert.equal(result.status, 1);
   assert.equal(result.json.code, 'remove-note-not-found');
   assert.equal(readFileSync(f.file, 'utf8'), tracker('call Alex; keep'));
@@ -71,12 +71,12 @@ test('missing notes and substring-only matches are refused without writing', t =
 
 test('extra separator spaces do not turn a partial note into a whole-note match', t => {
   const f = fixture(t, 'first;  call Alex  ; last');
-  assert.equal(run(f, '--remove-note=call').json.code, 'remove-note-not-found');
+  assert.equal(run(f, '--remove-note=call', '--expect-notes=first;  call Alex  ; last').json.code, 'remove-note-not-found');
   assert.equal(readFileSync(f.file, 'utf8'), tracker('first;  call Alex  ; last'));
 });
 test('dry runs and invalid flag combinations never change a tracker', t => {
   const f = fixture(t, 'keep; remove');
-  assert.equal(run(f, '--remove-note=remove', '--dry-run').status, 0);
+  assert.equal(run(f, '--remove-note=remove', '--expect-notes=keep; remove', '--dry-run').status, 0);
   for (const args of [['--remove-note='], ['--remove-note=remove', '--note=other'], ['--remove-note=remove', '--replace-note=keep', '--note=new']]) assert.equal(run(f, ...args).status, 1);
   assert.equal(readFileSync(f.file, 'utf8'), tracker('keep; remove'));
 });
@@ -90,4 +90,32 @@ test('removing a note preserves legacy status text moved into Notes', t => {
   const result = run(f, '--remove-note=remove', '--expect-notes=keep; remove');
   assert.equal(result.status, 0, result.stderr + result.stdout);
   assert.equal(readFileSync(f.file, 'utf8'), tracker(`${legacy}; keep`));
+});
+
+test('removal requires a reviewed Notes snapshot, including in dry runs', t => {
+  const f = fixture(t, 'same; same');
+  for (const args of [[], ['--dry-run']]) {
+    const result = run(f, '--remove-note=same', ...args);
+    assert.equal(result.status, 1);
+    assert.match(result.json.error, /--expect-notes/);
+    assert.equal(readFileSync(f.file, 'utf8'), tracker('same; same'));
+  }
+});
+test('concurrent edits to a different note invalidate a removal snapshot', t => {
+  const f = fixture(t, 'keep; remove');
+  writeFileSync(f.file, tracker('changed; remove'));
+  const result = run(f, '--remove-note=remove', '--expect-notes=keep; remove');
+  assert.equal(result.status, 3);
+  assert.equal(result.json.code, 'notes-changed');
+  assert.equal(readFileSync(f.file, 'utf8'), tracker('changed; remove'));
+});
+test('removal cannot accompany status undo even with a valid snapshot', t => {
+  const f = fixture(t, 'keep; remove');
+  const result = spawnSync(process.execPath, [SCRIPT, '--row', '1', '--undo', '--remove-note=remove', '--expect-notes=keep; remove', '--json'], {
+    cwd: f.root, env: { ...process.env, CAREER_OPS_ROOT: f.root, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: f.file }, encoding: 'utf8', timeout: 15000,
+  });
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).error, /--undo cannot be combined with --remove-note/);
+  assert.equal(readFileSync(f.file, 'utf8'), tracker('keep; remove'));
+  assert.equal(existsSync(join(f.root, 'data/status-log.tsv')), false);
 });

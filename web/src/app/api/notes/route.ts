@@ -6,7 +6,7 @@ import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
 
-type NotesRequest = { n?: unknown; status?: unknown; note?: unknown; replaceNote?: unknown; removeNote?: unknown; expectedNotes?: unknown };
+type NotesRequest = { n?: unknown; status?: unknown; note?: unknown; replaceNote?: unknown; removeNote?: unknown; expectedNotes?: unknown; noteIndex?: unknown };
 const validNote = (value: unknown): value is string => typeof value === "string" && value.length <= 4000 && !value.includes("\0") && !!value.replace(/[\x00-\x1f\x7f-\x9f]/g, "").trim();
 
 // Note-only edits delegate to the existing locked writer. Status and deletion
@@ -16,9 +16,11 @@ export async function POST(req: Request) {
   const n = trackerRowArg(body?.n);
   const status = typeof body?.status === "string" ? canonicalizeStatus(body.status) : null;
   const removing = body?.removeNote !== undefined;
+  const validSnapshot = typeof body?.expectedNotes === "string" && body.expectedNotes.length <= 64000 && !body.expectedNotes.includes("\0");
+  const editing = body?.replaceNote !== undefined;
   const validAction = body && (removing
-    ? validNote(body.removeNote) && body.note === undefined && body.replaceNote === undefined && typeof body.expectedNotes === "string" && body.expectedNotes.length <= 64000 && !body.expectedNotes.includes("\0")
-    : validNote(body.note) && (body.replaceNote === undefined || validNote(body.replaceNote)));
+    ? validNote(body.removeNote) && body.note === undefined && body.replaceNote === undefined && validSnapshot && body.noteIndex === undefined
+    : validNote(body.note) && (editing ? validNote(body.replaceNote) && typeof body.noteIndex === "number" && Number.isSafeInteger(body.noteIndex) && body.noteIndex >= 0 && validSnapshot : body.noteIndex === undefined && body.expectedNotes === undefined));
   if (!body || !n || !status || !validAction) {
     return Response.json({ error: "Choose a note of up to 4,000 characters for this job." }, { status: 400 });
   }
@@ -26,7 +28,7 @@ export async function POST(req: Request) {
   if (removing) args.push(`--remove-note=${body.removeNote}`, `--expect-notes=${body.expectedNotes}`);
   else {
     args.push(`--note=${body.note}`);
-    if (typeof body.replaceNote === "string") args.push(`--replace-note=${body.replaceNote}`);
+    if (typeof body.replaceNote === "string") args.push(`--replace-note=${body.replaceNote}`, `--note-index=${body.noteIndex}`, `--expect-notes=${body.expectedNotes}`);
   }
   let result: CliResult;
   try {

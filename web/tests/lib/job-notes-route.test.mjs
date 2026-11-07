@@ -34,7 +34,7 @@ async function post(action) {
 
 for (const action of [
   { note: "bad\0note" },
-  { note: "New note", replaceNote: "bad\0previous" },
+  { note: "New note", replaceNote: "bad\0previous", noteIndex: 0, expectedNotes: "Old note" },
   { removeNote: "bad\0note", expectedNotes: "Old note" },
   { removeNote: "Old note", expectedNotes: "bad\0snapshot" },
 ]) {
@@ -92,3 +92,26 @@ test("successful note changes still return the canonical tracker notes", async (
   assert.ok(fixture.calls[0].includes("--remove-note=Old note"));
   assert.ok(fixture.calls[0].includes("--expect-notes=Old note; Current notes"));
 });
+
+test("an edit passes its displayed position and reviewed snapshot to the locked writer", async () => {
+  const response = await post({ note: "New note", replaceNote: "same", noteIndex: 1, expectedNotes: "same; same" });
+  assert.equal(response.status, 200);
+  assert.ok(fixture.calls[0].includes("--replace-note=same"));
+  assert.ok(fixture.calls[0].includes("--note-index=1"));
+  assert.ok(fixture.calls[0].includes("--expect-notes=same; same"));
+});
+for (const action of [
+  { note: "New note", replaceNote: "Old note" },
+  { note: "New note", replaceNote: "Old note", noteIndex: 0 },
+  { note: "New note", replaceNote: "Old note", expectedNotes: "Old note" },
+  ...[-1, 1.5, "0", 9007199254740992].map(noteIndex => ({ note: "New note", replaceNote: "Old note", noteIndex, expectedNotes: "Old note" })),
+  { note: "New note", replaceNote: "Old note", noteIndex: 0, expectedNotes: "bad\0snapshot" },
+  { note: "New note", noteIndex: 0 },
+  { removeNote: "Old note", expectedNotes: "Old note", noteIndex: 0 },
+]) {
+  test(`invalid indexed edit is rejected before invoking the CLI: ${JSON.stringify(action)}`, async () => {
+    const response = await post(action);
+    assert.equal(response.status, 400);
+    assert.equal(fixture.calls.length, 0);
+  });
+}
