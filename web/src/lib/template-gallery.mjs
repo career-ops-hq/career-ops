@@ -17,18 +17,18 @@ import { SAMPLE_CV_PAYLOAD } from "./template-sample-resume.mjs";
 const BASE_TEMPLATE = "standard";
 const PREVIEW_TIMEOUT_MS = 20_000;
 
-/** @param {string} root absolute path to the career-ops checkout */
-async function loadResolver(root) {
-  return import(/* webpackIgnore: true */ pathToFileURL(path.join(root, "cv-templates.mjs")).href);
+/** @param {string} codeRoot absolute path to the career-ops checkout */
+async function loadResolver(codeRoot) {
+  return import(/* webpackIgnore: true */ pathToFileURL(path.join(codeRoot, "cv-templates.mjs")).href);
 }
 
 /**
- * @param {string} root
+ * @param {string} codeRoot
  * @param {{profilePath?: string}} [opts] profilePath: the profile the CLI would read
  * @returns {Promise<{templates: {name: string, displayName: string, isDefault: boolean}[], defaultName: string}>}
  */
-export async function listCvTemplates(root, { profilePath } = {}) {
-  const resolver = await loadResolver(root);
+export async function listCvTemplates(codeRoot, { profilePath } = {}) {
+  const resolver = await loadResolver(codeRoot);
   const listed = resolver.listTemplates("cv");
   const configured = resolver.loadProfileDefault("cv", profilePath ? { profilePath } : {});
   const wanted = configured ? resolver.kebab(configured) : BASE_TEMPLATE;
@@ -45,11 +45,11 @@ export async function listCvTemplates(root, { profilePath } = {}) {
  * Resolve `name` through the core, which throws for a name it does not list and
  * for a template whose required placeholders or declared sections are missing.
  * Returns the template's absolute path.
- * @param {string} root
+ * @param {string} codeRoot
  * @param {string} name
  */
-export async function assertSelectableTemplate(root, name) {
-  const resolver = await loadResolver(root);
+export async function assertSelectableTemplate(codeRoot, name) {
+  const resolver = await loadResolver(codeRoot);
   const listed = resolver.listTemplates("cv");
   if (typeof name !== "string" || !listed.some((t) => t.name === name)) {
     throw new Error(`Template not found: ${String(name).slice(0, 80)}`);
@@ -93,12 +93,12 @@ export function profileWithCvTemplate(source, name) {
 
 /**
  * The named template filled with the fictional sample resume, as an HTML page.
- * @param {string} root
+ * @param {string} codeRoot
  * @param {string} name
  * @returns {Promise<string>}
  */
-export async function renderTemplatePreview(root, name) {
-  const templatePath = await assertSelectableTemplate(root, name);
+export async function renderTemplatePreview(codeRoot, name) {
+  const templatePath = await assertSelectableTemplate(codeRoot, name);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "template-preview-"));
   try {
     const input = path.join(dir, "payload.json");
@@ -107,8 +107,8 @@ export async function renderTemplatePreview(root, name) {
     await new Promise((resolve, reject) => {
       execFile(
         process.execPath,
-        [path.join(root, "build-cv-html.mjs"), input, output, templatePath],
-        { cwd: root, timeout: PREVIEW_TIMEOUT_MS, windowsHide: true },
+        [path.join(codeRoot, "build-cv-html.mjs"), input, output, templatePath],
+        { cwd: codeRoot, timeout: PREVIEW_TIMEOUT_MS, windowsHide: true },
         (err, _out, stderr) => (err ? reject(new Error(stderr.trim() || err.message)) : resolve(undefined)),
       );
     });
