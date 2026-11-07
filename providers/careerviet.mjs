@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { citySlug } from './_city-slug.mjs';
 
 // CareerViet provider — https://careerviet.vn, a broad-coverage Vietnamese job
 // board. Wire in via a `job_boards:` entry with `provider: careerviet`.
@@ -45,6 +46,9 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { visibleText } from './_html-to-text.mjs';
+
+export { visibleText } from './_html-to-text.mjs';
 
 const TRUSTED_HOST = 'careerviet.vn';
 const BASE_URL = 'https://careerviet.vn/viec-lam';
@@ -106,20 +110,6 @@ function assertCareerVietUrl(url) {
   return url;
 }
 
-/**
- * Collapse a markup fragment to its visible text.
- * @param {string} fragment
- * @returns {string}
- */
-export function visibleText(fragment) {
-  return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 /**
  * Only Ho Chi Minh's code was confirmed live on 2026-08-26. Hanoi/Da Nang
@@ -139,17 +129,7 @@ const CITY_SLUGS = /** @type {const} */ ({
  * @returns {string | null}
  */
 export function citySegment(location) {
-  const key = String(location ?? '').trim().toLowerCase();
-  if (!key) return null;
-  // Own-property check: a user string like "constructor" or "toString" must
-  // resolve to null, not to an inherited Object.prototype member whose source
-  // text would then be interpolated into the request URL (same guard as
-  // itviec.mjs's cityPath(), #3229).
-  if (Object.hasOwn(CITY_SLUGS, key)) return CITY_SLUGS[key];
-  for (const [candidate, slug] of Object.entries(CITY_SLUGS)) {
-    if (key.includes(candidate)) return slug;
-  }
-  return null;
+  return citySlug(location, CITY_SLUGS);
 }
 
 /**

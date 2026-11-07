@@ -187,7 +187,15 @@ export default {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
       let json;
       try {
-        json = await fetchJsonWithRetry(ctx, apiUrlFor(board.board, page), { redirect: 'error' }, RETRY_POLICY);
+        // A status-less failure is retryable. verify-portals probes with
+        // ctx.maxPages set and wants that failure back at once, so a probe
+        // gets no retries. A normal scan keeps RETRY_POLICY (two retries).
+        json = await fetchJsonWithRetry(
+          ctx,
+          apiUrlFor(board.board, page),
+          { redirect: 'error' },
+          probing ? { retries: 0 } : RETRY_POLICY,
+        );
       } catch (err) {
         if (probing || page === 0) throw err;
         const attempts = err?.attempts ?? RETRY_POLICY.retries + 1;

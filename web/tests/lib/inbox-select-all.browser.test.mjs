@@ -47,9 +47,20 @@ test('select all shown supports filters, partial selections and confirmed batch 
   await all().uncheck();
   assert.equal(await checked().count(), 0);
 
+  // Filtered results retain upstream's 20-row cap until See all is requested.
+  await filter().fill('Fixture Extra');
+  await until(async () => await checks().count() === 20);
+  await all().check();
+  await until(async () => await checked().count() === 20);
+  await page.getByRole('button', { name: /See all 23 matches/ }).click();
+  await until(async () => await checks().count() === 23);
+  await all().check();
+  await until(async () => await checked().count() === 23);
+
   // Filtered select-all never includes hidden rows. Empty filters disable it.
   await filter().fill('Fixture Alpha');
   await until(async () => await checks().count() === 1);
+  await until(async () => await checked().count() === 0);
   await all().check();
   await page.getByRole('button', { name: 'Save to shortlist', exact: true }).click();
   await page.getByRole('button', { name: /^Shortlist.*\(1\)$/ }).waitFor();

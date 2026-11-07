@@ -67,7 +67,7 @@ test('plugins run loads data-root .env before its required-key gate', () => {
     const result = runCli(dir, ['run', 'notion', 'search']);
 
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 1, `stdout=${result.stdout}\nstderr=${result.stderr}`);
+    assert.equal(result.status, 1, describeSpawn(result, `stdout=\nstderr=`));
     assert.match(result.stderr, /search needs a query/);
     assert.doesNotMatch(result.stderr, /not enabled|missing .*\.env/i);
   } finally {

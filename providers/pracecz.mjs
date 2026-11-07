@@ -41,6 +41,7 @@ const SEARCH_URL = 'https://www.prace.cz/nabidky/';
 const POSTING_URL_BASE = 'https://www.prace.cz/nabidka/';
 const PAGE_SIZE = 40;
 const DEFAULT_MAX_PAGES = 10;
+const MAX_PAGES_CAP = 1500; // hard ceiling even for a user override
 const INTER_PAGE_DELAY_MS = 1000;
 const NOT_FOUND = 'pracecz: currentPageItems/totalItems not found — page markup changed?';
 
@@ -170,7 +171,12 @@ export default {
     }
 
     const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
-    const configured = Number.isInteger(entry?.max_pages) && entry.max_pages > 0 ? entry.max_pages : DEFAULT_MAX_PAGES;
+
+    const configured =
+      Number.isInteger(entry?.max_pages) && entry.max_pages > 0
+        ? Math.min(entry.max_pages, MAX_PAGES_CAP)
+        : DEFAULT_MAX_PAGES;
+
     const maxPages = probing ? Math.min(configured, ctx.maxPages) : configured;
 
     /** @type {Map<string, Job>} */

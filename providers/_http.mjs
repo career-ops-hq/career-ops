@@ -10,6 +10,7 @@ import {
 } from '../user-agent.mjs';
 import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
 import { currentConnectionScope, currentAbortSignal } from './_connection-scope.mjs';
+import { cachedText } from './_http-cache.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 
 /** @typedef {import('./_types.js').Context} Context */
@@ -58,7 +59,6 @@ export function resolveDefaultTimeoutMs(raw, fallback = 10_000) {
   return parsed;
 }
 
-const DEFAULT_TIMEOUT_MS = resolveDefaultTimeoutMs(process.env.CAREER_OPS_HTTP_TIMEOUT_MS);
 let proxyAgent;
 let proxySignature;
 
@@ -73,7 +73,9 @@ async function proxyFor(url) {
   for (const configuredProxy of [httpProxy, httpsProxy]) {
     if (!configuredProxy) continue;
     const parsed = new URL(configuredProxy);
-    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:') {
+    const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const isLoopback = host === 'localhost' || host === '::1' || (isIP(host) === 4 && host.startsWith('127.'));
+    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:' && !isLoopback) {
       throw new Error('Proxy URLs containing credentials must use HTTPS to protect proxy authentication.');
     }
   }
@@ -89,7 +91,11 @@ async function proxyFor(url) {
     throw new Error('Trusted proxy egress requires undici; run npm install in the career-ops directory, then retry.', { cause });
   });
   if (signature !== proxySignature) {
-    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy });
+    // proxyTunnel: true keeps every request, http:// included, on a CONNECT
+    // tunnel through the proxy. That is the default in undici 6 and 7. From
+    // undici 8 an http:// target is forwarded as an absolute-form request
+    // instead, which is what turned tests/providers/proxy-egress.test.mjs red.
+    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy, proxyTunnel: true });
     proxySignature = signature;
   }
   return { dispatcher: proxyAgent, proxyHost, fetchImpl: undiciFetch };
@@ -135,6 +141,10 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
 // server-side redirect could point the request at a private address after the
 // ip guard already passed the original host (#4079). Callers that really need
 // to follow redirects opt in explicitly.
+//
+// The default timeout is read on each request, not when this module loads: an
+// entry script such as scan.mjs imports this file statically, so the module is
+// evaluated before that script loads the data root's .env.
 /**
  * @param {string} url
  * @param {FetchOptions} [opts]
@@ -144,7 +154,7 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
  * @param {typeof fetch} [fetchImpl] undici's fetch when a proxy dispatcher is used; global fetch otherwise.
  * @returns {Promise<any>}
  */
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
+async function fetchInContext(url, { timeoutMs = resolveDefaultTimeoutMs(process.env.CAREER_OPS_HTTP_TIMEOUT_MS), headers = {}, method = 'GET', body = null, redirect = 'error', onResponse, acceptNotModified = false } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -193,6 +203,13 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
       }
       throw err;
     }
+    // 304 is the answer to If-None-Match, not a failed board. Count it as a
+    // success and let the caller reuse the body it saved.
+    if (acceptNotModified && res.status === 304) {
+      try { await res.body?.cancel(); } catch {}
+      onResponse?.({ status: 200, headers: res.headers });
+      return await consume(res);
+    }
     onResponse?.(res);
     const isInspectableManualRedirect = allowManualRedirectResponse
       && redirect === 'manual'
@@ -229,6 +246,17 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     // (this froze full-directory sweeps silently — 20 workers all stuck on
     // stalled reads with the abort timer already cleared).
     return await consume(res);
+  } catch (err) {
+    // The per-request timer already fired. A retry spends that same budget
+    // again on a board that is still hung (measured: one Ashby board, 30s
+    // timeout, 2 retries, about 94s). A board-watchdog abort is a different
+    // signal, and withRetry already stops when that signal is aborted, so
+    // leave it untagged. A fast reset or DNS failure never trips this timer.
+    if (controller.signal.aborted && !currentAbortSignal()?.aborted
+      && err !== null && (typeof err === 'object' || typeof err === 'function')) {
+      err.timedOut = true;
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -364,6 +392,37 @@ async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+function boardText(text) {
+  return String(text).replace(/^\uFEFF/, '');
+}
+
+async function readBoardText(url, opts, maxBytes, conditional) {
+  const headers = new Headers(opts.headers || {});
+  if (conditional?.ifNoneMatch && !headers.has('if-none-match')) {
+    headers.set('if-none-match', conditional.ifNoneMatch);
+  }
+  const acceptNotModified = headers.has('if-none-match');
+  return fetchWithTimeout(url, { ...opts, headers, acceptNotModified }, async (res) => {
+    if (acceptNotModified && res.status === 304) return { notModified: true };
+    const text = await readBodyCapped(res, maxBytes);
+    const cacheControl = res.headers.get('cache-control') || '';
+    return {
+      body: text,
+      etag: res.headers.get('etag'),
+      noStore: cacheControl.toLowerCase().includes('no-store'),
+    };
+  });
+}
+
+function fetchCachedBody(url, opts, maxBytes, json) {
+  return cachedText(url, opts, async (requestUrl, requestOpts, conditional) => {
+    const loaded = await readBoardText(requestUrl, requestOpts, maxBytes, conditional);
+    // A body that does not parse is not a board we should serve again.
+    if (json && !loaded.notModified) JSON.parse(boardText(loaded.body));
+    return loaded;
+  });
+}
+
 /**
  * Fetch and parse a JSON response, with the shared timeout and non-2xx guard.
  *
@@ -378,14 +437,11 @@ async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
  * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
 export async function fetchJson(url, opts = {}) {
-  const maxBytes = resolveMaxBytes(opts.maxBytes);
-  return fetchWithTimeout(url, opts, async (res) => {
-    // res.json() stripped a leading UTF-8 BOM (the spec's UTF-8 decode does);
-    // decoding the body as text and parsing it by hand does not, so a
-    // BOM-prefixed board answer would stop parsing here.
-    const text = await readBodyCapped(res, maxBytes);
-    return JSON.parse(text.replace(/^\uFEFF/, ''));
-  });
+  const text = await fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), true);
+  // res.json() stripped a leading UTF-8 BOM (the spec's UTF-8 decode does);
+  // decoding the body as text and parsing it by hand does not, so a
+  // BOM-prefixed board answer would stop parsing here.
+  return JSON.parse(boardText(text));
 }
 
 /**
@@ -439,8 +495,7 @@ export async function fetchTextHead(url, opts = {}) {
  * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
 export async function fetchText(url, opts = {}) {
-  const maxBytes = resolveMaxBytes(opts.maxBytes);
-  return fetchWithTimeout(url, opts, async (res) => readBodyCapped(res, maxBytes));
+  return fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), false);
 }
 
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
@@ -598,8 +653,13 @@ export function isRefusedRedirectError(err) {
 
 /**
  * Whether a failed request is worth retrying: 429, any 5xx, or a transport
- * error (no status — timeout/abort/DNS). A 4xx other than 429 is the server
- * telling us the request itself is wrong, and retrying it just burns time.
+ * error (no status — DNS, connection reset, or an abort that did not spend
+ * this request's own timer). A 4xx other than 429 is the server telling us
+ * the request itself is wrong, and retrying it just burns time.
+ *
+ * A timeout that already ran for the full `timeoutMs` is tagged `timedOut`
+ * by fetchInContext. Retrying it waits that long again and gets the same
+ * abort. Fast transport errors are not tagged, so they still retry.
  *
  * A refused redirect (redirect:'error' meeting a 3xx) surfaces as a bare
  * TypeError with no .status — the same shape as a transient network error —
@@ -619,7 +679,9 @@ export function isRetryableError(err) {
   // third time. The size error carries no status, so without this it would
   // fall through to the network-error case below.
   if (err?.code === 'response_too_large') return false;
-  return status === undefined; // network error / timeout / abort — no status set
+  // Checked after 429 / 5xx so a status the server actually sent still wins.
+  if (err?.timedOut === true) return false;
+  return status === undefined; // network error / abort that did not spend the timer
 }
 
 /**

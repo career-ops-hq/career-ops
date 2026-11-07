@@ -4,6 +4,8 @@ FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d6
 
 # Freeze font files and Poppler (including transitive dependencies) independently
 # of when CI rebuilds the image. Only the Ubuntu archive signing key is trusted.
+# Without --error-on=any a failed snapshot fetch only warns, and the build then fails later with a misleading "Unable to locate package".
+# The install retries too: apt's own retries span under a minute, and an outage can begin after the update succeeds.
 RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/nodesource.list \
     && printf '%s\n' \
       'Types: deb' \
@@ -13,9 +15,17 @@ RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/nodesource.list \
       'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
       'Check-Valid-Until: no' \
       > /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-      fonts-liberation fonts-noto-cjk poppler-utils \
+    && for attempt in 1 2 3 4 5; do \
+         apt-get update --error-on=any && break; \
+         [ "$attempt" -lt 5 ] || exit 1; \
+         sleep $((attempt * 20)); \
+       done \
+    && for attempt in 1 2 3 4 5; do \
+         apt-get install -y --no-install-recommends \
+           fonts-liberation fonts-noto-cjk poppler-utils && break; \
+         [ "$attempt" -lt 5 ] || exit 1; \
+         sleep $((attempt * 20)); \
+       done \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 

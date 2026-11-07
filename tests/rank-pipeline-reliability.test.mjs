@@ -8,14 +8,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT } from './helpers.mjs';
+import { envWithPathFirst, writeFakeCli } from './helpers/fake-cli.mjs';
 import { CLI_CANDIDATES, buildPrompt, resolveRankTimeoutMs } from '../rank-pipeline.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
-const POSIX = { skip: process.platform === 'win32' && 'POSIX executable fixture' };
 const ROWS = Array.from({ length: 12 }, (_, i) => `- [ ] https://example.test/${i} | Example | Engineer ${i}`);
 
 function sandbox(t, cliBody, bin = 'grok') {
@@ -24,9 +25,7 @@ function sandbox(t, cliBody, bin = 'grok') {
   mkdirSync(join(root, 'data'));
   mkdirSync(join(root, 'bin'));
   writeFileSync(join(root, 'data', 'pipeline.md'), `${ROWS.join('\n')}\n`);
-  const binary = join(root, 'bin', bin);
-  writeFileSync(binary, `#!${process.execPath}\nconst fs = require('node:fs');\n${cliBody}\n`);
-  chmodSync(binary, 0o755);
+  writeFakeCli(join(root, 'bin'), bin, `const fs = require('node:fs');\n${cliBody}\n`);
   return root;
 }
 
@@ -35,7 +34,7 @@ function rank(root, args = [], extra = {}, bin = 'grok') {
     cwd: root,
     encoding: 'utf8',
     timeout: 60_000,
-    env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '', PATH: `${join(root, 'bin')}:${process.env.PATH}`, ...extra },
+    env: envWithPathFirst(join(root, 'bin'), { CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '', ...extra }),
   });
   assert.ifError(result.error);
   return result;
@@ -64,10 +63,10 @@ test('each CLI is asked for one answer with no tools or extra turns', () => {
   assert.ok(copilot.includes('--deny-tool=read,write,shell,url,memory'));
 });
 
-test('opencode runs with every permission denied', POSIX, (t) => {
+test('opencode runs with every permission denied', (t) => {
   const root = sandbox(t, `fs.writeFileSync(process.env.RANK_ENV, process.env.OPENCODE_CONFIG_CONTENT ?? '');\n${SCORE_ALL}`, 'opencode');
   const result = rank(root, ['--dry-run'], { RANK_ENV: join(root, 'env.txt'), OPENCODE_CONFIG_CONTENT: '' }, 'opencode');
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.deepEqual(JSON.parse(readFileSync(join(root, 'env.txt'), 'utf8')), { permission: 'deny' });
 });
 
@@ -77,10 +76,10 @@ test('the prompt asks for a score from the listed text, not from fetching the po
   assert.match(prompt, /no tools/i);
 });
 
-test('the CLI runs in an empty temp directory, not the data root, and the directory is removed', POSIX, (t) => {
+test('the CLI runs in an empty temp directory, not the data root, and the directory is removed', (t) => {
   const root = sandbox(t, `fs.writeFileSync(process.env.RANK_CWD, JSON.stringify({ cwd: process.cwd(), files: fs.readdirSync('.') }));\n${SCORE_ALL}`);
   const result = rank(root, ['--dry-run'], { RANK_CWD: join(root, 'cwd.json') });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   const seen = JSON.parse(readFileSync(join(root, 'cwd.json'), 'utf8'));
   assert.notEqual(seen.cwd, root);
   assert.ok(!seen.cwd.startsWith(ROOT), seen.cwd);
@@ -88,14 +87,14 @@ test('the CLI runs in an empty temp directory, not the data root, and the direct
   assert.equal(existsSync(seen.cwd), false);
 });
 
-test('CAREER_OPS_RANK_TIMEOUT_MS bounds each call', POSIX, (t) => {
+test('CAREER_OPS_RANK_TIMEOUT_MS bounds each call', (t) => {
   const root = sandbox(t, `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);\n${SCORE_ALL}`);
   const result = rank(root, ['--dry-run'], { CAREER_OPS_RANK_TIMEOUT_MS: '300' });
   assert.match(result.stderr, /grok timed out after 0\.3 s/);
   assert.match(result.stderr, /CAREER_OPS_RANK_TIMEOUT_MS/);
 });
 
-test('the per-call timeout kills a child that ignores SIGTERM', POSIX, (t) => {
+test('the per-call timeout kills a child that ignores SIGTERM', (t) => {
   // A CLI that traps SIGTERM would hang forever under execFileSync's default
   // killSignal. SIGKILL still reaps it so later batches and the unranked report run.
   const root = sandbox(t, `process.on('SIGTERM', () => {});
@@ -113,26 +112,26 @@ test('an unset or invalid timeout falls back to the default', () => {
   assert.equal(resolveRankTimeoutMs('90000'), 90_000);
 });
 
-test('a dry run where every call fails exits 1', POSIX, (t) => {
+test('a dry run where every call fails exits 1', (t) => {
   const root = sandbox(t, `console.error('Error: API key expired.'); process.exitCode = 1;`);
   const result = rank(root, ['--dry-run']);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /Every call to grok failed/);
 });
 
-test('a run where no call returns usable JSON exits 1', POSIX, (t) => {
+test('a run where no call returns usable JSON exits 1', (t) => {
   const root = sandbox(t, `console.log('I could not score these postings.');`);
   const result = rank(root, ['--dry-run']);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /no usable JSON/);
 });
 
-test('rows the model skipped are named, not left silently unranked', POSIX, (t) => {
+test('rows the model skipped are named, not left silently unranked', (t) => {
   const root = sandbox(t, `const n = (process.argv.find(a => a.includes("POSTINGS:")).match(/^\\d+\\./gm) || []).length;
 const ids = n === 10 ? [0, 1, 2] : [0];
 console.log(JSON.stringify(ids.map(id => ({ id, score: 4, reason: 'Fixture match' }))));`);
   const result = rank(root, ['--dry-run']);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.match(result.stdout, /would annotate 4 of 12/);
   assert.match(result.stderr, /8 of 12 selected entr\(ies\) left unranked/);
   assert.match(result.stderr, /https:\/\/example\.test\/3 \(batch 1: no score returned\)/);

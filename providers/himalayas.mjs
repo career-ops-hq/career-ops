@@ -50,6 +50,8 @@ function cleanHimalayasUrl(value) {
 
 function locationText(value) {
   if (!Array.isArray(value)) return '';
+  // Explicit [] means no country restriction; timezone restrictions are separate.
+  if (value.length === 0) return 'Remote (worldwide)';
   return value
     .filter(v => typeof v === 'string' && v.trim())
     .map(v => v.trim())
@@ -100,7 +102,15 @@ export default {
       // query value keeps every request on the same pinned endpoint.
       if (cursor !== null) url.searchParams.set('cursor', cursor);
       const feedUrl = assertHimalayasUrl(url.href);
-      const json = await fetchJsonWithRetry(ctx, feedUrl, { redirect: 'error' });
+      // No retry while probing: a probe-budget rejection has no status, so
+      // the retry helper would read it as a transport error and spend the
+      // probe's remaining requests on it. A normal scan keeps the default policy.
+      const json = await fetchJsonWithRetry(
+        ctx,
+        feedUrl,
+        { redirect: 'error' },
+        probeCap === Infinity ? {} : { retries: 0 },
+      );
       if (!json || !Array.isArray(json.jobs)) {
         throw new Error(`himalayas: unexpected API response - expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
       }

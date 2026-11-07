@@ -20,6 +20,17 @@
 # changing, and a null detector cannot be mistaken for a passing check because
 # atsLint reports it under `skipped`, never under `findings`.
 #
+# Every rule carries a `scope`, which says what it needs in order to be judged
+# (#4798). `structural` is valid on an unrendered template: it reads markup and
+# styling, which a template has. `content` needs rendered output, because its
+# answer depends on what the render payload fills in. atsLint only ever sees a
+# template, so a content rule is reported under `skipped`, never run and never
+# passed; silent passing is the worse failure, since it reads as coverage. The
+# partition is what has to exist before atsLint and verify-ats.mjs's auditAts
+# can dispatch to each other: auditAts judges rendered output, and run on a
+# template it reports `No email address found` for a file that carries
+# {{EMAIL}}.
+#
 # Severity is `warning` throughout, by design. An adventurous template is a
 # choice; an unknowing one is a bug. atsLint never blocks a render.
 #
@@ -32,6 +43,7 @@ rules:
     rule: Single-column layout
     description: Page structure is one top-level content column, so extraction order matches reading order
     severity: warning
+    scope: structural
     detect: null
     unimplemented_because: >-
       Telling a layout table from a data table, and a genuine second column from
@@ -49,6 +61,7 @@ rules:
     rule: Standard section headers
     description: Literal section headings are ones an ATS maps to known fields, not invented synonyms
     severity: warning
+    scope: structural
     detect: standard-section-headers
     kinds: [cv]
     source:
@@ -77,6 +90,7 @@ rules:
     rule: No text in images or SVGs
     description: Text that exists only as vector or raster art never reaches the text layer
     severity: warning
+    scope: structural
     detect: null
     unimplemented_because: >-
       "An <img> whose only content role is a rendered heading" is a judgment
@@ -93,6 +107,7 @@ rules:
     rule: Nothing critical in PDF headers or footers
     description: Name, contact details and links live in the body, because ATS parsers drop page furniture
     severity: warning
+    scope: content
     detect: null
     unimplemented_because: >-
       Deciding that a fixed-position block *is* a running header, and that what
@@ -109,6 +124,7 @@ rules:
     rule: Selectable text
     description: The document body is real text, not a picture of text
     severity: warning
+    scope: structural
     detect: null
     unimplemented_because: >-
       "A template whose body content is a single raster image" is decidable, but
@@ -130,6 +146,7 @@ rules:
     rule: No nested tables
     description: A table inside a table scrambles cell order in most ATS text extractors
     severity: warning
+    scope: structural
     detect: nested-table
     source:
       - 'No nested tables'
@@ -140,6 +157,7 @@ rules:
     rule: No hidden text or white-font tricks
     description: Keywords the reader cannot see are penalised by ATS vendors and by recruiters reading the extracted text
     severity: warning
+    scope: structural
     detect: hidden-text
     source:
       - 'No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.'

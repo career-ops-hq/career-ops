@@ -9,7 +9,7 @@ export default function ApplyError({
 }) {
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-      <p className="text-sm text-red-600">Could not load this apply checklist.</p>
+      <p className="text-sm text-red-700 dark:text-red-400">Could not load this apply checklist.</p>
       <p className="mt-2 text-sm text-zinc-600">{error.message || "The report or related files could not be read."}</p>
       <button
         type="button"

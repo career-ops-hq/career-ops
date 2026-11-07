@@ -48,21 +48,22 @@ func windowedBody(m PipelineModel, availHeight int) []string {
 }
 
 // The windowed body must be line-for-line what slicing the full render gave,
-// in both view modes, at any cursor and offset, including a selected row that
-// wraps on a narrow terminal and offsets past the end of the body.
+// in both view modes, at any cursor and offset, including a selected row on a
+// 40-column terminal. That row used to wrap; it now stays one line, and the
+// window still has to agree with the full render.
 func TestRenderBodyWindowMatchesFullRenderSliced(t *testing.T) {
 	for _, n := range []int{0, 1, 7, 60} {
 		for _, mode := range []string{"grouped", "flat"} {
 			for _, width := range []int{40, 120} {
 				m := NewPipelineModel(theme.NewTheme(""), windowTestApps(n), model.PipelineMetrics{}, t.TempDir(), width, 30)
 				m.viewMode = mode
-				// Every optional column on: the selected row is wider than a
-				// 40-column terminal and wraps.
+				// Every optional column requested. At 40 columns they cannot
+				// all stay, and the selected row must still be one line.
 				for id := range m.visibleCols {
 					m.visibleCols[id] = true
 				}
-				if n > 0 && width == 40 && !strings.Contains(m.renderAppLine(m.filtered[0], true), "\n") {
-					t.Fatal("test premise: the selected row should wrap at width 40")
+				if n > 0 && width == 40 && strings.Contains(m.renderAppLine(m.filtered[0], true), "\n") {
+					t.Fatal("selected row wrapped at width 40")
 				}
 				for _, cursor := range []int{0, n / 2, max(0, n-1)} {
 					for _, offset := range []int{-1, 0, 1, 3, n / 2, n + 5, n + 100} {

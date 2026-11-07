@@ -5,37 +5,7 @@ system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md
 
 ## System Overview
 
-```
-                    ┌─────────────────────────────────┐
-                    │         AI Coding CLI Agent      │
-                    │   (reads AGENTS.md + modes/*.md) │
-                    └──────────┬──────────────────────┘
-                               │
-            ┌──────────────────┼──────────────────────┐
-            │                  │                       │
-     ┌──────▼──────┐   ┌──────▼──────┐   ┌───────────▼────────┐
-     │ Single Eval  │   │ Portal Scan │   │   Batch Process    │
-     │ (auto-pipe)  │   │  (scan.md)  │   │   (batch-runner)   │
-     └──────┬──────┘   └──────┬──────┘   └───────────┬────────┘
-            │                  │                       │
-            │           ┌──────▼──────┐          ┌────▼─────┐
-            │           │ pipeline.md │          │ N workers│
-            │           │ (URL inbox) │          │ (headless)
-            │           └─────────────┘          └────┬─────┘
-            │                                          │
-     ┌──────▼──────────────────────────────────────────▼──────┐
-     │                    Output Pipeline                      │
-     │  ┌──────────┐  ┌────────────┐  ┌───────────────────┐  │
-     │  │ Report.md│  │  PDF (HTML  │  │ Tracker TSV       │  │
-     │  │ (A-H eval)│  │  → Playwright)│ │ (merge-tracker)  │  │
-     │  └──────────┘  └────────────┘  └───────────────────┘  │
-     └────────────────────────────────────────────────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │  data/applications.md │
-                    │  (canonical tracker)  │
-                    └──────────────────────┘
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="architecture-system-overview-dark.svg"><img src="architecture-system-overview-light.svg" alt="System overview: an AI coding CLI agent reads AGENTS.md and modes/*.md and runs one of three flows. Single evaluation (modes/auto-pipeline.md) goes straight to output. Portal scan (scan.mjs and modes/scan.md) fills the URL inbox, data/pipeline.md, which pipeline mode then evaluates. Batch processing (batch/batch-runner.sh) runs N headless workers, one per offer: claude -p workers run in parallel, other CLIs one offer at a time. All three feed the output pipeline: a report (reports/NNN-*.md, the A-H evaluation), a PDF (generate-pdf.mjs, HTML through Playwright) and a tracker TSV (batch/tracker-additions/, merged by merge-tracker.mjs) into the canonical tracker, data/applications.md." width="760"></picture></p>
 
 ## Evaluation Flow (Single Offer)
 
@@ -62,13 +32,7 @@ system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md
 
 The batch system processes multiple offers in parallel:
 
-```
-batch-input.tsv    →  batch-runner.sh  →  N × headless CLI workers
-(id, url, source)     (orchestrator)       (self-contained prompt)
-                           │
-                    batch-state.tsv
-                    (tracks progress)
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="architecture-batch-processing-dark.svg"><img src="architecture-batch-processing-light.svg" alt="Batch processing: batch/batch-input.tsv lists the offers (id, url, source, notes). The orchestrator, batch/batch-runner.sh, records progress in batch/batch-state.tsv so a run can retry and resume, and hands each offer to one of N headless CLI workers running the self-contained prompt batch/batch-prompt.md. Workers are claude -p by default and run in parallel (--parallel, default 3); any other CLI runs one offer at a time. Each worker writes a report (reports/NNN-*.md), a PDF (output/*.pdf) and a tracker TSV line (batch/tracker-additions/). After the batch, merge-tracker.mjs merges the TSV lines into the canonical tracker, data/applications.md." width="760"></picture></p>
 
 Each worker is a headless AI CLI instance. The bundled `batch-runner.sh` runs `claude -p` workers by default; `--cli opencode`, `--cli gemini`, `--cli qwen` or `--cli grok` selects another CLI. Only `claude` workers run in parallel (`--parallel`, default 3) and retry on rate limits; the other CLIs run one offer at a time, with a single attempt per run (a later run still retries a failed offer, up to `--max-retries`). The Headless / Batch Mode table in `AGENTS.md` is not the runner's `--cli` list: it includes CLIs the runner does not launch, and it has no Gemini row because Gemini CLI is now a legacy wrapper (see `docs/SUPPORTED_CLIS.md`). Workers produce:
 - Report .md

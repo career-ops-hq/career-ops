@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { ROOT, pass, fail, rmSync, getBash } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 console.log('\nBatch dealbreaker skip');
 const read = (path) => readFileSync(join(ROOT, path), 'utf8').replace(/\r\n/g, '\n');
@@ -46,16 +47,18 @@ cd "$(dirname "$0")"
 REPORTS_DIR="$PWD/reports"
 TRACKER_DIR="$PWD/tracker-additions"
 LOGS_DIR="$PWD/logs"
+DISCARD_LOG="$LOGS_DIR/discard.log"
 mkdir -p "$TRACKER_DIR" "$LOGS_DIR"
 log_file="$PWD/worker.log"
 MAX_RETRIES=2
-MIN_SCORE=0
+MIN_SCORE="\${MIN_SCORE:-0}"
 RECOVERY_DIR="$PWD/recovery"
-update_state() { printf '%s\\n' "$@" > state; }
-append_recovery_record() { printf '%s\\n' "$@" > recovery; }
+update_state() { [[ -z "\${FAIL_STATE:-}" ]] || return 1; printf '%s\\n' "$@" > state; }
+append_recovery_record() { [[ -z "\${FAIL_STATE:-}" ]] || return 1; printf '%s\\n' "$@" > recovery; }
 sleep() { :; }
 ${functionCode('update_state_retrying')}
 ${functionCode('has_report_file')}
+${functionCode('log_discard')}
 release_report_num() { printf '%s' "$1" > released; }
 is_decimal_number() { [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]; }
 handle_result() {
@@ -70,13 +73,13 @@ handle_result
     rmSync(join(work, 'logs'), { recursive: true, force: true });
     for (const f of readdirSync(join(work, 'reports'))) rmSync(join(work, 'reports', f), { force: true });
   };
-  const handle = (payload, { tsv, report } = {}) => {
+  const handle = (payload, { tsv, report, env } = {}) => {
     reset();
     mkdirSync(join(work, 'tracker-additions'), { recursive: true });
     if (tsv !== undefined) writeFileSync(join(work, 'tracker-additions', '1.tsv'), tsv);
     if (report) writeFileSync(join(work, 'reports', '042-fabrikam-2026-01-31.md'), '# Fictional report\n');
     writeFileSync(join(work, 'worker.log'), `\`\`\`json\n${JSON.stringify(payload)}\n\`\`\`\n`);
-    const res = spawnSync(getBash(), [harness], { encoding: 'utf8', timeout: 30000 });
+    const res = spawnSync(getBash(), [harness], { encoding: 'utf8', timeout: 30000, env: { ...process.env, MIN_SCORE: '0', FAIL_STATE: '', ...env } });
     const path = existsSync(join(work, 'state')) ? 'state' : 'recovery';
     return {
       status: res.status,
@@ -96,8 +99,29 @@ handle_result
     assert.equal(existsSync(join(work, 'released')), false, 'the SKIP row holds its number until the merge');
     assert.equal(readFileSync(join(work, 'tracker-additions', '1.tsv'), 'utf8'), skipRow(), 'the SKIP row stays for the merge');
     assert.equal(existsSync(join(work, 'logs', 'quarantine')), false);
+    const discard = readFileSync(join(work, 'logs', 'discard.log'), 'utf8').trimEnd().split('\t');
+    assert.deepEqual(discard.slice(1), ['1', URL, `dealbreaker: "${RULE}"`], 'the skip is in the discard log (#6440)');
     assert.match(output, /Skipped \(dealbreaker\)/);
     assert.doesNotMatch(output, /Needs confirmation|Failed/);
+  });
+
+  const discardLog = join(work, 'logs', 'discard.log');
+  check('a dealbreaker skip that no state or recovery write recorded is not logged as a discard', () => {
+    const { output } = handle(skipPayload(), { tsv: skipRow(), env: { FAIL_STATE: '1' } });
+    assert.equal(existsSync(discardLog), false, output);
+  });
+
+  check('a below-min-score skip is logged with the reason its state row keeps', () => {
+    const { fields, output } = handle({ status: 'completed', id: '1', score: 2.5, error: null }, { report: true, env: { MIN_SCORE: '3' } });
+    assert.equal(fields[2], 'skipped', output);
+    assert.equal(fields[6], '2.5');
+    assert.equal(fields[7], 'below-min-score');
+    assert.deepEqual(readFileSync(discardLog, 'utf8').trimEnd().split('\t').slice(1), ['1', URL, 'below-min-score']);
+  });
+
+  check('a below-min-score skip that nothing recorded is not logged as a discard', () => {
+    const { output } = handle({ status: 'completed', id: '1', score: 2.5, error: null }, { report: true, env: { MIN_SCORE: '3', FAIL_STATE: '1' } });
+    assert.equal(existsSync(discardLog), false, output);
   });
 
   check('rule text with tabs or line breaks cannot split the state row', () => {
@@ -241,7 +265,7 @@ print_summary
       const env = { ...process.env, CAREER_OPS_ROOT: dir };
       for (const k of ['CAREER_OPS_DATA_DIR', 'CAREER_OPS_PROFILE', 'CAREER_OPS_TRACKER']) delete env[k];
       const res = spawnSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], { cwd: dir, encoding: 'utf8', env });
-      assert.equal(res.status, 0, res.stderr);
+      assert.equal(res.status, 0, describeSpawn(res));
       const merged = readFileSync(join(dir, 'data', 'applications.md'), 'utf8').trim().split('\n').at(-1);
       assert.match(merged, /\| Fabrikam \| Product Designer \| N\/A \| SKIP \|/);
       assert.ok(merged.includes(`"${RULE}"`) && merged.includes(`"${JD_LINE}"`), merged);
@@ -263,7 +287,7 @@ print_summary
         + `3\t${other}\tskipped\ts\te\t044\t2.0\tbelow-min-score\t0\n`);
       const env = { ...process.env, CAREER_OPS_ROOT: dir };
       const res = spawnSync(process.execPath, [join(ROOT, 'reconcile-pipeline.mjs'), '--state', join(dir, 'batch-state.tsv')], { cwd: dir, encoding: 'utf8', env });
-      assert.equal(res.status, 0, res.stderr);
+      assert.equal(res.status, 0, describeSpawn(res));
       const text = readFileSync(join(dir, 'data', 'pipeline.md'), 'utf8');
       const [pending, processed] = text.split('## Processed');
       const pendingLines = pending.split('\n');

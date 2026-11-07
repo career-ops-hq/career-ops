@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { JSON_SCHEMA } from 'js-yaml';
 import { loadYaml } from './lib/yaml-document.mjs';
+import { machineSummaryStart } from './lib/machine-summary-section.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { acquireTrackerLock, trackerLockDirFor, renameSyncWithRetry } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -27,7 +28,11 @@ function timestamp(value) {
   return Number.isFinite(n) && new Date(n).toISOString() === (value.length === 20 ? value.replace(/Z$/, '.000Z') : value) ? n : NaN;
 }
 
-/** Find one actual Markdown section; ignore headings inside fenced JD examples. */
+/**
+ * The report's only Machine Summary. Two candidate headings are a miss, not a
+ * choice, and the one heading must be the report's own (one pasted inside the
+ * archived JD is not).
+ */
 function machineSummary(markdown) {
   if (typeof markdown !== 'string' || markdown.length > 2_000_000) return null;
   const lines = markdown.split(/(?<=\n)/);
@@ -38,11 +43,11 @@ function machineSummary(markdown) {
     if (fence) {
       if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length && !mark[2].trim()) fence = null;
     } else if (mark) fence = mark[1];
-    else if (/^##[ \t]+Machine Summary[ \t]*\r?\n?$/.test(line)) headings.push(offset + line.length);
+    else if (/^##[ \t]+Machine Summary[ \t]*\r?\n?$/.test(line)) headings.push({ line: offset, end: offset + line.length });
     offset += line.length;
   }
-  if (headings.length !== 1) return null;
-  const start = headings[0];
+  if (headings.length !== 1 || headings[0].line !== machineSummaryStart(markdown)) return null;
+  const start = headings[0].end;
   const match = markdown.slice(start).match(/^(?:[ \t]*\r?\n)*(`{3,})(?:yaml|yml|json)[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*(?=\r?\n|$)/);
   if (!match) return null;
   const raw = match[2];

@@ -12,6 +12,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 function sandbox(t) {
   const dir = mkdtempSync(join(tmpdir(), 'co-remember-cli-'));
@@ -36,7 +37,7 @@ test('remember-cli writes CAREER_OPS_CLI to the data root .env and keeps other l
   const dir = sandbox(t);
   writeFileSync(join(dir, '.env'), 'OPENROUTER_MODEL=example/model\nCAREER_OPS_CLI=claude\n');
   const result = node(dir, [join(ROOT, 'remember-cli.mjs'), 'grok']);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(readFileSync(join(dir, '.env'), 'utf8'), 'OPENROUTER_MODEL=example/model\nCAREER_OPS_CLI=grok\n');
 });
 
@@ -49,7 +50,7 @@ test('remember-cli creates .env when there is none', (t) => {
 test('remember-cli refuses an unknown CLI and writes nothing', (t) => {
   const dir = sandbox(t);
   const result = node(dir, [join(ROOT, 'remember-cli.mjs'), 'not-a-cli']);
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, describeSpawn(result));
   assert.match(result.stderr, /not-a-cli/);
   assert.equal(existsSync(join(dir, '.env')), false);
 });
@@ -94,7 +95,7 @@ for (const [remembered, bin, call] of [['opencode', 'opencode', 'opencode run'],
       PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
       RANK_CALL: callFile,
     });
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.equal(readFileSync(callFile, 'utf8'), call);
   });
 }
