@@ -490,7 +490,7 @@ export async function POST(req: Request) {
             evaluationSections: evaluation?.ok ? evaluation.sections : undefined,
           });
           if (!result.ok) {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           sendWarnings(result.warnings);
