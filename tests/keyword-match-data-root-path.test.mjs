@@ -22,6 +22,15 @@ function check(label, run) {
 const dataRoot = mkdtempSync(join(tmpdir(), 'kw-data-root-'));
 mkdirSync(join(dataRoot, 'reports'));
 writeFileSync(join(dataRoot, 'cv.md'), '# Candidate\n\nBuilt Python services and Docker images.\n');
+mkdirSync(join(dataRoot, 'jds'));
+writeFileSync(join(dataRoot, 'jds', 'example.md'), [
+  'Data Engineer',
+  '',
+  'We are hiring a data engineer to build and run our data platform. You will design batch and streaming pipelines,',
+  'own their reliability, and work closely with analysts and product teams. Requirements: strong Python, hands-on',
+  'Docker and Kubernetes, solid SQL, and experience operating services in production. Nice to have: Terraform and AWS.',
+  '',
+].join('\n'));
 writeFileSync(join(dataRoot, 'reports', '001-example-2026-01-01.md'), [
   '# Evaluation: Example — Data Engineer',
   '',
@@ -47,6 +56,12 @@ try {
     const r = run(['reports/001-example-2026-01-01.md', '--cv', 'cv.md']);
     assert.equal(r.status, 0, describeSpawn(r));
     assert.match(r.stdout, /\*\*Present \(2\):\*\*/);
+  });
+
+  check('--jd-text jds/{file} is found under the data root', () => {
+    const r = run(['--jd-text', 'jds/example.md']);
+    assert.equal(r.status, 0, describeSpawn(r));
+    assert.match(r.stdout, /Python/);
   });
 
   check('a path found in neither place still stops with "Report not found"', () => {

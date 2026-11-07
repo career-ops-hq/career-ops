@@ -768,7 +768,7 @@ export async function resolveKeywords(input, root) {
   }
 
   if (input.kind === 'jd-text') {
-    const textPath = isAbsolute(input.textPath) ? input.textPath : join(process.cwd(), input.textPath);
+    const textPath = resolveUserPath(input.textPath, root);
     const body = await resolveJdTextFile(textPath);
     if (!body.ok) {
       console.error(body.message);

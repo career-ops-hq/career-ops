@@ -220,8 +220,8 @@ leser de strukturerte feltene og vedlegget side om side, så et skjema fylt ut f
 
 1. **Bundelen først, fordi stien ikke krever oppslag.** En søknad med bundle har den
    tilpassede CV-en på en sti avledet av report-nummer, virksomhet og rolle:
-   `node application-artifacts.mjs --report {report#} --company "{company}" --role "{role}"`
-   skriver ut alle stier som JSON, der `cv` → `tailored` → `html` er dokumentets sti,
+   `node application-artifacts.mjs --report {report#} --company {company} --role {role}`
+   skriver ut alle stier som JSON. Ta `{company}` og `{role}` fra den matchende reportens header, aldri fra siden, og gi hver verdi som sitt eget argument gjennom verktøyets argumentliste; flett dem aldri inn i en shell-streng, heller ikke i anførselstegn (samme regel som **Kommandoargumenter** i `stilling.md`). Utdataene er JSON, der `cv` → `tailored` → `html` er dokumentets sti,
    `cv/tailored/vNNN/cv.html` på disk. Det er der `modes/pdf.md` skriver den. Les `.html`, ikke `.pdf`: samme innhold,
    lesbart direkte.
 2. Flere versjoner? Bundelen nøkler dem `v001`, `v002` osv. Ta den høyeste som finnes

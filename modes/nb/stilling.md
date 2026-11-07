@@ -232,7 +232,7 @@ Bruk deretter `modes/oferta.md` -> Block D: klassifiser virksomhetstypen (`modes
 - Konkurranseklausul eller kundeklausul? Varighet (høyst 1 år) og kompensasjon.
 - Selvstendig konsulent / oppdragstaker? Timepris, oppdragets varighet, risiko for at forholdet egentlig er et ansettelsesforhold (arbeidsmiljøloven § 1-8) eller innleie (§ 14-12).
 - Lønn oppgitt per måned eller per år? Inkluderer beløpet bonus eller feriepenger? "Lønn etter tariff" eller "i henhold til hovedtariffavtalen" betyr at tariffavtalen fastsetter lønnen.
-- Overtid inkludert i lønnen? Bare lovlig for ledende eller særlig uavhengige stillinger (§ 10-12); ellers gir overtid minst 40 % tillegg.
+- Overtid inkludert i lønnen? For ledende eller særlig uavhengige stillinger kan overtiden ligge i lønnen (§ 10-12). For andre er et fast overtidstillegg lovlig bare når avtalen skiller vanlig lønn fra overtidsbetaling og tillegget minst dekker lovens 40 % (§ 10-6, Arbeidstilsynet); overtid som bare er "inkludert" uten et slikt skille, flagges.
 - Oppsigelsestid: lengre for kandidaten enn for arbeidsgiveren? Det er ikke tillatt (§ 15-3).
 
 ## Blokk E -- Tilpasningsplan

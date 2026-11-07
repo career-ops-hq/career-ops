@@ -4,14 +4,11 @@ Denne mappen inneholder de norske (bokmål) oversettelsene av de viktigste caree
 
 ## Når bør du bruke disse modene?
 
-Bruk `modes/nb/` hvis minst én av disse betingelsene er oppfylt:
+Bruk `modes/nb/` når du søker jobber i **det norske markedet**: hos norske arbeidsgivere eller med arbeidssted i Norge (FINN.no, arbeidsplassen.no, Jobbnorge, LinkedIn NO, virksomhetenes karrieresider). Det gjelder også når annonsene er på engelsk, noe som er vanlig i tech: norske kontraktsforhold følger stillingen, ikke språket i annonsen. Modene håndterer fast og midlertidig ansettelse, prøvetid, oppsigelsestid, tariffavtale, ferie og feriepenger, OTP og AFP, konkurranseklausul, og reglene for staten.
 
-- Du søker først og fremst på **stillingsannonser på norsk** (FINN.no, arbeidsplassen.no, Jobbnorge, LinkedIn NO, virksomhetenes karrieresider)
-- **CV-en din er på norsk**, eller du bytter mellom NB og EN avhengig av annonsen
-- Du trenger svar og søknader på **naturlig tech-norsk**, ikke maskinoversatt
-- Du må håndtere **norske kontraktsforhold**: fast og midlertidig ansettelse, prøvetid, oppsigelsestid, tariffavtale, ferie og feriepenger, OTP og AFP, konkurranseklausul
+Søker du jobber utenfor Norge, bruk standard-modene i `modes/`, selv om du selv bor i Norge eller annonsen er på norsk. Velg markedet etter hvor stillingen er, ikke etter språket (se "Output Language vs Market Modes" i AGENTS.md).
 
-Hvis de fleste annonsene dine er på engelsk, hold deg til standard-modene i `modes/`. De engelske modene fungerer for norske annonser, men de kjenner ikke det norske markedets særtrekk i detalj.
+Språket i rapporter og søknader styres for seg av `language.output`: norske markedsregler med engelsk output er et gyldig valg, og med `nb` skriver modene naturlig tech-norsk, ikke maskinoversatt.
 
 ## Hvordan aktiverer du dem?
 
