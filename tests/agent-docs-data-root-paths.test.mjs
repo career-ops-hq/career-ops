@@ -83,6 +83,44 @@ test('AGENTS.md and modes/_shared.md write tracker TSVs under {DATA_ROOT}', () =
     'AGENTS.md lists all of batch/* as System Layer, which points agents at the checkout');
 });
 
+/**
+ * Verifies that shared mode instructions resolve the Data Root before user-file access.
+ * @param {object} _testContext Node.js test context.
+ * @returns {void}
+ */
+function sharedModeResolvesDataRoot(_testContext) {
+  const shared = read('modes/_shared.md');
+  assert.ok(shared.includes('**Step 0 (before any User Layer file I/O):**'),
+    'modes/_shared.md does not require Data Root resolution before User Layer access');
+  assert.ok(shared.includes('getCareerOpsRoot()'),
+    'modes/_shared.md does not name the canonical Data Root resolver');
+  assert.ok(shared.includes('If resolution fails, stop before accessing User Layer files'));
+  assert.ok(shared.includes('Pass the resolved absolute `DATA_ROOT` to every subagent or worker'));
+}
+
+test('the shared mode resolves DATA_ROOT before User Layer file I/O', sharedModeResolvesDataRoot);
+
+/**
+ * Verifies that pipeline user-layer paths are anchored to the resolved Data Root.
+ * @param {object} _testContext Node.js test context.
+ * @returns {void}
+ */
+function pipelinePathsUseDataRoot(_testContext) {
+  const pipeline = read('modes/pipeline.md');
+  for (const path of [
+    '`{DATA_ROOT}/data/pipeline.md`',
+    '`{DATA_ROOT}/data/discard.log`',
+    '`{DATA_ROOT}/config/profile.yml`',
+    '`{DATA_ROOT}/modes/_profile.md`',
+    '`{DATA_ROOT}/modes/_custom.md`',
+  ]) {
+    assert.ok(pipeline.includes(path), `modes/pipeline.md does not root ${path} under DATA_ROOT`);
+  }
+  assert.ok(pipeline.includes('Use the exact value printed'));
+}
+
+test('pipeline user-layer paths name their data root', pipelinePathsUseDataRoot);
+
 test('a TSV written where AGENTS.md says merges under a configured data root', () => {
   const documented = read('AGENTS.md').match(/`\{DATA_ROOT\}\/(batch\/tracker-additions)\/\{num\}-\{company-slug\}\.tsv`/);
   assert.ok(documented, 'AGENTS.md no longer names the TSV location as {DATA_ROOT}/batch/tracker-additions/');
