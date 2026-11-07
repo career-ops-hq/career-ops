@@ -22,6 +22,9 @@ function check(label, run) {
 const dataRoot = mkdtempSync(join(tmpdir(), 'kw-data-root-'));
 mkdirSync(join(dataRoot, 'reports'));
 writeFileSync(join(dataRoot, 'cv.md'), '# Candidate\n\nBuilt Python services and Docker images.\n');
+// A second CV with different skills, so the --cv case can tell an explicit CV
+// from the default one.
+writeFileSync(join(dataRoot, 'cv-alt.md'), '# Candidate\n\nRan Kubernetes clusters.\n');
 mkdirSync(join(dataRoot, 'jds'));
 writeFileSync(join(dataRoot, 'jds', 'example.md'), [
   'Data Engineer',
@@ -69,10 +72,10 @@ try {
     assert.match(r.stdout, /\*\*Present \(2\):\*\* Python, Docker/);
   });
 
-  check('--cv cv.md is found under the data root', () => {
-    const r = run(['reports/001-example-2026-01-01.md', '--cv', 'cv.md']);
+  check('--cv cv-alt.md is found under the data root and used instead of cv.md', () => {
+    const r = run(['reports/001-example-2026-01-01.md', '--cv', 'cv-alt.md']);
     assert.equal(r.status, 0, describeSpawn(r));
-    assert.match(r.stdout, /\*\*Present \(2\):\*\*/);
+    assert.match(r.stdout, /\*\*Present \(1\):\*\* Kubernetes/);
   });
 
   check('--jd-text jds/{file} is found under the data root', () => {
