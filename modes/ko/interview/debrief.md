@@ -258,7 +258,7 @@ stated_priorities:        # 트랜스크립트 입력에만. 밝힌 우선순위
 
 다음 단계가 분명한 날짜 하루를 가리키면, 두 번째 질문 없이 `--next YYYY-MM-DD`를 넘깁니다. 요일은 로컬 달력 기준 날짜로 계산하며, 오늘도 포함합니다. 표현에 날짜가 없으면 `--next`를 생략합니다. 모호하다면(`next week`, 날짜가 두 개) 날짜 하나를 물어본 뒤 넘깁니다.
 
-그 플래그들로 `node debrief-sync.mjs`를 실행합니다. 그다음 연락처를 저장했다면 `node contacts.mjs --summary`를 실행합니다. 날짜를 정했다면 `node followup-cadence.mjs --summary`를 실행합니다.
+그 플래그들로 `node debrief-sync.mjs --app <tracker#>`를 실행합니다. 여기서 `<tracker#>`는 트래커에서 지원 건의 `#`입니다(리포트 번호가 아닙니다). 전달할 dealbreaker, 연락처, `--next` 날짜가 없으면 명령을 건너뜁니다. 스크립트는 기록할 내용이 없는 호출을 거부합니다. 그다음 연락처를 저장했다면 `node contacts.mjs --summary`를 실행합니다. 날짜를 정했다면 `node followup-cadence.mjs --summary`를 실행합니다.
 
 사용자가 새 상태를 말하지 않는 한 상태는 바꾸지 않습니다. 상태 변경은 이 명령보다 먼저 실행하는 별도의 `set-status.mjs` 호출입니다.
 
