@@ -586,11 +586,17 @@ try {
   }
   {
     const page = () => ({ total: 1_000_000, jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}` })) });
-    const { result: probed } = await captureConsoleErrors(() =>
+    const { result: probed, errors: probeWarnings } = await captureConsoleErrors(() =>
       workday.fetch({ ...entry, max_pages: 1 }, { ...mkWorkdayCtx(async () => page()), maxPages: 1 }));
-    probed.truncated
-      ? fail(`workday flagged a probe with max_pages 1 as truncated: ${JSON.stringify(probed.truncated)}`)
-      : pass('workday.fetch() leaves a probe unflagged when entry and probe caps are both 1');
+    !probed.truncated && !probeWarnings.some((w) => /truncated at/.test(w))
+      ? pass('workday.fetch() neither flags nor warns on a probe when entry and probe caps are both 1')
+      : fail(`workday probe with max_pages 1: truncated=${JSON.stringify(probed.truncated)} warnings=${JSON.stringify(probeWarnings)}`);
+    // No total and a short first page under max_pages: 1 is the natural end.
+    const { result: short, errors: shortWarnings } = await captureConsoleErrors(() =>
+      workday.fetch({ ...entry, max_pages: 1 }, mkWorkdayCtx(async () => ({ jobPostings: Array.from({ length: 5 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}` })) }))));
+    short.length === 5 && !short.truncated && !shortWarnings.some((w) => /truncated at/.test(w))
+      ? pass('workday.fetch() treats a short last page as complete even at max_pages (no flag, no warning)')
+      : fail(`workday short page at cap: ${short.length} jobs, truncated=${JSON.stringify(short.truncated)} warnings=${JSON.stringify(shortWarnings)}`);
     const { result: exact } = await captureConsoleErrors(() =>
       workday.fetch({ ...entry, max_pages: 2 }, mkWorkdayCtx(async () => ({ ...page(), total: 40 }))));
     exact.length === 40 && !exact.truncated

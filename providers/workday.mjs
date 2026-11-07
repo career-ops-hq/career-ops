@@ -930,6 +930,9 @@ export default {
       // cleanly with whatever pages were already gathered instead of
       // discarding them (Promise.all would fail the whole batch on one error).
       let page = 1;
+      // Raw row count of the last page read (before parsing drops rows): a
+      // short page is the board's natural end, so it can never be a cap stop.
+      let lastRawCount = firstPostings.length;
       if (stopReason === STOP_REASON.COMPLETE) {
         for (; page < pagesToFetch; page++) {
           if (pagesSpent >= pageBudget) { budgetExhausted = true; break; }
@@ -950,13 +953,14 @@ export default {
           }
           const pageJobs = parseWorkdayResponse(json, entry);
           jobs.push(...pageJobs);
-          if (total === null) {
-            const postings = Array.isArray(json?.jobPostings) ? json.jobPostings : [];
-            if (postings.length < PAGE_SIZE) break; // short page → last page reached
-          }
+          lastRawCount = Array.isArray(json?.jobPostings) ? json.jobPostings.length : 0;
+          if (total === null && lastRawCount < PAGE_SIZE) break; // short page → last page reached
           if (pageIsPastWindow(pageJobs, sinceMs)) { stopReason = STOP_REASON.EARLY_STOP; break; }
         }
-        if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages) {
+        // A cap stop needs a full last page and the entry's own cap, not a
+        // probe's ctx.maxPages (verify-portals/discover-ats probe with 1).
+        if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages
+          && lastRawCount >= PAGE_SIZE && ctxCap === Infinity) {
           stopReason = STOP_REASON.CAP;
         }
       }
