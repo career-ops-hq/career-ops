@@ -28,7 +28,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run career-profile` | `career-profile.mjs` | Import CV facts into `data/career-profile.yml` (preview by default; `--review` to save) |
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
 | `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
-| `node backup.mjs` | `backup.mjs` | Copy your User Layer to a cloud-drive folder or any folder (never deletes at the destination) |
+| `node backup.mjs --dest <dir>` | `backup.mjs` | Copy your User Layer (the updater's `USER_PATHS`) to a folder you choose, or a cloud drive with `--provider` (never deletes at the destination; `data/Connections.csv` only with `--include-connections`) |
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
@@ -2016,23 +2016,27 @@ Exit status: `0` success, `1` invalid option or write error, `2` missing tracker
 
 ## backup.mjs
 
-Copies the files `DATA_CONTRACT.md` lists as yours (CV, profile, `portals.yml`, everything under `data/`, `reports/`, `output/`, `jds/`, `interview-prep/`, `documents/`, `writing-samples/`, pending tracker additions) from the data root to a backup folder. It reads `CAREER_OPS_ROOT` / `.career-ops-data` like every other script. Files are copied whole, and nothing is ever deleted at the destination. Unchanged files (same size and modification time) are skipped, so a repeat run is cheap.
+Copies the User Layer to a backup folder. The file list is `USER_PATHS` in `update-system.mjs` (the updater's own list of what is yours: CV, profile, `portals.yml`, everything under `data/`, `reports/`, `output/`, `jds/`, `interview-prep/`, `documents/`, `writing-samples/`, the web app's `.career-ops-web/` stores and more), plus any paths a fork declares in `config/local-paths.txt`. It reads `CAREER_OPS_ROOT` / `.career-ops-data` like every other script. Files are copied whole, and nothing is ever deleted at the destination. Unchanged files (same size and modification time) are skipped, so a repeat run is cheap.
 
-Never copied: `.env` files, `data/cache/`, lock and temp files, and anything outside the User Layer.
+Never copied: `.env` files, `data/cache/`, lock and temp files, symlinks and anything under a symlinked folder, and anything outside the User Layer. `data/Connections.csv` (a LinkedIn export, other people's contact details) is copied only with `--include-connections`.
+
+Nothing is chosen for you: pass `--dest` or `--provider`, or set `CAREER_OPS_BACKUP_DIR`.
 
 ```bash
-node backup.mjs                            # <Google Drive>/Backups/career-ops
-node backup.mjs --dry-run                  # list what would be copied, copy nothing
 node backup.mjs --dest ~/Backups/career-ops
-node backup.mjs --provider dropbox         # google-drive (default) | dropbox | onedrive | icloud
-node backup.mjs --account work@corp.com    # when several Google accounts are signed in
-node backup.mjs --folder Work/career-ops   # folder under the drive (default Backups/career-ops)
-node backup.mjs --json                     # machine-readable result
+node backup.mjs --provider google-drive    # <Google Drive>/Backups/career-ops; also dropbox | onedrive | icloud
+node backup.mjs --provider google-drive --account work@corp.com   # when several accounts are signed in
+node backup.mjs --provider dropbox --folder Work/career-ops       # folder under the drive (default Backups/career-ops)
+node backup.mjs --dest ~/Backups/career-ops --include-connections # also copy data/Connections.csv
+node backup.mjs --dest ~/Backups/career-ops --dry-run             # list what would be copied, copy nothing
+node backup.mjs --dest ~/Backups/career-ops --json                # machine-readable result
 ```
 
-Where it goes, first match wins: `--dest`, then `CAREER_OPS_BACKUP_DIR`, then the drive folder found on this machine. With more than one drive found it stops and asks for `--account` or `--dest` instead of guessing. The destination's parent folder must already exist (so an unmounted drive never gets a stray local folder), and a destination inside your career-ops files is refused.
+Where it goes, first match wins: `--dest`, then `CAREER_OPS_BACKUP_DIR`, then the drive folder `--provider` names. With more than one drive found it stops and asks for `--account` or `--dest` instead of guessing. The destination's parent folder must already exist (so an unmounted drive never gets a stray local folder), and a destination inside your career-ops files is refused.
 
-Exit status: `0` success, `1` one or more files failed to copy, `2` no usable destination or invalid option.
+A file that cannot be read or copied is listed and the run carries on with the rest. A run that finds no files at all (a mistyped `CAREER_OPS_ROOT`, say) says so and exits `1` instead of reporting success.
+
+Exit status: `0` success, `1` one or more files failed to copy or nothing was found to copy, `2` no usable destination, invalid option or unreadable data root.
 
 ---
 

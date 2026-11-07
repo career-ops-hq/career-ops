@@ -2,26 +2,29 @@
 /**
  * backup.mjs — copy your career-ops User Layer to a backup folder (zero-token).
  *
- * Copies the files DATA_CONTRACT.md lists as yours (CV, profile, portals,
- * tracker and everything under data/, reports/, output/, jds/ ...) from the
- * data root to a destination folder. Nothing is ever deleted at the
- * destination, so a file you removed locally stays in the backup.
+ * Copies the User Layer (the paths in USER_PATHS, update-system.mjs: CV,
+ * profile, portals, tracker and everything under data/, reports/, output/,
+ * jds/ ...) from the data root to a destination folder. Nothing is ever
+ * deleted at the destination, so a file you removed locally stays in the
+ * backup. data/Connections.csv holds other people's contact details and is
+ * left out unless you pass --include-connections.
  *
- * Where the backup goes, first match wins:
+ * Nothing is chosen for you: say where the backup goes. First match wins:
  *   1. --dest <dir>                 exactly this folder
  *   2. CAREER_OPS_BACKUP_DIR        exactly this folder
- *   3. the cloud-drive folder found on this machine, plus Backups/career-ops
- *      (--provider google-drive | dropbox | onedrive | icloud; default google-drive)
+ *   3. --provider google-drive | dropbox | onedrive | icloud
+ *      the drive folder found on this machine, plus Backups/career-ops
  *
  * Files are copied whole. rsync's delta mode maps the old copy into memory,
  * which Google Drive's file-system layer refuses ("mmap: Resource deadlock
  * avoided"), so this never uses it.
  *
- * Usage: node backup.mjs [--dest <dir>] [--provider <name>] [--account <text>]
- *                        [--folder <path>] [--dry-run] [--json] [--quiet]
+ * Usage: node backup.mjs (--dest <dir> | --provider <name>) [--account <text>]
+ *                        [--folder <path>] [--include-connections]
+ *                        [--dry-run] [--json] [--quiet]
  *
- * Exit status: 0 success, 1 one or more files failed to copy, 2 no usable
- * destination or invalid option.
+ * Exit status: 0 success, 1 a file failed to copy or there was nothing to
+ * copy, 2 no usable destination, invalid option or unreadable data root.
  */
 
 import {
@@ -35,31 +38,45 @@ import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { LOCAL_PATHS_FILE, USER_PATHS, effectiveUserPaths } from './update-system.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 
-export const DEFAULT_PROVIDER = 'google-drive';
 export const DEFAULT_FOLDER = join('Backups', 'career-ops');
 export const PROVIDERS = ['google-drive', 'dropbox', 'onedrive', 'icloud'];
 export const MANIFEST_NAME = '.career-ops-backup.json';
 
-/** User Layer paths (relative to the data root) a backup covers. */
-export const BACKUP_PATHS = [
-  'cv.md', 'article-digest.md', 'voice-dna.md', 'portals.yml',
-  'config/profile.yml', 'config/cv-facts.json', 'config/benchmarks.yml', 'config/plugins.yml',
-  'modes/_profile.md', 'modes/_custom.md', 'modes/_brief.md',
-  'data', 'reports', 'output', 'jds', 'interview-prep', 'documents', 'writing-samples',
-  'batch/tracker-additions',
-];
+/** The one file under data/ that holds other people's data (a LinkedIn export). */
+const CONNECTIONS_FILE = 'data/Connections.csv';
 
 /**
- * Never copied: secrets, rebuildable caches, and lock/temp files.
+ * User Layer paths (relative to the data root, no trailing slash) a backup
+ * covers. USER_PATHS is the updater's own list of what is yours, exported so
+ * tools derive the same boundary; a fork's `config/local-paths.txt`
+ * declarations come with it. The declaration file itself is added so a restore
+ * brings the declarations back. A declaration file that cannot be parsed falls
+ * back to the built-in list and says so in `warnings`.
  */
-export function isExcluded(relPath) {
+export function backupPaths(dataRoot, warnings = []) {
+  let paths = [...USER_PATHS];
+  try {
+    paths = effectiveUserPaths(dataRoot);
+  } catch (error) {
+    warnings.push(`${error.message}; backing up the built-in user paths only.`);
+  }
+  return [...new Set([...paths, LOCAL_PATHS_FILE].map((p) => p.replace(/\/+$/, '')))];
+}
+
+/**
+ * Never copied: secrets, rebuildable caches, lock/temp files, and (unless
+ * `includeConnections`) the LinkedIn export.
+ */
+export function isExcluded(relPath, { includeConnections = false } = {}) {
   const p = relPath.split(sep).join('/');
   const name = p.slice(p.lastIndexOf('/') + 1);
   if (name === '.DS_Store' || name === '.env' || name.startsWith('.env.')) return true;
   if (p === 'data/cache' || p.startsWith('data/cache/')) return true;
+  if (!includeConnections && p === CONNECTIONS_FILE) return true;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
 }
 
@@ -103,15 +120,23 @@ export function providerRoots(provider, { home = homedir(), platform = osPlatfor
 }
 
 /**
- * Work out the backup folder. Returns `{ dest, source }` or throws an Error
- * whose message says what to pass instead (the CLI turns it into exit 2).
+ * Work out the backup folder. Nothing is the default: with no `dest`, no
+ * CAREER_OPS_BACKUP_DIR and no `provider` it throws. Returns `{ dest, source }`
+ * or throws an Error whose message says what to pass instead (the CLI turns it
+ * into exit 2).
  */
 export function resolveDestination({ dest, provider, account, folder, env = process.env, ...machine } = {}) {
   const exact = (dest ?? '').trim() || (env.CAREER_OPS_BACKUP_DIR ?? '').trim();
   if (exact) {
     return { dest: resolve(exact), source: dest?.trim() ? '--dest' : 'CAREER_OPS_BACKUP_DIR' };
   }
-  const name = provider || DEFAULT_PROVIDER;
+  const name = (provider ?? '').trim();
+  if (!name) {
+    throw new Error(
+      'No backup destination chosen. Pass --dest <dir> (or set CAREER_OPS_BACKUP_DIR), ' +
+      `or name a drive with --provider ${PROVIDERS.join(' | ')}.`,
+    );
+  }
   if (!PROVIDERS.includes(name)) {
     throw new Error(`Unknown provider "${name}". Use one of: ${PROVIDERS.join(', ')}.`);
   }
@@ -174,23 +199,48 @@ export function assertSafeDestination(dest, dataRoot, codeRoot = CODE_ROOT) {
 
 // ── Copy ─────────────────────────────────────────────────────────────────
 
-/** Regular files under `dataRoot/entry` (a file or a folder), as `{ rel, size, mtimeMs }`. */
-function listEntry(dataRoot, entry) {
+/** True when a folder on the way down to `entry` is a symlink (it could lead out of the data root). */
+function hasSymlinkedParent(dataRoot, entry) {
+  let current = dataRoot;
+  for (const part of entry.split('/').filter(Boolean).slice(0, -1)) {
+    current = join(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Regular files under `dataRoot/entry` (a file or a folder), as
+ * `{ rel, size, mtimeMs }`. A file that cannot be read is reported through
+ * `onError` and skipped, so one bad file never hides the rest.
+ */
+function listEntry(dataRoot, entry, { includeConnections, onError }) {
   const abs = join(dataRoot, entry);
   let st;
   try { st = lstatSync(abs); } catch { return []; }
-  if (st.isSymbolicLink() || isExcluded(entry)) return [];
+  if (st.isSymbolicLink() || hasSymlinkedParent(dataRoot, entry)) return [];
+  if (isExcluded(entry, { includeConnections })) return [];
   const paths = st.isDirectory()
     ? walkTree(abs, {
       // Symlinks are skipped (the default), so the backup never follows a link
       // out of the data root.
-      skip: (dirent, dir) => isExcluded(relative(dataRoot, join(dir, dirent.name))),
+      skip: (dirent, dir) => isExcluded(relative(dataRoot, join(dir, dirent.name)), { includeConnections }),
     })
     : [abs];
-  return paths.map((p) => {
-    const s = statSync(p);
-    return { rel: relative(dataRoot, p), size: s.size, mtimeMs: s.mtimeMs };
-  });
+  const files = [];
+  for (const p of paths) {
+    try {
+      const s = statSync(p);
+      files.push({ rel: relative(dataRoot, p), size: s.size, mtimeMs: s.mtimeMs });
+    } catch (error) {
+      onError(relative(dataRoot, p), error);
+    }
+  }
+  return files;
 }
 
 const unchanged = (src, destPath) => {
@@ -204,14 +254,27 @@ const unchanged = (src, destPath) => {
 };
 
 /**
- * Copy every backed-up file under `dataRoot` to `dest`.
- * @returns {{copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number}}
+ * Copy every backed-up file under `dataRoot` to `dest`. Throws only when the
+ * destination folder cannot be created; every per-file problem lands in
+ * `failed` and the run carries on. `found` counts the files discovered (copied
+ * or not), so a run that found nothing is distinguishable from one that found
+ * only unchanged files.
+ * @returns {{found: number, copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number, warnings: string[]}}
  */
-export function runBackup({ dataRoot, dest, dryRun = false }) {
-  const result = { copied: 0, unchanged: 0, failed: [], bytes: 0 };
+export function runBackup({ dataRoot, dest, dryRun = false, includeConnections = false }) {
+  const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
+  const fail = (path, error) => result.failed.push({ path, error: error.message });
   if (!dryRun) mkdirSync(dest, { recursive: true });
-  for (const entry of BACKUP_PATHS) {
-    for (const file of listEntry(dataRoot, entry)) {
+  for (const entry of backupPaths(dataRoot, result.warnings)) {
+    let files;
+    try {
+      files = listEntry(dataRoot, entry, { includeConnections, onError: fail });
+    } catch (error) {
+      fail(entry, error);
+      continue;
+    }
+    for (const file of files) {
+      result.found++;
       const target = join(dest, file.rel);
       if (unchanged(file, target)) { result.unchanged++; continue; }
       if (dryRun) { result.copied++; result.bytes += file.size; continue; }
@@ -225,45 +288,59 @@ export function runBackup({ dataRoot, dest, dryRun = false }) {
         result.bytes += file.size;
       } catch (error) {
         try { rmSync(part, { force: true }); } catch { /* best effort */ }
-        result.failed.push({ path: file.rel, error: error.message });
+        fail(file.rel, error);
       }
     }
   }
-  if (!dryRun) {
-    writeFileSync(join(dest, MANIFEST_NAME), `${JSON.stringify({
-      lastRun: new Date().toISOString(),
-      copied: result.copied,
-      unchanged: result.unchanged,
-      failed: result.failed.length,
-    }, null, 2)}\n`);
+  if (!dryRun && result.found > 0) {
+    try {
+      writeFileSync(join(dest, MANIFEST_NAME), `${JSON.stringify({
+        lastRun: new Date().toISOString(),
+        found: result.found,
+        copied: result.copied,
+        unchanged: result.unchanged,
+        failed: result.failed.length,
+      }, null, 2)}\n`);
+    } catch (error) {
+      fail(MANIFEST_NAME, error);
+    }
   }
   return result;
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--dry-run', '--json', '--quiet', '--help', '-h'];
+const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-connections', '--dry-run', '--json', '--quiet', '--help', '-h'];
 const VALUE_FLAGS = ['--dest', '--provider', '--account', '--folder'];
 
 const USAGE = `Usage:
-  node backup.mjs                          # back up to <Google Drive>/Backups/career-ops
   node backup.mjs --dest <dir>             # back up to exactly this folder
-  node backup.mjs --provider dropbox       # google-drive (default) | dropbox | onedrive | icloud
-  node backup.mjs --account <text>         # pick one drive when several are signed in
-  node backup.mjs --folder <relative/path> # folder under the drive (default Backups/career-ops)
-  node backup.mjs --dry-run                # show what would be copied, copy nothing
-  node backup.mjs --json | --quiet         # machine-readable result | errors only
-  CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest`;
+  node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
+  node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
+  node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
+  node backup.mjs ... --include-connections # also copy data/Connections.csv (other people's contact details)
+  node backup.mjs ... --dry-run            # show what would be copied, copy nothing
+  node backup.mjs ... --json | --quiet     # machine-readable result | errors only
+  CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest
+Nothing is chosen for you: pass --dest, set CAREER_OPS_BACKUP_DIR, or name a drive with --provider.`;
 
 function main(args) {
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  // Exit 1 means "a file failed", so a mistyped command is 2.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true, usageExitCode: 2 });
   const json = args.includes('--json');
   const quiet = args.includes('--quiet');
   const dryRun = args.includes('--dry-run');
-  const dataRoot = getCareerOpsRoot();
+  const includeConnections = args.includes('--include-connections');
+  const refuse = (message) => {
+    if (json) console.log(JSON.stringify({ ok: false, error: message }));
+    else console.error(`backup: ${message}`);
+    return 2;
+  };
 
+  let dataRoot;
   let target;
   try {
+    dataRoot = getCareerOpsRoot();
     target = resolveDestination({
       dest: flagValue(args, '--dest'),
       provider: flagValue(args, '--provider'),
@@ -275,18 +352,25 @@ function main(args) {
       throw new Error(`${dirname(target.dest)} does not exist (is the drive mounted?). Nothing was created.`);
     }
   } catch (error) {
-    if (json) console.log(JSON.stringify({ ok: false, error: error.message }));
-    else console.error(`backup: ${error.message}`);
-    return 2;
+    return refuse(error.message);
   }
 
-  const result = runBackup({ dataRoot, dest: target.dest, dryRun });
-  const ok = result.failed.length === 0;
+  let result;
+  try {
+    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeConnections });
+  } catch (error) {
+    return refuse(`cannot write to ${target.dest}: ${error.message}`);
+  }
+  const empty = result.found === 0;
+  const ok = result.failed.length === 0 && !empty;
   if (json) {
     console.log(JSON.stringify({ ok, dryRun, dest: target.dest, via: target.source, ...result }));
   } else {
+    for (const w of result.warnings) console.error(`backup: ${w}`);
     for (const f of result.failed) console.error(`backup: failed ${f.path}: ${f.error}`);
-    if (!quiet) {
+    if (empty) {
+      console.error(`backup: found nothing to back up under ${dataRoot}. Is CAREER_OPS_ROOT (or the data root) the right folder?`);
+    } else if (!quiet) {
       const mb = (result.bytes / 1048576).toFixed(1);
       console.log(`${dryRun ? 'Would copy' : 'Copied'} ${result.copied} file(s) (${mb} MB), ${result.unchanged} unchanged -> ${target.dest} [${target.source}]`);
     }

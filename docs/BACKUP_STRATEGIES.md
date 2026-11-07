@@ -78,20 +78,23 @@ mode picks it up.
 
 ## The built-in script: `node backup.mjs`
 
-For a plain copy to a cloud drive, career-ops ships a script. It finds your Google Drive
-folder and copies your data into `Backups/career-ops` underneath it, skipping unchanged files
-and never deleting anything in the backup:
+For a plain copy to a folder, career-ops ships a script. You choose where it goes: any
+folder with `--dest`, or a cloud drive with `--provider` (Google Drive, Dropbox, OneDrive or
+iCloud Drive; it copies into `Backups/career-ops` underneath the drive folder). It skips
+unchanged files and never deletes anything in the backup:
 
 ```bash
-node backup.mjs --dry-run      # see what would be copied
-node backup.mjs                # run it
-node backup.mjs --dest ~/Backups/career-ops   # or any folder you choose
+node backup.mjs --dest ~/Backups/career-ops --dry-run   # see what would be copied
+node backup.mjs --dest ~/Backups/career-ops             # run it
+node backup.mjs --provider google-drive                 # or a signed-in cloud drive
 ```
 
-It also supports Dropbox, OneDrive and iCloud Drive (`--provider`) and several signed-in
-accounts (`--account`); see [SCRIPTS.md](SCRIPTS.md#backupmjs). It keeps no history, so it
-protects against a lost machine, not against a mistaken edit. Use Pattern 1 or 3 below when
-you want to go back to an earlier version. The script is on-demand; schedule it with
+It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The LinkedIn
+export `data/Connections.csv` holds other people's contact details, so it is left out unless
+you add `--include-connections`. Several signed-in accounts are handled with `--account`; see
+[SCRIPTS.md](SCRIPTS.md#backupmjs). It keeps no history, so it protects against a lost
+machine, not against a mistaken edit. Use Pattern 1 or 3 below when you want to go back to
+an earlier version. The script is on-demand; schedule it with
 [the same tools as scans](AUTOMATION.md) if you want it recurring.
 
 ---
