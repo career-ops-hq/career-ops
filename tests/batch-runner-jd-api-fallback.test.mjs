@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { TRUNCATION_NOTICE, capJdText, markCappedAtsText } from '../lib/jd-page-fetch.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n');
@@ -34,6 +35,24 @@ const apiBlock = (() => {
 
 if (apiBlock) pass('batch-runner.sh has the ATS API fallback block');
 else fail('ATS API fallback block is missing from batch-runner.sh');
+
+// ── the runner's truncation marker is the real producer's ───────────────────
+// The functional stub below only proves the runner reacts to a marker it was
+// handed. This pins that the marker the runner greps for is the one the real
+// producer writes on both paths fetch-jd.mjs uses: a cut page JD (capJdText)
+// and a capped ATS result (markCappedAtsText turns compactText's bare ellipsis
+// into the notice before fetch-jd.mjs prints it).
+{
+  const marker = SRC.match(/grep -q '(Job description truncated here[^']*)' "\$jd_api_tmp"/)?.[1];
+  const cap = 100;
+  const page = capJdText('word '.repeat(200), cap);
+  const ats = markCappedAtsText('x'.repeat(cap) + '\u2026', cap);
+  if (marker && TRUNCATION_NOTICE(cap).includes(marker) && page.includes(marker) && ats.includes(marker)) {
+    pass('the runner marker appears in real capJdText and markCappedAtsText output');
+  } else {
+    fail(`the runner marker (${marker}) does not match the producer's notice`);
+  }
+}
 
 // ── static checks ───────────────────────────────────────────────────────────
 
