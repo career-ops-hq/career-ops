@@ -7,6 +7,8 @@ import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
 import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs";
 import { markAppliedEnabled } from "@/lib/apply/mark-applied.mjs";
+import { reopenApplyOptions } from "@/lib/apply/reopen-options.mjs";
+import { checklistHrefFor } from "@/lib/apply/unsupported-ats.mjs";
 import { isResumeLabel } from "@/lib/apply/resume-label.mjs";
 import type { ApplyField } from "@/lib/apply/extract";
 import { cn } from "@/lib/cn";
@@ -43,12 +45,12 @@ export function ApplyView() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && a.open(input.trim())}
+            onKeyDown={(e) => e.key === "Enter" && a.open(input.trim(), reopenApplyOptions(input.trim(), a))}
             placeholder="Paste an application form URL (Ashby, Lever, Greenhouse…)"
             className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-faint"
           />
           <button
-            onClick={() => a.open(input.trim())}
+            onClick={() => a.open(input.trim(), reopenApplyOptions(input.trim(), a))}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
           >
             <Wand2 className="size-4" /> Read form
@@ -81,11 +83,18 @@ export function ApplyView() {
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
               <div className="min-w-0">
                 <p className="text-sm text-amber-800 dark:text-amber-300">{a.error}</p>
-                {a.url && /^https?:\/\//.test(a.url) && (
-                  <a href={a.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
-                    Open the form directly <ExternalLink className="size-3" />
-                  </a>
-                )}
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  {a.url && /^https?:\/\//.test(a.url) && (
+                    <a href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
+                      Open the form directly <ExternalLink className="size-3" />
+                    </a>
+                  )}
+                  {checklistHrefFor(a.n) && (
+                    <Link href={checklistHrefFor(a.n) ?? ""} className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
+                      CV path and answers
+                    </Link>
+                  )}
+                </div>
               </div>
             </div>
           </div>

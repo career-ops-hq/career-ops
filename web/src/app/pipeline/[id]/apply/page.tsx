@@ -101,7 +101,7 @@ export default async function ApplyPage({
       status={app?.status ?? ""}
       pdfReady={resume !== null}
       trackerMarked={trackerMarked}
-      pdfNote={trackerMarked && resume === null ? null : disk.note}
+      pdfNote={reportNum != null && trackerMarked && resume === null ? null : disk.note}
     />
   );
 }
