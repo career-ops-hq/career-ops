@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { TemplateEditor } from "@/components/templates/template-editor";
-import { editingAfterReload, latestOnly, loadFailureView, pendingAfterReload, settleChoice } from "@/lib/templates-state.mjs";
+import { editLocks, editingAfterReload, latestOnly, loadFailureView, pendingAfterReload, settleChoice } from "@/lib/templates-state.mjs";
 
 // The CV templates the core resolves, each shown filled with a fictional resume
 // so the design is visible before it is chosen. Choosing one writes cv.template
@@ -220,13 +220,13 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
                   </button>
                   {t.layer === "user" && (
                     <>
-                      <button type="button" disabled={busy !== null} onClick={() => setEditing(t.name)} className="underline">
+                      <button type="button" disabled={busy !== null || editLocks(editing, t.name).edit} title={editLocks(editing, t.name).edit ? "Close the open editor first" : undefined} onClick={() => setEditing(t.name)} className="underline">
                         Edit
                       </button>
-                      <button type="button" disabled={busy !== null} onClick={() => ask(t.name, "rename")} className="underline">
+                      <button type="button" disabled={busy !== null || editLocks(editing, t.name).rename} title={editLocks(editing, t.name).rename ? "Close the editor first" : undefined} onClick={() => ask(t.name, "rename")} className="underline">
                         Rename
                       </button>
-                      <button type="button" disabled={busy !== null || t.isDefault} title={t.isDefault ? "Make another template the default first" : undefined} onClick={() => ask(t.name, "delete")} className="underline">
+                      <button type="button" disabled={busy !== null || t.isDefault || editLocks(editing, t.name).remove} title={t.isDefault ? "Make another template the default first" : editLocks(editing, t.name).remove ? "Close the editor first" : undefined} onClick={() => ask(t.name, "delete")} className="underline">
                         Delete
                       </button>
                     </>

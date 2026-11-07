@@ -36,3 +36,10 @@ test("no ref is written during render", () => {
 test("the load success handler records that a list has loaded", () => {
   assert.match(src, /hasListRef\.current = true/);
 });
+
+test("Edit, Rename and Delete read their disabled state from editLocks", () => {
+  assert.match(src, /import\s*{[^}]*\beditLocks\b[^}]*}\s*from\s*"@\/lib\/templates-state\.mjs"/);
+  for (const action of ["edit", "rename", "remove"]) {
+    assert.ok(src.includes(`editLocks(editing, t.name).${action}`), `${action} is gated`);
+  }
+});

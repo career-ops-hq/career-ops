@@ -79,3 +79,20 @@ export async function settleChoice(save, { applied, reload, failed }) {
 export function loadFailureView(listIsCurrent, hasList) {
   return listIsCurrent && hasList ? "alongside" : "replace";
 }
+
+/**
+ * Which of a card's actions to disable while a template is open in the editor.
+ * The editor holds unsaved text the section cannot see, so whatever would unmount
+ * it waits for Close, which already offers "Discard and close": removing its own
+ * template (rename or delete), or switching the editor to another card. Edit on
+ * its own card is a no-op and stays on; other cards' rename and delete leave the
+ * open template alone.
+ * @param {string | null} editing name of the template open in the editor
+ * @param {string} name the card's template
+ * @returns {{edit: boolean, rename: boolean, remove: boolean}}
+ */
+export function editLocks(editing, name) {
+  const open = editing !== null;
+  const own = open && editing === name;
+  return { edit: open && !own, rename: own, remove: own };
+}
