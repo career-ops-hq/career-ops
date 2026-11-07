@@ -27,6 +27,7 @@
 \usepackage{fancyhdr}
 \usepackage[english]{babel}
 \usepackage{tabularx}
+\usepackage{array}
 \usepackage{fontawesome}
 \usepackage{multicol}
 \setlength{\multicolsep}{-3.0pt}
@@ -51,6 +52,10 @@
 \titleformat{\section}{
   \vspace{-7pt}\scshape\raggedright\large\bfseries
 }{}{0em}{}[\color{black}\titlerule \vspace{0pt}]
+% Fixed section spacing: the gap before every title is the same, and
+% \raggedbottom (above) pools the leftover page height at the bottom instead of
+% stretching the gaps. Never reintroduce stretchable plus/minus glue here.
+\titlespacing*{\section}{0pt}{10pt}{6pt}
 % Ensure that generate pdf is machine readable/ATS parsable
 \pdfgentounicode=1
 
@@ -73,12 +78,35 @@
       \textit{\small#1} & \textit{\small #2} \\
     \end{tabular*}\vspace{-7pt}
 }
+% The left cell is a paragraph column, not `l`, so an over-long project name
+% wraps to a second line instead of running off the right edge of the page.
+% `l` cannot break a line at all: a name plus its tech list would push the
+% whole row past the margin, with nothing in the build reporting a problem.
+% 0.76\textwidth leaves room for the right-hand date before the two cells meet.
 \newcommand{\resumeProjectHeading}[2]{
   \vspace{-3pt}\item
-    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textbf{#1} & \textbf{\small #2} \\
+    \begin{tabular*}{1.0\textwidth}[t]{@{}>{\raggedright\arraybackslash}p{0.72\textwidth}@{\extracolsep{\fill}}>{\raggedleft\arraybackslash}p{0.24\textwidth}@{}}
+      \textbf{#1} & \textbf{\small\raggedleft #2} \\
     \end{tabular*}\vspace{-7pt}
 }
+% Awards are single-line rows, so they get their own list rather than
+% \resumeSubHeadingListStart. Two reasons, both about the gap around them:
+% \resumeProjectHeading ends in \vspace{-7pt} to pull the following bullet
+% tight under a project title, and an award has no bullets, so that tail drags
+% the next award (or the next section title) into the award line; and the
+% default itemize itemsep/parsep are what that -7pt was cancelling, so an
+% award list left on the defaults opens a paragraph-sized gap between two
+% one-line awards. So: a tight list, no negative tail, and a -3pt lead above
+% the first award to match what \resumeSubheading does under a section title.
+% Every gap then lands inside the 6.6-8.2pt band the other sections use.
+\newcommand{\resumeAwardHeading}[2]{
+  \item
+    \begin{tabular*}{1.0\textwidth}[t]{@{}>{\raggedright\arraybackslash}p{0.72\textwidth}@{\extracolsep{\fill}}>{\raggedleft\arraybackslash}p{0.24\textwidth}@{}}
+      \textbf{#1} & \textbf{\small\raggedleft #2} \\
+    \end{tabular*}
+}
+\newcommand{\resumeAwardListStart}{\vspace{-3pt}\begin{itemize}[leftmargin=0.0in, label={}, itemsep=1pt, parsep=0pt, topsep=0pt, partopsep=0pt]}
+\newcommand{\resumeAwardListEnd}{\end{itemize}}
 \newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{0pt}}
 \renewcommand\labelitemi{$\vcenter{\hbox{\tiny$\bullet$}}$}
 \renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
@@ -102,14 +130,24 @@
         % LINKEDIN
         \href{{{LINKEDIN_URL}}}{\raisebox{-0.2\height}\faLinkedin\ \underline{{{LINKEDIN_DISPLAY}}}}  ~
         % GITHUB
-        \href{{{GITHUB_URL}}}{\raisebox{-0.2\height}\faGithub\ \underline{{{GITHUB_DISPLAY}}}}
+        % PORTFOLIO_BLOCK carries its own separator and renders empty when the
+        % payload has no portfolio, so the header never ends on a dangling "~".
+        \href{{{GITHUB_URL}}}{\raisebox{-0.2\height}\faGithub\ \underline{{{GITHUB_DISPLAY}}}}{{PORTFOLIO_BLOCK}}
     \end{center}
+% Breathing room between the contact row and the first section title.
+\vspace{5pt}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Education  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Education}
-  \resumeSubHeadingListStart
-{{EDUCATION}}
-  \resumeSubHeadingListEnd
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Summary  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Professional Summary}
+{{SUMMARY}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Technical Skills  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Technical Skills}
+\begin{itemize}
+[leftmargin=0.15in, label={}]\small{\item{
+{{SKILLS}}
+}}
+\end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%  Experience  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Work Experience}
@@ -125,18 +163,15 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%  AWARDS  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Awards \& Honors}
-\resumeSubHeadingListStart
+\resumeAwardListStart
 {{AWARDS}}
-\resumeSubHeadingListEnd
+\resumeAwardListEnd
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Technical Skills  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Technical Skills}
-\vspace{-7pt}
-\begin{itemize}
-[leftmargin=0.15in, label={}]\small{\item{
-{{SKILLS}}
-}}
-\end{itemize}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Education  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Education}
+  \resumeSubHeadingListStart
+{{EDUCATION}}
+  \resumeSubHeadingListEnd
 
 %%%%  END  %%%%
 
