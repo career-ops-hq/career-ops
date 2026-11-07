@@ -199,6 +199,14 @@ const APPLY_PATTERNS = [
   // "Външно кандидатстване". Only at the start of the label: the noun also ends
   // advice-article links ("…писмо за кандидатстване"), which are not Apply.
   /^(?:външно )?кандидатстване(?![\p{L}\p{M}])/iu,
+  // Norwegian (arbeidsplassen.no, Jobbnorge, employer career sites): "Gå til
+  // søknad", "Send søknad", "Søk på stillingen", "Søk nå". normalizeForMatch
+  // turns "å" into "a" but leaves "ø" alone, so both are spelled here as they
+  // arrive. Bare "Søk" is not Apply: it is also every Norwegian site's search
+  // button ("Søk", "Søk etter stillinger"), so only the qualified labels count,
+  // and only at the start of the label.
+  /^(?:ga til|send) s[øo]knad(?:en)?(?![\p{L}\p{M}])/iu,
+  /^s[øo]k (?:pa (?:denne |den )?(?:stillingen|jobben)|stillingen|her|na)(?![\p{L}\p{M}])/iu,
 ];
 
 // CareerViet prints the application deadline in the posting's info block as

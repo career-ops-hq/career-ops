@@ -201,6 +201,7 @@ export const KEYWORDS_HEADINGS = [
   'Keywords extracted',             // en, ar, ja — modes/oferta.md, modes/ar/fursah.md, modes/ja/kyujin.md
   'Extracted Keywords',             // en — batch/batch-prompt.md (batch workers)
   'Udtrukne nøgleord',              // da — modes/da/oferta.md
+  'Uttrukne nøkkelord',             // nb — modes/nb/stilling.md
   'Extrahierte Keywords',           // de — modes/de/angebot.md
   'Palabras clave extraídas',       // es — modes/es/oferta.md
   'Mots-cles extraits',             // fr — modes/fr/offre.md
@@ -720,6 +721,29 @@ function refuseNoSkills(sourceLabel) {
 }
 
 /**
+ * A relative report, CV or JD-text path, resolved the way the modes write it.
+ * The modes pass `reports/{###}-….md` and `jds/{slug}.md` relative to the data
+ * root, which is not the process's working directory when the user layer lives
+ * elsewhere (a `.career-ops-data` marker or CAREER_OPS_ROOT). The data root
+ * wins whenever the file exists there, so a stale copy in the checkout can
+ * never be scored in its place; a path found only under the working directory
+ * still resolves there, and a path found in neither place is reported against
+ * the working directory, as before.
+ *
+ * @param {string} arg
+ * @param {string} root
+ * @returns {string}
+ */
+export function resolveUserPath(arg, root) {
+  if (isAbsolute(arg)) return arg;
+  if (root) {
+    const fromRoot = join(root, arg);
+    if (existsSync(fromRoot)) return fromRoot;
+  }
+  return join(process.cwd(), arg);
+}
+
+/**
  * Resolve keywords + provenance for any MatchInput.
  *
  * @param {MatchInput} input
@@ -747,7 +771,7 @@ export async function resolveKeywords(input, root) {
   }
 
   if (input.kind === 'jd-text') {
-    const textPath = isAbsolute(input.textPath) ? input.textPath : join(process.cwd(), input.textPath);
+    const textPath = resolveUserPath(input.textPath, root);
     const body = await resolveJdTextFile(textPath);
     if (!body.ok) {
       console.error(body.message);
@@ -764,7 +788,7 @@ export async function resolveKeywords(input, root) {
   }
 
   const reportArg = input.reportPath;
-  const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
+  const reportPath = resolveUserPath(reportArg, root);
   if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
     console.error(`Report not found: ${reportArg}`);
     console.error(`Example: node keyword-match.mjs ${shellExampleArg(join(getCareerOpsRoot(), 'reports', '001-role.md'))}`);
@@ -891,7 +915,7 @@ async function runKeywordMatch(args) {
 
   const cvArg = args.cvPath;
   const cvPath = cvArg
-    ? (isAbsolute(cvArg) ? cvArg : join(process.cwd(), cvArg))
+    ? resolveUserPath(cvArg, getCareerOpsRoot())
     : join(getCareerOpsRoot(), 'cv.md');
 
   if (!existsSync(cvPath) || !statSync(cvPath).isFile()) {

@@ -983,7 +983,7 @@ var trackerHeaderAliases = map[string]string{
 	"date": "date", "fecha": "date", "datum": "date", "data": "date",
 	"dato": "date", "tanggal": "date",
 	"company": "company", "empresa": "company",
-	"firma": "company", "virksomhed": "company", "perusahaan": "company",
+	"firma": "company", "virksomhed": "company", "virksomhet": "company", "perusahaan": "company",
 	"via": "via", "role": "role", "puesto": "role",
 	"rolle": "role", "rola": "role", "vaga": "role",
 	"location": "location", "ort": "location", "score": "score", "status": "status",
