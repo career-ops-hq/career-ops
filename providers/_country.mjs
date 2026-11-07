@@ -201,12 +201,17 @@ export function buildWorkplacePolicy(policy) {
   // Read the geography immediately attached to a worker-location phrase, plus
   // genuine country alternatives. Stop before unrelated duties/office mentions.
   const geographyTarget = (text, { allowAmbiguousCodes = true } = {}) => {
-    let rest = geographyText(text).trim().replace(/^(?:(?:a|an|any) (?:eligible )?country (?:in|within) |(?:a|an|any) )/, ''), region = false, local = false;
+    let rest = geographyText(text).trim().replace(/^(?:(?:a|an|any) (?:eligible )?country (?:in|within) |(?:a|an|any) )/, '')
+      .replace(/^(?:and )?around /, ''), region = false, local = false;
     const codes = new Set();
     while (rest) {
       const match = rest.match(geographyAtom);
       if (!match) break;
       const token = match[1], tail = rest.slice(match[0].length);
+      // AND may be followed by a worker qualification in an explicit location
+      // requirement. General "work in and with ..." prose is not that evidence.
+      if (token === 'and' && !/^\s*(?:$|[,/]|(?:and|or|only)\b)/.test(tail)
+        && !(allowAmbiguousCodes && /^\s+with\b/.test(tail))) break;
       const found = countries(countryValue(token), true);
       if (!found.size && !has(token, regions) && !has(token, onsite)) break;
       // "IT systems" is not Italy. A bounded geographic token such as
@@ -224,6 +229,42 @@ export function buildWorkplacePolicy(policy) {
   const explicitHomeGeography = text => [...geographyText(text).matchAll(/\b(based|located|reside|live|work remotely|work remote|remote work|remote role|work from home|work)\s+(?:in|from|within)\s+([^.!?;\n]+)/g)]
     .some(match => [...geographyTarget(match[2], { allowAmbiguousCodes: /^(?:based|located|reside|live)$/.test(match[1]) }).codes].some(c => homeCodes.has(c)));
   const supportsHomeGeography = text => supportsHomeProse(geographyText(text)) || explicitHomeGeography(text);
+  // Only immediate, explicit geography qualifiers are grammar here. Do not
+  // scan through considered/reviewed prose to discover a country elsewhere.
+  const eligibilityTargetText = text => text.trim().replace(/^(?:(?:currently|only)\s+|(?:restricted|limited|open)\s+(?:only\s+)?to\s+|(?:allowed|permitted|available)\s+(?:only\s+)?(?:in|from)\s+)+/, '');
+  // Preserve commas only within an explicit, country-only eligibility list.
+  // Unknown tails and independent restrictions remain separate clauses.
+  const completeCountryList = text => {
+    let rest = text.trim();
+    while (rest) {
+      const match = rest.match(geographyAtom);
+      if (!match || !countries(countryValue(match[1]), true).size) return false;
+      const tail = rest.slice(match[0].length);
+      if (!tail.trim()) return true;
+      const separator = tail.match(/^\s*(?:,|\/|\band\b|\bor\b)\s*/);
+      if (!separator) return false;
+      rest = tail.slice(separator[0].length);
+    }
+    return false;
+  };
+  const descriptionClauses = text => text.split(/[.!?;\n]+|\s+(?:but|however)\s+/).flatMap(sentence => {
+    const clauses = [];
+    let eligibleList = false;
+    for (const part of sentence.split(/,|\s+and\s+(?=(?:eligible (?:countries|locations) are\b|must\b|(?:candidates?|applicants?|residents?) (?:must|need to)\b))/)) {
+      let continuation = part;
+      if (eligibleList) {
+        const coordinated = part.replace(/^\s*(?:and|or)\s+/, '');
+        if (coordinated !== part && completeCountryList(coordinated)) continuation = coordinated;
+      }
+      if (eligibleList && completeCountryList(continuation)) clauses[clauses.length - 1] += ',' + continuation;
+      else {
+        clauses.push(part);
+        const list = [...part.matchAll(/\beligible (?:countries|locations) are\s+/g)].at(-1);
+        eligibleList = !!list && completeCountryList(eligibilityTargetText(part.slice(list.index + list[0].length)));
+      }
+    }
+    return clauses;
+  });
   const restricted = (text, codes = false) => {
     const found = countries(text, codes);
     return found.size > 0 && ![...found].some(c => homeCodes.has(c));
@@ -256,15 +297,28 @@ export function buildWorkplacePolicy(policy) {
     }
     // Narrow eligibility clauses, not arbitrary country mentions. A company
     // describing its London office must not erase a worldwide-remote listing.
-    for (const clause of description.split(/[.!?;,\n]+|\s+(?:but|however)\s+/)) {
+    for (const clause of descriptionClauses(description)) {
       if (/\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based) (?:role|position)(?: is)? (?:based |located )?in\b/.test(clause) && !has(clause, onsite)) return fail('description_onsite_restricted');
       if (!/\b(?:only|must (?:be |currently )?(?:based|located|reside|live)|(?:candidates?|applicants?|residents?) (?:must|need to)|restricted to|eligible (?:countries|locations)|hiring (?:only )?in|open (?:only )?to)\b/.test(clause)) continue;
-      for (const match of geographyText(clause).matchAll(/\bmust (?:be |currently )?(?:based|located|reside|live) (?:in|within)\s+(.+)/g)) {
-        const required = geographyTarget(match[1]);
+      const targetCountries = new Set(), workerClause = geographyText(clause);
+      for (const match of workerClause.matchAll(/\bmust (?:be |currently )?(?:based|located|reside|live) (?:in|within)\s+/g)) {
+        const required = geographyTarget(workerClause.slice(match.index + match[0].length));
         if (required.codes.size && ![...required.codes].some(c => homeCodes.has(c))) return fail('description_country_restricted');
         if (!required.codes.size && !required.region && !required.local) return fail('description_location_restricted');
+        for (const code of required.codes) targetCountries.add(code);
       }
-      if (restricted(clause)) return fail('description_country_restricted');
+      // Each explicit eligibility list is another restriction, not a union
+      // with earlier worker-location alternatives in the same clause.
+      for (const match of workerClause.matchAll(/\beligible (?:countries|locations) are\s+/g)) {
+        const required = geographyTarget(eligibilityTargetText(workerClause.slice(match.index + match[0].length))).codes;
+        if (!required.size) continue;
+        if (![...required].some(c => homeCodes.has(c))) return fail('description_country_restricted');
+        for (const code of required) targetCountries.add(code);
+      }
+      // An actual home-compatible target may mix ISO and country names. Only
+      // those parsed alternatives qualify; foreign evidence elsewhere keeps
+      // the existing generic veto, and every separate mandatory target is read.
+      if (restricted(clause) && ![...countries(clause)].every(c => targetCountries.has(c))) return fail('description_country_restricted');
       if (/\bmust (?:be |currently )?(?:based|located|reside|live)(?: in| within)?\b/.test(clause)
         && !supportsHomeGeography(clause) && !has(clause, regions) && !has(clause, onsite)) return fail('description_location_restricted');
       // A mandatory commute elsewhere is also narrower than a remote tag.
