@@ -5700,11 +5700,12 @@ async function main() {
     const isUnverifiedZero = unverifiedZeroTargets.includes(t.name);
 
     let status = errorKindByCompany.get(t.name) || 'reachable';
-    if (status === 'reachable' && isEmpty) status = 'empty';
-    if (status === 'reachable' && isUnverifiedZero) status = 'unverified_zero';
     // A board read only partly is not healthy coverage: logged `partial`, which
     // computeConsecutiveFailures counts toward the 🚨 streak like any failure.
+    // Checked before `empty`, so a tagged empty read cannot pass as healthy.
     if (status === 'reachable' && partialTargets.has(t.name)) status = 'partial';
+    if (status === 'reachable' && isEmpty) status = 'empty';
+    if (status === 'reachable' && isUnverifiedZero) status = 'unverified_zero';
 
     healthRecords.push({ timestamp: nowStr, company: t.name, status });
   }
