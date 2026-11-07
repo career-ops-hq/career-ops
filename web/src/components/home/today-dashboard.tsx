@@ -19,6 +19,7 @@ import { scoreNum } from "@/lib/format";
 import { undoStatus } from "@/lib/pipeline-status.mjs";
 import { pickAwaitingDecision, groupAwaiting } from "@/lib/home/awaiting.mjs";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
+import { ApplyNext } from "@/components/apply-next";
 import { resolveHeroState, mayClaimAllClear, showsQueue, missingSourceLabel, displayCounts } from "@/lib/home/hero-state.mjs";
 import { homeFollowupRemainder } from "@/lib/home/followups-shown.mjs";
 
@@ -32,6 +33,7 @@ export function TodayDashboard({
   reasons,
   legitimacy,
   inbox,
+  applyFacts = {},
 }: {
   applications: Application[];
   reasons: Record<string, CardReason>;
@@ -39,6 +41,7 @@ export function TodayDashboard({
   legitimacy: Record<string, string>;
   inbox: Pick<InboxJob, "url" | "done">[];
   inBetween: boolean;
+  applyFacts?: Record<string, { pdfOnDisk: boolean; postingUrl: string }>;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
@@ -281,12 +284,13 @@ export function TodayDashboard({
       {awaiting.length > 0 && (
         <Section icon={CircleHelp} title="Awaiting your decision" hint="Best score first">
           {recommended.length > 0 && (
-            <Link
-              href={`/pipeline/${recommended[0].n}`}
-              className="mb-3 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]"
-            >
-              Apply next · {companyPresentation(recommended[0]).label} {recommended[0].score} <ArrowRight className="size-4" />
-            </Link>
+            <ApplyNext
+              n={recommended[0].n}
+              company={companyPresentation(recommended[0]).label}
+              score={recommended[0].score}
+              pdfOnDisk={applyFacts[recommended[0].n]?.pdfOnDisk ?? false}
+              postingUrl={applyFacts[recommended[0].n]?.postingUrl ?? ""}
+            />
           )}
           {awaitingGroups.map(([label, group]) => (
             <div key={label} className="mb-3">

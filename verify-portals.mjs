@@ -295,6 +295,7 @@ const AGGREGATOR_HOSTS = [
   'ashbyhq.com',
   'bamboohr.com',
   'breezy.hr',
+  'careers.hibob.com',
   'gem.com',
   'glassdoor.com',
   'greenhouse.io',

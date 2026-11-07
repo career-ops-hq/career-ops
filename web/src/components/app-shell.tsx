@@ -79,9 +79,6 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
                 <span className="font-mono text-[10px] text-faint">THEME</span>
               </div>
               <ThemeToggle showLabel />
-              <div className="px-1">
-                <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-              </div>
             </div>
           </div>
         </aside>

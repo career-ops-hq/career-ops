@@ -69,6 +69,10 @@ test('aggregator hosts name no company', () => {
   // otherwise read as a company called "hirehive".
   assert.equal(companyFromHost('acme.hirehive.com'), null);
   assert.equal(companyFromHost('join.com'), null);
+  // "careers" is dropped too, so a tenant host would read as "hibob"; the
+  // vendor's own site still names the vendor.
+  assert.equal(companyFromHost('exampleco.careers.hibob.com'), null);
+  assert.equal(companyFromHost('www.hibob.com'), 'hibob');
 });
 
 test('a bare word is not a host', () => {
