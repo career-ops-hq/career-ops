@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -53,5 +53,44 @@ for (const file of readmes) {
         `Retired token "${token}" was found in ${file}`
       );
     }
+  });
+}
+
+// The Usage command tables list every mode the skill router accepts. Command names and
+// mode-file links are not translated, so the same row pattern reads every language; only
+// the section heading differs, which is why the rows are read from the whole file.
+const SKILL = readFileSync(join(ROOT, '.agents', 'skills', 'career-ops', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
+/** Router inputs → mode, e.g. `inbox` → `agent-inbox`, `eu-swe` → `regional/eu-swe`. */
+const routes = new Map([...SKILL.matchAll(/^\| `([a-z/-]+)` \| `([^`]+)` \|$/gm)].map((m) => [m[1], m[2]]));
+
+test('sanity check: parsed the skill router table', () => {
+  assert.ok(routes.size >= 30, `only ${routes.size} router inputs parsed — the routing table format changed`);
+});
+
+for (const file of readmes) {
+  test(`command tables in ${file} match the router`, () => {
+    const content = readFileSync(join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
+    /** Command-table rows as [command, mode-file link]. */
+    const rows = [...content.matchAll(/^\| \[`([a-z/-]+)`\]\(([^)]+)\) \|/gm)].map((m) => [m[1], m[2]]);
+    assert.ok(rows.length >= 30, `only ${rows.length} command rows parsed in ${file} — it has no command tables`);
+
+    const listed = new Set(rows.map(([command]) => command));
+    // An alias (`inbox`) is covered when the mode it routes to has a row.
+    const listedModes = new Set(rows.map(([command]) => routes.get(command)));
+    const missing = [...routes].filter(([input, mode]) => !listed.has(input) && !listedModes.has(mode)).map(([input]) => input);
+    assert.deepEqual(missing, [], `routed mode(s) missing from ${file}: ${missing.join(', ')}`);
+
+    const rejected = rows.map(([command]) => command).filter((command) => !routes.has(command));
+    assert.deepEqual(rejected, [], `${file} lists command(s) the router does not route: ${rejected.join(', ')}`);
+
+    const wrong = rows
+      .filter(([command, link]) => link !== `modes/${routes.get(command)}.md` || !existsSync(join(ROOT, link)))
+      .map(([command, link]) => `${command} → ${link}`);
+    assert.deepEqual(wrong, [], `${file} links that miss the routed mode file: ${wrong.join(', ')}`);
+  });
+
+  test(`${file} no longer carries the hand-copied command block`, () => {
+    const content = readFileSync(join(ROOT, file), 'utf8');
+    assert.ok(!/^\/career-ops pipeline /m.test(content), `${file} still has the old "/career-ops <mode> → ..." code block`);
   });
 }
