@@ -14,9 +14,9 @@ import { TemplateRefusal, refusalFrom } from "./template-refusal.mjs";
 
 export const MAX_TEMPLATE_BYTES = 512 * 1024;
 
-/** @param {string} root */
-async function loadResolver(root) {
-  return import(/* webpackIgnore: true */ pathToFileURL(path.join(root, "cv-templates.mjs")).href);
+/** @param {string} codeRoot */
+async function loadResolver(codeRoot) {
+  return import(/* webpackIgnore: true */ pathToFileURL(path.join(codeRoot, "cv-templates.mjs")).href);
 }
 
 /** @param {string} text */
@@ -32,11 +32,11 @@ function userEntry(resolver, kind, userDir, name) {
 
 /**
  * The text of one of the user's own templates, and a version to send back with the edit.
- * @param {string} root core checkout
+ * @param {string} codeRoot core checkout
  * @param {{kind: "cv"|"cover", name: string, userDir: string}} opts
  */
-export async function readUserTemplate(root, { kind, name, userDir }) {
-  const entry = userEntry(await loadResolver(root), kind, userDir, name);
+export async function readUserTemplate(codeRoot, { kind, name, userDir }) {
+  const entry = userEntry(await loadResolver(codeRoot), kind, userDir, name);
   const text = await fs.readFile(entry.path, "utf8");
   return { text, version: versionOf(text) };
 }
@@ -46,15 +46,15 @@ export async function readUserTemplate(root, { kind, name, userDir }) {
  * is too large or binary, when the file moved on since `version` was read, or when
  * the edited template would no longer resolve (missing required placeholders, a
  * declared section with no partial). Returns the path to write and the new version.
- * @param {string} root
+ * @param {string} codeRoot
  * @param {{kind: "cv"|"cover", name: string, text: string, version: string, userDir: string}} opts
  */
-export async function checkTemplateEdit(root, { kind, name, text, version, userDir }) {
+export async function checkTemplateEdit(codeRoot, { kind, name, text, version, userDir }) {
   if (typeof text !== "string") throw new TemplateRefusal("The template text is missing.");
   if (Buffer.byteLength(text) > MAX_TEMPLATE_BYTES) throw new TemplateRefusal(`The template is too large (limit ${MAX_TEMPLATE_BYTES / 1024} KB).`);
   if (text.includes("\0")) throw new TemplateRefusal("The template contains a NUL byte; it looks binary, not HTML.");
 
-  const resolver = await loadResolver(root);
+  const resolver = await loadResolver(codeRoot);
   const entry = userEntry(resolver, kind, userDir, name);
   const current = await fs.readFile(entry.path, "utf8");
   if (versionOf(current) !== version) {
