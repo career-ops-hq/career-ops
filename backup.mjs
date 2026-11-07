@@ -73,10 +73,13 @@ export function backupPaths(dataRoot, warnings = []) {
  */
 export function isExcluded(relPath, { includeConnections = false } = {}) {
   const p = relPath.split(sep).join('/');
-  const name = p.slice(p.lastIndexOf('/') + 1);
-  if (name === '.DS_Store' || name === '.env' || name.startsWith('.env.')) return true;
-  if (p === 'data/cache' || p.startsWith('data/cache/')) return true;
-  if (!includeConnections && p === CONNECTIONS_FILE) return true;
+  // Lowercased: macOS and Windows volumes are case-insensitive, so a renamed
+  // `Data/connections.csv` or `.ENV` is the same file.
+  const lower = p.toLowerCase();
+  const name = lower.slice(lower.lastIndexOf('/') + 1);
+  if (name === '.ds_store' || name === '.env' || name.startsWith('.env.')) return true;
+  if (lower === 'data/cache' || lower.startsWith('data/cache/')) return true;
+  if (!includeConnections && lower === CONNECTIONS_FILE.toLowerCase()) return true;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
 }
 
@@ -184,7 +187,7 @@ function canonical(path) {
 
 const within = (child, parent) => {
   const rel = relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 };
 
 /** The destination must not sit inside what it backs up (it would copy itself). */
@@ -231,6 +234,9 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
     ? walkTree(abs, {
       // Symlinks are skipped (the default), so the backup never follows a link
       // out of the data root.
+      // Nested checkouts (a git-cloned plugin under plugins.local/) are the
+      // user's own work, so they are copied rather than skipped.
+      allowNestedCheckouts: true,
       skip: (dirent, dir) => isExcluded(relative(dataRoot, join(dir, dirent.name)), include),
     })
     : [abs];
@@ -269,6 +275,12 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeConnections =
   const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
   const fail = (path, error) => result.failed.push({ path, error: error.message });
   if (!dryRun) mkdirSync(dest, { recursive: true });
+  // With an external data root, fork-local files declared in the checkout's
+  // config/local-paths.txt are not looked up there: say so instead of
+  // reporting a clean run that silently left them out.
+  if (resolve(dataRoot) !== resolve(CODE_ROOT) && existsSync(join(CODE_ROOT, LOCAL_PATHS_FILE))) {
+    result.warnings.push(`${LOCAL_PATHS_FILE} in the checkout is not read when the data root is elsewhere; back up fork-local files it declares separately.`);
+  }
   for (const entry of backupPaths(dataRoot, result.warnings)) {
     let files;
     try {

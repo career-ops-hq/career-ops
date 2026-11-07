@@ -84,9 +84,9 @@ iCloud Drive; it copies into `Backups/career-ops` underneath the drive folder). 
 unchanged files and never deletes anything in the backup:
 
 ```bash
-node backup.mjs --dest ~/Backups/career-ops --dry-run   # see what would be copied
+node backup.mjs --dest ~/Backups/career-ops --dry-run   # print counts and bytes that would be copied (no file list)
 node backup.mjs --dest ~/Backups/career-ops             # run it
-node backup.mjs --provider google-drive                 # or a signed-in cloud drive
+node backup.mjs --provider google-drive                 # or a signed-in cloud drive (needs a `Backups` folder in it)
 ```
 
 It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The LinkedIn export `data/Connections.csv` holds other people's contact details, so it is

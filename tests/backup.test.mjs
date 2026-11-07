@@ -25,6 +25,9 @@ try {
   }
   // The LinkedIn export holds other people's contact details: opt-in only.
   assert.equal(b.isExcluded('data/Connections.csv'), true);
+  assert.equal(b.isExcluded('data/connections.csv'), true);
+  assert.equal(b.isExcluded('Data/CONNECTIONS.CSV'), true);
+  assert.equal(b.isExcluded('config/.ENV'), true);
   assert.equal(b.isExcluded('data/Connections.csv', { includeConnections: true }), false);
   pass('excludes secrets, caches, lock/temp files and the LinkedIn export unless asked');
 
@@ -140,14 +143,19 @@ try {
   const outside = join(tmp, 'outside');
   put(outside, 'profile.yml', 'private');
   put(linked, 'cv.md', 'cv');
-  symlinkSync(outside, join(linked, 'config'));
+  let canLink = true;
+  try { symlinkSync(outside, join(linked, 'config')); } catch { canLink = false; }
+  if (canLink) {
   const viaLink = b.runBackup({ dataRoot: linked, dest: join(tmp, 'backup', 'linked') });
   assert.equal(viaLink.copied, 1);
   assert.equal(existsSync(join(tmp, 'backup', 'linked', 'config', 'profile.yml')), false);
   pass('skips a symlinked parent folder');
+  } else {
+    pass('skips a symlinked parent folder (skipped: cannot create symlinks here)');
+  }
 
   // One unreadable file is a failure entry; the rest of the run carries on.
-  if (process.getuid?.() !== 0) {
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
     const bad = join(tmp, 'bad-root');
     put(bad, 'cv.md', 'cv');
     put(bad, 'data/locked.md', 'locked');
