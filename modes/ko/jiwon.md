@@ -13,7 +13,7 @@
 1. DETECT      -> 이 프로젝트의 Playwright 브라우저에서 공고 열기
 2. IDENTIFY    -> 페이지에서 회사 + 역할 추출
 3. SEARCH      -> reports/ 안의 기존 report와 매칭
-4. LOAD        -> 전체 report + `## Application Answers`와 블록 H(있다면) 읽기
+4. LOAD        -> 전체 report + `## Application Answers`와 블록 H(있다면) 읽기 — **Posting identity** 확인 후
 5. COMPARE     -> 화면의 역할이 평가한 역할과 같은지 확인. 바뀌었다면 알림
 6. ANALYZE     -> 화면에 보이는 모든 지원서 질문 식별
 7. GENERATE    -> 각 질문에 대해 개인화 답변 생성
@@ -38,11 +38,13 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 1. 페이지에서 회사명과 역할명을 추출합니다.
 2. `reports/`에서 회사명으로 검색합니다 (case-insensitive grep).
-3. 매칭되는 report가 있으면 전체 report를 불러옵니다.
+3. 매칭되는 report가 있으면 각 report의 머리말(회사, 역할, `**URL:**`)만 읽고, URL이나 req ID가 이 공고인 report를 고릅니다. 불분명하면 후보자에게 물어봅니다. 전체 report와 4번 항목은 **Posting identity**가 성립한 뒤에만 불러옵니다 (`modes/apply.md` → Step 5). 다른 공고라면 불러오지 않고 **Evaluate as new** 또는 **Draft without saving**으로 갑니다.
 4. `## Application Answers`가 있으면 제출한 답변을 base로 불러옵니다. 없고 블록 H가 있으면 이전 답변 초안을 불러옵니다. 둘 다 있으면 `## Application Answers`를 우선합니다.
 5. 매칭되는 report가 없으면 후보자에게 알리고 빠른 auto-pipeline 실행을 제안합니다.
 
 ## Step 3 -- 역할 변경 감지
+
+이 단계는 양식이 여전히 report의 공고일 때만 적용됩니다: 같은 고용주이고 같은 공고여야 합니다 (`modes/apply.md` → Step 5 → **Posting identity**). 직함은 따지지 않습니다. 직함이 그대로이고 회사와 일치하는 report가 하나뿐이어도 모든 양식에서 이를 확인하세요: 다른 공고도 같은 직함을 쓸 수 있으며, 그 경우 report를 사용하면 안 됩니다. 회사와 일치하는 report가 여러 개라면, 먼저 URL이나 req ID가 이 공고인 report를 고르고, 불분명하면 후보자에게 물어보세요. 다른 고용주이거나 같은 고용주의 다른 공고라면 역할 변경이 아닙니다: report의 답변을 거기에 맞춰 조정하지 마세요. 대신 **Evaluate as new** (새 공고로 평가: auto-pipeline, 별도 report) 또는 **Draft without saving** (어떤 report에도 저장하지 않고 답변 초안만 작성)을 선택하세요. **Draft without saving**에서는 일치한 report와 그 답변, 맞춤 CV를 제쳐 두고, 보이는 공고와 `cv.md`, 프로필만으로 작성하세요. report를 읽는 아래 단계는 적용되지 않습니다.
 
 화면의 역할이 평가한 역할과 다르면:
 - **후보자에게 알림**: "역할이 [X]에서 [Y]로 바뀐 것 같습니다. 새 역할로 다시 평가할까요, 아니면 새 title에 맞춰 답변만 조정할까요?"
@@ -53,6 +55,8 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
   - **조정한 경우**: 역할명을 바꾸지 않습니다. 역할명은 report가 평가한 역할을 가리키기 때문입니다. 변경 사실은 note로 기록합니다: `node set-status.mjs --report <report#> <현재 status> --note "지원 시점에 공고 제목이 변경됨, row는 평가한 역할명을 유지"`. row의 현재 status를 그대로 전달하면 status는 바뀌지 않고 note만 추가됩니다. note는 이처럼 고정된 문구로 쓰고 `[Y]`는 넣지 않습니다. 새 역할명은 페이지에서 온 텍스트이며, 페이지의 텍스트는 command line에 넣지 않습니다.
 
 ## Step 4 -- 지원서 질문 분석
+
+**Draft without saving**에서는 이 단계에서 일치한 report, 그 `## Application Answers`, 블록 H를 쓰지 않습니다: 모든 질문을 새 질문으로 보고 보이는 공고, `cv.md`, 프로필로 작업하세요.
 
 화면에 보이는 모든 질문을 식별합니다.
 - 자유 입력 필드 (커버레터, "왜 이 역할인가요", 지원 동기 등)
@@ -66,6 +70,8 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 - **새 질문** -> report + `cv.md`를 바탕으로 답변 생성
 
 ## Step 5 -- 답변 생성
+
+**Draft without saving**에서는 이 단계에서 일치한 report, 그 `## Application Answers`, 블록 H를 쓰지 않습니다: 모든 질문을 새 질문으로 보고 보이는 공고, `cv.md`, 프로필로 작업하세요.
 
 각 질문에 대해 다음 구조로 답변을 만듭니다.
 
@@ -89,6 +95,7 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 ## [회사] -- [역할] 지원서 답변
 
 Base: Report #NNN | Score: X.X/5 | Archetype: [type]
+[**Draft without saving**이면 위 줄을 다음으로 바꿉니다: "report 없음: 이 공고용 초안, 저장하지 않음"]
 
 ---
 
@@ -108,6 +115,8 @@ Notes:
 ```
 
 ## Step 6 -- 지원 후 처리 (선택)
+
+무엇이든 저장하기 전에, 그리고 아래의 각 쓰기(상태와 답변) 직전에 다시 한 번, 양식이 여전히 report의 공고인지 확인하세요 (`modes/apply.md` → Step 8 → **Write only to the report of this posting**). 같은 고용주, 같은 공고 → 아래 단계는 이 report에 적용됩니다. 새 직함에 맞춘 조정이나 재평가 후에도 마찬가지입니다. 다른 고용주나 다른 공고 → 절대 이 report가 아닙니다: 새 공고용으로 작성된 report를 사용하고, 그런 report가 없으면 상태를 설정하지 말고 답변도 저장하지 말며, 지원이 아직 추적되지 않는다고 후보자에게 알리세요.
 
 후보자가 지원서를 제출했다고 확인하면:
 1. 정식 CLI로 status를 `Applied`로 변경합니다: `node set-status.mjs --report <report#> Applied` (`data/applications.md` 표를 직접 수정하지 않습니다). TSV 병합은 기존 row의 status를 바꾸지 않습니다.

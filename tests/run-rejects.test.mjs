@@ -55,7 +55,10 @@ const MSG = 'No URL provided.';
     { ...QUIET, timeout: 500 },
   );
   const f = lastRunFailure();
-  if (f?.signal && f.status === null && f.stderr.includes(MSG)) pass('the timeout child is killed by a signal with the message on stderr (premise)');
+  // Windows kills the child before its stderr is flushed; the signal and status
+  // still prove the timeout path, and the behavioural assertion below covers it.
+  const stderrFlushed = f?.stderr.includes(MSG) || (process.platform === 'win32' && f?.code === 'ETIMEDOUT');
+  if (f?.signal && f.status === null && stderrFlushed) pass('the timeout child is killed by a signal with the message on stderr (premise)');
   else fail(`timeout child premise broken: ${JSON.stringify(f)}`);
   if (!ok) pass('runRejects() rejects a child killed by the timeout');
   else fail('runRejects() counted a timed-out child as the intended rejection');

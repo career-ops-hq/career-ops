@@ -80,3 +80,14 @@ test('dry runs and invalid flag combinations never change a tracker', t => {
   for (const args of [['--remove-note='], ['--remove-note=remove', '--note=other'], ['--remove-note=remove', '--replace-note=keep', '--note=new']]) assert.equal(run(f, ...args).status, 1);
   assert.equal(readFileSync(f.file, 'utf8'), tracker('keep; remove'));
 });
+
+// The status writer also preserves legacy text after a status date. Removing
+// another note in that same transaction must keep the migrated status text.
+test('removing a note preserves legacy status text moved into Notes', t => {
+  const f = fixture(t, 'keep; remove');
+  const legacy = 'Applied 2026-10-02 via referral';
+  writeFileSync(f.file, tracker('keep; remove').replace('| Evaluated |', `| ${legacy} |`));
+  const result = run(f, '--remove-note=remove', '--expect-notes=keep; remove');
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(readFileSync(f.file, 'utf8'), tracker(`${legacy}; keep`));
+});

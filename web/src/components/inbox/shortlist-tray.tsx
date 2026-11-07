@@ -133,7 +133,7 @@ function ConfirmScore({
     return (
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted">No AI configured.</span>
-        <Link href="/config" className="inline-flex items-center gap-1 rounded-full border border-brand/40 bg-brand-soft px-3 py-1.5 font-medium text-brand max-sm:min-h-[44px]">
+        <Link href="/config" className="inline-flex items-center gap-1 rounded-full border border-brand/40 bg-brand-soft px-3 py-1.5 font-medium text-brand-text max-sm:min-h-[44px]">
           <Settings className="size-3.5" /> Set up
         </Link>
         <button type="button" onClick={onCancel} className="text-faint hover:text-foreground max-sm:min-h-[44px]">
@@ -145,7 +145,7 @@ function ConfirmScore({
   return (
     <div className="flex items-center gap-2">
       <span className="hidden items-center gap-1 text-[11px] text-muted sm:inline-flex">
-        <Coins className="size-3.5 text-brand" /> {costText}
+        <Coins className="size-3.5 text-brand-text" /> {costText}
       </span>
       <button
         type="button"

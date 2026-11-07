@@ -248,3 +248,12 @@ test('matchesTailoredCover: requires a cover token, excludes cv-, and honours th
   assert.equal(matchesTailoredCover('acmecorp-engineer-cover.pdf', 'acme'), false);
   assert.equal(matchesTailoredCover('acme-vp-marketing-cover.pdf', ''), false);
 });
+
+test('matchesTailoredCover: an over-budget draft beside the cover is never the cover', () => {
+  // generate-pdf.mjs keeps a render that ran over its page budget as
+  // {name}.overflow.pdf (then .overflow-2.pdf, ...) next to the real path, and
+  // writes it after the deliverable, so newest-first would pick it.
+  assert.equal(matchesTailoredCover('acme-vp-marketing-cover.overflow.pdf', 'acme'), false);
+  assert.equal(matchesTailoredCover('acme-vp-marketing-cover.overflow-2.pdf', 'acme'), false);
+  assert.equal(matchesTailoredCover('acme-vp-marketing-cover.pdf', 'acme'), true);
+});

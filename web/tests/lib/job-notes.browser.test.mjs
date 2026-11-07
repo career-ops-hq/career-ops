@@ -22,6 +22,11 @@ test('add, edit, delete, undo and persist job notes without changing status or o
   const notes = () => row().getByRole('button', { name: /^Notes for/ });
   const dialog = () => page.getByRole('dialog', { name: 'Job notes', exact: true });
   await page.goto(`${origin.origin}/pipeline?tab=ALL`);
+  // Notes adds a column beside the existing resume link, including virtual rows.
+  await page.getByRole('columnheader', { name: 'resume', exact: true }).waitFor();
+  await page.getByRole('columnheader', { name: 'Notes', exact: true }).waitFor();
+  assert.equal(await page.getByRole('columnheader').count(), 9);
+  assert.equal(await row().locator('td').count(), 9);
   await notes().click();
   await dialog().getByLabel('New note', { exact: true }).fill('Ask for an internal referral');
   await dialog().getByRole('button', { name: 'Add note', exact: true }).click();

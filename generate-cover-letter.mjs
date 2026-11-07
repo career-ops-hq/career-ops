@@ -18,7 +18,7 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
-import { assertFacts, printFactWarnings } from "./verify-cv-facts.mjs";
+import { assertFacts, newFactWarnings, printFactWarnings } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { PAGE_FORMATS, normalizePageFormat, pageFormatForCountry } from "./lib/page-format.mjs";
@@ -79,10 +79,20 @@ function containedInOutput(absPath) {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-/** Assert that a payload object contains the required keys. */
+/** Assert that a payload object contains the required keys and that their values are non-empty strings. */
 function _require(obj, keys, context) {
   for (const key of keys) {
-    if (!obj || typeof obj !== "object" || !(key in obj)) {
+    const value = obj && typeof obj === "object" ? obj[key] : undefined;
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(`Missing required field: ${context}.${key}`);
+    }
+  }
+}
+
+/** Assert that a payload contains the required object-shaped fields. */
+function _requireObject(obj, keys, context) {
+  for (const key of keys) {
+    if (!obj || typeof obj !== "object" || !(key in obj) || typeof obj[key] !== "object" || obj[key] === null) {
       throw new Error(`Missing required field: ${context}.${key}`);
     }
   }
@@ -144,9 +154,10 @@ function buildDateline(letter, hasRecipientBlock = false) {
   // one; either way, dropping company and city would lose them with nothing
   // taking their place. The shipped base template is the second case, so it
   // keeps the full join exactly as before.
+  const company = typeof letter.company === "string" ? letter.company : "";
   const parts = hasRecipientBlock
     ? [letter.date]
-    : [letter.company, letter.city, letter.date];
+    : [company, letter.city, letter.date];
   return parts.filter(Boolean).map(escapeHtml).join(" &nbsp;&nbsp; ");
 }
 
@@ -302,21 +313,83 @@ function buildSignatureBlock(signature, candidateName) {
 
 // Resolve the cover-letter template through the shared resolver so a
 // `cover_letter.template` profile default, an explicit `payload.template`, and
-// installed template packs are all honored. Any resolver failure (no profile,
-// no templates dir, bad config) falls back to the base template, preserving the
-// original hardcoded behavior.
+// installed template packs are all honored. With nothing configured the
+// resolver returns the base template (its default name is `standard`).
+//
+// Resolver errors propagate (#6370). This used to pass `fallback: true` and
+// catch everything, returning the base template, so a malformed
+// config/profile.yml, a template name that does not exist, or a template
+// missing required placeholders all rendered a plain letter with no warning:
+// the candidate's letterhead, signature or layout silently dropped. That
+// contradicts modes/cover.md Step 8 and `cv-templates.mjs resolve cover`,
+// which both surface the error. main() already prints a buildHtml error and
+// exits 1. A caller can still pass `{ fallback: true }` in opts, but that only
+// covers a template NAME that does not exist (it then resolves `standard`). A
+// malformed profile or an invalid template is an error either way: falling
+// back over those is exactly the silent substitution this function stopped
+// doing.
 export function resolveCoverTemplatePath(payload = {}, opts = {}) {
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const base = resolve(scriptDir, "templates", "cover-letter-template.html");
-  try {
-    return resolveTemplate("cover", payload.template, { format: "html", fallback: true, ...opts });
-  } catch {
-    return base;
+  return resolveTemplate("cover", payload.template, { format: "html", strict: true, ...opts });
+}
+
+/**
+ * Replace every balanced `{{ … }}` token in `text` in a single pass.
+ *
+ * Depth-aware: `{{` opens a level and `}}` closes one, and a token is the span
+ * from an opening `{{` to the `}}` that brings the depth back to zero. So
+ * `{{ outer {{ inner }} }}` is ONE token, not `{{ outer {{ inner }}` followed by
+ * a stray ` }}`. Single braces (`({})`) do not count.
+ *
+ * An opening `{{` that is never closed is left as literal text and the scan
+ * continues just after it. Giving up there instead would leave every later
+ * token in the template unfilled and unreported, which is worse than what a
+ * regex did.
+ *
+ * Each token is replaced by `replaceToken(token)`, and the result is never
+ * re-scanned, so a substituted value that contains `{{…}}` stays literal.
+ *
+ * @param {string} text
+ * @param {(token: string) => string} replaceToken
+ * @returns {string}
+ */
+export function replaceBalancedTokens(text, replaceToken) {
+  let out = "";
+  let emitted = 0;
+  let searchFrom = 0;
+  while (true) {
+    const start = text.indexOf("{{", searchFrom);
+    if (start === -1) break;
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < text.length - 1; ) {
+      if (text[i] === "{" && text[i + 1] === "{") {
+        depth++;
+        i += 2;
+      } else if (text[i] === "}" && text[i + 1] === "}") {
+        depth--;
+        i += 2;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      } else {
+        i++;
+      }
+    }
+    if (end === -1) {
+      // Unterminated: keep this `{{` literal and look for the next one.
+      searchFrom = start + 2;
+      continue;
+    }
+    out += text.slice(emitted, start) + replaceToken(text.slice(start, end));
+    emitted = end;
+    searchFrom = end;
   }
+  return out + text.slice(emitted);
 }
 
 export function buildHtml(payload, templatePath) {
-  _require(payload, ["candidate", "letter"], "payload");
+  _requireObject(payload, ["candidate", "letter"], "payload");
   const candidate = payload.candidate;
   const letter = payload.letter;
   _require(candidate, ["name"], "candidate");
@@ -377,8 +450,20 @@ export function buildHtml(payload, templatePath) {
   // scanning the result: a scan of the output cannot tell a template token from
   // the same sequence appearing inside a substituted value, which is exactly
   // what the single pass above is careful to leave literal.
+  //
+  // The pass visits EVERY `{{…}}` sequence, not only `{{UPPER_SNAKE}}` ones.
+  // Matching only the shape the map uses meant a lowercase, digit-bearing,
+  // hyphenated or space-padded token (`{{role_title}}`, `{{OPENING2}}`,
+  // `{{ COMPANY }}`) was never visited, so it was neither filled nor reported
+  // and shipped verbatim in the PDF (#6374). Lookup stays exact on purpose:
+  // `{{ COMPANY }}` is not `{{COMPANY}}`, and guessing would hide the typo.
+  //
+  // Tokens are found by balancing `{{` against `}}` (replaceBalancedTokens),
+  // not by a regex, so a token that contains braces — `{{ config | default({}) }}`
+  // — or another token — `{{ outer {{ inner }} }}` — is visited and reported
+  // whole, rather than cut at the first `}}` it happens to contain.
   const unresolved = new Set();
-  const rendered = html.replace(/\{\{[A-Z_]+\}\}/g, (token) => {
+  const rendered = replaceBalancedTokens(html, (token) => {
     const value = replacements[token];
     if (value == null) {
       unresolved.add(token);
@@ -471,8 +556,13 @@ Usage:
   }
 
   if (!payload.output_path) {
-    const company = (payload.letter?.company || "company").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
+    const company = (typeof payload.letter?.company === "string" ? payload.letter.company : "company")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-");
+    const role = (typeof payload.letter?.role_title === "string" ? payload.letter.role_title : "role")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 30);
     payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
   } else {
     try {
@@ -490,10 +580,11 @@ Usage:
     // Cover letters are candidate-facing documents too. Reuse the CV fact
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
-    const factCheck = assertFacts(html, {
+    const factOptions = {
       label: "cover letter",
       planTexts: letterInputTexts(payload),
-    });
+    };
+    const factCheck = assertFacts(html, factOptions);
     // Ahead of the verdict, because it qualifies it: with no config the phrase
     // lists are empty, so a silent gate here covers metrics and facts only.
     if (factCheck.configMissing) {
@@ -505,9 +596,22 @@ Usage:
     }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.
-    const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
+    const { normalizeTextForATS, reportAtsReplacements, renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
-    await renderHtmlToPdf(html, outputPath, {
+    // The pass a CV gets before it prints. Without it a letter kept its em
+    // dashes and curly quotes, and printed a draft's **bold** with the asterisks.
+    const { html: printed, replacements } = normalizeTextForATS(html);
+    reportAtsReplacements(replacements, console.error);
+    // As for a CV, the gate also reads the document that prints: the pass can
+    // spell out a phrase the draft hid, as `self–starter` prints as
+    // `self-starter`. A forbidden one stops here. Anything advisory is reported,
+    // unless the check above already named it.
+    const printedWarnings = newFactWarnings(factCheck, assertFacts(printed, factOptions));
+    if (printedWarnings) {
+      console.error(`CV fact check warning: cover letter`);
+      printFactWarnings(printedWarnings, console.error);
+    }
+    await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.

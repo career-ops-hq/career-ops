@@ -6,6 +6,7 @@ import { Check, Pencil, X } from "lucide-react";
 import { CANONICAL_STATES, statusDot } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { saveStatus } from "@/lib/pipeline-status.mjs";
+import { appliedWriteAllowed, statusEditAction } from "@/lib/applied-confirm.mjs";
 
 // Status writeback control. Updates the existing tracker row (status cell) via
 // /api/status — never adds rows. Reverts on failure; confirms with the
@@ -16,18 +17,25 @@ type StatusSelectProps = {
   inline?: boolean;
   applicationLabel?: string;
   onSaved?: (status: string, restoreFocus: boolean) => void;
+  // Set when this row unmounted during an earlier save. Pending keeps the
+  // chosen status on screen. Failed is the error the unmounted editor could
+  // not show.
+  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string };
+  onHeldSave?: (event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" }) => void;
 };
 
 export function StatusSelect(props: StatusSelectProps) {
   return <StatusEditor key={props.n} {...props} />;
 }
 
-function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }: StatusSelectProps) {
+function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, heldSave, onHeldSave }: StatusSelectProps) {
   const [status, setStatus] = useState(current);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
+  const [pendingApplied, setPendingApplied] = useState(false);
+  const pendingFrom = useRef("");
   const saving = useRef(false);
   const mounted = useRef(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -38,7 +46,10 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
   const label = applicationLabel ?? `application #${n}`;
 
   useEffect(() => {
-    if (!saving.current) setStatus(current);
+    if (!saving.current) {
+      setStatus(current);
+      setPendingApplied(false);
+    }
   }, [current]);
 
   useEffect(() => {
@@ -53,34 +64,51 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
     if (editing && inline) select.current?.focus();
   }, [editing, inline]);
 
+  const heldPending = heldSave?.phase === "pending" ? heldSave.status : "";
+  const heldError = heldSave?.phase === "failed" ? heldSave.error : "";
+  const savingNow = busy || heldPending !== "";
+  const errorShown = error || heldError;
+
   function cancel() {
-    if (saving.current) return;
+    if (saving.current || heldPending) return;
+    setPendingApplied(false);
     setStatus(current);
     setEditing(false);
     setError("");
     requestAnimationFrame(() => pencil.current?.focus());
   }
 
-  async function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const next = e.target.value;
-    const prev = inline ? current : status;
-    if (saving.current || next === prev) return;
-    const hadFocus = document.activeElement === select.current;
+  function declineApplied() {
+    if (saving.current || heldPending) return;
+    setPendingApplied(false);
+    setStatus(pendingFrom.current || current);
+    setError("");
+  }
+
+  async function commitChange(next: string, prev: string, hadFocus: boolean) {
     saving.current = true;
     setStatus(next);
     setBusy(true);
     setSaved(false);
     setError("");
+    // Record the attempt before the request, so a scroll that unmounts this
+    // editor still has the chosen status and can show a later failure.
+    onHeldSave?.({ type: "start", status: next });
     try {
       const confirmed = await saveStatus(n, prev, next);
-      if (!confirmed) return;
-      // A filter may unmount this editor while the write is in flight. Still
-      // refresh; the parent's callback captures identity, never row position.
-      // Disabling a focused select can move focus to body. Restore it only
-      // if the user has not moved to search, tabs or another row meanwhile.
+      if (!confirmed) {
+        onHeldSave?.({ type: "clear" });
+        return;
+      }
+      // A filter or the row window may unmount this editor while the write is
+      // in flight. Still refresh; the parent's callback captures identity,
+      // never row position. Disabling a focused select can move focus to body.
+      // Restore it only if the user has not moved to search, tabs or another
+      // row meanwhile.
       const restoreFocus = hadFocus && (document.activeElement === document.body || document.activeElement === select.current);
       if (onSaved) onSaved(confirmed, restoreFocus);
       else router.refresh();
+      onHeldSave?.({ type: "clear" });
       if (!mounted.current) return;
       setStatus(confirmed);
       setEditing(false);
@@ -91,25 +119,59 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
         requestAnimationFrame(() => pencil.current?.focus());
       }
     } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Could not save status. Please try again.";
+      onHeldSave?.({ type: "fail", error: message });
       if (!mounted.current) return;
       setStatus(prev); // revert on failure
-      setError(cause instanceof Error ? cause.message : "Could not save status. Please try again.");
+      setError(message);
     } finally {
       saving.current = false;
       if (mounted.current) setBusy(false);
     }
   }
 
-  const shown = inline && !busy ? current : status;
+  async function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const next = e.target.value;
+    const prev = pendingApplied ? pendingFrom.current : (inline ? current : status);
+    if (saving.current || heldPending) return;
+    const action = statusEditAction(next, prev);
+    if (action === "keep") {
+      setPendingApplied(false);
+      setStatus(current);
+      return;
+    }
+    if (action === "ask") {
+      pendingFrom.current = prev;
+      setStatus(next);
+      setPendingApplied(true);
+      setError("");
+      return;
+    }
+    setPendingApplied(false);
+    await commitChange(next, prev, document.activeElement === select.current);
+  }
+
+  async function confirmApplied() {
+    if (!pendingApplied || saving.current || heldPending) return;
+    const prev = pendingFrom.current;
+    const active = document.activeElement;
+    const hadFocus = active === select.current
+      || (active instanceof HTMLElement && Boolean(active.closest("[data-status-editor]")));
+    setPendingApplied(false);
+    await commitChange("Applied", prev, hadFocus);
+  }
+
+  const shown = heldPending ? heldPending : pendingApplied ? status : inline && !busy ? current : status;
+  const appliedAsk = appliedWriteAllowed({ status: "Applied", confirmed: false });
   const known = (CANONICAL_STATES as readonly string[]).includes(shown);
-  const buttonClass = "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-brand focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50 max-sm:size-11";
+  const buttonClass = "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-brand-text focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50 max-sm:size-11";
   const control = (
     <select
       ref={select}
       id={id}
       aria-label={inline ? `Status for ${label}` : undefined}
-      aria-invalid={error ? true : undefined}
-      aria-describedby={error ? `${id}-error` : undefined}
+      aria-invalid={errorShown ? true : undefined}
+      aria-describedby={errorShown ? `${id}-error` : undefined}
       value={shown}
       onChange={onChange}
       onKeyDown={(event) => {
@@ -118,7 +180,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
           cancel();
         }
       }}
-      disabled={busy}
+      disabled={savingNow}
       className="rounded-md border border-border bg-surface px-2.5 py-1 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50 max-sm:min-h-[44px]"
     >
       {!known && <option value={shown}>{shown}</option>}
@@ -126,11 +188,11 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
     </select>
   );
   return (
-    <span className="inline-flex flex-wrap items-center gap-2" aria-busy={busy}>
-      {inline ? editing ? (
+    <span className="inline-flex flex-wrap items-center gap-2" aria-busy={savingNow} data-status-editor="">
+      {inline ? (editing || heldPending !== "") ? (
         <>
           {control}
-          <button type="button" aria-label={`Cancel editing status for ${label}`} title="Cancel" onClick={cancel} disabled={busy} className={buttonClass}>
+          <button type="button" aria-label={`Cancel editing status for ${label}`} title="Cancel" onClick={cancel} disabled={savingNow} className={buttonClass}>
             <X aria-hidden="true" className="size-3.5" />
           </button>
         </>
@@ -140,7 +202,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
             <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", statusDot(shown))} />
             {shown}
           </span>
-          <button ref={pencil} type="button" aria-label={`Edit status for ${label}`} title="Edit status" onClick={() => { setError(""); setEditing(true); }} className={buttonClass}>
+          <button ref={pencil} type="button" aria-label={`Edit status for ${label}`} title="Edit status" onClick={() => { setError(""); onHeldSave?.({ type: "clear" }); setEditing(true); }} className={buttonClass}>
             <Pencil aria-hidden="true" className="size-4" />
           </button>
         </>
@@ -150,13 +212,24 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
           {control}
         </>
       )}
-      {busy && <span role="status" className="text-xs text-faint">saving…</span>}
+      {pendingApplied && (
+        <span className="inline-flex items-center gap-2">
+          <span className="text-xs text-foreground">{appliedAsk.prompt}</span>
+          <button type="button" onClick={() => void confirmApplied()} disabled={savingNow} className="text-xs font-medium text-brand-text disabled:opacity-60">
+            {appliedAsk.yesLabel}
+          </button>
+          <button type="button" onClick={declineApplied} disabled={savingNow} className="text-xs text-muted hover:text-foreground disabled:opacity-60">
+            Not yet
+          </button>
+        </span>
+      )}
+      {savingNow && <span role="status" className="text-xs text-faint">saving…</span>}
       {saved && (
-        <span role="status" className="animate-terminal-popup inline-flex items-center gap-1 text-xs font-medium text-brand">
+        <span role="status" className="animate-terminal-popup inline-flex items-center gap-1 text-xs font-medium text-brand-text">
           <Check aria-hidden="true" className="size-3" /> saved
         </span>
       )}
-      {error && <span id={`${id}-error`} role="alert" className="basis-full whitespace-normal text-xs text-red-600">{error}</span>}
+      {errorShown && <span id={`${id}-error`} role="alert" className="basis-full whitespace-normal text-xs text-red-700 dark:text-red-400">{errorShown}</span>}
     </span>
   );
 }

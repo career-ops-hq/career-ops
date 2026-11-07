@@ -205,9 +205,6 @@ De veldnamen in de kop (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 
 ---
 
-## Machine Summary
-(YAML-blok voor scripts -- zie de eis hieronder)
-
 ## A) Samenvatting van de functie
 (volledige inhoud van blok A)
 
@@ -251,11 +248,14 @@ De veldnamen in de kop (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 
 ## Job Description (archived verbatim)
 (de volledige tekst van de vacature, letterlijk geplakt -- zie de eis hieronder)
+
+## Machine Summary
+(YAML-blok voor scripts -- zie de eis hieronder)
 ```
 
 **Beslissingsregel (verplicht):** `**Beslissing:**` is `final_decision` uit de Machine Summary, en de regel onder de kop is de zin uit `## Conclusie (lead)`, woordelijk gekopieerd. Beide als laatste invullen. Gebruik nooit `Verdict:` als veldnaam: de webapp leest de eerste `VERDICT:` als scoreregel.
 
-**Machine Summary (verplicht):** YAML-blok direct na de kop, met schema, exacte veldnamen en regels uit `batch/batch-prompt.md` (de bron; hier niet herhalen). Bevat `advertised_comp` (het salarisbedrag van de vacature letterlijk, of `null`), `risk_summary` en `requirement_importance` (blok B rij voor rij; de `inferred`-grens geldt ook hier).
+**Machine Summary (verplicht):** YAML-blok aan het eind van het rapport, na `## Job Description (archived verbatim)`, met schema, exacte veldnamen en regels uit `batch/batch-prompt.md` (de bron; hier niet herhalen). Bevat `advertised_comp` (het salarisbedrag van de vacature letterlijk, of `null`), `risk_summary` en `requirement_importance` (blok B rij voor rij; de `inferred`-grens geldt ook hier).
 
 **Archivering van de vacature (verplicht, #2789):** Elk rapport MOET een sectie `## Job Description (archived verbatim)` bevatten met de volledige tekst van de vacature, nooit samengevat of herschreven. De kop blijft Engels: `check-jd-archive.mjs` zoekt hem op naam. De eerste regel is de zichtbare publicatiedatum (`Posted: {datum of relatieve tekst}`, of `Posted: not visible in source`), nooit de datum van het rapportbestand. Is de vacature te lang of niet volledig te citeren, sla haar dan op met `archive-posting.mjs` (opdracht hieronder) en zet in de sectie **exact** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, zonder andere tekst. Is geen machinale opslag mogelijk (bijvoorbeeld een lange geplakte tekst zonder URL), hernoem de sectie dan naar `## Job Description (not archived)` en vermeld waarom. Nooit een parafrase in plaats daarvan; de volledige regel staat in `modes/oferta.md` (**JD archival**).
 

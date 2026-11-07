@@ -3,15 +3,24 @@ import { parseWpJobFeedItems, wpJobFeedItems } from './_wp-job-feed.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Jobspresso provider - public WordPress jobs feed
-// (https://jobspresso.co/?feed=job_feed). The feed is public, no-auth,
+// (https://jobspresso.co/feed/job_feed/). The feed is public, no-auth,
 // and XML, so it is parsed in-process with the same tiny tag extractor
 // approach as providers/personio.mjs rather than adding an XML dependency.
 // The item parsing is shared with providers/wp-job-manager.mjs, the generic
 // provider for any board on the same plugin (providers/_wp-job-feed.mjs).
 //
 // Wire in via a `job_boards:` entry with `provider: jobspresso`.
+//
+// robots.txt (Source Indexing Policy rule 6): jobspresso.co disallows `/*?`
+// under `User-agent: *`, which covers the plugin's default `/?feed=job_feed`
+// URL. WordPress serves the same feed at the pretty-permalink path below,
+// which carries no query string and is the URL the feed's own
+// `<atom:link rel="self">` names, so that is the one fetched (#5774). Keep
+// it query-free: adding `paged` or `posts_per_page` would put the request
+// back under the Disallow. One request per scan is well within the site's
+// `Crawl-delay: 3`.
 
-const FEED_URL = 'https://jobspresso.co/?feed=job_feed';
+const FEED_URL = 'https://jobspresso.co/feed/job_feed/';
 const TRUSTED_HOST = 'jobspresso.co';
 
 /** @param {string} url */
@@ -75,10 +84,11 @@ function cleanUrl(value) {
  * - pubDate
  * - job_listing:company
  * - job_listing:location
+ * - content:encoded (the full post, which becomes `description`)
  *
  * The RSS link is used as the dedup key.
  * @param {string} xml - raw RSS feed body
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number, description?: string}>}
  */
 export function parseJobspressoFeed(xml) {
   if (typeof xml !== "string") return [];

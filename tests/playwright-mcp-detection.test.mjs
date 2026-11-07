@@ -35,15 +35,23 @@ const EMPTY_HOME_DIR = mkdtempSync(join(tmpdir(), 'co-mcp-emptyhome-'));
 // the CLAUDE_CONFIG_DIR pinning and as the CAREER_OPS_CLI delete in
 // doctor-cli-resolution.test.mjs. Scenarios that WANT any of these values
 // pass them explicitly via env.
+// The default scenarios assert cli_source=default means claude. That is only
+// true when no other agent CLI is executable on PATH. System directories are
+// not a safe pin: a machine image can ship a binary whose name matches one
+// (pi, gemini, copilot). An empty directory cannot. Node is launched by its
+// absolute path, and doctor skips its git check when git cannot be run.
+const EMPTY_PATH_DIR = mkdtempSync(join(tmpdir(), 'co-mcp-empty-path-'));
+
 function hostEnv() {
   const {
     OPENCODE: _openCodeMarker,
     OPENCODE_CONFIG: _openCodeConfig,
     OPENCODE_CONFIG_DIR: _openCodeConfigDir,
     XDG_CONFIG_HOME: _xdgConfigHome,
+    PATH: _path,
     ...rest
   } = process.env;
-  return rest;
+  return { ...rest, PATH: EMPTY_PATH_DIR };
 }
 
 function runDoctor(cwd, args, env, { executionCwd = cwd } = {}) {
@@ -1227,4 +1235,5 @@ try {
 } finally {
   rmSync(EMPTY_CONFIG_DIR, { recursive: true, force: true });
   rmSync(EMPTY_HOME_DIR, { recursive: true, force: true });
+  rmSync(EMPTY_PATH_DIR, { recursive: true, force: true });
 }
