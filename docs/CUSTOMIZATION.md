@@ -47,7 +47,7 @@ The HTML template uses these design tokens:
 - **Colors**: Cyan primary (`hsl(187,74%,32%)`) + Purple accent (`hsl(270,70%,45%)`)
 - **Layout**: Single-column, ATS-optimized
 
-To customize fonts/colors, edit the CSS in the template. Update font files in `fonts/` if switching fonts.
+To customize fonts/colors, copy the template to `data/templates/cv-template.{name}.html` under your data root, edit the CSS in the copy, and set `cv.template: {name}` in `config/profile.yml`. Don't edit `templates/cv-template.html` itself: updates replace it. Update font files in `fonts/` if switching fonts.
 
 ## Negotiation Scripts (modes/_profile.md)
 

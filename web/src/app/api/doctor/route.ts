@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,6 @@ const UNAVAILABLE = { available: false, onboardingNeeded: false, missing: [], wa
 // source of truth the CLI uses to decide onboarding. We never reimplement the
 // prerequisite list; we read the core's verdict.
 export async function GET() {
-  const root = careerOpsRoot();
   const doctor = rootScript("doctor");
   if (!fs.existsSync(doctor)) {
     return Response.json(UNAVAILABLE);
@@ -25,7 +25,7 @@ export async function GET() {
   // "Doctor didn't answer" must surface as available:false, never as a clean
   // bill of health.
   const { failed, stdout } = await new Promise<{ failed: boolean; stdout: string }>((resolve) => {
-    execFile(process.execPath, [doctor, "--json"], { cwd: root, timeout: 10_000, windowsHide: true }, (err, out) =>
+    execFile(process.execPath, [doctor, "--json"], { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 10_000, windowsHide: true }, (err, out) =>
       resolve({ failed: !!err || !(out ?? "").trim(), stdout: out || "" }),
     );
   });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,7 @@ export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
+  const refetch = useCallback(() => {
     fetch("/api/documents")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load documents");
@@ -38,6 +37,17 @@ export default function DocumentsPage() {
         setLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    refetch();
+
+    window.addEventListener("co-job-done", refetch);
+
+    return () => {
+      window.removeEventListener("co-job-done", refetch);
+    };
+  }, [refetch]);
+
 
   if (loading) {
     return (
@@ -68,14 +78,24 @@ export default function DocumentsPage() {
 
   if (documents.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center p-8 text-center">
-        <div className="mb-4 rounded-full bg-surface-hover p-3 text-muted">
-          <FileText className="h-6 w-6" />
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Documents
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Browse your generated CVs and cover letters.
+          </p>
         </div>
-        <h2 className="text-lg font-medium text-foreground">No documents found</h2>
-        <p className="mt-1 text-sm text-muted">
-          Generated CVs and cover letters will appear here.
-        </p>
+        <div className="flex flex-col items-center justify-center p-8 text-center">
+          <div className="mb-4 rounded-full bg-surface-hover p-3 text-muted">
+            <FileText className="h-6 w-6" />
+          </div>
+          <h2 className="text-lg font-medium text-foreground">No documents found</h2>
+          <p className="mt-1 max-w-md text-sm text-muted">
+            Open a report and choose Generate tailored CV (PDF). The file shows up here.
+          </p>
+        </div>
       </div>
     );
   }

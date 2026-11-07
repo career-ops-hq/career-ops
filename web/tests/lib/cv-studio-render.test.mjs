@@ -46,10 +46,16 @@ function setup(file, { fail }) {
   const load = { ok: true, reportNum: "007", company: "Acme", file, tree, doc, edits: emptyEdits("h1"), stale: false, hasBase: false };
   const previousRoot = process.env.CAREER_OPS_ROOT;
   process.env.CAREER_OPS_ROOT = root;
+  // The stub scripts stand in for the code checkout, which is where the render
+  // looks for them; the temp dir is both roots here.
+  const previousCodeRoot = process.env.CAREER_OPS_CODE_ROOT;
+  process.env.CAREER_OPS_CODE_ROOT = root;
   const out = (name) => path.join(root, "output", name);
   const cleanup = () => {
     if (previousRoot === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = previousRoot;
+    if (previousCodeRoot === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = previousCodeRoot;
     fs.rmSync(root, { recursive: true, force: true });
   };
   return { load, out, cleanup };

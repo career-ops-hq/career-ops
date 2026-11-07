@@ -233,6 +233,10 @@ function plainInline(text) {
  * @param {string} body
  * @returns {{ intro: string, sections: Section[] }}
  */
+function normalizeNewlines(text) {
+  return String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 export function splitSections(body) {
   /** @type {string[]} */
   const intro = [];
@@ -240,7 +244,7 @@ export function splitSections(body) {
   const sections = [];
   /** @type {{ heading: string, letter: string | null, lines: string[] } | null} */
   let cur = null;
-  for (const line of body.split("\n")) {
+  for (const line of normalizeNewlines(body).split("\n")) {
     const h = line.match(/^##\s+(.*)$/);
     if (h) {
       if (cur) sections.push({ heading: cur.heading, letter: cur.letter, content: cur.lines.join("\n").trim() });
@@ -285,4 +289,17 @@ export function sectionPreview(md) {
     return clip(table.rows.map(([k, v]) => `${plain(k ?? "")}: ${plain(v ?? "")}`).join(" · "));
   }
   return `${n} row${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * Archetype strings are job titles. Unlabeled, they sit under the real role
+ * and read as a second title.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function archetypeCaption(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return `Archetype: ${text}`;
 }
