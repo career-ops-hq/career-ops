@@ -226,7 +226,8 @@ try {
   } else fail(`capped=${cappedJobs.length} warn=${JSON.stringify(capWarn)}`);
 
   // Nested index and robots-denied child are skipped and reported.
-  const { result: nestedJobs, lines: nestedWarn } = await captureWarnings(() => make(async (url) => (
+  let nestedErr = '';
+  const { lines: nestedWarn } = await captureWarnings(() => make(async (url) => (
     url.endsWith('/sitemap-jobs-2.xml')
       ? { allowed: false, code: 'robots_disallowed', reason: 'disallows /sitemap-jobs-2.xml for career-ops' }
       : allowAll()
@@ -236,12 +237,27 @@ try {
       if (url.endsWith('/sitemap-jobs-1.xml')) return '<sitemapindex><sitemap><loc>https://careers.example.com/x.xml</loc></sitemap></sitemapindex>';
       throw new Error(`unexpected ${url}`);
     },
-  }));
-  if (nestedJobs.length === 0
+  }).catch((err) => { nestedErr = err.message; }));
+  if (/none of the 2 child sitemaps read could be used/.test(nestedErr)
       && nestedWarn.some((l) => /nested sitemap index/.test(l))
       && nestedWarn.some((l) => /skipped child sitemap .*sitemap-jobs-2\.xml: robots\.txt disallows/.test(l))) {
-    pass('nested index (forbidden by the protocol) and robots-denied children are skipped with warnings');
-  } else fail(`nested jobs=${nestedJobs.length} warn=${JSON.stringify(nestedWarn)}`);
+    pass('nested index and robots-denied children are skipped with warnings, and an index with no readable child throws');
+  } else fail(`nested err=${nestedErr} warn=${JSON.stringify(nestedWarn)}`);
+
+  let typoErr = '';
+  let typoCalls = 0;
+  try {
+    await make().fetch({ ...ENTRY, sitemap: { ...ENTRY.sitemap, index_filter: 'sitemap-jbos' } }, {
+      fetchText: async (url) => { typoCalls++; return fixture('sitemap-employer-index.xml'); },
+    });
+  } catch (err) { typoErr = err.message; }
+  if (/lists 5 child sitemaps but none is usable .*index_filter sitemap-jbos/.test(typoErr) && typoCalls === 1) {
+    pass('an index_filter that matches no child throws instead of returning an empty board');
+  } else fail(`typo err=${typoErr} calls=${typoCalls}`);
+
+  const emptyIndex = await make().fetch(ENTRY, { fetchText: async () => '<?xml version="1.0"?><sitemapindex></sitemapindex>' });
+  if (Array.isArray(emptyIndex) && emptyIndex.length === 0) pass('an index with no <sitemap> entries is a valid empty board');
+  else fail('empty sitemapindex did not return []');
 
   // A failing child keeps the others and is reported.
   const { result: partialJobs, lines: partialWarn } = await captureWarnings(() => make().fetch(

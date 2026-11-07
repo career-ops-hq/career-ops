@@ -384,6 +384,7 @@ export function createSitemapProvider({ robotsGate = robotsAllows } = {}) {
         locs = capUrls(root.locs, cfg.url.href, name);
       } else {
         const children = [];
+        let readable = 0;
         for (const loc of root.locs) {
           let child;
           try { child = new URL(loc); } catch { continue; }
@@ -419,6 +420,16 @@ export function createSitemapProvider({ robotsGate = robotsAllows } = {}) {
             continue;
           }
           locs.push(...capUrls(doc.locs, child.href, name));
+          readable++;
+        }
+        // An index that lists children but yields no readable job sitemap is
+        // broken or misconfigured (index_filter typo, every child off-host,
+        // .gz, robots-denied, failing or nested), not an empty board. An index
+        // with no <sitemap> entries at all stays a valid empty board.
+        if (root.locs.length > 0 && readable === 0) {
+          throw new Error(children.length === 0
+            ? `sitemap: ${name}: the sitemap index lists ${root.locs.length} child sitemaps but none is usable (same host, not .gz${cfg.indexFilter ? `, matching index_filter ${cfg.indexFilter.source}` : ''})`
+            : `sitemap: ${name}: none of the ${Math.min(children.length, limit)} child sitemaps read could be used (robots-denied, failed or nested; see the warnings above)`);
         }
       }
 
