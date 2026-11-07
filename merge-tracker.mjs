@@ -632,15 +632,17 @@ export async function mergeTracker(options = {}) {
    * which reads as the label `jr` followed by an id. The row would gain a req
    * number it never had, and a req number in Notes stops later fuzzy matches
    * against any addition carrying a real one (#1524). The clause then names the
-   * board alone. The full URL is still in the linked report's URL header.
+   * board alone. A host can read as one too: `jobg8.com` is the label `job`
+   * followed by the id `g8`. The clause then names no board at all. The full URL
+   * is still in the linked report's URL header.
    *
    * @param {string} existingNotes - The row's Notes cell before this update.
    * @param {string} url - The aggregator URL the addition carried.
    * @returns {string}
    */
   function aggregatorSightingNote(existingNotes, url) {
-    let note = `Also listed at ${url}`;
-    if (extractReqNumber(note)) note = `Also listed at ${new URL(url).hostname}`;
+    const note = [`Also listed at ${url}`, `Also listed at ${new URL(url).hostname}`]
+      .find((candidate) => !extractReqNumber(candidate)) ?? 'Also listed on an aggregator board';
     return String(existingNotes ?? '').includes(note) ? '' : note;
   }
 

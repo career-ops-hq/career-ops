@@ -535,6 +535,18 @@ ok('a sighting URL that reads as a req number is noted by host, not planted as a
   assert.equal(extractReqNumber(notesCell(rows[0])), null, 'Notes carry no req number');
 });
 
+ok('a sighting whose host also reads as a req number is noted without the host', () => {
+  // `jobg8.com` reads as the label `job` followed by the id `g8`, so naming the
+  // host would plant the same req number the host-only fallback above avoids.
+  const aggregator = 'https://www.jobg8.com/jobs/4001';
+  assert.ok(extractReqNumber('Also listed at www.jobg8.com'), 'precondition: the host reads as a req number');
+  const rows = mergeTwoWithUrls('https://boards.greenhouse.io/acme/jobs/7001', aggregator);
+  assertMerged(rows, 'employer row, JobG8 sighting');
+  assert.equal(urlHref(rows[0]), 'https://boards.greenhouse.io/acme/jobs/7001', 'the employer URL stays the key');
+  assert.ok(notesCell(rows[0]).endsWith('Also listed on an aggregator board'), `got: ${notesCell(rows[0])}`);
+  assert.equal(extractReqNumber(notesCell(rows[0])), null, 'Notes carry no req number');
+});
+
 // ─────────────── …but the POSTING ID on one aggregator still is ───────────────
 //
 // "Aggregator on either side → unknown" was too coarse. Two DIFFERENT job IDs
