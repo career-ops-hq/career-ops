@@ -2,6 +2,9 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveCodeRoot, resolveRootScript } from "../core/code-root.mjs";
+import { checklistHrefFor } from "./checklist-href.mjs";
+
+export { checklistHrefFor };
 
 // Server-only. The host table stays in ats-vendor.mjs. A static import of that
 // engine file is outside the web bundle root, so this loads it at runtime.
@@ -52,19 +55,6 @@ function loadAtsVendor() {
 export function unsupportedAtsMessage(label, opened = false) {
   const lead = `This posting is on ${label}. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app`;
   return opened ? `${lead}. The window was closed.` : `${lead}, so no browser was opened.`;
-}
-
-/**
- * Tracker and report ids are digits. Anything else is omitted so the checklist
- * link cannot carry a path.
- *
- * @param {unknown} applicationNumber
- * @returns {string | null}
- */
-export function checklistHrefFor(applicationNumber) {
-  const id = typeof applicationNumber === "string" || typeof applicationNumber === "number" ? String(applicationNumber).trim() : "";
-  if (!/^\d+$/.test(id)) return null;
-  return `/pipeline/${id}/apply`;
 }
 
 /**

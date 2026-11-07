@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FileDown, Loader2, FileText, RotateCcw, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { CvPdfFileActions } from "@/components/cv-pdf-file-actions";
-import { pdfButtonState, type PdfFailure } from "@/lib/pdf-button-state.mjs";
+import { pdfButtonState, pdfJobRefreshesReport, type PdfFailure } from "@/lib/pdf-button-state.mjs";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 
 const quietPill =
@@ -15,11 +15,18 @@ const quietPill =
 
 // Fires the real career-ops `pdf` mode (worker kind "pdf") to generate an
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
-// Once a tailored CV exists (tracker PDF ✅, or a pdf worker just finished), it
-// becomes a "View tailored CV" link (served by /api/cv-pdf) + a regenerate icon.
-export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company: string; pdfReady: boolean }) {
+export function GeneratePdfButton({ n, company, onDisk }: { n: string; company: string; onDisk: boolean }) {
   const { jobs, startJob } = useJobs();
+  const router = useRouter();
   const listQuery = pipelineQuery(useSearchParams().toString());
+  useEffect(() => {
+    const onDone = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail : null;
+      if (pdfJobRefreshesReport(detail, n)) router.refresh();
+    };
+    window.addEventListener("co-job-done", onDone);
+    return () => window.removeEventListener("co-job-done", onDone);
+  }, [n, router]);
   const jobQuery = listQuery ? `?${listQuery}` : "";
   const studioHref = `/pipeline/${encodeURIComponent(n)}/cv-studio${jobQuery}`;
   const viewHref = `/api/cv-pdf?n=${encodeURIComponent(n)}&company=${encodeURIComponent(company)}`;
@@ -30,7 +37,7 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
   const generate = () =>
     startJob({ title: `CV PDF · ${company}`, subtitle: "tailored for this role", kind: "pdf", input: n, page: `/pipeline/${n}` });
 
-  const state = pdfButtonState(job, pdfReady);
+  const state = pdfButtonState(job, onDisk);
 
   if (state.kind === "running")
     return (

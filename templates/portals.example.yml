@@ -1377,6 +1377,12 @@ search_queries:
 # origin. A custom frontend merely handing applications to Eploy (for example,
 # Specsavers' Attrax jobs page) is not the same protocol and is not supported.
 #
+# sitemap is explicit-only too: it reads an employer's own careers-site job
+# sitemap (sitemaps.org XML, as announced by a `Sitemap:` line in robots.txt)
+# for an employer with no public ATS API or whose ATS API host disallows
+# crawlers. Set `provider: sitemap` plus `sitemap: { url, job_path }`; every
+# sitemap URL is checked against the site's robots.txt before it is fetched.
+#
 # wp-job-manager is explicit-only too: it reads the WP Job Manager plugin's
 # `/?feed=job_feed` RSS feed off any WordPress job board, and a WordPress
 # host has nothing to detect. Set `provider: wp-job-manager` + `careers_url`
@@ -1631,6 +1637,24 @@ search_queries:
 #   eploy:                       # optional detail-page enrichment
 #     fetchDetails: false        # default false; sitemap-only is one request
 #     detailLimit: 25            # 1..100; ignored unless fetchDetails is true
+#   enabled: true
+#
+# - name: Example Sitemap Co
+#   # An employer's own careers-site job sitemap (sitemaps.org <urlset> or
+#   # <sitemapindex>). Use it when the employer has no public ATS API, or its
+#   # ATS API host disallows crawlers. robots.txt is checked before every
+#   # sitemap fetch; a disallowed sitemap is a named error.
+#   careers_url: https://careers.exampleco.com/jobs/
+#   provider: sitemap            # required — no URL pattern to auto-detect
+#   sitemap:
+#     url: https://careers.exampleco.com/sitemap.xml   # https, on the careers host
+#     # Regex over each <loc> path. (?<slug>) is required (the title);
+#     # (?<posting_id>) → externalId, (?<req_id>) → requisitionId.
+#     job_path: '^/jobs/(?<posting_id>\d+)/(?<slug>[^/]+)/?$'
+#     index_filter: ''           # optional regex over child <loc> in a sitemapindex
+#     max_sitemaps: 50           # 1..1000 child sitemaps read from an index
+#     fetchDetails: false        # JSON-LD JobPosting enrichment, title-filter survivors only
+#     detailLimit: 25            # 1..200; ignored unless fetchDetails is true
 #   enabled: true
 #
 # - name: Example Phenom Co
@@ -2628,6 +2652,19 @@ tracked_companies:
     api: https://boards-api.greenhouse.io/v1/boards/boomilp/jobs
     notes: "Integration and automation platform."
     enabled: true
+
+  - name: ServiceNow
+    # Its SmartRecruiters Posting API host disallows crawlers in robots.txt;
+    # the careers site's own sitemap is open to all agents and lists every
+    # live job. Detail pages challenge non-browser clients, so titles come
+    # from URL slugs (fetchDetails stays off).
+    careers_url: https://careers.servicenow.com/jobs/
+    provider: sitemap
+    sitemap:
+      url: https://careers.servicenow.com/sitemap.xml
+      job_path: '^/jobs/(?<posting_id>\d+)/(?<slug>[^/]+)/?$'
+    notes: "Workflow automation / AI platform."
+    enabled: false
 
   # -- Ashby-based (Playwright direct) --
 

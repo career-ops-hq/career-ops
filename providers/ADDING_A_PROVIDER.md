@@ -766,6 +766,7 @@ Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 | Retry/backoff via the shared helper, default policy | `providers/a16z-speedrun-talent.mjs`, `providers/getro.mjs` |
 | Retry/backoff via the shared helper, policy override | `providers/workday.mjs`, `providers/oraclecloud.mjs` |
 | Detecting a clamped `total`, recovering it via query fan-out + dedup | `providers/workday.mjs` (facet split) |
+| Employer careers-site sitemap, robots.txt checked before every fetch, detail enrichment only for `ctx.titleWanted` survivors | `providers/sitemap.mjs` |
 
 `fetchJsonWithRetry` / `fetchTextWithRetry` (`providers/_http.mjs`) take an
 optional 4th argument `policy: { retries, baseDelayMs, maxDelayMs }` for a

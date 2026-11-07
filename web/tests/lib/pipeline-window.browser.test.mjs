@@ -87,6 +87,7 @@ test("an off-screen save failure moves the window, and the error row does not se
   const row = (n) => page.locator("tr[data-application-key]:visible").filter({ has: page.getByRole("link", { name: `#${n}`, exact: true }) });
   await row(1).getByRole("button", { name: /^Edit status/ }).click();
   await row(1).getByRole("combobox").selectOption("Applied");
+  await row(1).getByRole("button", { name: "Yes, mark applied" }).click();
   await row(1).getByText("saving…").waitFor();
 
   // Leave the bottom edge. A banner there can grow the page without moving
