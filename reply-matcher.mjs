@@ -3,6 +3,7 @@
  */
 
 import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
+import { parseAppliedDate } from './followup-cadence.mjs';
 
 export function extractDomain(emailStr) {
   if (!emailStr) return null;
@@ -445,10 +446,17 @@ function comparableDateRange(raw) {
 }
 
 function candidateReceivedAt(cand) {
-  return comparableDateRange(
-    cand?.received_at ?? cand?.receivedAt ?? cand?.email_date ?? cand?.date,
-  );
+  const value = cand?.received_at ?? cand?.receivedAt ?? cand?.email_date ?? cand?.date;
+  const range = comparableDateRange(value);
+  // A date-only receipt has no known time of day. Its latest possible instant
+  // is needed when excluding applications definitely newer than the message.
+  if (range && /^\d{4}-\d{2}-\d{2}$/.test(String(value).trim())) {
+    return { ...range, latest: range.earliest + 86400000 - 1 };
+  }
+  return range;
 }
+
+const CALENDAR_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}(?:T.*)?$/i;
 
 function canonicalStatus(raw) {
   return String(raw ?? '').replace(/\*\*/g, '').trim().toLowerCase();
@@ -471,12 +479,38 @@ export function matchCandidates(candidates, apps, followups = []) {
   for (const cand of candidates) {
     const textContext = `${cand.from || ''} ${cand.subject || ''} ${cand.body_snippet || ''}`;
     const fromDomain = extractDomain(cand.from);
+    const receivedAt = cand.received_at ?? cand.receivedAt ?? cand.email_date ?? cand.date;
+    const emailRange = CALENDAR_DATE_SHAPE.test(String(receivedAt ?? '').trim()) ? candidateReceivedAt(cand) : null;
+    const latestReceipt = emailRange && emailRange.latest
+      + (/^\d{4}-\d{2}-\d{2}$/.test(String(receivedAt).trim()) ? 12 * 3600000 : 0);
     
     let bestMatches = [];
     let highestScore = -1;
     let anyRoleMatch = false;
+    const excludedRoles = [];
     
     for (const app of apps) {
+      // The tracker Date is an evaluation date. Only an explicit own submission
+      // note can establish when this application actually went out.
+      const appliedDate = emailRange && parseAppliedDate(app.notes, { requireValidCalendarDate: true, requireExactDate: true });
+      const appRange = appliedDate && comparableDateRange(appliedDate);
+      // Calendar notes have no timezone: allow UTC+14 at submission and UTC-12
+      // on a date-only receipt rather than turn an adjacent local day into proof.
+      if (appRange && appRange.earliest - 14 * 3600000 > latestReceipt) {
+        // Its role remains evidence that this is not a role-less company reply.
+        // Partial role words need the same company/domain corroboration as
+        // ordinary candidates, so unrelated future rows cannot block a match.
+        const isRoleExactMatch = checkRoleMatchExact(textContext, app.role);
+        const isRolePartialMatch = !isRoleExactMatch && checkRoleMatch(textContext, app.role);
+        const isCompanyMatch = checkCompanyMatch(textContext, app.company);
+        const hasDomainMatch = fromDomain
+          && getAppDomains(app, followups).some(d => fromDomain === d || fromDomain.endsWith(`.${d}`));
+        if (isRoleExactMatch || isRolePartialMatch) anyRoleMatch = true;
+        if (isRoleExactMatch || (isRolePartialMatch && (isCompanyMatch || hasDomainMatch))) {
+          excludedRoles.push(app.role);
+        }
+        continue;
+      }
       let score = 0;
       let signals = [];
       let companyHint = '';
@@ -557,11 +591,16 @@ export function matchCandidates(candidates, apps, followups = []) {
       }
     }
     
-    if (bestMatches.length === 1) {
+    const soleRole = bestMatches.length === 1 ? bestMatches[0].role_hint : '';
+    // A shorter title embedded in the excluded named role is not independent
+    // evidence for the survivor. Equivalent titles still match both ways.
+    const nestedExcludedRole = excludedRoles.some(role => checkRoleMatchExact(textContext, role)
+      && checkRoleMatchExact(role, soleRole) && !checkRoleMatchExact(soleRole, role));
+    if (bestMatches.length === 1 && (!excludedRoles.length || (checkRoleMatchExact(textContext, soleRole) && !nestedExcludedRole))) {
       const match = bestMatches[0];
       delete match.score;
       results.push(match);
-    } else if (bestMatches.length > 1) {
+    } else if (bestMatches.length > 0) {
       const tiedApps = bestMatches
         .map(match => apps.find(app => app.num === match.application_num))
         .filter(Boolean);
