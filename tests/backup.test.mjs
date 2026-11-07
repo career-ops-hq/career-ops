@@ -140,6 +140,10 @@ try {
   assert.equal(readFileSync(join(dest, 'data/Connections.csv'), 'utf8'), 'connections');
   pass('--include-contacts copies the LinkedIn export, contacts and reply candidates');
 
+  assert.throws(() => b.runBackup({ dataRoot: root, dest: join(root, 'out') }), /inside/);
+  assert.throws(() => b.runBackup({ dataRoot: root, dest: tmp }), /contains/);
+  pass('runBackup itself rejects a destination that overlaps the data root');
+
   // Nothing found: reported, not a silent success; no manifest written.
   const empty = join(tmp, 'empty-root');
   mkdirSync(empty);

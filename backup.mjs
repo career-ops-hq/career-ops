@@ -285,6 +285,9 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   const include = { includeContacts };
   const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
   const fail = (path, error) => result.failed.push({ path, error: error.message });
+  // The exported API enforces this too, not only the CLI: a caller must not be
+  // able to point a backup at a folder that overlaps what it reads.
+  assertSafeDestination(dest, dataRoot);
   if (!dryRun) mkdirSync(dest, { recursive: true });
   // With an external data root, fork-local files declared in the checkout's
   // config/local-paths.txt are not looked up there: say so instead of
