@@ -44,3 +44,29 @@ test("first-run compact mode still shows the checklist while a required file is 
   assert.equal(panel.mode, "checklist");
   assert.equal(panel.showSections, false);
 });
+
+
+test("mixed filled, missing, and template optional sections collapse with the unfilled count", () => {
+  const sections = [
+    { heading: "## Your North Star", state: "filled" },
+    { heading: "## Your must-haves", state: "missing" },
+    { heading: "## Your deal-breakers", state: "template" },
+    { heading: "## Your story", state: "filled" },
+  ];
+  const panel = setupPanelMode({ missing: [], sections });
+  assert.equal(panel.mode, "link");
+  assert.equal(panel.remaining, 2);
+  assert.equal(setupPanelLabel(panel), "Optional profile details (2 left)");
+});
+
+test("one remaining template section still collapses to a singular link", () => {
+  const sections = [
+    { heading: "## Your North Star", state: "filled" },
+    { heading: "## Your must-haves", state: "filled" },
+    { heading: "## Your deal-breakers", state: "template" },
+  ];
+  const panel = setupPanelMode({ missing: [], sections });
+  assert.equal(panel.mode, "link");
+  assert.equal(panel.remaining, 1);
+  assert.equal(setupPanelLabel(panel), "Optional profile details (1 left)");
+});

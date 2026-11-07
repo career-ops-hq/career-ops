@@ -18,7 +18,7 @@ export function scanEngineLabel(engine) {
  */
 export function scanEngineDetail(engine) {
   return engine === "full"
-    ? "Checks public job boards (Greenhouse, Lever, Ashby)."
+    ? "Checks public job boards (Greenhouse, Lever, Ashby, Workday)."
     : "Checks the companies you saved.";
 }
 
