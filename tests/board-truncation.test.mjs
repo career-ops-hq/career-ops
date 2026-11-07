@@ -17,6 +17,11 @@ test('canonical truncated object carries reason and counts', () => {
   assert.deepEqual(boardTruncation(jobs), { reason: 'page-cap', fetched: 100, total: 340, source: 'truncated' });
 });
 
+test('markTruncated keeps its reason argument even if counts carries one', () => {
+  const jobs = markTruncated([], 'page-cap', /** @type {any} */ ({ fetched: 5, reason: 'other' }));
+  assert.equal(boardTruncation(jobs)?.reason, 'page-cap');
+});
+
 test('legacy per-provider tags are recognized without provider changes', () => {
   const eightfold = Object.assign([{ title: 'a' }], { eightfoldTruncated: true });
   assert.deepEqual(boardTruncation(eightfold), { reason: 'cap-or-fetch-error', source: 'eightfoldTruncated' });

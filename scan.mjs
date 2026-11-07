@@ -5056,7 +5056,9 @@ async function main() {
       }
       totalFound += jobs.length;
       const truncation = boardTruncation(jobs);
-      if (truncation && !company._isBoard) partialTargets.set(company.name, truncation);
+      // Boards (job_boards: aggregators) too: unlike an empty result, which is
+      // routine for a keyword search, a capped or failed walk is a real gap.
+      if (truncation) partialTargets.set(company.name, truncation);
       if (!company._isBoard && jobs.length === 0) {
         if (emptyTargetStatus(observation) === 'empty') emptyTargets.push(company.name);
         else unverifiedZeroTargets.push(company.name);
