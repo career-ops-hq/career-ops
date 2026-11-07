@@ -141,6 +141,13 @@ const SUBMIT_TERMS = [
   "जमा करें", "सबमिट",
   // da
   "indsend", "send ansøgning",
+  // nb (and nn, where the spelling is the same or adds senda): "Send søknad"
+  // and "Send inn" file the application on Webcruiter, Jobbnorge, Easycruit,
+  // Visma Talent and Teamtailor's Norwegian forms. The bare "send" in
+  // IN_FORM_TERMS already catches both inside a form; they are here because
+  // a form-less ATS renders them outside one, the same reason as Danish
+  // "send ansøgning". "fullfør" mirrors English "finish".
+  "send(e|a)? søknad(en)?", "send(e|a)? inn", "fullfør( søknad(en)?)?",
   // tr
   "gönder", "başvur",
 ];
@@ -159,10 +166,18 @@ const SUBMIT_TERMS = [
 // <form>. The cost is a control like Indeed NL's bare "Versturen" on its
 // phone-confirmation step, which is refused too: the loop stops there and
 // the person clicks it, which is the side this guard errs on.
+//
+// Norwegian "søk" is both "apply" and "search", so it can only live here: in
+// the global tier it would refuse every site search button in Norway. Outside
+// a form, "Søk på stillingen", "Søk nå" (nn "Søk no") and "Søk her" are the
+// way in, like "Apply for this job". Inside a form the bare verb is held, so
+// it covers those phrases too, and a search form's "Søk" button is refused
+// with them: the lost click this guard accepts. The `\p{L}` boundaries keep
+// it off "Søknad", "Søker" and "Søkeord".
 const IN_FORM_TERMS = [
   "apply( now| for this job)?",
   "postuler", "candidati", "candidatar(-se|-me)?", "solliciteren", "solliciteer", "aplikuj", "bewerben",
-  "postular(me|se)?", "відгукнутися", "lamar", "आवेदन करें", "ansøg",
+  "postular(me|se)?", "відгукнутися", "lamar", "आवेदन करें", "ansøg", "søk",
   "send",
 ];
 
