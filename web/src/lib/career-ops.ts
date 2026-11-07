@@ -96,8 +96,9 @@ export function trackerCanDelete(): boolean {
 function read(rel: string): string | null {
   try {
     return fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8");
-  } catch {
-    return null;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
   }
 }
 
@@ -180,8 +181,8 @@ async function loadCloseDateModule(): Promise<CloseDateModule | null> {
 
 /** Join scan-history `closes_at` onto tracker rows by posting URL.
  *  Exact URL first, then the URL with the query string removed. A missing
- *  module or file leaves the rows unchanged. Success is cached. A failed
- *  import is not. */
+ *  file or module leaves the rows unchanged. Any other read error is thrown.
+ *  Success is cached. A failed import is not. */
 export async function withCloseDates(applications: Application[]): Promise<Application[]> {
   const text = read("data/scan-history.tsv");
   if (!text) return applications;
