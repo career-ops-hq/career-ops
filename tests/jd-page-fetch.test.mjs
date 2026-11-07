@@ -539,3 +539,14 @@ test('a malformed description-sized field still counts toward ambiguity', () => 
   const out = jdFromPageHtml(`<html><script>{${ctrl.replace('\\u0001', String.fromCharCode(1))},${good}}</script></html>`);
   assert.equal(out, null);
 });
+
+test('a Phenom page that ships a hidden expiry view is not closed by that banner text', async () => {
+  const tpl = '<section view="x-job-expire-view"><div class="expire-job-view"><h2>We\'re sorry\u2026 the job you are trying to apply for has been filled.</h2></div></section>';
+  const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: tpl })));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.ok(out && !out.closed);
+    assert.ok(out.text.length > 100);
+  } finally { net.restore(); }
+  assert.equal(pageClosureEvidence(page(`<p>${BODY}</p>`, { body: tpl }), 'https://careers.example.com/job/1'), null);
+});
