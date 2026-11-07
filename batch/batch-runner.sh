@@ -1346,6 +1346,10 @@ process_offer() {
           jd_rescue_closed_note="posting closed (jd-rescue): $(printf '%s' "${_rs_line#*$'\t'}" | tr -c '[:print:]' ' ' | sed 's/^closed://; s/  */ /g')"
           : > "$jd_file"
           jd_prefetch_words=0
+        elif [[ "$_rs_rc" -eq 4 ]]; then
+          # The download landed on a different page than the offer URL: its text is not this posting's.
+          : > "$jd_file"
+          jd_prefetch_words=0
         elif [[ "$_rs_rc" -eq 0 ]]; then
           IFS=$'\t' read -r _rs_words _rs_method <<< "$_rs_line"
           _rs_words="${_rs_words//[^0-9]/}"

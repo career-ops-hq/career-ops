@@ -495,3 +495,32 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
     else fail(`CLI open ATS case broke: ${JSON.stringify(open)}`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
+
+{
+  // Off-document download: its HTML is not this posting's. Nothing is rescued from the page, and the
+  // CLI tells the runner (exit 4) to drop the other page's text. A redirect to an error URL still closes.
+  const body = Array.from({ length: 150 }, (_, n) => `w${n}`).join(' ');
+  const dir = mkdtempSync(join(tmpdir(), 'co-jdrescue-offdoc-'));
+  try {
+    const raw = join(dir, 'p.html');
+    writeFileSync(raw, ldJson(jobPosting({ description: `<p>${body}</p>` })));
+    const go = (finalUrl) => {
+      try { return { code: 0, out: execFileSync(NODE, [SCRIPT, 'https://jobs.example.com/co/abc123', raw, join(dir, 'o.txt'), '0', finalUrl], { encoding: 'utf-8', timeout: 20000 }) }; }
+      catch (e) { return { code: e.status, out: String(e.stdout) }; }
+    };
+    const same = go('https://jobs.example.com/co/abc123');
+    const off = go('https://jobs.example.com/co/other-listing');
+    const err = go('https://jobs.example.com/co/abc123?error=true');
+    if (same.code === 0) pass('same-document final URL: the page JD is rescued as before');
+    else fail(`same-document case broke: ${JSON.stringify(same)}`);
+    if (off.code === 4 && /off-document/.test(off.out)) pass('off-document final URL: nothing is rescued from the page and the CLI exits 4');
+    else fail(`off-document not terminal: ${JSON.stringify(off)}`);
+    if (err.code === 3 || err.code === 4) pass('a redirect to an error-style URL is never rescued as this posting');
+    else fail(`error redirect was rescued: ${JSON.stringify(err)}`);
+    const { rescueDecision } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+    const two = ldJson(jobPosting({ description: `<p>${body}</p>` })) + ldJson(jobPosting({ title: 'Another role', description: `<p>${body} extra</p>` }));
+    const amb = await rescueDecision('https://jobs.example.com/co/abc123', two, { minWords: 80, strippedWords: 0, thin: true, fetchJd: async () => null });
+    if (!amb.found) pass('an ambiguous page (several postings) yields no page-derived JD');
+    else fail('ambiguous page was rescued');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}

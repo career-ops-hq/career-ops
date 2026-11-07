@@ -55,7 +55,7 @@
 import fs from 'node:fs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { fromLdJson, fromEmbeddedDescription, ldJsonBlocks, wordCount } from '../lib/jd-parse.mjs';
-import { pageClosureEvidence } from '../lib/jd-page-fetch.mjs';
+import { pageClosureEvidence, inspectPage, sameDocument } from '../lib/jd-page-fetch.mjs';
 
 // Re-exported so existing importers of this module keep working.
 export { fromLdJson, fromEmbeddedDescription, ldJsonBlocks, wordCount };
@@ -126,8 +126,14 @@ export async function rescueDecision(url, html, { minWords, strippedWords, thin,
   if (pageClosed) return { closed: true, evidence: pageClosed };
   const api = await fromKnownApi(url, fetchJd);
   if (api?.closed) return { closed: true, evidence: api.evidence };
+  // The download landed on a different page: nothing in its HTML belongs to this posting.
+  // Only the ATS API (keyed by the requested URL) may still supply a JD.
+  const offDocument = Boolean(finalUrl) && !sameDocument(url, finalUrl);
+  // A page naming several postings or description payloads is ambiguous for the same reason.
+  const ambiguous = !offDocument && inspectPage(String(html).slice(0, 3_000_000)).ambiguous;
+  const pageUsable = !offDocument && !ambiguous;
   return runRescueChain(
-    [() => fromLdJson(html), () => api, () => fromEmbeddedDescription(html)],
+    [() => (pageUsable ? fromLdJson(html) : null), () => api, () => (pageUsable ? fromEmbeddedDescription(html) : null)],
     { minWords, strippedWords, thin },
   );
 }
@@ -169,6 +175,11 @@ Options:
     process.exit(3);
   }
   const { found, thinFound, notBetter } = chain;
+  if (!found && !thinFound && !notBetter && finalUrl && !sameDocument(url, finalUrl)) {
+    // Off-document and nothing from the API: the runner must not keep the other page's text.
+    process.stdout.write('0\toff-document\n');
+    process.exit(4);
+  }
 
   if (!found) {
     // A rescue that yields another thin page is not a rescue. Reporting it as
