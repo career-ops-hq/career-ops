@@ -99,7 +99,9 @@ export async function runRescueChain(runners, { minWords, strippedWords, thin })
   let thinFound = null;
   let notBetter = null;
   for (const run of runners) {
-    const candidate = await run();
+    // One source that throws (a malformed JSON-LD value) must not hide the others.
+    let candidate;
+    try { candidate = await run(); } catch { continue; }
     if (!candidate) continue;
     if (candidate.closed) return { closed: true, evidence: candidate.evidence };
     const w = wordCount(candidate.text);
@@ -110,6 +112,24 @@ export async function runRescueChain(runners, { minWords, strippedWords, thin })
     break;
   }
   return { found, thinFound, notBetter };
+}
+
+/**
+ * Decide the rescue for a downloaded page. Closure is checked first and is terminal: an
+ * expired validThrough or closure banner on the page, then the ATS API (an Ashby delisting)
+ * BEFORE any page text is accepted, so a closed role with a full JD on the page is never
+ * handed to a worker. An open or missing ATS answer keeps the JSON-LD > API > embedded priority.
+ * @param {{ fetchJd?: Function }} [opts]
+ */
+export async function rescueDecision(url, html, { minWords, strippedWords, thin, fetchJd }) {
+  const pageClosed = pageClosureEvidence(html, url);
+  if (pageClosed) return { closed: true, evidence: pageClosed };
+  const api = await fromKnownApi(url, fetchJd);
+  if (api?.closed) return { closed: true, evidence: api.evidence };
+  return runRescueChain(
+    [() => fromLdJson(html), () => api, () => fromEmbeddedDescription(html)],
+    { minWords, strippedWords, thin },
+  );
 }
 
 async function main() {
@@ -142,13 +162,7 @@ Options:
     process.exit(1);
   }
 
-  // The static fetch's own text may still be a full JD for a closed role (an expired
-  // validThrough in JSON-LD, or a "no longer accepting applications" banner beside it).
-  const pageClosed = pageClosureEvidence(html, url);
-  const chain = pageClosed ? { closed: true, evidence: pageClosed } : await runRescueChain(
-    [() => fromLdJson(html), () => fromKnownApi(url), () => fromEmbeddedDescription(html)],
-    { minWords, strippedWords, thin },
-  );
+  const chain = await rescueDecision(url, html, { minWords, strippedWords, thin });
   if (chain.closed) {
     // Terminal: exit 3 with the evidence on one line, whatever the other sources hold.
     process.stdout.write(`0\tclosed:${String(chain.evidence ?? '').replace(/\s+/g, ' ').slice(0, 160)}\n`);

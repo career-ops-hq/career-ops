@@ -414,7 +414,20 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   const thinClosed = await runRescueChain([() => long, () => ({ closed: true, evidence: 'x' })], { ...opts, strippedWords: 0, thin: true });
   if (thinClosed.found) pass('without a closure signal the first adequate source still wins');
   else fail('a normal rescue stopped working');
-  const { fromKnownApi } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+  const { fromKnownApi, rescueDecision, runRescueChain: chainFn } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+  {
+    // A closed ATS answer wins over an adequate JSON-LD description on the same page.
+    const words = Array.from({ length: 200 }, (_, n) => `w${n}`).join(' ');
+    const pageHtml = ldJson(jobPosting({ description: `<p>${words}</p>` }));
+    const o = { minWords: 80, strippedWords: 0, thin: true };
+    const closedApi = await rescueDecision('https://jobs.ashbyhq.com/a/1', pageHtml, { ...o, fetchJd: async () => ({ text: 'x y z', closed: true, evidence: 'Ashby isListed: false', ats: 'ashby' }) });
+    const openApi = await rescueDecision('https://jobs.ashbyhq.com/a/1', pageHtml, { ...o, fetchJd: async () => null });
+    if (closedApi.closed === true && !closedApi.found && openApi.found?.method === 'ld+json') pass('a closed ATS result beats adequate JSON-LD; an open or missing one keeps JSON-LD priority');
+    else fail(`ATS closure vs JSON-LD wrong: ${JSON.stringify({ closedApi, openApi: openApi.found?.method })}`);
+    const survives = await chainFn([() => { throw new TypeError('toString is not a function'); }, () => ({ text: words, method: 'embedded' })], o);
+    if (survives.found?.method === 'embedded') pass('a source that throws does not stop the rescue chain');
+    else fail(`a throwing source broke the chain: ${JSON.stringify(survives)}`);
+  }
   const viaClosed = await fromKnownApi('https://jobs.ashbyhq.com/a/1', async () => ({ text: 'x y z', closed: true, evidence: 'Ashby isListed: false', ats: 'ashby' }));
   const viaOpen = await fromKnownApi('https://jobs.ashbyhq.com/a/1', async () => ({ text: 'x y z', ats: 'ashby' }));
   if (viaClosed?.closed === true && !viaClosed.text && viaOpen?.method === 'ats-api:ashby') pass('fromKnownApi reports a closed ATS result as closure and still returns an open one');
