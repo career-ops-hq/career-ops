@@ -69,13 +69,15 @@ Modene bruker naturlig tech-norsk slik det snakkes i engineering-team i Oslo, Be
 
 Disse antakelsene er lagt inn i modene. Er du uenig, åpne en issue -- de er ment å kunne diskuteres:
 
-- **Arbeidsmiljøloven gjelder alle.** Norge har ingen funksjonærlov; modene leter ikke etter en "funksjonærstatus" i annonsen.
-- **Fast ansettelse er hovedregelen.** En midlertidig stilling må ha et grunnlag i § 14-9, så modene ber om grunnlaget i stedet for bare å spørre "hvorfor ikke fast?".
+- **Arbeidsmiljøloven gjelder alle, unntatt der statsansatteloven gjelder i staten.** Norge har ingen funksjonærlov; modene leter ikke etter en "funksjonærstatus" i annonsen. For statlige stillinger bruker modene statsansatteloven for midlertidig ansettelse (§ 9), prøvetid (§ 15) og oppsigelse (§ 22), og Statens pensjonskasse i stedet for OTP.
+- **Fast ansettelse er hovedregelen.** En midlertidig stilling må ha et grunnlag i arbeidsmiljøloven § 14-9 (i staten statsansatteloven § 9), så modene ber om grunnlaget i stedet for bare å spørre "hvorfor ikke fast?".
 - **Prøvetid inntil 6 måneder er normalt.** Det flagges først over 6 måneder.
 - **Ferie er 25 virkedager ved lov, 5 uker i praksis.** Bare lovens minimum regnes som under markedet for funksjonærstillinger.
 - **Feriepenger erstatter lønnen for feriedagene.** Arbeidsgiveren trekker vanlig lønn for feriedagene samtidig som feriepengene utbetales (Skatteetaten, "trekk i lønn for ferie"), så feriepengene er ikke et tillegg på toppen av årslønnen, og modene sammenligner årslønn mot årslønn. Første år hos en ny arbeidsgiver kan ferien bli ulønnet.
 - **Pensjon oppgis i G-bånd.** Modene ber om satsen for 0-7,1 G og 7,1-12 G, og behandler OTP-minimumet (2 %) som under markedet.
 - **Ingen A-kasse.** Dagpenger kommer fra NAV; fagforeningsmedlemskap handler om juridisk hjelp, lønnsstatistikk og tariffavtale.
+- **Overskriftene følger `language.output`.** Med `nb` bruker reporten de norske overskriftene i `stilling.md`; med `en` bruker den malen i `modes/oferta.md`.
+- **Signal 6 bruker norsk rett for norske stillinger,** også når kandidaten bor utenfor Norge. De andre jurisdiksjonstabellene følger kandidatens `location`, som i `modes/oferta.md`.
 - **Netto regnes per år.** Trekkfri juni og halv skatt i desember gjør enkeltmåneder misvisende.
 - **Offentlig sektor leses fra stillingskode og lønnsspenn**, ikke fra tittelen alene. Statens hovedlønnstabell finnes ikke lenger (fra 1. mai 2024).
 - **FINN.no hentes ikke automatisk.** FINNs robots.txt forbyr automatisert tilgang uten samtykke, og Webcruiter stenger ute alle unntatt Googlebot. Modene ber kandidaten lime inn teksten, eller bruker samme annonse på arbeidsplassen.no.

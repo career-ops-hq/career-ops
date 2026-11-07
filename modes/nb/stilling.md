@@ -6,6 +6,8 @@ Når kandidaten limer inn en stillingsannonse (tekst eller URL), lever ALLTID al
 
 **Forholdet til `modes/oferta.md`.** Denne filen er den norske utgaven av evalueringen: norsk ordforråd, norske markedssjekker og report-malen. Gatene før blokk A er beskrevet kort nedenfor og står i sin helhet i `modes/oferta.md`; les dem der før blokk A, og bruk dem slik de står. Ved motstrid om forløp eller report-struktur gjelder `modes/oferta.md`; denne filen legger bare til det som er særegent for det norske markedet.
 
+**Hvilken fil er hvilken mode.** Med `language.modes_dir: modes/nb` er denne filen evalueringsmoden. Der ruteren, `auto-pipeline` eller en annen mode sier `oferta` eller "les `modes/oferta.md`" for selve evalueringen (blokk A-H og report-malen), bruk `modes/nb/stilling.md`; `modes/oferta.md` leses i tillegg for gatene og reglene denne filen viser til. Søknadsmoden `apply` er `modes/nb/soknad.md`, og `pipeline` er `modes/nb/pipeline.md`. Andre modes har ingen norsk fil, så den engelske brukes.
+
 **Unattended runs** (`modes/nb/_shared.md` → **Unattended runs**): spør aldri og vent aldri. Et treff i svartelisten stopper før blokk A, skriver ingenting og avslutter med `needs_confirmation: blacklist "{company}" - rerun with "evaluate anyway" to evaluate`. Bekreftet stengt annonse avslutter med `needs_confirmation: posting_closed {url} - share a live posting to evaluate`. En annonse gaten ikke kunne lese, avslutter med `needs_confirmation: jd_unavailable {url} - paste the JD text to evaluate it`. En annonse via byrå returnerer **Agency confirmation handoff** og avslutter med `needs_confirmation: agency {url or company/role} - rerun with the same posting and the agency it came through`.
 
 ## Liveness-gate (URL-input)
@@ -26,7 +28,7 @@ Finnes `data/blacklist.md`, sjekk virksomheten og annonsens URL mot den før blo
 
 ## Dealbreaker-gate
 
-Før blokk A, sjekk annonsen mot kandidatens egne harde regler (`config/profile.yml` → `dealbreakers` og `compensation.minimum`, `modes/_profile.md`, `modes/_custom.md`), etter `modes/oferta.md` → **Dealbreaker gate**: et treff krever en hard regel og en setning i annonsen som oppgir faktumet som bryter den; et utledet faktum er ikke et treff. Et oppgitt lønnsintervall bryter `compensation.minimum` bare når toppen er under minimum i samme valuta og periode -- og en norsk annonse oppgir som regel brutto årslønn, så sammenlign med årslønn, ikke månedslønn. Interaktivt: stopp og spør. Headless: skriv SKIP-raden og `needs_confirmation`-linjen slik `modes/oferta.md` beskriver.
+Før blokk A, sjekk annonsen mot kandidatens egne harde regler (`config/profile.yml` → `dealbreakers` og `compensation.minimum`, `modes/_profile.md`, `modes/_custom.md`), etter `modes/oferta.md` → **Dealbreaker gate**: et treff krever en hard regel og en setning i annonsen som oppgir faktumet som bryter den; et utledet faktum er ikke et treff. Et oppgitt lønnsintervall bryter `compensation.minimum` bare når toppen er under minimum i samme valuta og periode. Oppgir annonsen ikke perioden (som "Lønn fra kr 1 100 000 – 1 400 000"), gjett ikke: et utledet faktum er ikke et treff, og `modes/oferta-signals/13` sier at perioden aldri gjettes. Er valutaen en annen enn i `compensation.minimum` (NOK mot USD eller EUR), slår gaten ikke ut; regn om med en datert kurs i blokk D, merk tallet som omregnet, og la brukeren avgjøre. Interaktivt: stopp og spør. Headless: skriv SKIP-raden og `needs_confirmation`-linjen slik `modes/oferta.md` beskriver.
 
 ## Gate for bekreftelse av byrå (#1596, #4359)
 
@@ -219,14 +221,14 @@ Bruk WebSearch innenfor research-budsjettet til:
 - Virksomhetens lønnsrykte (Glassdoor)
 - Etterspørselstrend for rollen på det norske markedet
 
-Bruk deretter `modes/oferta.md` -> Block D: klassifiser virksomhetstypen (`modes/nb/_shared.md` § Virksomhetstype og lønnens pålitelighet), oppgi lønnens pålitelighetsnivå, og still 3-6 verifiseringsspørsmål til HR når annonsen nevner et lønnsbeløp. Tabellens første rad er alltid annonsens eget beløp, ordrett (`| Advertised (JD) | {beløp eller "not stated"} | JD |`); samme verdi går i Machine Summary `advertised_comp`. Finnes det ingen data, si det tydelig -- ikke finn på noe.
+Bruk deretter `modes/oferta.md` -> Block D: klassifiser virksomhetstypen (`modes/nb/_shared.md` § Virksomhetstype og lønnens pålitelighet), oppgi lønnens pålitelighetsnivå, og still 3-6 verifiseringsspørsmål til HR når annonsen nevner et lønnsbeløp. Oppgir annonsen et lønnsbeløp, er tabellens første rad annonsens eget beløp, ordrett (`| Advertised (JD) | {beløp} | JD |`), og samme verdi går i Machine Summary `advertised_comp`. Oppgir den ingen lønn, kort seksjonen ned til to linjer slik `modes/oferta.md` sier: `**Virksomhetstype:** {type eller Unknown} — {sikkerhet + én evidensfrase}` og `**Lønnens pålitelighet:** {tier} — ingen lønn oppgitt i annonsen` (tier-navnene High/Medium/Low/Unknown forblir på engelsk), og `advertised_comp` er `null`. Finnes det ingen data, si det tydelig -- ikke finn på noe.
 
 **Det norske markedet -- Obligatoriske sjekker:**
-- Pensjon nevnt? Be om satsen for 0-7,1 G og for 7,1-12 G, og regn den inn i den samlede pakken. Bare lovens minimum (2 %) er under markedet. "God pensjonsordning" uten satser er ikke data.
+- Pensjon nevnt? I privat sektor: be om satsen for 0-7,1 G og for 7,1-12 G, og regn den inn i den samlede pakken. Bare lovens minimum (2 %) er under markedet. "God pensjonsordning" uten satser er ikke data. I staten er pensjonen Statens pensjonskasse, og i kommuner KLP eller en kommunal pensjonskasse: opptjeningen følger ordningen, ikke en sats arbeidsgiveren velger, så spør ikke om OTP-bånd; ta ordningen med som en del av pakken.
 - Variabel del (bonus, resultatlønn, aksjeopsjoner / RSU, opsjonsordning for oppstartsselskaper)?
 - 5. ferieuke i avtalen? Feriepenger 12 % eller bare lovens 10,2 %?
 - Tariffavtale? Hvis ja: hvilken, og gir den AFP? I offentlig sektor: stillingskode og lønnsspenn.
-- Fast eller midlertidig? Hvis midlertidig: hvilket grunnlag i arbeidsmiljøloven § 14-9, varighet, mulighet for fast ansettelse.
+- Fast eller midlertidig? Hvis midlertidig: hvilket grunnlag (arbeidsmiljøloven § 14-9, i staten statsansatteloven § 9), varighet, mulighet for fast ansettelse.
 - Konkurranseklausul eller kundeklausul? Varighet (høyst 1 år) og kompensasjon.
 - Selvstendig konsulent / oppdragstaker? Timepris, oppdragets varighet, risiko for at forholdet egentlig er et ansettelsesforhold (arbeidsmiljøloven § 1-8) eller innleie (§ 14-12).
 - Lønn oppgitt per måned eller per år? Inkluderer beløpet bonus eller feriepenger? "Lønn etter tariff" eller "i henhold til hovedtariffavtalen" betyr at tariffavtalen fastsetter lønnen.
@@ -276,7 +278,7 @@ Analyser annonsen for signaler om at dette er en reell, aktiv stilling. Det hjel
 
 **1. Aktualitet** (fra snapshotet i liveness-gaten, eller fra Step 0 i `auto-pipeline`; utilgjengelig hvis bare annonsetekst ble limt inn):
 - Publiseringsdato eller "for X dager siden" -- hent fra siden
-- Søknadsfrist (dato eller "Snarest") -- en passert frist betyr stengt
+- Søknadsfrist (dato eller "Snarest") -- en passert frist betyr stengt. På arbeidsplassen.no er feltet `expires` hvor lenge annonsen ligger i databasen (for annonser importert fra FINN og andre kilder ofte noen uker), ikke søknadsfristen; les fristen fra annonsens eget søknadsfrist-felt eller teksten
 - Tilstanden til søknadsknappen (aktiv / stengt / mangler / sender til en generell side)
 - Ble URL-en omdirigert til en generell karriereside, noter det
 
@@ -303,16 +305,16 @@ Analyser annonsen for signaler om at dette er en reell, aktiv stilling. Det hjel
 - Gir rollen mening for virksomhetens forretning?
 - Er senioritetsnivået et som legitimt tar lengre tid å fylle?
 
-**6. Risiko knyttet til tilknytningsform** (fra annonseteksten; jurisdiksjon fra `config/profile.yml` → `location.country`):
+**6. Risiko knyttet til tilknytningsform** (fra annonseteksten):
 
-Følg Signal 6 i `modes/oferta.md`, med Norge-raden i tabellen der. I Norge er skillet mellom **arbeidstaker** (arbeidsmiljøloven § 1-8: arbeidsavtale, feriepenger, OTP, sykepenger fra arbeidsgiver, forskuddstrekk og a-melding) og **oppdragstaker** / **selvstendig næringsdrivende** (faktura, ENK eller AS, egen trygdeavgift, ingen feriepenger). Flagg bare når annonsen har uttrykkelig oppdragstakerformulering (be kandidaten "fakturere", jobbe "via eget ENK/AS", "konsulentoppdrag" i stedet for å bli "ansatt") **og** minst én bekreftende mangel (ingen goder, ingen ferie, ingen pensjon, ingen forskuddstrekk, ingen sluttdato). "Prosjektstilling" eller "engasjement" alene er ikke nok: det er midlertidige *ansettelser*. Notatet i `modes/oferta.md` skrives på `{language.output}`. Signalet endrer ikke tieren.
+Følg Signal 6 i `modes/oferta.md`. `modes/oferta.md` velger raden i tabellen etter kandidatens `config/profile.yml` → `location.country`. Denne markedsmoden avviker bevisst for stillinger med arbeidssted i Norge: bruk Norge-raden uansett hvor kandidaten bor, fordi tilknytningsformen for arbeid i Norge følger norsk rett og ordene i annonsen er norske. For stillinger utenfor Norge, bruk kandidatens `location.country` som i `modes/oferta.md`. I Norge er skillet mellom **arbeidstaker** (arbeidsmiljøloven § 1-8: arbeidsavtale, feriepenger, OTP, sykepenger fra arbeidsgiver, forskuddstrekk og a-melding) og **oppdragstaker** / **selvstendig næringsdrivende** (faktura, ENK eller AS, egen trygdeavgift, ingen feriepenger). Flagg bare når annonsen har uttrykkelig oppdragstakerformulering (be kandidaten "fakturere", jobbe "via eget ENK/AS", "konsulentoppdrag" i stedet for å bli "ansatt") **og** minst én bekreftende mangel (ingen goder, ingen ferie, ingen pensjon, ingen forskuddstrekk, ingen sluttdato). "Prosjektstilling" eller "engasjement" alene er ikke nok: det er midlertidige *ansettelser*. Notatet i `modes/oferta.md` skrives på `{language.output}`. Signalet endrer ikke tieren.
 
 **7. AI-buzzwords mot infrastruktur** (fra annonseteksten og research fra blokk D -- ingen nye forespørsler):
 
 Noen annonser beskriver virksomheten den *ønsker å bli*, ikke slik den er: tung "AI / digital transformasjon / innovasjon"-språkbruk oppå infrastruktur som er langt fra klar. Sjekk tre signalklasser: (a) buzzword-tetthet mot rollens scope (en mellomnivårolle som skal "drive AI-transformasjon i hele organisasjonen"), (b) teamstørrelse (et team på omtrent 5 eller færre som skal eie "transformasjon" for en stor organisasjon), (c) bransjens utgangspunkt (tradisjonell bransje der grunnleggende digitalisering ofte ikke er ferdig). **Flagg bare når 2+ av de tre er til stede**, med notatet fra `modes/oferta.md` på `{language.output}`. Signalet endrer ikke tieren.
 
 **8-22. Betingede signaler.** Signal 8 til 17, 19, 20, 21 og 22 gjelder bare noen annonser, og hvert har fullstendige regler i sin egen fil i `modes/oferta-signals/`. Sjekk hver trigger i `modes/oferta.md` → Block G mot annonsen, les filene for signalene som utløses, i ett trinn, og bruk dem. For Norge:
-- **10 (byråets lisens)** og **12 (forbudt innhold)**: tabellene i `templates/` har ingen `NO`-rad ennå. Bruk i stedet de norske signalene nedenfor.
+- **10, 12, 15, 19 og 22** slår opp i `templates/` etter kandidatens `location`, som `modes/oferta.md` sier. For en kandidat bosatt utenfor Norge treffer de derfor ikke en `NO`-rad selv om stillingen er norsk; de norske signalene nedenfor gjelder stillingen og brukes uansett.
 - **16 (midlertidig ansettelse)**: utløses av "vikariat", "engasjement", "midlertidig stilling", "prosjektstilling", "åremål".
 - **21 (gebyr betalt av kandidaten)**: utløses av enhver forespørsel om betaling; i Norge er det aldri lovlig for en formidler å kreve det (arbeidsmarkedsloven § 26).
 
@@ -368,7 +370,7 @@ En annonse kan være reell (blokk G) og likevel ikke si hvem rollen rapporterer 
 
 ## Konklusjon (lead)
 
-Skriv en blokk `## Konklusjon (lead)` rett etter blokk G og før `## Risk Summary`. Den svarer på ett spørsmål: søke eller ikke? Den gjengir `final_decision` fra Machine Summary i én setning og innfører aldri en annen beslutning. Beslutningen i fet skrift (Søk, Vurder, Undersøk først, Hopp over), deretter én begrunnelse som rapporten allerede har dokumentert. Markøren `(lead)` oversettes aldri, og blokken får aldri en bokstav.
+Skriv en blokk `## Konklusjon (lead)` (med `language.output: en`: `## Verdict (lead)`, se **Språk i overskriftene** nedenfor) rett etter blokk G og før `## Risk Summary`. Den svarer på ett spørsmål: søke eller ikke? Den gjengir `final_decision` fra Machine Summary i én setning og innfører aldri en annen beslutning. Beslutningen i fet skrift (Søk, Vurder, Undersøk først, Hopp over), deretter én begrunnelse som rapporten allerede har dokumentert. Markøren `(lead)` oversettes aldri, og blokken får aldri en bokstav.
 
 ```markdown
 ## Konklusjon (lead)
@@ -406,6 +408,8 @@ Lagre den fullstendige evalueringen i `reports/{###}-{company-slug}-{YYYY-MM-DD}
 - `{company-slug}` = virksomhetsnavnet med små bokstaver, uten mellomrom (bruk bindestreker; slugen må matche `^[a-z0-9-]+$`, så erstatt æ, ø og å med ASCII, f.eks. ae, o og a)
 - `{YYYY-MM-DD}` = dagens dato
 - Via et rekrutteringsbyrå uten kjent arbeidsgiver (#1596): slug `confidential-{agency-slug}`. Filen får aldri nytt navn når arbeidsgiveren blir kjent senere.
+
+**Språk i overskriftene.** Malen nedenfor viser overskriftene for `language.output: nb`. Med et annet `language.output` skrives de menneskelesbare overskriftene og beslutningsfeltet på det språket, slik `batch/batch-prompt.md` sier. For `en` betyr det malen i `modes/oferta.md` ordrett: `**Decision:** {Apply | Consider | Research first | Skip}`, `## Verdict (lead)`, `## A) Role Summary` osv. Bokstavene A)-H), markøren `(lead)` og de engelske feltnavnene nedenfor er like i alle språk.
 
 Feltnavnene i headeren (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`) og `## Machine Summary`, `## Risk Summary`, `## Score Evidence`, `## Keyword Coverage` og `## Job Description (archived verbatim)` forblir på engelsk: scripts og webvisningen leser dem etter navn.
 
@@ -476,7 +480,7 @@ Feltnavnene i headeren (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 (YAML-blokk for scripts -- se kravet nedenfor)
 ```
 
-**Beslutningslinje (obligatorisk):** `**Beslutning:**` er Machine Summary `final_decision`, og linjen under headeren er setningen fra `## Konklusjon (lead)`, kopiert ordrett. Begge fylles ut til slutt. Bruk aldri `Verdict:` som feltnavn: webappen leser den første `VERDICT:` som score-linje.
+**Beslutningslinje (obligatorisk):** `**Beslutning:**` (`**Decision:**` med `language.output: en`) er Machine Summary `final_decision`, og linjen under headeren er setningen fra `## Konklusjon (lead)`, kopiert ordrett. Begge fylles ut til slutt. Bruk aldri `Verdict:` som feltnavn: webappen leser den første `VERDICT:` som score-linje.
 
 **Machine Summary (obligatorisk):** YAML-blokk sist i rapporten, etter `## Job Description (archived verbatim)`, med skjema, eksakte feltnavn og regler fra `batch/batch-prompt.md` (kilden; gjentas ikke her). Inneholder `advertised_comp` (annonsens lønnsbeløp ordrett, eller `null`), `risk_summary` og `requirement_importance` (blokk B rad for rad; `inferred`-grensen gjelder også her).
 
@@ -501,7 +505,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 
 ### 1b. Sett inn ATS-nøkkelorddekning
 
-Etter at rapporten er lagret, kjør `keyword-match.mjs` (kommandoen nedenfor) og sett inn blokken `## Keyword Coverage` under de uttrukne nøkkelordene. Bare diagnostikk: legg bare til et nøkkelord hvis det svarer til reell erfaring.
+Etter at rapporten er lagret, kjør `keyword-match.mjs` (kommandoen nedenfor) og sett inn blokken `## Keyword Coverage` under de uttrukne nøkkelordene. Bare diagnostikk: legg bare til et nøkkelord hvis det svarer til reell erfaring. Er annonsen og CV-en på ulike språk (norsk annonse, engelsk `cv.md`), blir dekningen lav av konstruksjon, fordi matcheren sammenligner ord og ikke betydning. Si det i blokken, og legg aldri oversatte nøkkelord inn i CV-en bare for å heve tallet.
 
 Til kommandoen: skriv `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` i en JSON-fil (se **Kommandoargumenter** ovenfor) og kjør:
 

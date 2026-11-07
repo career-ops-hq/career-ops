@@ -2,7 +2,7 @@
 
 > Bruk `voice-dna.md` (hvis den finnes) på fritekstsvar og felt for søknadsbrev -- fullt vern, også den muntlige stemmen (Tier 1 + Tier 2). Se `_writing.md` → Voice DNA.
 
-Interaktiv mode for utfylling av et søknadsskjema. Åpne skjemaet i en Playwright-nettleser dette prosjektet starter, last inn den tidligere konteksten for stillingen, og lag et svar på hvert spørsmål.
+Med `language.modes_dir: modes/nb` er dette søknadsmoden (`apply`). Interaktiv mode for utfylling av et søknadsskjema. Åpne skjemaet i en Playwright-nettleser dette prosjektet starter, last inn den tidligere konteksten for stillingen, og lag et svar på hvert spørsmål.
 
 **Unattended runs** (`modes/nb/_shared.md` → **Unattended runs**): spør aldri, vent aldri og send aldri inn. Et treff i svartelisten stopper før utkastet og avslutter med `needs_confirmation: blacklist "{company}" - rerun with "apply anyway" to draft`. Avvik i virksomhet eller rolle, eller et byrå som må bekreftes, stopper før utkastet og avslutter med `needs_confirmation: apply_preflight {company} - confirm the company and role, then rerun`. En annonse som ser stengt ut, avslutter med `needs_confirmation: posting_closed {company} - rerun with the reason to apply anyway`. Kan ikke liveness verifiseres, avslutter kjøringen med `needs_confirmation: liveness_unverified {company} - confirm the company, role and active posting, then rerun`. Ellers lager du bare svar som er dekket av den tilpassede CV-en, `cv.md`, `config/profile.yml`, reporten eller svar prompten gir for denne søknaden, lar alle andre felt stå tomme, og avslutter med `needs_confirmation: apply_input {n} questions - answer them, then rerun`.
 
@@ -150,7 +150,7 @@ Matcher et felt, advar kandidaten FØR du lager eller fyller ut et svar på det:
 
 Før du lager svar, les den matchende reportens funn om midlertidig ansettelse i blokk G og den synlige annonseteksten. Beskriver en av dem uttrykkelig stillingen som midlertidig -- for eksempel `vikariat`, `engasjement`, `midlertidig stilling`, `prosjektstilling i 18 måneder`, `åremål`, `fixed-term`, `6-month contract` eller `temporary position` -- vis én påminnelse før første svar:
 
-> ℹ️ **Påminnelse om midlertidig stilling:** [Skriv på {language.output}: siter den eksakte formuleringen og behold en eventuell varighet ordrett. Si at stillingen uttrykkelig er tidsbegrenset, og foreslå å avklare forventninger om forlengelse eller fast ansettelse, hvilket grunnlag i arbeidsmiljøloven § 14-9 arbeidsgiveren bruker, goder, vilkår ved utløp og oppsigelse, og om den samlede pakken tar hensyn til den begrensede perioden. Kommer lønn opp, si bare at midlertidige stillinger kan ha andre lønnsstrukturer, og at aktuelle tall for dette markedet og denne rollen bør sjekkes før kandidaten velger et anker.]
+> ℹ️ **Påminnelse om midlertidig stilling:** [Skriv på {language.output}: siter den eksakte formuleringen og behold en eventuell varighet ordrett. Si at stillingen uttrykkelig er tidsbegrenset, og foreslå å avklare forventninger om forlengelse eller fast ansettelse, hvilket grunnlag arbeidsgiveren bruker (arbeidsmiljøloven § 14-9, i staten statsansatteloven § 9), goder, vilkår ved utløp og oppsigelse, og om den samlede pakken tar hensyn til den begrensede perioden. Kommer lønn opp, si bare at midlertidige stillinger kan ha andre lønnsstrukturer, og at aktuelle tall for dette markedet og denne rollen bør sjekkes før kandidaten velger et anker.]
 
 **Harde regler:**
 
