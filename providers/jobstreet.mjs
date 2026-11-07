@@ -323,7 +323,7 @@ export default {
       let json;
       try {
         json = /** @type {any} */ (
-          await fetchJsonWithRetry(ctx, searchUrl, { redirect: "error" })
+          await fetchJsonWithRetry(ctx, searchUrl, { redirect: "follow" })
         );
       } catch (err) {
         // A health probe's budget errors must propagate unchanged. In a real
