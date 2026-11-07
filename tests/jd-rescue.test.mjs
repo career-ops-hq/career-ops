@@ -528,3 +528,15 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
     else fail('ambiguous page was rescued');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
+
+{
+  // A page over the inspection cap cannot be checked whole: unusable, ATS API still allowed.
+  const { rescueDecision } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+  const words = Array.from({ length: 200 }, (_, n) => `w${n}`).join(' ');
+  const big = `"descriptionHtml":"${words}"` + ' '.repeat(3_100_000) + `"descriptionHtml":"${words} other and longer ${words}"`;
+  const o = { minWords: 80, strippedWords: 0, thin: true };
+  const none = await rescueDecision('https://jobs.example.com/co/abc123', big, { ...o, fetchJd: async () => null });
+  const api = await rescueDecision('https://jobs.example.com/co/abc123', big, { ...o, fetchJd: async () => ({ text: words, ats: 'ashby' }) });
+  if (!none.found && none.pageUnusable && api.found?.method === 'ats-api:ashby') pass('an oversized page is unusable but the ATS API can still supply the JD');
+  else fail(`oversize handling wrong: ${JSON.stringify({ none, api: api.found?.method })}`);
+}

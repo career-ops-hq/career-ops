@@ -8,6 +8,7 @@
 // the shell. Every case below is offline: fetch and DNS are stubbed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as awaitedModule from '../lib/jd-page-fetch.mjs';
 import { pageClosureEvidence, jdFromPageHtml, fetchJdFromPage, capJdText, markCappedAtsText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -549,4 +550,29 @@ test('a Phenom page that ships a hidden expiry view is not closed by that banner
     assert.ok(out.text.length > 100);
   } finally { net.restore(); }
   assert.equal(pageClosureEvidence(page(`<p>${BODY}</p>`, { body: tpl }), 'https://careers.example.com/job/1'), null);
+});
+
+test('the same posting with nested fields in a different key order is one posting', () => {
+  const node = (org) => `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Engineer', description: `<p>${BODY}</p>`, hiringOrganization: org })}</script>`;
+  const out = jdFromPageHtml(`<html>${node({ '@type': 'Organization', name: 'Acme' })}${node({ name: 'Acme', '@type': 'Organization' })}</html>`);
+  assert.ok(out);
+  const two = jdFromPageHtml(`<html>${node({ name: 'Acme' })}${node({ name: 'Other Co' })}</html>`);
+  assert.equal(two, null);
+});
+
+test('a JobPosting whose own URL names a different job is rejected, aliases are not', () => {
+  const ld = (url) => `<html><script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Engineer', description: `<p>${BODY}</p>`, ...(url ? { url } : {}) })}</script></html>`;
+  const { inspectPage } = awaitedModule;
+  assert.equal(inspectPage(ld('https://careers.example.com/job/2'), Date.now(), 'https://careers.example.com/job/1').found, null);
+  assert.ok(inspectPage(ld('https://careers.example.com/job/1/Some-Title'), Date.now(), 'https://careers.example.com/job/1').found);
+  assert.ok(inspectPage(ld('https://cdn.other.net/x/9'), Date.now(), 'https://careers.example.com/job/1').found);
+  assert.ok(inspectPage(ld(''), Date.now(), 'https://careers.example.com/job/1').found);
+});
+
+test('a malformed copy that differs only in whitespace does not make the page ambiguous', () => {
+  const words = Array.from({ length: 200 }, (_, n) => `w${n}`).join(' ');
+  const valid = `"descriptionHtml":"${words}\\nend"`;
+  const malformed = `"descriptionHtml":"${words}${String.fromCharCode(10)}end"`;
+  const out = jdFromPageHtml(`<html><script>{${valid},${malformed}}</script></html>`);
+  assert.ok(out);
 });

@@ -130,7 +130,9 @@ export async function rescueDecision(url, html, { minWords, strippedWords, thin,
   // Only the ATS API (keyed by the requested URL) may still supply a JD.
   const offDocument = Boolean(finalUrl) && !sameDocument(url, finalUrl);
   // A page naming several postings or description payloads is ambiguous for the same reason.
-  const ambiguous = !offDocument && inspectPage(String(html).slice(0, 3_000_000)).ambiguous;
+  // A page too large to inspect whole cannot be checked for a second posting or description: unusable.
+  const oversize = String(html).length > 3_000_000;
+  const ambiguous = oversize || (!offDocument && inspectPage(String(html), Date.now(), url).ambiguous);
   const pageUsable = !offDocument && !ambiguous;
   // The visible text the runner already stripped is the same unusable page, so its word count
   // must not reject a valid API JD either.
