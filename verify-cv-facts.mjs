@@ -2365,7 +2365,7 @@ function sourceSpellsFact(sourceText, value) {
  * title on the same line or on the line right after it).
  * A bracket pair with no link target after it is left alone.
  */
-function collapseMarkdownLinks(text) {
+export function collapseMarkdownLinks(text) {
   let out = '';
   let i = 0;
   const opener = /\[\s*([^\][]*?)\s*\]\(/y;
