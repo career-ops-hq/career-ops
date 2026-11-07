@@ -2112,8 +2112,12 @@ search_queries:
 #   provider: workingnomads
 #   enabled: true
 #
-# - name: Jobicy
+# - name: Jobicy                          # remote-only board; walks its whole 7-day feed
 #   provider: jobicy
+#   # geo: latam            # optional: a geoSlug from https://jobicy.com/api/v2/remote-jobs?get=locations
+#   # industry: engineering # optional: an industrySlug from https://jobicy.com/api/v2/remote-jobs?get=industries
+#   # tag: python           # optional: keyword matched against the job title
+#   # max_pages: 25         # optional page cap (100 postings/page, default 25, max 100)
 #   enabled: true
 #
 # - name: getManfred                      # Spanish/EU tech roles, salary ranges published
@@ -3828,8 +3832,9 @@ job_boards:
   # JS board backed by a same-origin JSON API. Required: `provider: consider`
   # (boards live on their own hosts, so there is no auto-detect) and
   # `careers_url`; the board id (not the host: Founderful's is "wingman") is
-  # read from that page. Optional knobs: `consider_size` (default 500, the most
-  # jobs one request returns), `consider_board` (the board id, only when the
+  # read from that page. Optional knobs: `consider_size` (default 500, maximum 1000,
+  # the jobs one request returns), `max_pages` (default 10, hard cap 100, the
+  # requests per board), `consider_board` (the board id, only when the
   # scan reports that it cannot be read from the page).
 
   - name: Founderful (portfolio)

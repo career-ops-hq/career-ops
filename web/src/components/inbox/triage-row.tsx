@@ -31,6 +31,7 @@ export function TriageRow({
   job,
   source,
   age,
+  reason,
   scored,
   selected,
   shortlisted,
@@ -43,6 +44,7 @@ export function TriageRow({
   job: InboxJob;
   source: AtsSource | null;
   age: number | null;
+  reason?: string;
   scored?: RowScore;
   selected: boolean;
   shortlisted: boolean;
@@ -96,7 +98,7 @@ export function TriageRow({
           {job.location && <span className="truncate">{job.location}</span>}
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
-          {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
+          {reason ? <span className="text-muted">{reason}</span> : null}
           {!evaluated && <span className="italic text-muted">not scored</span>}
         </p>
       </div>
