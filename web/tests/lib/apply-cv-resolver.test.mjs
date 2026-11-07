@@ -193,6 +193,35 @@ test('resolveTailoredCv: a cover-*.pdf is never returned, even if newer than the
   );
 });
 
+test('resolveTailoredCv: an over-budget .overflow.pdf draft is never returned, even though it is newer than the CV', async () => {
+  // generate-pdf.mjs keeps a render that ran over its page budget as a sibling
+  // {name}.overflow.pdf (then .overflow-2.pdf, ...) and writes it AFTER the
+  // deliverable, so newest-first alone would hand the apply flow the version
+  // the budget rejected.
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', -60000],
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow.pdf', 0],
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow-2.pdf', 0],
+    ],
+    async (outputDir) => {
+      const result = await resolveTailoredCv('Acme');
+      assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    }
+  );
+});
+
+test('resolveTailoredCv: a company with only an over-budget draft has no tailored CV', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow.pdf', 0],
+    ],
+    async () => {
+      assert.equal(await resolveTailoredCv('Acme'), null);
+    }
+  );
+});
+
 test('sortNewestFirst: drops a file that vanishes between readdir and stat instead of throwing (TOCTOU)', async () => {
   await withFixture([['exists.pdf', 0]], (outputDir) => {
     const result = sortNewestFirst(outputDir, ['exists.pdf', 'vanished-before-stat.pdf']);
