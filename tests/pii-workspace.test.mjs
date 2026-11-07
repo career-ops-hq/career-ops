@@ -334,7 +334,7 @@ test('restore reports deletion failure and sets nonzero exit code when token map
         }
         return orig(p);
       };
-      process.argv = [process.argv[0], 'pii-workspace.mjs', 'restore'];
+      process.argv = [process.argv[0], ${JSON.stringify(scriptPath)}, 'restore'];
       await import(${JSON.stringify(scriptUrl)});
     `;
 
