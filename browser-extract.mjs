@@ -362,9 +362,9 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
     url: postingUrl,
     title: compactText(str(job.title), 300),
     text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
-    // The board says the posting is no longer listed: carry that as closure, so a
-    // caller can stop instead of reading the marker out of the text.
-    ...(job.isListed === false ? { closed: true, evidence: 'Ashby isListed: false' } : {}),
+    // isListed:false is NOT closure: Ashby serves an unlisted posting by direct
+    // link and it can still take applications. The note in the text is the only
+    // carrier; closure needs independent evidence.
   };
 }
 
