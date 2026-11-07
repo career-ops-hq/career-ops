@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { latestOnly, pendingAfterReload } from "../../src/lib/templates-state.mjs";
+import { editingAfterReload, latestOnly, pendingAfterReload } from "../../src/lib/templates-state.mjs";
 
 // The Templates section reloads its list after every change. These two pieces
 // decide what a reload may do to the screen, so they are tested without React.
@@ -43,4 +43,16 @@ test("a form is closed when the reload no longer lists its template", () => {
 
 test("no open form stays no open form", () => {
   assert.equal(pendingAfterReload(null, [{ name: "mine" }]), null);
+});
+
+test("the open editor stays while its template is still in the reloaded list", () => {
+  assert.equal(editingAfterReload("mine", [{ name: "mine" }, { name: "other" }]), "mine");
+});
+
+test("the editor is closed when the reload no longer lists its template", () => {
+  assert.equal(editingAfterReload("gone", [{ name: "other" }]), null);
+});
+
+test("no open editor stays no open editor", () => {
+  assert.equal(editingAfterReload(null, [{ name: "mine" }]), null);
 });

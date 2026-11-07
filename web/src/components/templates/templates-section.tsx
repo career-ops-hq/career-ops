@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { TemplateEditor } from "@/components/templates/template-editor";
-import { latestOnly, pendingAfterReload } from "@/lib/templates-state.mjs";
+import { editingAfterReload, latestOnly, pendingAfterReload } from "@/lib/templates-state.mjs";
 
 // The CV templates the core resolves, each shown filled with a fictional resume
 // so the design is visible before it is chosen. Choosing one writes cv.template
@@ -54,6 +54,7 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
         const list: Template[] = Array.isArray(d?.templates) ? d.templates : [];
         setTemplates(list);
         setPending((p) => pendingAfterReload(p, list));
+        setEditing((e) => editingAfterReload(e, list));
       })
       .catch(() => {
         if (current()) setLoadError(true);

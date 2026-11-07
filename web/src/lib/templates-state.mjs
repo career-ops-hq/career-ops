@@ -31,3 +31,15 @@ export function latestOnly() {
 export function pendingAfterReload(pending, templates) {
   return pending && templates.some((t) => t.name === pending.name) ? pending : null;
 }
+
+/**
+ * The template open in the editor, or null once it is gone from the reloaded
+ * list. The editor already hides itself for a missing template; clearing the
+ * name stops it reopening when a template with that name appears again.
+ * @param {string | null} editing
+ * @param {{name: string}[]} templates
+ * @returns {string | null}
+ */
+export function editingAfterReload(editing, templates) {
+  return editing && templates.some((t) => t.name === editing) ? editing : null;
+}
