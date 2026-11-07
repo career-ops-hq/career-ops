@@ -1,7 +1,7 @@
 // Pure, client-side derivations for the inbox triage view. Every signal here is
-// FREE — parsed from data the raw posting already carries (URL host, title text,
-// first_seen date). 🔴 None of this ranks or scores relevance; it only labels and
-// buckets so the cheap facet filters can narrow the firehose with zero tokens.
+// free: URL host, title text, and first_seen date. These helpers only label a
+// row for the facet chips. Fit order lives in core/inbox-rank.mjs, one rule
+// for the inbox and what's new. Do not add a second sort here.
 
 import type { AtsSource } from "@/lib/explore";
 

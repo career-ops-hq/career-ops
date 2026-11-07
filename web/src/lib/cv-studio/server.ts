@@ -7,7 +7,7 @@ import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusFor
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
-import { markTrackerReady, spawnGeneratePdf } from "@/lib/pdf-render.mjs";
+import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
 import { htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
 import { unsupportedClaims } from "./rewrite.mjs";
@@ -202,10 +202,14 @@ export async function renderEditedPdf(load: Extract<StudioLoad, { ok: true }>, e
   atomicWrite(editedHtml, html);
   const format = /size:\s*a4/i.test(html) ? "a4" : "letter";
   const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
-  if (!render.ok) {
+  // A render over a warn-only page budget exits 0 but leaves nothing at
+  // editedPdf (the PDF went to a sibling .overflow.pdf draft, #6377), so the
+  // exit code alone would keep an HTML and mark the tracker ready for a PDF
+  // that was never written. Delivery is the file landing, same as the pdf run.
+  if (!render.delivered) {
     if (previousHtml === null) fs.rmSync(editedHtml, { force: true });
     else atomicWrite(editedHtml, previousHtml);
-    return { ok: false, error: render.stderr || "PDF rendering failed." };
+    return { ok: false, error: undeliveredRenderError(render, editedPdf) };
   }
   const warnings = render.stderr.split("\n").map((l: string) => l.trim()).filter(Boolean);
   const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), reportNum: load.reportNum });

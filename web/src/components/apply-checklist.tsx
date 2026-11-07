@@ -7,6 +7,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { PageFrame } from "@/components/page-frame";
 import { BackLink } from "@/components/back-link";
 import { MarkPdfReadyButton } from "@/components/mark-pdf-ready-button";
+import { CvPdfFileActions } from "@/components/cv-pdf-file-actions";
 import { saveStatus } from "@/lib/pipeline-status.mjs";
 
 type CopyItem = { label: string; text: string };
@@ -183,8 +184,9 @@ function PdfRow({ label, file, empty }: { label: string; file: PdfFile; empty: s
     <div className="mb-3 flex flex-wrap items-center gap-2">
       <span className="text-sm font-medium">{label}</span>
       <a href={file.downloadHref} target="_blank" rel="noreferrer" className={PILL}>
-        Download
+        View
       </a>
+      <CvPdfFileActions viewHref={file.downloadHref} className={PILL} />
       <CopyButton text={file.relativePath} label="Copy path" />
       <span className="font-mono text-xs text-faint">{file.relativePath}</span>
     </div>
