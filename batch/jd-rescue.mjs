@@ -132,10 +132,13 @@ export async function rescueDecision(url, html, { minWords, strippedWords, thin,
   // A page naming several postings or description payloads is ambiguous for the same reason.
   const ambiguous = !offDocument && inspectPage(String(html).slice(0, 3_000_000)).ambiguous;
   const pageUsable = !offDocument && !ambiguous;
-  return runRescueChain(
+  // The visible text the runner already stripped is the same unusable page, so its word count
+  // must not reject a valid API JD either.
+  const chain = await runRescueChain(
     [() => (pageUsable ? fromLdJson(html) : null), () => api, () => (pageUsable ? fromEmbeddedDescription(html) : null)],
-    { minWords, strippedWords, thin },
+    pageUsable ? { minWords, strippedWords, thin } : { minWords, strippedWords: 0, thin: true },
   );
+  return { ...chain, pageUnusable: !pageUsable };
 }
 
 async function main() {
@@ -175,9 +178,9 @@ Options:
     process.exit(3);
   }
   const { found, thinFound, notBetter } = chain;
-  if (!found && !thinFound && !notBetter && finalUrl && !sameDocument(url, finalUrl)) {
-    // Off-document and nothing from the API: the runner must not keep the other page's text.
-    process.stdout.write('0\toff-document\n');
+  if (!found && chain.pageUnusable) {
+    // Off-document or ambiguous page and no JD from the API: the runner must not keep the page's text.
+    process.stdout.write('0\tpage-unusable\n');
     process.exit(4);
   }
 

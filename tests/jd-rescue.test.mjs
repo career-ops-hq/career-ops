@@ -513,14 +513,18 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
     const err = go('https://jobs.example.com/co/abc123?error=true');
     if (same.code === 0) pass('same-document final URL: the page JD is rescued as before');
     else fail(`same-document case broke: ${JSON.stringify(same)}`);
-    if (off.code === 4 && /off-document/.test(off.out)) pass('off-document final URL: nothing is rescued from the page and the CLI exits 4');
+    if (off.code === 4 && /page-unusable/.test(off.out)) pass('off-document final URL: nothing is rescued from the page and the CLI exits 4');
     else fail(`off-document not terminal: ${JSON.stringify(off)}`);
     if (err.code === 3 || err.code === 4) pass('a redirect to an error-style URL is never rescued as this posting');
     else fail(`error redirect was rescued: ${JSON.stringify(err)}`);
     const { rescueDecision } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
     const two = ldJson(jobPosting({ description: `<p>${body}</p>` })) + ldJson(jobPosting({ title: 'Another role', description: `<p>${body} extra</p>` }));
+    const apiJd = async () => ({ text: Array.from({ length: 120 }, (_, n) => `a${n}`).join(' '), ats: 'ashby' });
+    const ambApi = await rescueDecision('https://jobs.example.com/co/abc123', two, { minWords: 80, strippedWords: 900, thin: false, fetchJd: apiJd });
+    if (ambApi.found?.method === 'ats-api:ashby') pass('on an unusable page the discarded text size cannot reject a valid API JD');
+    else fail(`API JD rejected by the discarded page's word count: ${JSON.stringify(ambApi)}`);
     const amb = await rescueDecision('https://jobs.example.com/co/abc123', two, { minWords: 80, strippedWords: 0, thin: true, fetchJd: async () => null });
-    if (!amb.found) pass('an ambiguous page (several postings) yields no page-derived JD');
+    if (!amb.found && amb.pageUnusable) pass('an ambiguous page (several postings) yields no page-derived JD and is flagged unusable');
     else fail('ambiguous page was rescued');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
