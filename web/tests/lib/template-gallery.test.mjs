@@ -16,12 +16,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   listCvTemplates,
+  listTemplatesOfKind,
   profileWithCvTemplate,
+  profileWithTemplate,
   renderTemplatePreview,
   assertSelectableTemplate,
   withPreviewCsp,
 } from "../../src/lib/template-gallery.mjs";
-import { SAMPLE_CV_PAYLOAD } from "../../src/lib/template-sample-resume.mjs";
+import { SAMPLE_CV_PAYLOAD, SAMPLE_COVER_PAYLOAD } from "../../src/lib/template-sample-resume.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -96,6 +98,37 @@ test("the fictional resume carries only reserved example contact details", () =>
   assert.equal(candidate.linkedin, undefined);
   assert.equal(candidate.github, undefined);
   assert.equal(candidate.portfolio, undefined);
+});
+
+test("cover-letter templates list, with cover_letter.template as the default", async () => {
+  const profilePath = scratchProfile("cover_letter:\n  template: standard\ncv:\n  template: modern\n");
+
+  const { templates, defaultName } = await listTemplatesOfKind(CORE, "cover", { profilePath });
+
+  assert.ok(templates.some((t) => t.name === "standard"));
+  assert.equal(defaultName, "standard");
+  assert.ok(!templates.some((t) => t.name === "modern"), "CV templates are not cover templates");
+});
+
+test("setting the cover default writes cover_letter.template and leaves cv alone", () => {
+  const source = "cv:\n  template: modern\n";
+
+  const text = profileWithTemplate(source, "cover", "standard");
+
+  assert.match(text, /cv:\n {2}template: modern\n/);
+  assert.match(text, /cover_letter:\n {2}template: "standard"/);
+});
+
+test("a cover template previews as a filled letter with the fictional sample", async () => {
+  const html = await renderTemplatePreview(CORE, "standard", "cover");
+
+  assert.ok(html.includes(SAMPLE_COVER_PAYLOAD.candidate.name));
+  assert.ok(html.includes(SAMPLE_COVER_PAYLOAD.letter.role_title));
+  assert.ok(!/\{\{[A-Z_]+\}\}/.test(html));
+});
+
+test("a name from the other kind is not selectable", async () => {
+  await assert.rejects(assertSelectableTemplate(CORE, "modern", "cover"), /not found/i);
 });
 
 test("a flow-style cv mapping with comments is refused, not rewritten without them", () => {

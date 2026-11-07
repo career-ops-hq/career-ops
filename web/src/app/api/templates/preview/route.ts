@@ -1,5 +1,5 @@
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { assertSelectableTemplate, renderTemplatePreview, withPreviewCsp } from "@/lib/template-gallery.mjs";
+import { parseKind, assertSelectableTemplate, renderTemplatePreview, withPreviewCsp } from "@/lib/template-gallery.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,15 +7,18 @@ export const dynamic = "force-dynamic";
 // A template filled with the fictional sample resume, as a standalone page for an
 // iframe. Never the user's data: the sample is bundled with the app.
 export async function GET(req: Request) {
-  const name = new URL(req.url).searchParams.get("name") ?? "";
+  const params = new URL(req.url).searchParams;
+  const name = params.get("name") ?? "";
+  const kind = parseKind(params.get("kind") ?? "cv");
+  if (!kind) return Response.json({ error: "kind must be cv or cover" }, { status: 400 });
   const root = resolveCodeRoot(process.cwd(), process.env);
   try {
-    await assertSelectableTemplate(root, name);
+    await assertSelectableTemplate(root, name, kind);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "unknown template" }, { status: 404 });
   }
   try {
-    return new Response(await withPreviewCsp(await renderTemplatePreview(root, name)), {
+    return new Response(withPreviewCsp(await renderTemplatePreview(root, name, kind)), {
       headers: {
         "content-type": "text/html; charset=utf-8",
         // A template is user-editable markup. The sandbox keeps any script in it

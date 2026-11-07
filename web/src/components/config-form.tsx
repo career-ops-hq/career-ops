@@ -300,7 +300,9 @@ export function ConfigForm() {
 
       <CadenceSettings />
 
-      <TemplatesSection />
+      <TemplatesSection kind="cv" />
+
+      <TemplatesSection kind="cover" />
 
       <div className="mt-8 flex items-center gap-3">
         <button

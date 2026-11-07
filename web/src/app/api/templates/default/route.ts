@@ -5,23 +5,25 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { readJsonObject } from "@/lib/json-body";
-import { assertSelectableTemplate, profileWithCvTemplate } from "@/lib/template-gallery.mjs";
+import { assertSelectableTemplate, parseKind, profileWithTemplate } from "@/lib/template-gallery.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Make a template the default for new CVs by writing cv.template in
-// config/profile.yml, the key the CLI reads. Only that line changes.
+// Make a template the default by writing cv.template (or cover_letter.template)
+// in config/profile.yml, the keys the CLI reads. Only that line changes.
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ name?: unknown }>(req);
+  const body = await readJsonObject<{ name?: unknown; kind?: unknown }>(req);
   if (!body) return NextResponse.json({ error: "bad json" }, { status: 400 });
   const name = typeof body.name === "string" ? body.name : "";
+  const kind = parseKind(body.kind ?? "cv");
+  if (!kind) return NextResponse.json({ error: "kind must be cv or cover" }, { status: 400 });
 
   // The core scripts live in the engine checkout; the profile lives in the data root.
   const codeRoot = resolveCodeRoot(process.cwd(), process.env);
   const root = careerOpsRoot();
   try {
-    await assertSelectableTemplate(codeRoot, name);
+    await assertSelectableTemplate(codeRoot, name, kind);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "unknown template" }, { status: 422 });
   }
@@ -37,7 +39,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "config/profile.yml could not be read." }, { status: 500 });
   }
   try {
-    atomicWriteWithBackup(file, profileWithCvTemplate(source, name));
+    atomicWriteWithBackup(file, profileWithTemplate(source, kind, name));
   } catch (e) {
     // A profile that does not parse, or is not a mapping, is the user's to fix.
     return NextResponse.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 409 });

@@ -14,7 +14,13 @@ const PAGE_WIDTH = 816;
 const PAGE_HEIGHT = 1056;
 const THUMB_WIDTH = 200;
 
-export function TemplatesSection() {
+const COPY = {
+  cv: { id: "cv-templates-heading", title: "CV templates", note: "Previews use a made-up resume, not yours. The default is used for new CVs." },
+  cover: { id: "cover-templates-heading", title: "Cover letter templates", note: "Previews use a made-up letter, not yours. The default is used for new cover letters." },
+} as const;
+
+export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
+  const copy = COPY[kind];
   const [templates, setTemplates] = useState<Template[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -22,14 +28,14 @@ export function TemplatesSection() {
 
   const load = useCallback(() => {
     setLoadError(false);
-    fetch("/api/templates")
+    fetch(`/api/templates?kind=${kind}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status));
         return r.json();
       })
       .then((d) => setTemplates(Array.isArray(d?.templates) ? d.templates : []))
       .catch(() => setLoadError(true));
-  }, []);
+  }, [kind]);
   useEffect(load, [load]);
 
   const choose = async (name: string) => {
@@ -39,7 +45,7 @@ export function TemplatesSection() {
       const res = await fetch("/api/templates/default", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, kind }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) setError(typeof j.error === "string" ? j.error : "Could not save.");
@@ -51,13 +57,11 @@ export function TemplatesSection() {
   };
 
   return (
-    <section aria-labelledby="templates-heading" className="mt-8">
-      <h2 id="templates-heading" className="text-base font-semibold">
-        CV templates
+    <section aria-labelledby={copy.id} className="mt-8">
+      <h2 id={copy.id} className="text-base font-semibold">
+        {copy.title}
       </h2>
-      <p className="mt-1 text-sm text-muted">
-        Previews use a made-up resume, not yours. The default is used for new CVs.
-      </p>
+      <p className="mt-1 text-sm text-muted">{copy.note}</p>
 
       {loadError ? (
         <p role="alert" className="mt-3 text-sm text-red-500">
@@ -72,7 +76,7 @@ export function TemplatesSection() {
         <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
           {templates.map((t) => (
             <li key={t.name} className="rounded-xl border border-border bg-surface/40 p-3">
-              <Thumb name={t.name} title={`${t.displayName} preview`} />
+              <Thumb kind={kind} name={t.name} title={`${t.displayName} preview`} />
               <div className="mt-2 flex items-center justify-between gap-2">
                 <span className="truncate text-sm font-medium">{t.displayName}</span>
                 {t.isDefault ? (
@@ -106,7 +110,7 @@ export function TemplatesSection() {
 // One template filled with the sample resume. The page is fetched and handed to
 // the frame as srcDoc (as the CV Studio preview does) rather than loaded by URL,
 // and only once the card scrolls into view, since each preview is a render.
-function Thumb({ name, title }: { name: string; title: string }) {
+function Thumb({ kind, name, title }: { kind: "cv" | "cover"; name: string; title: string }) {
   const box = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [html, setHtml] = useState<string | null>(null);
@@ -123,7 +127,7 @@ function Thumb({ name, title }: { name: string; title: string }) {
   useEffect(() => {
     if (!visible) return;
     let live = true;
-    fetch(`/api/templates/preview?name=${encodeURIComponent(name)}`)
+    fetch(`/api/templates/preview?kind=${kind}&name=${encodeURIComponent(name)}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status));
         return r.text();
@@ -133,7 +137,7 @@ function Thumb({ name, title }: { name: string; title: string }) {
     return () => {
       live = false;
     };
-  }, [visible, name]);
+  }, [visible, kind, name]);
 
   return (
     <div

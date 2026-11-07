@@ -67,3 +67,28 @@ export const SAMPLE_CV_PAYLOAD = {
   ],
   interests: ["Trail running", "Board games", "Woodworking"],
 };
+
+/**
+ * The cover letter every cover template preview is filled with. Same person as
+ * SAMPLE_CV_PAYLOAD, an invented employer, and the shape generate-cover-letter.mjs
+ * takes (candidate + letter).
+ */
+export const SAMPLE_COVER_PAYLOAD = {
+  candidate: { ...SAMPLE_CV_PAYLOAD.candidate },
+  letter: {
+    company: "Northwind Example Co.",
+    location: "Springfield, USA",
+    role_title: "Head of Operations",
+    greeting: "Dear Hiring Team,",
+    opening:
+      "I am writing about the Head of Operations role. Running operations for a growing company is the work I have done for the last eight years.",
+    profile_intro:
+      "At Harbor & Pine Labs I rebuilt the planning cycle and led a team of 14. Before that I opened a second fulfilment site on budget and two weeks early.",
+    achievements: [
+      { lead: "Planning", impact: "cut the quarterly cycle from six weeks to three." },
+      { lead: "Vendors", impact: "consolidated four contracts into two, saving 18% of annual spend." },
+    ],
+    closing: "I would welcome a conversation about how I can help your team.",
+    signature: { valediction: "Sincerely," },
+  },
+};
