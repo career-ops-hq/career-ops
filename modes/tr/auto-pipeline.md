@@ -35,7 +35,7 @@ Bu kontrol çözülene kadar Adım 1'e geçmeyin.
 ## Adım 2 — Raporu Kaydet .md
 
 Tam değerlendirmeyi `reports/{###}-{sirket-kisa-adi}-{YYYY-AA-GG}.md` konumuna kaydedin (format için `modes/tr/is-ilani.md` dosyasına bakın).
-Kaydedilen rapora G Blok'u ekleyin. Rapor başlığına **URL:** {url} ve **Meşruiyet:** {tier} ekleyin.
+Kaydedilen rapora G Blok'u ekleyin. Rapor başlığına **URL:** {url} ve **Legitimacy:** {tier} ekleyin.
 
 ## Adım 3 — PDF Oluştur
 

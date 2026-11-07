@@ -17,9 +17,9 @@ import { SAMPLE_CV_PAYLOAD, SAMPLE_COVER_PAYLOAD } from "./template-sample-resum
 const BASE_TEMPLATE = "standard";
 const PREVIEW_TIMEOUT_MS = 20_000;
 
-/** @param {string} root absolute path to the career-ops checkout */
-async function loadResolver(root) {
-  return import(/* webpackIgnore: true */ pathToFileURL(path.join(root, "cv-templates.mjs")).href);
+/** @param {string} codeRoot absolute path to the career-ops checkout */
+async function loadResolver(codeRoot) {
+  return import(/* webpackIgnore: true */ pathToFileURL(path.join(codeRoot, "cv-templates.mjs")).href);
 }
 
 /** Profile section holding `template` for each kind: the keys the CLI reads (KINDS in cv-templates.mjs). */
@@ -40,14 +40,14 @@ export function parseKind(value) {
 }
 
 /**
- * @param {string} root
+ * @param {string} codeRoot
  * @param {"cv"|"cover"} kind
  * @param {{profilePath?: string}} [opts] profilePath: the profile the CLI would read
  * @returns {Promise<{templates: {name: string, displayName: string, isDefault: boolean}[], defaultName: string}>}
  */
-export async function listTemplatesOfKind(root, kind, { profilePath } = {}) {
+export async function listTemplatesOfKind(codeRoot, kind, { profilePath } = {}) {
   assertKind(kind);
-  const resolver = await loadResolver(root);
+  const resolver = await loadResolver(codeRoot);
   const listed = resolver.listTemplates(kind);
   const configured = resolver.loadProfileDefault(kind, profilePath ? { profilePath } : {});
   const wanted = configured ? resolver.kebab(configured) : BASE_TEMPLATE;
@@ -60,20 +60,20 @@ export async function listTemplatesOfKind(root, kind, { profilePath } = {}) {
   };
 }
 
-/** @param {string} root @param {{profilePath?: string}} [opts] */
-export const listCvTemplates = (root, opts) => listTemplatesOfKind(root, "cv", opts);
+/** @param {string} codeRoot @param {{profilePath?: string}} [opts] */
+export const listCvTemplates = (codeRoot, opts) => listTemplatesOfKind(codeRoot, "cv", opts);
 
 /**
  * Resolve `name` through the core, which throws for a name it does not list and
  * for a template whose required placeholders or declared sections are missing.
  * Returns the template's absolute path.
- * @param {string} root
+ * @param {string} codeRoot
  * @param {string} name
  * @param {"cv"|"cover"} [kind]
  */
-export async function assertSelectableTemplate(root, name, kind = "cv") {
+export async function assertSelectableTemplate(codeRoot, name, kind = "cv") {
   assertKind(kind);
-  const resolver = await loadResolver(root);
+  const resolver = await loadResolver(codeRoot);
   const listed = resolver.listTemplates(kind);
   if (typeof name !== "string" || !listed.some((t) => t.name === name)) {
     throw new Error(`Template not found: ${String(name).slice(0, 80)}`);
@@ -125,15 +125,15 @@ export const profileWithCvTemplate = (source, name) => profileWithTemplate(sourc
  * The named template filled with the fictional sample, as an HTML page. A CV goes
  * through build-cv-html.mjs; a cover letter through generate-cover-letter.mjs's
  * buildHtml, the pure half of that script (no Playwright, nothing written).
- * @param {string} root
+ * @param {string} codeRoot
  * @param {string} name
  * @param {"cv"|"cover"} [kind]
  * @returns {Promise<string>}
  */
-export async function renderTemplatePreview(root, name, kind = "cv") {
-  const templatePath = await assertSelectableTemplate(root, name, kind);
+export async function renderTemplatePreview(codeRoot, name, kind = "cv") {
+  const templatePath = await assertSelectableTemplate(codeRoot, name, kind);
   if (kind === "cover") {
-    const mod = await import(/* webpackIgnore: true */ pathToFileURL(path.join(root, "generate-cover-letter.mjs")).href);
+    const mod = await import(/* webpackIgnore: true */ pathToFileURL(path.join(codeRoot, "generate-cover-letter.mjs")).href);
     return mod.buildHtml(structuredClone(SAMPLE_COVER_PAYLOAD), templatePath);
   }
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "template-preview-"));
@@ -144,8 +144,8 @@ export async function renderTemplatePreview(root, name, kind = "cv") {
     await new Promise((resolve, reject) => {
       execFile(
         process.execPath,
-        [path.join(root, "build-cv-html.mjs"), input, output, templatePath],
-        { cwd: root, timeout: PREVIEW_TIMEOUT_MS, windowsHide: true },
+        [path.join(codeRoot, "build-cv-html.mjs"), input, output, templatePath],
+        { cwd: codeRoot, timeout: PREVIEW_TIMEOUT_MS, windowsHide: true },
         (err, _out, stderr) => (err ? reject(new Error(stderr.trim() || err.message)) : resolve(undefined)),
       );
     });

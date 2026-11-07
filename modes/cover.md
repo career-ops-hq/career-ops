@@ -44,6 +44,8 @@ Read `modes/_writing.md` — the shared writing guidance (Voice DNA guardrail, W
 
 Read `modes/_profile.md` if it exists — the candidate's personalization file. It captures their target roles, adaptive framing and archetypes, exit narrative, cross-cutting advantage, proof points, comp targets, negotiation scripts, location policy, and any voice or writing-style rules they have added. Its rules **govern the letter's voice and structure and override the generic defaults in this mode and in `_writing.md`**, so the candidate's personalization is never lost.
 
+If `modes/_profile.md` has no `## Writing Style` section and `writing-samples/` holds a file other than `README.md`, run the Writing Style calibration in `modes/_writing.md` now and write the result to `modes/_profile.md` before drafting. Skip this when the section already exists.
+
 ---
 
 ## Step 2 — Parse the JD

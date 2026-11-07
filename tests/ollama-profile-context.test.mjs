@@ -8,7 +8,8 @@ import { createServer } from 'node:http';
 import {
   copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { listTree } from '../lib/walk-tree.mjs';
 import { pass, fail, ownRootEnv, NODE, ROOT } from './helpers.mjs';
 
 console.log('\nollama-eval — includes profile.yml and _profile.md in model context (#2488)');
@@ -20,6 +21,21 @@ const copyIntoFixture = (relativePath) => {
   copyFileSync(join(ROOT, relativePath), destination);
 };
 
+/** Copy a directory (and everything under it) into the fixture root. */
+const copyDirIntoFixture = (relativeDir) => {
+  for (const abs of listTree(join(ROOT, relativeDir))) copyIntoFixture(relative(ROOT, abs));
+};
+
+// The fixture is a hand-maintained transitive closure of ollama-eval's imports,
+// and every new shared module it pulls in has to be added here or the child dies
+// with ERR_MODULE_NOT_FOUND before it reaches the mock server (#5530-era fix).
+// Enumerating lib/ file by file made that a recurring papercut: the privacy
+// boundary added three modules (llm-outbound, privacy-guard, pii-interceptor)
+// and the list silently went stale. lib/ is a flat, dependency-light shared
+// layer, so copy the whole directory instead and stop maintaining the closure by
+// hand. Top-level entry points stay explicit — those are the files under test.
+copyDirIntoFixture('lib');
+
 for (const relativePath of [
   'ollama-eval.mjs',
   'profile-language.mjs',
@@ -30,23 +46,9 @@ for (const relativePath of [
   // tracker-utils imports the shared lock-contention helpers (#2777 fix):
   // a fixture that carries tracker-utils has to carry its import too.
   'pipeline-lock.mjs',
-  // ...which runs the shared lock protocol from lib/dir-lock.mjs (#5358).
-  'lib/dir-lock.mjs',
-  'lib/yaml-document.mjs',
   // ollama-eval/reserve-report-num resolve user-layer paths via
   // path-resolver.mjs (CAREER_OPS_ROOT), so the fixture carries that too.
   'path-resolver.mjs',
-  'lib/context-budget.mjs',
-  // ollama-eval builds its tracker-addition row with the shared helpers
-  // (#3796), so the fixture has to carry the module they were consolidated
-  // into -- same reason pipeline-lock.mjs is on this list.
-  'lib/tracker-addition.mjs',
-  // reserve-report-num.mjs's main-guard comes from lib/is-main-module.mjs
-  // (#3170), so a fixture that carries it has to carry the helper too.
-  'lib/is-main-module.mjs',
-  // ollama-eval dates its report with localToday() rather than the UTC day,
-  // so the fixture has to carry that helper for the module to load at all.
-  'lib/local-today.mjs',
   'utils/token-tracker.mjs',
 ]) {
   copyIntoFixture(relativePath);

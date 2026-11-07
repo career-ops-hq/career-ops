@@ -205,7 +205,9 @@ export function checkLocationDescriptors(payloadExperience, cvMdExperience) {
  *
  * @param {object} payload the parsed JSON payload build-cv-html.mjs consumes
  * @param {string} cvMdText raw cv.md content
- * @returns {{ verdict: 'pass'|'warn'|'unverified', orderViolations: string[], descriptorViolations: string[] }}
+ * @returns {{ verdict: 'pass'|'warn'|'unverified', reason?: 'no-match', orderViolations: string[], descriptorViolations: string[] }}
+ *   `reason: 'no-match'` marks the unverified case where cv.md parsed but no
+ *   payload experience entry matched one of its entries.
  */
 export function verifyStructure(payload, cvMdText) {
   const cvMdExperience = parseCvMdExperience(cvMdText);
@@ -233,6 +235,16 @@ export function verifyStructure(payload, cvMdText) {
     return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
   }
   const payloadExperience = Array.isArray(payload.experience) ? payload.experience : [];
+  // Nothing compared is not a pass either. Both checks look only at entries
+  // they can match across the two sides (the order check from the payload,
+  // the descriptor check from cv.md), so a payload that matches none of
+  // cv.md's entries (an empty experience list, every company renamed) gave
+  // them nothing to look at, and "no violations" printed as "passed".
+  const compared = payloadExperience.some((e) => findCompanyIndex(cvMdExperience, e.company, payloadExperience) !== -1)
+    || cvMdExperience.some((c) => findCompanyIndex(payloadExperience, c.company, cvMdExperience) !== -1);
+  if (!compared) {
+    return { verdict: 'unverified', reason: 'no-match', orderViolations: [], descriptorViolations: [] };
+  }
   const orderViolations = checkExperienceOrder(payloadExperience, cvMdExperience);
   const descriptorViolations = checkLocationDescriptors(payloadExperience, cvMdExperience);
   return {
@@ -344,6 +356,19 @@ function runSelfTest() {
   equal('correct order, all descriptors present: no violations',
     verifyStructure({ experience: correctOrder }, cvMd),
     { verdict: 'pass', orderViolations: [], descriptorViolations: [] });
+
+  // A payload that matches nothing in cv.md compared nothing: no violations
+  // there means nothing was looked at, not that the structure held.
+  const nothingMatched = verifyStructure({ experience: [] }, cvMd);
+  equal('empty payload experience against a parsed cv.md: unverified, not a false pass',
+    nothingMatched.verdict, 'unverified');
+  equal('the empty-payload case says why', nothingMatched.reason, 'no-match');
+  equal('renamed companies that match nothing: unverified',
+    verifyStructure({ experience: [{ company: 'Gamma Labs', location: 'Remote' }, { company: 'Delta Works', location: 'Remote' }] }, cvMd).verdict,
+    'unverified');
+  equal('one matched entry is a comparison: pass',
+    verifyStructure({ experience: [{ company: 'Acme Corp', location: 'Austin, TX · Series B fintech' }] }, cvMd).verdict,
+    'pass');
 
   const swappedOrder = [
     { company: 'Acme Corp', location: 'Austin, TX · Series B fintech' },
@@ -687,6 +712,11 @@ export function runCli(args = process.argv.slice(2)) {
   const result = verifyStructure(payload, cvMdText);
   if (result.verdict === 'unverified') {
     console.warn(`⚠️  CV structure check UNVERIFIED: ${basename(targetPath)}`);
+    if (result.reason === 'no-match') {
+      console.warn(`None of the tailored CV's experience entries matched a company in ${sourcePath} — nothing was compared.`);
+      console.warn('An empty experience list, or companies renamed beyond recognition, leaves the order and descriptor checks nothing to look at; review the tailored CV structure manually.');
+      return 0;
+    }
     console.warn(`Could not find supported company/location headers in ${sourcePath} — nothing was checked.`);
     console.warn(`Expected a ${EXPERIENCE_HEADING_NAMES.map((name) => `"## ${name}"`).join(' / ')} section with "### Company — Location" headers (em dash, en dash, or hyphens); review the tailored CV structure manually.`);
     return 0;

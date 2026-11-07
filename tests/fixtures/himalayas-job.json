@@ -1,0 +1,14 @@
+{
+  "job": {
+    "title": "Product Manager",
+    "companyName": "Fixture Labs",
+    "companySlug": "fixture-labs",
+    "guid": "https://himalayas.app/companies/fixture-labs/jobs/product-manager",
+    "applicationLink": "https://himalayas.app/companies/fixture-labs/jobs/product-manager?utm_source=api",
+    "description": "<p>Fixture Labs builds planning software for small teams. This fictional role works with engineering and design to improve the product and understand how customers use it.</p><h2>Responsibilities</h2><p>Interview users, investigate onboarding problems, write clear product specifications, prioritize improvements and measure the results of releases. Collaborate with the delivery team and explain decisions through concise written proposals.</p><h2>Requirements</h2><p>Experience owning software product decisions, working with analytics and testing prototypes with users. Communicate clearly, handle competing priorities and develop practical experiments. The role is remote and works with a distributed team. Applications and candidate decisions remain subject to the employer's current instructions.</p>",
+    "locationRestrictions": [],
+    "timezoneRestrictions": [0, 1],
+    "pubDate": 1793664000,
+    "expiryDate": 1795046400
+  }
+}

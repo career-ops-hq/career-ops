@@ -10,11 +10,12 @@
 // connection failed, turned the checks after it into navigation_errors.
 //
 // The page double plays that sequence out, so the fix is checked where the
-// suite runs without a browser (CI installs none). The second part runs the
-// same sequences on real Chromium and is skipped with a warning where Chromium
-// cannot launch. Its pages come from routes and its DNS is a stub, so nothing
-// leaves the machine.
-import { pass, fail, warn } from './helpers.mjs';
+// suite runs without a browser (the test job installs none). The second part
+// runs the same sequences on real Chromium and is skipped with a warning where
+// Chromium cannot launch (a failure under `test-all.mjs --needs browser`, which
+// the tool-suites CI job runs). Its pages come from routes and its DNS is a stub,
+// so nothing leaves the machine.
+import { pass, fail, toolUnavailable } from './helpers.mjs';
 import { checkUrlLiveness, installLivenessRouteGuard, newLivenessPage, setHostResolver } from '../liveness-browser.mjs';
 
 console.log('\nliveness-browser — after a failed navigation');
@@ -156,7 +157,7 @@ try {
   try {
     browser = await chromium.launch({ headless: true });
   } catch (e) {
-    warn(`failed-navigation checks on Chromium skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
+    toolUnavailable('browser', `failed-navigation checks on Chromium skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
   }
   if (browser) {
     // gone.example has no address, so the guard refuses the page itself.

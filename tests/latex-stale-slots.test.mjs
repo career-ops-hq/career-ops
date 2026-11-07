@@ -37,7 +37,7 @@ function fixture(run, initialText = sourceText) {
     const cli = (script, args) => spawnSync(process.execPath, [script, ...args], { cwd: new URL('..', import.meta.url), env, encoding: 'utf8' });
     writeFileSync(source, initialText);
     const extracted = cli('extract-latex-content.mjs', [source, '--out', manifest]);
-    assert.equal(extracted.status, 0, extracted.stderr);
+    assert.equal(extracted.status, 0, describeSpawn(extracted));
     const slots = JSON.parse(readFileSync(manifest, 'utf8')).slots;
     assert.equal(slots.length, 2);
     writeFileSync(manifest, JSON.stringify({ slots, patches: [{ id: slots[0].id, text: 'Tailored 30% & verified.' }] }));
@@ -49,7 +49,7 @@ function fixture(run, initialText = sourceText) {
 
 check('unchanged extracted source patches only the selected prose and escapes it', () => fixture(({ source, manifest, output, cli }) => {
   const result = cli('patch-latex-content.mjs', [source, manifest, output]);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(readFileSync(source, 'utf8'), sourceText);
   assert.equal(readFileSync(output, 'utf8'), sourceText.replace('Original first bullet.', String.raw`Tailored 30\% \& verified.`));
 }));
@@ -88,7 +88,7 @@ check('fresh unbraced item slots remain valid with trailing spaces and CRLF', ()
 `.replace('First bullet.', 'First bullet.   ').replace('Second bullet.', 'Second bullet. ').replace(/\n/g, '\r\n');
   fixture(({ source, manifest, output, cli }) => {
     const result = cli('patch-latex-content.mjs', [source, manifest, output]);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.match(readFileSync(output, 'utf8'), /Tailored 30\\% \\& verified\./);
     assert.equal(readFileSync(source, 'utf8'), initial);
   }, initial);

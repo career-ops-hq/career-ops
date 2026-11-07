@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { inboxScoreTarget } from "../../src/lib/inbox-score-target.mjs";
+import { inboxScoreTarget, skippableJobs } from "../../src/lib/inbox-score-target.mjs";
 
 const base = { jobId: "job-1", running: false, score: null, reportN: null };
 
@@ -39,4 +39,13 @@ test("a saved report with no parsed score still opens the pipeline page", () => 
     href: "/pipeline/21",
     showScore: false,
   });
+});
+
+test("a bulk skip leaves evaluated rows in place", () => {
+  const jobs = [{ url: "https://jobs.example/new" }, { url: "https://jobs.example/scored" }, { url: "https://jobs.example/running" }];
+  const scoreByUrl = new Map([
+    ["https://jobs.example/scored", { ...base, score: 4.1, reportN: 7 }],
+    ["https://jobs.example/running", { ...base, running: true }],
+  ]);
+  assert.deepEqual(skippableJobs(jobs, scoreByUrl), [{ url: "https://jobs.example/new" }]);
 });

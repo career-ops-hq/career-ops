@@ -25,19 +25,37 @@
  * Run: node sync-batch-input.mjs [--dry-run] [--pipeline <path>] [--input <path>] [--state <path>]
  */
 
-import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, realpathSync, lstatSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { isIP } from 'net';
+import { tmpdir } from 'os';
+import { createHash } from 'crypto';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
+import { acquirePipelineLock } from './pipeline-lock.mjs';
+import { releaseOrWarn } from './lib/dir-lock.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const CHECKOUT_ROOT = dirname(fileURLToPath(import.meta.url));
 
 /** Batch source label written into the source column. */
 export const SOURCE = 'pipeline';
+
+function canonicalInputPath(inputPath) {
+  let existing = inputPath;
+  while (!lstatSync(existing, { throwIfNoEntry: false })) existing = dirname(existing);
+  return resolve(realpathSync(existing), relative(existing, inputPath));
+}
+
+// A writable input can live in a read-only directory. Keep its lock in the
+// OS temp directory, with the same identity for direct paths and symlink aliases.
+export function batchInputLockTarget(inputPath) {
+  const identity = createHash('sha256').update(canonicalInputPath(resolve(inputPath))).digest('hex');
+  return join(realpathSync(tmpdir()), 'career-ops-batch-input-locks', identity);
+}
 
 const SECTION_RE = /^##\s+/;
 const PENDING_ITEM_RE = /^- \[ \]\s+/;
@@ -167,11 +185,11 @@ export function isSafePublicHttpUrl(raw) {
 /**
  * Extract labeled segments from a pipeline row body ("| label: value").
  * @param {string} body - Raw pipeline row body.
- * @returns {{note?: string, trust?: string, rank?: string, posted?: string}}
+ * @returns {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}}
  */
 export function extractLabels(body) {
   const labels = {};
-  const labelRe = /\|\s*(posted|trust|note|rank):\s*([^|]+)/g;
+  const labelRe = /\|\s*(posted|trust|yrs|note|rank):\s*([^|]+)/g;
   let m;
   while ((m = labelRe.exec(body)) !== null) {
     labels[m[1]] = m[2].trim();
@@ -191,7 +209,7 @@ export function lineCompany(body) {
 
 /**
  * Build the batch `notes` field from labeled segments.
- * @param {{note?: string, trust?: string, rank?: string, posted?: string}} labels - Label dictionary from extractLabels.
+ * @param {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}} labels - Label dictionary from extractLabels.
  * @returns {string}
  */
 export function buildNotes(labels) {
@@ -296,19 +314,19 @@ export function planBatchRows(pending, existingUrls, startId = 1) {
 // ── CLI entry point ────────────────────────────────────────────────────────
 
 if (isMainModule(import.meta.url)) {
-  const DRY_RUN = process.argv.includes('--dry-run');
-
-  if (process.argv.includes('-h') || process.argv.includes('--help')) {
-    console.log('Usage: node sync-batch-input.mjs [--dry-run] [--pipeline <path>] [--input <path>] [--state <path>]');
-    console.log('  Syncs pipeline.md "Pending" entries into batch/batch-input.tsv.');
-    process.exit(0);
-  }
+  const args = process.argv.slice(2);
+  const USAGE = 'Usage: node sync-batch-input.mjs [--dry-run] [--pipeline <path>] [--input <path>] [--state <path>]\n'
+    + '  Syncs pipeline.md "Pending" entries into batch/batch-input.tsv.';
+  const VALUE_FLAGS = ['--pipeline', '--input', '--state'];
+  // A mistyped --dry-run must not fall through to a real write, and --input=path
+  // must not be dropped in favour of the default file.
+  validateFlags(args, ['--dry-run', ...VALUE_FLAGS, '--help', '-h'], USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  const DRY_RUN = hasFlag(args, '--dry-run');
 
   function argValue(flag) {
-    const i = process.argv.indexOf(flag);
-    if (i < 0) return null;
-    const value = process.argv[i + 1];
-    if (value === undefined || value === '' || value.startsWith('--')) {
+    if (!hasFlag(args, flag)) return null;
+    const value = flagValue(args, flag);
+    if (value === undefined || value === '') {
       console.error(`Missing value for ${flag}`);
       process.exit(1);
     }
@@ -331,7 +349,8 @@ if (isMainModule(import.meta.url)) {
     ? join(CAREER_OPS, 'data/pipeline.md')
     : join(CAREER_OPS, 'pipeline.md');
   const PIPELINE_FILE = resolveInsideRepo(argValue('--pipeline'), defaultPipeline, '--pipeline');
-  const INPUT_FILE = resolveInsideRepo(argValue('--input'), join(CHECKOUT_ROOT, 'batch', 'batch-input.tsv'), '--input', CHECKOUT_ROOT);
+  const inputPath = resolveInsideRepo(argValue('--input'), join(CHECKOUT_ROOT, 'batch', 'batch-input.tsv'), '--input', CHECKOUT_ROOT);
+  const INPUT_FILE = canonicalInputPath(inputPath);
   const STATE_FILE = resolveInsideRepo(argValue('--state'), join(CHECKOUT_ROOT, 'batch', 'batch-state.tsv'), '--state', CHECKOUT_ROOT);
 
   if (!existsSync(PIPELINE_FILE)) {
@@ -345,49 +364,58 @@ if (isMainModule(import.meta.url)) {
     process.exit(0);
   }
 
-  const existingUrls = new Set();
-  let startId = 1;
-  if (existsSync(INPUT_FILE)) {
-    const inputText = readFileSync(INPUT_FILE, 'utf-8');
-    for (const u of urlsFromTsv(inputText, 1)) existingUrls.add(u);
-    startId = Math.max(startId, maxTsvId(inputText) + 1);
-  }
-  if (existsSync(STATE_FILE)) {
-    const stateText = readFileSync(STATE_FILE, 'utf-8');
-    for (const u of urlsFromTsv(stateText, 1)) existingUrls.add(u);
-    startId = Math.max(startId, maxTsvId(stateText) + 1);
-  }
+  // Allocation, deduplication and append share one snapshot across syncs.
+  const lock = DRY_RUN ? null : await acquirePipelineLock(batchInputLockTarget(INPUT_FILE));
+  const release = () => { if (lock) releaseOrWarn(lock); };
+  process.once('exit', release);
+  try {
+    const existingUrls = new Set();
+    let startId = 1;
+    if (existsSync(INPUT_FILE)) {
+      const inputText = readFileSync(INPUT_FILE, 'utf-8');
+      for (const u of urlsFromTsv(inputText, 1)) existingUrls.add(u);
+      startId = Math.max(startId, maxTsvId(inputText) + 1);
+    }
+    if (existsSync(STATE_FILE)) {
+      const stateText = readFileSync(STATE_FILE, 'utf-8');
+      for (const u of urlsFromTsv(stateText, 1)) existingUrls.add(u);
+      startId = Math.max(startId, maxTsvId(stateText) + 1);
+    }
 
-  const newRows = planBatchRows(pending, existingUrls, startId);
-  if (newRows.length === 0) {
-    console.log(`All ${pending.length} pending entries already in batch-input.tsv or batch-state.tsv — nothing to sync.`);
-    process.exit(0);
+    const newRows = planBatchRows(pending, existingUrls, startId);
+    if (newRows.length === 0) {
+      console.log(`All ${pending.length} pending entries already in batch-input.tsv or batch-state.tsv — nothing to sync.`);
+      process.exit(0);
+    }
+
+    console.log('=== Sync pipeline.md -> batch-input.tsv ===');
+    console.log(`📋 Pipeline pending: ${pending.length} entries`);
+    console.log(`⏭️  Already queued/processed: ${pending.length - newRows.length}`);
+    console.log(`➕ New entries to add: ${newRows.length}`);
+    for (const e of newRows) {
+      const label = e.company ? ` (${e.company})` : '';
+      console.log(`   ${e.url}${label}`);
+    }
+
+    if (DRY_RUN) {
+      // Print where a real run would write. The defaults depend on which root
+      // the install resolved (data root vs checkout), and that difference is the
+      // one a dry run cannot otherwise show: it exits before touching either file.
+      console.log(`(dry-run — no changes written; would append to ${relative(process.cwd(), INPUT_FILE) || INPUT_FILE})`);
+      process.exit(0);
+    }
+
+    if (!existsSync(INPUT_FILE)) {
+      mkdirSync(dirname(INPUT_FILE), { recursive: true });
+      writeFileSync(INPUT_FILE, `# batch-input.tsv — generated by sync-batch-input.mjs\n# id<tab>url<tab>source<tab>notes\n`);
+    }
+
+    appendFileSync(INPUT_FILE, newRows.map((e) => e.row).join('\n') + '\n');
+
+    console.log(`✅ ${newRows.length} entries appended to ${relative(process.cwd(), INPUT_FILE) || INPUT_FILE}`);
+    console.log('   Run `./batch/batch-runner.sh` to evaluate them.');
+  } finally {
+    release();
+    process.off('exit', release);
   }
-
-  console.log('=== Sync pipeline.md -> batch-input.tsv ===');
-  console.log(`📋 Pipeline pending: ${pending.length} entries`);
-  console.log(`⏭️  Already queued/processed: ${pending.length - newRows.length}`);
-  console.log(`➕ New entries to add: ${newRows.length}`);
-  for (const e of newRows) {
-    const label = e.company ? ` (${e.company})` : '';
-    console.log(`   ${e.url}${label}`);
-  }
-
-  if (DRY_RUN) {
-    // Print where a real run would write. The defaults depend on which root
-    // the install resolved (data root vs checkout), and that difference is the
-    // one a dry run cannot otherwise show: it exits before touching either file.
-    console.log(`(dry-run — no changes written; would append to ${relative(process.cwd(), INPUT_FILE) || INPUT_FILE})`);
-    process.exit(0);
-  }
-
-  if (!existsSync(INPUT_FILE)) {
-    mkdirSync(dirname(INPUT_FILE), { recursive: true });
-    writeFileSync(INPUT_FILE, `# batch-input.tsv — generated by sync-batch-input.mjs\n# id<tab>url<tab>source<tab>notes\n`);
-  }
-
-  appendFileSync(INPUT_FILE, newRows.map((e) => e.row).join('\n') + '\n');
-
-  console.log(`✅ ${newRows.length} entries appended to ${relative(process.cwd(), INPUT_FILE) || INPUT_FILE}`);
-  console.log('   Run `./batch/batch-runner.sh` to evaluate them.');
 }

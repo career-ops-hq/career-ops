@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
 import { computeListingFingerprint } from '../listing-fingerprint.mjs';
-import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities, migrateOfferToUrl, refreshListingKey } from '../scan.mjs';
+import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities, migrateOfferToUrl, refreshListingKey, seenJobKey } from '../scan.mjs';
 
 console.log('\nscan.mjs — listing fingerprint participates in scan dedup');
 
@@ -19,6 +19,13 @@ const first = {
 const alias = {
   ...first,
   url: 'https://job-boards.greenhouse.io/acme/jobs/4012345?gh_src=career-site',
+};
+// Same ATS identity, different posting. Used where a check must prove that a
+// rejection did not lend its listing key to another job. The Greenhouse alias
+// above is the same job, so the URL key already covers it.
+const identityOnly = {
+  ...first,
+  url: 'https://jobs.example.test/same-identity',
 };
 const expectedKey = computeListingFingerprint({ strong: identity }).listing_key;
 
@@ -92,8 +99,8 @@ try {
     const blocked = collectSeenUrls({
       scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key\n${acceptedUrl}\t2026-10-03\tgreenhouse\tStaff Engineer\tAcme\tskipped_blocked_host\tRemote\t\t\t\t\tacme\t\t\t${expectedKey}\n`,
     }, {}, { extraTokensFor: (_url, _portal, key) => key ? `listing:${key}` : null });
-    if (blocked.seen.has(acceptedUrl) && !blocked.seen.has(`listing:${expectedKey}`)
-        && !isOfferSeen(alias, blocked.seen, blocked.identityPromotableUrls)) {
+    if (blocked.seen.has(seenJobKey(acceptedUrl)) && !blocked.seen.has(`listing:${expectedKey}`)
+        && !isOfferSeen(identityOnly, blocked.seen, blocked.identityPromotableUrls)) {
       pass('URL-specific history failures do not promote listing identity to aliases');
   } else fail('a URL-specific history failure promoted its listing identity');
 
@@ -113,7 +120,7 @@ try {
         pass(`${status} history ${pinsOwnUrl ? 'pins' : 'does not pin'} its own URL`);
       } else fail(`${status} history ${pinsOwnUrl ? 'released' : 'pinned'} its own URL`);
       if (!rejected.seen.has(`listing:${expectedKey}`)
-          && !isOfferSeen(alias, rejected.seen, rejected.identityPromotableUrls)) {
+          && !isOfferSeen(identityOnly, rejected.seen, rejected.identityPromotableUrls)) {
         pass(`${status} history leaves a live identity alias eligible`);
       } else fail(`${status} history suppressed a different URL through rejected listing identity`);
     }
@@ -123,7 +130,7 @@ try {
     // a following URL free to be retained after it verifies successfully.
     const verifySeen = new Set();
     markOfferSeen(first, verifySeen, { includeIdentity: false });
-    if (!isOfferSeen(alias, verifySeen)) {
+    if (!isOfferSeen(identityOnly, verifySeen)) {
       const live = retainVerifiedListingIdentities([alias], verifySeen);
       if (live.length === 1 && verifySeen.has(`listing:${expectedKey}`)) {
         pass('verification retains identity only after a live alias is accepted');

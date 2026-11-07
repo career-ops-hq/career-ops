@@ -32,7 +32,7 @@ const LOCALES = [
   { file: 'modes/pl/oferta.md', score: '**Score:** {X/5}', decision: '**Decyzja:** {Aplikuj | Rozważ | Najpierw sprawdź | Pomiń}', lede: '{zdanie o aplikacji, skopiowane słowo w słowo}', apply: 'Aplikuj' },
   { file: 'modes/pt/oferta.md', score: '**Score:** {X/5}', decision: '**Decisão:** {Candidatar | Considerar | Pesquisar primeiro | Não candidatar}', lede: '{a frase de candidatar ou não, copiada palavra por palavra}', apply: 'Candidatar' },
   { file: 'modes/ru/oferta.md', score: '**Score:** {X/5}', decision: '**Решение:** {Откликнуться | Рассмотреть | Сначала изучить | Пропустить}', lede: '{предложение из `## Вердикт (lead)`, дословно}', apply: 'Откликнуться' },
-  { file: 'modes/tr/is-ilani.md', score: '**Puan:** {X.X}/5', decision: '**Karar:** {Başvur | Değerlendir | Önce araştır | Geç}', lede: '{`## Karar (lead)` cümlesi, kelimesi kelimesine}', apply: 'Başvur' },
+  { file: 'modes/tr/is-ilani.md', score: '**Score:** {X/5}', decision: '**Karar:** {Başvur | Değerlendir | Önce araştır | Geç}', lede: '{`## Karar (lead)` cümlesi, kelimesi kelimesine}', apply: 'Başvur' },
   { file: 'modes/ua/oferta.md', score: '**Score:** {X/5}', decision: '**Рішення:** {Відгукнутися | Розглянути | Спочатку дослідити | Пропустити}', lede: '{речення про відгук, дослівно}', apply: 'Відгукнутися' },
   { file: 'modes/vi/tuyen-dung.md', score: '**Score:** {X/5}', decision: '**Quyết định:** {Nộp hồ sơ | Cân nhắc | Tìm hiểu trước | Bỏ qua}', lede: '{câu của `## Kết luận (lead)`, chép nguyên văn}', apply: 'Nộp hồ sơ' },
   { file: 'modes/zh/oferta.md', score: '**Score:** {X/5}', decision: '**决定:** {申请 | 考虑 | 先调研 | 跳过}', lede: '{`## 结论 (lead)` 的那一句，逐字复制}', apply: '申请' },

@@ -92,7 +92,11 @@ export function parseJustJoinResponse(json) {
         url: `${JOB_BASE}${slug}`,
         company: String(offer.companyName || '').trim(),
         location: normalizeLocation(offer),
-        postedAt: postedAtMillis(offer.publishedAt),
+        // `publishedAt` moves forward every time the employer refreshes the
+        // offer (most of the board carries today's date), while
+        // `lastPublishedAt` keeps the earlier publication date. Prefer it so
+        // max_posting_age_days sees a refreshed old posting as old.
+        postedAt: postedAtMillis(offer.lastPublishedAt) ?? postedAtMillis(offer.publishedAt),
       };
     })
     .filter(Boolean);

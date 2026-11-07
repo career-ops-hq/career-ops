@@ -80,12 +80,18 @@ async function withFixture(files, fn) {
     }
   }
   const prev = process.env.CAREER_OPS_ROOT;
+  const prevCode = process.env.CAREER_OPS_CODE_ROOT;
   process.env.CAREER_OPS_ROOT = root;
+  // The stub tracker-utils.mjs below stands in for the code checkout, where
+  // pdf-index.ts loads it from; the temp dir is both roots here.
+  process.env.CAREER_OPS_CODE_ROOT = root;
   try {
     return await fn(outputDir);
   } finally {
     if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = prev;
+    if (prevCode === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = prevCode;
     rmSync(root, { recursive: true, force: true });
   }
 }
@@ -183,6 +189,35 @@ test('resolveTailoredCv: a cover-*.pdf is never returned, even if newer than the
     async (outputDir) => {
       const result = await resolveTailoredCv('Acme');
       assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    }
+  );
+});
+
+test('resolveTailoredCv: an over-budget .overflow.pdf draft is never returned, even though it is newer than the CV', async () => {
+  // generate-pdf.mjs keeps a render that ran over its page budget as a sibling
+  // {name}.overflow.pdf (then .overflow-2.pdf, ...) and writes it AFTER the
+  // deliverable, so newest-first alone would hand the apply flow the version
+  // the budget rejected.
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', -60000],
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow.pdf', 0],
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow-2.pdf', 0],
+    ],
+    async (outputDir) => {
+      const result = await resolveTailoredCv('Acme');
+      assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    }
+  );
+});
+
+test('resolveTailoredCv: a company with only an over-budget draft has no tailored CV', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow.pdf', 0],
+    ],
+    async () => {
+      assert.equal(await resolveTailoredCv('Acme'), null);
     }
   );
 });

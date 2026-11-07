@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="336" viewBox="0 0 760 336" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-labelledby="component-map-title">
+  <title id="component-map-title">Component map: an AI coding CLI (or a script) reads the prompt files in modes/*.md, the brain: scoring, evaluation, apply, scan and interview prompts, with _shared.md as the scoring core. They drive five areas: scan (scan.mjs, providers/), evaluate (modes/oferta.md plus the eval scripts), generate (PDFs, CVs, cover letters), track (data/, reports/) and update (update-system.mjs).</title>
+  <rect width="760" height="336" rx="12" fill="#0d1117"/>
+  <rect x="210" y="16" width="340" height="56" rx="10" fill="#161b22" stroke="#30363d"/>
+  <clipPath id="cm-cli"><rect x="210" y="16" width="340" height="56" rx="10"/></clipPath>
+  <rect x="210" y="16" width="6" height="56" fill="#DD7627" clip-path="url(#cm-cli)"/>
+  <text x="380" y="50" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">AI coding CLI (or scripts)</text>
+  <line x1="380" y1="72" x2="380" y2="105" stroke="#6e7681" stroke-width="2"/><path d="M374 103 L386 103 L380 112 Z" fill="#6e7681"/>
+  <text x="390" y="97" font-size="12" fill="#9198a1">reads prompt files</text>
+  <rect x="80" y="112" width="600" height="76" rx="10" fill="#161b22" stroke="#30363d"/>
+  <clipPath id="cm-modes"><rect x="80" y="112" width="600" height="76" rx="10"/></clipPath>
+  <rect x="80" y="112" width="6" height="76" fill="#DD7627" clip-path="url(#cm-modes)"/>
+  <text x="380" y="141" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">The brain<tspan font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" fill="#9198a1">  modes/*.md</tspan></text>
+  <text x="380" y="166" text-anchor="middle" font-size="12.5" fill="#9198a1">scoring, evaluation, apply, scan and interview prompts; _shared.md is the scoring core</text>
+  <line x1="380" y1="188" x2="380" y2="204" stroke="#6e7681" stroke-width="2"/>
+  <line x1="84" y1="204" x2="676" y2="204" stroke="#6e7681" stroke-width="2" stroke-linecap="round"/>
+  <line x1="84" y1="204" x2="84" y2="221" stroke="#6e7681" stroke-width="2"/><path d="M78 219 L90 219 L84 228 Z" fill="#6e7681"/><line x1="232" y1="204" x2="232" y2="221" stroke="#6e7681" stroke-width="2"/><path d="M226 219 L238 219 L232 228 Z" fill="#6e7681"/><line x1="380" y1="204" x2="380" y2="221" stroke="#6e7681" stroke-width="2"/><path d="M374 219 L386 219 L380 228 Z" fill="#6e7681"/><line x1="528" y1="204" x2="528" y2="221" stroke="#6e7681" stroke-width="2"/><path d="M522 219 L534 219 L528 228 Z" fill="#6e7681"/><line x1="676" y1="204" x2="676" y2="221" stroke="#6e7681" stroke-width="2"/><path d="M670 219 L682 219 L676 228 Z" fill="#6e7681"/>
+  <rect x="14" y="228" width="140" height="92" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="84" y="256" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">scan</text>
+  <text x="84" y="280" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">scan.mjs</text>
+  <text x="84" y="299" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">providers/</text>
+  <rect x="162" y="228" width="140" height="92" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="232" y="256" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">evaluate</text>
+  <text x="232" y="280" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">modes/oferta.md</text>
+  <text x="232" y="299" text-anchor="middle" font-size="12" fill="#9198a1">+ eval scripts</text>
+  <rect x="310" y="228" width="140" height="92" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="380" y="256" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">generate</text>
+  <text x="380" y="280" text-anchor="middle" font-size="12" fill="#9198a1">PDFs, CVs,</text>
+  <text x="380" y="299" text-anchor="middle" font-size="12" fill="#9198a1">cover letters</text>
+  <rect x="458" y="228" width="140" height="92" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="528" y="256" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">track</text>
+  <text x="528" y="280" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">data/</text>
+  <text x="528" y="299" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">reports/</text>
+  <rect x="606" y="228" width="140" height="92" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="676" y="256" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">update</text>
+  <text x="676" y="280" text-anchor="middle" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">update-system.mjs</text>
+</svg>

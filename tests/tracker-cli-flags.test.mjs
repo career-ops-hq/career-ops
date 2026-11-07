@@ -147,6 +147,21 @@ for (const { args, typo } of OTHER_TYPOS) {
   cleanup(sb);
 }
 
+// ── Test 5b: top-level --help lists every subcommand with its flags, so a
+//    user never has to open the source to find `history --id N`. ──
+{
+  const sb = makeSandbox();
+  const r = runTracker(['--help'], sb);
+  const expected = [
+    'sync [--check]', '--status', '--company', '--role', '--since', '--min-score',
+    '[--id N]', '--limit', '[--json | --csv]', '--csv', 'history --id N', 'export [--out FILE] [--force]', 'delete --num N [--dry-run]',
+  ];
+  const missing = expected.filter((needle) => !r.all.includes(needle));
+  if (r.status === 0 && missing.length === 0) pass('tracker.mjs --help lists every subcommand and its flags');
+  else fail(`tracker.mjs --help — missing ${JSON.stringify(missing)}, got exit ${r.status}: ${r.all}`);
+  cleanup(sb);
+}
+
 // ── Test 6: an unknown SUBCOMMAND (not a flag) still exits 1, unchanged —
 //    only --help/-h at the top level changed. ──
 {

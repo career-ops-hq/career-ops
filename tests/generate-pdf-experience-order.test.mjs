@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join, relative } from 'path';
 import { validateCvExperienceOrder } from '../cv-experience-order.mjs';
-import { listTemplates } from '../cv-templates.mjs';
+import { listTemplates, DEFAULT_TEMPLATES_DIR } from '../cv-templates.mjs';
 import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\n📄 generate-pdf: experience ordering guard');
@@ -277,7 +277,7 @@ function fromPartial(path, periods) {
 // looks for it.
 let partials = [];
 try {
-  partials = [...new Set(listTemplates('cv')
+  partials = [...new Set(listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR })
     .map(t => join(dirname(t.path), 'sections', 'experience.html'))
     .filter(existsSync))];
 } catch (err) {

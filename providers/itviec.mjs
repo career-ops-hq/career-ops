@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { citySlug } from './_city-slug.mjs';
 
 // ITviec provider — Vietnam's largest IT job board (https://itviec.com), the
 // project's first Vietnamese source. Wire in via a `job_boards:` entry with
@@ -33,6 +34,9 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { visibleText } from './_html-to-text.mjs';
+
+export { visibleText } from './_html-to-text.mjs';
 
 const TRUSTED_HOST = 'itviec.com';
 const LIST_URL = 'https://itviec.com/it-jobs';
@@ -82,21 +86,6 @@ function assertItviecUrl(url) {
   return url;
 }
 
-/**
- * Collapse a markup fragment to its visible text.
- * @param {string} fragment
- * @returns {string}
- */
-export function visibleText(fragment) {
-  return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 const CITY_SLUGS = /** @type {const} */ ({
   hcm: 'ho-chi-minh-hcm',
   'ho chi minh': 'ho-chi-minh-hcm',
@@ -115,16 +104,7 @@ const CITY_SLUGS = /** @type {const} */ ({
  * @returns {string | null}
  */
 export function cityPath(location) {
-  const key = String(location ?? '').trim().toLowerCase();
-  if (!key) return null;
-  // Own-property check: a user string like "constructor" or "toString" must
-  // resolve to null, not to an inherited Object.prototype member whose source
-  // text would then be interpolated into the request URL.
-  if (Object.hasOwn(CITY_SLUGS, key)) return CITY_SLUGS[key];
-  for (const [candidate, slug] of Object.entries(CITY_SLUGS)) {
-    if (key.includes(candidate)) return slug;
-  }
-  return null;
+  return citySlug(location, CITY_SLUGS);
 }
 
 /**
