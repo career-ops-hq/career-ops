@@ -87,6 +87,8 @@ check('-ing list nouns in later clauses are not read as verbs',
   const [adjective] = drift(ul('Built Python ETL pipelines for finance and automated reporting'));
   check('"and automated reporting" warns instead of blocking',
     adjective?.blocking === false && adjective.added.includes('automated'), adjective);
+  const [related] = drift(ul('Built a Python ETL pipeline for finance and related to billing'));
+  check('"and related to billing" warns instead of blocking', related?.blocking === false, related);
   const [verb] = drift(ul('Built a Python ETL pipeline for finance reporting and managed the vendors'));
   check('"and managed the vendors" still blocks', verb?.blocking === true, verb);
 }

@@ -2169,17 +2169,26 @@ function renderedBullets(text) {
  * Each word carries `certain`. A later clause opening with a regular "-ed"
  * word is ambiguous: "and managed the vendors" is a verb, "and automated
  * reporting" is an adjective before a noun. It is certain only when the word
- * is an irregular past form ("and wrote ...") or a determiner or preposition
- * follows it, the shape a verb taking its object has. An uncertain word warns
+ * is an irregular past form ("and wrote ...") or a determiner or object
+ * pronoun follows it, the shape a verb taking its object has. A preposition
+ * after it is not enough ("and related to billing"). An uncertain word warns
  * instead of blocking, the split #1411 agreed for checks that cannot yet tell
  * a true reformulation from a fabrication.
  *
  * @returns {{word: string, certain: boolean}[]}
  */
+// What opens a direct object: a determiner or an object pronoun. A
+// preposition does not count, since an adjective takes one as readily as a
+// verb does ("and related to billing", "and distributed across regions").
+const DRIFT_OBJECT_OPENERS = new Set([
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'each', 'every', 'all', 'both', 'any', 'some',
+  'my', 'our', 'its', 'their', 'his', 'her', 'it', 'them', 'us', 'me',
+]);
+
 function predicateWords(statement) {
   const words = [];
   const isVerbal = word => /ed$/u.test(word) || IRREGULAR_FORMS.has(word);
-  const takesObject = (word, next) => IRREGULAR_FORMS.has(word) || (next !== undefined && DRIFT_FUNCTION_WORDS.has(next));
+  const takesObject = (word, next) => IRREGULAR_FORMS.has(word) || DRIFT_OBJECT_OPENERS.has(next);
   const text = stripListMarker(statement);
   const label = text.match(/^([^,;:.!?]{1,60}):\s+(?=\S)/u);
   if (label) {
