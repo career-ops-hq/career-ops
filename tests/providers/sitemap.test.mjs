@@ -112,10 +112,18 @@ try {
   }
 
   // ── parseSitemapDocument: empty vs broken ───────────────────────
-  if (mod.parseSitemapDocument('').locs.length === 0
-      && mod.parseSitemapDocument('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>').locs.length === 0) {
-    pass('empty body and empty <urlset> parse to zero URLs');
+  if (mod.parseSitemapDocument('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>').locs.length === 0) {
+    pass('an empty <urlset> parses to zero URLs');
   } else fail('empty sitemap handling changed');
+
+  let blankCount = 0;
+  for (const body of ['', '   \n', null]) {
+    try { mod.parseSitemapDocument(body); } catch (err) { if (/empty response/.test(err.message)) blankCount++; }
+  }
+  let blankFetchErr = '';
+  try { await make().fetch(ENTRY, { fetchText: async () => '' }); } catch (err) { blankFetchErr = err.message; }
+  if (blankCount === 3 && /empty response/.test(blankFetchErr)) pass('a zero-byte or blank sitemap response throws instead of reading as an empty board');
+  else fail(`blank handling count=${blankCount} fetchErr=${blankFetchErr}`);
 
   let challengeThrew = false;
   try { mod.parseSitemapDocument('<!doctype html><title>Just a moment...</title>'); }

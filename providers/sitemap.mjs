@@ -215,11 +215,15 @@ function locOf(block) {
  *
  * @param {unknown} xml
  * @returns {{kind: 'urlset', locs: string[]} | {kind: 'index', locs: string[]}}
- * @throws when the body is non-empty but neither a `<urlset>` nor a
+ * @throws when the body is empty, or neither a `<urlset>` nor a
  *   `<sitemapindex>` (a challenge or login page must not read as zero jobs).
  */
 export function parseSitemapDocument(xml) {
-  if (typeof xml !== 'string' || !xml.trim()) return { kind: 'urlset', locs: [] };
+  // A 200 with no body is not a sitemap: a valid empty board is an empty
+  // <urlset>, so a zero-byte answer must not read as zero jobs.
+  if (typeof xml !== 'string' || !xml.trim()) {
+    throw new Error('sitemap: empty response (expected an XML <urlset> or <sitemapindex>)');
+  }
   if (/<sitemapindex\b[^>]*>/i.test(xml)) {
     const locs = [];
     for (const m of xml.matchAll(/<sitemap\b[^>]*>([\s\S]*?)<\/sitemap\s*>/gi)) {
