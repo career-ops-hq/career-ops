@@ -10,6 +10,14 @@ export function reportNumberFromCell(cell) {
   return match ? Number.parseInt(match[1], 10) : null;
 }
 
+function untaggedArtifactKind(pdfPath) {
+  const base = String(pdfPath ?? "").split(/[/\\]/).pop() ?? "";
+  const name = base.toLowerCase().replace(/\.[^.]*$/, "");
+  if (name.startsWith("cv-")) return "cv";
+  if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) return "cover";
+  return "cv";
+}
+
 /**
  * Parse lines from pdf-index.tsv into structured entries.
  *
@@ -21,7 +29,10 @@ export function reportNumberFromCell(cell) {
  * [4] date (YYYY-MM-DD)
  * [5] kind ("cv" | "cover" | custom)
  *
- * Missing or whitespace-only kind defaults to "cv" to preserve legacy rows (#3959).
+ * A blank kind stays a CV, so a legacy row from before the column is not
+ * dropped (#3959). A blank kind whose file is named as a cover letter is a
+ * cover, using the same filename rule as resolveArtifactKind. A declared
+ * cv or cover wins over the filename.
  */
 export function parsePdfManifestRows(indexText) {
   const rows = [];
@@ -30,17 +41,20 @@ export function parsePdfManifestRows(indexText) {
     const columns = line.split("\t");
     const reportId = columns[0]?.trim() ?? "";
     const pdf = columns[1]?.trim() ?? "";
+    const html = columns[2]?.trim() ?? "";
     const format = columns[3]?.trim() ?? "";
     const date = columns[4]?.trim() ?? "";
     const rawKind = (columns[5] ?? "").trim().toLowerCase();
 
     let kind = "unknown";
     if (rawKind === "cover") kind = "cover";
-    else if (rawKind === "cv" || rawKind === "") kind = "cv";
+    else if (rawKind === "cv") kind = "cv";
+    else if (rawKind === "") kind = untaggedArtifactKind(pdf);
 
     rows.push({
       reportId,
       pdf,
+      html,
       format,
       date,
       kind,
@@ -59,19 +73,21 @@ export function parsePdfManifestRows(indexText) {
  *  gets attached to a real application, and the wrong document attached
  *  silently is worse than none found.
  *
- *  A row with no kind is a CV. The manifest held nothing else before the column
- *  existed, so reading it as unknown would strand every pre-#3959 artifact.
+ *  A row with no kind is a CV unless the filename is a cover letter. A nameless
+ *  file stays a CV, because that is what the manifest held before the column.
+ *  A cover- prefix or a -cover suffix is the cover that used to share the
+ *  report number, so a CV lookup must not return it.
  */
 export function pdfIndexEntryForReport(indexText, reportNumber, kind = "cv") {
-  if (!Number.isInteger(reportNumber)) return { found: false, path: null };
+  if (!Number.isInteger(reportNumber)) return { found: false, path: null, html: null };
   const wanted = kind === "cover" ? "cover" : "cv";
   const rows = parsePdfManifestRows(indexText);
   for (const row of rows) {
     if (!/^\d+$/.test(row.reportId) || Number(row.reportId) !== reportNumber) continue;
     if (row.kind !== wanted) continue;
-    return { found: true, path: row.pdf || null };
+    return { found: true, path: row.pdf || null, html: row.html || null };
   }
-  return { found: false, path: null };
+  return { found: false, path: null, html: null };
 }
 
 /** Resolve the exact PDF path recorded for a report in pdf-index.tsv. */

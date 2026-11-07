@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { careerOpsRoot, rootScript, findReportFile } from "@/lib/career-ops";
+import { rootScript, findReportFile } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
     execFile(
       process.execPath,
       [script, file, "--json"],
-      { cwd: careerOpsRoot(), timeout: 20_000, maxBuffer: 4 << 20, windowsHide: true },
+      { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 20_000, maxBuffer: 4 << 20, windowsHide: true },
       (err, out, errOut) => resolve({ stdout: out || "", stderr: errOut || "", failed: Boolean(err) }),
     );
   });

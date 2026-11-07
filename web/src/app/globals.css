@@ -1,5 +1,17 @@
 @import "tailwindcss";
-@custom-variant dark (&:where(.dark, .dark *));
+/* Dark is a screen theme: browsers drop backgrounds when printing, so print
+   always takes the light palette and light variants. */
+@custom-variant dark {
+  @media screen {
+    &:where(.dark, .dark *) {
+      @slot;
+    }
+  }
+}
+/* Desktop windows tall enough that the sidebar's links, usage meter and theme
+   toggle all end above the Ask button parked at the sidebar's foot (about 850px
+   of sidebar content). Shorter windows keep Ask in the bottom-right corner. */
+@custom-variant md-tall (@media (min-width: 48rem) and (min-height: 56rem));
 
 /* ──────────────────────────────────────────────────────────────────────────
    Design tokens — inherited from career-ops-docs. Brand burnt-orange #dd7627
@@ -33,8 +45,8 @@
   --color-landing: var(--landing); /* editorial olive (light) / cream (dark) — docs landing-foreground */
   /* Brand as SMALL TEXT: the raw orange only passes AA in dark (4.95); in light
      it's 2.6-3.1 on cream/white. brand-text darkens it for light and keeps the
-     raw brand in dark. Use for small text/badges; brand stays for accents,
-     surfaces, icons and large headings (≥24px passes at 3:1). */
+     raw brand in dark. Every text color (text-*, CSS color) uses brand-text;
+     brand stays for fills, borders, rings and gradients. */
   --color-brand-text: var(--brand-text);
 }
 
@@ -53,19 +65,21 @@
   color-scheme: light;
 }
 
-.dark {
-  --bg: #0a0a0a;
-  --surface: #161616;
-  --surface-hover: #232323;
-  --border: #262626;
-  --fg: #fafafa;
-  --muted: #a1a1aa;
-  --faint: #8b8b95; /* AA: ~4.6:1 on #161616 (was #71717a ≈ 3.7:1, failed small text) */
-  --landing: #e4e2d0; /* cream editorial headline */
-  --brand-text: hsl(26 73% 51%); /* raw brand already passes in dark (≥4.95 on bg/surface) */
-  --dot: 240 5% 65% / 0.10;
-  --pre-bg: #111111;
-  color-scheme: dark;
+@media screen {
+  .dark {
+    --bg: #0a0a0a;
+    --surface: #161616;
+    --surface-hover: #232323;
+    --border: #262626;
+    --fg: #fafafa;
+    --muted: #a1a1aa;
+    --faint: #8b8b95; /* AA: ~4.6:1 on #161616 (was #71717a ≈ 3.7:1, failed small text) */
+    --landing: #e4e2d0; /* cream editorial headline */
+    --brand-text: hsl(26 73% 51%); /* raw brand already passes in dark (≥4.95 on bg/surface) */
+    --dot: 240 5% 65% / 0.10;
+    --pre-bg: #111111;
+    color-scheme: dark;
+  }
 }
 
 body {
@@ -228,12 +242,12 @@ html {
 .report-prose li,
 .report-prose blockquote { max-width: 76ch; }
 .report-prose strong { color: var(--fg); font-weight: 600; }
-.report-prose a { color: var(--color-brand); text-decoration: none; }
+.report-prose a { color: var(--color-brand-text); text-decoration: none; }
 .report-prose a:hover { text-decoration: underline; }
 .report-prose code {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  color: var(--color-brand);
+  color: var(--color-brand-text);
   background: var(--surface-hover);
   padding: 0.1em 0.35em;
   border-radius: 0.3rem;
@@ -314,12 +328,25 @@ html {
 .report-prose tbody tr:hover { background: color-mix(in srgb, var(--fg) 3%, transparent); }
 .report-prose img { border-radius: 0.5rem; }
 
+/* Paper cannot open a <details> or scroll a table, so print shows every
+   section expanded and lets wide tables wrap to the page width. */
+@media print {
+  details::details-content { content-visibility: visible; display: block; }
+  .report-prose table { display: table; width: 100%; max-width: none; overflow: visible; table-layout: fixed; }
+  .report-prose :is(td, th) { overflow-wrap: anywhere; }
+  .report-prose table:has(tr > *:nth-child(6)) :is(td, th) { min-width: 0; }
+  .report-prose tr, summary { break-inside: avoid; }
+  .report-prose :is(h1, h2, h3, h4), summary { break-after: avoid; }
+}
+
 /* CostBadge (co-located → global): cost color-semantics, see cost-badge.tsx */
 .co-cost{display:inline-flex;align-items:center;gap:.28rem;border-radius:999px;font-weight:600;line-height:1;white-space:nowrap;border:1px solid transparent}
 .co-cost[data-size="xs"]{font-size:10.5px;padding:.16rem .4rem;letter-spacing:.04em;text-transform:uppercase}
 .co-cost[data-size="sm"]{font-size:11px;padding:.24rem .5rem}
 .co-cost[data-tone="free"]{color:hsl(162 91% 24%);background:hsl(160 64% 46% / .12);border-color:hsl(160 64% 46% / .28)}
-html.dark .co-cost[data-tone="free"]{color:hsl(158 64% 60%);background:hsl(158 64% 52% / .13);border-color:hsl(158 64% 52% / .26)}
 .co-cost[data-tone="spend"]{color:hsl(35 9% 34%);background:hsl(35 8% 46% / .12);border-color:hsl(35 8% 46% / .26)}
+@media screen{
+html.dark .co-cost[data-tone="free"]{color:hsl(158 64% 60%);background:hsl(158 64% 52% / .13);border-color:hsl(158 64% 52% / .26)}
 html.dark .co-cost[data-tone="spend"]{color:hsl(35 8% 70%);background:hsl(35 6% 60% / .12);border-color:hsl(35 6% 60% / .24)}
+}
 .co-cost svg{width:.85em;height:.85em}

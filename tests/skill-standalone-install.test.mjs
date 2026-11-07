@@ -64,7 +64,10 @@ test('the standalone branch looks for an install, asks before init and resumes t
   for (const place of ['CAREER_OPS_ROOT', './career-ops', '~/career-ops']) {
     assert.ok(branch.includes(place), `standalone branch does not look in ${place}`);
   }
-  assert.ok(branch.includes('npx @santifer/career-ops init'), 'standalone branch does not name the init command');
+  // Pinned to the release (the Claude plugin directory blocks an unpinned npx); release-please bumps it.
+  const { version } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  assert.ok(branch.includes(`npx @santifer/career-ops@${version} init`), `standalone branch does not name the init command pinned to ${version}`);
+  assert.doesNotMatch(branch, /npx @santifer\/career-ops init/, 'standalone branch has an unpinned init command');
   assert.match(branch, /Ask before running it/, 'standalone branch must ask before installing');
   assert.match(branch, /original request/, 'standalone branch must pick the user\'s request back up');
   assert.match(branch, /https:\/\/github\.com\/career-ops-hq\/career-ops(?![\w-])/, 'standalone branch must link the canonical repo');

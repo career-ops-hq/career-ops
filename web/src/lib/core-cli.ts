@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 const CORE_CLI_TIMEOUT_MS = 30_000;
 
@@ -33,7 +34,7 @@ export function runCoreCli(script: string, args: string[]): Promise<CliResult> {
       process.execPath,
       [rootScript(script), ...args],
       {
-        cwd: careerOpsRoot(),
+        cwd: resolveCodeRoot(process.cwd(), process.env),
         timeout: CORE_CLI_TIMEOUT_MS,
         env: { ...process.env, ...boundedLockWait() },
         // windowsHide: see api/doctor/route.ts — a stale inherited console

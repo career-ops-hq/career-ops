@@ -1,61 +1,58 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Send, Lock } from "lucide-react";
-import { useJobs } from "@/components/jobs/job-store";
+import { Send } from "lucide-react";
 import { useApply } from "@/components/apply/apply-provider";
+import { applyDestination, applyOpenArgs } from "@/lib/apply-destination.mjs";
 
-// The "Apply" CTA. Brand fill only when the score is at/above the apply line
-// and legitimacy is not caution (#4206). Enabled ONLY when the tailored CV
-// for THIS offer is ready (the tracker's PDF column is ✅, or a pdf worker for
-// this #n just finished). On click it opens the apply form-proxy for the offer
-// (where the user reviews and submits it themselves — never auto-submit).
+export function useStartApply() {
+  const router = useRouter();
+  const apply = useApply();
+  return (dest: ReturnType<typeof applyDestination>, company: string) => {
+    // usePathname() drops the query and hash. The list filter and the row anchor live there.
+    const { pathname, search, hash } = window.location;
+    const args = applyOpenArgs({ dest, company, from: `${pathname}${search}${hash}` });
+    if (!args) return;
+    apply.open(args.url, args.opts);
+    router.push(args.href);
+  };
+}
+
 export function ApplyButton({
   n,
   url,
   company,
   pdfReady,
   quiet = false,
+  alreadyOnReport = true,
 }: {
   n: string;
   url?: string;
   company: string;
   pdfReady: boolean;
   quiet?: boolean;
+  alreadyOnReport?: boolean;
 }) {
-  const router = useRouter();
-  const { jobs } = useJobs();
-  const apply = useApply();
+  const start = useStartApply();
+  const dest = applyDestination({ n, pdfOnDisk: pdfReady, postingUrl: url, alreadyOnReport });
 
-  const pdfJobDone = jobs.some((j) => j.kind === "pdf" && j.input === n && j.status === "done");
-  const hasUrl = !!url && /^https?:\/\//i.test(url);
-  const ready = (pdfReady || pdfJobDone) && hasUrl;
-
-  if (!ready) {
+  if (dest.kind !== "apply") {
     return (
-      <button
-        type="button"
-        disabled
-        title={!hasUrl ? "No application URL on this report" : "Generate the tailored CV (PDF) first to apply"}
-        className="inline-flex cursor-not-allowed items-center justify-center gap-1.5 rounded-full border border-border bg-surface/40 px-3.5 py-1 text-xs font-medium text-faint max-sm:min-h-[44px]"
-      >
-        <Lock className="size-3.5" /> Apply
-      </button>
+      <span className="inline-flex max-w-sm flex-col items-start gap-0.5">
+        <span className="text-xs text-muted">{dest.message}</span>
+        {dest.nextHref && dest.nextLabel && (
+          <Link href={dest.nextHref} className="text-xs font-medium text-brand-text hover:underline">
+            {dest.nextLabel}
+          </Link>
+        )}
+      </span>
     );
   }
   return (
     <button
       type="button"
-      onClick={() => {
-        // n + from ride along so the Apply page can mark this row Applied,
-        // return the user to the page they left, and resolve THIS report's own
-        // tailored CV rather than the newest one for the company. Read straight
-        // off the handler's own location: usePathname() drops the query and
-        // hash, which is where the list filter and the row anchor live.
-        const { pathname, search, hash } = window.location;
-        apply.open(url!, { prefill: true, company, n, from: `${pathname}${search}${hash}` });
-        router.push("/apply");
-      }}
+      onClick={() => start(dest, company)}
       className={
         quiet
           ? "inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-transparent px-3.5 py-1 text-xs font-medium text-muted transition-colors hover:border-foreground/20 hover:text-foreground max-sm:min-h-[44px]"
@@ -63,8 +60,8 @@ export function ApplyButton({
       }
       title={
         quiet
-          ? "Apply — below the apply line or caution; opens the form pre-filled, you review and submit yourself"
-          : "Apply — opens the form pre-filled, you review and submit yourself"
+          ? "Below the apply line or flagged caution. Opens the form pre-filled. You review and submit it yourself."
+          : "Opens the form pre-filled. You review and submit it yourself."
       }
     >
       <Send className="size-3.5" /> Apply

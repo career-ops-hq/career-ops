@@ -28,7 +28,7 @@ export const BATCH_CAP = 12; // hard ceiling on a single fan-out
 const CANON_STATUS = ["Evaluated", "Preparation", "Applied", "Responded", "Assessment", "Interview", "Offer", "Hired", "Rejected", "Discarded", "SKIP"];
 
 const TAB_VALUES = [
-  "INBOX", "ALL", "EVALUATED", "PREPARATION", "APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP",
+  "INBOX", "ALL", "EVALUATED", "PREPARATION", "APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP", "OTHER",
 ] as const;
 const SORT_VALUES = ["company", "role", "score", "status", "date"] as const;
 

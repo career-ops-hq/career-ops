@@ -124,7 +124,7 @@ function parseLocation(block) {
  * @param {string} url
  */
 export function assertParsedSomething(html, url) {
-  if (!/\/JobDetail\/[^"'\s]+/i.test(String(html ?? ''))) return;
+  if (!/\/JobDetail[/?][^"'\s]+/i.test(String(html ?? ''))) return;
   throw new Error(
     `avature: ${url} still contains JobDetail links but no article could be parsed — the listing markup changed`,
   );
@@ -133,7 +133,8 @@ export function assertParsedSomething(html, url) {
 // Tenants vary the result class: Synopsys uses `article--result`, Siemens
 // appends a position index (`article--result 1`). Accept any suffix.
 // careers.avature.net renders `article--jobs` cards instead (seen 2026-09-28).
-const ARTICLE_PATTERN = /<article class="article article--(?:result|jobs)\b[^"]*"[\s\S]*?<\/article>/;
+// Deloitte USI drops the leading `article` class: `<article class="article--result ">`.
+const ARTICLE_PATTERN = /<article class="(?:article )?article--(?:result|jobs)\b[^"]*"[\s\S]*?<\/article>/;
 
 /**
  * Number of result cards on a page, before `parseArticles` drops any (no
@@ -153,23 +154,34 @@ export function parseArticles(htmlText, origin) {
   while ((a = re.exec(htmlText)) !== null) {
     const block = a[0];
     // JobDetail path may or may not sit under /careers/ (branded tenants vary),
-    // so anchor on JobDetail/ itself rather than a fixed prefix. Prefer the
+    // so anchor on JobDetail itself rather than a fixed prefix. Prefer the
     // `class="link"` title anchor (most tenants); fall back to any JobDetail
     // anchor for tenants (e.g. Rohde & Schwarz) whose title link carries no
-    // class. Share/mailto buttons url-encode the path (%2FJobDetail%2F) so they
-    // never match the literal `/JobDetail/` and can't be mistaken for the title.
-    // An `article--jobs` card's class="link" anchor is a "View more" button, so
-    // its h3 header title anchor is tried first.
+    // class. Links are path-style `/JobDetail/<slug>/<id>` or query-style
+    // `/JobDetail?jobId=<id>` (e.g. Macquarie). Share/mailto buttons url-encode
+    // the path (%2FJobDetail%2F / %3F) so they never match and can't be
+    // mistaken for the title. An `article--jobs` card's class="link" anchor is a
+    // "View more" button, so its h3 header title anchor is tried first.
     const urlM =
-      block.match(/article__header__text__title[^>]*>\s*<a[^>]*href="([^"]*\/JobDetail\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/) ||
-      block.match(/<a[^>]*class="link"[^>]*href="([^"]*\/JobDetail\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/) ||
-      block.match(/<a[^>]*href="([^"]*\/JobDetail\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+      block.match(/article__header__text__title[^>]*>\s*<a[^>]*href="([^"]*\/JobDetail[/?][^"]+)"[^>]*>([\s\S]*?)<\/a>/) ||
+      block.match(/<a[^>]*class="link"[^>]*href="([^"]*\/JobDetail[/?][^"]+)"[^>]*>([\s\S]*?)<\/a>/) ||
+      block.match(/<a[^>]*href="([^"]*\/JobDetail[/?][^"]+)"[^>]*>([\s\S]*?)<\/a>/);
     if (!urlM) continue;
     const title = clean(urlM[2]);
     if (!title) continue;
     let url = decodeEntities(urlM[1]);
-    if (!/^https?:\/\//i.test(url)) url = origin + (url.startsWith('/') ? url : '/' + url);
-    const idM = url.match(/\/JobDetail\/[^/]*\/(\d+)/);
+    if (!/^https?:\/\//i.test(url)) {
+      // new URL resolves root-relative, path-relative and protocol-relative
+      // (//host/...) hrefs the way a browser would; string concatenation would
+      // turn the protocol-relative form into origin + "//host/...". A href it
+      // cannot resolve is dropped rather than emitted as a broken URL.
+      try {
+        url = new URL(url, origin).href;
+      } catch {
+        continue;
+      }
+    }
+    const idM = url.match(/\/JobDetail\/[^/]*\/(\d+)/) || url.match(/\/JobDetail\?(?:[^#]*&)?jobId=(\d+)/i);
     out.push({
       id: idM ? idM[1] : url,
       title,
