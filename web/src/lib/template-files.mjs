@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { TemplateRefusal, refusalFrom } from "./template-refusal.mjs";
+import { assertInsideUserDir } from "./template-ownership.mjs";
 
 // Duplicate, rename and delete of the user's own templates (#1692). They live in
 // data/templates/ under the data root, the directory cv-templates.mjs searches
@@ -146,6 +147,7 @@ async function moveTemplate(codeRoot, { kind, name, to, userDir }) {
   assertValidName(to);
   const resolver = await loadResolver(codeRoot);
   const entry = findEntry(resolver, kind, userDir, name, { user: true });
+  await assertInsideUserDir(entry, userDir);
   assertNameFree(resolver, kind, userDir, to);
 
   const prefix = resolver.KINDS[kind].prefix;
@@ -208,6 +210,7 @@ export async function renameTemplateAndFollow(codeRoot, opts, updateProfile) {
 export async function deleteTemplate(codeRoot, { kind, name, userDir, profilePath }) {
   const resolver = await loadResolver(codeRoot);
   const entry = findEntry(resolver, kind, userDir, name, { user: true });
+  await assertInsideUserDir(entry, userDir);
   if (defaultName(resolver, kind, profilePath) === name) {
     throw new TemplateRefusal("This is your default template. Make another one the default first.");
   }

@@ -42,8 +42,9 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   // One guard per mounted section: a response applies only if its load is the
   // newest, and none applies after unmount.
   const guardRef = useRef(latestOnly());
-  const listRef = useRef<Template[] | null>(null);
-  listRef.current = templates;
+  // Whether a list has ever loaded, read by a failing reload. Set from the load
+  // handler, not during render.
+  const hasListRef = useRef(false);
 
   const load = useCallback((listIsCurrent = false) => {
     setLoadError(false);
@@ -57,11 +58,12 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
         if (!current()) return;
         const list: Template[] = Array.isArray(d?.templates) ? d.templates : [];
         setTemplates(list);
+        hasListRef.current = true;
         setPending((p) => pendingAfterReload(p, list));
         setEditing((e) => editingAfterReload(e, list));
       })
       .catch(() => {
-        if (current()) setLoadError(loadFailureView(listIsCurrent, listRef.current !== null));
+        if (current()) setLoadError(loadFailureView(listIsCurrent, hasListRef.current));
       });
   }, [kind]);
   useEffect(() => {

@@ -26,3 +26,13 @@ test("a failed reload is classified by loadFailureView, not hard-coded", () => {
 test("Retry never passes the click event as the list-is-current flag", () => {
   assert.doesNotMatch(src, /onClick=\{load\}/);
 });
+
+test("no ref is written during render", () => {
+  // A ref assigned in the component body is written by renders React may discard.
+  // The one the load failure reads is set from the load success handler instead.
+  assert.doesNotMatch(src, /^\s*\w+Ref\.current = templates;?\s*$/m);
+});
+
+test("the load success handler records that a list has loaded", () => {
+  assert.match(src, /hasListRef\.current = true/);
+});
