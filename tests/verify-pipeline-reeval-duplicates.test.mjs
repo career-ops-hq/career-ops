@@ -76,6 +76,13 @@ try {
     pass('a bare [N] in the Report cell that is not a link is not a reference: still flagged');
   } else fail('a bare [N] in the Report cell was read as a linked report');
 
+  // Check 10 reads the Report cell the same way, so a bare [3] leaves report #3 an orphan.
+  writeFileSync(vpTracker, HEADER + row(1, '[3]', 'ok'));
+  const orphanOut = run(NODE, ['verify-pipeline.mjs'], { env: vpEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+  if (orphanOut !== null && /Orphan report[^\n]*references #3: reports\/003-acme-/.test(orphanOut)) {
+    pass('a bare [N] in the Report cell is not a reference for Check 10 either: orphan report flagged');
+  } else fail('a bare [N] in the Report cell was read as a reference by the orphan-report check');
+
   // Two files that share a report NUMBER are a numbering collision, not a
   // re-evaluation, even when the one link covers both by number.
   writeFileSync(join(vpReports, '003-acme-2026-01-06.md'), report('Acme', 'Staff AI Engineer'));
