@@ -17,6 +17,8 @@ import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
+import { runCoreCli } from "@/lib/core-cli";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
@@ -179,44 +181,73 @@ export async function POST(req: Request) {
   const userTemplatesDir = dataRoot
     ? await resolveUserTemplatesDir(codeRoot, dataRoot)
     : undefined;
-  const prompt = buildPrompt({
-    kind,
-    input,
-    memory: readMemory(),
-    today,
-    postedAt,
-    lang,
-    cvTemplate,
-    userTemplatesDir,
-    // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
-    codeRoot,
-    reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
-    coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
-    profile: profileRef(careerOpsRoot()),
-    evaluationInstructions,
-  });
-
-  const isClaude = cliId === "claude";
-  // Which tools each kind gets, and the whole claude argv, live in
-  // claude-invocation.mjs — see its header for the policy and for why it is asserted on
-  // built values rather than on this file's source. NEVER auto-submits; that
-  // remains a prompt-level guarantee.
-  // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
-  // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
-  // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
-  // runtime — an OS sandbox on Codex, nothing yet on the runtimes with no
-  // verified mechanism. Those report level "none" and the run says so
-  // below, rather than looking identical to a fenced one (#2507).
-  // A CLI with its own structured stream gets the argv that turns it on, so its
-  // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
-  // envelope-parsing routes rely on.
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
-
   // Tracker-mutating runs hold a write token so a row delete can't race their
   // merge (tracker.mjs delete doesn't yet share a lock with merge-tracker,
   // see run-registry). evaluate's agent no longer writes; the backend persist
-  // path below still merges the tracker, so the token stays.
+  // path below still merges the tracker, so the token stays. It is taken before
+  // the JD prefetch, so a row delete cannot land in that window either.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
+  let prompt: string;
+  let isClaude: boolean;
+  let args: string[];
+  try {
+    // Read the JD here, not in the worker: WebFetch drops script content, so a
+    // board that renders its JD from script data looks like an empty shell to the
+    // worker and the run ends as "Needs review" on a live posting. null (plain
+    // boards, any miss) leaves the worker on its WebFetch path.
+    const prefetch = kind === "evaluate" ? await prefetchJd(input, runCoreCli, req.signal) : null;
+    // The caller went away while the JD was being read: do not start a worker for nobody.
+    if (req.signal.aborted) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return new Response(null, { status: 499 });
+    }
+    // A partial JD must not reach a worker that could score and save it as the
+    // whole posting, so refuse here instead of trusting the prompt to stop it.
+    if (isTruncatedJd(prefetch?.text)) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Evaluate it from your agent CLI with the job text pasted in (for example /career-ops, then paste the posting). No AI run was started." }, { status: 422 });
+    }
+    const prefetchedJd = prefetch?.text ?? null;
+    const closedEvidence = prefetch?.closedEvidence ?? null;
+    prompt = buildPrompt({
+      kind,
+      input,
+      memory: readMemory(),
+      today,
+      postedAt,
+      lang,
+      cvTemplate,
+      userTemplatesDir,
+      // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
+      codeRoot,
+      reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
+      coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
+      profile: profileRef(careerOpsRoot()),
+      evaluationInstructions,
+      prefetchedJd,
+      closedEvidence,
+    });
+
+    isClaude = cliId === "claude";
+    // Which tools each kind gets, and the whole claude argv, live in
+    // claude-invocation.mjs — see its header for the policy and for why it is asserted on
+    // built values rather than on this file's source. NEVER auto-submits; that
+    // remains a prompt-level guarantee.
+    // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
+    // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
+    // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
+    // runtime — an OS sandbox on Codex, nothing yet on the runtimes with no
+    // verified mechanism. Those report level "none" and the run says so
+    // below, rather than looking identical to a fenced one (#2507).
+    // A CLI with its own structured stream gets the argv that turns it on, so its
+    // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
+    // envelope-parsing routes rely on.
+    args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  } catch (e) {
+    // Nothing spawned yet, so nothing else will release the guard.
+    if (writeToken !== null) releaseTrackerWrite(writeToken);
+    throw e;
+  }
 
   // stdin must reach EOF or the CLI waits on piped input that never comes: Codex's
   // `exec` blocks reading stdin for additional context, hangs until the kill timer,
