@@ -300,7 +300,7 @@ export type PdfPathForReportResult =
   | { status: "found"; path: string; html: string | null }
   | { status: "not-found" }
   | { status: "invalid" }
-  | { status: "rejected" };
+  | { status: "rejected"; html: string | null };
 
 /** The exact PDF path indexed for this report number, or null if none exists
  *  (malformed id, no index row, the indexed file is missing on disk, or the
@@ -328,27 +328,28 @@ export async function pdfPathStatusForReport(n: string, kind: "cv" | "cover" = "
   const root = careerOpsRoot();
   const entry = pdfIndexEntryForReport(tsv, target, kind);
   if (!entry.found) return { status: "not-found" };
-  if (!entry.path) return { status: "rejected" };
   // The manifest is a user-layer file (generate-pdf.mjs writes it, but nothing
   // stops a hand edit) turned into a filesystem read that this route then
   // serves — the path must be contained BY CONSTRUCTION, not by trusting the
   // writer. Rows are written relative to the WORKSPACE root (careerOpsRoot()),
   // not to the manifest's own data/ directory — same base the pre-ACL version
   // of this function used — and must stay under the project's output/ tree.
-  const abs = path.resolve(root, entry.path);
   const outputDir = path.resolve(root, "output");
-  if (!abs.startsWith(outputDir + path.sep)) return { status: "rejected" };
-  // Scoped to outputDir, not the broader root: the lexical startsWith check
-  // above only rejects an unresolved path outside output/, but a symlink
-  // PLACED under output/ can still resolve to somewhere else inside root
-  // (e.g. reports/) and pass a root-scoped realpath check — serving a file
-  // this route was never meant to expose.
-  if (!isRegularContainedFile(abs, outputDir)) return { status: "rejected" };
+  // Studio can still open the recorded HTML when the PDF is unavailable.
   let html: string | null = null;
   if (entry.html) {
     const htmlAbs = path.resolve(root, entry.html);
     if (htmlAbs.startsWith(outputDir + path.sep) && isRegularContainedFile(htmlAbs, outputDir)) html = htmlAbs;
   }
+  if (!entry.path) return { status: "rejected", html };
+  const abs = path.resolve(root, entry.path);
+  if (!abs.startsWith(outputDir + path.sep)) return { status: "rejected", html };
+  // Scoped to outputDir, not the broader root: the lexical startsWith check
+  // above only rejects an unresolved path outside output/, but a symlink
+  // PLACED under output/ can still resolve to somewhere else inside root
+  // (e.g. reports/) and pass a root-scoped realpath check — serving a file
+  // this route was never meant to expose.
+  if (!isRegularContainedFile(abs, outputDir)) return { status: "rejected", html };
   return { status: "found", path: abs, html };
 }
 
