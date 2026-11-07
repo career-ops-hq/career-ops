@@ -27,7 +27,6 @@ import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW
 import { clearHeldSaves, excludeInFlightStatusRows, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
-import { LinkedInPaste } from "@/components/linkedin-paste";
 import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
@@ -771,7 +770,6 @@ export function PipelineView({
               {inboxFitError && (
                 <p role="alert" className="mt-2 whitespace-pre-wrap text-xs text-red-500">{inboxFitError}</p>
               )}
-              <LinkedInPaste />
               <InboxTriage inbox={inbox} />
               {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
             </>
