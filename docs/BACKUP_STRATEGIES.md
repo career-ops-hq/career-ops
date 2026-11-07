@@ -89,8 +89,8 @@ node backup.mjs --dest ~/Backups/career-ops             # run it
 node backup.mjs --provider google-drive                 # or a signed-in cloud drive (needs a `Backups` folder in it)
 ```
 
-It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The LinkedIn export `data/Connections.csv` holds other people's contact details, so it is
-left out unless you add `--include-connections`. The backup includes your agent-tool settings (`.claude/`, `opencode.json`, `plugins.local/`), which can
+It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The files that hold other people's contact details (`data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json`) are
+left out unless you add `--include-contacts`, which cannot be combined with `--provider` (a sync client would upload them). The backup includes your agent-tool settings (`.claude/`, `opencode.json`, `plugins.local/`), which can
 hold API tokens, so back up to a place only you can read. Several signed-in accounts are
 handled with `--account`; see
 [SCRIPTS.md](SCRIPTS.md#backupmjs). It keeps no history, so it protects against a lost

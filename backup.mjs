@@ -6,8 +6,9 @@
  * profile, portals, tracker and everything under data/, reports/, output/,
  * jds/ ...) from the data root to a destination folder. Nothing is ever
  * deleted at the destination, so a file you removed locally stays in the
- * backup. data/Connections.csv holds other people's contact details and is
- * left out unless you pass --include-connections.
+ * backup. data/Connections.csv, data/contacts.tsv and data/reply-candidates.json
+ * hold other people's contact details and are left out unless you pass
+ * --include-contacts.
  *
  * Nothing is chosen for you: say where the backup goes. First match wins:
  *   1. --dest <dir>                 exactly this folder
@@ -20,7 +21,7 @@
  * avoided"), so this never uses it.
  *
  * Usage: node backup.mjs (--dest <dir> | --provider <name>) [--account <text>]
- *                        [--folder <path>] [--include-connections]
+ *                        [--folder <path>] [--include-contacts]
  *                        [--dry-run] [--json] [--quiet]
  *
  * Exit status: 0 success, 1 a file failed to copy or there was nothing to
@@ -47,7 +48,9 @@ export const PROVIDERS = ['google-drive', 'dropbox', 'onedrive', 'icloud'];
 export const MANIFEST_NAME = '.career-ops-backup.json';
 
 /** The one file under data/ that holds other people's data (a LinkedIn export). */
-const CONNECTIONS_FILE = 'data/Connections.csv';
+// Files that hold other people's contact details (DATA_CONTRACT.md: third-party
+// PII). Left out unless the caller opts in with --include-contacts.
+const CONTACT_FILES = ['data/Connections.csv', 'data/contacts.tsv', 'data/reply-candidates.json'];
 
 /**
  * User Layer paths (relative to the data root, no trailing slash) a backup
@@ -69,9 +72,9 @@ export function backupPaths(dataRoot, warnings = []) {
 
 /**
  * Never copied: secrets, rebuildable caches, lock/temp files, and (unless
- * `includeConnections`) the LinkedIn export.
+ * `includeContacts`) the files holding other people's contact details.
  */
-export function isExcluded(relPath, { includeConnections = false } = {}) {
+export function isExcluded(relPath, { includeContacts = false } = {}) {
   const p = relPath.split(sep).join('/');
   // Lowercased: macOS and Windows volumes are case-insensitive, so a renamed
   // `Data/connections.csv` or `.ENV` is the same file.
@@ -82,7 +85,7 @@ export function isExcluded(relPath, { includeConnections = false } = {}) {
   // URLs can embed tokens) and dependency folders are not.
   if (lower.split('/').some((seg) => seg === '.git' || seg === 'node_modules')) return true;
   if (lower === 'data/cache' || lower.startsWith('data/cache/')) return true;
-  if (!includeConnections && lower === CONNECTIONS_FILE.toLowerCase()) return true;
+  if (!includeContacts && CONTACT_FILES.some((f) => lower === f.toLowerCase())) return true;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
 }
 
@@ -278,8 +281,8 @@ const unchanged = (src, destPath) => {
  * only unchanged files.
  * @returns {{found: number, copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number, warnings: string[]}}
  */
-export function runBackup({ dataRoot, dest, dryRun = false, includeConnections = false }) {
-  const include = { includeConnections };
+export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = false }) {
+  const include = { includeContacts };
   const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
   const fail = (path, error) => result.failed.push({ path, error: error.message });
   if (!dryRun) mkdirSync(dest, { recursive: true });
@@ -343,7 +346,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeConnections =
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-connections', '--dry-run', '--json', '--quiet', '--help', '-h'];
+const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-contacts', '--dry-run', '--json', '--quiet', '--help', '-h'];
 const VALUE_FLAGS = ['--dest', '--provider', '--account', '--folder'];
 
 const USAGE = `Usage:
@@ -351,7 +354,7 @@ const USAGE = `Usage:
   node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
-  node backup.mjs ... --include-connections # also copy data/Connections.csv (other people's contact details); not with --provider
+  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json (other people's contact details); not with --provider
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
   node backup.mjs ... --json | --quiet     # machine-readable result | errors only
   CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest
@@ -363,7 +366,7 @@ function main(args) {
   const json = args.includes('--json');
   const quiet = args.includes('--quiet');
   const dryRun = args.includes('--dry-run');
-  const includeConnections = args.includes('--include-connections');
+  const includeContacts = args.includes('--include-contacts');
   const refuse = (message) => {
     if (json) console.log(JSON.stringify({ ok: false, error: message }));
     else console.error(`backup: ${message}`);
@@ -372,8 +375,8 @@ function main(args) {
 
   // The export holds other people's contact details and a provider folder is
   // uploaded by a sync client, so the two flags never combine.
-  if (includeConnections && flagValue(args, '--provider')) {
-    return refuse('--include-connections cannot be combined with --provider (the export would be uploaded by the sync client). Use --dest with a folder you control.');
+  if (includeContacts && flagValue(args, '--provider')) {
+    return refuse('--include-contacts cannot be combined with --provider (the contact files would be uploaded by the sync client). Use --dest with a folder you control.');
   }
 
   let dataRoot;
@@ -396,7 +399,7 @@ function main(args) {
 
   let result;
   try {
-    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeConnections });
+    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeContacts });
   } catch (error) {
     return refuse(`cannot write to ${target.dest}: ${error.message}`);
   }

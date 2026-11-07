@@ -27,11 +27,14 @@ try {
   assert.equal(b.isExcluded('data/Connections.csv'), true);
   assert.equal(b.isExcluded('data/connections.csv'), true);
   assert.equal(b.isExcluded('Data/CONNECTIONS.CSV'), true);
+  assert.equal(b.isExcluded('data/contacts.tsv'), true);
+  assert.equal(b.isExcluded('data/reply-candidates.json'), true);
+  assert.equal(b.isExcluded('data/contacts.tsv', { includeContacts: true }), false);
   assert.equal(b.isExcluded('config/.ENV'), true);
   assert.equal(b.isExcluded('plugins.local/x/.git/config'), true);
   assert.equal(b.isExcluded('plugins.local/x/node_modules/a.js'), true);
   assert.equal(b.isExcluded('plugins.local/x/index.mjs'), false);
-  assert.equal(b.isExcluded('data/Connections.csv', { includeConnections: true }), false);
+  assert.equal(b.isExcluded('data/Connections.csv', { includeContacts: true }), false);
   pass('excludes secrets, caches, lock/temp files and the LinkedIn export unless asked');
 
   // The file list is the updater's USER_PATHS, not a second copy.
@@ -84,6 +87,8 @@ try {
   put(root, 'data/applications.md', 'tracker');
   put(root, 'data/.env', 'SECRET=1');
   put(root, 'data/Connections.csv', 'connections');
+  put(root, 'data/contacts.tsv', 'contacts');
+  put(root, 'data/reply-candidates.json', '[]');
   put(root, '.career-ops-web/chats.json', '{}');
   put(root, 'data/cache/http/h', 'cache');
   put(root, 'reports/001-a-2026-01-01.md', 'report');
@@ -108,6 +113,8 @@ try {
     assert.equal(existsSync(join(dest, rel)), false, rel);
   }
   assert.equal(existsSync(join(dest, 'data/Connections.csv')), false, 'LinkedIn export is opt-in');
+  assert.equal(existsSync(join(dest, 'data/contacts.tsv')), false, 'contacts are opt-in');
+  assert.equal(existsSync(join(dest, 'data/reply-candidates.json')), false, 'reply candidates are opt-in');
   assert.equal(readFileSync(join(dest, '.career-ops-web/chats.json'), 'utf8'), '{}');
   assert.equal(JSON.parse(readFileSync(join(dest, b.MANIFEST_NAME), 'utf8')).copied, 6);
 
@@ -127,10 +134,11 @@ try {
 
   assert.equal(existsSync(join(dest, '.claude/settings.json')), true, 'USER_PATHS files are copied');
   assert.equal(existsSync(join(dest, 'opencode.json')), true);
-  const withConnections = b.runBackup({ dataRoot: root, dest, includeConnections: true });
-  assert.equal(withConnections.copied, 1);
+  const withConnections = b.runBackup({ dataRoot: root, dest, includeContacts: true });
+  assert.equal(withConnections.copied, 3);
+  assert.equal(readFileSync(join(dest, 'data/contacts.tsv'), 'utf8'), 'contacts');
   assert.equal(readFileSync(join(dest, 'data/Connections.csv'), 'utf8'), 'connections');
-  pass('--include-connections copies the LinkedIn export');
+  pass('--include-contacts copies the LinkedIn export, contacts and reply candidates');
 
   // Nothing found: reported, not a silent success; no manifest written.
   const empty = join(tmp, 'empty-root');
@@ -139,7 +147,7 @@ try {
   assert.equal(none.found, 0);
   assert.equal(existsSync(join(tmp, 'backup', 'empty', b.MANIFEST_NAME)), false);
   // A run of only unchanged files is not "nothing found".
-  assert.equal(b.runBackup({ dataRoot: root, dest, includeConnections: true }).found, 6);
+  assert.equal(b.runBackup({ dataRoot: root, dest, includeContacts: true }).found, 8);
   pass('a run that finds nothing says so; unchanged files still count as found');
 
   // A symlinked parent can lead out of the data root: skipped.
@@ -226,7 +234,7 @@ try {
   });
   assert.equal(emptyRun.status, 1);
   assert.match(emptyRun.stderr, /found nothing to back up/);
-  const combo = cli('--provider', 'google-drive', '--include-connections', '--json');
+  const combo = cli('--provider', 'google-drive', '--include-contacts', '--json');
   assert.equal(combo.status, 2);
   assert.match(JSON.parse(combo.stdout).error, /cannot be combined/);
   pass('CLI exits 0 on success, 1 for a failed or empty run, 2 for a bad destination or option');
