@@ -1602,8 +1602,11 @@ it, and proposes the one `portals.yml` change that would have caught it. The
 verdict is one of: already surfaced, seen and dropped by a filter, tracked
 but disabled, tracked with no provider, tracked but dropped by the title or
 location filter, tracked but not seen yet, company not tracked, or company not
-tracked and its job site read by no provider. Zero-network: it reads `portals.yml`,
-`data/scan-history.tsv`, `data/pipeline.md` and the cached reverse-sweep
+tracked and its job site read by no provider. When no provider reads the
+posting's site, it also counts the other postings on that host, and when they
+name other companies, the fix leads with a provider for the site, keeping the
+per-company change as the fallback. Zero-network: it reads `portals.yml`,
+`data/scan-history.tsv`, `data/pipeline.md`, the tracker and the cached reverse-sweep
 company lists. It never edits `portals.yml`.
 
 ```bash
