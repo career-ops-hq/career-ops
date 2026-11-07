@@ -39,9 +39,14 @@ writeFileSync(join(dataRoot, 'reports', '001-example-2026-01-01.md'), [
   '',
 ].join('\n'));
 
+// The child runs from an empty directory of its own, so a jds/, reports/ or
+// cv.md in the checkout can never shadow the data-root fixture and the
+// fallback is what every case below actually exercises.
+const workDir = mkdtempSync(join(tmpdir(), 'kw-cwd-'));
+
 const run = (args) => spawnSync(NODE, [join(ROOT, 'keyword-match.mjs'), ...args], {
   encoding: 'utf-8',
-  cwd: ROOT,
+  cwd: workDir,
   env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
 });
 
@@ -71,4 +76,5 @@ try {
   });
 } finally {
   rmSync(dataRoot, { recursive: true, force: true });
+  rmSync(workDir, { recursive: true, force: true });
 }
