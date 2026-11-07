@@ -578,6 +578,12 @@ try {
   } else {
     fail(`workday fetch cap: expected a truncation warning, got ${JSON.stringify(capturedWarnings)}`);
   }
+  if (fetchedHugeWorkday.truncated?.reason === 'page-cap' && fetchedHugeWorkday.truncated?.fetched === 2000
+    && fetchedHugeWorkday.truncated?.total === 1_000_000 && fetchedHugeWorkday.workdayTruncated === undefined) {
+    pass('workday.fetch() marks a page-capped board with jobs.truncated, leaving workdayTruncated (retry hint) unset');
+  } else {
+    fail(`workday cap flag: truncated=${JSON.stringify(fetchedHugeWorkday.truncated)} workdayTruncated=${fetchedHugeWorkday.workdayTruncated}`);
+  }
 
   // Which cap warning fires is keyed on ENTRY PROVENANCE, not on the date
   // bound (#2495). "raise max_pages on this entry for more" is only actionable

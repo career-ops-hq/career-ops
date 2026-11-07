@@ -1265,6 +1265,11 @@ export default {
         const suspectTag = total !== null && total === maxPages * PAGE_SIZE ? ' (total may be Workday-capped, not real)' : '';
         console.error(`⚠️  workday: ${entry.name} truncated at ${maxPages} pages (${jobsSummary})${suspectTag}`);
       }
+      // Canonical partial-read signal for scan.mjs (lib/board-truncation.mjs).
+      // workdayTruncated is left alone: scan-ats-full.mjs reads its values to
+      // decide retries, and a page cap is neither of them. Probes never reach
+      // this branch (ctx.maxPages never sets stopReason to 'cap').
+      /** @type {any} */ (jobs).truncated = { reason: 'page-cap', fetched: jobs.length, ...(total !== null ? { total } : {}) };
     }
     // 'no-date-skip' hits many tenants in a full-directory scan (a company
     // with several Workday sites, like a1group or ashealthnet, triggers it
