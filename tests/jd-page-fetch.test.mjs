@@ -8,7 +8,7 @@
 // the shell. Every case below is offline: fetch and DNS are stubbed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jdFromPageHtml, fetchJdFromPage, capJdText, markCappedAtsText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
+import { pageClosureEvidence, jdFromPageHtml, fetchJdFromPage, capJdText, markCappedAtsText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -498,4 +498,25 @@ test('named Latin-1 entities decode in visible text, case-sensitively', async ()
   assert.equal(LATIN1_ENTITIES.Eacute, 'É');
   assert.equal(LATIN1_ENTITIES.uuml, 'ü');
   assert.equal(Object.hasOwn(LATIN1_ENTITIES, 'nbsp'), false);
+});
+
+test('a closure banner on a page that names several postings is not attributed to the URL', async () => {
+  const two = page(`<p>${BODY}</p>`, { extraLd: [{ '@type': 'JobPosting', title: 'Other role', description: `<p>${BODY} other</p>` }], body: '<p>This job is no longer available.</p>' });
+  const net = stubNetwork(() => html(two));
+  try { assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null); } finally { net.restore(); }
+  assert.equal(pageClosureEvidence(two, 'https://careers.example.com/job/1'), null);
+});
+
+test('pageClosureEvidence applies the same-document gate to the final URL', () => {
+  const closed = page(`<p>${BODY}</p>`, { body: '<p>This job is no longer available.</p>' });
+  assert.ok(pageClosureEvidence(closed, 'https://careers.example.com/job/1'));
+  assert.equal(pageClosureEvidence(closed, 'https://careers.example.com/job/1', 'https://careers.example.com/jobs'), null);
+});
+
+test('repeated unterminated description fields stay linear', () => {
+  const hostile = '"descriptionHtml":"'.repeat(150_000);
+  const t0 = Date.now();
+  pageClosureEvidence(hostile, 'https://careers.example.com/job/1');
+  jdFromPageHtml(hostile);
+  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
 });

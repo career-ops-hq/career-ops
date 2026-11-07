@@ -1340,7 +1340,7 @@ process_offer() {
       # the stripped text as is, and the checks below decide as before).
       if [[ -f "$BATCH_DIR/jd-rescue.mjs" && -s "$jd_raw_file" ]]; then
         _rs_rc=0
-        _rs_line=$(node "$BATCH_DIR/jd-rescue.mjs" "$url" "$jd_raw_file" "$jd_file" "$jd_prefetch_words" 2>/dev/null) || _rs_rc=$?
+        _rs_line=$(node "$BATCH_DIR/jd-rescue.mjs" "$url" "$jd_raw_file" "$jd_file" "$jd_prefetch_words" "${current_url:-$url}" 2>/dev/null) || _rs_rc=$?
         if [[ "$_rs_rc" -eq 3 ]]; then
           # The ATS says the posting is closed: terminal, even though the page text may look like a JD.
           jd_rescue_closed_note="posting closed (jd-rescue): $(printf '%s' "${_rs_line#*$'\t'}" | tr -c '[:print:]' ' ' | sed 's/^closed://; s/  */ /g')"

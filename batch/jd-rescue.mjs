@@ -3,7 +3,7 @@
  * jd-rescue.mjs — recover a job description from a page whose *visible* text is
  * too thin to use, before the batch runner spends a worker on it.
  *
- * Usage:  node batch/jd-rescue.mjs <url> <raw-html-file> <out-file> [stripped-words]
+ * Usage:  node batch/jd-rescue.mjs <url> <raw-html-file> <out-file> [stripped-words] [final-url]
  * Output: "<words>\t<method>" on stdout; exit 0 on success, 1 on failure.
  *         On success <out-file> is overwritten with clean plain text.
  *
@@ -121,8 +121,8 @@ export async function runRescueChain(runners, { minWords, strippedWords, thin })
  * handed to a worker. An open or missing ATS answer keeps the JSON-LD > API > embedded priority.
  * @param {{ fetchJd?: Function }} [opts]
  */
-export async function rescueDecision(url, html, { minWords, strippedWords, thin, fetchJd }) {
-  const pageClosed = pageClosureEvidence(html, url);
+export async function rescueDecision(url, html, { minWords, strippedWords, thin, fetchJd, finalUrl }) {
+  const pageClosed = pageClosureEvidence(html, url, finalUrl || url);
   if (pageClosed) return { closed: true, evidence: pageClosed };
   const api = await fromKnownApi(url, fetchJd);
   if (api?.closed) return { closed: true, evidence: api.evidence };
@@ -146,7 +146,7 @@ Options:
   --help, -h  Print this usage block and exit`);
     process.exit(0);
   }
-  const [url, rawFile, outFile, strippedArg] = args;
+  const [url, rawFile, outFile, strippedArg, finalUrl] = args;
   const minWords = Number(process.env.JD_RESCUE_MIN_WORDS || 80);
   const strippedWords = Number.isFinite(Number(strippedArg)) ? Number(strippedArg) : 0;
   const thin = strippedWords < minWords;
@@ -162,7 +162,7 @@ Options:
     process.exit(1);
   }
 
-  const chain = await rescueDecision(url, html, { minWords, strippedWords, thin });
+  const chain = await rescueDecision(url, html, { minWords, strippedWords, thin, finalUrl });
   if (chain.closed) {
     // Terminal: exit 3 with the evidence on one line, whatever the other sources hold.
     process.stdout.write(`0\tclosed:${String(chain.evidence ?? '').replace(/\s+/g, ' ').slice(0, 160)}\n`);
