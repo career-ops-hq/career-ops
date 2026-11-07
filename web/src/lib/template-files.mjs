@@ -188,6 +188,15 @@ export async function deleteTemplate(codeRoot, { kind, name, userDir, profilePat
   const dir = path.dirname(entry.path);
   if (entry.pack && path.resolve(dir) !== path.resolve(userDir)) {
     const left = (await fs.readdir(dir)).some((f) => /^(cv-template|cover-letter-template)(\.|$)/.test(f));
-    if (!left) await fs.rm(dir, { recursive: true, force: true });
+    if (!left) {
+      // Take only what the pack owns: its own sections/ folder. Anything else in
+      // the folder (a note, or the shared partials when the template was filed in
+      // <userDir>/sections itself) is not ours to erase, so the folder goes only
+      // if that leaves it empty.
+      await fs.rm(path.join(dir, "sections"), { recursive: true, force: true });
+      await fs.rmdir(dir).catch((e) => {
+        if (e.code !== "ENOTEMPTY" && e.code !== "EEXIST") throw e;
+      });
+    }
   }
 }

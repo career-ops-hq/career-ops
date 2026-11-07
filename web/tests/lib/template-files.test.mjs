@@ -266,3 +266,52 @@ test("a successful rename of the default runs the profile update once", async ()
   assert.equal(calls, 1);
   assert.ok(fs.existsSync(path.join(s.userDir, "cv-template.fav2.html")));
 });
+
+// Real layouts, not mocks. Flat templates read their partials from
+// <userDir>/sections/, shared by all of them. A pack is any folder under userDir
+// that holds a template file, so a template filed inside that very folder makes a
+// pack named "sections" out of the shared partials' directory. Deleting its last
+// template must remove the template, never the partials beside it.
+function sharedPartials(s) {
+  const dir = path.join(s.userDir, "sections");
+  fs.mkdirSync(dir, { recursive: true });
+  const files = ["experience.html", "education.html"];
+  for (const f of files) fs.writeFileSync(path.join(dir, f), `<section>${f}</section>`);
+  return { dir, files };
+}
+
+test("deleting the only template filed inside the shared sections folder keeps the partials", async () => {
+  const s = scratch();
+  await duplicateTemplate(CORE, { kind: "cv", from: "modern", name: "flat-user", userDir: s.userDir });
+  const shared = sharedPartials(s);
+  fs.copyFileSync(path.join(s.userDir, "cv-template.flat-user.html"), path.join(shared.dir, "cv-template.misfiled.html"));
+  assert.ok((await names(s)).some((t) => t.name === "misfiled"), "the misfiled file lists as a template");
+
+  await deleteTemplate(CORE, { kind: "cv", name: "misfiled", userDir: s.userDir, profilePath: s.profilePath });
+
+  assert.ok(!fs.existsSync(path.join(shared.dir, "cv-template.misfiled.html")));
+  for (const f of shared.files) assert.ok(fs.existsSync(path.join(shared.dir, f)), `${f} survives`);
+  assert.ok(fs.existsSync(path.join(s.userDir, "cv-template.flat-user.html")), "the flat template survives");
+});
+
+test("deleting a pack's only template keeps a file in the pack folder that is not the pack's own", async () => {
+  const s = scratch();
+  await duplicateTemplate(CORE, { kind: "cv", from: "ats", name: "pack-notes", userDir: s.userDir });
+  fs.writeFileSync(path.join(s.userDir, "pack-notes", "notes.txt"), "keep me");
+
+  await deleteTemplate(CORE, { kind: "cv", name: "pack-notes", userDir: s.userDir, profilePath: s.profilePath });
+
+  assert.equal(fs.readFileSync(path.join(s.userDir, "pack-notes", "notes.txt"), "utf8"), "keep me");
+  assert.ok(!fs.existsSync(path.join(s.userDir, "pack-notes", "cv-template.pack-notes.html")));
+});
+
+test("a pack with another template left keeps its sections for that one", async () => {
+  const s = scratch();
+  await duplicateTemplate(CORE, { kind: "cv", from: "ats", name: "pack-a", userDir: s.userDir });
+  fs.copyFileSync(path.join(s.userDir, "pack-a", "cv-template.pack-a.html"), path.join(s.userDir, "pack-a", "cv-template.pack-b.html"));
+
+  await deleteTemplate(CORE, { kind: "cv", name: "pack-a", userDir: s.userDir, profilePath: s.profilePath });
+
+  assert.ok(fs.existsSync(path.join(s.userDir, "pack-a", "cv-template.pack-b.html")));
+  assert.ok(fs.existsSync(path.join(s.userDir, "pack-a", "sections")));
+});
