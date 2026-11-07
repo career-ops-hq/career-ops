@@ -636,6 +636,10 @@ export async function mergeTracker(options = {}) {
    * followed by the id `g8`. The clause then names no board at all. The full URL
    * is still in the linked report's URL header.
    *
+   * "Already records it" is a whole clause, split on the '. ' separator that
+   * mergeNotes() joins with, not a substring: `…/jobs/view/4001` is inside
+   * `…/jobs/view/40010`, and the two are different listings.
+   *
    * @param {string} existingNotes - The row's Notes cell before this update.
    * @param {string} url - The aggregator URL the addition carried.
    * @returns {string}
@@ -643,7 +647,8 @@ export async function mergeTracker(options = {}) {
   function aggregatorSightingNote(existingNotes, url) {
     const note = [`Also listed at ${url}`, `Also listed at ${new URL(url).hostname}`]
       .find((candidate) => !extractReqNumber(candidate)) ?? 'Also listed on an aggregator board';
-    return String(existingNotes ?? '').includes(note) ? '' : note;
+    const recorded = String(existingNotes ?? '').split(/\.\s+/).map((c) => c.replace(/\.+$/, '').trim());
+    return recorded.includes(note) ? '' : note;
   }
 
   /**

@@ -520,6 +520,28 @@ ok('a repeated aggregator sighting is recorded in Notes once', () => {
   } finally { cleanup(env); }
 });
 
+ok('a sighting is recorded even when an earlier noted URL contains it', () => {
+  // Notes are compared by clause, not substring: `…/jobs/view/4001` is inside
+  // `…/jobs/view/40010`, and the two are different listings.
+  const env = makeEnv();
+  try {
+    const noted = 'https://www.linkedin.com/jobs/view/40010';
+    const aggregator = 'https://www.linkedin.com/jobs/view/4001';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | n. Also listed at ${noted} | https://boards.greenhouse.io/acme/jobs/7001 |`,
+    ]);
+    addTsv(env, '2-acme.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌',
+      '[2](reports/2-acme.md)', 'n', aggregator]);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assertMerged(rows, 'employer row, a second LinkedIn sighting');
+    assert.equal(urlHref(rows[0]), 'https://boards.greenhouse.io/acme/jobs/7001', 'the employer URL stays the key');
+    const notes = notesCell(rows[0]);
+    assert.ok(notes.includes(`Also listed at ${noted}.`), `the earlier sighting stays, got: ${notes}`);
+    assert.ok(notes.endsWith(`Also listed at ${aggregator}`), `the new sighting is recorded, got: ${notes}`);
+  } finally { cleanup(env); }
+});
+
 ok('a sighting URL that reads as a req number is noted by host, not planted as a req', () => {
   // LinkedIn builds its slug from the posting title, so a "Jr." title yields
   // `/jobs/view/jr-…-4001`, which extractReqNumber() reads as the label `jr`
