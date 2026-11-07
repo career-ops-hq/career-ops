@@ -418,7 +418,7 @@ export function computePortalRecommendations(portalsContent, scanContent, health
   const healthRows = [];
   for (const line of String(healthContent ?? '').split('\n')) {
     const [date, company, status] = line.trimEnd().split('\t');
-    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown'].includes(status)) continue;
+    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown', 'partial'].includes(status)) continue;
     healthRows.push({ date, company, status });
   }
   healthRows.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
@@ -444,7 +444,9 @@ export function computePortalRecommendations(portalsContent, scanContent, health
     if (!h || Date.parse(h.lastObserved) < cutoff) continue;
     const lastProduced = lastMatch.get(key) || null;
     const row = { company: company.name, ...h, lastProduced };
-    if (produced.has(key) && h.streak >= threshold) {
+    // A board whose latest read was `partial` is reachable but capped: its
+    // streak stands, but "find the current ATS slug" is the wrong advice.
+    if (produced.has(key) && h.streak >= threshold && h.status !== 'partial') {
       buckets.rotted.push({ ...row, recommendation: 'Verify reachability and find the current ATS slug before considering removal; failures do not prove closure.' });
     } else if (!produced.has(key) && Date.parse(h.firstObserved) <= cutoff) {
       buckets.neverProduced.push({ ...row, recommendation: 'Review title_filter and company-name matching before considering removal; no recorded matches does not prove a dead board.' });
