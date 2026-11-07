@@ -218,11 +218,14 @@ function hasSymlinkedParent(dataRoot, entry) {
  * `{ rel, size, mtimeMs }`. A file that cannot be read is reported through
  * `onError` and skipped, so one bad file never hides the rest.
  */
-function listEntry(dataRoot, entry, { include, onError }) {
+function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
   const abs = join(dataRoot, entry);
   let st;
   try { st = lstatSync(abs); } catch { return []; }
-  if (st.isSymbolicLink() || hasSymlinkedParent(dataRoot, entry)) return [];
+  if (st.isSymbolicLink() || hasSymlinkedParent(dataRoot, entry)) {
+    onSkip(entry);
+    return [];
+  }
   if (isExcluded(entry, include)) return [];
   const paths = st.isDirectory()
     ? walkTree(abs, {
@@ -269,7 +272,11 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeConnections =
   for (const entry of backupPaths(dataRoot, result.warnings)) {
     let files;
     try {
-      files = listEntry(dataRoot, entry, { include, onError: fail });
+      files = listEntry(dataRoot, entry, {
+        include,
+        onError: fail,
+        onSkip: (p) => result.warnings.push(`skipped ${p}: it is, or sits under, a symlink`),
+      });
     } catch (error) {
       fail(entry, error);
       continue;
