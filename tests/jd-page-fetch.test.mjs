@@ -613,6 +613,8 @@ test('a job id carried in the URL fragment tells two jobs apart', () => {
   const { inspectPage } = awaitedModule;
   assert.equal(inspectPage(ld('https://careers.example.com/careers#/job/2'), Date.now(), 'https://careers.example.com/careers#/job/1').found, null);
   assert.ok(inspectPage(ld('https://careers.example.com/careers#/job/1'), Date.now(), 'https://careers.example.com/careers#/job/1').found);
+  // a query inside the fragment counts too
+  assert.equal(inspectPage(ld('https://careers.example.com/careers#/job?jobId=2'), Date.now(), 'https://careers.example.com/careers#/job?jobId=1').found, null);
 });
 
 test('an oversize page proves no closure from its prefix', () => {
