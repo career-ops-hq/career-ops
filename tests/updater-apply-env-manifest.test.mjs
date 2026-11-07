@@ -9,7 +9,7 @@ import {
   checkoutSystemPathsBatched,
   manifestProbes,
   rejectUserLayerPaths,
-  USER_PATHS,
+  effectiveUserPaths,
 } from '../update-system.mjs';
 import { fail, makeUpdaterRepo, pass, rmSync } from './helpers.mjs';
 
@@ -33,7 +33,7 @@ try {
 
   const { kept, refused } = rejectUserLayerPaths(
     ['.env'],
-    USER_PATHS,
+    effectiveUserPaths(dir),
     manifestProbes({
       trackedOutput: g('ls-files', '-z'),
       upstreamOutput: upstreamFiles.join('\0'),
