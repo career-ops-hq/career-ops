@@ -518,6 +518,48 @@ try {
     fail(`empty-page stop: ${emptyRequests} requests, ${emptyStop.length} jobs, expected 2 and 200`);
   }
 
+  // ── oracle_host: an exact, opt-in branded host (Dell) ──────────────
+  {
+    const dell = {
+      name: 'Dell',
+      api: 'https://enterpriseplatform.dell.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs',
+      oracle_host: 'EnterprisePlatform.dell.com',
+    };
+    const site = resolveSite(dell);
+    site?.host === 'enterpriseplatform.dell.com' && site?.siteNumber === 'CX_1001'
+      ? pass('oraclecloud resolves a branded host named by oracle_host')
+      : fail(`oracle_host resolve: ${JSON.stringify(site)}`);
+
+    oc.detect(dell)?.url?.startsWith('https://enterpriseplatform.dell.com/hcmRestApi/')
+      && oc.detect({ name: 'Dell', api: dell.api }) === null
+      ? pass('oraclecloud.detect() claims a branded host only when oracle_host names it')
+      : fail(`oracle_host detect: ${JSON.stringify(oc.detect(dell))}`);
+
+    resolveSite({ name: 'Dell', api: dell.api }) === null
+      ? pass('oraclecloud still refuses a branded host without oracle_host')
+      : fail('branded host accepted without oracle_host');
+
+    resolveSite({ ...dell, oracle_host: 'other.dell.com' }) === null
+      ? pass('oraclecloud trusts only the exact oracle_host, not a sibling host')
+      : fail('oracle_host matched a different host');
+
+    resolveSite({ ...dell, oracle_host: '*.dell.com' }) === null
+      && resolveSite({ ...dell, oracle_host: 'https://enterpriseplatform.dell.com' }) === null
+      ? pass('oraclecloud rejects an oracle_host that is not one bare hostname')
+      : fail('malformed oracle_host accepted');
+
+    const calls = [];
+    const jobs = await oc.fetch(dell, {
+      fetchJson: async (url) => {
+        calls.push(url);
+        return { items: [{ TotalJobsCount: 1, requisitionList: [{ Id: '1', Title: 'Corporate Strategy Manager', PrimaryLocation: 'Round Rock, TX' }] }] };
+      },
+    });
+    jobs.length === 1 && calls.every((u) => hostOf(u) === 'enterpriseplatform.dell.com')
+      ? pass('oraclecloud fetches only from the pinned branded host')
+      : fail(`branded fetch: ${jobs.length} jobs, hosts=${calls.map(hostOf).join(',')}`);
+  }
+
 } catch (e) {
   fail(`oraclecloud provider tests crashed: ${e.message}`);
 }

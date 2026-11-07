@@ -1315,7 +1315,8 @@ search_queries:
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
 #                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:.
 #                   Newer tenants are issued a NUMBERED apex, e.g. <tenant>.fa.ocs.oraclecloud26.com — same shapes,
-#                   same provider; just use whichever host the employer's careers link actually points at.)
+#                   same provider; just use whichever host the employer's careers link actually points at.
+#                   A branded host that serves ORC on the employer's own domain needs oracle_host:, see below.)
 #   taleo           <tenant>.taleo.net/careersection/<section>/jobsearch.ftl (Taleo Enterprise Edition public sections)
 #   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded host like
 #                   careers.<company>.com is NOT matched unless the entry names it in eightfold_host:. Optional domain:
@@ -1596,6 +1597,15 @@ search_queries:
 #   siteNumber: CX_1002    # the site number after /sites/ (JPMC's external site)
 #   # locationId: 300000000123456   # optional — some tenants (BNY, Amex) need it to scope results
 #   max_pages: 25
+#   enabled: true
+#
+# - name: Example Branded ORC Co
+#   # Some employers serve Oracle Recruiting Cloud only on their own domain,
+#   # with no *.oraclecloud.com host to point at. Name that one host exactly
+#   # in oracle_host: (bare hostname: no scheme, port, path or *); the same
+#   # /hcmUI/CandidateExperience/.../sites/<siteNumber>/ URL shape applies.
+#   careers_url: https://careers.exampleco.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs
+#   oracle_host: careers.exampleco.com
 #   enabled: true
 #
 # - name: Example Taleo Co
