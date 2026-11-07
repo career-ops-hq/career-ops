@@ -1,0 +1,59 @@
+// tests/keyword-match-data-root-path.test.mjs — a relative report path resolves
+// against the data root when it is not under the working directory (#6620).
+//
+// modes/oferta.md step 1b passes `reports/{###}-….md`, relative to the data
+// root. With the user layer outside the checkout (a .career-ops-data marker or
+// CAREER_OPS_ROOT), keyword-match.mjs looked only under the working directory
+// and stopped with "Report not found".
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
+
+console.log('\nkeyword-match: relative paths under the data root');
+
+function check(label, run) {
+  try { run(); pass(label); } catch (error) { fail(`${label}: ${error.message}`); }
+}
+
+const dataRoot = mkdtempSync(join(tmpdir(), 'kw-data-root-'));
+mkdirSync(join(dataRoot, 'reports'));
+writeFileSync(join(dataRoot, 'cv.md'), '# Candidate\n\nBuilt Python services and Docker images.\n');
+writeFileSync(join(dataRoot, 'reports', '001-example-2026-01-01.md'), [
+  '# Evaluation: Example — Data Engineer',
+  '',
+  '## Keywords extracted',
+  'Python, Docker, Kubernetes',
+  '',
+].join('\n'));
+
+const run = (args) => spawnSync(NODE, [join(ROOT, 'keyword-match.mjs'), ...args], {
+  encoding: 'utf-8',
+  cwd: ROOT,
+  env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
+});
+
+try {
+  check('reports/{file} is found under the data root', () => {
+    const r = run(['reports/001-example-2026-01-01.md']);
+    assert.equal(r.status, 0, describeSpawn(r));
+    assert.match(r.stdout, /\*\*Present \(2\):\*\* Python, Docker/);
+  });
+
+  check('--cv cv.md is found under the data root', () => {
+    const r = run(['reports/001-example-2026-01-01.md', '--cv', 'cv.md']);
+    assert.equal(r.status, 0, describeSpawn(r));
+    assert.match(r.stdout, /\*\*Present \(2\):\*\*/);
+  });
+
+  check('a path found in neither place still stops with "Report not found"', () => {
+    const r = run(['reports/999-missing-2026-01-01.md']);
+    assert.equal(r.status, 1, describeSpawn(r));
+    assert.match(r.stderr, /Report not found: reports\/999-missing-2026-01-01\.md/);
+  });
+} finally {
+  rmSync(dataRoot, { recursive: true, force: true });
+}

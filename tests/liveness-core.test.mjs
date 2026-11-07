@@ -909,3 +909,37 @@ isClosureEvidence({ result: 'expired', code: 'hard_expired' }) === true
     ? pass('check-liveness.mjs --discard-expired selects URLs through the shared predicate')
     : fail('check-liveness.mjs builds its discard list without discardableExpiredUrls() — an unreadable page would be closed');
 }
+
+console.log('\nliveness-core — Norwegian apply controls');
+
+// arbeidsplassen.no labels Apply "Gå til søknad"; Jobbnorge and employer sites
+// use "Send søknad", "Søk på stillingen", "Søk nå" and "Søk her". Without them
+// every live Norwegian posting read no_apply_control (#6620).
+const norwegianBody = 'Om stillingen\nVi søker en avdelingsdirektør som skal lede plattform og infrastruktur i en stor offentlig virksomhet.\n'.repeat(4);
+for (const label of ['Gå til søknad', 'Send søknad', 'Søk på stillingen', 'Søk på denne stillingen', 'Søk nå', 'Søk her', 'GÅ TIL SØKNAD']) {
+  const norwegianApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://arbeidsplassen.nav.no/stillinger/stilling/022e0f20-ab6f-4fa8-ae75-8db6143c5d51',
+    finalUrl: 'https://arbeidsplassen.nav.no/stillinger/stilling/022e0f20-ab6f-4fa8-ae75-8db6143c5d51',
+    bodyText: norwegianBody,
+    applyControls: ['Lagre favoritt', label],
+  });
+  norwegianApply.result === 'active' && norwegianApply.code === 'apply_control_visible'
+    ? pass(`"${label}" marks a Norwegian posting active`)
+    : fail(`"${label}" classified ${norwegianApply.result}/${norwegianApply.code}, expected active/apply_control_visible`);
+}
+
+// Bare "Søk" is also every Norwegian site's search button, and the deadline
+// line and the "Søknadsfrist" label share the stem. None of them is Apply.
+for (const label of ['Søk', 'Søk etter stillinger', 'Søknadsfrist', 'Søk senest mandag 16. november']) {
+  const norwegianNotApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://arbeidsplassen.nav.no/stillinger/stilling/022e0f20-ab6f-4fa8-ae75-8db6143c5d51',
+    finalUrl: 'https://arbeidsplassen.nav.no/stillinger/stilling/022e0f20-ab6f-4fa8-ae75-8db6143c5d51',
+    bodyText: norwegianBody,
+    applyControls: [label],
+  });
+  norwegianNotApply.result === 'uncertain' && norwegianNotApply.code === 'no_apply_control'
+    ? pass(`"${label}" is not an Apply control`)
+    : fail(`"${label}" classified ${norwegianNotApply.result}/${norwegianNotApply.code}, expected uncertain/no_apply_control`);
+}

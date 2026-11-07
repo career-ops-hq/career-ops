@@ -729,6 +729,26 @@ function refuseNoSkills(sourceLabel) {
  *                     keywordNote: string | null, sourceUrl?: string,
  *                     reportArg?: string }>}
  */
+/**
+ * A relative report or CV path, resolved the way the modes write it. The modes
+ * pass `reports/{###}-….md` relative to the data root, which is not the
+ * process's working directory when the user layer lives elsewhere (a
+ * `.career-ops-data` marker or CAREER_OPS_ROOT). The working directory still
+ * wins when the file exists there, so a path typed from inside another folder
+ * keeps its meaning; only a miss there falls back to the data root.
+ *
+ * @param {string} arg
+ * @param {string} root
+ * @returns {string}
+ */
+export function resolveUserPath(arg, root) {
+  if (isAbsolute(arg)) return arg;
+  const fromCwd = join(process.cwd(), arg);
+  if (existsSync(fromCwd) || !root) return fromCwd;
+  const fromRoot = join(root, arg);
+  return existsSync(fromRoot) ? fromRoot : fromCwd;
+}
+
 export async function resolveKeywords(input, root) {
   if (input.kind === 'url') {
     const body = await resolveUrlJdBody(input.url);
@@ -765,7 +785,7 @@ export async function resolveKeywords(input, root) {
   }
 
   const reportArg = input.reportPath;
-  const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
+  const reportPath = resolveUserPath(reportArg, root);
   if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
     console.error(`Report not found: ${reportArg}`);
     console.error(`Example: node keyword-match.mjs ${shellExampleArg(join(getCareerOpsRoot(), 'reports', '001-role.md'))}`);
@@ -892,7 +912,7 @@ async function runKeywordMatch(args) {
 
   const cvArg = args.cvPath;
   const cvPath = cvArg
-    ? (isAbsolute(cvArg) ? cvArg : join(process.cwd(), cvArg))
+    ? resolveUserPath(cvArg, getCareerOpsRoot())
     : join(getCareerOpsRoot(), 'cv.md');
 
   if (!existsSync(cvPath) || !statSync(cvPath).isFile()) {
