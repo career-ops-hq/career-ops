@@ -19,7 +19,5 @@
     "codex",
     "opencode"
   ],
-  "skills": [
-    "./.agents/skills/career-ops"
-  ]
+  "skills": "./.agents/skills/"
 }

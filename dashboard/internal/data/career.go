@@ -719,7 +719,7 @@ func NormalizeStatus(raw string) string {
 		return "applied"
 	case strings.Contains(s, "rejected") || strings.Contains(s, "rechazado") || s == "rechazada" || strings.Contains(s, "reddedildi"):
 		return "rejected"
-	case strings.Contains(s, "discarded") || strings.Contains(s, "descartado") || s == "descartada" || s == "cerrada" || s == "cancelada" ||
+	case s == "lapsed" || strings.Contains(s, "discarded") || strings.Contains(s, "descartado") || s == "descartada" || s == "cerrada" || s == "cancelada" ||
 		strings.HasPrefix(s, "duplicado") || strings.HasPrefix(s, "dup") || strings.Contains(s, "iptal edildi") || strings.Contains(s, "iptal_edildi") || strings.Contains(s, "ıptal edildi") || strings.Contains(s, "ıptal_edildi"):
 		return "discarded"
 	case strings.Contains(s, "evaluated") || strings.Contains(s, "evaluada") || s == "condicional" || s == "hold" || s == "evaluar" || s == "verificar" || strings.Contains(s, "değerlendirildi") || strings.Contains(s, "degerlendirildi"):
