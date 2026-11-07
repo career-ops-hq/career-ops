@@ -45,6 +45,7 @@ if (!bash || !rescue) {
       "appendFileSync(process.env.STUB_TRACE, JSON.stringify(process.argv.slice(2)) + '\\n');",
       "const mode = process.env.STUB_MODE;",
       "if (mode === 'crash') process.exitCode = 2;",
+      "else if (mode === 'closed') { process.stdout.write('0\\tclosed:Ashby isListed: false\\n'); process.exitCode = 3; }",
       "else if (mode === 'miss') { process.stdout.write('0\\tnone\\n'); process.exitCode = 1; }",
       "else if (mode === 'thin') { process.stdout.write('12\\tld+json:thin\\n'); process.exitCode = 1; }",
       "else { writeFileSync(process.argv[4], process.env.STUB_JD); process.stdout.write('120\\tld+json\\n'); }",
@@ -66,9 +67,11 @@ if (!bash || !rescue) {
         `BATCH_DIR=${JSON.stringify(withStub ? batchDir : join(work, 'none'))}`,
         'url="https://jobs.example.com/acme/1"',
         'prefetch_min_words=80',
+        'jd_rescue_closed_note=""',
         `jd_prefetch_words=${words}`,
         rescue,
         'echo "words=$jd_prefetch_words"',
+        'echo "closed=$jd_rescue_closed_note"',
       ].join('\n'));
       const out = execFileSync(bash, [script], { encoding: 'utf-8', timeout: 30000, cwd: work, env: { ...process.env, STUB_MODE: mode, STUB_TRACE: trace, STUB_JD: long } });
       return { out, jd: readFileSync(jd, 'utf-8'), trace: readFileSync(trace, 'utf-8'), rawLeft: existsSync(`${jd}.raw`) };
@@ -86,6 +89,11 @@ if (!bash || !rescue) {
       if (r.jd === 'JS shell' && /words=3/.test(r.out) && !r.rawLeft) pass(`rescue "${mode}" fails open: stripped text and word count untouched`);
       else fail(`rescue "${mode}" changed state: jd=${JSON.stringify(r.jd)} ${r.out.trim().split('\n').pop()}`);
     }
+    // Control flow: exit 3 from the rescue is terminal. The JD file is emptied (the page text is
+    // not handed to a worker) and the closure note is set for the runner's skip decision.
+    const closed = run({ mode: 'closed', stripped: Array.from({ length: 150 }, (_, i) => `w${i}`).join(' '), words: 150 });
+    if (closed.jd === '' && /words=0/.test(closed.out) && /closed=posting closed \(jd-rescue\): Ashby isListed: false/.test(closed.out)) pass('rescue exit 3: JD file emptied and the closure note is recorded for the skip');
+    else fail(`rescue exit 3 not terminal: jd=${JSON.stringify(closed.jd.slice(0, 20))} ${closed.out.trim().split('\n').slice(-2).join(' | ')}`);
     const none = run({ mode: 'hit', withStub: false });
     if (none.jd === 'JS shell' && none.trace === '') pass('jd-rescue.mjs absent: no rescue, no error');
     else fail('absent rescue script changed behaviour');

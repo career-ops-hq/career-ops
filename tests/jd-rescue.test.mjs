@@ -414,9 +414,41 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   const thinClosed = await runRescueChain([() => long, () => ({ closed: true, evidence: 'x' })], { ...opts, strippedWords: 0, thin: true });
   if (thinClosed.found) pass('without a closure signal the first adequate source still wins');
   else fail('a normal rescue stopped working');
+  const { fromKnownApi } = await import(join(ROOT, 'batch/jd-rescue.mjs'));
+  const viaClosed = await fromKnownApi('https://jobs.ashbyhq.com/a/1', async () => ({ text: 'x y z', closed: true, evidence: 'Ashby isListed: false', ats: 'ashby' }));
+  const viaOpen = await fromKnownApi('https://jobs.ashbyhq.com/a/1', async () => ({ text: 'x y z', ats: 'ashby' }));
+  if (viaClosed?.closed === true && !viaClosed.text && viaOpen?.method === 'ats-api:ashby') pass('fromKnownApi reports a closed ATS result as closure and still returns an open one');
+  else fail(`fromKnownApi closure handling wrong: ${JSON.stringify({ viaClosed, viaOpen })}`);
   const src = readFileSync(join(ROOT, 'batch/jd-rescue.mjs'), 'utf8');
   const runner = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf8');
   if (/return \{ closed: true, evidence: result\.evidence \}/.test(src) && /process\.exit\(3\)/.test(src)
       && /_rs_rc" -eq 3/.test(runner) && /jd_closed_note="\$jd_rescue_closed_note"/.test(runner)) pass('jd-rescue exits 3 on closure and the runner skips the offer on it');
   else fail('closure is not propagated from jd-rescue to the runner');
+}
+
+{
+  // The static fetch's own text can be a full JD for a closed role: the CLI must exit 3, not rescue.
+  const body = Array.from({ length: 150 }, (_, n) => `w${n}`).join(' ');
+  const run = (html) => {
+    const dir = mkdtempSync(join(tmpdir(), 'co-jdrescue-closed-'));
+    writeFileSync(join(dir, 'p.html'), html);
+    try {
+      execFileSync(NODE, [SCRIPT, 'https://jobs.example.com/co/abc123', join(dir, 'p.html'), join(dir, 'out.txt'), '150'], { encoding: 'utf-8', timeout: 20000 });
+      return { code: 0, out: existsSync(join(dir, 'out.txt')) };
+    } catch (e) { return { code: e.status, stdout: String(e.stdout) }; }
+    finally { rmSync(dir, { recursive: true, force: true }); }
+  };
+  const expired = run(ldJson(jobPosting({ description: `<p>${body}</p>`, validThrough: '2020-01-01T00:00:00Z' })) + `<p>${body}</p>`);
+  if (expired.code === 3 && /^0\tclosed:/.test(expired.stdout)) pass('an expired validThrough on the downloaded page exits 3 even when the page text is a full JD');
+  else fail(`expired validThrough not terminal: ${JSON.stringify(expired)}`);
+  const banner = run(`${ldJson(jobPosting({ description: `<p>${body}</p>` }))}<p>This job is no longer available.</p><p>${body}</p>`);
+  if (banner.code === 3) pass('a closure banner in the downloaded page exits 3');
+  else fail(`closure banner not terminal: ${JSON.stringify(banner)}`);
+  const open = run(ldJson(jobPosting({ description: `<p>${body}</p>` })) + `<p>${body}</p>`);
+  if (open.code !== 3) pass('an open page is not reported as closed');
+  else fail('open page exited 3');
+  // Named Latin-1 entities decode (and are not turned into spaces).
+  const ent = rescue(ldJson(jobPosting({ description: `<p>Caf&eacute; and M&uuml;nchen &Eacute;cole ${body}</p>` })));
+  if (ent.ok && ent.out.includes('Café and München École')) pass('named Latin-1 entities (&eacute; &uuml; &Eacute;) decode in a rescued JD');
+  else fail(`Latin-1 entities not decoded: ${JSON.stringify((ent.out ?? '').slice(0, 60))}`);
 }

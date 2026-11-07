@@ -477,3 +477,25 @@ test('batch-runner handles fetch-jd exit 3 as a closed posting, not a fetch miss
   assert.match(runner, /"\$jd_api_rc" -eq 3/);
   assert.match(runner, /jd_closed_note/);
 });
+
+test('a page with no extractable JD but a closure banner is closed, not a plain miss', async () => {
+  const net = stubNetwork(() => html('<html><body><h1>Careers</h1><p>This job is no longer available.</p></body></html>'));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.equal(out?.closed, true);
+    assert.match(out.evidence, /page text/);
+  } finally { net.restore(); }
+});
+
+test('named Latin-1 entities decode in visible text, case-sensitively', async () => {
+  const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<p>Ce poste est ferm&eacute; &mdash; M&uuml;nchen &Eacute;cole.</p>' })));
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.ok(out);
+  } finally { net.restore(); }
+  const { LATIN1_ENTITIES } = await import('../lib/jd-parse.mjs');
+  assert.equal(LATIN1_ENTITIES.eacute, 'é');
+  assert.equal(LATIN1_ENTITIES.Eacute, 'É');
+  assert.equal(LATIN1_ENTITIES.uuml, 'ü');
+  assert.equal(Object.hasOwn(LATIN1_ENTITIES, 'nbsp'), false);
+});

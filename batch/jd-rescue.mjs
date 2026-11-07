@@ -55,6 +55,7 @@
 import fs from 'node:fs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { fromLdJson, fromEmbeddedDescription, ldJsonBlocks, wordCount } from '../lib/jd-parse.mjs';
+import { pageClosureEvidence } from '../lib/jd-page-fetch.mjs';
 
 // Re-exported so existing importers of this module keep working.
 export { fromLdJson, fromEmbeddedDescription, ldJsonBlocks, wordCount };
@@ -71,10 +72,10 @@ export { fromLdJson, fromEmbeddedDescription, ldJsonBlocks, wordCount };
  * carrying a second copy of the per-ATS code. A URL it does not recognise
  * answers null without any network request.
  */
-async function fromKnownApi(url) {
+export async function fromKnownApi(url, fetchJd) {
   try {
-    const { fetchJdViaKnownApi } = await import('../browser-extract.mjs');
-    const result = await fetchJdViaKnownApi(url, 20_000, 15_000);
+    fetchJd ??= (await import('../browser-extract.mjs')).fetchJdViaKnownApi;
+    const result = await fetchJd(url, 20_000, 15_000);
     if (!result?.text) return null;
     // A delisted/closed posting is not a JD to rescue: report closure so the chain
     // stops and the runner skips the offer instead of scoring other text from the page.
@@ -141,7 +142,10 @@ Options:
     process.exit(1);
   }
 
-  const chain = await runRescueChain(
+  // The static fetch's own text may still be a full JD for a closed role (an expired
+  // validThrough in JSON-LD, or a "no longer accepting applications" banner beside it).
+  const pageClosed = pageClosureEvidence(html, url);
+  const chain = pageClosed ? { closed: true, evidence: pageClosed } : await runRescueChain(
     [() => fromLdJson(html), () => fromKnownApi(url), () => fromEmbeddedDescription(html)],
     { minWords, strippedWords, thin },
   );
