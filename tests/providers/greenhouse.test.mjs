@@ -528,6 +528,63 @@ try {
     }
   }
 
+  // Oversized board: content=true overflows → plain list + bodies for kept titles.
+  {
+    const tooLarge = () => Object.assign(new Error('HTTP body exceeded maxBytes of 10485760'), { code: 'response_too_large' });
+    const listing = { jobs: [
+      { id: 1, title: 'Strategy Manager', absolute_url: 'https://job-boards.greenhouse.io/big/jobs/1', location: { name: 'Costa Mesa' } },
+      { id: 2, title: 'Welder', absolute_url: 'https://job-boards.greenhouse.io/big/jobs/2', location: { name: 'Costa Mesa' } },
+    ] };
+    const urls = [];
+    const rows = await greenhouse.fetch(
+      { name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big' },
+      {
+        titleWanted: (t) => /strategy/i.test(t),
+        sleep: async () => {},
+        fetchJson: async (url) => {
+          urls.push(url);
+          if (url.includes('content=true')) throw tooLarge();
+          if (url.endsWith('/jobs/1')) return { id: 1, content: '&lt;p&gt;Lead strategy.&lt;/p&gt;' };
+          return listing;
+        },
+      },
+    );
+    const strat = rows.find((r) => r.title === 'Strategy Manager');
+    const welder = rows.find((r) => r.title === 'Welder');
+    if (rows.length === 2 && strat?.description === 'Lead strategy.' && welder && welder.description === undefined
+      && !urls.some((u) => u.endsWith('/jobs/2'))) {
+      pass('greenhouse.fetch() reads an oversized board from the plain list, fetching bodies only for title-kept postings');
+    } else {
+      fail(`greenhouse oversized fallback rows=${JSON.stringify(rows)} urls=${JSON.stringify(urls)}`);
+    }
+
+    const failRows = await greenhouse.fetch(
+      { name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big' },
+      {
+        titleWanted: () => true,
+        sleep: async () => {},
+        fetchJson: async (url) => {
+          if (url.includes('content=true')) throw tooLarge();
+          if (/\/jobs\/\d+$/.test(url)) throw new Error('HTTP 500');
+          return listing;
+        },
+      },
+    );
+    if (failRows.length === 2) pass('greenhouse.fetch() keeps a posting whose detail fetch failed');
+    else fail(`greenhouse detail failure dropped postings: ${failRows.length}`);
+
+    try {
+      await greenhouse.fetch(
+        { name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big' },
+        { fetchJson: async () => { throw Object.assign(new Error('HTTP 404'), { status: 404 }); } },
+      );
+      fail('greenhouse.fetch() must not swallow a non-size error');
+    } catch (e) {
+      if (/404/.test(e.message)) pass('greenhouse.fetch() still throws a non-size error');
+      else fail(`greenhouse.fetch() threw ${e.message}`);
+    }
+  }
+
 } catch (e) {
   fail(`greenhouse provider tests crashed: ${e.message}`);
 }
