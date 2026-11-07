@@ -91,7 +91,8 @@ node backup.mjs --provider google-drive                 # or a signed-in cloud d
 
 It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The LinkedIn
 export `data/Connections.csv` holds other people's contact details, so it is left out unless
-you add `--include-connections`. Several signed-in accounts are handled with `--account`; see
+you add `--include-connections`, and the agent-tool settings (`.claude/`, `opencode.json`,
+`plugins.local/`), which can hold API tokens, need `--include-tool-config`. Several signed-in accounts are handled with `--account`; see
 [SCRIPTS.md](SCRIPTS.md#backupmjs). It keeps no history, so it protects against a lost
 machine, not against a mistaken edit. Use Pattern 1 or 3 below when you want to go back to
 an earlier version. The script is on-demand; schedule it with
