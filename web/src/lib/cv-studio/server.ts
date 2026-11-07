@@ -55,6 +55,9 @@ async function findTailoredHtml(reportNum: string, slug: string): Promise<string
     const sibling = originalOf(indexed.path.replace(/\.pdf$/i, ".html"));
     if (isRegularContainedFile(sibling, dir)) return sibling;
   }
+  // An indexed report must not borrow another application's matching HTML
+  // when its own files are missing or rejected. Keep guessing for legacy rows only.
+  if (indexed.status !== "not-found") return null;
   if (!slug) return null;
   let files: string[];
   try {
