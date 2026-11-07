@@ -558,6 +558,13 @@ test('a real closure banner next to a hidden expiry view still closes the page',
   assert.ok(out);
 });
 
+test('hostile markup around the expiry-view scan stays fast', () => {
+  const t0 = Date.now();
+  pageClosureEvidence(`<html>${'<a'.repeat(500_000)}>${'<div class="expire-job-view">'.repeat(20_000)}</html>`, 'https://careers.example.com/job/1');
+  pageClosureEvidence(`<html><div class="job-expire-view">${'<div>'.repeat(300_000)}</html>`, 'https://careers.example.com/job/1');
+  assert.ok(Date.now() - t0 < 5000, `took ${Date.now() - t0}ms`);
+});
+
 test('an expiry-view class named only inside a script does not hide a real closure banner', () => {
   const banner = '<h2>This job is no longer available.</h2>';
   const script = '<script>var c="job-expire-view expire-job-view";</script>';
