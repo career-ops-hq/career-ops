@@ -104,3 +104,34 @@ if (!bash || !rescue) {
     try { rmSync(work, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
+
+// ── end to end: rescue says closed → fetch-jd is not called, the offer is skipped, no worker ──
+if (bash && rescue) {
+  const work = mkdtempSync(join(tmpdir(), 'co-jd-rescue-e2e-'));
+  try {
+    const batchDir = join(work, 'batch'); const projectDir = join(work, 'project');
+    mkdirSync(batchDir); mkdirSync(projectDir);
+    writeFileSync(join(batchDir, 'jd-rescue.mjs'), "process.stdout.write('0\\tclosed:Ashby isListed: false\\n'); process.exitCode = 3;\n");
+    const trace = join(work, 'fetch-trace.txt'); writeFileSync(trace, '');
+    writeFileSync(join(projectDir, 'fetch-jd.mjs'), "import { appendFileSync } from 'node:fs'; appendFileSync(process.env.STUB_TRACE, 'called\\n');\n");
+    const apiBlk = SRC.match(/  local jd_api_words=0\n  if \[\[ ! -s "\$jd_file"[\s\S]*?\n  fi\n/)?.[0];
+    const decide = SRC.match(/  local jd_thin_skip=0 jd_thin_note="" jd_thin_retryable=0\n  if \[\[ -n "\$jd_closed_note" \]\]; then[\s\S]*?jd_thin_note="\$jd_closed_note"\n/)?.[0];
+    const skipBlk = SRC.match(/  if \[\[ "\$jd_thin_skip" == "1" \]\]; then[\s\S]*?\n    return 0\n  fi\n/)?.[0];
+    if (!apiBlk || !decide || !skipBlk) fail('could not extract the runner blocks for the end-to-end closure test');
+    else {
+      const jd = join(work, 'jd.txt'); writeFileSync(jd, 'full visible text of the closed page'); writeFileSync(`${jd}.raw`, '<html></html>');
+      const script = join(work, 'e2e.sh');
+      writeFileSync(script, [
+        '#!/usr/bin/env bash', 'set -euo pipefail',
+        `jd_file=${JSON.stringify(jd)}; jd_raw_file=${JSON.stringify(`${jd}.raw`)}; BATCH_DIR=${JSON.stringify(batchDir)}; PROJECT_DIR=${JSON.stringify(projectDir)}`,
+        'url="https://jobs.ashbyhq.com/acme/1"; prefetch_min_words=80; THIN_ACTION=webfetch; retries=0; MAX_RETRIES=2; id=7; started_at=t; report_num=042',
+        'update_state_retrying() { echo "STATE:$3"; }', 'release_report_num() { echo "RELEASED:$1"; }',
+        'f() {', '  local jd_prefetch_words=150 jd_rescue_closed_note=""', rescue, '  local jd_closed_note="$jd_rescue_closed_note"', apiBlk, decide + '  fi\n', skipBlk, '  echo "WORKER-REACHED"', '}', 'f',
+      ].join('\n'));
+      const out = execFileSync(bash, [script], { encoding: 'utf-8', timeout: 30000, cwd: work, env: { ...process.env, STUB_TRACE: trace, TMPDIR: work } });
+      const calls = readFileSync(trace, 'utf-8').trim();
+      if (/STATE:skipped/.test(out) && /RELEASED:042/.test(out) && !/WORKER-REACHED/.test(out) && calls === '' && !existsSync(jd)) pass('closed rescue: fetch-jd is not called, the offer is recorded skipped, no worker is reached');
+      else fail(`closed rescue end-to-end wrong: fetchCalls=${JSON.stringify(calls)} out=${out.trim()}`);
+    }
+  } finally { try { rmSync(work, { recursive: true, force: true }); } catch { /* best effort */ } }
+}

@@ -465,3 +465,33 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
   if (ent.ok && ent.out.includes('Café and München École')) pass('named Latin-1 entities (&eacute; &uuml; &Eacute;) decode in a rescued JD');
   else fail(`Latin-1 entities not decoded: ${JSON.stringify((ent.out ?? '').slice(0, 60))}`);
 }
+
+{
+  // CLI-level: a stubbed closed ATS result makes the real CLI exit 3, even though the page's own
+  // JSON-LD is an adequate JD. browser-extract.mjs is replaced through a module resolve hook.
+  const dir = mkdtempSync(join(tmpdir(), 'co-jdrescue-cli-ats-'));
+  try {
+    const hooks = join(dir, 'hooks.mjs');
+    writeFileSync(hooks, `export async function resolve(spec, ctx, next) {
+  if (spec.endsWith('browser-extract.mjs')) return { url: 'data:text/javascript,' + encodeURIComponent("export async function fetchJdViaKnownApi(){ return process.env.STUB_ATS === 'closed' ? { text: 'a b c', closed: true, evidence: 'Ashby isListed: false', ats: 'ashby' } : null; }"), shortCircuit: true };
+  return next(spec, ctx);
+}`);
+    const reg = join(dir, 'register.mjs');
+    writeFileSync(reg, `import { register } from 'node:module'; import { pathToFileURL } from 'node:url'; register(pathToFileURL(${JSON.stringify(hooks)}));`);
+    const body = Array.from({ length: 150 }, (_, n) => `w${n}`).join(' ');
+    const raw = join(dir, 'p.html');
+    writeFileSync(raw, ldJson(jobPosting({ description: `<p>${body}</p>` })));
+    const go = (mode) => {
+      try {
+        const out = execFileSync(NODE, ['--import', reg, SCRIPT, 'https://jobs.ashbyhq.com/acme/1', raw, join(dir, `o-${mode}.txt`), '0'], { encoding: 'utf-8', timeout: 20000, env: { ...process.env, STUB_ATS: mode } });
+        return { code: 0, out };
+      } catch (e) { return { code: e.status, out: String(e.stdout) }; }
+    };
+    const closed = go('closed');
+    const open = go('open');
+    if (closed.code === 3 && /closed:Ashby isListed: false/.test(closed.out) && !existsSync(join(dir, 'o-closed.txt'))) pass('CLI: a closed ATS result exits 3 and writes no JD even when the page has an adequate JSON-LD');
+    else fail(`CLI ATS closure not terminal: ${JSON.stringify(closed)}`);
+    if (open.code === 0 && existsSync(join(dir, 'o-open.txt'))) pass('CLI: with the ATS open or missing the JSON-LD JD is still rescued');
+    else fail(`CLI open ATS case broke: ${JSON.stringify(open)}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}

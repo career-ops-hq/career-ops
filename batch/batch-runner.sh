@@ -1376,7 +1376,7 @@ process_offer() {
   # host is a miss (exit 1), not a request.
   local jd_closed_note="$jd_rescue_closed_note"
   local jd_api_words=0
-  if [[ ! -s "$jd_file" && -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
+  if [[ ! -s "$jd_file" && -z "$jd_closed_note" && -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
     local jd_api_tmp jd_api_rc=0
     jd_api_tmp="$(mktemp "${TMPDIR:-/tmp}/batch-jd-api.XXXXXX")"
     node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_api_tmp" 2>/dev/null || jd_api_rc=$?
