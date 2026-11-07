@@ -711,6 +711,29 @@ function normalizeForComparison(text) {
 }
 
 /**
+ * Excerpts of two normalized section bodies around the first place they differ,
+ * so a locked-section failure shows what changed rather than an entire section.
+ * A whole Experience section runs to thousands of characters, which the web UI
+ * would cut off before the changed text. Equal-length windows of `context`
+ * characters either side of the divergence; an ellipsis marks each cut end.
+ * @param {string} expected
+ * @param {string} found
+ * @param {number} [context]
+ * @returns {[string, string]}
+ */
+export function lockedSectionExcerpts(expected, found, context = 80) {
+  let i = 0;
+  const max = Math.min(expected.length, found.length);
+  while (i < max && expected[i] === found[i]) i++;
+  const start = Math.max(0, i - context);
+  const cut = (text) => {
+    const end = Math.min(text.length, i + context);
+    return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+  };
+  return [cut(expected), cut(found)];
+}
+
+/**
  * Validate that sections marked as locked in config/profile.yml are identical
  * (ignoring formatting) between the source cv.md and the rendered HTML.
  * @param {string} html 
@@ -766,7 +789,8 @@ export function validateLockedSections(html, cvMarkdown, lockedKeys) {
     const renderedNorm = normalizeForComparison(renderedRaw);
 
     if (sourceNorm !== renderedNorm) {
-      throw new Error(`Locked section '${key}' was modified during tailoring.\nExpected (normalized): ${sourceNorm}\nFound (normalized): ${renderedNorm}`);
+      const [expectedExcerpt, foundExcerpt] = lockedSectionExcerpts(sourceNorm, renderedNorm);
+      throw new Error(`Locked section '${key}' was modified during tailoring.\nExpected (normalized): ${expectedExcerpt}\nFound (normalized): ${foundExcerpt}`);
     }
   }
 }
