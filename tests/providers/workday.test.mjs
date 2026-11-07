@@ -584,6 +584,19 @@ try {
   } else {
     fail(`workday cap flag: truncated=${JSON.stringify(fetchedHugeWorkday.truncated)} workdayTruncated=${fetchedHugeWorkday.workdayTruncated}`);
   }
+  {
+    const page = () => ({ total: 1_000_000, jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}` })) });
+    const { result: probed } = await captureConsoleErrors(() =>
+      workday.fetch({ ...entry, max_pages: 1 }, { ...mkWorkdayCtx(async () => page()), maxPages: 1 }));
+    probed.truncated
+      ? fail(`workday flagged a probe with max_pages 1 as truncated: ${JSON.stringify(probed.truncated)}`)
+      : pass('workday.fetch() leaves a probe unflagged when entry and probe caps are both 1');
+    const { result: exact } = await captureConsoleErrors(() =>
+      workday.fetch({ ...entry, max_pages: 2 }, mkWorkdayCtx(async () => ({ ...page(), total: 40 }))));
+    exact.length === 40 && !exact.truncated
+      ? pass('workday.fetch() leaves a board that ends exactly at the cap unflagged')
+      : fail(`workday exact-cap board: ${exact.length} jobs, truncated=${JSON.stringify(exact.truncated)}`);
+  }
 
   // Which cap warning fires is keyed on ENTRY PROVENANCE, not on the date
   // bound (#2495). "raise max_pages on this entry for more" is only actionable
