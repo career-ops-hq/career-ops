@@ -116,6 +116,20 @@ try {
     pass('an empty <urlset> parses to zero URLs');
   } else fail('empty sitemap handling changed');
 
+  const truncated = [
+    '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    '<?xml version="1.0"?><urlset><url><loc>https://careers.example.com/jobs/1/a/</loc></url>',
+    '<?xml version="1.0"?><sitemapindex><sitemap><loc>https://careers.example.com/s.xml</loc></sitemap>',
+  ];
+  let truncatedCount = 0;
+  for (const body of truncated) {
+    try { mod.parseSitemapDocument(body); } catch (err) { if (/truncated response/.test(err.message)) truncatedCount++; }
+  }
+  const selfClosing = mod.parseSitemapDocument('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>');
+  if (truncatedCount === 3 && selfClosing.kind === 'urlset' && selfClosing.locs.length === 0) {
+    pass('a root without its closing tag throws as truncated; a self-closing empty <urlset/> is a valid empty board');
+  } else fail(`truncated count=${truncatedCount} selfClosing=${JSON.stringify(selfClosing)}`);
+
   let blankCount = 0;
   for (const body of ['', '   \n', null]) {
     try { mod.parseSitemapDocument(body); } catch (err) { if (/empty response/.test(err.message)) blankCount++; }

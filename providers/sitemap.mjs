@@ -224,7 +224,15 @@ export function parseSitemapDocument(xml) {
   if (typeof xml !== 'string' || !xml.trim()) {
     throw new Error('sitemap: empty response (expected an XML <urlset> or <sitemapindex>)');
   }
+  // A root that opens but never closes is a truncated body, not a short
+  // board (sitemaps.org requires the closing tag; join.mjs applies the same
+  // rule to its company sitemap). A self-closing empty root is complete.
+  /** @param {string} tag */
+  const complete = (tag) => new RegExp(`<${tag}\\b[^>]*\\/>|<${tag}\\b[^>]*>[\\s\\S]*<\\/${tag}\\s*>`, 'i').test(xml);
+  /** @param {string} tag */
+  const incomplete = (tag) => new Error(`sitemap: truncated response (<${tag}> without a closing </${tag}>)`);
   if (/<sitemapindex\b[^>]*>/i.test(xml)) {
+    if (!complete('sitemapindex')) throw incomplete('sitemapindex');
     const locs = [];
     for (const m of xml.matchAll(/<sitemap\b[^>]*>([\s\S]*?)<\/sitemap\s*>/gi)) {
       const loc = locOf(m[1]);
@@ -233,6 +241,7 @@ export function parseSitemapDocument(xml) {
     return { kind: 'index', locs };
   }
   if (/<urlset\b[^>]*>/i.test(xml)) {
+    if (!complete('urlset')) throw incomplete('urlset');
     const locs = [];
     for (const m of xml.matchAll(/<url\b[^>]*>([\s\S]*?)<\/url\s*>/gi)) {
       const loc = locOf(m[1]);
