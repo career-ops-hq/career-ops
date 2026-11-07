@@ -31,7 +31,9 @@ function runCover(env) {
     cwd: dir,
     encoding: 'utf-8',
     timeout: 60_000,
-    env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', ...env },
+    // An inherited CAREER_OPS_PROFILE would point the script at a real profile
+    // and its template choice; the test must see the temporary root only.
+    env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: '', ...env },
   });
   rmSync(dir, { recursive: true, force: true });
   return result;
