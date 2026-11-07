@@ -37,9 +37,10 @@ test('a fresh checkout is told setup is not finished, not that tools are ready',
   const dir = checkout({ withSetup: false });
   try {
     const { status, out } = runDoctor(dir);
-    assert.equal(status, 0, out);
+    assert.equal(status, 1, out);
     assert.match(out, /Setup is not finished \(4 files missing: cv\.md, config\/profile\.yml, modes\/_profile\.md, portals\.yml\)/);
-    assert.match(out, /\d+ warning/);
+    assert.match(out, /node onboard-write\.mjs/);
+    assert.match(out, /Result: 2 issues found/);
     assert.doesNotMatch(out, /Your tools are ready/);
     assert.doesNotMatch(out, /ready to go/);
     assert.doesNotMatch(out, /Personalization files customized/);
@@ -66,9 +67,10 @@ test('a fresh checkout with a skill-entrypoint stub does not claim tools are rea
     mkdirSync(join(dir, '.claude', 'skills', 'career-ops'), { recursive: true });
     writeFileSync(join(dir, '.claude', 'skills', 'career-ops', 'SKILL.md'), '../../../.agents/skills/career-ops/SKILL.md\n');
     const { status, out } = runDoctor(dir);
-    assert.equal(status, 0, out);
+    assert.equal(status, 1, out);
     assert.match(out, /Setup is not finished \(4 files missing:/);
-    assert.match(out, /\d+ warning/);
+    assert.match(out, /node onboard-write\.mjs/);
+    assert.match(out, /Result: 2 issues found/);
     assert.doesNotMatch(out, /Your tools are ready/);
     assert.doesNotMatch(out, /ready to go/);
   } finally {
@@ -83,9 +85,96 @@ test('a failing check still reports the missing setup files', () => {
     const { status, out } = runDoctor(dir);
     assert.equal(status, 1, out);
     assert.match(out, /✗ data\/pipeline\.md could not be created/);
-    assert.match(out, /Result: 1 issue found\./);
+    assert.match(out, /✗ cv\.md not found/);
+    assert.match(out, /✗ config\/profile\.yml not found/);
+    assert.match(out, /Result: 3 issues found\./);
+    assert.match(out, /node onboard-write\.mjs/);
     assert.match(out, /Setup is not finished \(4 files missing: cv\.md, config\/profile\.yml, modes\/_profile\.md, portals\.yml\)\./);
-    assert.match(out, /Open your AI CLI in this folder \(claude, codex, opencode, qwen, agy or grok\) and it walks you through setup by chatting\./);
+    assert.match(out, /Open your AI CLI in the checkout \(claude, codex, opencode, qwen, agy or grok\) and it walks you through setup by chatting\./);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a missing cv.md exits non-zero and names onboard-write', () => {
+  const dir = checkout({ withSetup: true });
+  try {
+    rmSync(join(dir, 'cv.md'));
+    const { status, out } = runDoctor(dir);
+    assert.equal(status, 1, out);
+    assert.match(out, /✗ cv\.md not found/);
+    assert.match(out, /node onboard-write\.mjs/);
+    assert.doesNotMatch(out, /config\/profile\.yml not found/);
+    assert.doesNotMatch(out, /ready to go/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a missing profile exits non-zero and names onboard-write', () => {
+  const dir = checkout({ withSetup: true });
+  try {
+    rmSync(join(dir, 'config', 'profile.yml'));
+    const { status, out } = runDoctor(dir);
+    assert.equal(status, 1, out);
+    assert.match(out, /✗ config\/profile\.yml not found/);
+    assert.match(out, /node onboard-write\.mjs/);
+    assert.doesNotMatch(out, /cv\.md not found/);
+    assert.doesNotMatch(out, /ready to go/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('doctor --json still exits 0 when cv and profile are missing', () => {
+  const dir = checkout({ withSetup: false });
+  try {
+    const r = spawnSync(process.execPath, ['--import', pathToFileURL(PLAYWRIGHT_STUB).href, DOCTOR, '--json', '--target', dir], {
+      cwd: dir, encoding: 'utf-8', timeout: 60_000, env: { ...process.env, NO_COLOR: '1' },
+    });
+    assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+    const state = JSON.parse(r.stdout);
+    assert.equal(state.onboardingNeeded, true);
+    assert.ok(state.missing.includes('cv.md'));
+    assert.ok(state.missing.includes('config/profile.yml'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('a missing shell-selected profile exits non-zero', () => {
+  const dir = checkout({ withSetup: true });
+  try {
+    rmSync(join(dir, 'config', 'profile.yml'));
+    const named = join(dir, 'config', 'named-profile.yml');
+    const env = { ...process.env, NO_COLOR: '1', CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: named };
+    const r = spawnSync(process.execPath, ['--import', pathToFileURL(PLAYWRIGHT_STUB).href, DOCTOR], {
+      cwd: ROOT, encoding: 'utf-8', timeout: 60_000, env,
+    });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(r.status, 1, out);
+    assert.match(out, /✗ config\/profile\.yml not found \(CAREER_OPS_PROFILE names /);
+    assert.doesNotMatch(out, /⚠ config\/profile\.yml not found \(CAREER_OPS_PROFILE names /);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a missing default profile overridden by .env exits non-zero', () => {
+  const dir = checkout({ withSetup: true });
+  try {
+    rmSync(join(dir, 'config', 'profile.yml'));
+    writeFileSync(join(dir, '.env'), 'CAREER_OPS_PROFILE=config/from-env.yml\n');
+    const env = { ...process.env, NO_COLOR: '1', CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' };
+    delete env.CAREER_OPS_PROFILE;
+    const r = spawnSync(process.execPath, ['--import', pathToFileURL(PLAYWRIGHT_STUB).href, DOCTOR], {
+      cwd: ROOT, encoding: 'utf-8', timeout: 60_000, env,
+    });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(r.status, 1, out);
+    assert.match(out, /✗ config\/profile\.yml not found \(\.env sets CAREER_OPS_PROFILE=config\/from-env\.yml/);
+    assert.doesNotMatch(out, /⚠ config\/profile\.yml not found \(\.env sets CAREER_OPS_PROFILE=/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

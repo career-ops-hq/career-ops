@@ -15,6 +15,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { dataFolderMissingMessage } from "./core/data-root.mjs";
 
 /**
  * @typedef {Object} PdfRunSignals
@@ -90,10 +91,15 @@ export function writeCvHtml({ pdfPaths, html }) {
 
 /**
  * Spawn generate-pdf.mjs as a plain child process and resolve once it exits.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string, dataRoot?: string}} args
  * @returns {Promise<{ok: boolean, stderr: string}>}
  */
-export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, reportNum }) {
+export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, reportNum, dataRoot }) {
+  if (dataRoot && !fs.existsSync(dataRoot)) {
+    return Promise.resolve({ ok: false, stderr: dataFolderMissingMessage(dataRoot) });
+  }
+  const env = { ...process.env, CAREER_OPS_PDF_SHARED: "1" };
+  if (dataRoot) env.CAREER_OPS_ROOT = dataRoot;
   return new Promise((resolve) => {
     const child = spawnFn(
       execPath,
@@ -107,7 +113,7 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
       {
         cwd: coreRoot,
         windowsHide: true,
-        env: { ...process.env, CAREER_OPS_PDF_SHARED: "1" },
+        env,
       },
     );
     let stderr = "";
@@ -123,12 +129,19 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
  * a failure exit when --json is passed) so a caller can surface the specific
  * reason (not-found / ambiguous / lock-timeout / ...) rather than raw stderr.
  * `code` is the exit code, or null when the child never started.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, reportNum: string, dataRoot?: string}} args
  * @returns {Promise<{ok: boolean, code: number | null, data: {error?: string} | null, stderr: string}>}
  */
-export function markTrackerReady({ spawnFn, execPath, coreRoot, reportNum }) {
+export function markTrackerReady({ spawnFn, execPath, coreRoot, reportNum, dataRoot }) {
+  if (dataRoot && !fs.existsSync(dataRoot)) {
+    return Promise.resolve({ ok: false, code: null, data: null, stderr: dataFolderMissingMessage(dataRoot) });
+  }
   return new Promise((resolve) => {
-    const child = spawnFn(execPath, [path.join(coreRoot, "mark-pdf-ready.mjs"), reportNum, "--json"], { cwd: coreRoot, windowsHide: true });
+    const child = spawnFn(execPath, [path.join(coreRoot, "mark-pdf-ready.mjs"), reportNum, "--json"], {
+      cwd: coreRoot,
+      windowsHide: true,
+      ...(dataRoot ? { env: { ...process.env, CAREER_OPS_ROOT: dataRoot } } : {}),
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => { stdout += d.toString(); });
@@ -206,13 +219,13 @@ export function keepTailoredHtml(pdfPaths, warnings) {
  * Call after writeCvHtml for the same pdfPaths — this reads the HTML that
  * function wrote. `format` is passed in rather than read back off disk, so the two
  * no longer share a file and the only coupling left is the HTML itself.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string, dataRoot?: string}} args
  * @returns {Promise<RenderResult>}
  */
-export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, format, reportNum }) {
+export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, format, reportNum, dataRoot }) {
   const warnings = [];
 
-  const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
+  const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum, dataRoot });
   if (render.ok) keepTailoredHtml(pdfPaths, warnings);
   cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
 
@@ -236,7 +249,7 @@ export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, 
   // tracker-sync miss (e.g. the row was edited away mid-flight) doesn't fail
   // the whole job, but it must still be visible to whoever is watching this
   // run, not just a server-side log nobody sees.
-  const mark = await markTrackerReady({ spawnFn, execPath, coreRoot, reportNum });
+  const mark = await markTrackerReady({ spawnFn, execPath, coreRoot, reportNum, dataRoot });
   if (!mark.ok) {
     console.error(`mark-pdf-ready.mjs failed for report #${reportNum}: ${mark.data?.error ?? mark.stderr}`);
     warnings.push(

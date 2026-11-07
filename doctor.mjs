@@ -1201,15 +1201,19 @@ function checkScanExtractor(root) {
 const USER_LAYER_PREREQS = [
   {
     path: 'cv.md',
+    blocksExit: true,
     fix: [
+      'Run: node onboard-write.mjs --answers <answers.json> [--target <data-root>]',
       'Create cv.md in the project root with your CV in markdown',
       'See examples/ for reference CVs',
     ],
   },
   {
     path: 'config/profile.yml',
+    blocksExit: true,
     emptyImpact: 'evaluations and scans have none of your targeting',
     fix: [
+      'Run: node onboard-write.mjs --answers <answers.json> [--target <data-root>]',
       'Run: cp config/profile.example.yml config/profile.yml',
       'Then edit it with your details',
     ],
@@ -1288,7 +1292,7 @@ function checkPrereq(prereq) {
   if (path === 'config/profile.yml' && !explicitTarget && hasProfileOverride()) {
     const named = profilePathFor(projectRoot);
     return {
-      warn: true,
+      pass: false,
       label: `${path} not found (CAREER_OPS_PROFILE names ${named})`,
       fix: [`Create ${named}, or unset CAREER_OPS_PROFILE to use the profile in the data root`],
     };
@@ -1296,10 +1300,15 @@ function checkPrereq(prereq) {
   const fromEnvFile = path === 'config/profile.yml' && !explicitTarget ? profileFromEnvFile(projectRoot) : null;
   if (fromEnvFile) {
     return {
-      warn: true,
+      pass: false,
       label: `${path} not found (.env sets CAREER_OPS_PROFILE=${fromEnvFile}, but most commands never load .env)`,
       fix: [`Export CAREER_OPS_PROFILE=${fromEnvFile} in your shell so every command sees it, or remove it from .env and put the profile at ${profilePathFor(projectRoot)}`],
     };
+  }
+  // cv.md and config/profile.yml are the files a run cannot score without.
+  // The other two stay warnings: a checkout can be healthy and still unfinished.
+  if (prereq.blocksExit) {
+    return { pass: false, label: `${path} not found (user setup required)`, fix };
   }
   return { warn: true, label: `${path} not found (user setup required)`, fix };
 }
@@ -1689,7 +1698,10 @@ async function main() {
   const setupNote = setupMissing.length > 0
     ? `Setup is not finished (${setupMissing.length} file${setupMissing.length === 1 ? '' : 's'} missing: ${setupMissing.map(({ path }) => path).join(', ')})`
     : null;
-  const setupHint = `Open your AI CLI in this folder (${CLI_NAMES}) and it walks you through setup by chatting.`;
+  const onboardCmd = projectRoot === codeRoot
+    ? 'node onboard-write.mjs --answers <answers.json>'
+    : `node ${join(codeRoot, 'onboard-write.mjs')} --answers <answers.json> --target ${projectRoot}`;
+  const setupHint = `Run \`${onboardCmd}\` from the career-ops checkout. Open your AI CLI in the checkout (${CLI_NAMES}) and it walks you through setup by chatting.`;
   if (failures > 0) {
     console.log(`Result: ${failures} issue${failures === 1 ? '' : 's'} found. Fix them and run \`npm run doctor\` again.`);
     if (setupNote) {
