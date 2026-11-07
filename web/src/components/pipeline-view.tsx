@@ -46,12 +46,14 @@ export function PipelineView({
   applications,
   inbox,
   inboxCount,
+  inboxFitError = null,
   trackerShape = "rows",
   cvRows = [],
 }: {
   applications: Application[];
   inbox: InboxJob[] | null;
   inboxCount: number;
+  inboxFitError?: string | null;
   trackerShape?: "missing" | "empty" | "malformed" | "rows";
   /** Tracker row numbers that have a tailored CV PDF on disk. */
   cvRows?: string[];
@@ -826,6 +828,9 @@ export function PipelineView({
             </div>
           ) : (
             <>
+              {inboxFitError && (
+                <p role="alert" className="mt-2 whitespace-pre-wrap text-xs text-red-500">{inboxFitError}</p>
+              )}
               <LinkedInPaste />
               <InboxTriage inbox={inbox} />
               {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
