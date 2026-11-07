@@ -20,6 +20,7 @@ import {
   markTrackerReady,
   cleanupPdfScratch,
   renderAndMarkPdf,
+  failureReason,
 } from "../../src/lib/pdf-render.mjs";
 
 // A fake stdio stream: emits raw Buffers, or decoded strings once the code
@@ -727,4 +728,23 @@ test("writeCvHtml: a shorter re-render leaves no trailing bytes", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("failureReason: keeps the failing line, drops the advisories printed before it", () => {
+  // Given stderr where a voice-check warning precedes the real failure
+  const stderr = [
+    "\u26a0\ufe0f  Voice check warning for cv-web-423.html: an en dash. The build continues.",
+    "\u274c PDF generation failed: Fact check failed for cv-web-423.html: non-metric facts absent from sources: employer=X",
+  ].join("\n");
+
+  // Then only the failure line is reported
+  assert.equal(
+    failureReason(stderr),
+    "\u274c PDF generation failed: Fact check failed for cv-web-423.html: non-metric facts absent from sources: employer=X",
+  );
+});
+
+test("failureReason: no failure marker -> whole stderr; empty -> generic message", () => {
+  assert.equal(failureReason("boom"), "boom");
+  assert.equal(failureReason(""), "PDF rendering failed.");
 });

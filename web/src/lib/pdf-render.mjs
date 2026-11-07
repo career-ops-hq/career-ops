@@ -180,7 +180,7 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
  * @returns {string}
  */
 export function undeliveredRenderError(render, finalPdf) {
-  if (!render.ok) return render.stderr || "PDF rendering failed.";
+  if (!render.ok) return failureReason(render.stderr);
   const budgetLine = /CV is \d+ pages?; the allowed maximum is \d+ pages?\./.exec(render.stderr)?.[0] ?? null;
   const draftPath = OVERFLOW_DRAFT_RE.exec(render.stderr)?.[1];
   const draftName = draftPath ? path.basename(draftPath) : null;
@@ -275,6 +275,21 @@ export function keepTailoredHtml(pdfPaths, warnings) {
  * @property {string[]} warnings - Non-fatal issues to surface to the user (e.g. a renderer advisory, or a tracker row that was not marked).
  */
 /** @typedef {RenderFailedResult | RenderedResult} RenderResult */
+
+/**
+ * The reason a failed render died, without the advisories printed before it.
+ * generate-pdf.mjs writes `⚠️` warnings (voice check, page budget) ahead of the
+ * `❌` line that names the actual failure, and the caller caps the message
+ * length, so passing raw stderr hid the cause behind a harmless warning.
+ * @param {string} stderr
+ * @returns {string}
+ */
+export function failureReason(stderr) {
+  const lines = (stderr || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const errors = lines.filter((l) => l.startsWith("❌"));
+  const picked = errors.length > 0 ? errors : lines;
+  return picked.length > 0 ? picked.join("\n") : "PDF rendering failed.";
+}
 
 /**
  * Render the tailored HTML to a PDF, then mark the tracker's PDF column
