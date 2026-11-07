@@ -54,7 +54,34 @@ const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 // (missing a skill) is recoverable by the user reading the JD themselves;
 // over-extracting noise into "required skills" is not — it would misreport
 // gaps that aren't real.
-//
+
+// Qualified requirement headings (#6255), kept apart so scanJd() can tell a
+// line matched by one of them from the older requirement headings.
+const QUALIFIED_REQUIREMENT_ARMS = [
+  // The ^ anchor means the keyword has to be the heading's first word, so
+  // a qualified noun heading — Amazon's "Basic Qualifications", Google's
+  // "Minimum Qualifications", "Role Qualifications", "Key Requirements" —
+  // matched nothing and the JD reported no-requirements-section (#6255).
+  // The qualifier is a closed list, not "any words": an open prefix would
+  // turn a prose line such as "Gather and document requirements" into a
+  // heading and open a block in the middle of the responsibilities.
+  // The lookahead also requires the keyword to END the heading (or be
+  // followed by ":" / "("): without it, a bare requirement line such as
+  // "Technical requirements include Python and Kubernetes" read as a
+  // heading and its skills were dropped. Closing heading markers
+  // ("## Basic Qualifications ##", "【Basic Qualifications】") still end it.
+  '(?:(?:basic|minimum|key|core|job|role|position|technical|essential|desired|desirable|additional|mandatory|general|specific|candidate|professional|education(?:al)?)\\s+){1,2}(?:requirement|qualification)(?=s?[\\s#\u3011]*(?:[:\uFF1A(\uFF08]|$))',
+  // US public-sector postings title the block "Knowledge, Skills, and
+  // Abilities" (KSAs), "Experience, Skills, and Abilities", or both joined
+  // by a slash: "Knowledge/Experience, Skills, and Abilities" (#6255).
+  // Same end-of-heading lookahead, for the same prose-line reason.
+  '(?:(?:knowledge|experience|education)(?:\\s*\\/\\s*(?:knowledge|experience|education))?,?\\s+)?skills,?\\s+(?:and|&)\\s+abilit(?:y|ies)(?=[\\s#\u3011]*(?:[:\uFF1A(\uFF08]|$))',
+];
+const QUALIFIED_REQUIREMENT_HEADER_RE = new RegExp(
+  '^#{0,6}\\s*\u3010?\\s*(?:' + QUALIFIED_REQUIREMENT_ARMS.join('|') + ')',
+  'im'
+);
+
 // Real postings rarely use the word "Requirements". The literal-only list
 // missed the phrasings most modern ATS boards actually ship ("What we're
 // looking for", "Who you are", "You may be a good fit if", "You have"), so a
@@ -104,6 +131,7 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
+    ...QUALIFIED_REQUIREMENT_ARMS,
   ].join('|') + ')s?\\b|(?:' + [
     // Spanish (es-419 / es-ES) requirement headers. A Spanish-language
     // posting's requirements block is invisible to the English list above, so
@@ -361,8 +389,22 @@ function scanJd(jdText) {
       // The full-width colon and the CJK separators (、，；) count the same as
       // their ASCII forms: "任职要求：Python、Docker".
       const colon = headerLine.search(/[:：]/);
-      const inline = colon === -1 ? '' : headerLine.slice(colon + 1);
+      let inline = colon === -1 ? '' : headerLine.slice(colon + 1);
+      // A qualified heading may carry its list in parentheses instead:
+      // "Basic Qualifications (Python and Kubernetes)", full-width included.
+      if (!inline && QUALIFIED_REQUIREMENT_HEADER_RE.test(headerLine)) {
+        const paren = headerLine.search(/[(（]/);
+        if (paren !== -1) inline = headerLine.slice(paren + 1);
+      }
+      // A qualified heading with no separator ("Technical requirements:
+      // Python and Kubernetes") was a requirement line before #6255 made it a
+      // heading, so its known skills are kept — vocabulary names only. Every
+      // other heading keeps the #5173 rule: a sentence after the colon ("About
+      // you: Curious about Kubernetes.") is not a list.
       if (/[;,、，；]/.test(inline)) addSkillTokens(inline, skills);
+      else if (QUALIFIED_REQUIREMENT_HEADER_RE.test(headerLine)) {
+        for (const skill of extractSkills(inline)) skills.add(skill);
+      }
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;

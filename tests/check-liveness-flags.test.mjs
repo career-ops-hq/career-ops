@@ -24,7 +24,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 import { ROOT } from './helpers.mjs';
 
 const SCRIPT = join(ROOT, 'check-liveness.mjs');
@@ -83,7 +83,7 @@ test('an unknown flag is rejected instead of checked as a URL', () => {
 test('--help --bogus reports the unknown flag', () => {
   const result = run(['--help', '--bogus']);
   const text = out(result);
-  assert.notEqual(result.status, 0, describeSpawn(result));
+  assert.ok(exitedNonZero(result), describeSpawn(result));
   assert.match(text, /unrecognized flag/);
   assert.match(text, /--bogus/);
 });

@@ -23,7 +23,7 @@ import {
   stripStatusDecoration,
   resolveWorkspaceRoot, containedReportFile, reportUrlToken,
 } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow, normalizeVia, extractReqNumber, parseScore, normalizeTextKey } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, isUnsetUrlCell, normalizeVia, extractReqNumber, parseScore, normalizeTextKey } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -232,7 +232,8 @@ const reportUrls = new Map();
  * distinct" — so `node merge-tracker.mjs` kept both rows and `node
  * dedup-tracker.mjs` then removed one. Both now read through
  * reportUrlToken(), with the same path containment. A placeholder such as
- * `N/A` needs no filtering here: postingUrlRelation() gives it no key.
+ * `N/A` counts as no cell: it has no key of its own, so stopping at it hid the
+ * report and left the same two rows looking identical.
  *
  * Read lazily and memoised: only rows that already share a company reach a
  * guard.
@@ -241,7 +242,7 @@ const reportUrls = new Map();
  * @returns {string}
  */
 function postingUrl(row) {
-  if (row.url) return row.url;
+  if (!isUnsetUrlCell(row.url)) return row.url;
   if (!reportUrls.has(row.report)) {
     reportUrls.set(row.report, reportUrlToken(containedReportFile(row.report, REPORTS_ROOT)));
   }

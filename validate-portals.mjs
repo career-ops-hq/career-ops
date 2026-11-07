@@ -10,14 +10,17 @@
  *   node validate-portals.mjs --help
  */
 
+import { buildWorkplacePolicy } from './providers/_country.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { barePrefixDomainKeywords } from './title-keywords.mjs';
+import { barePrefixDomainKeywords, compileContentTraits } from './title-keywords.mjs';
+import { nearestKey } from './validate-profile.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -126,6 +129,22 @@ function validateKeywordList(value, path, errors) {
   }
 }
 
+// content_filter `min_match` (#6020): an integer from 1 to the number of
+// distinct positive traits, counted the way scan.mjs counts them (" | "
+// alternatives are one trait, case-insensitive duplicates are one trait).
+// scan.mjs refuses to start on the same shapes, so this only reports them
+// earlier.
+function validateContentMinMatch(rule, path, errors) {
+  if (rule.min_match === undefined) return;
+  const traits = compileContentTraits(rule.positive).length;
+  const minMatch = rule.min_match;
+  if (traits === 0) {
+    add(errors, `${path}.min_match`, `needs a non-empty ${path}.positive list`);
+  } else if (!Number.isInteger(minMatch) || minMatch < 1 || minMatch > traits) {
+    add(errors, `${path}.min_match`, `must be an integer from 1 to ${traits} (the number of distinct ${path}.positive entries)`);
+  }
+}
+
 function validateParser(parser, path, errors) {
   if (parser === undefined || parser === null) return;
   if (!isObject(parser)) {
@@ -187,6 +206,52 @@ const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
 // whitelist this validation exists to catch.
 const FIELD_FILTER_FIELDS = ['positive', 'negative'];
 
+// Settings a scan actually reads. A key outside this list is left alone: people
+// keep private notes in the same file, and those must not fail a scan. A key
+// one or two edits from a real setting is different. `tracked_companys` is not
+// `tracked_companies`, so the company list is read as missing, the scan reports
+// zero companies, and the process exits 0.
+export const PORTAL_TOP_LEVEL_KEYS = [
+  'title_filter',
+  'title_filter_full',
+  'title_filter_overrides',
+  'search_queries',
+  'tracked_companies',
+  'job_boards',
+  'scan_history',
+  'preferred_languages',
+  'interamt_searches',
+  'dayforce_boards',
+  'location_filter',
+  'country_eligibility_filter',
+  'salary_filter',
+  'experience_filter',
+  'portal_prune_quiet_days',
+  'max_posting_age_days',
+  'trust_filter',
+  'content_filter',
+  'visa_filter',
+  'skip_tiers',
+  'domain_filter',
+  'field_filters',
+  'company_aliases',
+  'portal_health_threshold',
+  'portal_health_stale_days',
+];
+
+export function portalTopLevelTypos(config) {
+  if (!isObject(config)) return [];
+  const known = new Set(PORTAL_TOP_LEVEL_KEYS);
+  const found = [];
+  for (const key of Object.keys(config)) {
+    if (known.has(key)) continue;
+    const suggestion = nearestKey(key, PORTAL_TOP_LEVEL_KEYS, 2);
+    if (!suggestion) continue;
+    found.push({ key, suggestion });
+  }
+  return found;
+}
+
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
   const warnings = [];
@@ -194,6 +259,14 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
   if (!isObject(config)) {
     add(errors, '<root>', 'portals config must be a YAML object');
     return { errors, warnings };
+  }
+
+  for (const typo of portalTopLevelTypos(config)) {
+    add(
+      errors,
+      typo.key,
+      `unknown top-level key "${typo.key}" — did you mean "${typo.suggestion}"? The misspelled key is ignored, so the setting never applies`,
+    );
   }
 
   if (config.title_filter !== undefined) {
@@ -331,6 +404,16 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
     } else {
+      if (config.location_filter.workplace_policy !== undefined) {
+        const policy = config.location_filter.workplace_policy;
+        if (!isObject(policy)) add(errors, 'location_filter.workplace_policy', 'must be an object');
+        else {
+          for (const key of ['onsite_locations', 'onsite_countries', 'remote_countries', 'remote_regions']) {
+            validateKeywordList(policy[key], 'location_filter.workplace_policy.' + key, errors);
+          }
+          try { buildWorkplacePolicy(policy); } catch (error) { add(errors, 'location_filter.workplace_policy', error.message); }
+        }
+      }
       validateKeywordList(config.location_filter.always_allow, 'location_filter.always_allow', errors);
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
@@ -350,6 +433,13 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     } else {
       validateKeywordList(config.content_filter.positive, 'content_filter.positive', errors);
       validateKeywordList(config.content_filter.negative, 'content_filter.negative', errors);
+      validateContentMinMatch(config.content_filter, 'content_filter', errors);
+      const rescue = config.content_filter.rescue_title_misses;
+      if (rescue !== undefined && typeof rescue !== 'boolean') {
+        add(errors, 'content_filter.rescue_title_misses', 'must be a boolean when set');
+      } else if (rescue === true && compileContentTraits(config.content_filter.positive).length === 0) {
+        add(errors, 'content_filter.rescue_title_misses', 'needs a non-empty content_filter.positive list: a title miss is kept only on a positive match');
+      }
       if (config.content_filter.by_title_keyword !== undefined) {
         if (!isObject(config.content_filter.by_title_keyword)) {
           add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive (or title_filter_full.positive) keyword');
@@ -374,6 +464,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
             }
             validateKeywordList(rule.positive, `${path}.positive`, errors);
             validateKeywordList(rule.negative, `${path}.negative`, errors);
+            validateContentMinMatch(rule, path, errors);
           }
         }
       }
@@ -548,6 +639,14 @@ tracked_companies:
       throw new Error(`expected 2 errors, got ${result.errors.length}`);
     }
     console.log('validate-portals self-test OK');
+
+    const typoFile = join(tmp, 'typo.yml');
+    writeFileSync(typoFile, 'tracked_companys:\n  - name: "Example Co"\n    careers_url: "https://boards.example.com/example"\n', 'utf-8');
+    const typo = await validateFile(typoFile);
+    const typoPaths = typo.errors.map((e) => e.path);
+    if (!typoPaths.includes('tracked_companys')) {
+      throw new Error(`expected tracked_companys to be rejected, got ${JSON.stringify(typo.errors)}`);
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -608,7 +707,9 @@ async function main() {
   if (result.errors.length > 0) process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(`validate-portals failed: ${err.message}`);
-  process.exit(1);
-});
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`validate-portals failed: ${err.message}`);
+    process.exit(1);
+  });
+}

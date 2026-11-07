@@ -201,4 +201,86 @@ export function postingUrlRelation(rawA, rawB) {
   return a.language && b.language ? "distinct" : "one-sided-language";
 }
 
+const SAME_JOB_TRACKING = [
+  /^ref$/i, /^src$/i, /^source$/i,
+  /^lever-origin$/i, /^lever-source$/i, /^rltr$/i,
+];
+
+const GREENHOUSE_BOARD_HOSTS = new Set([
+  "boards.greenhouse.io",
+  "boards.eu.greenhouse.io",
+  "job-boards.greenhouse.io",
+  "job-boards.eu.greenhouse.io",
+  "boards-api.greenhouse.io",
+]);
+
+function linkedInCanonicalKey(raw) {
+  let u;
+  try { u = new URL(raw.trim()); } catch { return ""; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+  const host = foldHostname(u.hostname);
+  if (!/(^|\.)linkedin\.com$/.test(host)) return "";
+  const path = u.pathname.match(/^\/(?:jobs\/view\/(?:.*-)?|comm\/jobs\/view\/)(\d+)\/?$/);
+  const pathId = path ? path[1] : null;
+  const current = u.searchParams.get("currentJobId");
+  const id = pathId || (current && /^\d+$/.test(current) ? current : null);
+  return id ? `linkedin.com:${id}` : "";
+}
+
+function greenhouseJobId(url) {
+  let pathId = null;
+  if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
+    const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    if (match) pathId = match[1];
+  }
+  const query = url.searchParams.get("gh_jid");
+  const queryId = query && /^\d+$/.test(query) ? query : null;
+  if (pathId && queryId && pathId !== queryId) return null;
+  return pathId || queryId;
+}
+
+function indeedJobId(url) {
+  if (!/(^|\.)indeed\.com$/.test(url.hostname)) return null;
+  const jk = url.searchParams.get("jk") ?? url.searchParams.get("vjk");
+  return jk && /^[\w-]+$/.test(jk) ? jk : null;
+}
+
+export function canonicalJobKey(raw) {
+  if (typeof raw !== "string") return "";
+  const s = raw.trim();
+  if (!s) return "";
+
+  const linked = linkedInCanonicalKey(s);
+  if (linked) return linked;
+
+  let u;
+  try { u = new URL(s); } catch { return ""; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+  u.hostname = foldHostname(u.hostname);
+
+  const indeed = indeedJobId(u);
+  if (indeed) return `indeed.com:${indeed}`;
+
+  const greenhouse = greenhouseJobId(u);
+  if (greenhouse) return `greenhouse:${greenhouse}`;
+
+  for (const key of [...u.searchParams.keys()]) {
+    const lower = key.toLowerCase();
+    if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
+      u.searchParams.delete(key);
+    }
+  }
+  const normalized = normalizeUrl(u.href);
+  if (!normalized) return "";
+  const out = new URL(normalized);
+  if (out.pathname.length > 1) {
+    out.pathname = out.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  }
+  return out.toString();
+}
+
+export function postingKey(raw) {
+  return canonicalJobKey(raw);
+}
+
 export default normalizeUrl;

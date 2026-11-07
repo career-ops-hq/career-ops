@@ -23,7 +23,6 @@
  * resolving the next day. outcome.mjs looks captures up by report number.
  */
 
-import { chromium } from 'playwright';
 import { open, unlink, readFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
@@ -36,6 +35,7 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { detectNonContentMarker } from './check-jd-archive.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -497,8 +497,12 @@ async function main() {
       results.push({ url, filename, reference, skipped: true });
     }
   } else {
-    // Sequential — project convention: never Playwright in parallel
-    const browser = await chromium.launch({ headless: true });
+    // Sequential — project convention: never Playwright in parallel.
+    // Loaded here, after --help / --dry-run / a missing pipeline have already
+    // returned. A static import made those paths wait on the browser package
+    // and crash when it was not installed.
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       for (const { url, company, role } of targets) {
         try {

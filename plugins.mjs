@@ -34,7 +34,7 @@ import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs
 import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { postingKey } from './url-key.mjs';
+import { canonicalJobKey } from './url-key.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
@@ -44,7 +44,12 @@ const DATA_ROOT = getCareerOpsRoot();
 // The same read resolution as set-status.mjs and every other tracker reader:
 // CAREER_OPS_TRACKER, then data/applications.md, then the legacy root copy.
 const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
-const PIPELINE_PATH = path.join(DATA_ROOT, 'data', 'pipeline.md');
+// The same resolution as scan.mjs's PIPELINE_PATH, so the CAREER_OPS_PIPELINE
+// lane is honored by the de-dup read, the export snapshot, the write and the
+// log line alike (#6353). Passed to appendToPipeline() explicitly rather than
+// left to its default, so all four always agree on one file.
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data', 'pipeline.md');
+const PIPELINE_LABEL = process.env.CAREER_OPS_PIPELINE ? PIPELINE_PATH : 'data/pipeline.md';
 
 // A misbehaving plugin's stray rejection should be attributed and not silently
 // crash the host (the engine's per-hook try/catch handles the common case; this
@@ -104,7 +109,7 @@ function trackerSnapshotRows(md) {
   return rows;
 }
 
-/** URLs already present in data/pipeline.md, for additive de-duplication. */
+/** URLs already present in the pipeline (data/pipeline.md or the CAREER_OPS_PIPELINE lane), for additive de-duplication. */
 function existingPipelineUrls() {
   const urls = new Set();
   if (!existsSync(PIPELINE_PATH)) return urls;
@@ -126,9 +131,9 @@ function loadPortalsConfig() {
 
 /** Jobs whose posting is not in the pipeline yet, one per posting. */
 export function newPipelineJobs(found, pipelineUrls) {
-  const seen = new Set([...pipelineUrls].map(postingKey));
+  const seen = new Set([...pipelineUrls].map((url) => canonicalJobKey(url) || url));
   return found.filter((j) => {
-    const key = postingKey(j.url) || j.url;
+    const key = canonicalJobKey(j.url) || j.url;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -180,6 +185,11 @@ function buildSnapshot() {
 }
 
 async function cmdList() {
+  const problem = readPluginConfigListError(DATA_ROOT);
+  if (problem) {
+    console.error(problem);
+    process.exit(1);
+  }
   warnConfigLeftInCodeRoot(ROOT, DATA_ROOT);
   const cfg = await loadPluginConfig(DATA_ROOT);
   await loadDotenvOnce(DATA_ROOT);
@@ -208,6 +218,11 @@ async function cmdList() {
 }
 
 async function cmdRun(args) {
+  const problem = readPluginConfigListError(DATA_ROOT);
+  if (problem) {
+    console.error(problem);
+    process.exit(1);
+  }
   const dryRun = args.includes('--dry-run');
   const positional = args.filter(a => a !== '--dry-run');
   const token = positional[0];
@@ -251,6 +266,18 @@ async function cmdRun(args) {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
     const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, hook);
+    const failed = results.filter(r => !r.ok);
+    if (failed.length) {
+      for (const r of failed) console.error(`${r.id} ${hook} failed: ${r.error}`);
+      process.exit(1);
+    }
+    // export and notify return a non-array on success. Only ingest and search promise Job[].
+    const notJobs = results.filter(r => !Array.isArray(r.result));
+    if (notJobs.length) {
+      for (const r of notJobs) console.error(`${r.id} ${hook} failed: expected an array of jobs`);
+      process.exit(1);
+    }
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     const { jobs, counts } = admitPluginJobs(found, {
       id,
@@ -262,12 +289,12 @@ async function cmdRun(args) {
     console.log(`${id} ${hook}: ${found.length} found, ${jobs.length} new${skipped ? ` (skipped: ${skipped})` : ''}.`);
     if (dryRun) { jobs.slice(0, 20).forEach(j => console.log(`  • ${j.title} — ${j.url}`)); console.log('(--dry-run: pipeline not written)'); return; }
     if (jobs.length) {
-      await appendToPipeline(jobs);
+      await appendToPipeline(jobs, { pipelinePath: PIPELINE_PATH });
       // Recorded so the next ingest, and every scanner, sees these as known.
       // Only postings: an interview event in scan-history would read as a
       // scanned job everywhere scan-history is counted.
       if (manifest.jobPostings) await appendToScanHistory(jobs, localToday(), 'added');
-      console.log(`→ Appended ${jobs.length} to data/pipeline.md. Run /career-ops pipeline to evaluate.`);
+      console.log(`→ Appended ${jobs.length} to ${PIPELINE_LABEL}. Run /career-ops pipeline to evaluate.`);
     }
     return;
   }
@@ -280,19 +307,43 @@ async function cmdRun(args) {
     const rowCount = snapshot.applications.length;
     const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
     const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dataRoot: DATA_ROOT, dryRun, timeoutMs, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, 'export');
+    let failed = false;
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
-      else console.log(`${r.id} export: failed — ${r.error}`);
+      else {
+        console.error(`${r.id} export failed: ${r.error}`);
+        failed = true;
+      }
     }
+    if (failed) process.exit(1);
     return;
   }
 
   if (hook === 'notify') {
     const message = positional.slice(hookArgStart).join(' ') || '(career-ops notification)';
     const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
-    for (const r of results) console.log(r.ok ? `${r.id} notify: sent.` : `${r.id} notify: failed — ${r.error}`);
+    exitIfPluginDidNotRun(results, id, 'notify');
+    let failed = false;
+    for (const r of results) {
+      if (r.ok) console.log(`${r.id} notify: sent.`);
+      else {
+        console.error(`${r.id} notify failed: ${r.error}`);
+        failed = true;
+      }
+    }
+    if (failed) process.exit(1);
     return;
   }
+}
+
+// An empty result list means the selected plugin never ran. The integrity
+// gate and a failed import already printed why. A hook that ran and returned
+// no jobs is a one-element ok result, not an empty list.
+function exitIfPluginDidNotRun(results, id, hook) {
+  if (results.length > 0) return;
+  console.error(`${id} ${hook} did not run.`);
+  process.exit(1);
 }
 
 function findManifest(id) {
@@ -369,6 +420,41 @@ export function parsePluginConfig(raw, file) {
     throw new Error(`${file} does not contain a YAML mapping — refusing to overwrite it. Nothing was changed.`);
   }
   return cfg;
+}
+
+/**
+ * Why `list` and `run` stop. Scan keeps loadPluginConfig's fail-open read.
+ * Null when the file is absent, empty, or a YAML mapping.
+ * @param {string|null} raw
+ * @param {string} [file]
+ * @returns {string|null}
+ */
+export function pluginConfigListError(raw, file = 'config/plugins.yml') {
+  if (raw == null) return null;
+  try {
+    parsePluginConfig(raw, file);
+    return null;
+  } catch (err) {
+    const first = String(err.message).split('\n')[0];
+    const yaml = first.match(/valid YAML \((.*)\) —/);
+    const detail = yaml ? yaml[1] : (first.includes('YAML mapping') ? 'the file is not a YAML mapping' : first);
+    return `${file}: ${detail}. A broken file is not the same as every plugin being off. Fix ${file}, then run: node plugins.mjs list`;
+  }
+}
+
+function readPluginConfigListError(root) {
+  const rel = 'config/plugins.yml';
+  const file = path.join(root, rel);
+  // Read first and treat only ENOENT as absent. existsSync says false for a
+  // file in a config/ this user cannot search, which would list every plugin as off.
+  let raw;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    return `${rel} could not be read (${err.message}). Fix the file, then run: node plugins.mjs list`;
+  }
+  return pluginConfigListError(raw, rel);
 }
 
 // Write enabled:true/false into config/plugins.yml, merging (never clobbering
@@ -641,7 +727,7 @@ async function main() {
 
 // Named exports for the test suite — not part of the CLI API.
 export const _testPaths = Object.freeze({ APPLICATIONS_PATH, PIPELINE_PATH });
-export { buildSnapshot as _testBuildSnapshot };
+export { buildSnapshot as _testBuildSnapshot, existingPipelineUrls as _testExistingPipelineUrls };
 
 if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });

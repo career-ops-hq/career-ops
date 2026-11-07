@@ -100,6 +100,12 @@ test("a replaced list item's trailing comment is kept as a comment line ahead of
   assert.equal(edit(source, { target_roles: { primary: ["New"] } }), 'target_roles:\n  primary:\n    # user note\n    - "New"\n');
 });
 
+test("any line of a replaced mapping item keeps its trailing comment, and a # in a value is not one", () => {
+  const source = 'target_roles:\n  archetypes:\n    - name: "Role #1" # first\n      fit: "primary"   # primary = dream role\n    - name: "Role #2"\n      fit: "Tier #3"\n';
+  const out = edit(source, { target_roles: { archetypes: [] } });
+  assert.equal(out, "target_roles:\n  archetypes: []\n    # first\n    # primary = dream role\n");
+});
+
 test("block list items are replaced, with comments between them kept ahead of the new items", () => {
   const source = "target_roles:\n  primary:\n    - \"Old One\"\n    # a note\n    - \"Old Two\"\n  # after the list\n  archetypes: []\n";
   const out = edit(source, { target_roles: { primary: ["New One", "New Two"] } });
@@ -123,13 +129,18 @@ test("a non-default child indent is followed", () => {
   assert.equal(edit(source, { followup_cadence: { applied_max_followups: 1 } }), "followup_cadence:\n    applied_first_days: 7\n    applied_max_followups: 1\n");
 });
 
+test("a list of mappings is replaced whole, nested keys included", () => {
+  const source = "target_roles:\n  primary:\n    - name: a\n      level: b\n    - name: c\n      level: d\n  other: e\n";
+  assert.equal(edit(source, { target_roles: { primary: ["f"] } }), "target_roles:\n  primary:\n    - \"f\"\n  other: e\n");
+  assert.equal(edit(source, { target_roles: { primary: [] } }), "target_roles:\n  primary: []\n  other: e\n");
+});
+
 test("shapes the line edit does not place return null, so the route falls back to yaml.dump", () => {
   for (const [shape, source, patch] of [
     ["flow section", "candidate: { full_name: A }\n", { candidate: { full_name: "B" } }],
     ["scalar section", "follow_ups: off\n", { follow_ups: { enabled: true } }],
     ["block scalar value", "candidate:\n  full_name: |\n    A\n", { candidate: { full_name: "B" } }],
     ["mapping value", "candidate:\n  location:\n    city: A\n", { candidate: { location: "B" } }],
-    ["multi-line list items", "target_roles:\n  primary:\n    - name: a\n      level: b\n", { target_roles: { primary: ["c"] } }],
     ["document end marker", "candidate:\n  full_name: A\n...\n", { follow_ups: { enabled: true } }],
   ]) {
     const expected = merged(source, patch);
