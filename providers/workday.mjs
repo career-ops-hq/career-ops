@@ -207,9 +207,19 @@ function facetCoverage(facet) {
  *
  * Exported for the test suite, which pins the DSG numbers.
  */
-export function trueTotalFromFacets(facets) {
+export function trueTotalFromFacets(facets, { exclude = [] } = {}) {
+  const skip = new Set(exclude);
   let best = null;
   for (const facet of Array.isArray(facets) ? facets : []) {
+    // Workday counts facets disjunctively: each facet's values are counted
+    // with every OTHER applied filter but not its own, so a multi-select UI can
+    // show the alternatives (Algolia "disjunctive faceting"; Elasticsearch
+    // `post_filter`). An applied facet's counts therefore describe the board
+    // WITHOUT that filter, not this slice. Nvidia, 2026-11-07: slice
+    // jobFamilyGroup=X & workerSubType=Regular reported total 1594 while its
+    // own jobFamilyGroup facet summed to 2308 (the whole Regular board), which
+    // read as an offset clamp on a slice that was already complete.
+    if (skip.has(facet?.facetParameter)) continue;
     const coverage = facetCoverage(facet);
     if (coverage === null) continue;
     if (best === null || coverage > best) best = coverage;
@@ -866,10 +876,10 @@ export default {
      * ceiling while the facet counts — which are not clamped — describe a
      * bigger board. A probe (ctx.maxPages) never splits: it asked for one page.
      */
-    const isClamped = (total, facets) => {
+    const isClamped = (total, facets, appliedFacets = {}) => {
       if (ctxCap !== Infinity) return false;
       if (total === null || total > WORKDAY_OFFSET_CEILING) return false;
-      const trueTotal = trueTotalFromFacets(facets);
+      const trueTotal = trueTotalFromFacets(facets, { exclude: Object.keys(appliedFacets || {}) });
       return trueTotal !== null && trueTotal > WORKDAY_OFFSET_CEILING;
     };
 
@@ -922,7 +932,7 @@ export default {
       // is real and distinct, and it is the coverage floor the split builds on.
       // Only the pages *past* the ceiling are duplicates, and `total` being
       // clamped to the ceiling already stops pagination there.
-      const clamped = stopReason === STOP_REASON.COMPLETE && isClamped(total, facets);
+      const clamped = stopReason === STOP_REASON.COMPLETE && isClamped(total, facets, appliedFacets);
 
       // Sequential, not concurrent (mirrors providers/4dayweek.mjs, thehub.mjs,
       // arbeitnow.mjs, jibeapply.mjs) — a single tenant's API has no reason to
@@ -1060,11 +1070,12 @@ export default {
         // badly under-covering facet is itself the minimum, and leaving it in
         // would inflate the bar to exactly the gap it should be judged against.
         const chosenCoverage = facet.values.reduce((sum, v) => sum + v.count, 0);
-        const trueTotal = trueTotalFromFacets(result.facets);
+        const trueTotal = trueTotalFromFacets(result.facets, { exclude: Object.keys(applied) });
         if (trueTotal !== null) {
           const others = [];
           for (const f of Array.isArray(result.facets) ? result.facets : []) {
             if (f?.facetParameter === facet.facetParameter) continue;
+            if (Object.prototype.hasOwnProperty.call(applied, f?.facetParameter)) continue; // disjunctive counts, see trueTotalFromFacets
             const coverage = facetCoverage(f);
             if (coverage !== null) others.push(coverage);
           }
