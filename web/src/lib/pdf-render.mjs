@@ -280,14 +280,16 @@ export function keepTailoredHtml(pdfPaths, warnings) {
  * The reason a failed render died, without the advisories printed before it.
  * generate-pdf.mjs writes `⚠️` warnings (voice check, page budget) ahead of the
  * `❌` line that names the actual failure, and the caller caps the message
- * length, so passing raw stderr hid the cause behind a harmless warning.
+ * length, so passing raw stderr hid the cause behind a harmless warning. Every
+ * line from the first `❌` onward is kept: a locked-section mismatch prints its
+ * Expected/Found values on the lines after the header.
  * @param {string} stderr
  * @returns {string}
  */
 export function failureReason(stderr) {
   const lines = (stderr || "").split("\n").map((l) => l.trim()).filter(Boolean);
-  const errors = lines.filter((l) => l.startsWith("❌"));
-  const picked = errors.length > 0 ? errors : lines;
+  const start = lines.findIndex((l) => l.startsWith("❌"));
+  const picked = start >= 0 ? lines.slice(start) : lines;
   return picked.length > 0 ? picked.join("\n") : "PDF rendering failed.";
 }
 

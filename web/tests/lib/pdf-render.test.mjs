@@ -744,6 +744,47 @@ test("failureReason: keeps the failing line, drops the advisories printed before
   );
 });
 
+test("failureReason: keeps the detail lines that follow the failure header", () => {
+  const stderr = [
+    "⚠️  Voice check warning for cv-web-423.html: an en dash. The build continues.",
+    "❌ PDF generation failed: Locked section 'education' was modified during tailoring.",
+    "Expected (normalized): bs computer science",
+    "Found (normalized): phd computer science",
+  ].join("\n");
+
+  assert.equal(
+    failureReason(stderr),
+    [
+      "❌ PDF generation failed: Locked section 'education' was modified during tailoring.",
+      "Expected (normalized): bs computer science",
+      "Found (normalized): phd computer science",
+    ].join("\n"),
+  );
+});
+
+test("renderAndMarkPdf: a failed render with advisories before the failure surfaces only the failure", async () => {
+  // Reverting the caller to `error: render.stderr` must fail this test, which the
+  // direct failureReason tests above cannot catch.
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "423");
+  writeFileSync(pdfPaths.html, "<html></html>");
+  const failure = "❌ PDF generation failed: Fact check failed for cv-web-423.html: non-metric facts absent from sources: employer=X";
+  const stderr = [
+    "⚠️  Voice check warning for cv-web-423.html: an en dash. The build continues.",
+    failure,
+  ].join("\n");
+  const { spawnFn } = makeRouterSpawn({
+    "generate-pdf.mjs": { exitCode: 1, stderr },
+    "mark-pdf-ready.mjs": { exitCode: 0 },
+  });
+  try {
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "letter", reportNum: "423" });
+    assert.deepEqual(result, { kind: "render-failed", error: failure });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("failureReason: no failure marker -> whole stderr; empty -> generic message", () => {
   assert.equal(failureReason("boom"), "boom");
   assert.equal(failureReason(""), "PDF rendering failed.");
