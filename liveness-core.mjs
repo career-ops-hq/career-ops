@@ -151,6 +151,7 @@ export const BOT_CHALLENGE_PATTERNS = [
 
 const EXPIRED_URL_PATTERNS = [
   /[?&]error=true/i,
+  /recruiting\.paylocity\.com\/recruiting\/jobs\/jobnotfound(?:\/|\?|#|$)/i,
 ];
 
 const APPLY_PATTERNS = [

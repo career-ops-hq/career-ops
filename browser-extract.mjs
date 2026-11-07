@@ -51,6 +51,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { classifyLiveness } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { HTML_TAG_RE } from './providers/_html-to-text.mjs';
 import { isWorkModelOnly } from './providers/greenhouse.mjs';
 import { buildLocation } from './providers/hirehive.mjs';
 import { isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
@@ -182,8 +183,8 @@ const BLOCK_END_RE = /<\/(p|div|ul|ol|h[1-6]|tr|section|article|blockquote)\s*>/
  * payloads and hard-caps at 4000 chars while collapsing ALL whitespace
  * (newlines included) into single spaces. A JD read for evaluation wants the
  * full body up to `--max-chars`, with its paragraph and bullet breaks intact.
- * The entity decoder itself IS shared, so the two cannot drift on the thing
- * that has actually drifted historically (#1555/#1639/#2623).
+ * The entity decoder and the tag matcher ARE shared, so the two cannot drift on
+ * the thing that has actually drifted historically (#1555/#1639/#2623).
  *
  * Double-decode for the same reason htmlToText does: payloads often carry
  * entity-escaped markup (`&lt;p&gt;`), and text-level entities only become
@@ -199,7 +200,7 @@ export function jdHtmlToText(html) {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<li[^>]*>/gi, '\n- ')
     .replace(BLOCK_END_RE, '\n')
-    .replace(/<[^>]+>/g, ' ');
+    .replace(HTML_TAG_RE, ' ');
   return decodeEntities(stripped)
     .replace(/[ \t\u00a0]+/g, ' ')
     .replace(/ *\n */g, '\n')
@@ -898,6 +899,71 @@ async function fetchUltiproJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
   }
 }
 
+/**
+ * Shape one HiBob `/api/job-ad/{uuid}/application-form` answer into a jd-mode
+ * result. Pure, same contract as the other normalizers. `data.jobAd` carries
+ * the title, the site as the page shows it ("Berlin, Germany"), the work model
+ * and the employment type; `jobDescription` keys each field by a path ending
+ * in `/jobDescription/{field}` and wraps the value as `{ value }`. The four
+ * text sections are HTML and keep the tenant's own section labels when it set
+ * them.
+ *
+ * @param {any} json - parsed application-form response body
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeHibobJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  const ad = json?.data?.jobAd;
+  if (!ad || typeof ad !== 'object') return null;
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const fields = ad.jobDescription && typeof ad.jobDescription === 'object' ? ad.jobDescription : {};
+  const field = (name) => {
+    const key = Object.keys(fields).find((k) => k.endsWith(`/jobDescription/${name}`));
+    return key ? fields[key]?.value : undefined;
+  };
+  const labels = field('sectionLabels') && typeof field('sectionLabels') === 'object' ? field('sectionLabels') : {};
+  const blocks = [];
+  for (const [key, label] of [['description', 'Description'], ['responsibilities', 'Responsibilities'], ['requirements', 'Requirements'], ['benefits', 'Benefits']]) {
+    const body = jdHtmlToText(typeof field(key) === 'string' ? field(key) : '');
+    if (body) blocks.push(`${str(labels[key]) || label}:\n${body}`);
+  }
+  if (!blocks.length) return null;
+
+  const meta = [];
+  if (str(ad.site)) meta.push(`Location: ${str(ad.site)}`);
+  if (str(ad.workspaceType)) meta.push(`Work model: ${str(ad.workspaceType)}`);
+  if (str(ad.employmentType)) meta.push(`Type: ${str(ad.employmentType)}`);
+  const min = field('payTransparencyMinSalary');
+  const max = field('payTransparencyMaxSalary');
+  const range = [min, max].filter((v) => typeof v === 'number' && v > 0).map((v) => v.toLocaleString('en-US')).join(' – ');
+  if (range) meta.push(`Salary: ${[range, str(field('payTransparencySalaryCurrency')), str(field('payTransparencySalaryPayPeriod'))].filter(Boolean).join(' ')}`);
+
+  return {
+    url: postingUrl,
+    title: compactText(str(ad.title), 300),
+    text: compactText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+async function fetchHibobJd(resolved, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(resolved.apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(resolved.apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT, ...resolved.headers },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return await discard(res);
+    return normalizeHibobJob(await res.json(), postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Workable full-body JD, independent of liveness state and listing text caps. */
 export function normalizeWorkableJob(json, shortcode, postingUrl, textCap = JD_TEXT_CAP) {
   if (!json || typeof json !== 'object' || json.shortcode !== shortcode ||
@@ -986,6 +1052,7 @@ export const JD_FETCHERS = {
     fetchUltiproJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
   hirehive: (resolved, url, textCap, timeoutMs) =>
     fetchHireHiveJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
+  hibob: fetchHibobJd,
 };
 
 /**

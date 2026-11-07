@@ -73,7 +73,7 @@ import {
   BROWSER_PROCESS_ENV,
   DATA_ROOT as SCAN_DATA_ROOT,
   loadSeenUrls,
-  normalizeUrlForDedup,
+  seenJobKey,
   buildTitleFilter,
   buildLocationFilter,
   buildContentFilterOrExit,
@@ -693,14 +693,14 @@ async function main() {
     totalFound += result.totalFound;
     process.stdout.write(`${result.totalFound} found, ${result.found.length} passed filters\n`);
 
-    for (const skip of result.titleSkipped) { seen.add(normalizeUrlForDedup(skip.url)); titleSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
-    for (const skip of result.locationSkipped) { seen.add(normalizeUrlForDedup(skip.url)); locationSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
-    for (const skip of result.contentSkipped) { seen.add(normalizeUrlForDedup(skip.url)); contentSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
-    for (const skip of result.countryEligibilitySkipped) { seen.add(normalizeUrlForDedup(skip.url)); countryEligibilitySkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
-    for (const skip of result.visaSkipped) { seen.add(normalizeUrlForDedup(skip.url)); visaSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.titleSkipped) { seen.add(seenJobKey(skip.url)); titleSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.locationSkipped) { seen.add(seenJobKey(skip.url)); locationSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.contentSkipped) { seen.add(seenJobKey(skip.url)); contentSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.countryEligibilitySkipped) { seen.add(seenJobKey(skip.url)); countryEligibilitySkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.visaSkipped) { seen.add(seenJobKey(skip.url)); visaSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
 
     for (const offer of result.found) {
-      const key = normalizeUrlForDedup(offer.url);
+      const key = seenJobKey(offer.url);
       if (seen.has(key)) { dupeSkipped.push(offer); continue; }
       seen.add(key);
       newOffers.push(offer);

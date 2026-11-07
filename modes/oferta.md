@@ -28,7 +28,7 @@ The helper reads the ATS's anonymous public API. If the host cannot pass argumen
 
 Do not continue to Block A until this gate is resolved. The snapshot captured here is reused by Block G's freshness signals.
 
-**Session title:** once a real JD is read and the role and employer are known, apply the router's **Session Title** rule (`SKILL.md`, #5303): rename an interactive session to `{Role}, {Company}` when the host allows it. On an `auto-pipeline` handoff with a known employer this already happened in its Step 0. An undisclosed-employer agency posting is titled `{Role}, via {Agency}` only after the **Agency confirmation handoff** resolves.
+**Session title:** apply the router's **Session Title** rule (`SKILL.md`, #5303) in an interactive session when the host allows it: `Career-ops eval (fetching)` while the JD is read, `{Role}, {Company} (evaluating)` once a real JD gives the role and employer, and plain `{Role}, {Company}` when the evaluation is done. A gate that stops the run (liveness, blacklist, dealbreaker, agency) ends it on `(on hold)`. On an `auto-pipeline` handoff, `auto-pipeline` owns the title, so leave it. An undisclosed-employer agency posting is titled `{Role}, via {Agency}` only after the **Agency confirmation handoff** resolves.
 
 ## Local public facts reuse (#1025)
 
