@@ -28,6 +28,9 @@ try {
   assert.equal(b.isExcluded('data/connections.csv'), true);
   assert.equal(b.isExcluded('Data/CONNECTIONS.CSV'), true);
   assert.equal(b.isExcluded('config/.ENV'), true);
+  assert.equal(b.isExcluded('plugins.local/x/.git/config'), true);
+  assert.equal(b.isExcluded('plugins.local/x/node_modules/a.js'), true);
+  assert.equal(b.isExcluded('plugins.local/x/index.mjs'), false);
   assert.equal(b.isExcluded('data/Connections.csv', { includeConnections: true }), false);
   pass('excludes secrets, caches, lock/temp files and the LinkedIn export unless asked');
 

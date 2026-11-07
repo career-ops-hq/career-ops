@@ -78,6 +78,9 @@ export function isExcluded(relPath, { includeConnections = false } = {}) {
   const lower = p.toLowerCase();
   const name = lower.slice(lower.lastIndexOf('/') + 1);
   if (name === '.ds_store' || name === '.env' || name.startsWith('.env.')) return true;
+  // A nested checkout is copied for its files, but its git metadata (remote
+  // URLs can embed tokens) and dependency folders are not.
+  if (lower.split('/').some((seg) => seg === '.git' || seg === 'node_modules')) return true;
   if (lower === 'data/cache' || lower.startsWith('data/cache/')) return true;
   if (!includeConnections && lower === CONNECTIONS_FILE.toLowerCase()) return true;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
