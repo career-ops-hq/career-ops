@@ -76,6 +76,7 @@ try {
   assert.throws(() => b.assertSafeDestination(join(root, 'out', 'bk'), root, join(tmp, 'code')), /inside/);
   assert.throws(() => b.assertSafeDestination(root, root, join(tmp, 'code')), /inside/);
   b.assertSafeDestination(join(tmp, 'elsewhere'), root, join(tmp, 'code'));
+  assert.throws(() => b.assertSafeDestination(tmp, root, join(tmp, 'code')), /contains/);
   pass('refuses a destination inside the data root');
 
   // Copy: whole files, exclusions honoured, unchanged skipped, nothing deleted.
@@ -157,6 +158,22 @@ try {
     pass('skips a symlinked parent folder (skipped: cannot create symlinks here)');
   }
 
+  // A symlinked folder inside the destination must not be written through.
+  if (canLink) {
+    const srcRoot = join(tmp, 'sym-src');
+    put(srcRoot, 'cv.md', 'cv');
+    put(srcRoot, 'config/profile.yml', 'mine');
+    const symDest = join(tmp, 'backup', 'sym-dest');
+    const live = join(tmp, 'sym-live');
+    put(live, 'profile.yml', 'LIVE');
+    mkdirSync(symDest, { recursive: true });
+    symlinkSync(live, join(symDest, 'config'));
+    const through = b.runBackup({ dataRoot: srcRoot, dest: symDest });
+    assert.equal(readFileSync(join(live, 'profile.yml'), 'utf8'), 'LIVE');
+    assert.equal(through.failed.length, 1);
+    pass('does not write through a symlinked folder in the destination');
+  }
+
   // One unreadable file is a failure entry; the rest of the run carries on.
   if (process.platform !== 'win32' && process.getuid?.() !== 0) {
     const bad = join(tmp, 'bad-root');
@@ -209,6 +226,9 @@ try {
   });
   assert.equal(emptyRun.status, 1);
   assert.match(emptyRun.stderr, /found nothing to back up/);
+  const combo = cli('--provider', 'google-drive', '--include-connections', '--json');
+  assert.equal(combo.status, 2);
+  assert.match(JSON.parse(combo.stdout).error, /cannot be combined/);
   pass('CLI exits 0 on success, 1 for a failed or empty run, 2 for a bad destination or option');
 } catch (e) {
   fail(`backup.mjs: ${e.message}`);

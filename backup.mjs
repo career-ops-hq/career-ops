@@ -201,6 +201,11 @@ export function assertSafeDestination(dest, dataRoot, codeRoot = CODE_ROOT) {
       throw new Error(`Backup folder ${dest} is inside ${base}. Choose a folder outside your career-ops files.`);
     }
   }
+  // A destination that holds the data root would map a backed-up file onto the
+  // live one (dest/config/profile.yml is the live config/profile.yml).
+  if (within(canonical(dataRoot), d)) {
+    throw new Error(`Backup folder ${dest} contains ${dataRoot}. Choose a separate folder.`);
+  }
 }
 
 // ── Copy ─────────────────────────────────────────────────────────────────
@@ -299,6 +304,11 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeConnections =
     for (const file of files) {
       result.found++;
       const target = join(dest, file.rel);
+      // A symlinked folder inside the destination could point back at live files.
+      if (hasSymlinkedParent(dest, file.rel.split(sep).join('/'))) {
+        fail(file.rel, new Error('a folder in the backup destination is a symlink; not copying through it'));
+        continue;
+      }
       if (unchanged(file, target)) { result.unchanged++; continue; }
       if (dryRun) { result.copied++; result.bytes += file.size; continue; }
       const part = `${target}.part`;
@@ -341,7 +351,7 @@ const USAGE = `Usage:
   node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
-  node backup.mjs ... --include-connections # also copy data/Connections.csv (other people's contact details)
+  node backup.mjs ... --include-connections # also copy data/Connections.csv (other people's contact details); not with --provider
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
   node backup.mjs ... --json | --quiet     # machine-readable result | errors only
   CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest
@@ -359,6 +369,12 @@ function main(args) {
     else console.error(`backup: ${message}`);
     return 2;
   };
+
+  // The export holds other people's contact details and a provider folder is
+  // uploaded by a sync client, so the two flags never combine.
+  if (includeConnections && flagValue(args, '--provider')) {
+    return refuse('--include-connections cannot be combined with --provider (the export would be uploaded by the sync client). Use --dest with a folder you control.');
+  }
 
   let dataRoot;
   let target;
