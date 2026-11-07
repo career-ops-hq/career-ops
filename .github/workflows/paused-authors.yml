@@ -1,0 +1,39 @@
+name: Paused authors
+
+# Maintainers can pause new pull requests from one account without blocking it
+# from the organization: an organization block would also stop it from
+# commenting, reviewing and answering on the PRs it already has open, which stay
+# in review as usual. The paused logins live in the repository variable
+# PAUSED_PR_AUTHORS (comma-separated, no spaces), not in this file, so pausing an
+# account or lifting the pause is a settings change, not a commit. With the
+# variable empty or unset, this workflow does nothing.
+#
+# pull_request_target runs in the base repository and never checks out the PR,
+# so no code from the PR is executed here.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  close:
+    # contains() compares case-insensitively, like GitHub logins.
+    if: contains(format(',{0},', vars.PAUSED_PR_AUTHORS), format(',{0},', github.event.pull_request.user.login))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const body = [
+              `Thanks for the PR, @${pr.user.login}. New pull requests from this account are paused for now, so this one is closed without review.`,
+              '',
+              'Please write to hi@career-ops.org and we will pick it up from there. Your open PRs, comments and issues are not affected.',
+            ].join('\n');
+            await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+            await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
