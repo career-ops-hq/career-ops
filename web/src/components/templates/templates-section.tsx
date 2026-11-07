@@ -76,7 +76,12 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) setError(typeof j.error === "string" ? j.error : "Could not save.");
-      else setTemplates((prev) => prev && prev.map((t) => ({ ...t, isDefault: t.name === name })));
+      else {
+        setTemplates((prev) => prev && prev.map((t) => ({ ...t, isDefault: t.name === name })));
+        // A reload started earlier may still be in flight with the old default.
+        // Starting a newer one makes latestOnly discard it.
+        load();
+      }
     } catch {
       setError("Could not save.");
     }
