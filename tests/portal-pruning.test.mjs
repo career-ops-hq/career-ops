@@ -39,6 +39,11 @@ check('pruning honors thresholds and healthy streak resets', () => {
   assert.equal(recommend(config, scan, health + '\n2026-09-22\tRot\treachable', now).rotted.length, 0);
   assert.equal(recommend(config + 'portal_prune_quiet_days: 100\n', scan, health, now).neverProduced.length, 0);
 });
+check('a partial read keeps the streak but is not rotted-board advice', () => {
+  const r = recommend(config, scan, health + '\n2026-09-22T11:00:00.000Z\tRot\tpartial', now);
+  assert.equal(r.rotted.length, 0);
+  assert.equal(r.healthyButQuiet.length, 1); // Quiet only: a partial read never resets the streak
+});
 check('pruning orders health evidence chronologically before computing the streak', () => {
   const reversed = [
     '2026-09-22\tRot\treachable',
