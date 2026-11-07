@@ -484,7 +484,7 @@ console.log('\njd-rescue.mjs — JD recovery from structured page data');
     writeFileSync(raw, ldJson(jobPosting({ description: `<p>${body}</p>` })));
     const go = (mode) => {
       try {
-        const out = execFileSync(NODE, ['--import', reg, SCRIPT, 'https://jobs.ashbyhq.com/acme/1', raw, join(dir, `o-${mode}.txt`), '0'], { encoding: 'utf-8', timeout: 20000, env: { ...process.env, STUB_ATS: mode } });
+        const out = execFileSync(NODE, ['--import', pathToFileURL(reg).href, SCRIPT, 'https://jobs.ashbyhq.com/acme/1', raw, join(dir, `o-${mode}.txt`), '0'], { encoding: 'utf-8', timeout: 20000, env: { ...process.env, STUB_ATS: mode } });
         return { code: 0, out };
       } catch (e) { return { code: e.status, out: String(e.stdout) }; }
     };
