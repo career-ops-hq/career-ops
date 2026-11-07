@@ -258,7 +258,7 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 
 若下一步指明了唯一明确的日历日，直接传 `--next YYYY-MM-DD`，不再追问。星期几按本地日历日换算，今天也算。若说法里没有具体日期，省略 `--next`。若有歧义（`next week`、两个日期），先请用户给出一个日期，再传入。
 
-带着这些参数运行 `node debrief-sync.mjs --app <tracker#>`，其中 `<tracker#>` 是该申请在 tracker 中的 `#`（不是报告编号）。`--dealbreaker` 只接受一句话，且每次调用只能出现一次，所以每条已确认的句子各运行一条命令。不要把两句话合并成一个值：脚本会拒绝分号。联系人参数和 `--next` 只放在第一条命令里。之后的每条命令只传 `--app <tracker#>` 和一个 `--dealbreaker`，别的都不传。每个值都用单引号括起来，这样 shell 会原样传递 `$` 和反引号。值里的单引号在 Git Bash 等 POSIX shell 中写成 `'\''`。在 PowerShell 中写成 `''`；PowerShell 也把弯引号（`‘` 或 `’`）当作引号，所以弯引号同样要写两次：
+带着这些参数运行 `node debrief-sync.mjs --app <tracker#>`，其中 `<tracker#>` 是该申请在 tracker 中的 `#`（不是报告编号）。`--dealbreaker` 只接受一句话，且每次调用只能出现一次，所以每条已确认的句子各运行一条命令。不要把两句话合并成一个值：脚本会拒绝分号。联系人参数和 `--next` 只放在第一条命令里。之后的每条命令只传 `--app <tracker#>` 和一个 `--dealbreaker`，别的都不传。每个值都用单引号括起来，这样 shell 会原样传递 `$` 和反引号。值里的单引号在 Git Bash 等 POSIX shell 中写成 `'\''`。在 PowerShell 中写成 `''`；PowerShell 也把弯引号（`‘`、`’`、`‚` 或 `‛`）当作引号，所以弯引号同样要写两次：
 
 ```bash
 node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD

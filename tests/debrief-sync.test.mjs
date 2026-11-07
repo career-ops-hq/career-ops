@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { replaceNextPin } from '../followup-seed.mjs';
-import { ROOT, pass, fail } from './helpers.mjs';
+import { ROOT, pass, fail, warn } from './helpers.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'debrief-sync.mjs');
@@ -458,44 +458,34 @@ check('no debrief mode passes a debrief-sync flag twice in one command', () => {
   }
 });
 
-if (englishBlock) {
+// Run the Step 10 example as written, once per shell Step 10 names, with values
+// that shell would mangle if the documented quoting were wrong.
+function exerciseExample(shell, { quote, spawnLine, second, name }) {
   const root = freshRoot();
   const FIRST = SENTENCE;
-  // A shell would expand $ and run backticks inside double quotes. The example
-  // uses single quotes, so these values must reach the CLI unchanged.
-  const SECOND = "No recruiter's pay below $120,000 or `whoami` pitch";
-  const NAME = "Avery O'Quinn";
   const DECLINED = 'No travel above 25 percent';
   const lines = englishBlock.trim().split('\n').map((line) => line
     .replaceAll('<tracker#>', '7')
-    .replaceAll('<sentence 1>', shellQuoteValue(FIRST))
-    .replaceAll('<sentence 2>', shellQuoteValue(SECOND))
-    .replaceAll('<name>', shellQuoteValue(NAME))
+    .replaceAll('<sentence 1>', quote(FIRST))
+    .replaceAll('<sentence 2>', quote(second))
+    .replaceAll('<name>', quote(name))
     .replaceAll('YYYY-MM-DD', FUTURE));
-  // Run each line through /bin/sh where there is one, so the quoting rule is
-  // what the test checks; on Windows, split it the same way and spawn directly.
-  const runLine = (line) => (process.platform === 'win32'
-    ? run(root, shellWords(line).slice(2))
-    : spawnSync('/bin/sh', ['-c', line], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      env: { ...childEnv(root), PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ''}` },
-    }));
+  const runLine = (line) => spawnLine(root, line);
   const count = (text, needle) => text.split(needle).length - 1;
   try {
     writeFixture(root);
     const results = lines.map(runLine);
-    check('the Step 10 example records both confirmed dealbreakers, the contact, and the pin', () => {
+    check(`${shell}: the Step 10 example records both confirmed dealbreakers, the contact, and the pin`, () => {
       for (const result of results) assert.equal(result.status, 0, describeSpawn(result));
       const report = machineSummary(readRoot(root, REPORT_REL));
       assert.equal(report.final_decision, 'Skip');
-      assert.deepEqual(report.hard_stops, [FIRST, SECOND]);
+      assert.deepEqual(report.hard_stops, [FIRST, second]);
       const tracker = readRoot(root, 'data/applications.md');
       assert.equal(count(tracker, `Dealbreaker: ${FIRST}`), 1);
-      assert.equal(count(tracker, `Dealbreaker: ${SECOND}`), 1);
+      assert.equal(count(tracker, `Dealbreaker: ${second}`), 1);
       assert.match(tracker, /\| Interview \|/);
       assert.ok(!tracker.includes(DECLINED) && !readRoot(root, REPORT_REL).includes(DECLINED));
-      assert.equal(count(readRoot(root, 'data/contacts.tsv'), NAME), 1);
+      assert.equal(count(readRoot(root, 'data/contacts.tsv'), name), 1);
       const pins = readRoot(root, 'data/follow-ups.md');
       assert.equal((pins.match(/^- next #7 /gm) || []).length, 1);
       assert.ok(pins.includes(`- next #7 ${FUTURE} `));
@@ -503,7 +493,7 @@ if (englishBlock) {
 
     const before = snapshot(root);
     const again = lines.map(runLine);
-    check('running the Step 10 example again writes nothing', () => {
+    check(`${shell}: running the Step 10 example again writes nothing`, () => {
       for (const result of again) {
         assert.equal(result.status, 0, describeSpawn(result));
         assert.equal(JSON.parse(result.stdout).wrote, false);
@@ -512,6 +502,42 @@ if (englishBlock) {
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const shellEnv = (root) => ({
+  ...childEnv(root),
+  PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ''}`,
+});
+
+if (englishBlock) {
+  // A POSIX shell expands $ and runs backticks inside double quotes. The
+  // example single-quotes each value, so these reach the CLI unchanged. On
+  // Windows there is no /bin/sh: split the line the same way and spawn directly.
+  exerciseExample('POSIX shell', {
+    quote: shellQuoteValue,
+    second: "No recruiter's pay below $120,000 or `whoami` pitch",
+    name: "Avery O'Quinn",
+    spawnLine: (root, line) => (process.platform === 'win32'
+      ? run(root, shellWords(line).slice(2))
+      : spawnSync('/bin/sh', ['-c', line], { cwd: ROOT, encoding: 'utf8', env: shellEnv(root) })),
+  });
+
+  // PowerShell reads ' and the curly quotes ‘ ’ ‚ ‛ as single quotes, and Step
+  // 10 says to double each one inside a value. GitHub's runners ship pwsh on
+  // every OS in the matrix; a machine without it warns instead of passing.
+  const pwsh = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' });
+  if (pwsh.status === 0) {
+    exerciseExample('PowerShell', {
+      quote: (value) => value.replace(/['‘’‚‛]/g, (c) => c + c),
+      second: "No recruiter’s pay below $120,000, ‚net‛ or 'gross' `n",
+      name: "Avery O’Quinn-D'Arcy",
+      spawnLine: (root, line) => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', line], {
+        cwd: ROOT, encoding: 'utf8', env: shellEnv(root),
+      }),
+    });
+  } else {
+    warn('PowerShell run of the Step 10 example skipped: pwsh is not installed');
   }
 }
 
