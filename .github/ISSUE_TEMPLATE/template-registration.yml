@@ -1,0 +1,52 @@
+name: Template pack registration
+description: Register your career-ops-template-<name> repo so it can be listed as an approved community template pack
+labels: ["template-submission"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > ⚠️ **Privacy first.** Never paste your CV, scan results, or other personal data — issues are **public forever**.
+
+        This issue becomes your pack's **home** (its changelog and compatibility board). After it's filed, open a **registry PR** with the `template-registry.md` PR template to actually list it. Design: [#1778](https://github.com/career-ops-hq/career-ops/issues/1778).
+  - type: checkboxes
+    id: coc
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow the [Code of Conduct](https://github.com/career-ops-hq/career-ops/blob/main/CODE_OF_CONDUCT.md)
+          required: true
+  - type: input
+    id: repo
+    attributes:
+      label: Repo URL
+      description: Must be named `career-ops-template-<name>` (a public GitHub repo you own).
+      placeholder: https://github.com/your-user/career-ops-template-yourpack
+    validations:
+      required: true
+  - type: input
+    id: desc
+    attributes:
+      label: One-line description
+      description: What the pack is for.
+    validations:
+      required: true
+  - type: textarea
+    id: kinds
+    attributes:
+      label: Kinds, theme count and ATS status
+      description: Which kinds it ships (cv, cover), how many themes, and whether each one passes the ATS lint.
+    validations:
+      required: true
+  - type: checkboxes
+    id: attest
+    attributes:
+      label: Attestations
+      options:
+        - label: Single-column, selectable text; any design-forward layout carries an `atsRisk` note
+          required: true
+        - label: No scripts, embedded content or remote subresources; every asset ships inside the pack
+          required: true
+        - label: MIT-compatible license; attribution kept for any ported design; no personal data in the repo
+          required: true
+        - label: No commercial / hosted-service / monetization wording — career-ops is free and local-first
+          required: true
