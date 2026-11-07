@@ -14,6 +14,24 @@ test("the checklist Applied button asks before it writes", () => {
   assert.ok(ask !== -1 && yes !== -1 && write !== -1);
   assert.ok(ask < yes && yes < write, "the first click asks; only the yes path writes");
   assert.match(src, /if \(!pending\.write\) setAsk\(true\)/);
+  const askAt = src.indexOf("{ask && (");
+  const askEnd = src.indexOf("{error &&", askAt);
+  assert.ok(askAt !== -1 && askEnd > askAt);
+  const confirm = src.slice(askAt, askEnd);
+  assert.match(confirm, /role="alert"/);
+  assert.match(confirm, /ref=\{yesRef\}/);
+  assert.match(src, /yesRef\.current\?\.focus\(\)/);
+});
+
+test("Today's decision card Applied confirm takes focus and has an alert role", () => {
+  const src = readFileSync(join(here, "../../src/components/home/decision-card.tsx"), "utf8");
+  const askAt = src.indexOf("{askApplied && (");
+  const askEnd = src.indexOf("{error &&", askAt);
+  assert.ok(askAt !== -1 && askEnd > askAt);
+  const confirm = src.slice(askAt, askEnd);
+  assert.match(confirm, /role="alert"/);
+  assert.match(confirm, /ref=\{appliedYesRef\}/);
+  assert.match(src, /appliedYesRef\.current\?\.focus\(\)/);
 });
 
 test("pipeline Applied from a key or the bulk button asks before it writes", () => {

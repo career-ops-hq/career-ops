@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ExternalLink } from "lucide-react";
@@ -225,7 +225,12 @@ function AppliedButton({ trackerNum, status }: { trackerNum: string | null; stat
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [ask, setAsk] = useState(false);
+  const yesRef = useRef<HTMLButtonElement>(null);
   const applied = status.trim().toLowerCase() === "applied";
+  useEffect(() => {
+    if (!ask) return;
+    yesRef.current?.focus();
+  }, [ask]);
   const pending = appliedWriteAllowed({ status: "Applied", confirmed: false });
 
   async function markApplied() {
@@ -259,10 +264,10 @@ function AppliedButton({ trackerNum, status }: { trackerNum: string | null; stat
         </button>
       )}
       {ask && (
-        <span className="inline-flex flex-col items-start gap-1">
+        <span role="alert" className="inline-flex flex-col items-start gap-1">
           <span className="text-xs text-foreground">{pending.prompt}</span>
           <span className="inline-flex items-center gap-2">
-            <button type="button" className={PILL} disabled={!trackerNum || busy} onClick={() => void markApplied()}>
+            <button ref={yesRef} type="button" className={PILL} disabled={!trackerNum || busy} onClick={() => void markApplied()}>
               {busy ? "Saving…" : pending.yesLabel}
             </button>
             <button type="button" className="text-xs text-muted hover:text-foreground disabled:opacity-60" disabled={busy} onClick={() => setAsk(false)}>

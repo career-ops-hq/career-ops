@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Check, X, FileText, Loader2 } from "lucide-react";
@@ -30,7 +30,12 @@ export function DecisionCard({ app, reason, onDecided }: { app: Application; rea
   const [error, setError] = useState<string | null>(null);
   const [failedStatus, setFailedStatus] = useState<"Applied" | "Discarded" | null>(null);
   const [askApplied, setAskApplied] = useState(false);
+  const appliedYesRef = useRef<HTMLButtonElement>(null);
   const submitting = useRef(false);
+  useEffect(() => {
+    if (!askApplied) return;
+    appliedYesRef.current?.focus();
+  }, [askApplied]);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
   const company = companyPresentation(app);
@@ -123,10 +128,11 @@ export function DecisionCard({ app, reason, onDecided }: { app: Application; rea
         )}
       </div>
       {askApplied && (
-        <div className="rounded-md border border-border bg-surface px-3 py-2">
+        <div role="alert" className="rounded-md border border-border bg-surface px-3 py-2">
           <p className="text-xs text-foreground">{appliedWriteAllowed({ status: "Applied", confirmed: false }).prompt}</p>
           <div className="mt-2 flex items-center gap-2">
             <button
+              ref={appliedYesRef}
               type="button"
               disabled={!!busy}
               onClick={() => {
