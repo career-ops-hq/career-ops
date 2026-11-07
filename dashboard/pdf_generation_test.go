@@ -4,6 +4,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,8 +124,8 @@ func TestRunGeneratePDFOverflowWithNoPDFIsNotGenerated(t *testing.T) {
 	if !strings.Contains(msg.Err, "No PDF was written; the over-budget draft is cv-acme.overflow.pdf.") {
 		t.Fatalf("got %q", msg.Err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "output", "cv-acme.pdf")); err == nil {
-		t.Fatal("no PDF must appear at the output path")
+	if _, err := os.Stat(filepath.Join(root, "output", "cv-acme.pdf")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("no PDF must appear at the output path, stat err: %v", err)
 	}
 }
 
