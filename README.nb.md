@@ -246,7 +246,7 @@ claude   # eller codex / opencode / qwen / agy / grok
 
 # Be så CLI-en din tilpasse systemet til deg:
 # «Endre arketypene til backend-roller»
-# «Oversett modene til engelsk»
+# «Bruk de norske modene under modes/nb/»
 # «Legg til disse 5 selskapene i portals.yml»
 # «Oppdater profilen min med denne CV-en jeg limer inn»
 
