@@ -94,7 +94,8 @@ test("Evaluate reads cv.md from CAREER_OPS_DATA_DIR", async () => {
     const response = await POST(evaluateRequest());
     const body = await response.json();
     const error = typeof body.error === "string" ? body.error : JSON.stringify(body);
-    assert.equal(response.status === 500 || response.status === 400, true, error);
+    assert.equal(response.status, 500, error);
+    assert.equal(error, "No AI process may start in a data-root test");
     assert.doesNotMatch(error, /data folder not found/);
     assert.doesNotMatch(error, /Add your CV first/);
     assert.doesNotMatch(error, /career-ops checkout is incomplete/);
