@@ -20,10 +20,13 @@ try {
   for (const rel of ['.env', 'data/.env', 'data/cache/http/a', '.DS_Store', 'data/x.lock', 'data/y.part']) {
     assert.equal(b.isExcluded(rel), true, rel);
   }
-  for (const rel of ['cv.md', 'data/Connections.csv', 'data/applications.md', 'data/cacheable.md', 'reports/001-a.md']) {
+  for (const rel of ['cv.md', 'data/applications.md', 'data/cacheable.md', 'reports/001-a.md']) {
     assert.equal(b.isExcluded(rel), false, rel);
   }
-  pass('excludes secrets, caches, lock/temp files only');
+  // The LinkedIn export holds other people's contact details: opt-in only.
+  assert.equal(b.isExcluded('data/Connections.csv'), true);
+  assert.equal(b.isExcluded('data/Connections.csv', { includeConnections: true }), false);
+  pass('excludes secrets, caches, lock/temp files and the LinkedIn export unless asked');
 
   // The file list is the updater's USER_PATHS, not a second copy.
   const listed = b.backupPaths(tmp);
@@ -85,25 +88,25 @@ try {
   mkdirSync(join(tmp, 'backup'));
 
   const dry = b.runBackup({ dataRoot: root, dest, dryRun: true });
-  assert.equal(dry.copied, 7);
-  assert.equal(dry.found, 7);
+  assert.equal(dry.copied, 6);
+  assert.equal(dry.found, 6);
   assert.equal(existsSync(dest), false);
 
   const first = b.runBackup({ dataRoot: root, dest });
-  assert.equal(first.copied, 7);
-  assert.equal(first.found, 7);
+  assert.equal(first.copied, 6);
+  assert.equal(first.found, 6);
   assert.deepEqual(first.failed, []);
   assert.equal(readFileSync(join(dest, 'data/applications.md'), 'utf8'), 'tracker');
   for (const rel of ['data/.env', 'data/cache/http/h', 'node_modules/x/index.js', 'modes/_shared.md']) {
     assert.equal(existsSync(join(dest, rel)), false, rel);
   }
-  assert.equal(readFileSync(join(dest, 'data/Connections.csv'), 'utf8'), 'connections');
+  assert.equal(existsSync(join(dest, 'data/Connections.csv')), false, 'LinkedIn export is opt-in');
   assert.equal(readFileSync(join(dest, '.career-ops-web/chats.json'), 'utf8'), '{}');
-  assert.equal(JSON.parse(readFileSync(join(dest, b.MANIFEST_NAME), 'utf8')).copied, 7);
+  assert.equal(JSON.parse(readFileSync(join(dest, b.MANIFEST_NAME), 'utf8')).copied, 6);
 
   const second = b.runBackup({ dataRoot: root, dest });
   assert.equal(second.copied, 0);
-  assert.equal(second.unchanged, 7);
+  assert.equal(second.unchanged, 6);
 
   put(root, 'cv.md', 'cv, edited');
   utimesSync(join(root, 'cv.md'), new Date(), new Date(Date.now() + 60_000));
@@ -117,6 +120,10 @@ try {
 
   assert.equal(existsSync(join(dest, '.claude/settings.json')), true, 'USER_PATHS files are copied');
   assert.equal(existsSync(join(dest, 'opencode.json')), true);
+  const withConnections = b.runBackup({ dataRoot: root, dest, includeConnections: true });
+  assert.equal(withConnections.copied, 1);
+  assert.equal(readFileSync(join(dest, 'data/Connections.csv'), 'utf8'), 'connections');
+  pass('--include-connections copies the LinkedIn export');
 
   // Nothing found: reported, not a silent success; no manifest written.
   const empty = join(tmp, 'empty-root');
@@ -125,7 +132,7 @@ try {
   assert.equal(none.found, 0);
   assert.equal(existsSync(join(tmp, 'backup', 'empty', b.MANIFEST_NAME)), false);
   // A run of only unchanged files is not "nothing found".
-  assert.equal(b.runBackup({ dataRoot: root, dest, }).found, 6);
+  assert.equal(b.runBackup({ dataRoot: root, dest, includeConnections: true }).found, 6);
   pass('a run that finds nothing says so; unchanged files still count as found');
 
   // A symlinked parent can lead out of the data root: skipped.
