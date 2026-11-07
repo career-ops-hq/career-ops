@@ -90,8 +90,9 @@ test('scan logs a partly-read board `partial` in health and the --json receipt, 
     ].join('\n'));
     // Drop every inherited CAREER_OPS_* override (pipeline, scan history,
     // tracker, profile, data dir, cache, ...) so the scan reads and writes only
-    // inside dataRoot, never a developer's real files.
-    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CAREER_OPS_')));
+    // inside dataRoot, never a developer's real files. Case-insensitive, since
+    // Windows environment names are.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.toUpperCase().startsWith('CAREER_OPS_')));
     const result = spawnSync(process.execPath, [
       '--import', pathToFileURL(preload).href, fileURLToPath(new URL('../scan.mjs', import.meta.url)), '--json', '--quiet',
     ], {
