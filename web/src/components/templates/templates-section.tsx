@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { TemplateEditor } from "@/components/templates/template-editor";
+import { latestOnly, pendingAfterReload } from "@/lib/templates-state.mjs";
 
 // The CV templates the core resolves, each shown filled with a fictional resume
 // so the design is visible before it is chosen. Choosing one writes cv.template
@@ -36,17 +37,33 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   // Bumped after a save so the card previews fetch the edited template.
   const [rev, setRev] = useState(0);
 
+  // One guard per mounted section: a response applies only if its load is the
+  // newest, and none applies after unmount.
+  const guardRef = useRef(latestOnly());
+
   const load = useCallback(() => {
     setLoadError(false);
+    const current = guardRef.current();
     fetch(`/api/templates?kind=${kind}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status));
         return r.json();
       })
-      .then((d) => setTemplates(Array.isArray(d?.templates) ? d.templates : []))
-      .catch(() => setLoadError(true));
+      .then((d) => {
+        if (!current()) return;
+        const list: Template[] = Array.isArray(d?.templates) ? d.templates : [];
+        setTemplates(list);
+        setPending((p) => pendingAfterReload(p, list));
+      })
+      .catch(() => {
+        if (current()) setLoadError(true);
+      });
   }, [kind]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    const guard = guardRef.current;
+    load();
+    return () => guard.stop();
+  }, [load]);
 
   const choose = async (name: string) => {
     setBusy(name);
