@@ -599,8 +599,10 @@ try {
       : fail(`workday short page at cap: ${short.length} jobs, truncated=${JSON.stringify(short.truncated)} warnings=${JSON.stringify(shortWarnings)}`);
     const { result: exact } = await captureConsoleErrors(() =>
       workday.fetch({ ...entry, max_pages: 2 }, mkWorkdayCtx(async () => ({ ...page(), total: 40 }))));
-    exact.length === 40 && !exact.truncated
-      ? pass('workday.fetch() leaves a board that ends exactly at the cap unflagged')
+    // total === max_pages x 20 is what Workday's server clamp reports, so a
+    // full walk to it cannot be told from a clamped one: it stays marked.
+    exact.length === 40 && exact.truncated?.reason === 'page-cap' && exact.truncated?.total === 40
+      ? pass('workday.fetch() keeps a board whose total equals max_pages x 20 marked (indistinguishable from a server clamp)')
       : fail(`workday exact-cap board: ${exact.length} jobs, truncated=${JSON.stringify(exact.truncated)}`);
   }
 

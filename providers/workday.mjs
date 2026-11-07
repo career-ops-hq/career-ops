@@ -1271,11 +1271,12 @@ export default {
       }
       // Canonical partial-read signal for scan.mjs (lib/board-truncation.mjs).
       // workdayTruncated is left alone: scan-ats-full.mjs reads its values to
-      // decide retries, and a page cap is neither of them. Not on a probe (an
-      // entry with max_pages: 1 reaches CAP under ctx.maxPages: 1 too), and not
-      // when the reported total fits in the pages read, which is a complete
-      // board that happened to end exactly at the cap.
-      if (ctxCap === Infinity && (total === null || total > maxPages * PAGE_SIZE)) {
+      // decide retries, and a page cap is neither of them. CAP already excludes
+      // probes and short last pages (runQuery). A reported total of exactly
+      // max_pages x PAGE_SIZE is NOT proof of completion: it is the value
+      // Workday's server clamp reports (suspectTag above), so it stays marked,
+      // matching the warning.
+      if (ctxCap === Infinity) {
         /** @type {any} */ (jobs).truncated = { reason: 'page-cap', fetched: jobs.length, ...(total !== null ? { total } : {}) };
       }
     }
