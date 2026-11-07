@@ -21,3 +21,12 @@ test("posted, trust, note, and rank stay labels when the row has no city or pay"
   assert.equal(row.company, "Acme");
   assert.equal(row.role, "Engineer");
 });
+
+test("a rank label is kept for inbox ordering", () => {
+  const [row] = parseInbox(
+    "- [ ] https://example.com/j | Acme | Engineer | rank: 4.2/5 \u2014 Strong match\n",
+  );
+  assert.equal(row.rankStamp, "4.2/5 \u2014 Strong match");
+  assert.equal(row.location, undefined);
+  assert.equal(row.compensation, undefined);
+});

@@ -15,7 +15,8 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT } from './helpers.mjs';
-import { describeCliFailure, resolveCliLaunch } from '../rank-pipeline.mjs';
+import { describeCliFailure } from '../rank-pipeline.mjs';
+import { resolveCliLaunch } from '../lib/agent-launch.mjs';
 
 const TITLE = 'R&D "Labs" & Ops';
 

@@ -106,6 +106,29 @@ The pass rate is each channel's editorial shape, not noise: @data_science_job 77
 
 **The bar for the next channel proposal**, so it is written down: measure the channel (share of posts naming an employer, share linking a vacancy page, what survives both), name its operator, and expect the provider to drop the rest. A channel below roughly a quarter passing is the channel's editorial choice, and the provider will read it correctly and emit little.
 
+**Re-measured 2026-10-31: positional employer shapes and the Habr Career fix.** 51 public RU/CIS channels, 3 preview pages each, 2,973 posts, saved once and replayed before and after the change. Two things kept posts that already met rules 1 and 2 from being emitted:
+
+- Every `career.habr.com` vacancy link was refused. `habr.com` is on the non-apply list as a long-read host, and the subdomain matched it before the board list was checked. All the Proglib channels link there. The board list is now checked first: 98 of the newly emitted posts link to Habr Career.
+- Many channel templates name the employer by position, not by label: `Employer ищет …` (Proglib, POSTER), `Title в Employer` on the title line (offerclaw, Remocate and Sparkles mirrors), a second line `Employer is a …` (the EN template of @geekjobs and its siblings), and a finder.work mirror's employer on the line after the salary. These four shapes run only after the five marked shapes find nothing. Because a position is weaker evidence than a label, each capture is also refused when it reads as a role, a sector or unit ("в FinTech", "в команду CDP"), a department, a work format ("Удаленно (Москва)", "Relocation available"), a contract term, a person (a Russian patronymic), a year, a destination ("с переездом в Дубай"), a declined place name ("в Лиссабоне"), a city or region standing alone ("в Алматы", "Москва" after the salary line), a phrase ("в Чехии или Испании"), or a `в` inside a quoted title. `Title / Employer` and `Title — Employer` were measured too and left out: they carried 27 posts and most of the review findings, and wait for a shared candidate filter of their own.
+
+A post is also dropped when it says, anywhere in the text, that the employer's name is withheld ("название компании-заказчика не раскрыто", "неназванной финтех-организации"). On Proglib that sentence follows a first line naming the agency. A post that withholds something else ("Зарплата не раскрыта") is kept.
+
+| | before | after |
+|---|---|---|
+| posts emitted | 284 | 621 |
+| previously emitted posts with the same company, url and title | — | 271 of 284 |
+| previously emitted posts now refused | — | 13: 12 that name no employer (`Worldwide 🌏` ×10 and `NDA` read from the hashtag template and a `Компания:` label, `Custom Software Development`, a line of business), and 1 that linked a Remocate page, read until now as the employer's own site |
+
+The 350 new posts name 227 distinct employers. Each employer name was reviewed by hand against its post, and the false attributions found were turned into the refusals above, each with a test. The links were not opened one by one: they pass the current `classifyLink()` rules, including the Habr Career path rule and the mirror-host changes, with ingamejob.com added to the board list (2 of the new posts). Habr Career, on the board list since the provider was merged, was checked on 2026-11-04 on a random 15 of the 107 Habr Career links emitted at the time: 11 were live vacancy pages naming the same employer as the post, with an "Откликнуться" button; 4 had closed since the corpus was saved (2 answer 404, 2 are archived), which is what `check-liveness.mjs` is for. Two of the 13 readable pages name a recruiting agency, Top Selection, as the company and say nothing about a client; the source cannot tell those apart from the agency hiring for itself. Applying needs neither an account nor a payment: on two of the sampled vacancies, checked by hand, "Откликнуться" opens a plain application form behind a captcha.
+
+**Hosts refused instead (`UNDECLARED_HOSTS`).** A host that is on no list is read as the employer's own site whenever its path looks like a vacancy, so a mirror left off the board list still passes, as the employer. Four hosts the measured channels link are refused outright: remocate.app (a relocation job board; its "Apply Now" redirects to the employer's own ATS, but its operator is not named on the site and has been asked), offerclaw.app (unreachable while measured, so neither its operator nor candidate access could be checked), vseti.app (a vacancy aggregator whose page the posts carry in place of the employer's link, which source rules 2 and 5 keep out), and hellowehire.com (a shared ATS for freelance recruiters, run by Plus8Soft; a vacancy page there is a recruiter's intake form, and its employer field is often blank). In the corpus they carry 173 otherwise attributable posts (112, 54, 6 and 1). A mirror moves to the board list in its own PR once its operator is declared here.
+
+**Board mirror added to the board list (rule 4).** A post that links a mirror's vacancy page rather than the employer's own is emitted with the mirror page as `url`, so the mirror host is declared here with its operator.
+
+- **ingamejob.com** (InGame Job, a games-industry job board). Operator: InGameJob OÜ, Tallinn, Estonia, named with its address in the site's [privacy policy](https://ingamejob.com/privacy); Estonian registry code 14769069, active; the same policy gives a contact address at the site's own domain. Rule 1: a vacancy page is free to read without an account, and the apply form on it (name, e-mail, message, PDF CV) needs no sign-in and no payment. What the site sells is on the employer side (job credits, candidate-database access, boosters). Rule 2: the post links the InGame Job vacancy page, whose apply form is the application path; it is the `url`. Rule 3: paid boosters ("Top", "Hot", "Premium") put a job at the top of the site's search and in its newsletters and social channels, and the site lists jobs posted on it ahead of the vacancies it aggregates. None of that reaches career-ops, which reads each Telegram post the same way and ranks on the user's machine. Rule 6: `User-agent: *` disallows only `/away/` and `/email/`, with `Crawl-delay: 5`; the provider never fetches the vacancy page. Checked 2026-11-03; no out-of-band confirmation from the operator yet.
+
+Still out of reach by design: posts whose only application path is a Telegram contact or an e-mail address, digests carrying several vacancy links, and channels that link only through teletype or telegra.ph.
+
 ---
 
 ## Computrabajo
@@ -185,3 +208,45 @@ A general job board for Colombia. Measured: one GET of `https://www.magneto365.c
 **Rule 5 (aggregation stays in core).** Each portal has its own provider. jobs.cz and prace.cz are separate portals, but many employers publish the same offer on both: for "python", 56 of the 63 prace.cz offers also appeared on jobs.cz with identical company and title. The scanner's existing company+role dedup merges these.
 
 **Rule 6 (the source's own `robots.txt`).** Under `User-agent: *`, jobs.cz does not disallow the listing path `/prace/`, and its disallowed `/api/` and `/iapi/` are never requested. prace.cz does not disallow `/nabidky/`, the only path the providers read; its disallowed `/hledat/` (the old search path, which now redirects to `/nabidky/`) and application-form paths are never requested. Neither file names an AI or agent crawler.
+
+---
+
+## jobspresso.co
+
+| | |
+|---|---|
+| **Proposed by** | issue [#1310](https://github.com/career-ops-hq/career-ops/issues/1310); provider by @aakash811 |
+| **Provider** | `providers/jobspresso.mjs` |
+| **PR** | [#1320](https://github.com/career-ops-hq/career-ops/pull/1320) · rule 6 re-check in issue [#5774](https://github.com/career-ops-hq/career-ops/issues/5774) |
+| **Merged** | 2026-06-29, before this policy existed (2026-08-04) |
+| **Status** | Listed; feed URL moved to the query-free path on 2026-11-05 |
+
+Re-read against rule 6 after a contributor checked the live `robots.txt` in [#5774](https://github.com/career-ops-hq/career-ops/issues/5774).
+
+**Rule 6 (the source's own `robots.txt`).** Checked on 2026-10-23 and again on 2026-11-05: one GET of `https://jobspresso.co/robots.txt`, HTTP 200. Under `User-agent: *` it disallows `/*?` and sets `Crawl-delay: 3`; its only `Allow` lines are `/*.css` and `/*.js`. No group names career-ops. `/*?` covered the URL the provider originally fetched, `/?feed=job_feed`, the same shape as Lagou in the [Evaluated, not supported](SUPPORTED_JOB_BOARDS.md#evaluated-not-supported) table. Unlike Lagou, a usable request without a query string exists: WordPress serves the same feed at `https://jobspresso.co/feed/job_feed/`, which is the URL the feed's own `<atom:link rel="self">` names. On 2026-11-05 it answered HTTP 200 `application/rss+xml` with no redirect, and returned the same 10 items as the query-string URL. `/*?` does not cover it, so the provider now reads that path, once per scan.
+
+**Rules 1 to 5.** Not re-verified here.
+
+---
+
+## jobicy.com
+
+| | |
+|---|---|
+| **Proposed by** | provider by [#1260](https://github.com/career-ops-hq/career-ops/pull/1260); rule 3 re-check in this PR |
+| **Provider** | `providers/jobicy.mjs` |
+| **PR** | [#1260](https://github.com/career-ops-hq/career-ops/pull/1260) · rule 3 re-check: this PR |
+| **Merged** | 2026-06-29, before this policy existed (2026-08-04) |
+| **Status** | Listed; walks the whole 7-day feed since this PR |
+
+Re-read against rule 3 after the feed's documentation ([jobi.cy/apidocs](https://jobi.cy/apidocs), updated 2026-10-19) turned out to describe cursor pagination the provider never used.
+
+**Rule 3 (complete inventory, no paid placement).** The provider read one page, `?count=50`. Measured on 2026-11-05 with career-ops' default User-Agent, no key, cookie or session: the feed is a 7-day window served newest first, 100 postings a page, and one full walk of its `nextCursor` returned 1,358 postings over 14 pages (largest page 0.9 MB), zero duplicates, published 2026-10-30 to 2026-11-05. The 50 the provider read were 3.7% of the board and had all been published the same day. The provider now follows `nextCursor` until the feed reports `hasMore: false`, up to `max_pages` (default 25, max 100), and warns when that cap cuts the walk short. The public payload has no promoted or sponsored field, and the documentation states the order: publication time, newest first, listing id as tie-breaker. The optional `geo` / `industry` / `tag` keys are the feed's own documented filters, chosen by the user per entry; with `geo=argentina` the same walk returned 124 postings over 2 pages.
+
+**Rule 2 (canonical URL).** For a public request the payload carries one URL per posting, the Jobicy listing page; the employer's ATS link is a field of the paid Commercial API only. Jobicy's fair-use terms also ask that apply links from the free API keep pointing at the Jobicy page, so `url` stays that page.
+
+**Rule 6 (the source's own `robots.txt`).** Checked on 2026-11-05: one GET of `https://jobicy.com/robots.txt`, HTTP 200. Its `User-agent: *` group disallows query shapes such as `/*?s=`, `/*?p=`, `/*?q=`, `/*?offset=0` and `/*api_access_key=`, and paths such as `/search/` and `/job-listings/`; none covers `/api/v2/remote-jobs` with `count`, `cursor`, `geo`, `industry` or `tag`. It also carries `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. No group names career-ops.
+
+**Fair use.** The documentation asks integrations to start an automated pass no more than once an hour and to follow its cursor pages in order. One scan is one pass per `provider: jobicy` entry, with 250 ms between pages.
+
+**Rules 1, 4 and 5.** Not re-verified here.

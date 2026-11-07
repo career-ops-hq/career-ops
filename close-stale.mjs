@@ -24,8 +24,9 @@
  * A candidate is SKIPPED (and reported with its reason) when it has any later
  * signal that somebody might still be answering:
  *   - `active-interview`   the company has an entry in data/active-interviews.md
- *                          (company match only; a role mismatch must not close
- *                          an application the user is interviewing for);
+ *                          (company match only, with or without the legal
+ *                          form; a role mismatch must not close an
+ *                          application the user is interviewing for);
  *   - `status-log`         data/status-log.tsv holds a transition after Applied;
  *   - `open-follow-up`     data/follow-ups.md has a follow-up logged for this row
  *                          within the last `--days` days, or an uncleared `next`
@@ -66,6 +67,7 @@ import {
 } from './tracker-parse.mjs';
 import {
   loadCanonicalStates, resolveCanonicalState, openTrackerTransaction, appendLedgerRows, cell,
+  companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { parseActiveInterviews, findColumn } from './process-quality.mjs';
@@ -136,18 +138,19 @@ export function noteTag(today, days) {
 // ── signal loaders (pure over text, so tests can drive them directly) ──
 
 /**
- * Normalized company keys that have an entry in data/active-interviews.md.
- * The empty key stands for a placeholder employer (`?`).
+ * Company cells that have an entry in data/active-interviews.md.
  *
  * @param {string} content
- * @returns {Set<string>}
+ * @returns {string[]}
  */
-export function interviewCompanyKeys(content) {
-  const keys = new Set();
-  for (const row of parseActiveInterviews(content)) {
-    keys.add(normalizeTextKey(findColumn(row, 'company')));
-  }
-  return keys;
+export function interviewCompanies(content) {
+  return parseActiveInterviews(content).map((row) => findColumn(row, 'company'));
+}
+
+function hasInterview(company, interviewNames) {
+  const key = normalizeTextKey(company);
+  return interviewNames.some((name) => normalizeTextKey(name) === key
+    || companiesMatchIgnoringCorporateForm(name, company));
 }
 
 /**
@@ -184,14 +187,14 @@ function loadTimelines(logContent, states) {
  * @param {string} ctx.today - YYYY-MM-DD
  * @param {number} ctx.days
  * @param {object[]} ctx.states - loadCanonicalStates() output
- * @param {Set<string>} [ctx.interviewKeys]
+ * @param {string[]} [ctx.interviewCompanies]
  * @param {{entries: object[], pins: Map, cleared: Map}} [ctx.followups]
  * @param {Map<number, object[]>} [ctx.timelines] - folded status-log
  * @returns {{appliedRows: number, candidates: object[], skipped: object[], recent: number, undated: number}}
  */
 export function classifyRows(trackerMd, ctx) {
   const { today, days, states } = ctx;
-  const interviewKeys = ctx.interviewKeys ?? new Set();
+  const interviewNames = ctx.interviewCompanies ?? [];
   const followups = ctx.followups ?? { entries: [], pins: new Map(), cleared: new Map() };
   const timelines = ctx.timelines ?? new Map();
   const cutoff = isoMinusDays(today, days);
@@ -232,8 +235,7 @@ export function classifyRows(trackerMd, ctx) {
     if (String(row.notes ?? '').includes(NOTE_TAG_PREFIX) || timeline.some((o) => o.source === LEDGER_SOURCE)) {
       skip('previously-auto-closed'); continue;
     }
-    const key = normalizeTextKey(row.company);
-    if (interviewKeys.has(key)) { skip('active-interview'); continue; }
+    if (hasInterview(row.company, interviewNames)) { skip('active-interview'); continue; }
     const later = lastAppliedIdx === -1
       ? timeline.filter((o) => o.to !== 'Applied' && o.date >= referenceDate)
       : timeline.slice(lastAppliedIdx + 1).filter((o) => o.to !== 'Applied');
@@ -338,7 +340,7 @@ function loadContext({ dataRoot, trackerPath, today, days, states }) {
     today,
     days,
     states,
-    interviewKeys: interviewCompanyKeys(readIfExists(interviewsPath)),
+    interviewCompanies: interviewCompanies(readIfExists(interviewsPath)),
     followups: {
       entries: parseFollowups(followupsMd),
       pins: parseNextOverrides(followupsMd),

@@ -1,23 +1,15 @@
-// Client-safe (no node). Deterministic "is this CV good enough to score?" signal —
-// ZERO tokens. Advisory only: it drives a green-check vs amber hint, NEVER blocks
-// saving (the minimal-CV principle: even a rough parse is enough for a first score).
-
-export type CvReadiness = { scoreable: boolean; words: number; hasExperience: boolean; hasSkills: boolean; hint?: string };
-
-export function cvReadiness(md: string): CvReadiness {
-  const text = (md || "").trim();
-  const words = text ? text.split(/\s+/).length : 0;
-  const hasExperience = /(^|\n)#{1,3}\s*(experience|work|employment|empleo|experiencia)/i.test(text) || /\b(20\d\d)\s*[-–—]\s*(20\d\d|present|now|actualidad)/i.test(text);
-  const hasSkills = /(^|\n)#{1,3}\s*(skills|technologies|competenc|habilidad)/i.test(text);
-  const scoreable = words >= 80 && (hasExperience || hasSkills || words >= 200);
-  let hint: string | undefined;
-  if (!scoreable) hint = words < 40 ? "That's very short — add your experience for real matches (you can save anyway)." : "Looks thin — add a role or two for better matches (you can save anyway).";
-  return { scoreable, words, hasExperience, hasSkills, hint };
-}
+// Client-safe (no node). The readiness check lives in readiness.mjs.
 
 // ── CV ingest stream markers (parallel to the <<act:>>/<<offer:>> envelopes) ──
 export type CvSeed = { title?: string; roles?: string[]; location?: string };
 export type CvIngestResult = { markdown: string; seed: CvSeed | null; error: string | null; trace: string };
+
+export function cvStreamErrorMessage(reason: string): string {
+  if (reason === "unreadable") return "I couldn't read text from that file (it may be a scanned image). Upload the TeX source or paste the text instead.";
+  if (reason === "timeout") return "CV conversion timed out. Try again or check your AI CLI in Config.";
+  if (["cli-failed", "launch-failed", "no-output"].includes(reason)) return "Your AI CLI couldn't finish converting the CV. Check its sign-in and connection in Config, then try again.";
+  return "Couldn't finish converting the CV. Try again or paste the text instead.";
+}
 
 /** Parse the full accumulated ingest stream text into its parts. Tolerant: a
  *  still-streaming buffer just yields partial markdown + the pre-start trace. */

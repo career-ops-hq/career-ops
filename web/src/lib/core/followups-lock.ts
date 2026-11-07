@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 /**
  * ACL for the core's follow-ups file lock (`followup-seed.mjs`).
@@ -50,7 +50,7 @@ const modCache = new Map<string, CoreWithFollowupsLock>();
  *  exclude cross-process and the in-process queue alone is correct — see
  *  `withFollowupsLock` below. */
 async function loadCoreLock(): Promise<CoreWithFollowupsLock | null> {
-  const file = path.join(careerOpsRoot(), "followup-seed.mjs");
+  const file = path.join(resolveCodeRoot(process.cwd(), process.env), "followup-seed.mjs");
   const cached = modCache.get(file);
   if (cached) return cached;
   if (!fs.existsSync(file)) return null;

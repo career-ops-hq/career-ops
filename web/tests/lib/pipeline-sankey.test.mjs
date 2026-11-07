@@ -73,6 +73,23 @@ test("Discarded after reaching Applied or later stays under Submitted", () => {
   assert.equal(classifyLeaf({ n: 7, status: "Discarded" }, [{ num: 7, from: "Interview", to: "Discarded" }]), "discardedInterview");
 });
 
+test("an unknown status is not Still evaluated", () => {
+  assert.equal(classifyLeaf({ n: 4, status: "Paused" }, []), "other");
+  const g = buildPipelineSankey([
+    { n: 1, status: "Evaluated" },
+    { n: 2, status: "Paused" },
+    { n: 3, status: "SKIP" },
+  ]);
+  const v = Object.fromEntries(g.nodes.map((n) => [n.id, n.value]));
+  assert.equal(v.evaluated, 1);
+  assert.equal(v.other, 1);
+  assert.equal(g.nodes.find((n) => n.id === "other")?.label, "Other status");
+  assert.equal(
+    v.tracked,
+    (v.skip || 0) + (v.evaluated || 0) + (v.other || 0) + (v.discardedEarly || 0) + (v.submitted || 0),
+  );
+});
+
 test("buildPipelineSankey conserves tracked = skip + evaluated + submitted", () => {
   const apps = [
     { n: 1, status: "SKIP" },

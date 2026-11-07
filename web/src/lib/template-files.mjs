@@ -18,9 +18,9 @@ export function isValidTemplateName(name) {
   return typeof name === "string" && name.length <= MAX_NAME && name !== BASE_NAME && NAME_RE.test(name);
 }
 
-/** @param {string} root */
-async function loadResolver(root) {
-  return import(/* webpackIgnore: true */ pathToFileURL(path.join(root, "cv-templates.mjs")).href);
+/** @param {string} codeRoot */
+async function loadResolver(codeRoot) {
+  return import(/* webpackIgnore: true */ pathToFileURL(path.join(codeRoot, "cv-templates.mjs")).href);
 }
 
 /** @param {string} name */
@@ -70,12 +70,12 @@ function retitle(text, from, to, prettify) {
  * Copy a template, shipped or yours, into the user's templates directory.
  * A pack copies its template file and its sections/. A flat template copies its
  * single file.
- * @param {string} root core checkout
+ * @param {string} codeRoot core checkout
  * @param {{kind: "cv"|"cover", from: string, name: string, userDir: string}} opts
  */
-export async function duplicateTemplate(root, { kind, from, name, userDir }) {
+export async function duplicateTemplate(codeRoot, { kind, from, name, userDir }) {
   assertValidName(name);
-  const resolver = await loadResolver(root);
+  const resolver = await loadResolver(codeRoot);
   const source = findEntry(resolver, kind, userDir, from);
   // Throws for a source that does not resolve itself (missing placeholders, a
   // declared section with no partial), so a broken template is not copied.
@@ -127,13 +127,13 @@ function defaultName(resolver, kind, profilePath) {
 /**
  * Rename one of the user's own templates. Returns whether it was the default, so
  * the caller can point the profile at the new name.
- * @param {string} root
+ * @param {string} codeRoot
  * @param {{kind: "cv"|"cover", name: string, to: string, userDir: string, profilePath?: string}} opts
  * @returns {Promise<{wasDefault: boolean}>}
  */
-export async function renameTemplate(root, { kind, name, to, userDir, profilePath }) {
+export async function renameTemplate(codeRoot, { kind, name, to, userDir, profilePath }) {
   assertValidName(to);
-  const resolver = await loadResolver(root);
+  const resolver = await loadResolver(codeRoot);
   const entry = findEntry(resolver, kind, userDir, name, { user: true });
   assertNameFree(resolver, kind, userDir, to);
 
@@ -150,19 +150,19 @@ export async function renameTemplate(root, { kind, name, to, userDir, profilePat
  * profile follows. If that update fails, the file is renamed back, so the profile
  * never points at a template that is gone. The failure is a 409 refusal that
  * carries the original error as its `cause`; only the cause holds a path.
- * @param {string} root
+ * @param {string} codeRoot
  * @param {{kind: "cv"|"cover", name: string, to: string, userDir: string, profilePath?: string}} opts
  * @param {() => Promise<void> | void} updateProfile
  * @returns {Promise<{wasDefault: boolean}>}
  */
-export async function renameTemplateAndFollow(root, opts, updateProfile) {
-  const { wasDefault } = await renameTemplate(root, opts);
+export async function renameTemplateAndFollow(codeRoot, opts, updateProfile) {
+  const { wasDefault } = await renameTemplate(codeRoot, opts);
   if (!wasDefault) return { wasDefault };
   try {
     await updateProfile();
   } catch (cause) {
     try {
-      await renameTemplate(root, { ...opts, name: opts.to, to: opts.name });
+      await renameTemplate(codeRoot, { ...opts, name: opts.to, to: opts.name });
     } catch {
       throw new TemplateRefusal(`Renamed to "${opts.to}", but the profile still names "${opts.name}" and the file could not be put back.`, 409, { cause });
     }
@@ -175,11 +175,11 @@ export async function renameTemplateAndFollow(root, opts, updateProfile) {
  * Delete one of the user's own templates. The template the profile names as the
  * default is refused: removing it would leave the profile naming a template that
  * falls back to the base one without anyone choosing that.
- * @param {string} root
+ * @param {string} codeRoot
  * @param {{kind: "cv"|"cover", name: string, userDir: string, profilePath?: string}} opts
  */
-export async function deleteTemplate(root, { kind, name, userDir, profilePath }) {
-  const resolver = await loadResolver(root);
+export async function deleteTemplate(codeRoot, { kind, name, userDir, profilePath }) {
+  const resolver = await loadResolver(codeRoot);
   const entry = findEntry(resolver, kind, userDir, name, { user: true });
   if (defaultName(resolver, kind, profilePath) === name) {
     throw new TemplateRefusal("This is your default template. Make another one the default first.");

@@ -186,7 +186,7 @@ export function FilterBuilder({
                 onClick={() => set({ sinceDays: r.days })}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                  filters.sinceDays === r.days ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
+                  filters.sinceDays === r.days ? "bg-brand-soft text-brand-text" : "text-muted hover:text-foreground",
                 )}
               >
                 {r.label}
@@ -207,7 +207,7 @@ export function FilterBuilder({
                   onClick={() => toggleAts(a)}
                   className={cn(
                     "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                    on ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:text-foreground",
+                    on ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:text-foreground",
                   )}
                 >
                   {ATS_LABEL[a]}
