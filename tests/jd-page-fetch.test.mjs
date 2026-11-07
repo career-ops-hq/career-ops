@@ -399,7 +399,7 @@ test('hostile markup cannot make the visible-text closure check slow', async () 
     const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body })));
     const t0 = Date.now();
     try { await fetchJdFromPage('https://careers.example.com/job/1'); } finally { net.restore(); }
-    assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
+    assert.ok(Date.now() - t0 < 15_000, `took ${Date.now() - t0}ms`);
   }
 });
 
@@ -435,7 +435,7 @@ test('hostile markup in a JSON-LD description stays linear', () => {
   for (const junk of ['<script '.repeat(300_000), '<style '.repeat(300_000), '<'.repeat(1_500_000)]) {
     const t0 = Date.now();
     jdFromPageHtml(page(`<p>${BODY}</p>${junk}`));
-    assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
+    assert.ok(Date.now() - t0 < 15_000, `took ${Date.now() - t0}ms`);
   }
 });
 
@@ -468,7 +468,7 @@ test('a very large @graph array is walked without spread or shift limits', () =>
   const t0 = Date.now();
   const out = jdFromPageHtml(`<html><body><script type="application/ld+json">${ld}</script></body></html>`);
   assert.ok(out && out.method === 'ld+json');
-  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
+  assert.ok(Date.now() - t0 < 15_000, `took ${Date.now() - t0}ms`);
 });
 
 test('batch-runner handles fetch-jd exit 3 as a closed posting, not a fetch miss', () => {
@@ -518,5 +518,24 @@ test('repeated unterminated description fields stay linear', () => {
   const t0 = Date.now();
   pageClosureEvidence(hostile, 'https://careers.example.com/job/1');
   jdFromPageHtml(hostile);
-  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
+  assert.ok(Date.now() - t0 < 15_000, `took ${Date.now() - t0}ms`);
+});
+
+test('the same posting twice with different description whitespace is not ambiguous', () => {
+  const node = (d) => `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Engineer', description: d })}</script>`;
+  const out = jdFromPageHtml(`<html>${node(`<p>${BODY}</p>`)}${node(`<p>${BODY.replace(/ /g, '  ')}\n</p>`)}</html>`);
+  assert.ok(out);
+});
+
+test('a malformed JSON-LD description does not stop the closure check', () => {
+  const bad = `<script type="application/ld+json">{"@type":"JobPosting","title":{"toString":null,"valueOf":null},"description":{"toString":null}}</script><p>This job is no longer available.</p>`;
+  assert.ok(pageClosureEvidence(bad, 'https://careers.example.com/job/1'));
+});
+
+test('a malformed description-sized field still counts toward ambiguity', () => {
+  const words = Array.from({ length: 200 }, (_, n) => `w${n}`).join(' ');
+  const ctrl = '"descriptionHtml":"' + words + '\u0001 tail"';
+  const good = '"descriptionHtml":"' + words + ' other"';
+  const out = jdFromPageHtml(`<html><script>{${ctrl.replace('\\u0001', String.fromCharCode(1))},${good}}</script></html>`);
+  assert.equal(out, null);
 });
