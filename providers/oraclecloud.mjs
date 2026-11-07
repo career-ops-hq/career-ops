@@ -227,9 +227,14 @@ export default {
     const site = resolveSite(entry);
     if (!site) throw new Error(`oraclecloud: cannot derive API URL for ${entry.name}`);
 
-    const maxPages = Number.isInteger(entry.max_pages) && entry.max_pages > 0
+    const entryMaxPages = Number.isInteger(entry.max_pages) && entry.max_pages > 0
       ? Math.min(entry.max_pages, MAX_PAGES)
       : MAX_PAGES;
+    // `ctx.maxPages` is verify-portals' liveness probe: honor it as a ceiling,
+    // so a probe costs one request instead of the whole board
+    // (providers/ADDING_A_PROVIDER.md).
+    const ctxMaxPages = Number(/** @type {any} */ (ctx)?.maxPages);
+    const maxPages = ctxMaxPages > 0 ? Math.min(entryMaxPages, ctxMaxPages) : entryMaxPages;
 
     const all = [];
     let total = null;

@@ -444,6 +444,7 @@ try {
     // ctx.maxPages is verify-portals' one-page liveness probe, not a scan: it
     // stops early by design, so it must not report the board as partial (same
     // convention as eightfold's probeLimited and apple's probing).
+    let probeRequests = 0;
     const probe = await oc.fetch(
       { name: 'Probed', careers_url: careers, max_pages: 2 },
       {
@@ -452,14 +453,15 @@ try {
         sleep: async () => {},
         fetchText: async () => {},
         fetchJson: async (url) => {
+          probeRequests++;
           const offset = Number(new URL(url).searchParams.get('offset') || 0);
           return { items: [{ TotalJobsCount: 1000, requisitionList: Array.from({ length: 200 }, (_, i) => ({ Id: String(offset + i), Title: `R${offset + i}` })) }], hasMore: true };
         },
       },
     );
-    probe.length > 0 && !probe.truncated
-      ? pass('oraclecloud.fetch() leaves a ctx.maxPages liveness probe unflagged')
-      : fail(`oraclecloud probe flagged: ${probe.length} jobs, truncated=${JSON.stringify(probe.truncated)}`);
+    probeRequests === 1 && probe.length === 200 && !probe.truncated
+      ? pass('oraclecloud.fetch() stops a ctx.maxPages liveness probe after one page, unflagged')
+      : fail(`oraclecloud probe: ${probeRequests} requests, ${probe.length} jobs, truncated=${JSON.stringify(probe.truncated)}`);
   }
 
   // ── pagination: a SHORT page is not the end when a total says otherwise ──
