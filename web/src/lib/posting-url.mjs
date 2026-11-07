@@ -203,11 +203,11 @@ export function resolvePostingUrl(trackerCell, reportField) {
  * @returns {string}
  */
 export function applyPostingUrl(reportField, trackerCell, applyLink = "") {
-  const fromTracker = resolvePostingUrl(trackerCell, "");
+  const fromTracker = postingUrl(resolvePostingUrl(trackerCell, ""));
   if (fromTracker) return fromTracker;
   const fromReport = postingUrl(typeof reportField === "string" ? reportField : "");
   if (fromReport) return fromReport;
-  return resolvePostingUrl(applyLink, "") || "";
+  return postingUrl(resolvePostingUrl(applyLink, "")) || "";
 }
 
 const MAX_URL_LEN = 2048;

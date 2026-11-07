@@ -52,6 +52,30 @@ test("applyPostingUrl prefers the tracker cell, then the report", () => {
   );
 });
 
+test("applyPostingUrl skips a tracker URL with no host", () => {
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "[board](https://)"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("", "https://", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/apply",
+  );
+  assert.equal(applyPostingUrl("not a link", "https://", "https://"), "");
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://user:pass@jobs.example.com/secret"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "[job](https://jobs.example.com/Software\\ Engineer)"),
+    "https://jobs.example.com/Software Engineer",
+  );
+});
+
 test("readTrackerUrl keeps a value that is already a URL", () => {
   const nested = "https://jobs.example.com/[other](https://other.example.com)";
   assert.equal(readTrackerUrl(nested), nested);
