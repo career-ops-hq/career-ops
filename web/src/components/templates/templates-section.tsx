@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { TemplateEditor } from "@/components/templates/template-editor";
-import { editingAfterReload, latestOnly, pendingAfterReload } from "@/lib/templates-state.mjs";
+import { editingAfterReload, latestOnly, loadFailureView, pendingAfterReload, settleChoice } from "@/lib/templates-state.mjs";
 
 // The CV templates the core resolves, each shown filled with a fictional resume
 // so the design is visible before it is chosen. Choosing one writes cv.template
@@ -28,7 +28,9 @@ const COPY = {
 export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   const copy = COPY[kind];
   const [templates, setTemplates] = useState<Template[] | null>(null);
-  const [loadError, setLoadError] = useState(false);
+  // false: fine. "replace": the error stands in for the list. "alongside": the
+  // list is current, so it stays and the error sits beside it.
+  const [loadError, setLoadError] = useState<false | "replace" | "alongside">(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -40,8 +42,10 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   // One guard per mounted section: a response applies only if its load is the
   // newest, and none applies after unmount.
   const guardRef = useRef(latestOnly());
+  const listRef = useRef<Template[] | null>(null);
+  listRef.current = templates;
 
-  const load = useCallback(() => {
+  const load = useCallback((listIsCurrent = false) => {
     setLoadError(false);
     const current = guardRef.current();
     fetch(`/api/templates?kind=${kind}`)
@@ -57,7 +61,7 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
         setEditing((e) => editingAfterReload(e, list));
       })
       .catch(() => {
-        if (current()) setLoadError(true);
+        if (current()) setLoadError(loadFailureView(listIsCurrent, listRef.current !== null));
       });
   }, [kind]);
   useEffect(() => {
@@ -69,23 +73,23 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   const choose = async (name: string) => {
     setBusy(name);
     setError(null);
-    try {
-      const res = await fetch("/api/templates/default", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, kind }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) setError(typeof j.error === "string" ? j.error : "Could not save.");
-      else {
-        setTemplates((prev) => prev && prev.map((t) => ({ ...t, isDefault: t.name === name })));
-        // A reload started earlier may still be in flight with the old default.
-        // Starting a newer one makes latestOnly discard it.
-        load();
-      }
-    } catch {
-      setError("Could not save.");
-    }
+    await settleChoice(
+      async () => {
+        const res = await fetch("/api/templates/default", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, kind }),
+        });
+        const j = await res.json().catch(() => ({}));
+        return { ok: res.ok, error: typeof j.error === "string" ? j.error : undefined };
+      },
+      {
+        applied: () => setTemplates((prev) => prev && prev.map((t) => ({ ...t, isDefault: t.name === name }))),
+        // The list shown now is already right, so a failed reload must not hide it.
+        reload: () => load(true),
+        failed: setError,
+      },
+    );
     setBusy(null);
   };
 
@@ -134,10 +138,10 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
         {NAME_HINT}
       </p>
 
-      {loadError ? (
+      {loadError === "replace" ? (
         <p role="alert" className="mt-3 text-sm text-red-500">
           Could not load the templates.{" "}
-          <button type="button" className="underline" onClick={load}>
+          <button type="button" className="underline" onClick={() => load(false)}>
             Retry
           </button>
         </p>
@@ -230,6 +234,14 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
             </li>
           ))}
         </ul>
+      )}
+      {loadError === "alongside" && (
+        <p role="alert" className="mt-3 text-sm text-red-500">
+          Could not refresh the templates; the list above may be out of date.{" "}
+          <button type="button" className="underline" onClick={() => load(true)}>
+            Retry
+          </button>
+        </p>
       )}
       {error && (
         <p role="alert" className="mt-3 text-sm text-red-500">
