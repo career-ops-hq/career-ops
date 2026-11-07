@@ -440,6 +440,26 @@ try {
     cut.length === 400 && cut.truncated?.reason === 'page-cap' && cut.truncated?.fetched === 400 && cut.truncated?.total === 1000
       ? pass('oraclecloud.fetch() marks a max_pages-capped board with jobs.truncated (400 of 1000)')
       : fail(`oraclecloud page-cap flag: ${cut.length} jobs, truncated=${JSON.stringify(cut.truncated)}`);
+
+    // ctx.maxPages is verify-portals' one-page liveness probe, not a scan: it
+    // stops early by design, so it must not report the board as partial (same
+    // convention as eightfold's probeLimited and apple's probing).
+    const probe = await oc.fetch(
+      { name: 'Probed', careers_url: careers, max_pages: 2 },
+      {
+        transport: 'http',
+        maxPages: 1,
+        sleep: async () => {},
+        fetchText: async () => {},
+        fetchJson: async (url) => {
+          const offset = Number(new URL(url).searchParams.get('offset') || 0);
+          return { items: [{ TotalJobsCount: 1000, requisitionList: Array.from({ length: 200 }, (_, i) => ({ Id: String(offset + i), Title: `R${offset + i}` })) }], hasMore: true };
+        },
+      },
+    );
+    probe.length > 0 && !probe.truncated
+      ? pass('oraclecloud.fetch() leaves a ctx.maxPages liveness probe unflagged')
+      : fail(`oraclecloud probe flagged: ${probe.length} jobs, truncated=${JSON.stringify(probe.truncated)}`);
   }
 
   // ── pagination: a SHORT page is not the end when a total says otherwise ──
