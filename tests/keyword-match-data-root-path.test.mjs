@@ -44,9 +44,21 @@ writeFileSync(join(dataRoot, 'reports', '001-example-2026-01-01.md'), [
 // fallback is what every case below actually exercises.
 const workDir = mkdtempSync(join(tmpdir(), 'kw-cwd-'));
 
-const run = (args) => spawnSync(NODE, [join(ROOT, 'keyword-match.mjs'), ...args], {
+// A second working directory that holds a stale copy of the same report, with
+// different keywords, for the case where both locations have the file.
+const staleDir = mkdtempSync(join(tmpdir(), 'kw-stale-cwd-'));
+mkdirSync(join(staleDir, 'reports'));
+writeFileSync(join(staleDir, 'reports', '001-example-2026-01-01.md'), [
+  '# Evaluation: Example — Data Engineer (stale copy)',
+  '',
+  '## Keywords extracted',
+  'Rust, Haskell',
+  '',
+].join('\n'));
+
+const run = (args, cwd = workDir) => spawnSync(NODE, [join(ROOT, 'keyword-match.mjs'), ...args], {
   encoding: 'utf-8',
-  cwd: workDir,
+  cwd,
   env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
 });
 
@@ -69,6 +81,13 @@ try {
     assert.match(r.stdout, /Python/);
   });
 
+  check('the data root wins when the working directory has a stale copy of the same path', () => {
+    const r = run(['reports/001-example-2026-01-01.md'], staleDir);
+    assert.equal(r.status, 0, describeSpawn(r));
+    assert.match(r.stdout, /\*\*Present \(2\):\*\* Python, Docker/);
+    assert.doesNotMatch(r.stdout, /Rust|Haskell/);
+  });
+
   check('a path found in neither place still stops with "Report not found"', () => {
     const r = run(['reports/999-missing-2026-01-01.md']);
     assert.equal(r.status, 1, describeSpawn(r));
@@ -77,4 +96,5 @@ try {
 } finally {
   rmSync(dataRoot, { recursive: true, force: true });
   rmSync(workDir, { recursive: true, force: true });
+  rmSync(staleDir, { recursive: true, force: true });
 }

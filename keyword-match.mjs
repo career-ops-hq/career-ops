@@ -721,6 +721,29 @@ function refuseNoSkills(sourceLabel) {
 }
 
 /**
+ * A relative report, CV or JD-text path, resolved the way the modes write it.
+ * The modes pass `reports/{###}-….md` and `jds/{slug}.md` relative to the data
+ * root, which is not the process's working directory when the user layer lives
+ * elsewhere (a `.career-ops-data` marker or CAREER_OPS_ROOT). The data root
+ * wins whenever the file exists there, so a stale copy in the checkout can
+ * never be scored in its place; a path found only under the working directory
+ * still resolves there, and a path found in neither place is reported against
+ * the working directory, as before.
+ *
+ * @param {string} arg
+ * @param {string} root
+ * @returns {string}
+ */
+export function resolveUserPath(arg, root) {
+  if (isAbsolute(arg)) return arg;
+  if (root) {
+    const fromRoot = join(root, arg);
+    if (existsSync(fromRoot)) return fromRoot;
+  }
+  return join(process.cwd(), arg);
+}
+
+/**
  * Resolve keywords + provenance for any MatchInput.
  *
  * @param {MatchInput} input
@@ -729,26 +752,6 @@ function refuseNoSkills(sourceLabel) {
  *                     keywordNote: string | null, sourceUrl?: string,
  *                     reportArg?: string }>}
  */
-/**
- * A relative report or CV path, resolved the way the modes write it. The modes
- * pass `reports/{###}-….md` relative to the data root, which is not the
- * process's working directory when the user layer lives elsewhere (a
- * `.career-ops-data` marker or CAREER_OPS_ROOT). The working directory still
- * wins when the file exists there, so a path typed from inside another folder
- * keeps its meaning; only a miss there falls back to the data root.
- *
- * @param {string} arg
- * @param {string} root
- * @returns {string}
- */
-export function resolveUserPath(arg, root) {
-  if (isAbsolute(arg)) return arg;
-  const fromCwd = join(process.cwd(), arg);
-  if (existsSync(fromCwd) || !root) return fromCwd;
-  const fromRoot = join(root, arg);
-  return existsSync(fromRoot) ? fromRoot : fromCwd;
-}
-
 export async function resolveKeywords(input, root) {
   if (input.kind === 'url') {
     const body = await resolveUrlJdBody(input.url);
