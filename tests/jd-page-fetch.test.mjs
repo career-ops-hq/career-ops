@@ -583,6 +583,13 @@ test('shared year or version path segments do not make different job ids match',
   assert.ok(inspectPage(ld('https://careers.example.com/2024/job/1/Some-Title'), Date.now(), 'https://careers.example.com/2024/job/1').found);
 });
 
+test('numeric job ids that look like years still tell two jobs apart', () => {
+  const ld = (url) => `<html><script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Engineer', description: `<p>${BODY}</p>`, url })}</script></html>`;
+  const { inspectPage } = awaitedModule;
+  assert.equal(inspectPage(ld('https://careers.example.com/job/2044'), Date.now(), 'https://careers.example.com/job/2031').found, null);
+  assert.ok(inspectPage(ld('https://careers.example.com/job/2031'), Date.now(), 'https://careers.example.com/job/2031').found);
+});
+
 test('an oversize page proves no closure from its prefix', () => {
   const pad = ' '.repeat(3_100_000);
   const expired = `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: 'E', description: 'x', validThrough: '2020-01-01' })}</script>`;
