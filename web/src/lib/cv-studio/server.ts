@@ -8,7 +8,7 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
-import { htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
+import { escapeHtml, htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
 import { unsupportedClaims } from "./rewrite.mjs";
 import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, type StudioEdits } from "./studio.mjs";
@@ -167,7 +167,11 @@ export async function unsupportedRewriteClaims(text: string, bulletText: string)
   const { verifyFacts, auditClaims } = await coreModule<VerifyCvFacts>("verify-cv-facts");
   const voice = await coreModule<CvVoice>("cv-voice");
   const cvPath = path.join(root, "cv.md");
-  const cv = verifyFacts(text, { sourcePaths: [cvPath, path.join(root, "article-digest.md")], configPath: path.join(root, "config", "cv-facts.json") });
+  // Checked as the list item it will render as: the PDF gate anchors each
+  // <li> to its source bullet (bullet drift, #1411), and a bare string is not
+  // a list item, so a rewrite that changed the verb would pass here and then
+  // block the render on save.
+  const cv = verifyFacts(`<ul><li>${escapeHtml(text)}</li></ul>`, { sourcePaths: [cvPath, path.join(root, "article-digest.md")], configPath: path.join(root, "config", "cv-facts.json") });
   // Wording evidence is cv.md, same as the PDF gate. The tailored bullet is
   // not the candidate's own words. The fact audit below stays on this bullet.
   let cvText = "";
