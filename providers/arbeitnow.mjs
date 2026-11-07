@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { htmlToText } from './_html-to-text.mjs';
+
 // Arbeitnow provider — board-wide aggregator feed (EU/DACH-heavy, but
 // international): https://www.arbeitnow.com/api/job-board-api
 // Response shape: { data: [ { slug, company_name, title, description, remote,
@@ -55,11 +57,15 @@ function resolveMaxPages(entry) {
  *   - company:  `company_name`, falling back to the portal entry name, then
  *               "Arbeitnow".
  *   - location: `location`, with "Remote" appended when `remote` is true.
+ *   - description: `description`, HTML-stripped and capped. It ships in the
+ *               list payload, so it costs no extra request — content_filter,
+ *               country_eligibility_filter and visa_filter all read it, and
+ *               formatScanHistoryRow() fingerprints it. Omitted when empty.
  *   - postedAt: `created_at` (epoch SECONDS) → epoch ms (omitted when absent).
  *
  * @param {any} j
  * @param {string} [fallbackCompany]
- * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number } | null}
+ * @returns {{ title: string, url: string, company: string, location: string, description?: string, postedAt?: number } | null}
  */
 export function normalizeArbeitnowJob(j, fallbackCompany) {
   if (!j || typeof j !== 'object') return null;
@@ -89,8 +95,17 @@ export function normalizeArbeitnowJob(j, fallbackCompany) {
   const baseLocation = typeof j.location === 'string' ? j.location.trim() : '';
   const location = [baseLocation, j.remote === true ? 'Remote' : ''].filter(Boolean).join(', ');
 
-  /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number }} */
+  /** @type {{ title: string, url: string, company: string, location: string, description?: string, postedAt?: number }} */
   const job = { title, url, company, location };
+  // `description` arrives as HTML in the same list payload (no per-job request),
+  // so it is free. Empty/garbage → omitted. Each description-reading filter
+  // sets its own missing-description policy: `content_filter` (scan.mjs:855)
+  // and `country_eligibility_filter` (scan.mjs:936) pass an absent description,
+  // but `visa_filter` with `require_mention: true` rejects it (scan.mjs:1041).
+  if (typeof j.description === 'string') {
+    const description = htmlToText(j.description);
+    if (description) job.description = description;
+  }
   if (Number.isFinite(j.created_at)) job.postedAt = j.created_at * 1000; // epoch seconds → ms
   return job;
 }

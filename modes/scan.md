@@ -248,7 +248,7 @@ Levels are additive — they are executed in order, and results are merged and d
    - The filter applies to every source, including an employer's own ATS board; there is no per-source exemption. An old posting date is not evidence that a role is closed — evergreen roles may remain open for months. To include them, increase the window or disable `max_posting_age_days` (affects all sources), then verify the specific posting before applying. CLI date-window flags still apply independently.
 
 7. **Deduplicate** against 3 sources:
-   - `scan-history.tsv` → exact URL already seen (except rows marked `skipped_title`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa` or `skipped_country_eligibility`, which never count as seen; see Scan History)
+   - `scan-history.tsv` → exact URL already seen (except rows marked `skipped_title`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility` or `skipped_experience`, which never count as seen; see Scan History)
    - `applications.md` → normalized company + role already evaluated
    - `pipeline.md` → exact URL already in pending or processed list
 
@@ -269,9 +269,10 @@ Levels are additive — they are executed in order, and results are merged and d
       - **Active**: visible job title + role description + visible Apply/Submit/Apply Now control inside the main content area. Do not count generic header/navbar/footer text.
       - **Expired** (any of these signals):
         - Final URL contains `?error=true` (Greenhouse redirects here when an offer is closed).
-        - Page contains: "job no longer available" / "no longer open" / "position has been filled" / "this job has expired" / "page not found".
-        - Only navbar and footer are visible, with no JD content (content < ~300 characters).
-   d. If expired: record in `scan-history.tsv` with status `skipped_expired` and discard.
+        - The page's HTTP response status is 404 or 410. A "Page not found" message on a 200 response is not this signal.
+        - Page contains: "job no longer available" / "no longer open" / "position has been filled" / "this job has expired".
+      - **Unconfirmed**: only navbar and footer are visible, with no JD content (content < ~300 characters) and none of the expired signals above. The posting may not have rendered yet, so this is not evidence it closed.
+   d. If expired: record in `scan-history.tsv` with status `skipped_expired` and discard. If unconfirmed: skip it for this scan without recording it, so the next scan checks it again.
    e. If active: continue to step 8.
 
    **Do not interrupt the entire scan if a single URL fails.** If `browser_navigate` or parser errors (timeout, 403, crash, etc.), mark as `skipped_error` and continue with the next one.
@@ -313,7 +314,7 @@ If a non-publicly accessible URL is found:
 | 3 | `portal` | `Ashby — AI PM` | Query name from `portals.yml` |
 | 4 | `title` | `PM AI` | Job title as returned by the ATS |
 | 5 | `company` | `Acme` | Company name |
-| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility`, `skipped_date`, `skipped_invalid_url`, `skipped_blocked_host`, `cooldown:{company}:{until}` |
+| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility`, `skipped_experience`, `skipped_date`, `skipped_invalid_url`, `skipped_blocked_host`, `cooldown:{company}:{until}` |
 | 7 | `location` | `Remote — Europe` | Location string (may be empty); persisted for later auditing |
 | 8 | `fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
 | 9 | `posted_at` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
@@ -323,26 +324,27 @@ If a non-publicly accessible URL is found:
 | 13 | `requisition_id` | `ID2608-00427A` | The employer's requisition id, when the provider reads one from a dedicated ATS field (`Job.requisitionId`); empty otherwise. Company+role dedup keeps two same-titled postings apart when their requisitions differ |
 | 14 | `language` | `en-GB` | Language of the posting text as the source names it (a code or a name), when the provider reports it (`Job.language`); empty otherwise. Read by the opt-in `scan_history.dedup_include_language` |
 | 15 | `listing_key` | `listing_v1_…` | Strong local ATS identity key when the provider supplies a complete resolved identity; blank when it cannot |
+| 16 | `closes_at` | `2026-03-31` | Calendar day the posting closes, when the source already carried one. Empty when it did not. |
 
 Columns are append-only: readers index by position, so new columns arrive at the end and older files keep their shorter rows. Never renumber or reorder. The header is written only when the file is created, so an existing file may still carry a shorter header than the rows being appended to it — that is expected, not corruption.
 
 Cells are stored with reversible spreadsheet-formula escaping: tabs and line breaks become spaces, and a cell starting with `=`, `+`, `-` or `@` — or with apostrophes followed by one of them — gets one more leading `'`, so a spreadsheet never runs it as a formula. `parseScanHistoryLine` (`lib/scan-history-columns.mjs`) strips exactly that one apostrophe, so read rows through it to get the written values back. A reader that splits lines itself sees the stored form.
 
-`skipped_title`, `skipped_location` and `skipped_age` record what `title_filter`, `location_filter` and `max_posting_age_days` removed. They exist so a mis-aimed setting is visible in the data rather than only as a summary counter, and they carry no dedup weight: each names a setting the user edits, so a row written under the old setting must not suppress the same posting once it moves. A keyword added to `title_filter.positive` gets back every title it now matches on the next scan. Each posting gets one such row per status, not one per scan. Only `title_filter` is recorded as `skipped_title`; a rejection by another field declared in `filter_on` is not.
+`skipped_title`, `skipped_location` and `skipped_age` record what `title_filter`, `location_filter` and `max_posting_age_days` removed. They exist so a mis-aimed setting is visible in the data rather than only as a summary counter, and they carry no dedup weight: each names a setting the user edits, so a row written under the old setting must not suppress the same posting once it moves. A keyword added to `title_filter.positive` gets back every title it now matches on the next scan. Each posting gets one such row per status, not one per scan. Only `title_filter` is recorded as `skipped_title`; a rejection by another field declared in `filter_on` is not. With `content_filter.rescue_title_misses: true`, a title miss is decided at the content check instead: it gets a `skipped_title` row only when its description does not keep it, and a filter between the two that drops it first (location, age, salary) books it as that filter's rejection.
 
 `skipped_no_apply_control` marks a page that loaded without a recognised Apply control. It also carries no dedup weight: the check not finding a button is not proof the posting is closed, so the next scan verifies the URL again. Unlike the other two observational statuses, which are decided from data already in hand, this re-check costs a browser load every time the URL comes up. It is recorded once per posting.
 
-`skipped_content`, `skipped_visa` and `skipped_country_eligibility` are written by `scan-dayforce.mjs` for postings its `content_filter`, visa filter and `country_eligibility_filter` removed. They name settings too, so they carry no dedup weight either: widen one of those filters and the next Dayforce scan hands the posting back. `scan.mjs` applies the same three filters but writes no row for them. `skipped_date` is `scan-interamt.mjs`'s incremental cut, a posting published before its last scan, which that scan already covered; it does count as seen.
+`skipped_content`, `skipped_visa` and `skipped_country_eligibility` are written by `scan-dayforce.mjs` for postings its `content_filter`, visa filter and `country_eligibility_filter` removed. They name settings too, so they carry no dedup weight either: widen one of those filters and the next Dayforce scan hands the posting back. `scan.mjs` applies the same three filters but writes no row for them. `skipped_experience` is written by `scan.mjs` for a new posting `experience_filter` dropped (only with `action: drop`; the default `label` keeps it) because its JD states a minimum above your band; like the other config skips it carries no dedup weight, so changing your years or `stretch_years` hands it back. `skipped_date` is `scan-interamt.mjs`'s incremental cut, a posting published before its last scan, which that scan already covered; it does count as seen.
 
 The scanner writes the other statuses in that list itself: `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` comes from the agent workflow above, which also writes `skipped_title` for the titles it filters.
 
 ```tsv
-url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language	listing_key
+url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language	listing_key	closes_at
 https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme			listing_v1_…
-https://...	2026-02-11	ExampleCo	QA Engineer	ExampleCo	added	Hamburg, Germany		2026-02-11			exampleco	REF1234X	de	listing_v1_example
+https://...	2026-02-11	ExampleCo	QA Engineer	ExampleCo	added	Hamburg, Germany		2026-02-11			exampleco	REF1234X	de	listing_v1_example	2026-03-31
 ```
 
-The first row comes from a provider that reports no requisition id or language, so its `requisition_id` and `language` cells are empty while `listing_key` still carries the key from its resolved ATS identity; the second comes from one that reports all three.
+The first row comes from a provider that reports no requisition id or language, so its `requisition_id` and `language` cells are empty while `listing_key` still carries the key from its resolved ATS identity. The second comes from one that reports all three, and a close day. The first row leaves `closes_at` empty.
 
 ### Filtering by posted date
 
@@ -451,6 +453,8 @@ New added to pipeline.md: N
 
 → Run the `pipeline` mode to evaluate the new offers (`/career-ops pipeline` where available, or ask the agent to run `pipeline`).
 ```
+
+**Session title counts:** end the summary with `Title counts: {remaining}/{found}` and the URLs of the postings still counted, so the interactive parent session can rename itself and hand those URLs to `pipeline`. `found` is every posting that passed the scanner's filters plus every search hit taken forward for checking. `remaining` is `found` less each one removed since: a duplicate, a dead or unconfirmed link, a title or location miss. The router's **Session Title** rule (`SKILL.md`, #5303) holds the full definitions. A worker running this mode never renames anything.
 
 ## Managing careers_url
 

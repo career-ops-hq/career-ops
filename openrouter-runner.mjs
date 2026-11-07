@@ -30,9 +30,12 @@ import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
+import { anonymizeContext } from './utils/privacy-filter.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
-import { appendToPipeline, appendToScanHistory, atomicWriteFile } from './scan.mjs';
+import {
+  appendToPipeline, appendToScanHistory, atomicWriteFile, BROWSER_PROCESS_ENV,
+} from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -40,7 +43,17 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
-import { classifyLiveness } from './liveness-core.mjs';
+import { classifyLiveness, isUnreadableVerdict, JOB_ID_PATTERN } from './liveness-core.mjs';
+import { fetchJdViaKnownApi } from './browser-extract.mjs';
+import { HYDRATING_CODES, extractApplyControls, postingIdentity } from './liveness-browser.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
+
+// Ambient privacy guard over global fetch. Installed explicitly here (rather
+// than relying on NODE_OPTIONS) so the OpenRouter path is guarded in a plain
+// checkout. Idempotent — a second install is a no-op.
+installPiiInterceptor();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -68,11 +81,145 @@ function loadEnvFile() {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const OPENROUTER_API_URL    = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
-const MAX_TOKENS            = 8192;
-const RATE_LIMIT_DELAY_MS   = 2500;  // pause between requests on free tier
-const MODEL_TIMEOUT_MS      = 15_000; // abort a single model call after 15 s
+const MAX_TOKENS = 8192;
+const RATE_LIMIT_DELAY_MS = 2500;  // pause between requests on free tier
+const DEFAULT_MODEL_TIMEOUT_MS = 120_000;
+// setTimeout() treats delays above 2^31-1 ms as 1 ms, so larger overrides are rejected.
+const MAX_TIMEOUT_MS = 2_147_483_647;
+const parseTimeoutOverride = (val) => {
+  if (typeof val !== 'string') return null;
+  const trimmed = val.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= MAX_TIMEOUT_MS ? parsed : null;
+};
+// Resolved on each call (not at import) so overrides loaded later from .env apply.
+const getModelTimeoutMs = () =>
+  parseTimeoutOverride(process.env.CAREER_OPS_TIMEOUT_MS) ??
+  parseTimeoutOverride(process.env.OPENROUTER_TIMEOUT_MS) ??
+  DEFAULT_MODEL_TIMEOUT_MS;
+
+// ---------------------------------------------------------------------------
+// Quota & response validation errors
+// ---------------------------------------------------------------------------
+export class QuotaExhaustedError extends Error {
+  constructor(message = 'OpenRouter free-model daily quota exhausted') {
+    super(message);
+    this.name = 'QuotaExhaustedError';
+  }
+}
+
+export function isDailyQuotaExhausted(status, bodyText) {
+  if (status !== 429) return false;
+  const lower = String(bodyText || '').toLowerCase();
+  return lower.includes('free-models-per-day') ||
+    lower.includes('daily limit exceeded') ||
+    lower.includes('free model daily quota') ||
+    lower.includes('per-day limit') ||
+    lower.includes('daily quota exceeded');
+}
+
+export function validateEvaluationResponse(content) {
+  if (!content || typeof content !== 'string') {
+    return { ok: false, reason: 'empty_response' };
+  }
+  const text = content.trim();
+  if (text.length === 0) {
+    return { ok: false, reason: 'empty_response' };
+  }
+
+  // 1. Reject malformed tool-call markup
+  const toolCallPatterns = [
+    /<tool_call[\s>]/i,
+    /<\/tool_call>/i,
+    /<dots_function_call[\s>]/i,
+    /<\/dots_function_call>/i,
+    /<\|tool_call_start\|>/i,
+    /<\|tool_call_end\|>/i,
+    /<arg_key>/i,
+    /<arg_value>/i,
+    /<parameter[\s>]/i,
+    /<\/parameter>/i,
+    /<invoke[\s>]/i,
+    /<\/invoke>/i,
+    /playwright<param_key>/i,
+  ];
+  for (const pat of toolCallPatterns) {
+    if (pat.test(text)) {
+      return { ok: false, reason: 'contains_tool_call_markup' };
+    }
+  }
+
+  // 2. Reject JSON tool invocation requests
+  if (/^\s*\[?\s*\{\s*"tool"\s*:/i.test(text) ||
+    /\{\s*"tool"\s*:\s*"(?:browser_navigate|browser_snapshot|bash|playwright)"/i.test(text) ||
+    /\{\s*"command"\s*:\s*"[^"]*"\s*,\s*"description"\s*:/i.test(text)) {
+    return { ok: false, reason: 'json_tool_request' };
+  }
+
+  // 3. Reject browser commands / session placeholders
+  if (/(?:browser_navigate|browser_snapshot)\s*[<{("']/i.test(text) ||
+    /(?:<arg_value>|["']url["']:\s*["'])https?:\/\/[^\s"']+.*?browser_navigate/i.test(text) ||
+    /^\s*Browser session opened\./im.test(text) ||
+    /^\s*visiting URL:\s*http/im.test(text)) {
+    return { ok: false, reason: 'browser_command_instruction' };
+  }
+
+  // 4. Reject safety stubs / extraction fallbacks
+  if (/^\s*User Safety:\s*safe/im.test(text)) {
+    return { ok: false, reason: 'safety_filter_placeholder' };
+  }
+  if (/You need to enable JavaScript to run this app/i.test(text)) {
+    return { ok: false, reason: 'unrendered_spa_error' };
+  }
+  if (/^\s*fetching job description from URL/im.test(text) && text.length < 600) {
+    return { ok: false, reason: 'incomplete_fetch_placeholder' };
+  }
+
+  // 5. Reject shell command instructions presented instead of report
+  if (/```(?:bash|sh)\s*\n\s*(?:node browser-extract\.mjs|cat \/workspace\/)/i.test(text) ||
+    /\bnode\s+reserve-report-num(?:\.mjs)?\b/i.test(text) ||
+    /node browser-extract\.mjs.*--mode jd/i.test(text) ||
+    /cat \/workspace\/data\/blacklist/i.test(text)) {
+    return { ok: false, reason: 'shell_command_instruction' };
+  }
+
+  // 6. Minimum content length for a genuine evaluation report
+  if (text.length < 350) {
+    return { ok: false, reason: 'content_too_short' };
+  }
+
+  // 7. Require essential sections from the A-G evaluation format
+  const blocks = [
+    ['A', /(?:^|\n)#{1,4}\s*(?:A(?![A-Za-z0-9])[).:-]?\s*|Block A\b|Role Summary\b)/im],
+    ['B', /(?:^|\n)#{1,4}\s*(?:B(?![A-Za-z0-9])[).:-]?\s*|Block B\b|Match with CV\b|CV Match\b)/im],
+    ['C', /(?:^|\n)#{1,4}\s*(?:C(?![A-Za-z0-9])[).:-]?\s*|Block C\b|Level and Strategy\b)/im],
+    ['D', /(?:^|\n)#{1,4}\s*(?:D(?![A-Za-z0-9])[).:-]?\s*|Block D\b|Comp and Demand\b)/im],
+    ['E', /(?:^|\n)#{1,4}\s*(?:E(?![A-Za-z0-9])[).:-]?\s*|Block E\b|Customization Plan\b|Personalization Plan\b|Tailoring Plan\b)/im],
+    ['F', /(?:^|\n)#{1,4}\s*(?:F(?![A-Za-z0-9])[).:-]?\s*|Block F\b|Interview Plan\b)/im],
+    ['G', /(?:^|\n)#{1,4}\s*(?:G(?![A-Za-z0-9])[).:-]?\s*|Block G\b|Posting Legitimacy\b|Legitimacy\b)/im],
+  ];
+
+  for (const [letter, pattern] of blocks) {
+    if (!pattern.test(text)) {
+      return { ok: false, reason: `missing_block_${letter}` };
+    }
+  }
+
+  // 8. Require Score or Decision
+  const hasScoreOrDecision = /(?:^|\n)\s*\*?\*?\s*(?:Score|Puntuaci[oó]n|Note|Bewertung)\s*:\*?\*?\s*\d/im.test(text) ||
+    /(?:^|\n)\s*\*?\*?\s*(?:Decision|D[eé]cision|Entscheidung)\s*:\*?\*?\s*\*?\*?(?:Apply|Consider|Research first|Skip)/im.test(text) ||
+    /(?:^|\n)\s*score:\s*\d+(?:\.\d+)?/im.test(text) ||
+    /(?:^|\n)\s*final_decision:\s*["']?(?:Apply|Consider|Research first|Skip)/im.test(text);
+
+  if (!hasScoreOrDecision) {
+    return { ok: false, reason: 'missing_score_or_decision' };
+  }
+
+  return { ok: true };
+}
 
 // Provider priority order — models are sorted by provider prefix, not hardcoded names.
 // Add, remove, or reorder providers here; model names are resolved at runtime from the API.
@@ -96,7 +243,7 @@ let modelIndex = 0;      // current position in rotation
 // Persistent blacklist file — survives process restarts. data/ is User Layer
 // (gitignored runtime state), so it follows the data root like every other
 // data/ path this runner touches.
-const BLACKLIST_DIR  = path.join(getCareerOpsRoot(), 'data');
+const BLACKLIST_DIR = path.join(getCareerOpsRoot(), 'data');
 const BLACKLIST_FILE = path.join(BLACKLIST_DIR, 'model-blacklist.json');
 function loadPersistedBlacklist() {
   try {
@@ -108,7 +255,7 @@ function saveBlacklist(set) {
   try {
     fs.mkdirSync(BLACKLIST_DIR, { recursive: true });
     fs.writeFileSync(BLACKLIST_FILE, JSON.stringify([...set], null, 2), 'utf-8');
-  } catch {}
+  } catch { }
 }
 
 // Models that failed permanently (403, timeout, persistent 429) — never retry
@@ -152,7 +299,13 @@ async function loadFreeModels() {
 
     freeModels = list.sort((a, b) => {
       const diff = priorityOf(a) - priorityOf(b);
-      return diff !== 0 ? diff : a.localeCompare(b);
+      if (diff !== 0) return diff;
+      if (providerOf(a) === 'minimax' && providerOf(b) === 'minimax') {
+        const flash = 'minimax/minimax-m3.1-flash:free';
+        if (a === flash) return b === flash ? 0 : -1;
+        if (b === flash) return 1;
+      }
+      return a.localeCompare(b);
     });
 
     console.log(`[models] ${freeModels.length} free models loaded from OpenRouter API.`);
@@ -162,7 +315,7 @@ async function loadFreeModels() {
     throw new Error(
       `[models] Failed to fetch free model list: ${reason}. ` +
       (hasKey ? 'Check that your API key is valid and that network access to OpenRouter is available.'
-               : 'OPENROUTER_API_KEY is not set — copy .env.example to .env and add your key.')
+        : 'OPENROUTER_API_KEY is not set — copy .env.example to .env and add your key.')
     );
   }
 
@@ -268,21 +421,28 @@ async function callOpenRouter(systemPrompt, userMessage) {
       max_tokens: MAX_TOKENS,
     });
     const ctrl = new AbortController();
-    const timerId = setTimeout(() => ctrl.abort(), MODEL_TIMEOUT_MS);
+    const timeoutMs = getModelTimeoutMs();
+    const timerId = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
+      // Privacy gate: the complete serialized request is inspected after prompt
+      // construction and before the network call. Throws (nothing sent) on a hit.
+      assertLlmRequestAllowed(OPENROUTER_API_URL, body);
       const resp = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${key}`,
-          'Content-Type':  'application/json',
-          'HTTP-Referer':  'https://github.com/career-ops-hq/career-ops',
-          'X-Title':       'career-ops',
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/career-ops-hq/career-ops',
+          'X-Title': 'career-ops',
         },
         body,
         signal: ctrl.signal,
       });
       if (!resp.ok) {
         const t = await resp.text();
+        if (isDailyQuotaExhausted(resp.status, t)) {
+          throw new QuotaExhaustedError(`OpenRouter daily free-tier quota exhausted (${t.slice(0, 120)})`);
+        }
         throw new Error(`HTTP ${resp.status}: ${t.slice(0, 120)}`);
       }
       const data = await resp.json();
@@ -293,7 +453,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const usage = normalizeOpenAIUsage(data.usage);
       return { content, usage };
     } catch (e) {
-      if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${MODEL_TIMEOUT_MS / 1000}s`);
+      if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${timeoutMs / 1000}s`);
       throw e;
     } finally {
       clearTimeout(timerId);
@@ -328,27 +488,33 @@ async function callOpenRouter(systemPrompt, userMessage) {
       });
 
       const controller = new AbortController();
-      const timerId = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+      const timeoutMs = getModelTimeoutMs();
+      const timerId = setTimeout(() => controller.abort(), timeoutMs);
       let data;
       try {
+        // Privacy gate (rotation path). Same rule as the pinned-model path above.
+        assertLlmRequestAllowed(OPENROUTER_API_URL, body);
         const resp = await fetch(OPENROUTER_API_URL, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${key}`,
-            'Content-Type':  'application/json',
-            'HTTP-Referer':  'https://github.com/career-ops-hq/career-ops',
-            'X-Title':       'career-ops',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/career-ops-hq/career-ops',
+            'X-Title': 'career-ops',
           },
           body,
           signal: controller.signal,
         });
         if (!resp.ok) {
           const t = await resp.text();
+          if (isDailyQuotaExhausted(resp.status, t)) {
+            throw new QuotaExhaustedError(`OpenRouter daily free-tier quota exhausted (${t.slice(0, 120)})`);
+          }
           throw new Error(`HTTP ${resp.status}: ${t.slice(0, 120)}`);
         }
         data = await resp.json();
       } catch (e) {
-        if (e.name === 'AbortError') throw new Error(`Timeout after ${MODEL_TIMEOUT_MS / 1000}s`);
+        if (e.name === 'AbortError') throw new Error(`Timeout after ${timeoutMs / 1000}s`);
         throw e;
       } finally {
         clearTimeout(timerId);
@@ -366,16 +532,25 @@ async function callOpenRouter(systemPrompt, userMessage) {
       return { content, usage };
 
     } catch (e) {
+      if (e?.code === 'PRIVACY_GUARD_BLOCKED') throw e;
+      if (e instanceof QuotaExhaustedError || e.name === 'QuotaExhaustedError') {
+        console.log(`FAILED (${e.message})`);
+        throw e;
+      }
       lastError = e;
       const msg = e.message.split('\n')[0];
 
-          const is403     = msg.includes('HTTP 403');
+      const is403 = msg.includes('HTTP 403');
       const isTimeout = msg.startsWith('Timeout');
-      const is429     = msg.includes('HTTP 429') || msg.includes('rate-li') || msg.includes('rate limit') || msg.includes('temporarily rate');
-      if (is403 || isTimeout) {
+      const is429 = msg.includes('HTTP 429') || msg.includes('rate-li') || msg.includes('rate limit') || msg.includes('temporarily rate');
+      if (is403) {
         blacklistedModels.add(model);
         saveBlacklist(blacklistedModels);
         console.log(`SKIP (blacklisted: ${msg})`);
+      } else if (isTimeout) {
+        // Do not permanently disk-blacklist models on transient timeouts (Safeguard 8)
+        console.log(`FAILED (${msg})`);
+        await new Promise(r => setTimeout(r, Math.min(800 * Math.pow(1.5, attempt), 3000)));
       } else if (is429) {
         rateLimitCounts[model] = (rateLimitCounts[model] ?? 0) + 1;
         if (rateLimitCounts[model] >= 3) {
@@ -384,12 +559,12 @@ async function callOpenRouter(systemPrompt, userMessage) {
           console.log(`SKIP (auto-blacklisted: persistent 429)`);
         } else {
           console.log(`FAILED (HTTP 429 [${rateLimitCounts[model]}/3])`);
-          await new Promise(r => setTimeout(r, 800));
+          await new Promise(r => setTimeout(r, Math.min(800 * Math.pow(1.5, attempt), 3000)));
         }
       } else {
         delete rateLimitCounts[model];
         console.log(`FAILED (${msg})`);
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, Math.min(800 * Math.pow(1.5, attempt), 3000)));
       }
     }
   }
@@ -397,36 +572,118 @@ async function callOpenRouter(systemPrompt, userMessage) {
   throw new Error(`All ${active.length} active models failed. Last error: ${lastError?.message}`);
 }
 
-// Exported so tests/openrouter-runner-429-reset.test.mjs can script fetch()
+// Exported so tests/openrouter-runner-429-reset.test.mjs and
+// tests/openrouter-runner-validation.test.mjs can script fetch()
 // against the real rotation and blacklist logic without a network or a CLI run.
-export { callOpenRouter, rateLimitCounts, blacklistedModels };
+export {
+  callOpenRouter,
+  rateLimitCounts,
+  blacklistedModels,
+  getModelTimeoutMs,
+  cmdEvaluate,
+  cmdPipeline,
+};
 
 // ---------------------------------------------------------------------------
 // Context loading
 // ---------------------------------------------------------------------------
 function loadContext() {
-  return {
+  // Opt-in (privacy.redact_contact_info in config/profile.yml): keep name and
+  // contact details out of the prompt sent to the model.
+  return anonymizeContext({
     cv:          readFile('cv.md')               ?? 'CV not found.',
     profile:     readProfile()                   ?? '',
     shared:      readSystemFile('modes/_shared.md') ?? '',
     profileMode: readFile('modes/_profile.md')   ?? '',
-  };
+  });
 }
 
-export function buildSystemPrompt(modeContent, ctx) {
-  const languageInstruction = outputLanguageInstruction(parseOutputLanguage(ctx.profile));
+// The mode files are written for Claude Code, which has Playwright, WebFetch,
+// Bash and file reads. This runner sends no `tools`, so a model that follows
+// them answers with tool calls and no evaluation (#5809). Say so before them,
+// and drop the parts that tell the model to use tools.
+function noToolsNote(evaluate) {
   return [
-    ctx.shared,
+    'RUNNER NOTE: you have no tools in this run.',
+    // Only evaluate sends a posting; apply sends an evaluation report.
+    evaluate
+      ? 'The job text is in the user message and the CV is below.'
+      : 'Everything you need is in the user message and the CV below.',
+    'Do not navigate, fetch, read files or run commands, and ignore any instruction below to do so.',
+  ].join('\n');
+}
+
+// Matched by heading, not line number, so edits to modes/ don't move them. A
+// section runs to the next heading of the same or a higher level, or to its
+// `until` line. A heading that is gone leaves the text as it was.
+const TOOL_SECTIONS = [
+  '## Liveness gate (URL inputs)',
+  '## Bounded Research Budget',
+  '### Tools',
+  // Stops before the agency-confirmation rule, which the runner keeps.
+  { heading: '### Subagent delegation (cost guardrail)', until: '<!-- guardrail:agency-confirmation -->' },
+  '### Prior-contact FYI (non-scoring)',
+  '### 1b. Embed ATS keyword coverage',
+  '### 2. Record in tracker',
+  '### 3. Salary observations (desired ask only)',
+];
+// Single lines that tell the model to run a command or search, by how they start.
+const TOOL_LINES = [
+  '1b. **First evaluation of each session:** Run `node cv-sync-check.mjs`',
+  '4. Use WebSearch for comp and company data',
+  '- Search: `"{company}"',
+  '- `{###}` = next sequential number',
+];
+const READ_CV_RULE = '**RULE: NEVER hardcode metrics from proof points.**';
+
+export function stripToolInstructions(text) {
+  let lines = text.split('\n');
+  for (const section of TOOL_SECTIONS) {
+    const { heading, until } = typeof section === 'string' ? { heading: section } : section;
+    const start = lines.findIndex(l => l.trimEnd() === heading);
+    if (start === -1) continue;
+    const level = heading.match(/^#+/)[0].length;
+    const next = lines.findIndex((l, i) => i > start
+      && (new RegExp(`^#{1,${level}} `).test(l) || (until !== undefined && l.trimEnd() === until)));
+    lines.splice(start, (next === -1 ? lines.length : next) - start);
+  }
+  lines = lines.filter(l => !TOOL_LINES.some(p => l.startsWith(p)));
+  lines = lines.map(l => (l.startsWith(READ_CV_RULE) ? `${READ_CV_RULE} Take them from the CV below.` : l));
+  return lines.join('\n');
+}
+
+export function buildSystemPrompt(modeContent, ctx, { evaluate = false } = {}) {
+  const languageInstruction = outputLanguageInstruction(parseOutputLanguage(ctx.profile));
+
+  const executionBoundary = [
+    '═══════════════════════════════════════════════════════',
+    'CRITICAL OPERATING RULES FOR THIS SESSION',
+    '═══════════════════════════════════════════════════════',
+    evaluate
+      ? '1. You are a standalone evaluation report writer, NOT an interactive tool-using CLI agent.'
+      : '1. You generate application form answers from the supplied evaluation report, NOT an interactive tool-using CLI agent.',
+    '2. You do NOT have access to WebSearch, Playwright, bash, file-writing, or any external tools.',
+    '3. Do NOT emit function calls, tool calls (<tool_call>, <dots_function_call>, <|tool_call_start|>), JSON tool requests, or XML invocation tags.',
+    '4. Do NOT output shell commands or code snippets asking to execute tools (such as browser-extract, reserve-report-num, curl, or bash).',
+    '5. All needed job description text and candidate data are already provided below.',
+    ...(evaluate ? [
+      '6. Generate the complete, standalone Markdown evaluation report covering Blocks A through G directly.',
+    ] : []),
+    '═══════════════════════════════════════════════════════',
+  ].join('\n');
+
+  return [
+    noToolsNote(evaluate),
+    executionBoundary,
+    stripToolInstructions(ctx.shared),
     ctx.profileMode,
-    modeContent,
+    stripToolInstructions(modeContent),
     '---',
     'CANDIDATE PROFILE (YAML):',
     ctx.profile,
     '---',
-    'CV (Markdown):',
+    'CANDIDATE CV:',
     ctx.cv,
-    '---',
-    'OUTPUT LANGUAGE:',
     languageInstruction,
   ].filter(Boolean).join('\n\n');
 }
@@ -452,8 +709,10 @@ function assertSafeRemoteUrl(url) {
 }
 
 // Verdicts from the liveness check that mean the page is not an open posting
-// that can be read: besides any `expired` one (404, nav/footer text only, a
-// closed or listing page), a bot wall or a redirect away from the posting.
+// that can be read: besides any `expired` one (404, a closed or listing page),
+// a page too short to read (isUnreadableVerdict: nav/footer only, or not
+// rendered yet, which classifyLiveness reports as `uncertain`), a bot wall or
+// a redirect away from the posting.
 const UNREADABLE_PAGE_CODES = new Set(['bot_challenge', 'redirected_off_posting']);
 
 // Why a fetched page holds no job description to evaluate, or null when it
@@ -463,35 +722,126 @@ const UNREADABLE_PAGE_CODES = new Set(['bot_challenge', 'redirected_off_posting'
 export function unreadableJobPage({ status = 0, requestedUrl = '', finalUrl = '', text = '' } = {}) {
   if (status >= 400) return `HTTP ${status}`;
   const verdict = classifyLiveness({ status, requestedUrl, finalUrl, bodyText: text });
-  if (verdict.result === 'expired' || UNREADABLE_PAGE_CODES.has(verdict.code)) {
+  if (verdict.result === 'expired' || isUnreadableVerdict(verdict) || UNREADABLE_PAGE_CODES.has(verdict.code)) {
     return `${verdict.code}: ${verdict.reason}`;
   }
   return null;
 }
 
-async function fetchJobPage(url) {
+// What the page read strips before the text is taken: it is not job content.
+const NON_CONTENT_SELECTOR = 'script,style,nav,footer,header';
+
+// Most text the runner keeps of one job description. Handed to the API fetcher
+// too, so it does not cut the text short of what the slices below would keep.
+const JD_TEXT_CAP = 16_000;
+
+// Wait for a single-page app to render its job description, at most 15 s. The
+// wait ends once the text the read will keep (the main content, minus
+// nav/header/footer and what is not shown) holds more than 1500 chars. Counting
+// the whole body let a long nav or a consent panel pass while the description
+// still said "Loading...". The count leaves the live DOM alone; the read strips
+// it afterwards. A page that stays shorter (a short posting) ends the wait at
+// the first decisive liveness verdict instead, the rule liveness-browser.mjs
+// polls by: any code outside HYDRATING_CODES. A decisive verdict ends it only
+// for a closed posting, or when the text the read keeps passes
+// unreadableJobPage: an apply control above a "Loading..." description is
+// decisive but not yet readable. Not when the text stops changing, as a
+// spinner holds it constant on a live page. An HTTP error status (`status` >=
+// 400) has nothing to wait for; the caller reads the status.
+export async function waitForJobText(page, { status = 0, url = '' } = {}) {
+  if (status >= 400) return;
+  const deadline = Date.now() + 15_000;
+  const requested = url ? postingIdentity(url) : { postingId: null };
+  for (;;) {
+    try {
+      const reading = await page.evaluate((selector) => {
+        const root = document.querySelector('main, [role="main"], article') || document.body || document;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let length = 0;
+        const parts = [];
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const el = node.parentElement;
+          if (!el || el.closest(selector) || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) continue;
+          length += node.nodeValue.trim().length;
+          if (length > 1500) return { long: true };
+          parts.push(node.nodeValue);
+        }
+        return { long: false, bodyText: document.body?.innerText ?? '', kept: parts.join(' ') };
+      }, NON_CONTENT_SELECTOR);
+      if (reading.long) return;
+      // The apply controls are read as liveness-browser's readPage reads them,
+      // with the same posting identity.
+      const finalUrl = page.url();
+      const landed = postingIdentity(finalUrl);
+      const anotherPosting = requested.postingId && landed.postingId !== requested.postingId;
+      const applyControls = await page.evaluate(extractApplyControls, {
+        ...(anotherPosting ? { postingId: null, postingSegment: null } : landed),
+        pageUrl: finalUrl,
+        idPattern: JOB_ID_PATTERN,
+      });
+      const { bodyText, kept } = reading;
+      const verdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
+      if (!HYDRATING_CODES.has(verdict.code)) {
+        // An apply control is a decisive verdict even over a description that
+        // still says "Loading...": the wait ends only on a closed posting or
+        // once the text the read keeps is readable.
+        if (verdict.result === 'expired') return;
+        const text = kept.replace(/\s+/g, ' ').trim();
+        if (!unreadableJobPage({ status, requestedUrl: url, finalUrl, text })) return;
+      }
+    } catch {
+      // the page navigated or rebuilt its DOM mid-read; try again
+    }
+    if (Date.now() + 250 > deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+// `fetchApi` is a test seam for the ATS API fetch; the default is the real one.
+export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) {
   assertSafeRemoteUrl(url);
+  const viaApi = await fetchApi(url, JD_TEXT_CAP);
+  if (viaApi?.text) {
+    const { title, text } = viaApi;
+    // The title leads the content, as fetch-jd.mjs prints it: the normalizers
+    // keep it apart from the text and a description need not repeat it.
+    const unreadable = unreadableJobPage({ status: 200, requestedUrl: url, finalUrl: url, text });
+    if (!unreadable) return (title ? `${title}\n\n${text}` : text).slice(0, JD_TEXT_CAP);
+    // The ATS says the posting is closed (Workday canApply, SmartRecruiters
+    // active): a browser read would only lose that. Any other unreadable
+    // reason (too short ...) still falls through to the page.
+    if (classifyLiveness({ status: 200, requestedUrl: url, finalUrl: url, bodyText: text }).result === 'expired') {
+      // Left pending in pipeline.md like any unreadable page (#5814): cmdPipeline
+      // marks a row done only when cmdEvaluate returns a report.
+      throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
+    }
+  }
   let chromium;
-  try {
-    ({ chromium } = await import('playwright'));
-  } catch {
-    console.warn('[fetch] Playwright unavailable — falling back to plain fetch.');
+  if (!process.env.CAREER_OPS_NO_PLAYWRIGHT) {
+    try {
+      ({ chromium } = await import('playwright'));
+    } catch {
+      console.warn('[fetch] Playwright unavailable — falling back to plain fetch.');
+    }
   }
 
   if (chromium) {
     let browser;
     let unreadable = null;
     try {
-      browser = await chromium.launch({ headless: true });
+      browser = await chromium.launch(browserLaunchOptions(
+        { headless: true },
+        { projectRoot: DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+      ));
       const page = await browser.newPage();
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForTimeout(2000); // wait for SPA render
-      const text = await page.evaluate(() => {
-        document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
+      await waitForJobText(page, { status: response?.status() ?? 0, url }); // wait for SPA render
+      const text = await page.evaluate((selector) => {
+        document.querySelectorAll(selector).forEach(el => el.remove());
         return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
-      });
+      }, NON_CONTENT_SELECTOR);
       unreadable = unreadableJobPage({ status: response?.status() ?? 0, requestedUrl: url, finalUrl: page.url(), text });
-      if (!unreadable) return text.slice(0, 16_000);
+      if (!unreadable) return text.slice(0, JD_TEXT_CAP);
     } catch (e) {
       console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
     } finally {
@@ -511,7 +861,7 @@ async function fetchJobPage(url) {
     const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
     if (unreadable) throw new Error(`no job description (${unreadable})`);
-    return text.slice(0, 16_000);
+    return text.slice(0, JD_TEXT_CAP);
   } catch (e) {
     throw new Error(`Could not fetch job page: ${e.message}`);
   }
@@ -566,9 +916,9 @@ function readPipeline() {
     if (m) {
       const parts = m[1].split(' | ');
       pending.push({
-        url:     parts[0]?.trim() ?? '',
+        url: parts[0]?.trim() ?? '',
         company: parts[1]?.trim() ?? 'Unknown',
-        role:    parts[2]?.trim() ?? 'Unknown',
+        role: parts[2]?.trim() ?? 'Unknown',
       });
     }
   }
@@ -737,12 +1087,15 @@ async function cmdEvaluate(input, ctx) {
   }
 
   console.log('\nEvaluating...');
-  const systemPrompt = buildSystemPrompt(modeContent, ctx);
+  const systemPrompt = buildSystemPrompt(modeContent, ctx, { evaluate: true });
 
   let resultObj;
   try {
     resultObj = await callOpenRouter(systemPrompt, `Evaluate this job listing:\n\n${jdText}`);
   } catch (e) {
+    if (e.name === 'QuotaExhaustedError' || e instanceof QuotaExhaustedError) {
+      throw e;
+    }
     console.error(`OpenRouter error: ${e.message}`);
     return null;
   }
@@ -754,7 +1107,15 @@ async function cmdEvaluate(input, ctx) {
   const notEvaluated = result.match(/^---DEAD_POSTING---\s*$|^\s*(?:status:\s*)?needs_confirmation\b.*$/m);
   if (notEvaluated) {
     console.error(`Not evaluated, nothing saved. The model replied: ${notEvaluated[0].trim()}`);
-    return null;
+    return { success: false, reason: 'not_evaluated' };
+  }
+
+  // Validate the evaluation response BEFORE reserving a report number or writing anything!
+  const validation = validateEvaluationResponse(result);
+  if (!validation.ok) {
+    console.error(`\n❌ Evaluation rejected by validation: ${validation.reason}`);
+    console.error(`   Output failed validation check (${validation.reason}). Report will NOT be marked successful.`);
+    return { success: false, reason: validation.reason };
   }
 
   let reservedNumbers;
@@ -770,15 +1131,15 @@ async function cmdEvaluate(input, ctx) {
 
   try {
     // Save report
-    const today   = localToday();
-    const num     = reservedNumbers[0];
-    const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
-    const numStr  = formatReportNumber(num);
+    const today = localToday();
+    const num = reservedNumbers[0];
+    const slug = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
+    const numStr = formatReportNumber(num);
     const relPath = `reports/${numStr}-${slug}-${today}.md`;
 
     // Extract Legitimacy from LLM output or fall back to placeholder
     const legitMatch = result.match(/\*\*Legitimacy:\*\*\s*([^\n]+)/);
-    const legitLine  = legitMatch ? `**Legitimacy:** ${legitMatch[1].trim()}` : '**Legitimacy:** unconfirmed';
+    const legitLine = legitMatch ? `**Legitimacy:** ${legitMatch[1].trim()}` : '**Legitimacy:** unconfirmed';
     writeFile(relPath, `**URL:** ${input || '(pasted)'}\n${legitLine}\n\n${withJdArchiveSection(result, archiveText)}`);
 
     // Capture the DENOMINATOR when the model writes one. The old pattern took
@@ -796,17 +1157,17 @@ async function cmdEvaluate(input, ctx) {
     // matched 3/4 axes`) is refused as N/A rather than guessed at. That is the
     // trade the shared helper already documents and the gemini path already
     // pins: N/A is recoverable, a wrong score is not.
-    const scoreMatch  = result.match(/(?:score|puntuaci[oó]n)[^\d]*(\d+(?:\.\d+)?[^\r\n]*)/i);
+    const scoreMatch = result.match(/(?:score|puntuaci[oó]n)[^\d]*(\d+(?:\.\d+)?[^\r\n]*)/i);
     // An unparseable score used to become the EMPTY string, and merge-tracker
     // refuses a blank required cell ("use the documented sentinel rather than a
     // blank cell") -- so the evaluation was skipped whole, the same loss #3796
     // documents for the drifted copies. The shared helper returns the `N/A`
     // sentinel (#1799), which merges as an unscored row instead of as nothing.
-    const scoreStr    = normalizedTrackerScore(scoreMatch ? scoreMatch[1] : '');
+    const scoreStr = normalizedTrackerScore(scoreMatch ? scoreMatch[1] : '');
     const companyName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
-    const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
-    const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
+    const reportLink = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
+    const tsvLine = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
+    const tsvFile = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
     // Header row, then the single data row. merge-tracker.mjs resolves the
     // fields by NAME when the header is present (#3517), so this row cannot be
     // read into the wrong columns. (Headerless files still work; they are the
@@ -819,7 +1180,7 @@ async function cmdEvaluate(input, ctx) {
     console.log(result);
     console.log('\n─────────────────────────────────────────────────────\n');
 
-    return relPath;
+    return { success: true, relPath, score: scoreStr };
   } finally {
     try {
       await releaseReportNumbers(reservedNumbers, { reportsDir: path.join(DATA_ROOT, 'reports') });
@@ -830,30 +1191,43 @@ async function cmdEvaluate(input, ctx) {
 }
 
 // -- PIPELINE --
-async function cmdPipeline(ctx) {
+async function cmdPipeline(ctx, options = {}) {
   const pending = readPipeline();
   if (pending.length === 0) {
     console.log('No pending listings in pipeline.md.');
     return;
   }
 
-  console.log(`Processing ${pending.length} pending listing(s) from pipeline.md...\n`);
+  const isOne = options.one === true || options.limit === 1;
+  const toProcess = isOne ? pending.slice(0, 1) : pending;
 
-  for (let i = 0; i < pending.length; i++) {
-    const item = pending[i];
-    console.log(`\n[${i + 1}/${pending.length}] ${item.company} — ${item.role}`);
+  console.log(`Processing ${toProcess.length} pending listing(s) from pipeline.md${isOne ? ' (one-job mode)' : ''}...\n`);
+
+  for (let i = 0; i < toProcess.length; i++) {
+    const item = toProcess[i];
+    console.log(`\n[${i + 1}/${toProcess.length}] ${item.company} — ${item.role}`);
     try {
-      const report = await cmdEvaluate(item.url, ctx);
-      if (report) await markPipelineDone(item.url);
+      const res = await cmdEvaluate(item.url, ctx);
+      if (res && res.success === true) {
+        await markPipelineDone(item.url);
+        console.log(`  Marked complete in pipeline: ${item.company} — ${item.role}`);
+      } else {
+        console.warn(`  Evaluation incomplete or failed. Listing preserved as pending in pipeline.md for retry.`);
+      }
     } catch (e) {
+      if (e.name === 'QuotaExhaustedError' || e instanceof QuotaExhaustedError) {
+        console.error(`\n🛑 OpenRouter daily quota exhausted: ${e.message}`);
+        console.error('Stopping pipeline immediately to avoid wasting requests.');
+        break;
+      }
       console.error(`  Error: ${e.message}`);
     }
-    if (i < pending.length - 1) {
+    if (i < toProcess.length - 1) {
       await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY_MS));
     }
   }
 
-  console.log('\n✅ Pipeline processing complete.\n');
+  console.log('\n✅ Pipeline processing finished.\n');
 }
 
 // -- APPLY --
@@ -931,7 +1305,7 @@ async function cmdApply(ref, ctx) {
 // Only run the CLI when invoked directly (`node openrouter-runner.mjs ...`), so the
 // module can be imported (e.g. by test-all.mjs) without executing a command.
 const invokedDirectly = isMainModule(import.meta.url);
-const [,, command, ...args] = invokedDirectly ? process.argv : [];
+const [, , command, ...args] = invokedDirectly ? process.argv : [];
 if (invokedDirectly) loadEnvFile();
 const ctx = invokedDirectly ? loadContext() : null;
 
@@ -951,7 +1325,8 @@ if (invokedDirectly) switch (command) {
     break;
 
   case 'pipeline':
-    await cmdPipeline(ctx);
+    const isOneJob = args.includes('--one') || args.includes('-1') || args.includes('--limit=1');
+    await cmdPipeline(ctx, { one: isOneJob });
     break;
 
   case 'apply':
@@ -973,6 +1348,7 @@ COMMANDS:
   node openrouter-runner.mjs evaluate <url>    → Evaluate a listing by URL
   node openrouter-runner.mjs evaluate          → Paste a job description interactively
   node openrouter-runner.mjs pipeline          → Batch-evaluate all pending entries in pipeline.md
+  node openrouter-runner.mjs pipeline --one    → Batch-evaluate only 1 pending entry (test mode)
   node openrouter-runner.mjs apply <report_no> → Generate application form answers from a report
   node openrouter-runner.mjs models            → List available free models from OpenRouter
 

@@ -12,9 +12,11 @@ const ID = 'b2180f86-f899-4b62-85c0-bc5155591152';
 const item = (over = {}) => ({
   searchInfo: { isPromoted: false },
   metadata: { advertId: ID, publishedAt: '2026-10-20T15:36:43+02:00' },
-  advert: { title: 'Site Reliability Engineer', language: 'en',
+  advert: {
+    title: 'Site Reliability Engineer', language: 'en',
     workLocation: { places: [{ city: 'Praha-Michle' }], type: 'PARTIALLY_REMOTE' },
-    salary: { min: 100000, max: 115000, currency: 'czk', period: 'MONTH', displayMode: 'SHOW_ALL' } },
+    salary: { min: 100000, max: 115000, currency: 'czk', period: 'MONTH', displayMode: 'SHOW_ALL' }
+  },
   company: { publicName: 'Thales DIS Czech Republic s.r.o.' },
   deprecated: { recruitmentId: 2001441278 },
   ...over,
@@ -32,7 +34,7 @@ const fullPage = (total) => (url) => {
 
 const stub = (respond, extra = {}) => {
   const calls = [];
-  const ctx = { ...extra, sleep: async () => {}, fetchText: async (url, opts) => { calls.push({ url, opts }); return respond(url); } };
+  const ctx = { ...extra, sleep: async () => { }, fetchText: async (url, opts) => { calls.push({ url, opts }); return respond(url); } };
   return { calls, ctx };
 };
 
@@ -232,111 +234,119 @@ try {
     else fail(`pracecz.fetch() requested pages ${JSON.stringify(pages)}`);
   }
 
-  {
-    const { calls, ctx } = stub(fullPage(400));
-    const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, ctx));
-    if (calls.length === 2 && text.includes('truncated at max_pages=2')) pass('pracecz.fetch() stops at max_pages and warns that the search was truncated');
-    else fail(`max_pages=2: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
-  }
+    {
+      const { calls, ctx } = stub(fullPage(999999));
+      await pracecz.fetch({
+        provider: 'pracecz',
+        name: 'Acme',
+        pracecz: { keywords: ['x'] },
+        max_pages: 1501,
+      }, ctx);
 
-  {
-    const { calls, ctx } = stub(fullPage(400), { maxPages: 1 });
-    const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, ctx));
-    if (calls.length === 1 && text === '') pass('pracecz.fetch() honors ctx.maxPages:1 with exactly one request and no warning');
-    else fail(`ctx.maxPages=1: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
-
-    const err = new Error('probe budget');
-    let caught = null;
-    try {
-      await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, stub(() => { throw err; }, { maxPages: 1 }).ctx);
-    } catch (e) {
-      caught = e;
+      if (calls.length === 1500) {
+        pass('pracecz.fetch() enforces MAX_PAGES_CAP=1500');
+      } else {
+        fail(`max_pages=1501: expected 1500 requests, got ${calls.length}`);
+      }
     }
-    if (caught === err) pass('pracecz.fetch() propagates a fetch rejection unwrapped while ctx.maxPages is set');
-    else fail(`probe rejection was rewrapped or swallowed: ${caught && caught.message}`);
-  }
+    {
+      const { calls, ctx } = stub(fullPage(400), { maxPages: 1 });
+      const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, ctx));
+      if (calls.length === 1 && text === '') pass('pracecz.fetch() honors ctx.maxPages:1 with exactly one request and no warning');
+      else fail(`ctx.maxPages=1: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
 
-  {
-    let fetched = [];
-    const respond = (url) => {
-      if (pageOf(url) === '2') throw new Error('boom');
-      return fullPage(81)(url);
-    };
-    const text = await captureStderr(async () => {
-      fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, stub(respond).ctx);
-    });
-    if (fetched.length === 40 && text.includes('pracecz')) pass('pracecz.fetch() keeps page-1 jobs and warns when page 2 fails');
-    else fail(`page-2 failure: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
-  }
-
-  {
-    let fetched = [];
-    const respond = (url) => {
-      if (url.includes('q=bad')) throw new Error('boom');
-      return page([item()]);
-    };
-    const text = await captureStderr(async () => {
-      fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['bad', 'good'] } }, stub(respond).ctx);
-    });
-    if (fetched.length === 1 && text.includes('page 1 failed')) pass('pracecz.fetch() keeps the other keywords and warns when one keyword fails on page 1');
-    else fail(`one keyword failing: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
-  }
-
-  {
-    try {
-      await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['a', 'b'] } }, stub(() => { throw new Error('boom'); }).ctx);
-      fail('pracecz.fetch() should throw when every keyword request fails');
-    } catch (err) {
-      if (/all 2 keyword request\(s\) failed/.test(err.message)) pass('pracecz.fetch() throws when every keyword fails');
-      else fail(`pracecz.fetch() threw an unexpected error on total outage: ${err.message}`);
+      const err = new Error('probe budget');
+      let caught = null;
+      try {
+        await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, stub(() => { throw err; }, { maxPages: 1 }).ctx);
+      } catch (e) {
+        caught = e;
+      }
+      if (caught === err) pass('pracecz.fetch() propagates a fetch rejection unwrapped while ctx.maxPages is set');
+      else fail(`probe rejection was rewrapped or swallowed: ${caught && caught.message}`);
     }
-  }
 
-  {
-    const fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['a', 'b'] } }, stub(() => page([item()])).ctx);
-    if (fetched.length === 1) pass('pracecz.fetch() dedups an offer returned for two keywords');
-    else fail(`pracecz.fetch() returned ${fetched.length} rows for one shared offer`);
-  }
-
-  {
-    const branded = item({ extended: { careerPage: { url: 'https://acme.jobs.cz/pd/1' } } });
-    const fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['a', 'b'] } }, stub((url) => page([url.includes('q=a') ? branded : item()])).ctx);
-    if (fetched.length === 1) pass('pracecz.fetch() dedups one advertId seen under two URLs');
-    else fail(`pracecz.fetch() returned ${fetched.length} rows for one advertId under two URLs`);
-  }
-
-  {
-    let message = '';
-    try {
-      await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, stub(() => page([item({ advert: advert({ title: undefined }) })], 5)).ctx);
-    } catch (err) {
-      message = err.message;
+    {
+      let fetched = [];
+      const respond = (url) => {
+        if (pageOf(url) === '2') throw new Error('boom');
+        return fullPage(81)(url);
+      };
+      const text = await captureStderr(async () => {
+        fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, stub(respond).ctx);
+      });
+      if (fetched.length === 40 && text.includes('pracecz')) pass('pracecz.fetch() keeps page-1 jobs and warns when page 2 fails');
+      else fail(`page-2 failure: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
     }
-    if (/^pracecz: "x" reports 5 offers but none parsed/.test(message)) pass('pracecz.fetch() throws when the page reports offers but no item normalizes');
-    else fail(`items without advert.title: ${JSON.stringify(message)}`);
-  }
 
-  {
-    const { calls, ctx } = stub(() => page([item()]));
-    await withTmpCwd(
-      (tmp) => {
-        mkdirSync(join(tmp, 'config'));
-        writeFileSync(join(tmp, 'config', 'profile.yml'), 'target_roles:\n  primary:\n    - Data Engineer\n');
-      },
-      () => pracecz.fetch({ provider: 'pracecz', name: 'Acme' }, ctx),
-    );
-    if (calls.length && calls[0].url.includes('q=Data%20Engineer')) pass('pracecz.fetch() falls back to config/profile.yml target_roles');
-    else fail(`pracecz.fetch() fallback requested ${JSON.stringify(calls.map((c) => c.url))}`);
-
-    let message = '';
-    try {
-      await withTmpCwd(() => {}, () => pracecz.fetch({ provider: 'pracecz', name: 'Acme' }, stub(() => page([item()])).ctx));
-    } catch (err) {
-      message = err.message;
+    {
+      let fetched = [];
+      const respond = (url) => {
+        if (url.includes('q=bad')) throw new Error('boom');
+        return page([item()]);
+      };
+      const text = await captureStderr(async () => {
+        fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['bad', 'good'] } }, stub(respond).ctx);
+      });
+      if (fetched.length === 1 && text.includes('page 1 failed')) pass('pracecz.fetch() keeps the other keywords and warns when one keyword fails on page 1');
+      else fail(`one keyword failing: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
     }
-    if (/no pracecz\.keywords/.test(message)) pass('pracecz.fetch() throws a clear error when no keywords and no profile fallback exist');
-    else fail(`pracecz.fetch() with no keywords: ${JSON.stringify(message)}`);
+
+    {
+      try {
+        await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['a', 'b'] } }, stub(() => { throw new Error('boom'); }).ctx);
+        fail('pracecz.fetch() should throw when every keyword request fails');
+      } catch (err) {
+        if (/all 2 keyword request\(s\) failed/.test(err.message)) pass('pracecz.fetch() throws when every keyword fails');
+        else fail(`pracecz.fetch() threw an unexpected error on total outage: ${err.message}`);
+      }
+    }
+
+    {
+      const fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['a', 'b'] } }, stub(() => page([item()])).ctx);
+      if (fetched.length === 1) pass('pracecz.fetch() dedups an offer returned for two keywords');
+      else fail(`pracecz.fetch() returned ${fetched.length} rows for one shared offer`);
+    }
+
+    {
+      const branded = item({ extended: { careerPage: { url: 'https://acme.jobs.cz/pd/1' } } });
+      const fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['a', 'b'] } }, stub((url) => page([url.includes('q=a') ? branded : item()])).ctx);
+      if (fetched.length === 1) pass('pracecz.fetch() dedups one advertId seen under two URLs');
+      else fail(`pracecz.fetch() returned ${fetched.length} rows for one advertId under two URLs`);
+    }
+
+    {
+      let message = '';
+      try {
+        await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, stub(() => page([item({ advert: advert({ title: undefined }) })], 5)).ctx);
+      } catch (err) {
+        message = err.message;
+      }
+      if (/^pracecz: "x" reports 5 offers but none parsed/.test(message)) pass('pracecz.fetch() throws when the page reports offers but no item normalizes');
+      else fail(`items without advert.title: ${JSON.stringify(message)}`);
+    }
+
+    {
+      const { calls, ctx } = stub(() => page([item()]));
+      await withTmpCwd(
+        (tmp) => {
+          mkdirSync(join(tmp, 'config'));
+          writeFileSync(join(tmp, 'config', 'profile.yml'), 'target_roles:\n  primary:\n    - Data Engineer\n');
+        },
+        () => pracecz.fetch({ provider: 'pracecz', name: 'Acme' }, ctx),
+      );
+      if (calls.length && calls[0].url.includes('q=Data%20Engineer')) pass('pracecz.fetch() falls back to config/profile.yml target_roles');
+      else fail(`pracecz.fetch() fallback requested ${JSON.stringify(calls.map((c) => c.url))}`);
+
+      let message = '';
+      try {
+        await withTmpCwd(() => { }, () => pracecz.fetch({ provider: 'pracecz', name: 'Acme' }, stub(() => page([item()])).ctx));
+      } catch (err) {
+        message = err.message;
+      }
+      if (/no pracecz\.keywords/.test(message)) pass('pracecz.fetch() throws a clear error when no keywords and no profile fallback exist');
+      else fail(`pracecz.fetch() with no keywords: ${JSON.stringify(message)}`);
+    }
+  } catch (e) {
+    fail(`pracecz provider tests crashed: ${e.message}`);
   }
-} catch (e) {
-  fail(`pracecz provider tests crashed: ${e.message}`);
-}

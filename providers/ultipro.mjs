@@ -63,7 +63,7 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 // for why a fixed `=== 'recruiting.ultipro.com'` check is wrong here. `\d*`
 // (zero or more digits) covers the bare host and any numbered variant
 // (recruiting2, recruiting3, ...) without hardcoding a finite list of them.
-const HOST_RE = /^recruiting\d*\.ultipro\.(?:com|ca)$/i;
+export const HOST_RE = /^recruiting\d*\.ultipro\.(?:com|ca)$/i;
 
 // A careers/job-board page or the list API itself:
 // `https://{host}/{tenant}/JobBoard/{boardId}/...`. `tenant` and `boardId`

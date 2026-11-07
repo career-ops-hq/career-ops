@@ -259,6 +259,12 @@ export function validateTemplate(path, kind) {
 
 const DEFAULT_ATS_RULES_PATH = resolve(__dirname, 'templates', 'ats-rules.yml');
 
+// Whether a rule can be judged on an unrendered template (#4798). `structural`
+// rules read markup and styling, which a template carries. `content` rules need
+// what the render payload fills in, so on a template they have no answer: they
+// are reported under `skipped`, never run, and never read as a pass.
+const ATS_RULE_SCOPES = ['structural', 'content'];
+
 export function loadAtsRules(path = DEFAULT_ATS_RULES_PATH) {
   const doc = loadYaml(readFileSync(path, 'utf-8')) || {};
   // A missing `rules:` key, a wrongly-typed one and an empty list used to
@@ -291,6 +297,13 @@ export function loadAtsRules(path = DEFAULT_ATS_RULES_PATH) {
     }
     if (!Array.isArray(rule.source) || rule.source.length === 0) {
       throw new Error(`${at} (${rule.id}): needs at least one source quote`);
+    }
+    // Own properties only, as for `detect` below: `scope: toString` is not a scope.
+    if (!ATS_RULE_SCOPES.some((scope) => scope === rule.scope)) {
+      throw new Error(
+        `${at} (${rule.id}): scope must be one of ${ATS_RULE_SCOPES.join(', ')}; got ${JSON.stringify(rule.scope)}. `
+          + 'A rule that does not say whether it needs rendered output cannot be dispatched honestly.'
+      );
     }
     if (!rule.must_not_flag) {
       throw new Error(`${at} (${rule.id}): needs must_not_flag, the half that decides whether the rule is worth having`);
@@ -579,10 +592,25 @@ export function atsLint(path, kind, opts = {}) {
           result.skipped.push({
             id: rule.id,
             rule: rule.rule,
+            scope: rule.scope,
             reason: `document language is "${lang}"; the accepted-header list is English only`,
           });
           continue;
         }
+      }
+
+      // A path handed to atsLint is a template, never rendered output, so a
+      // content rule has nothing to read. Skipped before its detector is even
+      // looked up: a clean result here would be a pass that checked nothing.
+      if (rule.scope === 'content') {
+        result.skipped.push({
+          id: rule.id,
+          rule: rule.rule,
+          scope: rule.scope,
+          reason: 'content-dependent: needs rendered output, and this is an unrendered template'
+            + (rule.unimplemented_because ? `. Also unimplemented: ${rule.unimplemented_because}` : ''),
+        });
+        continue;
       }
 
       const detector = rule.detect ? ATS_DETECTORS[rule.detect] : null;
@@ -590,6 +618,7 @@ export function atsLint(path, kind, opts = {}) {
         result.skipped.push({
           id: rule.id,
           rule: rule.rule,
+          scope: rule.scope,
           reason: rule.detect
             ? `no detector registered for "${rule.detect}"`
             : rule.unimplemented_because || 'no detector yet',
@@ -601,6 +630,7 @@ export function atsLint(path, kind, opts = {}) {
           id: rule.id,
           rule: rule.rule,
           severity: rule.severity || 'warning',
+          scope: rule.scope,
           detail,
           source: rule.source || [],
         });
@@ -613,13 +643,101 @@ export function atsLint(path, kind, opts = {}) {
   return result;
 }
 
+// ---- User template audit (#5777) ----
+
+const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
+
+function placeholdersOf(path) {
+  return new Set((readFileSync(path, 'utf-8').match(PLACEHOLDER_RE) || []).map((t) => t.slice(2, -2)));
+}
+
+// The slots the shipped templates of one kind all keep: those in the base template
+// that every shipped named variant also carries. A slot a shipped variant drops
+// (INTERESTS, say) is optional by the project's own example, so a user copy
+// dropping it is not drift. With no shipped variant there is nothing to tell
+// optional from core, so nothing is judged (null) rather than every slot flagged.
+function coreSlots(system) {
+  const base = system.get('standard');
+  const variants = [...system.values()].filter((e) => e.name !== 'standard');
+  if (!base || variants.length === 0) return null;
+  let core = placeholdersOf(base.path);
+  for (const v of variants) {
+    const have = placeholdersOf(v.path);
+    core = new Set([...core].filter((slot) => have.has(slot)));
+  }
+  return core;
+}
+
+/**
+ * Advisory audit of the user's own templates (those under data/templates/).
+ * Returns one finding per template that has a problem, and [] when all is well:
+ *   - invalid: it does not resolve (missing required placeholders, or a declared
+ *     section with no partial). The message is the resolver's own.
+ *   - name: its file name is not in the normalized form the resolver looks for, so
+ *     no name selects it.
+ *   - drifted: it lacks a slot every shipped variant of its kind keeps.
+ * Never throws for a template problem and never blocks a render; callers decide
+ * how loudly to report.
+ */
+export function auditUserTemplates({ dir = DEFAULT_TEMPLATES_DIR, userDir = DEFAULT_USER_TEMPLATES_DIR(), format = 'html' } = {}) {
+  assertFormat(format);
+  const findings = [];
+  for (const kind of Object.keys(KINDS)) {
+    const system = discoverIn(kind, { dir, format }, 'system');
+    const core = coreSlots(system);
+    for (const entry of discoverIn(kind, { dir: userDir, format }, 'user').values()) {
+      const problems = [];
+      // resolveTemplate() normalizes every name it is given (kebab), and discovery
+      // accepts the raw file name, so a file such as cv-template.a--b.html lists as
+      // "a--b" yet no name selects it: both "a--b" and "a-b" look for cv-template.a-b.html.
+      // Say that, and the name to use, instead of the resolver's "not found".
+      const usable = kebab(entry.name);
+      if (usable !== entry.name) {
+        problems.push({
+          type: 'name',
+          detail: `no name selects this file: names are normalized to "${usable}". Rename it to ${KINDS[kind].prefix}.${usable}.${format}`,
+        });
+      } else {
+        try {
+          resolveTemplate(kind, entry.name, { dir, userDir, format });
+        } catch (err) {
+          problems.push({ type: 'invalid', detail: err.message });
+        }
+      }
+      if (core) {
+        const have = placeholdersOf(entry.path);
+        const missing = [...core].filter((slot) => !have.has(slot)).sort();
+        if (missing.length) problems.push({ type: 'drifted', missing });
+      }
+      if (problems.length) findings.push({ kind, name: entry.name, path: entry.path, problems });
+    }
+  }
+  return findings;
+}
+
 export function loadProfileDefault(kind, { profilePath = DEFAULT_PROFILE_PATH, strict = false } = {}) {
   const cfg = KINDS[kind];
   if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
-  if (!existsSync(profilePath)) return null;
+  // Read first and treat only ENOENT as "no profile". existsSync() also
+  // answers false when the file exists but cannot be reached (e.g. its parent
+  // directory is not searchable), and a strict caller would then silently get
+  // the base template for a profile that names another one.
+  let source;
+  try {
+    source = readFileSync(profilePath, 'utf-8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    if (strict) {
+      throw new Error(
+        `Failed to read profile at ${profilePath} (${err?.code || 'unknown error'}). Check that the file is readable. ${err?.message || err}`,
+        { cause: err },
+      );
+    }
+    return null;
+  }
   let doc;
   try {
-    doc = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+    doc = loadYaml(source) || {};
   } catch (err) {
     if (strict) {
       throw new Error(
@@ -643,11 +761,19 @@ export function resolveTemplate(kind, name, opts = {}) {
     format = 'html',
     profilePath = DEFAULT_PROFILE_PATH,
     fallback = false,
+    // strict: a profile that exists but is not valid YAML throws instead of
+    // reading as "no default configured". Off by default so existing callers
+    // keep their behaviour; the cover-letter renderer opts in (#6370).
+    strict = false,
   } = opts;
   assertFormat(format);
 
   const explicit = Boolean(name && String(name).trim());
-  let chosen = kebab(explicit ? name : loadProfileDefault(kind, { profilePath }) || 'standard');
+  // Strict callers parse the profile even when a name was passed, so a broken
+  // config/profile.yml is reported on every strict path rather than only when
+  // the profile happens to supply the name.
+  const profileDefault = (!explicit || strict) ? loadProfileDefault(kind, { profilePath, strict }) : null;
+  let chosen = kebab(explicit ? name : profileDefault || 'standard');
   const fileFor = (n) => (n === 'standard' ? `${cfg.prefix}.${format}` : `${cfg.prefix}.${n}.${format}`);
 
   // Resolution goes through the same discovery as listTemplates, so a name that

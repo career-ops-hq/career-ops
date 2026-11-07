@@ -4,6 +4,8 @@ import { atsVendorOf } from './ats-vendor.mjs';
 import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { detectColumns, extractCellUrl, isHeaderRow, isSeparatorRow, linkedReportNumbers, reportUrlForNumbers as reportUrlFromReports } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { hireHiveTenantOf } from './providers/hirehive.mjs';
+import { resolveHibobTenant } from './providers/hibob.mjs';
 import { resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const WEB_URL_RE = /https?:\/\/[^\s|)>]+/i;
@@ -41,6 +43,16 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
     const endpointAt = parts.findIndex((part) => /^(?:job|search|tile-search-results|services)$/i.test(part));
     u.pathname = endpointAt > 0 ? `/${parts.slice(0, endpointAt).join('/')}` : '/';
   } else if (vendor === 'icims' || vendor === 'bamboohr') {
+    u.pathname = '/';
+  } else if (vendor === 'hibob') {
+    // Seeds are sampled under --limit before detect() runs, so a host the
+    // provider refuses is dropped here instead of taking a real board's slot.
+    if (!resolveHibobTenant(rawUrl)) return null;
+    u.pathname = '/';
+  } else if (vendor === 'hirehive') {
+    // Seeds are sampled under --limit before detect() runs, so a host the
+    // provider refuses is dropped here instead of taking a real board's slot.
+    if (u.protocol !== 'https:' || !hireHiveTenantOf(u.hostname)) return null;
     u.pathname = '/';
   }
   u.search = '';

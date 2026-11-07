@@ -5,6 +5,7 @@ import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
 import { readFillResult, screenForFill } from "@/lib/apply/fill-stream.mjs";
+import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
 type Meta = { needsConfirmation?: boolean };
@@ -28,6 +29,8 @@ type ApplyCtx = {
   issues: ApplyIssue[];
   driveSteps: DriveStep[];
   error: string;
+  /** Set when the posting is Workday, iCIMS, or UKG. Drive and prefill do not run. */
+  blockedAts: { message: string; postingUrl: string; checklistHref: string } | null;
   open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => Promise<void>;
   prefill: () => Promise<void>;
   setAnswer: (idOrLabel: string, value: string) => void;
@@ -74,6 +77,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [issues, setIssues] = useState<ApplyIssue[]>([]);
   const [driveSteps, setDriveSteps] = useState<DriveStep[]>([]);
   const [error, setError] = useState("");
+  const [blockedAts, setBlockedAts] = useState<ApplyCtx["blockedAts"]>(null);
   const sessionId = useRef<string | null>(null);
   const companyRef = useRef<string>("");
   // Mirrors `n` for the async fetch below, same reason as companyRef: the
@@ -177,6 +181,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setShots([]);
     setIssues([]);
     setDriveSteps([]);
+    setBlockedAts(null);
     setUrl(u);
     setCompany(opts?.company ?? "");
     companyRef.current = opts?.company ?? "";
@@ -185,7 +190,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setFrom(opts?.from ?? "");
     pendingPrefill.current = false;
     try {
-      const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: cliId() }) });
+      const r = await fetch("/api/apply/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: u, cliId: cliId(), ...(opts?.n ? { n: opts.n } : {}) }),
+      });
       const d = await r.json();
       // The user can leave while this is in flight, and the request can't be
       // recalled — a session that lands after they left is closed here or its
@@ -193,6 +202,15 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const late = resolveLateSession({ stale: generation.current !== gen, sessionId: d.id });
       if (late !== "apply") {
         if (late === "close") closeSession(d.id);
+        return;
+      }
+      const followUp = sessionFollowUp(d);
+      if (followUp.kind === "unsupported") {
+        setBlockedAts({ message: followUp.message, postingUrl: followUp.postingUrl, checklistHref: followUp.checklistHref });
+        if (followUp.postingUrl) setUrl(followUp.postingUrl);
+        setError(followUp.message);
+        setStatus("error");
+        pendingPrefill.current = false;
         return;
       }
       if (d.error) {
@@ -414,12 +432,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setPrefillLog([]);
     setIssues([]);
     setDriveSteps([]);
+    setBlockedAts(null);
     setError("");
   }, []);
 
   const value = useMemo(
-    () => ({ status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset }),
-    [status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset],
+    () => ({ status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, blockedAts, open, prefill, setAnswer, fill, agentFill, reset }),
+    [status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, blockedAts, open, prefill, setAnswer, fill, agentFill, reset],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

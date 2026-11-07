@@ -166,7 +166,7 @@ test('a relative path that climbs out of the project is refused unless the profi
 
 test('http(s) photo URLs do not need the profile (#5094)', () => {
   const { result, output } = buildWith(payload('https://example.com/me.png'), undefined);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(existsSync(output), true);
 });
 
