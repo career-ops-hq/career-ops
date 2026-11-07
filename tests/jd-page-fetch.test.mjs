@@ -608,6 +608,13 @@ test('numeric job ids that look like years still tell two jobs apart', () => {
   assert.ok(inspectPage(ld('https://careers.example.com/job/2031'), Date.now(), 'https://careers.example.com/job/2031').found);
 });
 
+test('a job id carried in the URL fragment tells two jobs apart', () => {
+  const ld = (url) => `<html><script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Engineer', description: `<p>${BODY}</p>`, url })}</script></html>`;
+  const { inspectPage } = awaitedModule;
+  assert.equal(inspectPage(ld('https://careers.example.com/careers#/job/2'), Date.now(), 'https://careers.example.com/careers#/job/1').found, null);
+  assert.ok(inspectPage(ld('https://careers.example.com/careers#/job/1'), Date.now(), 'https://careers.example.com/careers#/job/1').found);
+});
+
 test('an oversize page proves no closure from its prefix', () => {
   const pad = ' '.repeat(3_100_000);
   const expired = `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: 'E', description: 'x', validThrough: '2020-01-01' })}</script>`;
