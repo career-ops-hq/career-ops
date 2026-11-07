@@ -11,7 +11,7 @@ import {
   rejectUserLayerPaths,
   USER_PATHS,
 } from '../update-system.mjs';
-import { fail, finish, makeUpdaterRepo, pass, rmSync } from './helpers.mjs';
+import { fail, makeUpdaterRepo, pass, rmSync } from './helpers.mjs';
 
 console.log('\n🧪 Testing apply() against a target manifest containing .env...');
 
@@ -56,5 +56,3 @@ try {
 } finally {
   rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
-
-finish();
