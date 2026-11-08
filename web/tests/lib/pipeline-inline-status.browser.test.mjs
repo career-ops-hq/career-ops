@@ -90,6 +90,7 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
     });
     await edit(11).click();
     await select(11).selectOption("Applied");
+    await row(11).getByRole("button", { name: "Yes, mark applied" }).click();
     assert.equal(await select(11).isDisabled(), true);
     assert.equal(await row(11).getByRole("button", { name: /^Cancel editing/ }).isDisabled(), true);
     assert.equal(await edit(12).isEnabled(), true);
@@ -119,6 +120,7 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
     });
     await edit(11).click();
     await select(11).selectOption("Applied");
+    await row(11).getByRole("button", { name: "Yes, mark applied" }).click();
     await until(() => row(11).count().then((count) => count === 0));
     await until(() => tab("EVALUATED").innerText().then((text) => /^EVALUATED\s+1$/.test(text)));
     assert.match(await tab("APPLIED").innerText(), /^APPLIED\s+2$/);

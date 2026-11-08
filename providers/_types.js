@@ -211,6 +211,15 @@
  *                              versions selectively also returns the ranked ones, after
  *                              each posting's default version; scan.mjs then keeps the
  *                              best-ranked version where it keeps one per posting.
+ * @property {(title: string) => boolean} [titleWanted] Present only in scan.mjs runs whose
+ *                              entry filters on title: this scan's own title decision
+ *                              (title_filter, overrides included). A provider that pays an
+ *                              extra request per posting (workday's multi-location detail
+ *                              GETs, sitemap's fetchDetails) spends it only on postings
+ *                              this returns true for, so detail requests scale with the
+ *                              relevant postings, not the board. It never drops a row: the
+ *                              provider still returns every posting and scan.mjs filters.
+ *                              Absent in verify-portals and tests.
  * @property {{get: (key: string) => any, set: (key: string, value: any) => void, delete: (key: string) => void}} [idCache]
  *                              This provider's slice of the store in provider-id-cache.mjs:
  *                              values it resolved on an earlier scan (a board id that only

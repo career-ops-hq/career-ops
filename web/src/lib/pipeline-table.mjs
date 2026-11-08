@@ -42,7 +42,7 @@ const ROW_TARGET = /^(?:https?:\/\/|local:\S)/i;
  *  compensation. Missing company and role stay empty. A row with neither an
  *  http(s) nor a `local:` cell is skipped. Further trailing columns are ignored.
  *  @param {string} md - content of data/pipeline.md.
- *  @returns {{url: string, company: string, role: string, location?: string, compensation?: string, done: boolean, postedAt?: string}[]}
+ *  @returns {{url: string, company: string, role: string, location?: string, compensation?: string, done: boolean, postedAt?: string, rankStamp?: string}[]}
  */
 export function parseInbox(md) {
   const jobs = [];
@@ -63,6 +63,7 @@ export function parseInbox(md) {
       else positional.push(seg);
     }
     const posted = labels.get("posted");
+    const rankStamp = labels.get("rank");
     jobs.push({
       done: m[1].toLowerCase() === "x",
       url: all[urlIndex],
@@ -73,6 +74,9 @@ export function parseInbox(md) {
       // the row's own posting date (scan.mjs `posted:` label) — a more direct
       // freshness signal than the scan-history join, which stays as fallback
       postedAt: posted && /^\d{4}-\d{2}-\d{2}$/.test(posted) ? posted : undefined,
+      // Absent unless the row carries a rank label. A present-but-undefined
+      // key fails deep equality on rows that were never ranked.
+      ...(rankStamp ? { rankStamp } : {}),
     });
   }
   return jobs;
