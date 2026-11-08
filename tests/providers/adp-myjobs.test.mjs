@@ -193,7 +193,7 @@ try {
     // A source that ignores $skip (same page forever) ends the walk instead of looping.
     const ctx = mkCtx(() => ({ count: 1000, jobRequisitions: mkRows(1, 200) }));
     const jobs = await adp.fetch({ ...entry, adpMyjobs: { orgoid: ORGOID } }, ctx);
-    check(ctx.calls.length === 2 && jobs.length === 200, 'fetch() stops when a page yields no new reqIds');
+    check(ctx.calls.length === 3 && jobs.length === 200, 'fetch() stops after two consecutive pages with no new reqIds');
   }
 
   {
@@ -209,6 +209,13 @@ try {
     console.error = (...a) => warns2.push(a.join(' '));
     let j2;
     try { j2 = await adp.fetch({ ...entry, adpMyjobs: { orgoid: ORGOID } }, mkCtx(() => ({ count: 250, jobRequisitions: mkRows(1, 200) }))); } finally { console.error = origErr; }
+    // One repeated page followed by fresh rows does not end the walk.
+    const ctx3 = mkCtx((url) => {
+      const skip = skipOf(url);
+      return { count: 600, jobRequisitions: skip === 200 ? mkRows(1, 200) : mkRows(skip + 1, 200) };
+    });
+    const j3 = await adp.fetch({ ...entry, adpMyjobs: { orgoid: ORGOID } }, ctx3);
+    check(ctx3.calls.length === 3 && j3.length === 400 && !j3.adpMyjobsTruncated, 'a single repeated page does not end the walk early');
     check(j2.length === 200 && j2.adpMyjobsTruncated === true && warns2.some(w => /stopped early/.test(w)), 'a repeated page that reaches count is still flagged as a stall');
   }
 

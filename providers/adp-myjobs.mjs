@@ -270,6 +270,7 @@ export default {
     let skip = 0;
     let total = null;
     let hitCeiling = false; // ran out of page budget with a full page and more to read
+    let repeatPages = 0; // consecutive pages that yielded no new reqId
     let stalled = false; // the API stopped advancing ($skip ignored) before the board's own end
 
     for (let page = 0; page < pageLimit; page++) {
@@ -291,9 +292,19 @@ export default {
       // before the count test, since a repeated page can push `skip` past
       // `count` without the board being complete. A short page with no count
       // is still a natural end.
-      if (fresh === 0 && pageJobs.length > 0 && (total !== null || rawCount >= PAGE_SIZE)) { stalled = true; break; }
+      // One repeated page is tolerated (a later page may still carry new rows);
+      // two in a row mean the API is not advancing.
+      if (fresh === 0 && pageJobs.length > 0 && (total !== null || rawCount >= PAGE_SIZE)) {
+        if (++repeatPages >= 2) { stalled = true; break; }
+      } else {
+        repeatPages = 0;
+      }
       // Natural end: the source's own count is reached, or (no count) a short page.
-      if (total !== null ? skip >= total : rawCount < PAGE_SIZE) break;
+      // Reaching the count on a page that added nothing new is not completion.
+      if (total !== null ? skip >= total : rawCount < PAGE_SIZE) {
+        if (fresh === 0 && pageJobs.length > 0) stalled = true;
+        break;
+      }
       if (page === pageLimit - 1) hitCeiling = true;
     }
 
