@@ -10,11 +10,15 @@
 
 import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
-import { sleep } from './_http.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { intInRange } from './_config-utils.mjs';
 
 // A board too big to read with every body inline (content=true) is read as the
-// plain list instead, and bodies are fetched one posting at a time for just
-// the postings this scan keeps (ctx.titleWanted). Greenhouse documents both
+// plain list instead (#6560). With the entry's opt-in
+// (`greenhouse: { fetchDetails: true, detailLimit: 25 }`, the same shape as
+// eploy.mjs), bodies are then fetched one posting at a time for just the
+// postings this scan keeps (ctx.titleWanted), up to detailLimit, and never
+// during a health probe (ctx.maxPages). Greenhouse documents both
 // shapes: "GET /v1/boards/{board_token}/jobs" lists jobs, `?content=true`
 // adds each job's full description, and "GET /v1/boards/{board_token}/jobs/{id}"
 // returns one job with its content
@@ -23,7 +27,16 @@ import { sleep } from './_http.mjs';
 // ~10 KB per posting detail. The inline body grows with board size times
 // description length, so the response cap is a board-size limit in disguise;
 // the plain list and one detail per kept posting stay small at any size.
-const DETAIL_DELAY_MS = 100;
+const DETAIL_DELAY_MS = 200; // ADDING_A_PROVIDER.md: 150-250 ms between sequential requests
+
+/** @param {any} entry */
+function parseDetailConfig(entry) {
+  const cfg = entry?.greenhouse || {};
+  return {
+    fetchDetails: cfg.fetchDetails === true,
+    detailLimit: intInRange(cfg.detailLimit, 25, 1, 100),
+  };
+}
 
 const LEGACY_BOARD_HOSTS = new Set(['boards.greenhouse.io', 'boards.eu.greenhouse.io']);
 const JOB_BOARD_HOSTS = new Set(['job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io']);
@@ -252,29 +265,33 @@ export default {
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v1\/boards\/([^/]+)\/jobs\/?$/)?.[1] || '';
 
     if (!bodiesInline) {
+      const { fetchDetails, detailLimit } = parseDetailConfig(entry);
+      const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
       const titleWanted = typeof ctx?.titleWanted === 'function' ? ctx.titleWanted : null;
-      const wanted = titleWanted ? usable.filter(/** @param {any} j */ j => titleWanted(j.title || '')) : [];
-      let filled = 0;
-      for (const j of wanted) {
-        if (j.id == null || !boardSlug) continue;
-        if (filled > 0) await sleep(DETAIL_DELAY_MS, ctx);
-        try {
-          const detailUrl = assertGreenhouseUrl(`https://${new URL(apiUrl).hostname}/v1/boards/${encodeURIComponent(boardSlug)}/jobs/${encodeURIComponent(String(j.id))}`);
-          const detail = /** @type {any} */ (await ctx.fetchJson(detailUrl, { redirect: 'error' }));
-          if (detail && typeof detail.content === 'string') j.content = detail.content;
-          filled++;
-        } catch {
-          // One posting's body is enrichment: keep the posting without it
-          // rather than lose it, and never the board.
-        }
-      }
-      // Without a title filter there is nothing to narrow the detail reads to,
-      // so description-based filters (content_filter, visa, country
-      // eligibility) cannot judge these postings: say so.
-      if (!titleWanted) {
-        console.warn(`[greenhouse] ${entry.name}: board too large for content=true; read without descriptions, so description-based filters (content_filter, visa, country eligibility) cannot judge these postings.`);
+      if (!fetchDetails || probing || !titleWanted || !boardSlug) {
+        // No opt-in, a probe, or no title filter to narrow the reads to: the
+        // board stays readable, but description-based filters (content_filter,
+        // visa, country eligibility) cannot judge these postings. Say so.
+        if (!probing) console.warn(`[greenhouse] ${entry.name}: board too large for content=true; read without descriptions, so description-based filters (content_filter, visa, country eligibility) cannot judge these postings.${fetchDetails ? '' : ' Set greenhouse.fetchDetails: true on this entry to fetch bodies for title-matched postings.'}`);
       } else {
-        console.error(`ℹ️  greenhouse: ${entry.name} board too large to read with bodies inline; read the plain list (${usable.length} jobs) and fetched bodies for ${filled} of ${wanted.length} title-matched`);
+        const wanted = usable.filter(/** @param {any} j */ j => j.id != null && titleWanted(j.title || ''));
+        const candidates = wanted.slice(0, detailLimit);
+        let attempted = 0;
+        let filled = 0;
+        for (const j of candidates) {
+          // Paced on attempts, not successes, so a run of failures is no burst.
+          if (attempted > 0) await sleep(DETAIL_DELAY_MS, ctx);
+          attempted++;
+          try {
+            const detailUrl = assertGreenhouseUrl(`https://${new URL(apiUrl).hostname}/v1/boards/${encodeURIComponent(boardSlug)}/jobs/${encodeURIComponent(String(j.id))}`);
+            const detail = /** @type {any} */ (await fetchJsonWithRetry(ctx, detailUrl, { redirect: 'error' }));
+            if (detail && typeof detail.content === 'string') { j.content = detail.content; filled++; }
+          } catch {
+            // One posting's body is enrichment: after the retries, keep the
+            // posting without it rather than lose it, and never the board.
+          }
+        }
+        console.error(`ℹ️  greenhouse: ${entry.name} board too large to read with bodies inline; read the plain list (${usable.length} jobs) and fetched bodies for ${filled} of ${wanted.length} title-matched${wanted.length > detailLimit ? ` (capped at detailLimit ${detailLimit})` : ''}`);
       }
     }
 
