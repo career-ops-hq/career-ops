@@ -203,6 +203,13 @@ try {
     let jobs;
     try { jobs = await adp.fetch({ ...entry, adpMyjobs: { orgoid: ORGOID } }, mkCtx(() => ({ count: 1000, jobRequisitions: mkRows(1, 200) }))); } finally { console.error = origErr; }
     check(jobs.adpMyjobsTruncated === true && warns.some(w => /stopped early/.test(w)) && !warns.some(w => /raise max_pages/.test(w)), 'a stalled walk warns "stopped early" and tags the result, without the max_pages warning');
+
+    // A repeated page that happens to carry skip past count is still a stall.
+    const warns2 = [];
+    console.error = (...a) => warns2.push(a.join(' '));
+    let j2;
+    try { j2 = await adp.fetch({ ...entry, adpMyjobs: { orgoid: ORGOID } }, mkCtx(() => ({ count: 250, jobRequisitions: mkRows(1, 200) }))); } finally { console.error = origErr; }
+    check(j2.length === 200 && j2.adpMyjobsTruncated === true && warns2.some(w => /stopped early/.test(w)), 'a repeated page that reaches count is still flagged as a stall');
   }
 
   {

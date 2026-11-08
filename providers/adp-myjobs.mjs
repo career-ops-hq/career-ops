@@ -287,10 +287,13 @@ export default {
         jobs.push(job);
       }
       skip += rawCount;
+      // Every row on this page was a repeat: $skip is being ignored. Checked
+      // before the count test, since a repeated page can push `skip` past
+      // `count` without the board being complete. A short page with no count
+      // is still a natural end.
+      if (fresh === 0 && pageJobs.length > 0 && (total !== null || rawCount >= PAGE_SIZE)) { stalled = true; break; }
       // Natural end: the source's own count is reached, or (no count) a short page.
       if (total !== null ? skip >= total : rawCount < PAGE_SIZE) break;
-      // Every row on this page was a repeat or unusable: $skip is being ignored.
-      if (fresh === 0 && pageJobs.length > 0) { stalled = true; break; }
       if (page === pageLimit - 1) hitCeiling = true;
     }
 
