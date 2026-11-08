@@ -33,6 +33,8 @@ If there are no session files at all:
 If session files exist but every one is a practice or mock session:
 > "Only practice sessions found. Red flags come from how a real interviewer behaved, and the questions in a practice session were asked by the AI. Run `/career-ops interview` after your next real interview to generate a debrief, then come back to check for red flags."
 
+In that case, run the stale red-flag file check (Step 1) before exiting.
+
 Either way, exit gracefully.
 
 ## Step 1 — Discover Sessions
@@ -40,6 +42,8 @@ Either way, exit gracefully.
 List all `.md` files in `interview-prep/sessions/` except `README.md`, and read each file's YAML front matter `source` field.
 
 **Skip every file with `source: practice` or `source: mock`**, even when its front matter or filename names a real company. In those files the `**Interviewer:**` turns are mock questions (in a `practice` file, the questions the AI asked while role-playing), so they say nothing about how the company interviews. A skipped file contributes nothing to Steps 2–6: no signals, no Step 2c observations, no session count. A file without a `source` field is treated as a real interview, as before.
+
+**Stale red-flag file check.** Earlier versions of this mode counted practice sessions, so an existing `interview-prep/{company-slug}-redflags.md` may rest on them, and the evaluation report's Risk Summary (`modes/oferta.md`) still shows its warning level. A company with at least one eligible session gets that file rewritten in Step 5 from eligible sessions only. For each company slug that appears only in skipped files (read the slug from the filename, as below), check whether the file exists. If it does, tell the user it may have been built from practice sessions and offer to delete it. Delete it only on the user's explicit yes; otherwise leave it in place and say so in the summary.
 
 Parse each remaining filename using the `YYYY-MM-DD` date segment as the anchor:
 
@@ -139,7 +143,7 @@ Compute a **red-flag score**:
 
 ## Step 5 — Generate Output
 
-**Output routing:** Red-flag analysis is company-wide (signals aggregate across rounds regardless of role). Write to a single company-level file: `interview-prep/{company-slug}-redflags.md`. Create it if absent. If sessions span multiple role slugs, note all roles in the header. Do not append to per-role intel files — those are role-specific, this is company-specific. This file is cross-referenced by the evaluation report's `## Risk Summary` block (see `modes/oferta.md`), which surfaces its warning level plus a relative link — keep the `**Warning level:**` line intact.
+**Output routing:** Red-flag analysis is company-wide (signals aggregate across rounds regardless of role). Write to a single company-level file: `interview-prep/{company-slug}-redflags.md`. Create it if absent, and replace it if present. If sessions span multiple role slugs, note all roles in the header. Do not append to per-role intel files — those are role-specific, this is company-specific. This file is cross-referenced by the evaluation report's `## Risk Summary` block (see `modes/oferta.md`), which surfaces its warning level plus a relative link — keep the `**Warning level:**` line intact.
 
 Write the following structure:
 

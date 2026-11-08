@@ -41,6 +41,19 @@ check('Step 1 keeps files with no source field (older transcripts) in scope',
 check('Step 1 excludes the directory README from the session list',
   /except `README\.md`/.test(step1), 'README.md not excluded');
 
+// A -redflags.md written before this rule may rest on practice sessions, and
+// oferta's Risk Summary keeps surfacing its warning level until it is replaced.
+check('Step 1 checks for a stale -redflags.md when a company has only skipped files',
+  /Stale red-flag file check/.test(step1) && /appears only in skipped files/.test(step1) && /\{company-slug\}-redflags\.md/.test(step1),
+  'stale-file check missing');
+check('Stale red-flag file is deleted only on the user\'s explicit yes',
+  /offer to delete it/.test(step1) && /Delete it only on the user's explicit yes/.test(step1),
+  'deletion not gated on consent');
+check('Practice-only exit runs the stale red-flag file check',
+  /run the stale red-flag file check \(Step 1\) before exiting/.test(threshold), 'practice-only exit skips the check');
+check('Step 5 replaces an existing -redflags.md instead of keeping it',
+  /Create it if absent, and replace it if present/.test(mode), 'replace rule missing');
+
 check('Minimum Threshold counts eligible sessions, not any file',
   /at least \*\*1\*\* eligible session file/.test(threshold) && /`README\.md` is not a session/.test(threshold),
   'threshold still counts every file');
