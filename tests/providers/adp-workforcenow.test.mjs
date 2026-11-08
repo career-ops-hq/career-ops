@@ -62,6 +62,23 @@ try {
     fail(`adp-workforcenow.detect() should default lang to en_US, returned ${JSON.stringify(hit)}`);
   }
 
+  // api without lang + careers_url with lang for the SAME tenant: the
+  // careers_url lang must win over the en_US default — an api entry alone
+  // would silently pin an en_CA board to en_US and read totalNumber 0.
+  const hitApiNoLang = adp.detect({ name: 'ExampleCo', api: CAREERS_URL, careers_url: `${CAREERS_URL}&lang=en_CA` });
+  if (hitApiNoLang && hitApiNoLang.url.includes('lang=en_CA')) {
+    pass('adp-workforcenow.detect() inherits same-tenant careers_url lang when api omits it');
+  } else {
+    fail(`adp-workforcenow.detect() should inherit careers_url lang, returned ${JSON.stringify(hitApiNoLang)}`);
+  }
+  // A DIFFERENT tenant's careers_url lang is never inherited.
+  const hitOtherTenant = adp.detect({ name: 'ExampleCo', api: CAREERS_URL, careers_url: `https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=other-cid&ccId=999&lang=fr_CA` });
+  if (hitOtherTenant && hitOtherTenant.url.includes('lang=en_US') && !hitOtherTenant.url.includes('fr_CA')) {
+    pass('adp-workforcenow.detect() keeps en_US when careers_url is a different tenant');
+  } else {
+    fail(`adp-workforcenow.detect() should not inherit another tenant's lang, returned ${JSON.stringify(hitOtherTenant)}`);
+  }
+
   // Missing cid or ccId → null, not a throw.
   if (adp.detect({ name: 'X', careers_url: 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=only-cid' }) === null) {
     pass('adp-workforcenow.detect() returns null when ccId is missing');
