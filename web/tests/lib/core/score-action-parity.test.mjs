@@ -12,7 +12,7 @@ const CORE = path.join(resolveCodeRoot(path.join(HERE, '..', '..', '..'), {}), '
 const mirror = await import(pathToFileURL(MIRROR).href);
 const core = await import(pathToFileURL(CORE).href);
 
-const SCORES = [0, 2.9, 3, 3.4, 3.5, 3.9, 4, 4.4, 4.5, 5, -1, 5.1, Number.NaN];
+const SCORES = [0, 2.9, 3, 3.4, 3.5, 3.9, 4, 4.4, 4.5, 5, -1, 5.1, Number.NaN, null];
 
 test('band, recommendation, triage, and PDF gate match the root table', () => {
   assert.deepEqual(mirror.SCORE_BANDS, core.SCORE_BANDS);

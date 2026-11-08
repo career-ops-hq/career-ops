@@ -38,6 +38,7 @@ test('four bands cover 0 to 5 with no gap and no overlap', () => {
   assert.equal(bandForScore(-0.1), null);
   assert.equal(bandForScore(5.1), null);
   assert.equal(bandForScore('nope'), null);
+  assert.equal(bandForScore(null), null);
 });
 
 test('the recommendation follows the band unless a hard stop or a suspicious posting overrides it', () => {
@@ -49,6 +50,10 @@ test('the recommendation follows the band unless a hard stop or a suspicious pos
   assert.equal(recommendationFor(4.8, { suspicious: true }), 'Research first');
   assert.equal(recommendationFor(4.8, { hardStop: true, suspicious: true }), 'Skip');
   assert.equal(recommendationFor(9), null);
+  assert.equal(recommendationFor(null), null);
+  assert.equal(recommendationFor(null, { hardStop: true }), null);
+  assert.equal(recommendationFor(null, { suspicious: true }), null);
+  assert.equal(recommendationFor(0), 'Skip');
 });
 
 test('triage and the PDF gate use the same floors', () => {
@@ -68,6 +73,9 @@ test('triage and the PDF gate use the same floors', () => {
   assert.equal(pdfGateAllows(2.9), false);
   assert.equal(pdfGateAllows(2.9, 0), true);
   assert.equal(pdfGateAllows('nope'), false);
+  assert.equal(triageVerdict(null), null);
+  assert.equal(pdfGateAllows(null, 0), false);
+  assert.equal(pdfGateAllows(0, 0), true);
 });
 
 test('the written modes name this table and its numbers', () => {

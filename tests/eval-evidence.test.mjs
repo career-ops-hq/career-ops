@@ -10,6 +10,7 @@ import {
   UNKNOWN_COMP_SENTENCE,
   normalizeEvaluationText,
   postingStatesPay,
+  readGlobalScore,
 } from '../lib/eval-evidence.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,6 +47,8 @@ score_evidence:
 
 **Decision:** ${decision}
 
+## Verdict (lead)
+
 **${decision}.** Written before the band check.
 
 ---SCORE_SUMMARY---
@@ -73,7 +76,7 @@ test('missing pay is marked unknown and the score number stays put', () => {
   assert.equal(out.includes('Training-data'), false);
   assert.equal(out.includes('Estimated salary'), false);
   assert.match(out, /compensation: "unknown"/);
-  assert.match(out, new RegExp(UNKNOWN_COMP_SENTENCE.replace(/[.]/g, '\\.')));
+  assert.equal(out.includes(UNKNOWN_COMP_SENTENCE), true);
   assert.equal(out.includes('lowers the score'), false);
   assert.match(out, /^SCORE:\s*4\.2\s*$/m);
   assert.match(out, /^score:\s*4\.2\s*$/m);
@@ -124,6 +127,26 @@ test('the written decision follows the band, and a hard stop or a suspicious pos
     legitimacy: 'Suspicious',
   }), JD_WITH_PAY);
   assert.match(suspicious, /final_decision: "Research first"/);
+});
+
+test('a missing score does not become Skip', () => {
+  const text = reply({ decision: 'Apply' })
+    .replace(/^score:.*$/m, 'score:')
+    .replace(/^SCORE:.*$/m, 'SCORE:');
+  assert.equal(readGlobalScore(text), null);
+  const out = normalizeEvaluationText(text, JD_WITH_PAY);
+  assert.match(out, /final_decision: "Apply"/);
+  assert.doesNotMatch(out, /final_decision: "Skip"/);
+  assert.match(out, /\*\*Decision:\*\* Apply/);
+  assert.match(out, /## Verdict \(lead\)\n\n\*\*Apply\.\*\*/);
+});
+
+test('an earlier bold Apply line stays and the verdict line follows the score', () => {
+  const text = `**Apply.** Stated before the verdict.\n\n${reply({ score: '2.4', decision: 'Apply' })}`;
+  const out = normalizeEvaluationText(text, JD_WITH_PAY);
+  assert.match(out, /^\*\*Apply\.\*\* Stated before the verdict\./m);
+  assert.match(out, /## Verdict \(lead\)\n\n\*\*Skip\.\*\*/);
+  assert.match(out, /final_decision: "Skip"/);
 });
 
 test('a maybe score is Consider, not Apply', () => {
