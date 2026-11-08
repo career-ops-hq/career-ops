@@ -3,11 +3,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
+import { evaluationGateForJob } from "@/lib/job-gate.mjs";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { LinkedInPaste } from "@/components/linkedin-paste";
+import { orderInbox } from "@/lib/core/inbox-rank.mjs";
 import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
 import { FacetChips } from "./facet-chips";
@@ -25,9 +28,8 @@ const BATCH = 20;
 type UndoNotice = { label: string; fn: () => Promise<void>; busy?: boolean; error?: string };
 
 // The inbox as a TRIAGE surface: Abundance → Triage → Shortlist → Opt-in Score.
-// Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
-// it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
-// role relevant — order is freshness with a single documented plug point.
+// Default is the best 20 fits (never the full wall). Newest is a local toggle.
+// Free facets + Save/Skip narrow the list. Only "Score shortlist" spends tokens.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const router = useRouter();
   const { jobs, startJob } = useJobs();
@@ -44,6 +46,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [sortMode, setSortMode] = useState<"fit" | "newest">("fit");
 
   // persisted triage state + ephemeral selection/undo
   const [shortlist, setShortlist] = useState<ShortItem[]>([]);
@@ -133,7 +136,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     }
     const m = new Map<string, RowScore>();
     for (const [url, j] of best) {
-      m.set(url, { score: j.result?.score ?? null, tone: j.result?.tone ?? "muted", jobId: j.id, running: j.status === "running", reportN: j.reportN });
+      m.set(url, { score: j.result?.score ?? null, tone: j.result?.tone ?? "muted", jobId: j.id, running: j.status === "running", reportN: j.reportN, needsReview: j.status === "gated" || Boolean(evaluationGateForJob(j)) });
     }
     return m;
   }, [jobs]);
@@ -164,16 +167,30 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     [enriched, hidden, within, sources, seniorities, locQ, kw],
   );
 
-  // 🔴 SINGLE ORDER PLUG POINT — freshness only (newest first_seen first; unknown last).
-  // A smarter ranker replaces ONLY this comparator; facets/triage/shortlist/score never
-  // touch relevance. This is the whole firewall in one line.
-  const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
+  // Fit order lives in core/inbox-rank.mjs. This is the only sort.
+  const ordered = useMemo(() => orderInbox(filtered.map((entry) => ({
+    ...entry,
+    postedAt: entry.job.postedAt,
+    fit: entry.job.fit ?? null,
+  })), sortMode), [filtered, sortMode]);
 
   const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
-  const capped = !showAll && !anyFacet;
+  // Keep the batch cap with filters on too: filters sit under the list, so an
+  // uncapped match set pushes what the filter did off screen.
+  const capped = !showAll;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
+  const listTopRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    setShowAll(false);
+  }, [within, sources, seniorities, locQ, kw]);
+  // Chip/facet changes only — scrolling on every locQ/kw keystroke pulls the
+  // focused text input out of view while the user is still typing.
+  useEffect(() => {
+    if (within == null && sources.size === 0 && seniorities.size === 0) return;
+    listTopRef.current?.scrollIntoView({ block: "nearest" });
+  }, [within, sources, seniorities]);
   useEffect(() => {
     setCursor((index) => (visible.length === 0 ? -1 : index < 0 ? index : Math.min(index, visible.length - 1)));
   }, [visible.length]);
@@ -375,37 +392,23 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {writeError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-400">{writeError}</p>}
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
-      <FacetChips
-        within={within}
-        setWithin={setWithin}
-        sources={sources}
-        toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
-        seniorities={seniorities}
-        toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
-        locQ={locQ}
-        setLocQ={setLocQ}
-        kw={kw}
-        setKw={setKw}
-        availSources={availSources}
-        availSeniorities={availSeniorities}
-        resultCount={filtered.length}
-        totalCount={enriched.length - hiddenCount}
-        anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
-      />
-
-      {/* batch header: fresh slice by default, or the full filtered set */}
-      <div className="mt-4 flex items-baseline justify-between gap-3">
+      {/* batch header: fresh/filtered slice by default; "See all" lifts the cap */}
+      <div ref={listTopRef} className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
-          {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
+          {anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : capped ? (sortMode === "newest" ? "Fresh — worth a look" : "Best fits") : "All roles"}
         </p>
-        {hiddenCount > 0 && (
-          <button type="button" onClick={() => void restoreHidden()} disabled={restoring} aria-busy={restoring} className="text-xs text-faint transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]">
-            {hiddenCount} hidden · {restoring ? "restoring…" : "restore"}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          <div role="group" aria-label="Sort inbox" className="flex items-center gap-2 text-xs">
+            <button type="button" aria-pressed={sortMode === "fit"} onClick={() => setSortMode("fit")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
+            <button type="button" aria-pressed={sortMode === "newest"} onClick={() => setSortMode("newest")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")}>Newest</button>
+          </div>
+          {hiddenCount > 0 && (
+            <button type="button" onClick={() => void restoreHidden()} disabled={restoring} aria-busy={restoring} className="text-xs text-faint transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]">
+              {hiddenCount} hidden · {restoring ? "restoring…" : "restore"}
+            </button>
+          )}
+        </div>
       </div>
-      <p className="mt-1 text-xs text-faint">j and k move. s saves. x skips. Shift+X skips the checked rows.</p>
 
       {/* multi-select action bar */}
       {selected.size > 0 && (
@@ -433,6 +436,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               job={e.job}
               source={e.source}
               age={e.age}
+              reason={e.fit?.reason ?? ""}
               scored={scoreByUrl.get(e.job.url)}
               selected={selected.has(e.job.url)}
               shortlisted={isShortlisted(e.job.url)}
@@ -449,14 +453,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         </div>
       )}
 
-      {/* "See all N" — only when the fresh batch is capping a larger list */}
+      {/* "See all N" — when the batch is capping a larger (optionally filtered) list */}
       {capped && ordered.length > BATCH && (
         <button
           type="button"
           onClick={() => setShowAll(true)}
           className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
         >
-          See all {ordered.length} in inbox →
+          See all {ordered.length}{anyFacet ? " matches" : " in inbox"} →
         </button>
       )}
 
@@ -464,6 +468,28 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {shortlist.length === 0 && (
         <p className="mt-4 text-center text-xs text-faint">Save roles worth a look, then score them together — one token spend.</p>
       )}
+      </div>
+      <LinkedInPaste />
+      <div hidden={inbox.length === 0}>
+      <FacetChips
+        within={within}
+        setWithin={setWithin}
+        sources={sources}
+        toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+        seniorities={seniorities}
+        toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+        locQ={locQ}
+        setLocQ={setLocQ}
+        kw={kw}
+        setKw={setKw}
+        availSources={availSources}
+        availSeniorities={availSeniorities}
+        resultCount={filtered.length}
+        totalCount={enriched.length - hiddenCount}
+        anyActive={anyFacet}
+        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
+      />
+      <p className="mt-3 text-xs text-faint">j and k move. s saves. x skips. Shift+X skips the checked rows.</p>
       </div>
 
       {/* undo toast (sits above the tray) */}

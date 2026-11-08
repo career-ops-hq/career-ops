@@ -34,7 +34,7 @@ import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs
 import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { postingKey } from './url-key.mjs';
+import { canonicalJobKey } from './url-key.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
@@ -131,9 +131,9 @@ function loadPortalsConfig() {
 
 /** Jobs whose posting is not in the pipeline yet, one per posting. */
 export function newPipelineJobs(found, pipelineUrls) {
-  const seen = new Set([...pipelineUrls].map(postingKey));
+  const seen = new Set([...pipelineUrls].map((url) => canonicalJobKey(url) || url));
   return found.filter((j) => {
-    const key = postingKey(j.url) || j.url;
+    const key = canonicalJobKey(j.url) || j.url;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -266,6 +266,18 @@ async function cmdRun(args) {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
     const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, hook);
+    const failed = results.filter(r => !r.ok);
+    if (failed.length) {
+      for (const r of failed) console.error(`${r.id} ${hook} failed: ${r.error}`);
+      process.exit(1);
+    }
+    // export and notify return a non-array on success. Only ingest and search promise Job[].
+    const notJobs = results.filter(r => !Array.isArray(r.result));
+    if (notJobs.length) {
+      for (const r of notJobs) console.error(`${r.id} ${hook} failed: expected an array of jobs`);
+      process.exit(1);
+    }
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     const { jobs, counts } = admitPluginJobs(found, {
       id,
@@ -295,19 +307,43 @@ async function cmdRun(args) {
     const rowCount = snapshot.applications.length;
     const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
     const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dataRoot: DATA_ROOT, dryRun, timeoutMs, pluginId: id }), id);
+    exitIfPluginDidNotRun(results, id, 'export');
+    let failed = false;
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
-      else console.log(`${r.id} export: failed — ${r.error}`);
+      else {
+        console.error(`${r.id} export failed: ${r.error}`);
+        failed = true;
+      }
     }
+    if (failed) process.exit(1);
     return;
   }
 
   if (hook === 'notify') {
     const message = positional.slice(hookArgStart).join(' ') || '(career-ops notification)';
     const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
-    for (const r of results) console.log(r.ok ? `${r.id} notify: sent.` : `${r.id} notify: failed — ${r.error}`);
+    exitIfPluginDidNotRun(results, id, 'notify');
+    let failed = false;
+    for (const r of results) {
+      if (r.ok) console.log(`${r.id} notify: sent.`);
+      else {
+        console.error(`${r.id} notify failed: ${r.error}`);
+        failed = true;
+      }
+    }
+    if (failed) process.exit(1);
     return;
   }
+}
+
+// An empty result list means the selected plugin never ran. The integrity
+// gate and a failed import already printed why. A hook that ran and returned
+// no jobs is a one-element ok result, not an empty list.
+function exitIfPluginDidNotRun(results, id, hook) {
+  if (results.length > 0) return;
+  console.error(`${id} ${hook} did not run.`);
+  process.exit(1);
 }
 
 function findManifest(id) {

@@ -55,9 +55,13 @@ jobs:
       # Trusted Publishing (OIDC): npm >= 11.5.1 authenticates via the workflow's
       # id-token against the trusted publisher configured on npmjs.com — no token.
       # setup-node ships an older npm, so upgrade before publishing.
+      # The version is exact, not @latest: this step runs with id-token: write,
+      # so @latest would hand publish rights to whatever npm release came out
+      # that day. 12.2.2 is the npm that published career-ops v1.39.0. Dependabot
+      # does not update a version inside a `run:` line, so bump it by hand.
       - name: Upgrade npm for trusted publishing
         if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
-        run: npm install -g npm@latest
+        run: npm install -g npm@12.2.2
       - name: Publish scaffolder to npm
         if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         run: npm publish --provenance --access public
