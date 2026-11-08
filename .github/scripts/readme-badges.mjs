@@ -26,6 +26,13 @@ import { fileURLToPath } from 'node:url';
 import { isMainModule } from '../../lib/is-main-module.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const USAGE = `Usage: node .github/scripts/readme-badges.mjs [hired] [discord] [npm]
+
+Redraws the README's badges as SVGs under docs/ (default: all three):
+  hired    from docs/hired-count.json          -> docs/hired-badge.svg
+  discord  from Discord's public invite API    -> docs/discord-badge.svg
+  npm      from the version in package.json    -> docs/npm-badge.svg
+A source or shields.io that does not answer keeps the last badge and warns; the exit code stays 0.`;
 const DISCORD_INVITE = '8pRpHETxa4';
 const DARK = '2b3137';
 
@@ -154,6 +161,7 @@ export async function refresh({ names = Object.keys(BADGES), root = REPO_ROOT, f
 }
 
 async function main(argv) {
+  if (argv.includes('--help') || argv.includes('-h')) { process.stdout.write(`${USAGE}\n`); return 0; }
   const names = argv.length ? argv : Object.keys(BADGES);
   const unknown = names.filter((name) => !BADGES[name]);
   if (unknown.length) {

@@ -4,6 +4,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ROOT } from './helpers.mjs';
 import { BADGES, badgeProblem, badgeUrl, refresh } from '../.github/scripts/readme-badges.mjs';
@@ -104,6 +105,15 @@ test('the badges in the repo are whole, self-contained SVGs', () => {
     const svg = readFileSync(join(ROOT, spec.file), 'utf8');
     assert.ok(svg.trim().startsWith('<svg') && svg.trim().endsWith('</svg>'), name);
     assert.doesNotMatch(svg, /\b(?:xlink:)?href\s*=\s*["']?\s*(?!data:)[a-z][\w+.-]*:/i, `${name} must not reference anything outside itself`);
+  }
+});
+
+test('--help and -h print the usage and draw nothing', () => {
+  for (const flag of ['--help', '-h']) {
+    const r = spawnSync(process.execPath, [join(ROOT, '.github', 'scripts', 'readme-badges.mjs'), flag], { encoding: 'utf8', cwd: tmpdir() });
+    assert.equal(r.status, 0, flag);
+    assert.match(r.stdout, /^Usage: node \.github\/scripts\/readme-badges\.mjs/, flag);
+    assert.doesNotMatch(r.stdout, /updated|unchanged|kept/, `${flag} must not run the refresh`);
   }
 });
 
