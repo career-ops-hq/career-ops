@@ -44,8 +44,17 @@ check('Step 1 excludes the directory README from the session list',
 // A -redflags.md written before this rule may rest on practice sessions, and
 // oferta's Risk Summary keeps surfacing its warning level until it is replaced.
 check('Step 1 checks for a stale -redflags.md when a company has only skipped files',
-  /Stale red-flag file check/.test(step1) && /appears only in skipped files/.test(step1) && /\{company-slug\}-redflags\.md/.test(step1),
+  /Stale red-flag file check/.test(step1) && /for each existing `interview-prep\/\*-redflags\.md`/.test(step1) && /No eligible session belongs to that company/i.test(step1),
   'stale-file check missing');
+// A filename cannot tell acme-corp + senior-engineer from acme + corp-senior-engineer,
+// so the check matches a known red-flag slug against front matter first.
+check('Stale check matches the company by front matter, filename prefix only as fallback',
+  /front matter `company`, slugified, equals the slug/.test(step1) && /filename starts with `\{company-slug\}-`/.test(step1),
+  'company match still parsed from the filename');
+// /career-ops interview is the CV onboarding interview; debriefs come from interview/debrief.
+check('Onboarding messages point to /career-ops interview/debrief, not the CV interview',
+  (threshold.match(/`\/career-ops interview\/debrief`/g) || []).length === 2 && !/`\/career-ops interview`/.test(threshold),
+  'threshold messages still name /career-ops interview');
 check('Stale red-flag file is deleted only on the user\'s explicit yes',
   /offer to delete it/.test(step1) && /Delete it only on the user's explicit yes/.test(step1),
   'deletion not gated on consent');
