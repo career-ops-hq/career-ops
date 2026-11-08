@@ -587,6 +587,15 @@ try {
     fail(`no-total cap: ${nt.result.length} jobs, ${JSON.stringify(nt.lines)}`);
   }
 
+  // A health probe asks for one page via ctx.maxPages: honoured, and not reported as truncation.
+  const probeCount = { n: 0 };
+  const probe = await captureWarn(() => oc.fetch({ name: 'Probe', careers_url: careers }, { ...pagedCtx(7118, probeCount), maxPages: 1 }));
+  if (probeCount.n === 1 && probe.result.length === 200 && probe.lines.length === 0 && !probe.result.oraclecloudTruncated) {
+    pass('oraclecloud.fetch() honours ctx.maxPages (health probe) and stays silent about that stop');
+  } else {
+    fail(`probe cap: ${probeCount.n} requests, ${probe.result.length} jobs, warnings ${JSON.stringify(probe.lines)}`);
+  }
+
   if (mod.resolveMaxPages({}) === 25 && mod.resolveMaxPages({ max_pages: 0 }) === 25 && mod.resolveMaxPages({ max_pages: 'x' }) === 25
       && mod.resolveMaxPages({ max_pages: 60 }) === 60 && mod.resolveMaxPages({ max_pages: 9999 }) === mod.HARD_MAX_PAGES) {
     pass('oraclecloud.resolveMaxPages() defaults to 25, honours a positive integer, caps at HARD_MAX_PAGES');

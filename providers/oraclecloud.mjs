@@ -244,7 +244,11 @@ export default {
     const site = resolveSite(entry);
     if (!site) throw new Error(`oraclecloud: cannot derive API URL for ${entry.name}`);
 
-    const maxPages = resolveMaxPages(entry);
+    const entryMaxPages = resolveMaxPages(entry);
+    // Health probes / audits pass ctx.maxPages (1) to ask for a single page;
+    // honour it, and don't call that deliberate stop a truncation.
+    const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
+    const maxPages = Math.min(entryMaxPages, ctxCap);
 
     const all = [];
     let total = null;
@@ -288,7 +292,7 @@ export default {
     // The page cap ended the walk with rows still unread (or, when the tenant
     // reports no total, with no sign the board ended). Say so: a silently
     // short board reads as a complete one.
-    if (capped) {
+    if (capped && entryMaxPages <= ctxCap) {
       const counts = total === null ? `${all.length} jobs fetched, total unknown` : `${all.length} of ${total} jobs`;
       const advice = maxPages < HARD_MAX_PAGES
         ? `raise max_pages on this entry for more (up to ${HARD_MAX_PAGES})`
