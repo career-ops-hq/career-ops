@@ -7,24 +7,26 @@ import fs from "node:fs";
 import path from "node:path";
 import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { localISODate } from "@/lib/followups";
-import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, noOutputError, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
-import { persistEvaluation, evaluateRunOutcome } from "@/lib/report-persist.mjs";
+import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
-import { resolveCvTemplate } from "@/lib/core/cv-template.mjs";
+import { resolveCvTemplate, resolveUserTemplatesDir } from "@/lib/core/cv-template.mjs";
 import { profileRef } from "@/lib/core/profile-path.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 import { readJsonObject } from "@/lib/json-body";
+import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,9 +41,11 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
  * @returns A stream of status, warning, error, and completion events.
  */
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown }>(req);
+  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown }>(req);
   if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
+  const evaluation = kind === "evaluate" ? parseEvaluationOptions(body.evaluationSections) : undefined;
+  if (evaluation && !evaluation.ok) return Response.json({ error: evaluation.error }, { status: 400 });
   if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
@@ -80,18 +84,44 @@ export async function POST(req: Request) {
     pdf: ["build-cv-html.mjs", "cv-templates.mjs", "generate-pdf.mjs"],
     cover: ["modes/cover.md"],
   };
+  const requiredFiles = needsScripts[kind] ?? [];
+  // Scripts and system modes live in the code checkout, which on a split-layout
+  // install is not the data root (cv.md, reports/ and output stay under that).
+  const codeRoot = resolveCodeRoot(process.cwd(), process.env);
   // CAREER_OPS_ROOT is runtime user data, not a build input. Tracing this
   // dynamic path would copy the whole web project into every server bundle.
-  const missing = (needsScripts[kind] ?? []).find(
-    (required) => !fs.existsSync(path.join(/* turbopackIgnore: true */ careerOpsRoot(), required)),
-  );
-  if (missing) {
+  const requiredPaths = requiredFiles.map((rel) => path.join(/* turbopackIgnore: true */ codeRoot, rel));
+  // The evaluate mode file, read again below for focused evaluations.
+  const requiredPath = requiredPaths[0] ?? "";
+  const missingIndex = requiredPaths.findIndex((file) => !fs.existsSync(/* turbopackIgnore: true */ file));
+  if (missingIndex !== -1) {
+    const missing = requiredFiles[missingIndex];
     return new Response(
       JSON.stringify({
-        error: `This needs a complete career-ops checkout (${missing}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
+        error: `This needs a complete career-ops checkout (${missing}). The career-ops code checkout is incomplete — point CAREER_OPS_CODE_ROOT at a full checkout.`,
       }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
+  }
+
+  // Assemble selected canonical instructions before any extraction or model call.
+  // Omitted work never becomes part of the worker's evaluation instructions.
+  let evaluationInstructions: string | null = null;
+  if (evaluation?.ok && !evaluation.full) {
+    try {
+      // modes/ and batch/ are system files: they live in the code checkout.
+      const root = codeRoot;
+      evaluationInstructions = selectedEvaluationInstructions({
+        mode: fs.readFileSync(/* turbopackIgnore: true */ requiredPath, "utf8"),
+        canonicalMode: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "modes/oferta.md"), "utf8"),
+        shared: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "modes/_shared.md"), "utf8"),
+        batch: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "batch/batch-prompt.md"), "utf8"),
+        sections: evaluation.sections,
+      });
+    } catch (error) {
+      console.error("[career-ops] Failed to load focused evaluation instructions:", error);
+      return Response.json({ error: "Could not load the selected evaluation instructions. No AI run was started." }, { status: 422 });
+    }
   }
 
   // fix-portal's prompt puts this straight into a shell command the agent runs, and
@@ -157,7 +187,22 @@ export async function POST(req: Request) {
   // (#4034). Only pdf fills a template, so nothing else pays for the lookup.
   // The root is passed, not re-derived: a relative CAREER_OPS_PROFILE resolves
   // against it, and `process.cwd()` here is `<core>/web` (see cv-template.mjs).
-  const cvTemplate = kind === "pdf" ? await resolveCvTemplate(careerOpsRoot()) : undefined;
+  // The data root goes in too: a template from the core's user layer (#5777) lives
+  // there, so it is named relative to the worker's cwd, not the checkout.
+  const dataRoot = kind === "pdf" ? careerOpsRoot() : undefined;
+
+  const cvTemplate = dataRoot
+    ? await resolveCvTemplate(codeRoot, dataRoot)
+    : undefined;
+
+  const userTemplatesDir = dataRoot
+    ? await resolveUserTemplatesDir(codeRoot, dataRoot)
+    : undefined;
+  // build-cv-html.mjs runs in the checkout, so it gets an absolute template path:
+  // a user-layer template is data-root-relative, a system one checkout-relative.
+  const cvTemplateFile = cvTemplate && dataRoot
+    ? path.resolve(userTemplatesDir && cvTemplate.startsWith(`${userTemplatesDir}/`) ? dataRoot : codeRoot, cvTemplate)
+    : undefined;
   const prompt = buildPrompt({
     kind,
     input,
@@ -166,9 +211,13 @@ export async function POST(req: Request) {
     postedAt,
     lang,
     cvTemplate,
+    userTemplatesDir,
+    // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
+    codeRoot,
     reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
     coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
     profile: profileRef(careerOpsRoot()),
+    evaluationInstructions,
   });
 
   const isClaude = cliId === "claude";
@@ -352,6 +401,10 @@ export async function POST(req: Request) {
       // every byte for the backend while holding the body out of the run log.
       const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
       const reportFilter = kind === "evaluate" ? createReportEnvelopeFilter() : null;
+      // Assistant-authored text only, before report-body filtering. Tools/JDs
+      // cannot directly declare a gated outcome. Process integrity is checked
+      // first at close, before this text can be treated as a terminal stop.
+      let evaluationText = "";
       // While the agent emits the <<cv-payload>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -361,6 +414,7 @@ export async function POST(req: Request) {
       // the stream never idles during the filtered phase. Unknown event types are
       // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
+        if (kind === "evaluate") evaluationText += text;
         const filter = cvFilter ?? reportFilter;
         const visible = filter ? filter.push(text) : text;
         if (visible) send({ type: "text", text: visible });
@@ -445,13 +499,15 @@ export async function POST(req: Request) {
             spawnFn: spawn,
             execPath: process.execPath,
             root: careerOpsRoot(),
+            coreRoot: resolveCodeRoot(process.cwd(), process.env),
             markdown,
             url: input,
             today,
             postedAt,
+            evaluationSections: evaluation?.ok ? evaluation.sections : undefined,
           });
           if (!result.ok) {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           sendWarnings(result.warnings);
@@ -479,14 +535,14 @@ export async function POST(req: Request) {
           const result = await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
-            root: careerOpsRoot(),
+            coreRoot: resolveCodeRoot(process.cwd(), process.env),
             pdfPaths: paths,
             payload: envelope.payload,
-            template: cvTemplate,
+            template: cvTemplateFile,
             reportNum: paths.reportNum,
           });
           if (result.kind !== "rendered") {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
@@ -535,14 +591,8 @@ export async function POST(req: Request) {
         // pdfRunOutcome's noOutputMessage — because a CLI that produced no output at
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
-        const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) {
-            const detail = stderrErrorSnippet ? ` (${stderrErrorSnippet})` : "";
-            return `The CLI exited with an error — is it installed and authenticated?${detail}`;
-          }
-          if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
-          return null;
-        };
+        const noOutputMessage = (): string | null =>
+          noOutputError({ emittedText, sawError, cleanExit, stderrSnippet: stderrErrorSnippet });
 
         if (kind === "pdf") {
           // Release any text the filter was still holding, so the log keeps the
@@ -555,7 +605,7 @@ export async function POST(req: Request) {
           const envelope = cvFilter?.result();
           const outcome = pdfRunOutcome({
             envelope,
-            noOutputMessage: noOutputError(),
+            noOutputMessage: noOutputMessage(),
             sawError,
             cleanExit,
             hasPaths: pdfPaths !== undefined,
@@ -584,12 +634,14 @@ export async function POST(req: Request) {
           const envelope = reportFilter?.result();
           const outcome = evaluateRunOutcome({
             envelope,
-            noOutputMessage: noOutputError(),
+            noOutputMessage: noOutputMessage(),
             sawError,
             cleanExit,
+            text: evaluationText,
           });
           if (!outcome.ok) {
-            send({ type: "error", msg: outcome.message });
+            const event = evaluationOutcomeEvent(outcome, { tokens: lastTokens, costUsd: lastCostUsd });
+            if (event) send(event);
           } else if (envelope?.ok !== true) {
             send({ type: "error", msg: "Internal error: the evaluate run passed its gate with no report to save — please report this." });
           } else {
@@ -602,7 +654,7 @@ export async function POST(req: Request) {
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit
         // and real output. Anything else is surfaced. An errored run must never be
         // banked as a confident score.
-        const baseErr = noOutputError();
+        const baseErr = noOutputMessage();
         if (baseErr) {
           send({ type: "error", msg: baseErr });
         } else if (!cleanExit || sawError) {

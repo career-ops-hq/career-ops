@@ -13,7 +13,7 @@ Mode interaktif untuk saat kandidat mengisi formulir lamaran di browser Playwrig
 1. DETEKSI      -> Buka lowongan di browser Playwright proyek ini
 2. IDENTIFIKASI -> Ekstrak perusahaan + role dari halaman
 3. CARI         -> Cocokkan dengan report yang ada di reports/
-4. MUAT         -> Baca report lengkap + `## Application Answers` dan Blok H (jika ada)
+4. MUAT         -> Baca report lengkap + `## Application Answers` dan Blok H (jika ada), setelah **Posting identity** terpenuhi
 5. BANDINGKAN   -> Apakah role di layar cocok dengan yang dievaluasi? Jika berubah -> beri peringatan
 6. ANALISIS     -> Identifikasi SEMUA pertanyaan yang terlihat di formulir
 7. HASILKAN     -> Untuk tiap pertanyaan, hasilkan jawaban yang dipersonalisasi
@@ -38,11 +38,13 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 1. Ekstrak nama perusahaan dan jabatan dari halaman
 2. Cari di `reports/` berdasarkan nama perusahaan (Grep case-insensitive)
-3. Jika cocok -> muat report lengkap
+3. Jika cocok -> baca hanya kepala setiap report yang cocok (perusahaan, role, `**URL:**`) dan pilih yang URL atau req ID-nya adalah lowongan ini; tanyakan kandidat jika belum jelas. Muat report lengkap dan butir 4 hanya setelah **Posting identity** terpenuhi (`modes/apply.md` → Step 5); untuk lowongan lain, lanjut ke **Evaluate as new** atau **Draft without saving** tanpa memuatnya
 4. Jika ada `## Application Answers` -> muat jawaban yang sudah dikirim sebagai dasar; jika tidak, dan ada Blok H, draft jawaban sebelumnya. Jika keduanya ada, `## Application Answers` didahulukan
 5. Jika TIDAK cocok -> beri peringatan kepada kandidat dan tawarkan auto-pipeline cepat
 
 ## Langkah 3 -- Deteksi perubahan role
+
+Langkah ini hanya berlaku selama formulir masih lowongan dari report: pemberi kerja yang sama dan lowongan yang sama (`modes/apply.md` → Step 5 → **Posting identity**); judul tidak dihitung. Periksa ini untuk setiap formulir, juga saat judul tidak berubah dan hanya satu report yang cocok dengan perusahaan: lowongan lain bisa memakai judul yang sama, dan report itu tidak boleh dipakai. Jika beberapa report cocok dengan perusahaan, ambil dulu report yang URL atau req ID-nya adalah lowongan ini, dan tanyakan kandidat jika belum jelas. Pemberi kerja lain, atau lowongan lain di pemberi kerja yang sama, bukan perubahan role: jangan pernah menyesuaikan jawaban report ke sana. Sebagai gantinya pilih **Evaluate as new** (evaluasi sebagai lowongan baru: auto-pipeline, report sendiri) atau **Draft without saving** (susun jawaban tanpa menyimpannya ke report mana pun). Untuk **Draft without saving**, sisihkan report yang cocok, jawabannya, dan CV yang disesuaikan, lalu susun jawaban hanya dari lowongan yang terlihat, `cv.md`, dan profil; langkah di bawah yang membaca report tidak berlaku.
 
 Jika role di layar berbeda dari yang dievaluasi:
 - **Beri peringatan kepada kandidat**: "Role berubah dari [X] menjadi [Y]. Mau saya evaluasi ulang atau menyesuaikan jawaban dengan jabatan baru?"
@@ -53,6 +55,8 @@ Jika role di layar berbeda dari yang dievaluasi:
   - **Setelah menyesuaikan**: biarkan jabatannya, karena itu menamai role yang dievaluasi report. Catat perubahannya sebagai catatan dengan `node set-status.mjs --report <report#> <status saat ini> --note "Lowongan berganti nama saat melamar, baris tetap memakai jabatan yang dievaluasi"`. Memberikan status baris saat ini membuatnya tidak berubah dan menambahkan catatannya. Pakai teks tetap seperti ini dan jangan sertakan `[Y]`: jabatan baru adalah teks dari halaman, dan teks dari halaman tidak pernah masuk ke baris perintah.
 
 ## Langkah 4 -- Analisis pertanyaan formulir
+
+Untuk **Draft without saving**, langkah ini tidak memakai report yang cocok, `## Application Answers`-nya, maupun Blok H: perlakukan setiap pertanyaan sebagai baru dan bekerja dari lowongan yang terlihat, `cv.md`, dan profil.
 
 Identifikasi SEMUA pertanyaan yang terlihat:
 - Kolom teks bebas (cover letter, "kenapa posisi ini", motivasi, dll.)
@@ -66,6 +70,8 @@ Klasifikasikan tiap pertanyaan:
 - **Pertanyaan baru** -> hasilkan jawaban dari report + `cv.md`
 
 ## Langkah 5 -- Hasilkan jawaban
+
+Untuk **Draft without saving**, langkah ini tidak memakai report yang cocok, `## Application Answers`-nya, maupun Blok H: perlakukan setiap pertanyaan sebagai baru dan bekerja dari lowongan yang terlihat, `cv.md`, dan profil.
 
 Untuk tiap pertanyaan, susun jawaban mengikuti skema ini:
 
@@ -88,6 +94,7 @@ Untuk tiap pertanyaan, susun jawaban mengikuti skema ini:
 ## Jawaban untuk [Perusahaan] -- [Role]
 
 Dasar: Report #NNN | Score: X.X/5 | Arketipe: [tipe]
+[Untuk **Draft without saving**, ganti baris di atas dengan: "Tanpa report: draft untuk lowongan ini, tidak disimpan"]
 
 ---
 
@@ -107,6 +114,8 @@ Catatan:
 ```
 
 ## Langkah 6 -- Setelah melamar (opsional)
+
+Sebelum menyimpan apa pun, dan sekali lagi tepat sebelum setiap penulisan di bawah (status dan jawaban), pastikan formulir masih lowongan dari report (`modes/apply.md` → Step 8 → **Write only to the report of this posting**). Pemberi kerja dan lowongan sama → langkah di bawah berlaku untuk report ini, juga setelah penyesuaian ke judul baru atau evaluasi ulang. Pemberi kerja lain atau lowongan lain → jangan pernah report ini: gunakan report yang ditulis untuk lowongan baru; jika tidak ada, jangan set status, jangan simpan jawaban, dan beri tahu kandidat bahwa lamaran ini belum tercatat.
 
 Jika kandidat mengonfirmasi lamaran sudah dikirim:
 1. Perbarui status dari "Evaluated" menjadi "Applied" dengan `node set-status.mjs --report <report#> Applied` (jangan mengedit tabel `applications.md` secara manual)

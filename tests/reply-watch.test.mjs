@@ -7,6 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { ROOT, NODE, rmSync } from './helpers.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath, trackerLockDirFor } from '../tracker-utils.mjs';
 
 const SCRIPT = join(ROOT, 'reply-watch.mjs');
 
@@ -22,13 +23,13 @@ function setupWorkspace() {
   return { tmp, dataDir, trackerFile };
 }
 
-function runReplyWatch(tmp, trackerFile, candidatesFile = null, input = '') {
+function runReplyWatch(tmp, trackerFile, candidatesFile = null, input = '', timeoutMs = 30000) {
   const args = candidatesFile ? [candidatesFile] : [];
   return spawnSync(NODE, [SCRIPT, ...args], {
     cwd: tmp,
     input,
     encoding: 'utf-8',
-    timeout: 30000,
+    timeout: timeoutMs,
     env: { ...process.env, CAREER_OPS_TRACKER: trackerFile }
   });
 }
@@ -178,4 +179,34 @@ test('reply-watch.mjs renders and applies one confirmed update per company-wide 
   assert.equal(log.length, 2);
 
   rmSync(tmp, { recursive: true, force: true });
+});
+
+test('a reply-watch run killed while set-status waits on the tracker lock reports how far the child got', async () => {
+  const { tmp, trackerFile } = setupWorkspace();
+  const candFile = join(tmp, 'cands.json');
+  writeFileSync(candFile, JSON.stringify([{
+    message_id: 'lock-contention', from: 'hr@acme.com',
+    subject: 'Acme — Backend Engineer', body_snippet: 'We invite you to interview.',
+  }]));
+
+  // Hold the tracker lock so reply-watch's set-status call blocks past the
+  // spawn timeout. The child dies ETIMEDOUT mid-update waiting on set-status
+  // lock contention; the failure message must say how far it got from its
+  // captured stdout/stderr.
+  // Canonicalize the path so the lock matches set-status's even under a
+  // symlinked temp dir (macOS /var -> /private/var); otherwise nothing waits.
+  const lock = await acquireTrackerLock(trackerLockDirFor(canonicalizeTrackerPath(trackerFile)));
+  try {
+    const startedAt = Date.now();
+    const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n', 5000);
+    const elapsedMs = Date.now() - startedAt;
+    assert.ok(elapsedMs < 20000, `runReplyWatch took ${elapsedMs}ms (expected < 20000ms); ${describeSpawn(res)}`);
+    assert.equal(res.error?.code, 'ETIMEDOUT', describeSpawn(res));
+    const message = describeSpawn(res);
+    assert.match(message, /Suggested status updates to apply/);
+    assert.match(message, /#1 Acme \(Backend Engineer\): Applied → Interview/);
+  } finally {
+    lock.release();
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

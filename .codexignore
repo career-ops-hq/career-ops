@@ -1,0 +1,35 @@
+# What a Codex plugin install and index should skip. It mirrors .gitignore
+# and .dockerignore: the user's own files and generated output never travel
+# with the plugin, and dependency trees are rebuilt on install.
+
+# User layer (DATA_CONTRACT.md): personal and generated, never shipped
+cv.md
+article-digest.md
+config/profile.yml
+modes/_profile.md
+portals.yml
+data/
+reports/
+output/
+interview-prep/
+jds/
+local/
+writing-samples/
+batch/logs/
+batch/tracker-additions/
+batch/batch-state.tsv
+batch/batch-input.tsv
+.career-ops-data
+.env
+
+# Dependencies and build output
+node_modules/
+web/node_modules/
+scaffolder/node_modules/
+web/.next/
+
+# Local state and noise
+.update-dismissed
+.update-lock
+*.log
+.DS_Store

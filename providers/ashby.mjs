@@ -15,7 +15,8 @@ import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 
-const ASHBY_TIMEOUT_MS = 30_000;
+// verify-portals.mjs probes Ashby boards with it too, so both read the same board.
+export const ASHBY_TIMEOUT_MS = 30_000;
 const ASHBY_RETRIES = 2;
 const ASHBY_BACKOFF_BASE_MS = 1_000;
 

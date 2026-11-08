@@ -3,7 +3,7 @@
  *
  * Plain .mjs (same pattern as pdf-paths.mjs / clean-chips.mjs) so this can be
  * unit-tested with `node --test`, no TypeScript build step. `spawnFn`,
- * `execPath`, and `root` are injected rather than importing node:child_process
+ * `execPath`, and `coreRoot` (the code checkout — the scripts live there, not in the data root) are injected rather than importing node:child_process
  * or career-ops.ts directly, keeping this module free of TypeScript
  * dependencies and letting tests substitute a fake child process.
  *
@@ -108,10 +108,14 @@ export function writeCvPayload({ pdfPaths, payload }) {
  * promise settles only on `close`: the caller deletes the scratch files next,
  * and must not do that while the child may still be writing them.
  *
- * @param {{spawnFn: Function, execPath: string, args: string[], cwd: string, startError: string, timeoutMs?: number}} args
+ * Output is decoded on the stream, not per chunk: a chunk boundary inside a
+ * multibyte character (the renderer's warnings open with ⚠️) would otherwise
+ * leave U+FFFD in the text an error message is built from.
+ *
+ * @param {{spawnFn: Function, execPath: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv, startError: string, timeoutMs?: number}} args
  * @returns {Promise<{ok: boolean, code: number | null, stdout: string, stderr: string}>}
  */
-function spawnResult({ spawnFn, execPath, args, cwd, startError, timeoutMs = DEFAULT_PDF_CHILD_TIMEOUT_MS }) {
+function spawnResult({ spawnFn, execPath, args, cwd, env, startError, timeoutMs = DEFAULT_PDF_CHILD_TIMEOUT_MS }) {
   return new Promise((resolve) => {
     let settled = false;
     let timeoutId;
@@ -129,13 +133,15 @@ function spawnResult({ spawnFn, execPath, args, cwd, startError, timeoutMs = DEF
     try {
       // windowsHide: see api/doctor/route.ts — a stale inherited console
       // kills every child with 0xC0000142 on Windows; never inherit one.
-      child = spawnFn(execPath, args, { cwd, windowsHide: true });
+      child = spawnFn(execPath, args, { cwd, windowsHide: true, ...(env ? { env } : {}) });
     } catch (e) {
       finish({ ok: false, code: null, stdout: "", stderr: `${startError}: ${e.message}` });
       return;
     }
     let stdout = "";
     let stderr = "";
+    child.stdout?.setEncoding?.("utf8");
+    child.stderr?.setEncoding?.("utf8");
     child.stdout?.on("data", (d) => { stdout += d.toString(); });
     child.stderr?.on("data", (d) => { stderr += d.toString(); });
     child.on("close", (code) => finish(timeoutResult ?? { ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() }));
@@ -164,17 +170,17 @@ function spawnResult({ spawnFn, execPath, args, cwd, startError, timeoutMs = DEF
  * report, or null when the report carries no recognised size. The builder owns
  * that decision (profile, payload, `auto` by country — lib/page-format.mjs), so
  * the renderer is handed its answer instead of reaching one of its own.
- * @param {{spawnFn: Function, execPath: string, root: string, payload: string, html: string, template?: string, timeoutMs?: number}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, payload: string, html: string, template?: string, timeoutMs?: number}} args
  * @returns {Promise<{ok: boolean, stderr: string, pageFormat: "a4"|"letter"|null}>}
  */
-export function spawnBuildCvHtml({ spawnFn, execPath, root, payload, html, template, timeoutMs }) {
+export function spawnBuildCvHtml({ spawnFn, execPath, coreRoot, payload, html, template, timeoutMs }) {
   return spawnResult({
     spawnFn,
     execPath,
-    // path.resolve, not join: an absolute template (another drive on Windows)
-    // must stay itself rather than be glued under root.
-    args: [path.join(root, "build-cv-html.mjs"), payload, html, ...(template ? [path.resolve(root, template)] : [])],
-    cwd: root,
+    // path.resolve, not join: an absolute template (a data-root template, or
+    // another drive on Windows) must stay itself rather than be glued under coreRoot.
+    args: [path.join(coreRoot, "build-cv-html.mjs"), payload, html, ...(template ? [path.resolve(coreRoot, template)] : [])],
+    cwd: coreRoot,
     startError: "CV builder failed to start",
     timeoutMs: timeoutMs ?? QUICK_PDF_CHILD_TIMEOUT_MS,
   }).then(({ ok, stdout, stderr }) => {
@@ -186,14 +192,53 @@ export function spawnBuildCvHtml({ spawnFn, execPath, root, payload, html, templ
 }
 
 /**
+ * The stderr line generate-pdf.mjs prints when a render ran over a warn-only
+ * page budget and went to a sibling draft instead of the output path (#6377).
+ * Used only to NAME the draft in the error shown to the user; whether a PDF was
+ * delivered is decided from the file itself (see spawnGeneratePdf), never from
+ * this text, so a wording change or a decoding hiccup cannot mark a rejected
+ * render as ready. The capture ends at the draft's own suffix, not at the
+ * first " (", which a directory on the way can contain.
+ */
+export const OVERFLOW_DRAFT_RE = /Overflow draft: (.*?\.overflow(?:-\d+)?\.pdf) \(/m;
+
+/**
+ * Identity of the file at `file` as the renderer leaves it, or null when there
+ * is none. writeFileAtomic writes a temp file and renames it into place, so a
+ * delivered PDF always has a new inode and mtime; a render that kept the
+ * previous PDF (or wrote nothing) leaves this unchanged.
+ * @param {string} file
+ * @returns {string | null}
+ */
+export function pdfFingerprint(file) {
+  try {
+    const s = fs.statSync(file);
+    return `${s.ino}:${s.mtimeMs}:${s.size}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Spawn generate-pdf.mjs as a plain child process and resolve once it exits.
+ *
+ * `ok` is the exit code. `delivered` is whether this render left a PDF at
+ * `finalPdf`: a render over a warn-only page budget exits 0 but writes nothing
+ * there (the PDF went to a sibling .overflow.pdf draft, #6377), so `ok` alone
+ * would keep an HTML beside, and mark the tracker ready for, a file that was
+ * never written. Delivery is judged from the file: a PDF that landed during
+ * this render has a new identity, one that was kept or never written has the
+ * old one (or none). Every caller reads `delivered`, so the judgement lives
+ * here and not in one of them.
+ *
  * A null `format` omits --format, leaving the size to generate-pdf.mjs's own
  * profile-then-default resolution (the web path never passes null: see
  * renderAndMarkPdf).
- * @param {{spawnFn: Function, execPath: string, root: string, html: string, finalPdf: string, format: "letter"|"a4"|null, reportNum: string, timeoutMs?: number}} args
- * @returns {Promise<{ok: boolean, stderr: string}>}
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4"|null, reportNum: string, timeoutMs?: number}} args
+ * @returns {Promise<{ok: boolean, delivered: boolean, stderr: string}>}
  */
-export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, format, reportNum, timeoutMs }) {
+export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, reportNum, timeoutMs }) {
+  const before = pdfFingerprint(finalPdf);
   return spawnResult({
     spawnFn,
     execPath,
@@ -201,11 +246,48 @@ export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, form
     // from the template's fixed markup order, so this guard would otherwise
     // hard-fail every web-triggered render — same bypass a human already
     // applies manually via the CLI when this diverges.
-    args: [path.join(root, "generate-pdf.mjs"), html, finalPdf, ...(format ? [`--format=${format}`] : []), `--report=${reportNum}`, "--allow-reorder"],
-    cwd: root,
+    args: [path.join(coreRoot, "generate-pdf.mjs"), html, finalPdf, ...(format ? [`--format=${format}`] : []), `--report=${reportNum}`, "--allow-reorder"],
+    cwd: coreRoot,
+    env: { ...process.env, CAREER_OPS_PDF_SHARED: "1" },
     startError: "PDF rendering failed to start",
     timeoutMs,
-  }).then(({ ok, stderr }) => ({ ok, stderr }));
+  }).then(({ ok, stderr }) => {
+    const after = pdfFingerprint(finalPdf);
+    const landed = after !== null && after !== before;
+    return { ok, delivered: ok && landed, stderr };
+  });
+}
+
+/**
+ * The error to show for a render that delivered no PDF at `finalPdf`, kept
+ * short enough to survive the run route's 200-character cut.
+ *
+ * For a failed exit that is the renderer's own stderr. For a clean exit that
+ * wrote nothing, the full stderr opens with the page-budget warning, which
+ * alone runs past 200 characters and reads as advice to keep going; the line
+ * saying no PDF was written would never reach the user. So this leads with the
+ * page counts and the outcome, and names the draft this render wrote (the
+ * first free name: .overflow.pdf, then .overflow-2.pdf, ...), not the pattern,
+ * so the user does not open an older draft.
+ * @param {{ok: boolean, stderr: string}} render
+ * @param {string} finalPdf
+ * @returns {string}
+ */
+export function undeliveredRenderError(render, finalPdf) {
+  if (!render.ok) return failureReason(render.stderr);
+  const budgetLine = /CV is \d+ pages?; the allowed maximum is \d+ pages?\./.exec(render.stderr)?.[0] ?? null;
+  const draftPath = OVERFLOW_DRAFT_RE.exec(render.stderr)?.[1];
+  const draftName = draftPath ? path.basename(draftPath) : null;
+  if (!budgetLine && !draftName) {
+    // Exit 0, no PDF, and nothing on stderr to explain it: say exactly that
+    // rather than guess at a page budget.
+    return `PDF rendering reported success but wrote nothing to ${path.basename(finalPdf)}.`;
+  }
+  const budget = budgetLine ?? "The CV is over its page budget.";
+  const named = draftName ? `${budget} No PDF was written; the over-budget draft is ${draftName}. Trim the CV and render again.` : null;
+  return named && named.length <= 200
+    ? named
+    : `${budget} No PDF was written: the over-budget render was kept as an .overflow.pdf draft beside it. Trim the CV and render again.`;
 }
 
 /**
@@ -214,15 +296,15 @@ export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, form
  * a failure exit when --json is passed) so a caller can surface the specific
  * reason (not-found / ambiguous / lock-timeout / ...) rather than raw stderr.
  * `code` is the exit code, or null when the child never started or timed out.
- * @param {{spawnFn: Function, execPath: string, root: string, reportNum: string, timeoutMs?: number}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, reportNum: string, timeoutMs?: number}} args
  * @returns {Promise<{ok: boolean, code: number | null, data: {error?: string} | null, stderr: string}>}
  */
-export function markTrackerReady({ spawnFn, execPath, root, reportNum, timeoutMs }) {
+export function markTrackerReady({ spawnFn, execPath, coreRoot, reportNum, timeoutMs }) {
   return spawnResult({
     spawnFn,
     execPath,
-    args: [path.join(root, "mark-pdf-ready.mjs"), reportNum, "--json"],
-    cwd: root,
+    args: [path.join(coreRoot, "mark-pdf-ready.mjs"), reportNum, "--json"],
+    cwd: coreRoot,
     startError: "mark-pdf-ready.mjs failed to start",
     timeoutMs: timeoutMs ?? QUICK_PDF_CHILD_TIMEOUT_MS,
   }).then(({ ok, code, stdout, stderr }) => {
@@ -288,6 +370,25 @@ export function keepTailoredHtml(pdfPaths, warnings) {
 /** @typedef {RenderFailedResult | RenderedResult} RenderResult */
 
 /**
+ * The reason a failed render died, without the advisories printed before it.
+ * Keeps every line from the first `❌` on, since some failures put their detail
+ * (e.g. the locked-section Expected/Found values) on the lines after it.
+ * generate-pdf.mjs writes `⚠️` warnings (voice check, page budget) ahead of the
+ * `❌` line that names the actual failure, and the caller caps the message
+ * length, so passing raw stderr hid the cause behind a harmless warning. Every
+ * line from the first `❌` onward is kept: a locked-section mismatch prints its
+ * Expected/Found values on the lines after the header.
+ * @param {string} stderr
+ * @returns {string}
+ */
+export function failureReason(stderr) {
+  const lines = (stderr || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const start = lines.findIndex((l) => l.startsWith("❌"));
+  const picked = start >= 0 ? lines.slice(start) : lines;
+  return picked.length > 0 ? picked.join("\n") : "PDF rendering failed.";
+}
+
+/**
  * Collect a successful child's stderr as warnings, one per non-blank line.
  * @param {string} stderr
  * @param {string[]} warnings
@@ -306,19 +407,20 @@ function pushStderrWarnings(stderr, warnings) {
  * optimistically. Always cleans up scratch files, whether any step succeeds or
  * fails.
  *
- * `template` is the repo-relative path resolveCvTemplate() returned for this
- * run, so the web renders the template cv.template selects, as the CLI does.
- * The sheet is the one the builder reports, so the body and the paper match.
- * @param {{spawnFn: Function, execPath: string, root: string, pdfPaths: {payload: string, html: string, finalPdf: string}, payload: Record<string, unknown>, template?: string, reportNum: string}} args
+ * `template` is the path resolveCvTemplate() returned for this run, made
+ * absolute by the route, so the web renders the template cv.template selects, as
+ * the CLI does. The sheet is the one the builder reports, so the body and the
+ * paper match.
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {payload: string, html: string, finalPdf: string}, payload: Record<string, unknown>, template?: string, reportNum: string}} args
  * @returns {Promise<RenderResult>}
  */
-export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, payload, template, reportNum }) {
+export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, payload, template, reportNum }) {
   const warnings = [];
   try {
     const written = writeCvPayload({ pdfPaths, payload });
     if (!written.ok) return { kind: "build-failed", error: written.error };
 
-    const build = await spawnBuildCvHtml({ spawnFn, execPath, root, payload: pdfPaths.payload, html: pdfPaths.html, template });
+    const build = await spawnBuildCvHtml({ spawnFn, execPath, coreRoot, payload: pdfPaths.payload, html: pdfPaths.html, template });
     if (!build.ok) return { kind: "build-failed", error: build.stderr || "CV HTML build failed." };
     // Without the builder's sheet, generate-pdf.mjs would resolve its own from
     // fewer inputs (no payload country), and the body and the paper could
@@ -328,14 +430,20 @@ export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, payl
     // slot for (#5908): content the user wrote that this PDF will not show.
     pushStderrWarnings(build.stderr, warnings);
 
-    const render = await spawnGeneratePdf({ spawnFn, execPath, root, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format: build.pageFormat, reportNum });
-    if (!render.ok) return { kind: "render-failed", error: render.stderr || "PDF rendering failed." };
+    // A render over a warn-only page budget exits 0 but writes nothing to the
+    // final path (#6377): there is then no PDF to keep an HTML beside or to mark
+    // ready, and "done" would point the user at a file that was never written,
+    // so it is reported the way a strict overflow is. spawnGeneratePdf judges
+    // delivery from the file itself.
+    const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format: build.pageFormat, reportNum });
+    if (!render.delivered) {
+      return { kind: "render-failed", error: undeliveredRenderError(render, pdfPaths.finalPdf) };
+    }
     keepTailoredHtml(pdfPaths, warnings);
-    // A render that exits 0 can still have written advisories to stderr, and two
-    // of them matter to whoever asked for this PDF: the page-budget overflow
-    // (warning-only unless --strict-pages) and the CV fact check's advisory
-    // phrases. Dropping them would mean an unsupported claim the fact gate
-    // flagged reached nobody on the web path.
+    // A render that exits 0 can still have written advisories to stderr, and
+    // they matter to whoever asked for this PDF: the CV fact check's advisory
+    // phrases, the portal-length warnings. Dropping them would mean an
+    // unsupported claim the fact gate flagged reached nobody on the web path.
     pushStderrWarnings(render.stderr, warnings);
   } finally {
     cleanupPdfScratch(path.dirname(pdfPaths.html), pdfScratchPrefix(reportNum));
@@ -345,7 +453,7 @@ export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, payl
   // tracker-sync miss (e.g. the row was edited away mid-flight) doesn't fail
   // the whole job, but it must still be visible to whoever is watching this
   // run, not just a server-side log nobody sees.
-  const mark = await markTrackerReady({ spawnFn, execPath, root, reportNum });
+  const mark = await markTrackerReady({ spawnFn, execPath, coreRoot, reportNum });
   if (!mark.ok) {
     console.error(`mark-pdf-ready.mjs failed for report #${reportNum}: ${mark.data?.error ?? mark.stderr}`);
     warnings.push(

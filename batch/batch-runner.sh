@@ -99,10 +99,11 @@ DISCARD_LOG="$LOGS_DIR/discard.log"
 TRACKER_DIR="$DATA_ROOT/batch/tracker-additions"
 REPORTS_DIR="$DATA_ROOT/reports"
 # The runner's own bookkeeping (input, state, logs, locks) stays beside the
-# script. reserve-report-num.mjs and merge-tracker.mjs default batch-state.tsv
-# to the data root, where this runner never writes it, so name the real file
-# for them: both skip report numbers this run recorded as failed. Built from
-# PROJECT_DIR, which is the form node can open under Git Bash (see above).
+# script. reserve-report-num.mjs and merge-tracker.mjs read batch-state.tsv
+# there too, and a data root's own copy beside it (resolveBatchStatePaths), and
+# both skip report numbers recorded as failed. The variable still names the file for every worker, and
+# learn.mjs reads it to tell a batch worker. Built from PROJECT_DIR, which is
+# the form node can open under Git Bash (see above).
 export CAREER_OPS_BATCH_STATE="$PROJECT_DIR/batch/batch-state.tsv"
 # Workers run unattended, so nobody can confirm a change to the user's standing
 # rules. modes/_shared.md tells an agent that sees this flag not to write them.
@@ -112,6 +113,8 @@ PAUSE_FILE="$BATCH_DIR/batch-runner.paused"
 THROTTLE_FILE="$BATCH_DIR/batch-runner.throttled"
 STATE_LOCK_DIR="$BATCH_DIR/.batch-state.lock"
 STATE_LOCK_PID_FILE="$STATE_LOCK_DIR/pid"
+STATE_LOCK_FLOCK_FILE="$BATCH_DIR/.batch-state.flock"
+STATE_LOCK_FLOCK=0
 STATE_LOCK_TIMEOUT_SECONDS=30
 MAIN_PID="${BASHPID:-$$}"
 
@@ -126,6 +129,7 @@ SCOPE_COMPANY=""
 MAX_RETRIES=2
 MIN_SCORE=0
 SKIP_PDF=false
+MODE="full"
 MODEL=""  # explicit override; otherwise resolved from the profile's spend_tier
 RESOLVED_MODEL=""
 RESOLVED_SPEND_TIER=""
@@ -176,6 +180,8 @@ Options:
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
   --worker-timeout N   Stop a worker after N seconds and record it as failed
                        (default: 1800; 0 = no limit)
+  --mode MODE          Evaluation mode: full (default) or match (condensed single-pass CV match)
+  --single-pass        Alias for --mode match
   --thin-action MODE   What to do when no usable JD text could be fetched (JS-rendered
                        page, empty shell): 'webfetch' (default) spawns the worker and
                        lets it try WebFetch; 'skip' records the offer as skipped with
@@ -251,6 +257,18 @@ while [[ $# -gt 0 ]]; do
     --max-retries) MAX_RETRIES="$2"; shift 2 ;;
     --min-score) MIN_SCORE="$2"; shift 2 ;;
     --skip-pdf) SKIP_PDF=true; shift ;;
+    --mode)
+      [[ $# -ge 2 ]] || { echo "ERROR: --mode requires an argument (full or match)"; exit 1; }
+      MODE="$2"
+      if [[ "$MODE" == "match" || "$MODE" == "single-pass" ]]; then
+        MODE="match"
+      fi
+      shift 2
+      ;;
+    --single-pass)
+      MODE="match"
+      shift
+      ;;
     --rate-limit-sleep)
       [[ $# -ge 2 ]] || { echo "ERROR: --rate-limit-sleep requires an argument"; exit 1; }
       RATE_LIMIT_SLEEP="$2"
@@ -289,6 +307,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$MODE" != "full" && "$MODE" != "match" ]]; then
+  echo "ERROR: Unknown --mode '$MODE'. Supported: full, match."
+  exit 1
+fi
+
+MATCH_OUTPUT_LANGUAGE=""
+if [[ "$MODE" == "match" ]]; then
+  PROMPT_FILE="$BATCH_DIR/batch-prompt-match.md"
+  SKIP_PDF=true
+  # #5297: a match worker never sees the user profile, so targeting and
+  # compensation cannot move the score. language.output is the one setting it
+  # gets, resolved here once per run with the same reader the evaluators use.
+  if [[ -f "$PROFILE_FILE" ]]; then
+    MATCH_OUTPUT_LANGUAGE="$(node --input-type=module -e '
+      import { readFileSync } from "node:fs";
+      import { pathToFileURL } from "node:url";
+      const { parseOutputLanguage } = await import(pathToFileURL(process.argv[1]).href);
+      process.stdout.write(parseOutputLanguage(readFileSync(process.argv[2], "utf-8")));
+    ' "$PROJECT_DIR/profile-language.mjs" "$PROFILE_FILE" 2>/dev/null)" || {
+      MATCH_OUTPUT_LANGUAGE=""
+      echo "WARN: could not read language.output from $PROFILE_FILE; match workers will write in en." >&2
+    }
+  fi
+  [[ -n "$MATCH_OUTPUT_LANGUAGE" ]] || MATCH_OUTPUT_LANGUAGE="en"
+fi
+
 if [[ -z "$PARALLEL" ]]; then
   if [[ "$CLI" == "claude" ]]; then PARALLEL=$DEFAULT_CLAUDE_PARALLEL; else PARALLEL=1; fi
 fi
@@ -312,25 +356,37 @@ if ! is_decimal_number "$MIN_SCORE"; then
 fi
 
 # Lock file to prevent double execution
+# noclobber makes the create atomic, so two runners started together cannot
+# both own the lock (and both stop the shared PDF painter on exit).
 acquire_lock() {
-  if [[ -f "$LOCK_FILE" ]]; then
+  if ! (set -C; printf '%s\n' "$MAIN_PID" > "$LOCK_FILE") 2>/dev/null; then
     local old_pid
-    old_pid=$(cat "$LOCK_FILE")
-    if kill -0 "$old_pid" 2>/dev/null; then
+    old_pid=$(cat "$LOCK_FILE" 2>/dev/null || true)
+    if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
       echo "ERROR: Another batch-runner is already running (PID $old_pid)"
       echo "If this is stale, remove $LOCK_FILE"
       exit 1
-    else
-      echo "WARN: Stale lock file found (PID $old_pid not running). Removing."
-      rm -f "$LOCK_FILE"
+    fi
+    echo "WARN: Stale lock file found (PID $old_pid not running). Removing."
+    rm -f "$LOCK_FILE"
+    if ! (set -C; printf '%s\n' "$MAIN_PID" > "$LOCK_FILE") 2>/dev/null; then
+      echo "ERROR: Another batch-runner took the lock first"
+      exit 1
     fi
   fi
-  echo "$MAIN_PID" > "$LOCK_FILE"
 }
 
 release_lock() {
   if [[ "${BASHPID:-$$}" != "$MAIN_PID" ]]; then
     return
+  fi
+  # Stop the painter this run started. A copied runner in a fixture has no
+  # lib/pdf-server.mjs, and a run that never painted has no pid file. Either
+  # miss must not fail the batch.
+  if [[ "${PDF_SERVER_OWNER:-}" == "1" ]]; then
+    PDF_SERVER_MODULE="$PROJECT_DIR/lib/pdf-server.mjs" PDF_SERVER_ROOT="$PROJECT_DIR" \
+      node --input-type=module -e 'import { pathToFileURL } from "node:url"; const m = await import(pathToFileURL(process.env.PDF_SERVER_MODULE).href); await m.stopSharedPdfServer(process.env.PDF_SERVER_ROOT);' \
+      >/dev/null 2>&1 || true
   fi
   rm -f "$LOCK_FILE"
 }
@@ -511,6 +567,10 @@ release_state_lock() {
 }
 
 run_with_state_lock() {
+  if [[ "$STATE_LOCK_FLOCK" == "1" ]]; then
+    run_with_state_flock "$@" || return $?
+    return 0
+  fi
   acquire_state_lock || return $?
 
   local status=0
@@ -521,6 +581,53 @@ run_with_state_lock() {
   fi
 
   release_state_lock
+  return "$status"
+}
+
+# The mkdir lock is only as atomic as mkdir(1). On Ubuntu 26.04 mkdir is uutils
+# coreutils, and before uutils 0.11.0 it checks that the directory is absent,
+# then creates it, and exits 0 when a racing mkdir made it in between. Two
+# workers both took the lock, reserved the same report number and rewrote
+# batch-state.tsv together, with nothing printed (#6362). flock(1) leaves the
+# excluding to the kernel. main() calls this once, before any worker starts,
+# so every worker takes the same lock. Without flock (stock macOS, Git Bash)
+# mkdir(1) is atomic and the mkdir lock stays, as it does on a file system
+# that refuses flock.
+select_state_lock() {
+  command -v flock >/dev/null 2>&1 || return 0
+  if { flock -x -n 9; } 2>/dev/null 9>>"$STATE_LOCK_FLOCK_FILE"; then
+    STATE_LOCK_FLOCK=1
+  else
+    echo "WARN: flock cannot lock $STATE_LOCK_FLOCK_FILE; using the mkdir state lock." >&2
+  fi
+}
+
+# Polls every 0.1s up to STATE_LOCK_TIMEOUT_SECONDS, like the mkdir lock
+# (BusyBox flock has no -w). The lock lives on fd 9, open only inside this
+# function, so the workers, their CLI and the PDF painter never inherit it. A
+# program started inside the critical section does inherit it, and holds the
+# lock until it exits (9>&- would not stop that: bash saves fd 9 to another
+# descriptor that the program still gets), so start nothing long-lived there.
+# The lock file is never removed: a worker waiting on the old file and one
+# locking a new one would both get in.
+run_with_state_flock() {
+  local status=1 waited=0
+  local max_waits=$((STATE_LOCK_TIMEOUT_SECONDS * 10))
+  {
+    while true; do
+      if flock -x -n 9; then
+        status=0
+        "$@" || status=$?
+        break
+      fi
+      if (( waited >= max_waits )); then
+        echo "ERROR: Timed out waiting for state lock at $STATE_LOCK_FLOCK_FILE" >&2
+        break
+      fi
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+  } 9>>"$STATE_LOCK_FLOCK_FILE"
   return "$status"
 }
 
@@ -658,20 +765,31 @@ resolve_worker_model() {
   RESOLVED_MODEL="$(spend_tier_to_model "$RESOLVED_SPEND_TIER")"
 }
 
+
 # Append a one-line, auditable record of a pre-screen-gate discard to
 # batch/logs/discard.log (see modes/batch.md — Pre-screen gate). Format:
 # {ISO8601 timestamp}\t{job id}\t{url}\t{reason}
+#
+# Callers write the "skipped" state first and call this only when that state
+# (or its recovery record) was written, so the same id, url and reason are on
+# disk. A failed append is therefore reported, not fatal: the record can be
+# rebuilt from state instead of aborting the run.
 log_discard() {
   local id="$1" url="$2" reason="$3"
-  mkdir -p "$LOGS_DIR"
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"
+  if ! { mkdir -p "$LOGS_DIR" && printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"; } 2>/dev/null; then
+    echo "    ⚠️  Could not append to $DISCARD_LOG for #$id; its skipped state record keeps the reason" >&2
+  fi
 }
 
 
+# The mode a plain redirect gives a new file (0644 under umask 022). mktemp
+# creates 0600, and the state file keeps the mode it has always had.
+STATE_FILE_MODE=$(printf '%o' "$(( 0666 & ~0$(umask) ))")
+
 # Update or insert state for an offer.
-# Caller must hold STATE_LOCK_DIR while this runs.
+# Caller must hold the state lock (run_with_state_lock) while this runs.
 update_state_unlocked() {
   local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
 
@@ -689,7 +807,12 @@ update_state_unlocked() {
     init_state
   fi
 
-  local tmp="$STATE_FILE.tmp"
+  # A tmp file of its own per rewrite, beside the state file so mv stays a
+  # rename. With one shared $STATE_FILE.tmp, two rewrites that overlapped
+  # truncated and renamed each other's file: rows doubled and mv failed (#6362).
+  local tmp
+  tmp=$(mktemp "$STATE_FILE.tmp.XXXXXX") || return 1
+  chmod "$STATE_FILE_MODE" "$tmp" 2>/dev/null || true
   local found=false
 
   # Write header
@@ -720,7 +843,10 @@ update_state_unlocked() {
       "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" >> "$tmp"
   fi
 
-  mv "$tmp" "$STATE_FILE"
+  if ! mv -f "$tmp" "$STATE_FILE"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 update_state() {
@@ -1346,7 +1472,9 @@ process_offer() {
 
   # Build the prompt with placeholders replaced
   local prompt
-  if [[ "$SKIP_PDF" == "true" ]]; then
+  if [[ "${MODE:-full}" == "match" ]]; then
+    prompt="Process this job offer in single-pass CV match mode. Extract CV facts, score the match against the JD requirements in a single pass, output the report and tracker addition, and output final JSON. Do not generate PDF; write ❌ in the tracker PDF column and set \"pdf\": null in the final JSON."
+  elif [[ "$SKIP_PDF" == "true" ]]; then
     prompt="Process this job offer. Run the pipeline: A-G evaluation + report .md + tracker line. Do not generate PDF; write ❌ in the tracker PDF column and set \"pdf\": null in the final JSON."
     echo "    ⏭️  --skip-pdf set — skipping PDF generation for #$id ($url)"
   else
@@ -1387,7 +1515,12 @@ process_offer() {
     {
       printf '\n\n---\n\n'
       printf '## Runtime paths: data root outside the checkout\n\n'
-      printf 'This install keeps the user layer in a separate data root. The profile for this run is `%s`. Where this prompt names `config/profile.yml`, read that file instead. Wherever this prompt names one of the paths below, resolve it under the data root, not the working directory:\n\n' "$PROFILE_FILE"
+      if [[ "${MODE:-full}" == "match" ]]; then
+        # Match mode names no profile file (#5297), so do not point at one.
+        printf 'This install keeps the user layer in a separate data root. Wherever this prompt names one of the paths below, resolve it under the data root, not the working directory:\n\n'
+      else
+        printf 'This install keeps the user layer in a separate data root. The profile for this run is `%s`. Where this prompt names `config/profile.yml`, read that file instead. Wherever this prompt names one of the paths below, resolve it under the data root, not the working directory:\n\n' "$PROFILE_FILE"
+      fi
       printf 'Data root: %s\n\n' "$DATA_ROOT"
       printf '`cv.md`, `article-digest.md`, `modes/_profile.md`, `modes/_custom.md`, `reports/`, `output/`, `data/`, `interview-prep/`, `batch/tracker-additions/`\n\n'
       printf 'Write the report under `reports/` in the data root and the tracker TSV under `batch/tracker-additions/` in the data root, and give scripts absolute data-root paths for these files. Markdown links written inside the report and the tracker TSV keep the relative form this prompt shows (`reports/...`). Every other path (`templates/`, the `.mjs` scripts, the other `modes/` files) stays relative to the working directory.\n'
@@ -1405,7 +1538,7 @@ process_offer() {
   # getProfilePath() returns the real path while DATA_ROOT keeps the one pwd
   # gave, and that alone used to add this block.
   local profile_override="${CAREER_OPS_PROFILE:-}"
-  if [[ -n "${profile_override//[[:space:]]/}" && "$PROFILE_RESOLVED" == "true" && "$PROFILE_FILE" != "$DATA_ROOT/config/profile.yml" && "$DATA_ROOT" == "$PROJECT_DIR" ]]; then
+  if [[ "${MODE:-full}" != "match" && -n "${profile_override//[[:space:]]/}" && "$PROFILE_RESOLVED" == "true" && "$PROFILE_FILE" != "$DATA_ROOT/config/profile.yml" && "$DATA_ROOT" == "$PROJECT_DIR" ]]; then
     {
       printf '\n\n---\n\n'
       printf '## Runtime profile\n\n'
@@ -1416,16 +1549,26 @@ process_offer() {
   # Inject user-layer personalization into the temporary worker prompt.
   # The resolved prompt is gitignored runtime state, so user profile data stays
   # out of the system layer while batch scoring matches interactive scoring.
-  for context_file in "$DATA_ROOT/modes/_profile.md" "$PROFILE_FILE" "$DATA_ROOT/modes/_custom.md"; do
-    if [[ -f "$context_file" ]]; then
-      {
-        printf '\n\n---\n\n'
-        printf '## Runtime personalization: %s\n\n' "${context_file#"$DATA_ROOT/"}"
-        sed 's/^/    /' "$context_file"
-        printf '\n'
-      } >> "$resolved_prompt"
-    fi
-  done
+  # Match mode gets none of it, only the output language (#5297).
+  if [[ "${MODE:-full}" == "match" ]]; then
+    {
+      printf '\n\n---\n\n'
+      printf '## Runtime output language\n\n'
+      printf 'language.output for this run: `%s`\n' "${MATCH_OUTPUT_LANGUAGE:-en}"
+    } >> "$resolved_prompt"
+  else
+    for context_file in "$DATA_ROOT/modes/_profile.md" "$PROFILE_FILE" "$DATA_ROOT/modes/_custom.md"; do
+      if [[ -f "$context_file" ]]; then
+        {
+          printf '\n\n---\n\n'
+          printf '## Runtime personalization: %s\n\n' "${context_file#"$DATA_ROOT/"}"
+          sed 's/^/    /' "$context_file"
+          printf '\n'
+        } >> "$resolved_prompt"
+      fi
+    done
+  fi
+
 
   # Build the launch command for the configured CLI.
   # For claude the model is resolved once per run from spend_tier unless --model
@@ -1459,6 +1602,8 @@ process_offer() {
   local terminal_failure_recorded=false
   local shim_retries=0
   local max_shim_retries=4
+  local match_output_retries=0
+  local max_match_output_retries=1
   while true; do
     exit_code=0
     case "$CLI" in
@@ -1482,6 +1627,61 @@ process_offer() {
         run_worker grok --always-approve --output-format plain ${model_args[@]+"${model_args[@]}"} -p "$full_prompt" > "$log_file" 2>&1 || exit_code=$?
         ;;
     esac
+
+    # In match mode, check if worker result JSON is malformed or missing required
+    # fields (parsed_status or parsed_score). If so, retry once before finalizing
+    # so a transient formatting glitch does not permanently fail or bypass gates.
+    if [[ "${MODE:-full}" == "match" && $exit_code -eq 0 ]]; then
+      local worker_check_json
+      worker_check_json=$(awk '
+        /^```json[[:space:]]*$/ { in_block=1; block=""; next }
+        in_block && /^```[[:space:]]*$/ { in_block=0; last=block; next }
+        in_block { block = block $0 "\n" }
+        END { printf "%s", last }
+      ' "$log_file" 2>/dev/null || true)
+      local check_status="" check_score=""
+      if [[ -n "$worker_check_json" ]]; then
+        local check_parsed
+        check_parsed=$(printf '%s' "$worker_check_json" | node -e '
+          let data = "";
+          process.stdin.on("data", d => data += d);
+          process.stdin.on("end", () => {
+            try {
+              const obj = JSON.parse(data);
+              const status = typeof obj.status === "string" ? obj.status : "";
+              const score = typeof obj.score === "number" ? String(obj.score) : "";
+              process.stdout.write(status + "\x1f" + score);
+            } catch {
+              process.stdout.write("");
+            }
+          });
+        ' 2>/dev/null || true)
+        if [[ -n "$check_parsed" ]]; then
+          IFS=$'\x1f' read -r check_status check_score <<< "$check_parsed"
+        fi
+      fi
+      if [[ -z "$check_status" || ( "$check_status" != "needs_confirmation" && "$check_status" != "skipped" && "$check_status" != "failed" && -z "$check_score" ) ]]; then
+        if (( match_output_retries < max_match_output_retries && retries < MAX_RETRIES )); then
+          match_output_retries=$((match_output_retries + 1))
+          retries=$((retries + 1))
+          # Move the malformed attempt's artifacts aside first. Left in place,
+          # a retry with another slug leaves two reports on one number, and a
+          # retry that writes no report would pass the report-file check on the
+          # stale one. Same quarantine as the confirmation-hold path below.
+          local retry_quarantine="$LOGS_DIR/quarantine" retry_artifact
+          shopt -s nullglob
+          for retry_artifact in "$REPORTS_DIR/$report_num-"*.md "$TRACKER_DIR/$id.tsv"; do
+            [[ "$retry_artifact" == *-RESERVED.md ]] && continue
+            mkdir -p "$retry_quarantine"
+            mv "$retry_artifact" "$retry_quarantine/$id-match-retry-${retry_artifact##*/}"
+          done
+          shopt -u nullglob
+          echo "    ⚠️  Malformed or missing match mode JSON summary (attempt $retries/$MAX_RETRIES); retrying once..."
+          sleep 2
+          continue
+        fi
+      fi
+    fi
 
     # Non-claude CLIs run a single attempt: the session-limit and rate-limit
     # detection below greps generic phrases (429, quota, session limit) that
@@ -1612,6 +1812,20 @@ process_offer() {
       fi
     fi
 
+    # In match mode, enforce valid JSON output and required fields. If malformed
+    # or missing parsed_status or parsed_score (and not a human-confirmation hold
+    # or dealbreaker skip), treat as a failed worker attempt so it cannot be
+    # recorded as completed with score "-" or bypass --min-score.
+    if [[ "${MODE:-full}" == "match" && -z "$worker_failed_match" ]]; then
+      if [[ -z "$worker_result_json" || -z "$parsed" || -z "$parsed_status" ]]; then
+        worker_failed_match="failed"
+        worker_error_match="malformed or missing match mode JSON summary (parsed_status missing)"
+      elif [[ "$parsed_status" != "needs_confirmation" && "$parsed_status" != "skipped" ]] && { [[ -z "$parsed_score" ]] || ! is_decimal_number "$score"; }; then
+        worker_failed_match="failed"
+        worker_error_match="missing or invalid match mode score: $score"
+      fi
+    fi
+
     # A human gate is not a failure or a successful evaluation (#4359).
     # Keep it out of retries and release the unused report reservation.
     if [[ "$parsed_status" == "needs_confirmation" ]]; then
@@ -1702,7 +1916,13 @@ process_offer() {
         # Keep the reservation. The SKIP row uses this number and no report
         # file holds it, so releasing now would hand it to the next job before
         # the merge. merge_tracker releases it once the row is in the tracker.
-        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "-" "dealbreaker: \"$skip_rule\"" "$retries" || true
+        # rc 2: nothing was recorded and the job runs again as pending, so it
+        # is not a discard yet.
+        local skip_state_rc=0
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "-" "dealbreaker: \"$skip_rule\"" "$retries" || skip_state_rc=$?
+        if (( skip_state_rc != 2 )); then
+          log_discard "$id" "$url" "dealbreaker: \"$skip_rule\""
+        fi
         echo "    ⏭️  Skipped (dealbreaker): $url — \"$skip_rule\""
         return 0
       fi
@@ -1759,11 +1979,26 @@ process_offer() {
       # LC_ALL=C: under a non-English locale awk parses "4.5" as 4, so the
       # MIN_SCORE comparison would silently run on truncated integers.
       if LC_ALL=C awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
-        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
+        local score_state_rc=0
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || score_state_rc=$?
+        if (( score_state_rc != 2 )); then
+          log_discard "$id" "$url" "below-min-score"
+        fi
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0
       fi
+    fi
+
+    # Defensive guard: in match mode, an offer must never complete without a valid numeric score.
+    if [[ "${MODE:-full}" == "match" ]] && ! is_decimal_number "$score"; then
+      if (( retries < MAX_RETRIES )); then
+        retries=$((retries + 1))
+      fi
+      update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "missing or invalid numeric score in match mode: $score" "$retries" || true
+      release_report_num "$report_num"
+      echo "    ❌ Failed (invalid match mode score: $score, attempt $retries)"
+      return 0
     fi
 
     update_state_retrying "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries" || true
@@ -2005,6 +2240,7 @@ main() {
   if [[ "$DRY_RUN" == "false" ]]; then
     acquire_lock
     rm -f "$PAUSE_FILE" "$THROTTLE_FILE"
+    select_state_lock
   fi
 
   init_state
@@ -2024,6 +2260,9 @@ main() {
   fi
 
   echo "=== career-ops batch runner ==="
+  if [[ "${MODE:-full}" == "match" ]]; then
+    echo "Mode: match (single-pass CV evaluation)"
+  fi
   if (( LIMIT > 0 )); then
     echo "Parallel: $PARALLEL | Max retries: $MAX_RETRIES | Limit: $LIMIT"
   else
@@ -2150,6 +2389,14 @@ main() {
     echo ""
     echo "Would process $pending_count offers"
     exit 0
+  fi
+
+  # --skip-pdf must not start a painter, even when the parent shell already opted in.
+  if [[ "$SKIP_PDF" == "true" ]]; then
+    unset CAREER_OPS_PDF_SHARED
+  else
+    export CAREER_OPS_PDF_SHARED=1
+    PDF_SERVER_OWNER=1
   fi
 
   # Process offers

@@ -64,6 +64,7 @@
 // in the payload (`external_id` / `original_id` were null throughout), so
 // `requisitionId` and `language` are left unset rather than guessed.
 
+import { closesAtIso } from '../lib/posting-close.mjs';
 import { fetchJsonWithRetry, BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
@@ -155,14 +156,25 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-/** `city` → `municipality` → `region` → country, whichever the ad carries. */
+/**
+ * `{place}, {region}, {country}` from whichever parts the ad carries, where
+ * place is `city`, else `municipality`. The region and country are kept, not
+ * just the most specific part: a bare town ("Västerås") matches no
+ * `location_filter` entry for Sweden, so with a non-empty `allow` list every
+ * ad from an unlisted town was dropped as out of region. Repeated parts
+ * (a city named like its municipality or region) are written once.
+ */
 function formatLocation(address) {
   if (!address || typeof address !== 'object') return '';
-  for (const field of ['city', 'municipality', 'region', 'country']) {
-    const value = address[field];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return '';
+  const text = (field) => (typeof address[field] === 'string' ? address[field].trim() : '');
+  const parts = [text('city') || text('municipality'), text('region'), text('country')].filter(Boolean);
+  const seen = new Set();
+  return parts.filter((part) => {
+    const key = part.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).join(', ');
 }
 
 /**
@@ -188,7 +200,7 @@ export function rawHitCount(json) {
  *   - one malformed row (no id / no headline)                   → skipped
  *
  * @param {any} json
- * @returns {{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, externalId?: string}[]}
+ * @returns {{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, closesAt?: string, externalId?: string}[]}
  */
 export function parsePlatsbankenResponse(json) {
   const rows = json && Array.isArray(json.hits) ? json.hits : null;
@@ -211,6 +223,7 @@ export function parsePlatsbankenResponse(json) {
     const description = row.description && typeof row.description === 'object' ? row.description : null;
     const descriptionText = description && typeof description.text === 'string' ? description.text.trim() : '';
     const postedAt = toEpochMs(row.publication_date);
+    const closesAt = closesAtIso(row.application_deadline);
     const externalId = row.id === null || row.id === undefined ? '' : String(row.id).trim();
 
     jobs.push({
@@ -220,6 +233,7 @@ export function parsePlatsbankenResponse(json) {
       location: formatLocation(row.workplace_address),
       ...(descriptionText ? { description: descriptionText } : {}),
       ...(postedAt === undefined ? {} : { postedAt }),
+      ...(closesAt ? { closesAt } : {}),
       ...(externalId ? { externalId } : {}),
     });
   }

@@ -30,14 +30,14 @@ jobs:
       group: hired-wall
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 24 }
       - name: Parse issue and append entry
         id: entry
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const body = context.payload.issue.body || '';
@@ -124,7 +124,7 @@ jobs:
           echo "n=$N" >> "$GITHUB_OUTPUT"
       - name: Tell them their number
         if: steps.commit.outputs.n
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             await github.rest.issues.createComment({

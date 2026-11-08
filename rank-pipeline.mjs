@@ -29,7 +29,7 @@
  *   node rank-pipeline.mjs --self-test         # in-memory suite; spawns no subprocess
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'fs';
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -37,6 +37,8 @@ import { fileURLToPath } from 'url';
 import { flagValue, hasFlag, safeIntFlag, validateFlags } from './lib/cli-flags.mjs';
 import { sanitizeMarkdownField } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
+import { scorePosting } from './lib/inbox-rank.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readRememberedCli } from './lib/agent-cli.mjs';
@@ -100,6 +102,7 @@ export const CLI_CANDIDATES = [
   { bin: 'agy', id: 'antigravity', args: p => ['-p', p] },
   { bin: 'grok', args: p => ['-p', p, '--disable-web-search', '--disallowed-tools', GROK_DENIED_TOOLS] },
   { bin: 'pi', args: p => ['--no-tools', '-p', p] },
+  { bin: 'omp', args: p => ['--no-tools', '-p', p] },
 ];
 
 const USAGE = `
@@ -141,6 +144,26 @@ export function formatRankSegment(score, reason) {
   if (!clean) return '';
   if (clean.length > REASON_MAX) clean = `${clean.slice(0, REASON_MAX - 1).trimEnd()}…`;
   return `rank: ${clamped}/5 — ${clean}`;
+}
+
+/**
+ * Same fit rule the inbox uses, written in this file's stamp shape.
+ * main() does not call it. The LLM pass stays opt-in and unchanged.
+ *
+ * @param {{ title?: string, location?: string, pay?: string, rankStamp?: string | null }} entry
+ * @param {Parameters<typeof scorePosting>[1]} targets
+ * @returns {string} A `rank:` segment, or '' when the row is unranked.
+ */
+export function heuristicSegment(entry, targets) {
+  const source = entry || {};
+  const fit = scorePosting({
+    title: source.title ?? '',
+    location: source.location ?? '',
+    pay: source.pay ?? '',
+    rankStamp: source.rankStamp ?? null,
+  }, targets);
+  if (!fit) return '';
+  return formatRankSegment(fit.score, fit.reason);
 }
 
 /**
@@ -483,7 +506,7 @@ async function main(args) {
       const current = readFileSync(PIPELINE_PATH, 'utf-8');
       const result = applyAnnotations(current, annotations, original);
       written = result.written;
-      if (written) writeFileSync(PIPELINE_PATH, result.text);
+      if (written) replaceUserFile(PIPELINE_PATH, result.text);
     });
   }
 
