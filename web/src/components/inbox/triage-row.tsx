@@ -3,8 +3,6 @@
 import Link from "next/link";
 import { Bookmark, BookmarkCheck, Loader2, X, CirclePause } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
-import type { AtsSource } from "@/lib/explore";
-import { ATS_LABEL } from "@/lib/explore";
 import { unscoredInboxHref } from "@/lib/posting-url.mjs";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -42,7 +40,7 @@ export function TriageRow({
   index: number;
   cursor: boolean;
   job: InboxJob;
-  source: AtsSource | null;
+  source: string;
   age: number | null;
   reason?: string;
   scored?: RowScore;
@@ -95,8 +93,8 @@ export function TriageRow({
           )}
         </p>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
+          <Badge tone="info" className="text-[11px]" title={job.sourceInferred ? "Job link host; original discovery source was not recorded" : `Source: ${source}`}>{source}</Badge>
           {job.location && <span className="truncate">{job.location}</span>}
-          {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
           {reason ? <span className="text-muted">{reason}</span> : null}
           {!evaluated && <span className="italic text-muted">not scored</span>}

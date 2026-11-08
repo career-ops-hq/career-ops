@@ -185,11 +185,11 @@ export function isSafePublicHttpUrl(raw) {
 /**
  * Extract labeled segments from a pipeline row body ("| label: value").
  * @param {string} body - Raw pipeline row body.
- * @returns {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}}
+ * @returns {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string, source?: string}}
  */
 export function extractLabels(body) {
   const labels = {};
-  const labelRe = /\|\s*(posted|trust|yrs|note|rank):\s*([^|]+)/g;
+  const labelRe = /\|\s*(posted|trust|yrs|note|rank|source):\s*([^|]+)/g;
   let m;
   while ((m = labelRe.exec(body)) !== null) {
     labels[m[1]] = m[2].trim();

@@ -62,6 +62,11 @@ export function JobCard({
   };
 
   const isFull = job.engine === "full";
+  const websiteCount = job.filters?.websiteIds?.length || 0;
+  const hasAts = !Array.isArray(job.filters?.ats) || job.filters.ats.length > 0;
+  const engineLabel = websiteCount
+    ? isFull && !hasAts ? "Saved websites" : isFull ? "ATS + websites" : "Configured boards + websites"
+    : isFull ? "Broad ATS discovery" : "Configured companies & boards";
   const isActive = job.status === "active";
   const positiveList = job.filters?.positive || [];
   const letter = (job.name || "S").trim().charAt(0).toUpperCase();
@@ -136,7 +141,7 @@ export function JobCard({
             )}
           >
             {isFull ? <Globe className="size-3" /> : <Zap className="size-3" />}
-            {isFull ? "Full ATS Sweep" : "Zero-Token Portals"}
+            {engineLabel}
           </span>
 
           <span

@@ -63,6 +63,7 @@ const SUITES = {
   "cv-upload": { url: "CV_UPLOAD_TEST_URL", root: "CV_UPLOAD_TEST_ROOT", fixture: "cv-upload" },
   "dialog-focus": { url: "DIALOG_FOCUS_TEST_URL", fixture: "pipeline-status" },
   "employer-preset": { url: "EXPLORE_EMPLOYER_TEST_URL", fixture: "blank" },
+  "portal-monitors": { url: "PORTAL_MONITOR_TEST_URL", root: "PORTAL_MONITOR_TEST_ROOT", fixture: "portal-monitors", preload: "fixture-fetch.mjs", preloadVar: "PORTAL_MONITOR_TEST_PRELOAD" },
   "evaluation-options": { url: "EVALUATION_OPTIONS_TEST_URL", fixture: "inbox-undo" },
   "followups-loading": { url: "FOLLOWUPS_LOADING_TEST_URL", root: "FOLLOWUPS_LOADING_TEST_ROOT", fixture: "pipeline-status" },
   "inbox-keys": { url: "INBOX_KEYS_TEST_URL", root: "INBOX_KEYS_TEST_ROOT", fixture: "inbox-undo" },
@@ -84,7 +85,7 @@ const SUITES = {
 
 // Every var any suite reads, so a value from the caller's shell cannot point a
 // suite at some other server.
-const SUITE_VARS = Object.values(SUITES).flatMap((s) => [s.url, s.root].filter(Boolean));
+const SUITE_VARS = Object.values(SUITES).flatMap((s) => [s.url, s.root, s.preloadVar].filter(Boolean));
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -105,9 +106,10 @@ function makeRoot(fixture) {
 
 // detached, so the server and the next process server.mjs spawns share a
 // process group that stop() can signal in one call.
-function startServer(root, port, log) {
+function startServer(root, port, log, preload) {
   const env = { ...process.env, CAREER_OPS_ROOT: root, NEXT_TELEMETRY_DISABLED: "1" };
   for (const name of ["CAREER_OPS_DATA_DIR", "CAREER_OPS_TRACKER", "CAREER_OPS_WEB_ALLOWED_HOSTS", ...SUITE_VARS]) delete env[name];
+  if (preload) env.NODE_OPTIONS = `${env.NODE_OPTIONS || ""} --import=${preload}`.trim();
   const child = spawn(process.execPath, ["server.mjs", "start", "-p", String(port)], {
     cwd: WEB, env, detached: true, stdio: ["ignore", log, log],
   });
@@ -196,7 +198,7 @@ async function attempt(name) {
     const url = `http://127.0.0.1:${port}`;
     logPath = path.join(root, "..", `${path.basename(root)}-server.log`);
     const log = fs.openSync(logPath, "w");
-    server = startServer(root, port, log);
+    server = startServer(root, port, log, suite.preload && path.join(root, suite.preload));
     fs.closeSync(log);
     await waitReady(url, server);
     // FORCE_COLOR=0: an inherited FORCE_COLOR colors the reporter's summary
@@ -205,6 +207,7 @@ async function attempt(name) {
     for (const name of SUITE_VARS) delete env[name];
     env[suite.url] = url;
     if (suite.root) env[suite.root] = root;
+    if (suite.preloadVar) env[suite.preloadVar] = path.join(root, suite.preload);
     const { code, out } = await runSuite(file, env);
     const tests = count(out, "tests");
     const skipped = count(out, "skipped");

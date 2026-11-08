@@ -10,7 +10,6 @@ import {
   isBroadSearch,
   parseExplorePatch,
   type AtsSource,
-  type DiscoverySource,
   type EmployerScanOutcome,
   type DiscoveredOffer,
   type ExploreFilters,
@@ -20,7 +19,7 @@ import {
 import { CHINA_PRESET, EMPLOYER_LABEL, employerRequest } from "@/lib/employer-preset.mjs";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
-import { isAbortError, isScannerMissing } from "@/lib/explore-error.mjs";
+import { emptyScanPhase, isAbortError, isScannerMissing } from "@/lib/explore-error.mjs";
 import { postNdjsonXhr } from "@/lib/post-ndjson-xhr.mjs";
 import { settledExploreUrl } from "@/lib/explore-url.mjs";
 import { createRunOwner } from "@/lib/explore-run.mjs";
@@ -39,7 +38,8 @@ export type Phase =
   | "blocked"; // AI search needs a CLI
 export type AiCost = { searches: number; candidates: number; fetches: number };
 export type SourceState = {
-  state: "queued" | "active" | "swept" | "noisy";
+  state: "queued" | "active" | "swept" | "noisy" | "failed";
+  name?: string;
   companies?: number;
   done?: number;
   total?: number;
@@ -56,10 +56,12 @@ type ExploreCtx = {
   phase: Phase;
   running: boolean;
   offers: DiscoveredOffer[];
-  sources: Partial<Record<DiscoverySource, SourceState>>;
+  sources: Record<string, SourceState>;
   matchCount: number;
   companiesScanned: number;
   companiesAvailable: number;
+  websitesSearched: number;
+  websitesUndated: number;
   capHit: boolean;
   droppedNoDate: number;
   status: string;
@@ -109,7 +111,9 @@ type ResultSnapshot = {
   companiesAvailable: number;
   capHit: boolean;
   droppedNoDate: number;
-  sources: Partial<Record<DiscoverySource, SourceState>>;
+  sources: Record<string, SourceState>;
+  websitesSearched?: number;
+  websitesUndated?: number;
   partial: boolean;
   status: string;
   error: string;
@@ -136,12 +140,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const touched = useRef(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [offers, setOffers] = useState<DiscoveredOffer[]>([]);
-  const [sources, setSources] = useState<Partial<Record<DiscoverySource, SourceState>>>({});
+  const [sources, setSources] = useState<Record<string, SourceState>>({});
   const [matchCount, setMatchCount] = useState(0);
   const [companiesScanned, setCompaniesScanned] = useState(0);
   // Authoritative scan-health signals (scanner --json mode, #1199): tell a capped /
   // degraded scan from a genuinely empty one, and power a "scanned X of Y" banner.
   const [companiesAvailable, setCompaniesAvailable] = useState(0);
+  const [websitesSearched, setWebsitesSearched] = useState(0);
+  const [websitesUndated, setWebsitesUndated] = useState(0);
   const [capHit, setCapHit] = useState(false);
   const [droppedNoDate, setDroppedNoDate] = useState(0);
   const [status, setStatus] = useState("");
@@ -188,14 +194,17 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setMatchCount(0);
     setCompaniesScanned(0);
     setCompaniesAvailable(0);
+    setWebsitesSearched(0);
+    setWebsitesUndated(0);
     setCapHit(false);
     setDroppedNoDate(0);
     setPartial(false);
     setError("");
     setScannerMissing(false);
-    setStatus("Casting the net across the ATS network…");
-    const init: Partial<Record<DiscoverySource, SourceState>> = {};
+    setStatus(f.ats.length ? "Searching the selected sources…" : "Checking selected websites…");
+    const init: Record<string, SourceState> = {};
     for (const a of employer ? f.employers ?? [] : f.ats) init[a] = { state: "queued" };
+    if (!employer) for (const id of f.websiteIds ?? []) init[id] = { state: "queued" };
     setSources(init);
     // Do not write the filter URL here. Next.js patches history.replaceState and
     // treats it as a navigation, which aborts this fetch — Discover flashed
@@ -206,6 +215,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     let aborted = false;
     let sawScannerMissing = false; // the structured 400 (data-only checkout), not a runtime scan error
     let companiesScannedAcc = 0; // 0 at the end = the directories never downloaded → degraded, not empty
+    let websitesSearchedAcc = 0;
     let capHitAcc = false; // scan was capped (only a slice of the universe searched)
     let datasetIssueAcc = false; // some ATS dataset was stale/empty/unreachable
     let employerResult: EmployerScanOutcome | null = null;
@@ -226,6 +236,15 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         case "atsDone":
           setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: ev.unreachable > 0 ? "noisy" : "swept", unreachable: ev.unreachable } }));
           break;
+        case "websiteStart":
+          setPhase("scanning");
+          setStatus("Checking a saved website…");
+          setSources((s) => ({ ...s, [ev.id]: { ...s[ev.id], state: "active" } }));
+          break;
+        case "websiteDone":
+          setStatus(`${ev.name}: ${ev.error ? "could not be checked" : `${ev.count} matching ${ev.count === 1 ? "job" : "jobs"}`}.`);
+          setSources((s) => ({ ...s, [ev.id]: { ...s[ev.id], state: ev.error ? "failed" : "swept", name: ev.name } }));
+          break;
         case "offer":
           acc.push(ev.offer);
           setOffers((o) => [...o, ev.offer]);
@@ -244,6 +263,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
           if (ev.employerOutcome) { employerResult = ev.employerOutcome; setEmployerOutcome(ev.employerOutcome); }
           companiesScannedAcc = ev.companiesScanned;
           setCompaniesScanned(ev.companiesScanned);
+          if (typeof ev.websitesSearched === "number") { websitesSearchedAcc = ev.websitesSearched; setWebsitesSearched(ev.websitesSearched); }
+          if (typeof ev.websitesUndated === "number") setWebsitesUndated(ev.websitesUndated);
           if (typeof ev.companiesAvailable === "number") setCompaniesAvailable(ev.companiesAvailable);
           if (ev.capHit) {
             capHitAcc = true;
@@ -313,7 +334,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     // Mark any still-active sources as swept (stream ended).
     setSources((s) => {
       const next = { ...s };
-      for (const k of Object.keys(next) as AtsSource[]) if (next[k]?.state === "active" || next[k]?.state === "queued") next[k] = { ...next[k]!, state: "swept" };
+      for (const k of Object.keys(next)) if (next[k]?.state === "active" || next[k]?.state === "queued") next[k] = { ...next[k]!, state: sawError ? "failed" : "swept" };
       return next;
     });
 
@@ -336,14 +357,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setError(sawError);
       setScannerMissing(sawScannerMissing);
       setPhase("failed");
-    } else if (capHitAcc || datasetIssueAcc || droppedNoDateAcc > 0 || companiesScannedAcc === 0) {
-      // Maintainer's RULE (#1199): it is NOT "all caught up" if the scan was capped,
-      // a dataset was stale/unreachable, postings were dropped for missing a date, OR
-      // nothing was searched at all (legacy 0-companies fallback when --json is absent).
-      // Truly-empty is only when live datasets were fully searched and found nothing.
-      setPhase("degraded");
     } else {
-      setPhase(isBroadSearch(f) ? "empty-current" : "empty-loose");
+      // A successful website-only search is meaningful even when no companies
+      // were scanned. Capped or incomplete scans stay visibly degraded.
+      setPhase(emptyScanPhase({ capHit: capHitAcc, datasetIssue: datasetIssueAcc,
+        droppedNoDate: droppedNoDateAcc, companiesScanned: companiesScannedAcc,
+        websitesSearched: websitesSearchedAcc, broad: isBroadSearch(f) }));
     }
   }, []);
 
@@ -362,6 +381,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setMatchCount(0);
     setCompaniesScanned(0);
     setCompaniesAvailable(0);
+    setWebsitesSearched(0);
+    setWebsitesUndated(0);
     setCapHit(false);
     setDroppedNoDate(0);
     setPartial(false);
@@ -454,6 +475,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setSources({});
     setMatchCount(0);
     setCompaniesScanned(0);
+    setWebsitesSearched(0);
+    setWebsitesUndated(0);
     setStatus("");
     setPartial(false);
     setError("");
@@ -624,6 +647,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setMatchCount(typeof snap.matchCount === "number" ? snap.matchCount : snap.offers.length);
     setCompaniesScanned(snap.companiesScanned ?? 0);
     setCompaniesAvailable(snap.companiesAvailable ?? 0);
+    setWebsitesSearched(snap.websitesSearched ?? 0);
+    setWebsitesUndated(snap.websitesUndated ?? 0);
     setCapHit(!!snap.capHit);
     setDroppedNoDate(snap.droppedNoDate ?? 0);
     setSources(snap.sources ?? {});
@@ -652,24 +677,24 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       const snap: ResultSnapshot = {
-        v: 1, mode, phase, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources,
+        v: 1, mode, phase, offers, matchCount, companiesScanned, companiesAvailable, websitesSearched, websitesUndated, capHit, droppedNoDate, sources,
         partial, status, error, scannerMissing, added: [...added], aiTrace, aiCost, aiIntent,
       };
       sessionStorage.setItem(RESULTS_KEY, JSON.stringify(snap));
     } catch {
       /* sessionStorage full/unavailable — non-fatal */
     }
-  }, [phase, mode, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources, partial, status, employerOutcome, error, scannerMissing, added, aiTrace, aiCost, aiIntent]);
+  }, [phase, mode, offers, matchCount, companiesScanned, companiesAvailable, websitesSearched, websitesUndated, capHit, droppedNoDate, sources, partial, status, employerOutcome, error, scannerMissing, added, aiTrace, aiCost, aiIntent]);
 
   const value = useMemo(
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, employerOutcome, partial, error, scannerMissing, added, adding,
+      offers, sources, matchCount, companiesScanned, companiesAvailable, websitesSearched, websitesUndated, capHit, droppedNoDate, status, employerOutcome, partial, error, scannerMissing, added, adding,
       discover, loadFresh, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, employerOutcome, partial, error, scannerMissing, added, adding, discover, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, websitesSearched, websitesUndated, capHit, droppedNoDate, status, employerOutcome, partial, error, scannerMissing, added, adding, discover, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

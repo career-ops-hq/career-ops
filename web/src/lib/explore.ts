@@ -30,6 +30,8 @@ export type ExploreFilters = {
   alwaysAllow: string[];
   sinceDays: number;
   ats: AtsSource[];
+  /** IDs of saved websites selected for this search, not URLs from the client. */
+  websiteIds: string[];
   limitPerAts: number;
 };
 
@@ -42,6 +44,7 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   alwaysAllow: [],
   sinceDays: 7,
   ats: [...ATS_SOURCES],
+  websiteIds: [],
   limitPerAts: 150,
 };
 
@@ -60,6 +63,8 @@ export type DiscoveredOffer = {
   geographyEvidence?: Record<string, unknown>;
   ats: string;
   source: string;
+  /** Human-readable source where this job was found, distinct from the host URL. */
+  sourceLabel?: string;
   /** which positive keyword matched the title (transparency, e.g. "ai" in "Nail") */
   matchedKeyword?: string;
   /** free, zero-token triage hint computed at discovery time from the posting
@@ -93,6 +98,8 @@ export type ScanEvent =
   | { kind: "atsStart"; ats: string; companies: number }
   | { kind: "progress"; ats: string; scanned: number; total: number; matches: number }
   | { kind: "atsDone"; ats: string; unreachable: number }
+  | { kind: "websiteStart"; id: string }
+  | { kind: "websiteDone"; id: string; name: string; count: number; error?: string }
   | { kind: "offer"; offer: DiscoveredOffer }
   | {
       kind: "summary";
@@ -105,6 +112,8 @@ export type ScanEvent =
       capHit?: boolean;
       datasetStatus?: Record<string, "ok" | "stale" | "empty">;
       postingsDroppedNoDate?: number;
+      websitesSearched?: number;
+      websitesUndated?: number;
       // Sources whose results are missing (ran out of time or crashed) while the
       // others finished — a partial result, never "all caught up".
       incomplete?: string[];
@@ -129,6 +138,7 @@ function clampNum(v: unknown, lo: number, hi: number, fallback: number): number 
 
 function cleanAts(v: unknown): AtsSource[] {
   if (!Array.isArray(v)) return [...ATS_SOURCES];
+  if (!v.length) return [];
   const out = v
     .map((a) => String(a).toLowerCase())
     .filter((a): a is AtsSource => (ATS_SOURCES as string[]).includes(a));
@@ -144,7 +154,7 @@ export function parseExplorePatch(
   base: ExploreFilters = DEFAULT_FILTERS,
   merge = false,
 ): ExploreFilters {
-  const next: ExploreFilters = { ...base, ats: [...base.ats] };
+  const next: ExploreFilters = { ...base, ats: [...base.ats], websiteIds: [...(base.websiteIds || [])] };
   if (raw.preset === "china-employers") next.preset = "china-employers";
   else if (raw.preset !== undefined) next.preset = undefined;
   if (raw.employers !== undefined && Array.isArray(raw.employers)) {
@@ -168,6 +178,9 @@ export function parseExplorePatch(
   if (raw.limit !== undefined) next.limitPerAts = clampNum(raw.limit, 50, 500, base.limitPerAts);
   if (raw.limitPerAts !== undefined) next.limitPerAts = clampNum(raw.limitPerAts, 50, 500, base.limitPerAts);
   if (raw.ats !== undefined) next.ats = cleanAts(raw.ats);
+  if (raw.websiteIds !== undefined && Array.isArray(raw.websiteIds)) {
+    next.websiteIds = [...new Set(raw.websiteIds.filter((id): id is string => typeof id === "string" && /^[a-f0-9-]{36}$/i.test(id)))].slice(0, 20);
+  }
   return next;
 }
 
@@ -186,6 +199,7 @@ export function filtersToParams(f: ExploreFilters): string {
   if (f.alwaysAllow.length) sp.set("home", f.alwaysAllow.join(","));
   if (f.sinceDays !== DEFAULT_FILTERS.sinceDays) sp.set("since", String(f.sinceDays));
   if (f.ats.length !== ATS_SOURCES.length) sp.set("ats", f.ats.join(","));
+  if (f.websiteIds?.length) sp.set("websites", f.websiteIds.join(","));
   if (f.limitPerAts !== DEFAULT_FILTERS.limitPerAts) sp.set("limit", String(f.limitPerAts));
   return sp.toString();
 }
@@ -203,7 +217,8 @@ export function paramsToFilters(sp: URLSearchParams, base: ExploreFilters = DEFA
       blockHard: split(sp.get("hardno")),
       alwaysAllow: split(sp.get("home")),
       since: sp.get("since") ?? undefined,
-      ats: split(sp.get("ats")),
+      ats: sp.has("ats") ? (sp.get("ats") || "").split(",").filter(Boolean) : undefined,
+      websiteIds: sp.has("websites") ? (sp.get("websites") || "").split(",").filter(Boolean) : undefined,
       limit: sp.get("limit") ?? undefined,
     },
     base,

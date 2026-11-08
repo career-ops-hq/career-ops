@@ -44,7 +44,8 @@ export function EditJobModal({
         allow: job.filters?.allow || [],
         block: job.filters?.block || [],
         alwaysAllow: job.filters?.alwaysAllow || [],
-        ats: job.filters?.ats?.length ? [...job.filters.ats] : [...DEFAULT_FILTERS.ats],
+        // An empty ATS list intentionally means a website-only search.
+        ats: Array.isArray(job.filters?.ats) ? [...job.filters.ats] : [...DEFAULT_FILTERS.ats],
       });
     }
   }, [job]);
@@ -114,14 +115,15 @@ export function EditJobModal({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label htmlFor="edit-scan-engine" className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
               <select
+                id="edit-scan-engine"
                 value={engine}
                 onChange={(e) => setEngine(e.target.value as ScanEngine)}
                 className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
               >
-                <option value="full">Full ATS Dataset Sweep</option>
-                <option value="portals">Zero-Token Portals.yml</option>
+                <option value="full">Broad ATS discovery and selected websites</option>
+                <option value="portals">Configured companies and boards</option>
               </select>
             </div>
 
@@ -154,7 +156,8 @@ export function EditJobModal({
 
           {/* ─── Reuse FilterBuilder from Explore ─── */}
           <div className="rounded-xl border border-border bg-surface/30 p-4">
-            <FilterBuilder filters={filters} onChange={setFilters} />
+            <FilterBuilder filters={filters} onChange={setFilters} configuredBoards={engine === "portals"} />
+            <p className="mt-3 text-xs text-muted">Changing the search filters establishes a fresh baseline for the selected websites.</p>
           </div>
 
           {/* ─── Actions ─── */}

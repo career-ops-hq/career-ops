@@ -1,8 +1,6 @@
 "use client";
 
 import { Search, X } from "lucide-react";
-import type { AtsSource } from "@/lib/explore";
-import { ATS_LABEL } from "@/lib/explore";
 import { FRESHNESS_WINDOWS, SENIORITY_LABEL, type Seniority } from "@/lib/inbox";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { cn } from "@/lib/cn";
@@ -30,15 +28,15 @@ export function FacetChips({
 }: {
   within: number | null;
   setWithin: (d: number | null) => void;
-  sources: Set<AtsSource>;
-  toggleSource: (s: AtsSource) => void;
+  sources: Set<string>;
+  toggleSource: (s: string) => void;
   seniorities: Set<Seniority>;
   toggleSeniority: (s: Seniority) => void;
   locQ: string;
   setLocQ: (v: string) => void;
   kw: string;
   setKw: (v: string) => void;
-  availSources: AtsSource[];
+  availSources: string[];
   availSeniorities: Seniority[];
   resultCount: number;
   totalCount: number;
@@ -85,7 +83,7 @@ export function FacetChips({
 
         {availSources.map((s) => (
           <Pill key={s} on={sources.has(s)} onClick={() => toggleSource(s)}>
-            {ATS_LABEL[s]}
+            {s}
           </Pill>
         ))}
 

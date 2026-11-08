@@ -22,6 +22,7 @@ import {
   claimManualJob,
   enqueueDueJobs,
   executeJob,
+  executeScheduledJob,
   extractRolesFound,
   MAX_ATTEMPTS,
   MAX_RUNS,
@@ -744,4 +745,87 @@ test("a non-object scheduled-job patch is rejected by input validation", () => {
   for (const value of [null, "status", ["status"]]) {
     assert.throws(() => assertScheduledJobBody(value), /object/);
   }
+});
+
+test("website-only schedules baseline the first run and deliver only newly discovered matches", async () => {
+  const sourceId = "11111111-1111-4111-8111-111111111111";
+  const source = { id: sourceId, name: "Fixture website", enabled: true, seenKeys: ["legacy-baseline"], nextRunAt: "2026-01-01T09:00:00Z" };
+  const job = { id: "22222222-2222-4222-8222-222222222222", engine: "full", filters: { ats: [], websiteIds: [sourceId], positive: ["AI"], sinceDays: 7 } };
+  const oldJob = { sourceId, title: "AI student", company: "Example", url: "https://example.com/jobs/1" };
+  const newJob = { sourceId, title: "AI intern", company: "Example", url: "https://example.com/jobs/2" };
+  let listings = [oldJob];
+  let delivered = [];
+  const opts = {
+    core: {},
+    executeAts: () => assert.fail("website-only search must not run ATS discovery"),
+    searchWebsites: async (_root, ids, filters, options) => {
+      assert.deepEqual(ids, [sourceId]);
+      assert.deepEqual(filters.positive, ["AI"]);
+      assert.deepEqual(options, { dedupeAcrossSources: false, excludeSeen: false });
+      return { offers: listings, searched: [{ id: sourceId, name: source.name }], failures: [] };
+    },
+    readSources: () => [source],
+    deliverWebsites: async (_root, offers) => { delivered.push(...offers); return { added: offers.length, failures: [] }; },
+  };
+  const baseline = await executeScheduledJob("unused", job, opts);
+  assert.equal(baseline.state, "success");
+  assert.equal(baseline.rolesFound, 0);
+  assert.match(baseline.message, /1 website baselined/);
+  assert.equal(delivered.length, 0);
+  listings = [oldJob, newJob];
+  const next = await executeScheduledJob("unused", { ...job, websiteCheckpoints: baseline.websiteCheckpoints }, opts);
+  assert.equal(next.state, "success");
+  assert.equal(next.rolesFound, 1);
+  assert.deepEqual(delivered, [newJob]);
+  assert.equal(next.websiteCheckpoints[sourceId].seenKeys.length, 2);
+  assert.deepEqual(source.seenKeys, ["legacy-baseline"]);
+  assert.equal(source.nextRunAt, "2026-01-01T09:00:00Z");
+
+  const changed = await executeScheduledJob("unused", { ...job, filters: { ...job.filters, positive: ["robotics"] }, websiteCheckpoints: next.websiteCheckpoints }, {
+    ...opts, searchWebsites: async () => ({ offers: [newJob], searched: [{ id: sourceId, name: source.name }], failures: [] }),
+  });
+  assert.match(changed.message, /1 website baselined/);
+  assert.equal(delivered.length, 1, "a changed filter must not report all existing matches as new");
+});
+
+test("a failed or disabled website does not advance its scheduled-search checkpoint", async () => {
+  const firstId = "11111111-1111-4111-8111-111111111111";
+  const secondId = "22222222-2222-4222-8222-222222222222";
+  const job = { id: "33333333-3333-4333-8333-333333333333", engine: "full", filters: { ats: [], websiteIds: [firstId, secondId], positive: [] } };
+  const source = { id: firstId, name: "First", enabled: true };
+  const opts = { core: {}, readSources: () => [source],
+    searchWebsites: async () => ({ offers: [{ sourceId: firstId, title: "Job", url: "https://example.com/jobs/1" }], searched: [{ id: firstId, name: "First" }], failures: [{ id: secondId, name: "Second", error: "Unavailable" }] }),
+    deliverWebsites: async () => assert.fail("initial baseline does not deliver"),
+  };
+  const partial = await executeScheduledJob("unused", job, opts);
+  assert.equal(partial.state, "failed");
+  assert.match(partial.message, /Second: Unavailable/);
+  assert.ok(partial.websiteCheckpoints[firstId]);
+  assert.equal(partial.websiteCheckpoints[secondId], undefined);
+  const stopped = await executeScheduledJob("unused", { ...job, websiteCheckpoints: partial.websiteCheckpoints }, {
+    ...opts, readSources: () => [{ ...source, enabled: false }],
+  });
+  assert.equal(stopped.state, "failed");
+  assert.equal(stopped.websiteCheckpoints[firstId], undefined);
+  assert.match(stopped.message, /paused or removed/);
+});
+
+test("mixed scheduled scans retain ATS results and per-source checkpoints persist only for unchanged searches", async () => {
+  const sourceId = "11111111-1111-4111-8111-111111111111";
+  const jobId = "22222222-2222-4222-8222-222222222222";
+  const job = { id: jobId, engine: "full", status: "active", filters: { ats: ["lever"], websiteIds: [sourceId], positive: ["AI"] } };
+  const result = await executeScheduledJob("unused", job, {
+    core: {},
+    executeAts: () => ({ state: "success", attempt: 1, rolesFound: 3, message: "ATS ok" }),
+    readSources: () => [{ id: sourceId, name: "Fixture", enabled: true }],
+    searchWebsites: async () => ({ offers: [], searched: [{ id: sourceId, name: "Fixture" }], failures: [] }),
+    deliverWebsites: async () => assert.fail("empty baseline does not deliver"),
+  });
+  assert.equal(result.rolesFound, 3);
+  const store = { jobs: [{ ...job }], runs: [], queue: [] };
+  await recordCompletion("unused", { job }, result, store);
+  assert.ok(store.jobs[0].websiteCheckpoints[sourceId]);
+  const edited = { jobs: [{ ...job, filters: { ...job.filters, positive: ["robotics"] } }], runs: [], queue: [] };
+  await recordCompletion("unused", { job }, result, edited);
+  assert.equal(edited.jobs[0].websiteCheckpoints, undefined);
 });

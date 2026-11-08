@@ -90,19 +90,20 @@ export function CreateJobModal({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label htmlFor="create-scan-engine" className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
               <select
+                id="create-scan-engine"
                 value={engine}
                 onChange={(e) => setEngine(e.target.value as ScanEngine)}
                 className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
               >
-                <option value="full">Full ATS Dataset Sweep</option>
-                <option value="portals">Zero-Token Portals.yml</option>
+                <option value="full">Broad ATS discovery and selected websites</option>
+                <option value="portals">Configured companies and boards</option>
               </select>
               <p className="mt-1 text-[11px] text-faint">
                 {engine === "full"
-                  ? "Sweeps public Greenhouse/Lever/Ashby datasets."
-                  : "Scans pre-configured portals.yml companies (0 AI cost)."}
+                  ? "Scans selected ATS networks and saved websites."
+                  : "Scans your configured companies and boards, plus selected websites."}
               </p>
             </div>
 
@@ -135,7 +136,8 @@ export function CreateJobModal({
 
           {/* ─── Reuse FilterBuilder from Explore ─── */}
           <div className="rounded-xl border border-border bg-surface/30 p-4">
-            <FilterBuilder filters={filters} onChange={setFilters} />
+            <FilterBuilder filters={filters} onChange={setFilters} configuredBoards={engine === "portals"} />
+            <p className="mt-3 text-xs text-muted">Each website&apos;s first scheduled check records a baseline. Later checks add newly discovered matches; changing filters establishes a fresh baseline.</p>
           </div>
 
           {/* ─── Actions ─── */}

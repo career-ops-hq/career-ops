@@ -85,3 +85,9 @@ export function isScannerMissing(body) {
 export function isAbortError(err) {
   return !!err && typeof err === "object" && /** @type {{name?: unknown}} */ (err).name === "AbortError";
 }
+
+/** A successful website-only check is a real search, even with zero companies. */
+export function emptyScanPhase({ capHit, datasetIssue, droppedNoDate, companiesScanned, websitesSearched, broad }) {
+  if (capHit || datasetIssue || droppedNoDate > 0 || (companiesScanned === 0 && websitesSearched === 0)) return "degraded";
+  return broad ? "empty-current" : "empty-loose";
+}

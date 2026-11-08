@@ -8638,9 +8638,10 @@ try {
   const pipelineFields = pipelineRow.split('|').map(part => part.trim());
   if (
     pendingLines.length === 1 &&
-    pipelineFields.length === 4 &&
+    pipelineFields.length === 5 &&
     pipelineFields[0] === '- [ ] https://jobs.example.com/123%7Cevil' &&
     pipelineFields[3] === '@Remote EU' &&
+    pipelineFields[4] === 'source: local-parser' &&
     !pipelineRow.includes('\n') &&
     !pipelineRow.includes('\t') &&
     !pipelineRow.includes('\\|') &&
@@ -8713,8 +8714,8 @@ try {
   const badDatePipeline = formatPipelineOffer({ ...datedOffer, postedAt: -1 });
   const nanDatePipeline = formatPipelineOffer({ ...datedOffer, postedAt: Number.NaN });
   if (
-    datedPipeline === '- [ ] https://jobs.example.com/42 | Acme | Staff Engineer | Remote (US) | posted: 2026-06-18' &&
-    noDatePipeline === '- [ ] https://jobs.example.com/42 | Acme | Staff Engineer | Remote (US)' &&
+    datedPipeline === '- [ ] https://jobs.example.com/42 | Acme | Staff Engineer | Remote (US) | posted: 2026-06-18 | source: greenhouse-api' &&
+    noDatePipeline === '- [ ] https://jobs.example.com/42 | Acme | Staff Engineer | Remote (US) | source: greenhouse-api' &&
     badDatePipeline === noDatePipeline && // negative epoch → no segment (guarded)
     nanDatePipeline === noDatePipeline // NaN → no segment (guarded)
   ) {
@@ -8751,11 +8752,11 @@ try {
   const flaggedNoFlags = formatPipelineOffer({ ...trustBase, trustScore: 80, trustFlags: [] });
   const withDateAndTrust = formatPipelineOffer({ ...trustBase, postedAt: Date.parse('2026-06-18T00:00:00Z'), trustScore: 70, trustFlags: ['invalid_url'], note: 'pick' });
   if (
-    flaggedPipeline === '- [ ] https://jobs.example.com/77 | Acme | SRE | Remote | trust: 60 missing_apply_url,suspicious_domain' &&
-    cleanPipeline === '- [ ] https://jobs.example.com/77 | Acme | SRE | Remote' && // score 100 → no segment
+    flaggedPipeline === '- [ ] https://jobs.example.com/77 | Acme | SRE | Remote | trust: 60 missing_apply_url,suspicious_domain | source: lever-api' &&
+    cleanPipeline === '- [ ] https://jobs.example.com/77 | Acme | SRE | Remote | source: lever-api' && // score 100 → no segment
     untrustedPipeline === cleanPipeline && // no trust fields → byte-identical
-    flaggedNoFlags === '- [ ] https://jobs.example.com/77 | Acme | SRE | Remote | trust: 80' && // score-only when no flags
-    withDateAndTrust === '- [ ] https://jobs.example.com/77 | Acme | SRE | Remote | posted: 2026-06-18 | trust: 70 invalid_url | note: pick' // stable order posted→trust→note
+    flaggedNoFlags === '- [ ] https://jobs.example.com/77 | Acme | SRE | Remote | trust: 80 | source: lever-api' && // score-only when no flags
+    withDateAndTrust === '- [ ] https://jobs.example.com/77 | Acme | SRE | Remote | posted: 2026-06-18 | trust: 70 invalid_url | note: pick | source: lever-api' // stable order posted→trust→note→source
   ) {
     pass('pipeline writer appends a labeled trust: segment ordered posted→trust→note, byte-identical when clean/unset (#1743)');
   } else {

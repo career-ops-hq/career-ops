@@ -36,10 +36,15 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
   write back through the core's own scripts.
-- **Explore** — the free reverse-ATS scan with an honest partial-dataset
-  indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
+- **Explore** — search public ATS networks and your saved websites, add a
+  website or individual job URL, and schedule a search. Results indicate
+  incomplete coverage. AI-assisted discovery remains optional.
 - **Scheduled scans** — save local zero-token or full-dataset scans and run due
   jobs through an optional worker on Windows, macOS or Linux.
+- **Portals** — view and manage the health of saved websites and company
+  boards. Supported careers-page URLs reuse the existing provider registry. Unsupported sites and LinkedIn searches are reported explicitly.
+  Individual job links, including LinkedIn jobs missed by email, can be saved
+  from Explore without AI evaluation.
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
@@ -91,6 +96,17 @@ before starting an AI run.
   automation. The CLI works exactly the same without it.
 
 ## Scheduled scans
+
+Explore can include saved websites in a scheduled search. Its first website
+check records a baseline, so existing postings do not flood the inbox; later
+discoveries enter `data/pipeline.md` with a persistent in-app notice. Changing
+the scheduled search's filters establishes a new baseline. Existing individual
+website schedules retain their cadence, filters and checkpoints, and appear on
+Scheduled scans. Newly added websites remain available for searching until a
+schedule is created. Website settings and notifications stay in the user-layer
+`data/portal-monitors.json`. The existing OS worker checks due jobs every 15
+minutes. The computer must be on and logged in; missed checks catch up after
+waking. No email is sent and no AI evaluation is started by monitoring.
 
 The web UI can save scan definitions without installing an OS task. To check and
 run due jobs every 15 minutes, install the local worker from the repository root.

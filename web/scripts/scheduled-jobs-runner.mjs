@@ -3,11 +3,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
 import {
   isSafeScheduledId,
+  readScheduledStore,
   withResourceLock,
   withScheduledStore,
 } from "../src/lib/scheduled-jobs-store.mjs";
@@ -17,6 +18,8 @@ import { scheduledRunnerResourcePath, scheduledStorePath } from "../src/lib/sche
 import { getCareerOpsRoot } from "../../path-resolver.mjs";
 import { getProfilePath } from "../src/lib/core/profile-path.mjs";
 import { scanFailureMessage } from "../src/lib/scheduled-scan-error.mjs";
+import { runDueMonitors } from "../../portal-monitor.mjs";
+import { postingKey } from "../../url-key.mjs";
 
 const CODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const MAX_RUNS = 100;
@@ -254,6 +257,123 @@ export function executeJob(root, job, options = {}) {
   };
 }
 
+// The checkpoint belongs to a saved search, not to the source. A source may
+// also have its own daily monitor with different title keywords; advancing its
+// seenKeys after a filtered search would silently hide jobs from that monitor.
+export function websiteCriteriaKey(filters = {}) {
+  const fields = ["positive", "negative", "allow", "block", "blockHard", "alwaysAllow", "sinceDays"];
+  const value = Object.fromEntries(fields.map((field) => [field, filters[field] ?? (field === "sinceDays" ? 7 : [])]));
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function selectedWebsiteIds(job) {
+  return Array.isArray(job.filters?.websiteIds) ? [...new Set(job.filters.websiteIds)] : [];
+}
+
+/**
+ * Run the existing scheduled ATS scan plus the explicitly selected websites.
+ * The first successful search of each website records a per-search baseline;
+ * changing search criteria establishes a fresh baseline as well. A failed or
+ * disabled source never advances its checkpoint. Existing auto-monitors keep
+ * their own timing, keyword filters, notices, and checkpoint entirely intact.
+ *
+ * Dependency seams keep tests free of network calls and real user data.
+ */
+export async function executeScheduledJob(root, job, options = {}) {
+  const startedAt = Date.now();
+  const websiteIds = selectedWebsiteIds(job);
+  const ats = job.filters?.ats;
+  const runAts = job.engine === "portals" || !Array.isArray(ats) || ats.length > 0;
+  if (!runAts && !websiteIds.length) {
+    return { state: "failed", attempt: 1, rolesFound: 0, durationMs: 0, message: "Select an ATS source or a saved website." };
+  }
+
+  const atsResult = runAts ? (options.executeAts || executeJob)(root, job, options.atsOptions) : null;
+  if (!websiteIds.length) return atsResult;
+
+  const core = options.core || await import("../../portal-monitor.mjs");
+  const search = options.searchWebsites || core.searchMonitorSources;
+  const deliver = options.deliverWebsites || core.deliverMonitorSearch;
+  const readSources = options.readSources || ((r) => core.readMonitorStore(r).sources);
+  const errors = [];
+  const checkpointUpdates = {};
+  const previous = job.websiteCheckpoints || {};
+  const criteria = websiteCriteriaKey(job.filters);
+  let baselined = 0;
+  let added = 0;
+  try {
+    // Every source gets its own complete baseline, even when another source
+    // lists the same job or that job already exists in the inbox.
+    const result = await search(root, websiteIds, job.filters || {}, { dedupeAcrossSources: false, excludeSeen: false });
+    errors.push(...(result.failures || []));
+    const sourcesById = new Map(readSources(root).map((source) => [source.id, source]));
+    const failedIds = new Set(errors.map((failure) => failure.id));
+    const candidates = [];
+    const candidatesById = new Set();
+    for (const source of result.searched || []) {
+      if (failedIds.has(source.id)) continue;
+      const current = sourcesById.get(source.id);
+      if (!current || !current.enabled) {
+        errors.push({ id: source.id, name: source.name, error: "Source was paused or removed during the scan." });
+        failedIds.add(source.id);
+        continue;
+      }
+      const offers = (result.offers || []).filter((offer) => offer.sourceId === source.id);
+      const keys = offers.map((offer) => postingKey(offer.url));
+      const old = previous[source.id];
+      const baseline = !old || old.criteria !== criteria || !Array.isArray(old.seenKeys);
+      const seen = new Set(baseline ? [] : old.seenKeys);
+      if (baseline) baselined += 1;
+      else for (const offer of offers) {
+        if (!seen.has(postingKey(offer.url))) { candidates.push(offer); candidatesById.add(source.id); }
+      }
+      checkpointUpdates[source.id] = { criteria, seenKeys: [...new Set([...seen, ...keys])], checkedAt: nowIso() };
+    }
+
+    if (options.isCurrent && !options.isCurrent()) {
+      return { state: "failed", attempt: 1, rolesFound: atsResult?.rolesFound || 0,
+        durationMs: Date.now() - startedAt, message: "The schedule changed during its scan. Website results were not saved; run it again." };
+    }
+
+    if (candidates.length) {
+      try {
+        const delivery = await deliver(root, candidates);
+        added = Number(delivery.added) || 0;
+        for (const failure of delivery.failures || []) {
+          errors.push(failure);
+          failedIds.add(failure.id);
+        }
+      } catch (error) {
+        for (const id of candidatesById) {
+          errors.push({ id, name: sourcesById.get(id)?.name || id, error: error instanceof Error ? error.message : String(error) });
+          failedIds.add(id);
+        }
+      }
+    }
+    // Never checkpoint a source whose delivery failed: the next run retries it.
+    for (const id of failedIds) delete checkpointUpdates[id];
+    const parts = [];
+    if (atsResult) parts.push(`ATS: ${atsResult.rolesFound || 0} matching roles`);
+    parts.push(`Websites: ${added} new job${added === 1 ? "" : "s"} added`);
+    if (baselined) parts.push(`${baselined} website${baselined === 1 ? "" : "s"} baselined`);
+    const undated = Number(result.unknownDates) || 0;
+    if (undated > 0) parts.push(`${undated} listing${undated === 1 ? "" : "s"} included with unknown posting dates`);
+    if (atsResult?.state === "failed") parts.push(`ATS failed: ${atsResult.message}`);
+    if (errors.length) parts.push(`Website check failed: ${errors.map((e) => `${e.name || e.id}: ${e.error}`).join("; ")}`);
+    return {
+      state: atsResult?.state === "failed" || errors.length ? "failed" : "success",
+      attempt: atsResult?.attempt || 1,
+      rolesFound: (atsResult?.rolesFound || 0) + added,
+      durationMs: Date.now() - startedAt,
+      message: parts.join(" · "),
+      websiteCheckpoints: checkpointUpdates,
+    };
+  } catch (error) {
+    return { state: "failed", attempt: atsResult?.attempt || 1, rolesFound: atsResult?.rolesFound || 0,
+      durationMs: Date.now() - startedAt, message: `Website check failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 export async function recordCompletion(storePath, claim, result, inMemoryStore = null) {
   const at = nowIso();
   const apply = (store) => {
@@ -269,6 +389,12 @@ export async function recordCompletion(storePath, claim, result, inMemoryStore =
       current.updatedAt = at;
       if (result.state === "failed") current.lastError = result.message;
       else delete current.lastError;
+      // Do not persist checkpoints produced by an outdated set of filters or
+      // sources if the user edited the schedule while a network scan ran.
+      if (result.websiteCheckpoints && websiteCriteriaKey(current.filters) === websiteCriteriaKey(job.filters)
+          && JSON.stringify(selectedWebsiteIds(current)) === JSON.stringify(selectedWebsiteIds(job))) {
+        current.websiteCheckpoints = { ...(current.websiteCheckpoints || {}), ...result.websiteCheckpoints };
+      }
     }
 
     const run = store.runs.find((item) => item.id === claim.runId && item.jobId === job.id);
@@ -302,6 +428,14 @@ async function main() {
   return withResourceLock(
     runnerResource,
     async () => {
+      // Website monitors share this installed OS worker. They have their own
+      // per-source checkpoints and must also run when no broad scan is queued.
+      // A broken source must not prevent other scheduled scans from running.
+      let monitors;
+      if (!manualJobId) {
+        try { monitors = await runDueMonitors(root); }
+        catch (error) { monitors = { error: error.message }; }
+      }
       let claim;
       if (manualJobId) {
         if (!isSafeScheduledId(manualJobId)) throw new Error("Invalid scheduled job identifier.");
@@ -316,12 +450,19 @@ async function main() {
         claim = await takeDueJob(storePath);
       }
 
-      if (!claim) return { status: "idle" };
+      if (!claim) return { status: "idle", ...(monitors ? { monitors } : {}) };
 
-      const result = executeJob(root, claim.job);
+      const result = await executeScheduledJob(root, claim.job, {
+        isCurrent: () => {
+          const current = readScheduledStore(storePath).jobs.find((item) => item.id === claim.job.id);
+          return Boolean(current && current.status === claim.job.status
+            && websiteCriteriaKey(current.filters) === websiteCriteriaKey(claim.job.filters)
+            && JSON.stringify(selectedWebsiteIds(current)) === JSON.stringify(selectedWebsiteIds(claim.job)));
+        },
+      });
       await recordCompletion(storePath, claim, result);
       if (result.state === "failed") throw new Error(result.message);
-      return { status: "success", jobId: claim.job.id, ...result };
+      return { status: "success", jobId: claim.job.id, ...result, ...(monitors ? { monitors } : {}) };
     },
     { timeoutMs: 1_000, staleMs: SCAN_TIMEOUT_MS * MAX_ATTEMPTS + 60_000 },
   );

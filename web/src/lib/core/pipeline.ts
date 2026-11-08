@@ -48,6 +48,7 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
       ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
       postedAt: toCorePostedAt(o.postedAt),
       source: o.source || o.ats || "explorer",
+      sourceLabel: o.sourceLabel || "",
       // Preserve the optional per-offer signal so it survives to pipeline.md.
       // The core writer treats an empty note as absent (byte-identical output).
       note: o.note || "",

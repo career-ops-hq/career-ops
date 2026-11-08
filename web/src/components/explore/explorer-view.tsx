@@ -15,6 +15,7 @@ import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
+import { usePipeline } from "@/components/pipeline/pipeline-provider";
 import { ScheduleJobAction } from "./schedule-job-action";
 
 // Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
@@ -40,11 +41,12 @@ export function ExplorerView({
   evaluated: { n: string; company: string; role: string }[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, employerOutcome, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
-  const scanNote =
-    companiesScanned > 0
-      ? `Scanned ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}${partial ? " · some sources were unreachable" : ""}.`
-      : undefined;
+  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, employerOutcome, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, websitesSearched, capHit, droppedNoDate, partial } = useExplore();
+  const scanParts = [
+    companiesScanned > 0 ? `${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}` : "",
+    websitesSearched > 0 ? `${websitesSearched.toLocaleString()} saved website${websitesSearched === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  const scanNote = scanParts.length ? `Searched ${scanParts.join(" and ")}${partial ? " · some sources were unreachable" : ""}.` : undefined;
   const inited = useRef(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [cli, setCli] = useState<{ id: string | null; name?: string }>({ id: null });
@@ -89,25 +91,30 @@ export function ExplorerView({
     }
   }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
 
-  const enriched: EnrichedOffer[] = useMemo(() => {
-    const trackedUrls = new Set(inboxUrls);
-    return offers.map((o) => {
-      const inPipeline = trackedUrls.has(o.url);
-      const c = norm(o.company);
-      const t = norm(o.title);
-      const ev = evaluated.find((a) => {
-        if (norm(a.company) !== c) return false;
-        const ar = norm(a.role);
-        return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
-      });
-      return { ...o, inPipeline, evaluatedN: ev?.n };
-    });
-  }, [offers, inboxUrls, evaluated]);
+  const snapshot = usePipeline();
+  const inboxSnapshot = snapshot.loading ? inboxUrls.map(url => ({ url, done: false })) : snapshot.inbox;
+  const appsSnapshot = snapshot.loading ? evaluated.map(app => ({ ...app, status: "Evaluated" })) : snapshot.applications;
+  const inboxByUrl = useMemo(() => new Map(inboxSnapshot.map((j) => [j.url, j])), [inboxSnapshot]);
+  const enriched: EnrichedOffer[] = useMemo(
+    () =>
+      offers.map((o) => {
+        const inPipeline = inboxByUrl.has(o.url);
+        const c = norm(o.company);
+        const t = norm(o.title);
+        const ev = appsSnapshot.find((a) => {
+          if (norm(a.company) !== c) return false;
+          const ar = norm(a.role);
+          return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
+        });
+        return { ...o, inPipeline, processed: inboxByUrl.get(o.url)?.done, evaluatedN: ev?.n, applicationStatus: ev?.status };
+      }),
+    [offers, inboxByUrl, appsSnapshot],
+  );
 
   const isAi = mode === "ai";
   const isResults = phase === "results";
   const employer = filters.preset === CHINA_PRESET;
-  const canDiscover = !running && (employer ? (filters.employers?.length ?? 0) > 0 : filters.ats.length > 0);
+  const canDiscover = !running && (employer ? (filters.employers?.length ?? 0) > 0 : filters.ats.length > 0 || (filters.websiteIds?.length ?? 0) > 0);
   const scanRunning = running && !isAi && !employer;
   // Keep one ResultsList mounted across scanning → revealing → results so
   // filter/sort/scroll and co-rise survive the 850ms reveal handoff.
@@ -136,7 +143,7 @@ export function ExplorerView({
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
             {isAi
               ? "Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate."
-              : employer ? "Scan selected employer sites using your role and location terms, zero tokens. Open an original JD to check its details." : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
+              : employer ? "Scan selected employer sites using your role and location terms, zero tokens. Open an original JD to check its details." : "Search selected public ATS networks and saved websites using your role and location filters. Discovering costs no AI tokens."}
           </p>
         )}
       </header>
@@ -225,8 +232,8 @@ export function ExplorerView({
           {!employerOutcome && phase === "empty-current" && (
             <EmptyState
               tone="good"
-              title="You're all caught up."
-              body="Nothing new since your last scan. Your pipeline is current — that's the goal."
+              title="No matching new roles in the selected sources."
+              body="Try a broader search or check again later."
               note={scanNote}
               onRerun={() => {
                 setFilters({ ...filters, sinceDays: Math.max(filters.sinceDays, 30) });

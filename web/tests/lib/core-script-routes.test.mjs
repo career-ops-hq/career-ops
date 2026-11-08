@@ -160,6 +160,7 @@ const DRIVEN_ROUTES = [
   "followups/cadence",
   "keyword-match",
   "patterns",
+  "portals/monitors",
   "portals/verify",
   "quiet-companies",
   "stats",
@@ -308,4 +309,23 @@ test("portals/verify still parses a completed sweep", async () => {
       ["Globex", "broken"],
     ],
   );
+});
+
+// Installation is driven with a stand-in script in the disposable code root;
+// it never changes the operator's schedule.
+test("portal monitor installation launches a platform script without an inherited Windows console", async () => {
+  const windows = process.platform === "win32";
+  mkdirSync(join(codeRoot, "web/scripts"), { recursive: true });
+  const script = join(codeRoot, "web/scripts", windows ? "install-scan-schedule.ps1" : "install-scan-schedule.sh");
+  writeFileSync(script, windows ? "exit 0\n" : "#!/bin/sh\nexit 0\n");
+  const { POST } = await route("portals/monitors");
+  const { body, launches: made } = await call(POST, new Request("http://localhost/api/portals/monitors", {
+    method: "POST", body: JSON.stringify({ action: "install-schedule" }),
+  }));
+  assert.equal(body.ok, true);
+  const installer = made.filter(launch => launch.options?.cwd === codeRoot && launch.file === (windows ? "powershell.exe" : "/bin/sh"));
+  assert.equal(installer.length, 1);
+  assert.ok(installer[0].options.windowsHide);
+  assert.equal(made[0].options.cwd, codeRoot);
+  assert.equal(made[0].options.env.CAREER_OPS_ROOT, dataRoot);
 });

@@ -920,6 +920,7 @@ export function PipelineView({
                       {r.closesAt ? (
                         <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
                       ) : null}
+                      {r.source && <Badge tone="info" title={r.sourceInferred ? "Job link host; original discovery source was not recorded" : `Source: ${r.source}`}>{r.source}</Badge>}
                       {posting && (
                         <a
                           href={posting}

@@ -2142,7 +2142,7 @@ const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
  * segment invents a city for a role and lets it resurface, while a genuine
  * location beginning `Posted: ` / `Rank: ` does not occur.
  */
-const PIPELINE_LABELED_SEGMENT_RE = /^(?:posted|trust|yrs|note|rank):\s/iu;
+const PIPELINE_LABELED_SEGMENT_RE = /^(?:posted|trust|yrs|note|rank|source):\s/iu;
 
 /**
  * The `~~…~~` wrapper an expired entry is written with.
@@ -3385,7 +3385,13 @@ export function formatPipelineOffer(offer) {
   // confusing it for a positional cell, and it stays generic: nothing here is
   // source-specific, and an offer without `note` produces byte-identical output.
   const note = typeof offer.note === 'string' ? sanitizeMarkdownField(offer.note) : '';
-  return note ? `${line} | note: ${note}` : line;
+  if (note) line = `${line} | note: ${note}`;
+  // Keep discovery provenance alongside the job URL. An employer URL may be
+  // reached from another job board, so its hostname alone cannot recover it.
+  const source = typeof offer.sourceLabel === 'string' && offer.sourceLabel.trim()
+    ? offer.sourceLabel : typeof offer.source === 'string' ? offer.source : '';
+  const cleanSource = sanitizeMarkdownField(source).trim();
+  return cleanSource ? `${line} | source: ${cleanSource}` : line;
 }
 
 // postedAt arrives as epoch ms (or absent). Convert to 'YYYY-MM-DD', or '' when missing.
@@ -3730,10 +3736,11 @@ export async function appendToPipeline(offers, {
   pipelinePath = PIPELINE_PATH,
   scanHistoryPath = SCAN_HISTORY_PATH,
   historyPolicy = null,
+  deduplicate = false,
 } = {}) {
-  if (offers.length === 0) return;
+  if (offers.length === 0) return deduplicate ? [] : undefined;
 
-  await withPipelineLock(pipelinePath, async () => {
+  return withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
     let text = existsSync(pipelinePath)
       ? readFileSync(pipelinePath, 'utf-8')
@@ -3749,7 +3756,7 @@ export async function appendToPipeline(offers, {
       if (err?.code !== 'EISDIR') throw err;
     }
     const fresh = offersMissingFromPipeline(offers, text, historyText, policy);
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) return deduplicate ? [] : undefined;
 
     const headings = [...text.matchAll(/^##[ \t].*$/gm)];
     const pending = headings.find(h => sectionKind(h[0]) === 'pending');
@@ -3771,6 +3778,7 @@ export async function appendToPipeline(offers, {
     }
 
     atomicWriteFile(pipelinePath, text);
+    return deduplicate ? fresh : undefined;
   });
 }
 
@@ -5256,6 +5264,7 @@ async function main() {
         const offerForVerification = {
           ...job,
           source: sourceName,
+          ...(company._isBoard ? { sourceLabel: company.name } : {}),
           tracked: Boolean(careersUrlDomain),
           careersUrlDomain,
         };

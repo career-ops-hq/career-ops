@@ -168,7 +168,7 @@ export function TodayDashboard({
   // the outage. See displayCounts().
   const shown = displayCounts({ followupsError, freshError, overdue, newThisWeek });
   const followupRest = homeFollowupRemainder(followups.length, overdue);
-  const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
+const inboxByUrl = useMemo(() => new Map(inbox.map((j) => [j.url, j])), [inbox]);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
@@ -319,7 +319,7 @@ export function TodayDashboard({
         <Section icon={Sparkles} title="Fresh matches this week" hint="Found by your free scans · 0 tokens">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {fresh.slice(0, 6).map((o) => (
-              <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
+              <DiscoveryCard key={o.url} offer={o} inPipeline={inboxByUrl.has(o.url)} processed={inboxByUrl.get(o.url)?.done} />
             ))}
           </div>
           {fresh.length > 6 && (
