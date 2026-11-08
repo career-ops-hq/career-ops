@@ -32,7 +32,10 @@ function runWithAlgolia(dir, behaviour) {
   const env = { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' };
   delete env.CAREER_OPS_PORTALS; delete env.GEMINI_API_KEY; delete env.GEMINI_MODEL;
   // With a trusted proxy the shared helper switches to undici's own fetch and skips the fixture.
-  delete env.CAREER_OPS_TRUST_PROXY_EGRESS;
+  // Env names are case-insensitive on Windows, so drop every spelling of the flag.
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() === 'CAREER_OPS_TRUST_PROXY_EGRESS') delete env[key];
+  }
   const r = spawnSync(process.execPath, ['--require', preload, fileURLToPath(new URL('../scan-hn.mjs', import.meta.url))],
     { cwd: dir, encoding: 'utf8', timeout: 60000, env });
   const requests = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
