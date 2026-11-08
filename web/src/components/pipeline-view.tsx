@@ -36,6 +36,12 @@ import { listEntrySync } from "@/lib/history-back.mjs";
 type Tab = (typeof PIPELINE_TABS)[number];
 type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
 
+// Reuse the measured row height when returning from a detail page. Otherwise
+// the shorter first-paint spacers clamp the browser's restored scroll position
+// before layout can measure the taller source/evaluation controls again.
+const measuredRowHeights = new Map<number, number>();
+const entryScrollPositions = new Map<string, number>();
+
 const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
 const VIEWS_KEY = "career-ops:pipeline-views";
 const REMOVAL_WARNING = "This removal is not saved yet. Reloading brings the view back.";
@@ -142,6 +148,8 @@ export function PipelineView({
     // The search timer would router.replace this list and can steal the click
     // if the list is still mounted while the next page loads.
     cancelPendingSearch();
+    const entryKey = window.navigation?.currentEntry?.key;
+    if (entryKey) entryScrollPositions.set(entryKey, window.scrollY);
     const next = listEntrySync(pathname, params.toString(), q);
     if (!next) return;
     const state = window.history.state;
@@ -323,7 +331,9 @@ export function PipelineView({
   const bodyRef = useRef<HTMLTableSectionElement>(null);
   // TRACKER_ROW_PX is the first-paint guess. The status cell wraps to two
   // lines at some widths, so the spacers use the height a mounted row has.
-  const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
+  const [rowPx, setRowPx] = useState(() =>
+    typeof window === "undefined" ? TRACKER_ROW_PX : measuredRowHeights.get(window.innerWidth) ?? TRACKER_ROW_PX,
+  );
   const mountedRows = filtered.slice(span.start, span.end);
   const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
   // The checkbox, the sortable columns and the resume column.
@@ -349,6 +359,7 @@ export function PipelineView({
         rowHeight = row.getBoundingClientRect().height || rowPx;
         break;
       }
+      measuredRowHeights.set(window.innerWidth, rowHeight);
       if (rowHeight !== rowPx) setRowPx(rowHeight);
       const next = trackerWindow({
         count: filtered.length,
@@ -366,16 +377,31 @@ export function PipelineView({
     window.addEventListener("resize", measure);
     // Back restores the list's scroll position after this commit, and that
     // move does not always emit a scroll event. Keep measuring until it lands.
+    const entryKey = window.navigation?.currentEntry?.key;
+    const savedY = entryKey ? entryScrollPositions.get(entryKey) : undefined;
+    let restoring = savedY !== undefined;
+    const stopRestore = () => { restoring = false; };
+    window.addEventListener("wheel", stopRestore, { passive: true });
+    window.addEventListener("touchstart", stopRestore, { passive: true });
+    window.addEventListener("keydown", stopRestore);
     let frames = 0;
     let raf = 0;
     const followScrollRestore = () => {
       measure();
+      // Native history restoration can run before the virtual table reaches
+      // its measured height. Retry the saved entry's position after layout,
+      // without fighting a user who has started scrolling or using the keys.
+      if (restoring) window.scrollTo(0, savedY!);
       frames += 1;
       if (frames < 30) raf = requestAnimationFrame(followScrollRestore);
+      else if (entryKey) entryScrollPositions.delete(entryKey);
     };
     raf = requestAnimationFrame(followScrollRestore);
     return () => {
       cancelAnimationFrame(raf);
+      window.removeEventListener("wheel", stopRestore);
+      window.removeEventListener("touchstart", stopRestore);
+      window.removeEventListener("keydown", stopRestore);
       window.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
     };
