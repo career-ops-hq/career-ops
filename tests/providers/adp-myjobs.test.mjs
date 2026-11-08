@@ -202,7 +202,7 @@ try {
     const origErr = console.error; console.error = (...a) => warns.push(a.join(' '));
     let jobs;
     try { jobs = await adp.fetch({ ...entry, adpMyjobs: { orgoid: ORGOID } }, mkCtx(() => ({ count: 1000, jobRequisitions: mkRows(1, 200) }))); } finally { console.error = origErr; }
-    check(jobs.adpMyjobsTruncated === true && warns.some(w => /stopped early/.test(w)) && !warns.some(w => /raise max_pages/.test(w)), 'a stalled walk warns "stopped early" and tags the result, without the max_pages warning');
+    check(jobs.adpMyjobsTruncated === true && warns.some(w => /incomplete/.test(w)) && !warns.some(w => /raise max_pages/.test(w)), 'a stalled walk warns "incomplete" and tags the result, without the max_pages warning');
 
     // A repeated page that happens to carry skip past count is still a stall.
     const warns2 = [];
@@ -215,8 +215,8 @@ try {
       return { count: 600, jobRequisitions: skip === 200 ? mkRows(1, 200) : mkRows(skip + 1, 200) };
     });
     const j3 = await adp.fetch({ ...entry, adpMyjobs: { orgoid: ORGOID } }, ctx3);
-    check(ctx3.calls.length === 3 && j3.length === 400 && !j3.adpMyjobsTruncated, 'a single repeated page does not end the walk early');
-    check(j2.length === 200 && j2.adpMyjobsTruncated === true && warns2.some(w => /stopped early/.test(w)), 'a repeated page that reaches count is still flagged as a stall');
+    check(ctx3.calls.length === 3 && j3.length === 400 && j3.adpMyjobsTruncated === true, 'a single repeated page does not end the walk early, but the gap marks the board incomplete');
+    check(j2.length === 200 && j2.adpMyjobsTruncated === true && warns2.some(w => /incomplete/.test(w)), 'a repeated page that reaches count is still flagged as a stall');
   }
 
   {
