@@ -1,4 +1,4 @@
-import { reportNumberFromCell } from "./apply/cv-selection.mjs";
+import { firstMarkdownLinkTarget } from "./posting-url.mjs";
 
 function clean(value) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -32,19 +32,28 @@ export function documentDisplayTitle(doc) {
   };
 }
 
+function reportFileNumber(cell) {
+  const target = firstMarkdownLinkTarget(cell);
+  if (!target) return null;
+  const base = target.split(/[?#]/, 1)[0].split(/[\\/]/).filter(Boolean).pop() ?? "";
+  const match = /^(\d+)(?:-.+)?\.md$/i.exec(base);
+  return match ? match[1] : null;
+}
+
 /**
- * Company and role for a generated PDF. Prefer the tracker row whose report
- * cell points at this report. A row number is used only when that row has
- * no report link, because row numbers and report numbers drift apart.
+ * Company and role for a generated PDF. The report number is the one in the
+ * link target's filename, not the number in the label.
+ * `[5](../reports/006-globex.md)` is report 6. A row number is used only when
+ * that row has no report link, because row numbers and report numbers drift apart.
  *
  * @param {Array<{ n?: string, company?: string, role?: string, report?: string }> | undefined} applications
  * @param {string | number | null | undefined} reportId
  */
 export function namesForReport(applications, reportId) {
   const rows = Array.isArray(applications) ? applications : [];
-  const byReport = rows.find((row) => sameNumber(reportNumberFromCell(row?.report), reportId));
+  const byReport = rows.find((row) => sameNumber(reportFileNumber(row?.report), reportId));
   const row = byReport
-    || rows.find((item) => reportNumberFromCell(item?.report) == null && sameNumber(item?.n, reportId));
+    || rows.find((item) => reportFileNumber(item?.report) == null && sameNumber(item?.n, reportId));
   return {
     company: row?.company || "",
     role: row?.role || "",

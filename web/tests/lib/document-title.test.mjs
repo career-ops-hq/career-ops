@@ -51,3 +51,19 @@ test("a row number is used only when that row has no report link", () => {
   ];
   assert.deepEqual(namesForReport(applications, "10"), { company: "Northwind", role: "Analyst" });
 });
+
+test("a display label that is a different number does not steal another report's company and role", () => {
+  const applications = [
+    { n: "1", company: "Globex", role: "Engineer", report: "[5](../reports/006-globex.md)" },
+    { n: "5", company: "Initech", role: "Analyst", report: "" },
+  ];
+  assert.deepEqual(namesForReport(applications, "5"), { company: "Initech", role: "Analyst" });
+  assert.deepEqual(namesForReport(applications, "6"), { company: "Globex", role: "Engineer" });
+  const presented = presentDocument(
+    { kind: "cv", filename: "cv-globex.pdf", reportId: "5" },
+    applications,
+  );
+  assert.equal(presented.title, "Tailored CV — Initech, Analyst");
+  assert.equal(presented.company, "Initech");
+  assert.equal(presented.role, "Analyst");
+});

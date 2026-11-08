@@ -8,7 +8,13 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const root = careerOpsRoot();
   const manifestPath = await resolvePdfIndexPath();
-  // A valid PDF id must still reach the PDF branch even if the tracker is unreadable.
-  const applications = new URL(req.url).searchParams.get("id") ? undefined : readApplications();
+  let applications;
+  if (!new URL(req.url).searchParams.get("id")) {
+    try {
+      applications = readApplications();
+    } catch (err) {
+      console.error("[documents] tracker unreadable:", err);
+    }
+  }
   return handleDocumentsRequest(req, root, manifestPath, isRegularContainedFile, applications);
 }
