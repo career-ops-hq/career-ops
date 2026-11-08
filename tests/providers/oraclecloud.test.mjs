@@ -596,6 +596,15 @@ try {
     fail(`probe cap: ${probeCount.n} requests, ${probe.result.length} jobs, warnings ${JSON.stringify(probe.lines)}`);
   }
 
+  // Entry cap equal to the probe cap: still a probe stop, still silent.
+  const eqCount = { n: 0 };
+  const eq = await captureWarn(() => oc.fetch({ name: 'Eq', careers_url: careers, max_pages: 1 }, { ...pagedCtx(7118, eqCount), maxPages: 1 }));
+  if (eqCount.n === 1 && eq.lines.length === 0 && !eq.result.oraclecloudTruncated) {
+    pass('oraclecloud.fetch() is silent when max_pages equals the probe cap');
+  } else {
+    fail(`equal caps warned: ${JSON.stringify(eq.lines)}`);
+  }
+
   if (mod.resolveMaxPages({}) === 25 && mod.resolveMaxPages({ max_pages: 0 }) === 25 && mod.resolveMaxPages({ max_pages: 'x' }) === 25
       && mod.resolveMaxPages({ max_pages: 60 }) === 60 && mod.resolveMaxPages({ max_pages: 9999 }) === mod.HARD_MAX_PAGES) {
     pass('oraclecloud.resolveMaxPages() defaults to 25, honours a positive integer, caps at HARD_MAX_PAGES');

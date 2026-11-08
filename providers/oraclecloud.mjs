@@ -292,7 +292,7 @@ export default {
     // The page cap ended the walk with rows still unread (or, when the tenant
     // reports no total, with no sign the board ended). Say so: a silently
     // short board reads as a complete one.
-    if (capped && entryMaxPages <= ctxCap) {
+    if (capped && entryMaxPages < ctxCap) {
       const counts = total === null ? `${all.length} jobs fetched, total unknown` : `${all.length} of ${total} jobs`;
       const advice = maxPages < HARD_MAX_PAGES
         ? `raise max_pages on this entry for more (up to ${HARD_MAX_PAGES})`
