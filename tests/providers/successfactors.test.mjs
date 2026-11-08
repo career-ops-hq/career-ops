@@ -522,6 +522,20 @@ try {
       jobs = await sf.fetch({ name: 'RmkCo', careers_url: 'https://jobs.rmkco.example', max_pages: 60 }, { ...rmkCtx(calls, async () => { probeGate = true; return { allowed: true }; }), maxPages: 1 });
       if (jobs.length === 25 && calls.n === 1 && !probeGate && warns.length === 0) pass('successfactors RMK probe honors ctx.maxPages without robots check or warning');
       else fail(`successfactors RMK probe wrong: ${jobs.length} jobs, ${calls.n} calls, gate=${probeGate}, warns=${JSON.stringify(warns)}`);
+      // Denial keeps a lower max_jobs; CSB probe after an empty RMK board never consults robots; short last page is not "capped".
+      warns.length = 0; calls = { n: 0 };
+      jobs = await sf.fetch({ ...base, max_pages: 200, max_jobs: 500 }, csbCtx(calls, deny));
+      if (jobs.length === 500) pass('successfactors robots denial keeps a lower max_jobs');
+      else fail(`successfactors denial dropped lower max_jobs: ${jobs.length}`);
+      warns.length = 0; let g2 = 0;
+      await sf.fetch({ name: 'EmptyRmk', careers_url: 'https://jobs.emptyrmk.example', max_pages: 200 }, { sleep: async () => {}, robotsGate: async (u) => { g2++; return { allowed: !/services/.test(u) }; }, fetchText: async () => '<!DOCTYPE html>', fetchJson: async () => ({ totalJobs: 0, jobSearchResult: [] }) });
+      if (g2 === 1 && warns.length === 0) pass('successfactors CSB probe after an empty RMK board skips the robots gate and warns nothing');
+      else fail(`successfactors CSB probe consulted robots: gateCalls=${g2}, warns=${JSON.stringify(warns)}`);
+      warns.length = 0;
+      const shortLast = (u) => { const r = Number(new URL(u).searchParams.get('startrow')); return r < 975 ? tilePage(r) : tilePage(r).split('</li>').slice(0, 10).join('</li>') + '</li>'; };
+      jobs = await sf.fetch({ name: 'ShortLast', careers_url: 'https://jobs.shortlast.example' }, { sleep: async () => {}, robotsGate: allow, fetchText: async (u) => shortLast(u) });
+      if (jobs.length === 985 && warns.length === 0) pass('successfactors RMK does not warn when the last page before the cap is short');
+      else fail(`successfactors RMK short last page wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
       // RMK board that ends naturally: no warning.
       warns.length = 0;
       jobs = await sf.fetch({ name: 'SmallCo', careers_url: 'https://jobs.smallco.example' }, { sleep: async () => {}, fetchText: async (u) => (new URL(u).searchParams.get('startrow') === '0' ? tilePage(0) : '') });

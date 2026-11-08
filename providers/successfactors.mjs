@@ -61,6 +61,9 @@ const MAX_JOBS = 1000; // default cap on total postings pulled per site (both st
 // Raising is also gated on the host's robots.txt (see allowRaise).
 const RMK_MAX_PAGES_CEILING = 400;
 const MAX_JOBS_CEILING = 10000;
+// RMK pages are fetched as ?startrow=N, so the robots gate checks a paged URL (a
+// rule on the query string would not show on the bare path).
+const RMK_GATE_STARTROW = 25;
 
 // CSB knobs.
 const CSB_PAGE_SIZE = 10; // fixed by the /services/recruiting/v1/jobs API
@@ -361,7 +364,8 @@ async function limitsFor(entry, kind, url, ctx) {
   // Drop only what exceeds the defaults; a lower CSB max_pages still applies.
   const defPages = kind === 'csb' ? CSB_MAX_PAGES_PER_LOCALE : MAX_PAGES;
   const keepPages = posInt(entry?.max_pages) !== null && entry.max_pages <= defPages;
-  return resolveLimits({ ...entry, max_pages: keepPages ? entry.max_pages : undefined, max_jobs: undefined }, kind);
+  const keepJobs = posInt(entry?.max_jobs) !== null && entry.max_jobs <= MAX_JOBS;
+  return resolveLimits({ ...entry, max_pages: keepPages ? entry.max_pages : undefined, max_jobs: keepJobs ? entry.max_jobs : undefined }, kind);
 }
 
 // CSB strategy: discover locales, paginate the JSON jobs API per locale, dedup
@@ -373,7 +377,11 @@ async function limitsFor(entry, kind, url, ctx) {
 // NOT read as a dead board — return [] instead of throwing.
 /** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx @param {{probe?: boolean}} [opts] */
 async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
-  const { maxPages, maxJobs } = await limitsFor(entry, 'csb', cfg.jobsApi, ctx);
+  // The post-RMK probe only looks for the empty-shell signature: defaults, no
+  // robots check, so an RMK entry's raised max_pages is never read as a CSB raise.
+  const { maxPages, maxJobs } = probe
+    ? resolveLimits({ ...entry, max_pages: undefined, max_jobs: undefined }, 'csb')
+    : await limitsFor(entry, 'csb', cfg.jobsApi, ctx);
   let locales = CSB_DEFAULT_LOCALES;
   try {
     const html = await ctx.fetchText(cfg.searchPage, { redirect: 'error', headers: { accept: 'text/html' } });
@@ -484,7 +492,7 @@ async function fetchRmk(entry, cfg, ctx) {
   const probeLimit = posInt(ctx.maxPages);
   const { maxPages: cappedPages, maxJobs } = probeLimit
     ? resolveLimits({ ...entry, max_pages: undefined, max_jobs: undefined }, 'rmk')
-    : await limitsFor(entry, 'rmk', cfg.tileApi, ctx);
+    : await limitsFor(entry, 'rmk', `${cfg.tileApi}?startrow=${RMK_GATE_STARTROW}`, ctx);
   const maxPages = probeLimit ? Math.min(cappedPages, probeLimit) : cappedPages;
   const jobs = [];
   const seen = new Set();
@@ -493,6 +501,7 @@ async function fetchRmk(entry, cfg, ctx) {
   // new postings — i.e. the board very likely has more. The RMK fragment carries
   // no total, so the warning can only say "at least".
   let capped = false;
+  let pageSize = 0;
   for (let page = 0; page < maxPages; page++) {
     const htmlText = await ctx.fetchText(`${cfg.tileApi}?startrow=${startrow}`, {
       redirect: 'error',
@@ -500,6 +509,7 @@ async function fetchRmk(entry, cfg, ctx) {
     });
     const tiles = parseTiles(htmlText, cfg.jobBase);
     if (tiles.length === 0) break;
+    if (page === 0) pageSize = tiles.length;
 
     let fresh = 0;
     for (const tile of tiles) {
@@ -517,7 +527,8 @@ async function fetchRmk(entry, cfg, ctx) {
     if (fresh === 0) break;
     startrow += tiles.length;
     if (jobs.length >= maxJobs || page === maxPages - 1) {
-      capped = !probeLimit;
+      // A short final page means the board ended on its own, not at the cap.
+      capped = !probeLimit && (jobs.length >= maxJobs || tiles.length >= pageSize);
       break;
     }
   }
