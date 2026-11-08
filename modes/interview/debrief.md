@@ -245,24 +245,31 @@ Rules for the transcript:
 - **Tag each answer.** On the line directly above each `**Candidate:**` line, emit `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case, comma-separated for multi-competency answers (e.g. `system-design`, `people-leadership`, `incident-response`). You already assessed each answer in Step 2, so tag from that assessment rather than re-reading. Tags are free-form; pick the competency the question actually tested.
 - **Reconstruct the candidate turn faithfully.** Use what the candidate reported saying in Step 1, not an idealized answer. The "correct/complete answer" from Step 2 belongs in the debrief file, never in the transcript — the transcript records what happened.
 - **`source: debrief`.**
-- **`stated_priorities` goes in the front matter** (Step 1c), as a YAML list of `speaker` + `quote` items, so scripts and `interview/plan` can read it without parsing the body. Double-quote every `quote` and escape inner double quotes so the front matter stays valid YAML. The item's round and date are the file's own `round` and `date`. Omit the field when nothing was stated and whenever `input_source: recall`. Never put priorities in a practice-session file, since those have no real interviewer.
+- **`stated_priorities` goes in the front matter** (Step 1c), as a YAML list of `speaker` + `quote` items, so scripts and `interview/plan` can read it without parsing the body. Double-quote every `quote` so the front matter stays valid YAML and parses back to the exact spoken value: if escaping manually, escape backslashes before escaping inner double quotes, so a literal `\n` in the quote stays two characters instead of becoming a newline. The item's round and date are the file's own `round` and `date`. Omit the field when nothing was stated and whenever `input_source: recall`. Never put priorities in a practice-session file, since those have no real interviewer.
 - The session file lands in a gitignored directory (real names/companies never enter version control); write it without redacting.
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-After the debrief is saved, record confirmed facts on the application. Match a new fact to a dealbreaker the user already wrote in `modes/_profile.md` or `config/profile.yml`. Show the fact and the profile sentence. Ask `Record this dealbreaker on the report and the tracker? [y/N]`. On yes, pass that sentence as `--dealbreaker`. On no, omit it.
+After the debrief is saved, record confirmed facts on the application. Match each new fact to a dealbreaker the user already wrote in `modes/_profile.md` or `config/profile.yml`. Ask about each match on its own, and show the fact and the profile sentence. `debrief-sync.mjs` rejects a `--dealbreaker` value that contains a semicolon (`;`), a tab or a line break, and that stops the whole call. If the sentence contains one, tell the user which character it is and ask for a one-line version without it that keeps the meaning. Do not remove the character or reword the sentence yourself. Check the user's version for all three characters, and ask again until it has none. Then ask `Record this dealbreaker on the report and the tracker? [y/N]`. Keep every sentence the user confirms, or the user's one-line version of it. Drop every sentence the user declines.
 
-For each named person, ask `Save this contact to data/contacts.tsv? [y/N]`. On yes, pass the name, the email if one was given, and the type if the user named one.
+For each named person, ask `Save this contact to data/contacts.tsv? [y/N]`. On yes, pass the name, the email if one was given, and the type if the user named one. `--contact-type` takes only `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` or `other`, in lowercase. Map the user's word to the value it means, in any language (a "talent partner" is `recruiter`, "my future boss" is `hiring-manager`). If the word doesn't clearly match one value, leave `--contact-type` out and still save the contact. `debrief-sync.mjs` rejects any other value, and that stops the whole call, dealbreaker and `--next` included.
 
 If the next step names one clear calendar day, pass `--next YYYY-MM-DD` with no second question. Resolve a weekday from the local calendar day, and today counts. If the phrase has no day, omit `--next`. If it is ambiguous (`next week`, two days), ask for one date and then pass it.
 
-Run `node debrief-sync.mjs --app <tracker#>` with those flags, where `<tracker#>` is the application's `#` in the tracker (not its report number). If there is no dealbreaker, contact or `--next` day to pass, skip the command: the script refuses a call with nothing to record. Then, when a contact was saved, run `node contacts.mjs --summary`. When a day was pinned, run `node followup-cadence.mjs --summary`.
+Run `node debrief-sync.mjs --app <tracker#>` with those flags, where `<tracker#>` is the application's `#` in the tracker (not its report number). `--dealbreaker` takes one sentence and may appear only once per call, so run one command per confirmed sentence. Never join two sentences into one value: the script rejects a semicolon. Put the contact flags and `--next` on the first command only. Each further command passes `--app <tracker#>` and one `--dealbreaker`, nothing else. Put each value in single quotes so the shell passes `$` and backticks through unchanged. Write a single quote inside a value as `'\''` in Git Bash or another POSIX shell. In PowerShell, write it as `''`, and double a curly quote (`‘`, `’`, `‚` or `‛`) the same way, because PowerShell reads curly quotes as quotes too:
 
-Do not change status unless the user names a new status. That is a separate `set-status.mjs` call, before this command.
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
 
-A second run of the same command is safe.
+Run the commands one at a time and check each exit status. If a command fails, stop, fix it, and run the list again from the first command. If there is no dealbreaker, contact or `--next` day to pass, skip the command: the script refuses a call with nothing to record. After the last command, when a contact was saved, run `node contacts.mjs --summary`. When a day was pinned, run `node followup-cadence.mjs --summary`.
+
+Do not change status unless the user names a new status. That is a separate `set-status.mjs` call, before these commands.
+
+A second run of the same commands is safe: a sentence, contact or pin already recorded is not written again.
 
 ---
 

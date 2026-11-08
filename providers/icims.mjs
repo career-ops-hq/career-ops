@@ -5,8 +5,8 @@
 // Auto-detects from careers_url on any `*.icims.com` https host
 // (canonical form: `https://careers-<tenant>.icims.com/jobs/search?ss=1`).
 //
-// iCIMS list pages carry title/location/URL but NO posted date; dates live
-// only on the job detail page's JSON-LD (schema.org JobPosting `datePosted`).
+// iCIMS list pages carry title/location/URL but no dates. Posted and close
+// dates live on the job detail page's JSON-LD (`datePosted`, `validThrough`).
 // The provider therefore returns undated jobs plus an `enrichDate(job, ctx)`
 // hook — scan-ats-full.mjs calls it only for jobs that already passed the
 // cheap title/location filters, so a 10k-tenant sweep pays detail-page
@@ -14,6 +14,7 @@
 
 import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { closesAtIso } from '../lib/posting-close.mjs';
 
 // ~20 postings/page → 30 pages covers 600 postings; tenants bigger than that
 // are rare on iCIMS and a reverse scan only needs the fresh slice anyway.
@@ -80,8 +81,7 @@ export function parseIcimsSearchPage(html, origin, companyName) {
     if (!title || !title[1].trim()) continue;
     // `field-label` is one token in a themed class list, not reliably the last
     // one, so anchoring on the literal `field-label">` read an empty location
-    // off any tenant that appended a class. An empty location then shows up as
-    // N/A on a normal scan (scan.mjs does not call enrichDate).
+    // off any tenant that appended a class.
     // The lookarounds keep `field-label` a whole token, so a longer hyphenated
     // class like `field-label-inline` still doesn't count as a match.
     // The label text has to start with the word Location. Tenants suffix it
@@ -183,8 +183,9 @@ export default {
 
   /**
    * Fill in job.postedAt from the posting's detail page (JSON-LD JobPosting
-   * `datePosted`) — the list pages carry no date at all. Any failure leaves
-   * the job undated; the caller's undated policy then applies as usual.
+   * `datePosted`) — the list pages carry no date at all. A real `validThrough`
+   * on that same node becomes job.closesAt. Any failure leaves the job
+   * undated; the caller's undated policy then applies as usual.
    *
    * The same detail page also carries `jobLocation.address`, so an empty
    * list-page location is filled here too. Several tenants render the search
@@ -213,6 +214,8 @@ export default {
     }
     const ts = Date.parse(pickDatePosted(nodes) || '');
     if (!Number.isNaN(ts)) job.postedAt = ts;
+    const closesAt = pickClosesAt(nodes);
+    if (closesAt) job.closesAt = closesAt;
     if (!String(job.location || '').trim() || /^n\/?a$/i.test(String(job.location).trim())) {
       const loc = pickLocation(nodes);
       if (loc) job.location = loc;
@@ -256,16 +259,40 @@ function pickLocation(nodes) {
   return null;
 }
 
-// From flattened JSON-LD nodes, return the datePosted of the first JobPosting
-// node; if none carries a @type, fall back to the first node that has a
-// datePosted at all (preserves the original lenient single-object behavior).
-function pickDatePosted(nodes) {
+function jobPostingType(node) {
+  const type = node?.['@type'];
+  return type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'));
+}
+
+function datedPostingNode(nodes) {
   let fallback = null;
   for (const node of nodes) {
     if (!node || typeof node !== 'object' || !node.datePosted) continue;
-    const type = node['@type'];
-    if (type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'))) return node.datePosted;
-    if (fallback == null) fallback = node.datePosted;
+    if (jobPostingType(node)) return node;
+    if (fallback == null) fallback = node;
   }
   return fallback;
+}
+
+function pickDatePosted(nodes) {
+  const node = datedPostingNode(nodes);
+  return node ? node.datePosted : null;
+}
+
+function pickClosesAt(nodes) {
+  const posted = datedPostingNode(nodes);
+  if (posted) return closesAtIso(posted) || '';
+  let fallback = '';
+  let sawTyped = false;
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue;
+    const day = closesAtIso(node);
+    if (jobPostingType(node)) {
+      sawTyped = true;
+      if (day) return day;
+      continue;
+    }
+    if (!fallback && day) fallback = day;
+  }
+  return sawTyped ? '' : fallback;
 }

@@ -245,24 +245,31 @@ Regras para a transcrição:
 - **Marque cada resposta com tags.** Na linha imediatamente acima de cada linha `**Candidate:**`, emita `<!-- competency: tag[, tag...] -->` — em minúsculas com hífen (lowercase-kebab-case), separadas por vírgula para respostas com múltiplas competências (ex.: `system-design`, `people-leadership`, `incident-response`). Você já avaliou cada resposta no Step 2, portanto marque a partir dessa avaliação em vez de reler. As tags são livres; escolha a competência que a pergunta realmente testou.
 - **Reconstrua o turno do candidato fielmente.** Use o que o candidato relatou ter dito no Step 1, não uma resposta idealizada. A "resposta correta/completa" do Step 2 pertence ao arquivo de debrief, nunca à transcrição — a transcrição registra o que aconteceu.
 - **`source: debrief`.**
-- **`stated_priorities` vai no front matter** (Step 1c), como uma lista YAML de itens `speaker` + `quote`, para que scripts e `interview/plan` possam ler sem fazer o parsing do corpo. Coloque entre aspas duplas cada `quote` e escape aspas duplas internas para que o front matter permaneça como YAML válido. A rodada e a data do item são as do próprio arquivo (`round` e `date`). Omita o campo quando nada foi informado e sempre que `input_source: recall`. Nunca coloque prioridades em um arquivo de sessão prática, pois essas não têm um entrevistador real.
+- **`stated_priorities` vai no front matter** (Step 1c), como uma lista YAML de itens `speaker` + `quote`, para que scripts e `interview/plan` possam ler sem fazer o parsing do corpo. Coloque entre aspas duplas cada `quote` para que o front matter permaneça como YAML válido e o valor interpretado seja exatamente o que foi dito: ao escapar manualmente, escape as barras invertidas antes das aspas duplas internas, para que um `\n` literal na citação permaneça dois caracteres em vez de virar uma quebra de linha. A rodada e a data do item são as do próprio arquivo (`round` e `date`). Omita o campo quando nada foi informado e sempre que `input_source: recall`. Nunca coloque prioridades em um arquivo de sessão prática, pois essas não têm um entrevistador real.
 - O arquivo da sessão fica em um diretório ignorado pelo git (nomes/empresas reais nunca entram no controle de versão); escreva-o sem ocultar nomes.
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-Após salvar o debrief, registre os fatos confirmados na candidatura. Compare um novo fato a um dealbreaker que o usuário já escreveu em `modes/_profile.md` ou `config/profile.yml`. Mostre o fato e a frase do perfil. Pergunte `Registrar este dealbreaker no relatório e no tracker? [y/N]`. Se sim, passe essa frase como `--dealbreaker`. Se não, omita.
+Após salvar o debrief, registre os fatos confirmados na candidatura. Compare cada novo fato a um dealbreaker que o usuário já escreveu em `modes/_profile.md` ou `config/profile.yml`. Pergunte sobre cada correspondência separadamente e mostre o fato e a frase do perfil. O `debrief-sync.mjs` rejeita um valor de `--dealbreaker` com ponto e vírgula (`;`), tabulação ou quebra de linha, e isso interrompe a chamada inteira. Se a frase tiver um desses caracteres, diga ao usuário qual é e peça uma versão em uma única linha, sem ele, que mantenha o sentido. Não remova o caractere nem reescreva a frase por conta própria. Verifique a versão do usuário quanto aos três caracteres e peça de novo até que ela não tenha nenhum. Depois pergunte `Registrar este dealbreaker no relatório e no tracker? [y/N]`. Mantenha cada frase que o usuário confirmar, ou a versão em uma linha dele. Descarte cada frase que o usuário recusar.
 
-Para cada pessoa nomeada, pergunte `Salvar este contato em data/contacts.tsv? [y/N]`. Se sim, passe o nome, o e-mail se foi fornecido e o tipo se o usuário nomeou um.
+Para cada pessoa nomeada, pergunte `Salvar este contato em data/contacts.tsv? [y/N]`. Se sim, passe o nome, o e-mail se foi fornecido e o tipo se o usuário nomeou um. `--contact-type` aceita apenas `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` ou `other`, em minúsculas. Associe a palavra do usuário ao valor que ela significa, em qualquer idioma (um "talent partner" é `recruiter`, "meu futuro chefe" é `hiring-manager`). Se a palavra não corresponder claramente a um valor, omita `--contact-type` e salve o contato mesmo assim. O `debrief-sync.mjs` rejeita qualquer outro valor, e isso interrompe a chamada inteira, incluindo o dealbreaker e `--next`.
 
 Se o próximo passo nomear um dia claro no calendário, passe `--next YYYY-MM-DD` sem uma segunda pergunta. Resolva o dia da semana a partir do dia do calendário local, e hoje conta. Se a frase não tiver dia, omita `--next`. Se for ambígua (`próxima semana`, dois dias), peça uma data e então passe-a.
 
-Execute `node debrief-sync.mjs` com essas flags. Em seguida, quando um contato for salvo, execute `node contacts.mjs --summary`. Quando um dia for definido, execute `node followup-cadence.mjs --summary`.
+Execute `node debrief-sync.mjs --app <tracker#>` com essas flags, onde `<tracker#>` é o `#` da candidatura no tracker (não o número do relatório). `--dealbreaker` recebe uma única frase e só pode aparecer uma vez por chamada, então execute um comando por frase confirmada. Nunca junte duas frases em um só valor: o script rejeita ponto e vírgula. Coloque as flags de contato e `--next` apenas no primeiro comando. Cada comando seguinte passa `--app <tracker#>` e um único `--dealbreaker`, nada mais. Coloque cada valor entre aspas simples para que o shell passe `$` e crases sem alteração. Escreva uma aspa simples dentro de um valor como `'\''` no Git Bash ou em outro shell POSIX. No PowerShell, escreva-a como `''`, e duplique do mesmo jeito uma aspa curva (`‘`, `’`, `‚` ou `‛`), porque o PowerShell também a lê como aspa:
 
-Não altere o status a menos que o usuário nomeie um novo status. Essa é uma chamada separada de `set-status.mjs`, antes deste comando.
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
 
-Uma segunda execução do mesmo comando é segura.
+Execute os comandos um de cada vez e verifique o código de saída de cada um. Se um comando falhar, pare, corrija-o e execute a lista de novo a partir do primeiro comando. Se não houver dealbreaker, contato nem dia `--next` para passar, pule o comando: o script recusa uma chamada sem nada para registrar. Depois do último comando, quando um contato for salvo, execute `node contacts.mjs --summary`. Quando um dia for definido, execute `node followup-cadence.mjs --summary`.
+
+Não altere o status a menos que o usuário nomeie um novo status. Essa é uma chamada separada de `set-status.mjs`, antes destes comandos.
+
+Uma segunda execução dos mesmos comandos é segura: uma frase, um contato ou uma data já registrados não são gravados de novo.
 
 ---
 

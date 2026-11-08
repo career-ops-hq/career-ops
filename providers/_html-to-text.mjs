@@ -22,7 +22,7 @@ export const DESCRIPTION_CAP = 4000;
 // next `>` (a `&gt;150k` paragraphs later) was deleted, sponsorship sentence
 // included. `<script`, `</p`, `<!--` still match, so double-encoded active
 // markup stays inert.
-const HTML_TAG_RE = /<(?=[a-z/!?])(?:[^>"']|"[^"]*"|'[^']*')+>/gi;
+export const HTML_TAG_RE = /<(?=[a-z/!?])(?:[^>"']|"[^"]*"|'[^']*')+>/gi;
 const HTML_MEDIA_RE = /<(script|style)\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1\s*>/gi;
 
 /** @param {string} content */

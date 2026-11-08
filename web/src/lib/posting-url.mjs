@@ -196,6 +196,20 @@ export function resolvePostingUrl(trackerCell, reportField) {
   return postingHref(trackerCell) || postingHref(reportField) || "";
 }
 
+/**
+ * @param {string | null | undefined} reportField
+ * @param {string | null | undefined} trackerCell
+ * @param {string | null | undefined} [applyLink]
+ * @returns {string}
+ */
+export function applyPostingUrl(reportField, trackerCell, applyLink = "") {
+  const fromTracker = postingUrl(resolvePostingUrl(trackerCell, ""));
+  if (fromTracker) return fromTracker;
+  const fromReport = postingUrl(typeof reportField === "string" ? reportField : "");
+  if (fromReport) return fromReport;
+  return postingUrl(resolvePostingUrl(applyLink, "")) || "";
+}
+
 const MAX_URL_LEN = 2048;
 
 export function postingUrl(raw) {

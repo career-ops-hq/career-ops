@@ -90,6 +90,42 @@ try {
     fail(`unexpected second parsed job: ${JSON.stringify(jobs[1])}`);
   }
 
+  // The live feed escapes titles twice (`&amp;amp;` in the raw XML), which one
+  // decode turned into a literal `&amp;` in the title and the company.
+  const amp = (title, slug) =>
+    `<item><title>${title}</title><link>https://nodesk.co/remote-jobs/${slug}/</link></item>`;
+  const ampJobs = parseNodeskFeed(`<rss><channel>${[
+    amp('Senior Product Manager, Hybrid Platform &amp;amp; Deployment Models at Temporal', 'temporal-pm'),
+    amp('Finance &amp;amp; Strategy Manager (FP&amp;amp;A) at Johnson &amp;amp; Johnson', 'jnj-finance'),
+    amp('R&amp;D Engineer at Acme', 'acme-rd'),
+    amp('Escaping &amp;amp;amp; Engineer at Acme', 'acme-escaping'),
+  ].join('')}</channel></rss>`);
+  const ampSeen = ampJobs.map((j) => [j.title, j.company]);
+
+  if (
+    JSON.stringify(ampSeen.slice(0, 2)) === JSON.stringify([
+      ['Senior Product Manager, Hybrid Platform & Deployment Models', 'Temporal'],
+      ['Finance & Strategy Manager (FP&A)', 'Johnson & Johnson'],
+    ])
+  ) {
+    pass('parseNodeskFeed decodes a twice-escaped & in the title and the company');
+  } else {
+    fail(`twice-escaped titles parsed as ${JSON.stringify(ampSeen.slice(0, 2))}`);
+  }
+
+  if (JSON.stringify(ampSeen[2]) === JSON.stringify(['R&D Engineer', 'Acme'])) {
+    pass('parseNodeskFeed still reads a once-escaped title');
+  } else {
+    fail(`once-escaped title parsed as ${JSON.stringify(ampSeen[2])}`);
+  }
+
+  // Two passes, not decode-until-stable: a third level of escaping is text.
+  if (JSON.stringify(ampSeen[3]) === JSON.stringify(['Escaping &amp; Engineer', 'Acme'])) {
+    pass('parseNodeskFeed decodes a title exactly twice');
+  } else {
+    fail(`three-times-escaped title parsed as ${JSON.stringify(ampSeen[3])}`);
+  }
+
   let fetchCalled = false;
 
   const fetched = await nodesk.fetch({}, {

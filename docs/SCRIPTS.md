@@ -58,6 +58,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run paste-reply` | `paste-reply.mjs` | Manual/no-Gmail input into the `reply-watch.mjs` classification pipeline |
 | `npm run closing-soon` | `closing-soon.mjs` | List tracker rows whose Notes (or matching `jds/` capture) carry a closing date within N days, plus separate `overdue` and `unparsed` groups (read-only) |
 | `npm run close-stale` | `close-stale.mjs` | Close long-silent `Applied` rows in bulk (dry run by default; `--confirm` writes through the locked tracker path, tags the note and logs each transition) |
+| `npm run import-tracker -- export.csv` | `import-tracker.mjs` | Add the applications in a CSV export from another tracker (Teal, Huntr, Simplify, a spreadsheet) to the tracker (dry run by default; `--confirm` adds the rows through `merge-tracker.mjs`) |
 | `npm run reeval-candidates` | `reeval-candidates.mjs` | List `Evaluated` tracker rows whose last evaluation predates the latest change to `cv.md`, `article-digest.md`, `config/profile.yml` or `modes/_profile.md` (read-only) |
 | `npm run freshness` | `check-table-freshness.mjs` | Staleness validator for jurisdiction data tables (`as_of` / `next_effective` watchdog) |
 | `npm run jd-archive` | `check-jd-archive.mjs` | Validate every `reports/*.md` has an archived JD (embedded section, numbered `jds/` capture, or a capture its tracker row links) — `missing-jd-archive` with no tracker to join, `jd-archive-review-due` for a live row |
@@ -251,8 +252,8 @@ report that clobber. A canary that comes back green means the harness detected
 the planted damage; a red canary means the gate is incapable of failing and its
 green runs are worthless.
 
-Both modes run on every PR, as the `upgrade-gate` job in
-`.github/workflows/test.yml`.
+Both modes run on every PR that changes more than docs, as the `upgrade-gate`
+job in `.github/workflows/test.yml`.
 
 ---
 
@@ -667,18 +668,21 @@ tracker row, so a contact cannot be attached across companies.
 Optional GitHub evidence step of the `expand` mode (#5295). Reads the pull
 requests you authored through your existing `gh auth` (no new token) and checks
 what `cv.md` claims against them. Read-only: PR title, state, repository,
-stars, visibility, and commit counts/dates. README reading is separately
-opt-in through `github_evidence.read_readmes: true`; it never reads
-source code and never writes `cv.md`. Candidates reach `cv.md` only through `expand`'s confirm gate and
+stars, visibility, commit counts/dates, and document file names. README reading
+is separately opt-in through `github_evidence.read_readmes: true`; it never
+reads source code or file contents and never writes `cv.md`. Candidates reach
+`cv.md` only through `expand`'s confirm gate and
 `add-entry.mjs`.
 
 ```bash
 node github-evidence.mjs          # writes output/github-evidence-{date}.{md,json}
 node github-evidence.mjs --json   # same, and prints the JSON on stdout
+node github-evidence.mjs --skip-document-listing # omit document names and tree queries
 ```
 
-- Only PRs and commits you authored count. Your own repos (owning is not
-  authorship) and forks are listed by name and counts only, never as evidence.
+- Only PRs and commits you authored count as contribution evidence. Your own
+  repos (owning is not authorship) and forks are listed by name and counts only
+  for PR authorship; confirmed document names can still inform `expand` proposals.
 - A private repo is evidence only when listed in `config/profile.yml`:
   `github_evidence.private_allowlist: ["owner/repo"]` (empty by default). Any
   other private repo, or one whose visibility could not be read, appears by
@@ -731,6 +735,37 @@ counts as not logged in: a login check that fails any other way (no stderr,
 `gh` crashed or was killed) is a `2` naming the exit status. On exit `2` or
 `3`, `expand` continues with its zero-key behaviour; on exit `1` it asks the
 user to fix `candidate.github` (its Input steps 2–4).
+
+**Document names (`documents`, #5728).** PRDs, requirement-change notes, data
+contracts and acceptance baselines kept under `docs/` are invisible to a README
+read and to PR evidence. The report therefore also lists document file names on
+the default branch of your own non-fork repos (the 30 most recently pushed, via
+one GraphQL query) and of each allowlisted repo that is not a fork: one
+`repos/<owner>/<repo>/git/trees/<branch>?recursive=1` call per repo, plus one
+metadata call per allowlisted repo the own-repo query did not return. A document
+is a file under `docs/`, `doc/` or `documentation/` (`.md`, `.mdx`, `.rst`,
+`.adoc`, `.txt`, `.docx`, `.pdf`, `.pptx`, `.xlsx` and similar), or a top-level
+document other than README, CHANGELOG, LICENSE, CONTRIBUTING and the like.
+Names matching a product or requirement keyword in English or Chinese (`prd`,
+`requirement`, `spec`, `acceptance`, `contract`, `design`, 需求, 契约, 口径,
+验收, …) carry them in `keywords`, and flagged names are listed first, at most
+40 per repo (`filesCapped`). Names only: no file is opened and no source code is
+read. Names are listed for public repos and allowlisted private ones; any other
+private repo or repo with unknown visibility shows counts only, with names
+hidden (`namesShown: false`). This visibility rule applies only to the
+`documents` section; the existing PR metadata section continues to show
+non-allowlisted private repositories by name and count. Hidden document rows
+also omit repository names, branch names and raw GitHub error paths from JSON,
+Markdown and stderr while retaining safe error types and HTTP status codes. A truncated tree sets
+`treeTruncated`. A failed call is a gap in `documents.gaps` (`status` `partial`
+or `failed`) and changes neither the rest of the report nor the exit code. The
+Markdown report adds the same list as its last section. `expand` asks you which
+of these documents are your own work before reading any of them.
+
+Pass `--skip-document-listing` for one run, or set
+`github_evidence.skip_document_listing: true` in `config/profile.yml` to skip
+document tree queries by default. PR and commit evidence still runs, and the
+report marks the document listing as skipped.
 
 ---
 
@@ -902,6 +937,39 @@ Paths follow `CAREER_OPS_ROOT` / `CAREER_OPS_DATA_DIR` / `CAREER_OPS_TRACKER`. D
 
 ---
 
+## import-tracker
+
+Adds the applications in another tracker's CSV export to `data/applications.md`. It is for a user who already kept a search in Teal, Huntr, Simplify or a spreadsheet: export that tracker as CSV and import it once, instead of adding each row by hand. Zero-LLM, no network.
+
+**Dry run by default**: nothing is written without `--confirm`. The preview names the column it read for each field, the columns it ignores, and reports the outcome for every row. It shows up to 20 importable rows and five rows for each other outcome, with an `... N more` line when details are omitted.
+
+Columns are matched by header name, so their order does not matter. The file needs a company column (`Company`, `Company Name`, `Employer`) and a role column (`Job Position`, `Job Title`, `Position Title`, `Title`, `Role`). Status, date, posting URL, location and notes are optional; `--help` lists every recognized header. Stage names resolve through `templates/states.yml` first, then through a small table of other trackers' stages (`Interviewing` becomes `Interview`, `Negotiating` becomes `Offer`, `Not Selected` becomes `Rejected`, `No Response`, `Withdrawn` and `Archived` become `Discarded`). A row with an empty stage is read as `Applied`.
+
+| Outcome | Meaning |
+|---------|---------|
+| to import | a new application, added with the `N/A` score, `—` report and `❌` PDF that a hand-added row carries |
+| already in the tracker | same posting URL as a row, or the same company and role when either side has no URL. The tracked row is never changed. Use `set-status.mjs` to move it |
+| repeated in this file | the same posting appears on an earlier row |
+| not applied yet | `Bookmarked`, `Wishlist`, `Saved`, `Applying` and similar. In career-ops these postings go in the pipeline, where they get evaluated |
+| unknown stage | a stage neither table knows. Rename it in the file to a tracker state and run again |
+| missing company or role | the row is left out |
+
+Dates are read as `YYYY-MM-DD` (a time part is dropped), `Jul 3, 2026`, `3 Jul 2026`, or a slash date. Slash dates are read month first unless a date in the file has a first part above 12, which proves day first. `--day-first` forces day/month/year and skips that check, so a mixed file is not refused. A slash date that does not fit the chosen order has no readable date. It gets today's date and `no date in source` in Notes. Normalize the dates in the file before importing. Notes also carry `imported from <file>` and the source stage when it differs from the tracker state.
+
+`--confirm` reserves numbers with `reserve-report-num.mjs`, writes one headed tracker-addition TSV per row, runs `merge-tracker.mjs` and releases the numbers. A missing tracker is created first, with a `URL` column when the file has posting links. On a tracker with no `URL` column the preview says the links cannot be kept, and `--confirm` refuses the import until `node merge-tracker.mjs --backfill-urls` adds the column. A row merge refuses (for example a report link to a number `batch-state.tsv` marks failed) is not lost: its TSV stays in the printed temp directory with its number reserved, the import exits `1`, and the message gives the `merge-tracker.mjs` command to re-run after the fix. Use that command, not a second import. The refused row is not in the tracker, so importing the file again plans it again under a new number. After an import that completes, re-running the same file adds nothing. Imports do not write to `data/status-log.tsv`, so `funnel-velocity.mjs` has no pre-import stage timing for those rows.
+
+```bash
+node import-tracker.mjs teal-export.csv              # preview
+node import-tracker.mjs teal-export.csv --confirm    # add the rows
+node import-tracker.mjs sheet.csv --day-first        # 03/04/2026 is 3 April
+```
+
+Paths follow `CAREER_OPS_ROOT` / `CAREER_OPS_DATA_DIR` / `CAREER_OPS_TRACKER`.
+
+**Exit codes:** `0` on a preview or a completed import, `1` for a usage error, an unreadable file, a file with no company or role column, or a date column that mixes both orders. Under `--confirm` the exit code is `merge-tracker.mjs`'s, or `1` when the tracker has no `URL` column and the file has links, or when merge left a row unapplied.
+
+---
+
 ## reeval-candidates
 
 Lists tracker rows that were scored against older candidate evidence. A row's score is fixed when the role is evaluated, while the primary sources the evaluation read keep changing (`expand` adds proof points, `add` adds a project, the profile gains a target). This script compares each row's last evaluation date with the last change to `cv.md`, `article-digest.md`, `config/profile.yml` (through `getProfilePath()`, so `CAREER_OPS_PROFILE` is honored) and `modes/_profile.md`, all under the data root, and lists the rows that predate it, oldest evaluation first, with the source(s) that changed after each one.
@@ -1037,6 +1105,8 @@ npm run liveness -- --no-record https://a.com/job/1     # check without writing 
 ```
 
 Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
+
+The headed retry on an anti-bot wall runs only when the site's `robots.txt` permits the path (`robots-check.mjs`, #5776). It is read once per host per run, as `career-ops`, and it fails closed: only a policy that allows the path, a 404/410 or an empty file lets the retry run, while a 401/403, 5xx, timeout, unresolvable or private host, or a 200 that is not a robots.txt skips it. A skipped retry keeps the headless `uncertain` verdict, with `(headed retry skipped: robots.txt …)` added to its reason, so it never turns a posting into `expired`. The first, headless request is not gated. `scan --verify --headed-fallback` applies the same gate.
 
 An `expired` verdict is also written to `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead stops resurfacing in the web "new matches this week" feed. Only URLs the history already knows get a row, and each gets one until it is relisted. An `uncertain` verdict writes nothing. That includes a short page with no closure notice, no 404/410 and no apply control (`insufficient_content`): it is usually a posting that has not rendered yet, so it reads `uncertain`, not `expired`. `--no-record` makes the run leave no trace.
 

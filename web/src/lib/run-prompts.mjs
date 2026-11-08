@@ -12,6 +12,7 @@
 import path from "node:path";
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 import { REPORT_ENVELOPE_INSTRUCTION } from "./report-envelope.mjs";
+import { EVALUATION_GATE_INSTRUCTION } from "./evaluation-gate.mjs";
 import { COVER_TONES } from "./cover-brief.mjs";
 import { DEFAULT_PROFILE_REF, profileNote } from "./core/profile-path.mjs";
 
@@ -247,7 +248,7 @@ Target: ${input}`;
     // pdf mode runs with no write tool at all.
     return `${profileLine}You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules. Keyword injection, the competency grid, project selection, and its never-invent-a-skill rule all apply. Keep every role newest-first. Reorder bullets inside a role, never the roles. Do not run the mode's shell steps. The platform builds the HTML, runs the title, structure, and keyword checks, and renders the PDF.
 1. Read ${fromCheckout("modes/pdf.md", codeRoot)}, cv.md, ${profile}, and the evaluation report at ${JSON.stringify(reportFile ?? `reports/${input}-*.md`)} (for the JD keywords + analysis).
-2. Tailor the CV per modes/pdf.md. Inject the JD's keywords into the summary and the first bullets of each role, build the competency grid, and pick the top 3-4 projects. NEVER invent skills. Only reword REAL experience using the JD's vocabulary. Keep roles newest-first.
+2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder bullets within each experience entry by relevance, build the competency grid, pick the top 3-4 projects. Keep entire Work Experience entries in reverse-chronological order (newest start date first), preserving company, title, and dates from cv.md. Never promote an older role above a newer role for relevance. Before emitting the JSON, check the job-period sequence is newest-first; move whole entries with their bullets and dates if needed. NEVER invent skills. Only reword REAL experience using the JD's vocabulary.
 3. Emit the tailored CV as one JSON object matching the JSON Input Schema in modes/pdf.md. Do not fill an HTML template and do not emit HTML. Do NOT run modes/pdf.md's template-resolution step. The platform already resolved the template through cv-templates.mjs and builds the HTML itself. ${CV_ENVELOPE_INSTRUCTION}
 4. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
@@ -317,6 +318,8 @@ Use WebFetch to read the posting (you are headless — Playwright is unavailable
 ${mem}${unattendedAmbiguityStep}
 OUTPUT: Do NOT save or edit any file, run scripts, or allocate report numbers. Output exactly one complete selected report between a line containing only \`<<report-md>>\` and a line containing only \`<</report-md>>\`. The platform saves it. Include the canonical Machine Summary and full verbatim JD archive. Never submit an application, fill forms, or contact anyone.
 
+${EVALUATION_GATE_INSTRUCTION}
+
 After the envelope, end with EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
 
@@ -331,6 +334,8 @@ ${postingInput}`;
    **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
 
 ${mem}${unattendedAmbiguityStep}2. ${REPORT_ENVELOPE_INSTRUCTION}
+
+   ${EVALUATION_GATE_INSTRUCTION}
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation ONLY.
 
