@@ -536,6 +536,27 @@ try {
       jobs = await sf.fetch({ name: 'ShortLast', careers_url: 'https://jobs.shortlast.example' }, { sleep: async () => {}, robotsGate: allow, fetchText: async (u) => shortLast(u) });
       if (jobs.length === 985 && warns.length === 0) pass('successfactors RMK does not warn when the last page before the cap is short');
       else fail(`successfactors RMK short last page wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
+      // CSB stop reasons: no total + full page at the cap warns; overstated total + short page does not.
+      warns.length = 0;
+      const noTotal = { name: 'NoTotal', careers_url: 'https://careers.nototal.example', sfVariant: 'csb', max_pages: 3 };
+      jobs = await sf.fetch(noTotal, { sleep: async () => {}, robotsGate: allow, fetchText: async () => '', fetchJson: async (_u, o) => { const pn = JSON.parse(o.body).pageNumber; return { jobSearchResult: Array.from({ length: 10 }, (_, i) => rec(String(pn * 10 + i))) }; } });
+      if (jobs.length === 30 && warns.length === 1 && /total unknown/.test(warns[0])) pass('successfactors CSB warns when a full page ends at the cap and the API gave no total');
+      else fail(`successfactors CSB no-total cap wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
+      warns.length = 0;
+      jobs = await sf.fetch({ name: 'Over', careers_url: 'https://careers.over.example', sfVariant: 'csb' }, { sleep: async () => {}, robotsGate: allow, fetchText: async () => '', fetchJson: async (_u, o) => { const pn = JSON.parse(o.body).pageNumber; return { totalJobs: 5000, jobSearchResult: pn === 0 ? Array.from({ length: 4 }, (_, i) => rec(String(i))) : [] }; } });
+      if (jobs.length === 4 && warns.length === 0) pass('successfactors CSB does not warn when a short page ends the read despite an overstated total');
+      else fail(`successfactors CSB overstated total wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
+      // Unflagged CSB entry that opts in: RMK empty -> CSB probe -> full gated read at the entry's limits.
+      warns.length = 0; calls = { n: 0 };
+      jobs = await sf.fetch({ name: 'AutoCsb', careers_url: 'https://careers.autocsb.example', max_pages: 200, max_jobs: 5000 }, { ...csbCtx(calls, allow), fetchText: async (u) => (/tile-search/.test(u) ? '<!DOCTYPE html>' : '<a href="/search/?locale=en_US">en</a>') });
+      if (jobs.length === TOTAL && warns.length === 0) pass('successfactors unflagged CSB entry with raised limits is read at those limits after the empty-RMK probe');
+      else fail(`successfactors auto-CSB raise wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
+      // RMK fullness uses raw tile rows: a full last page containing one title-less tile still counts as capped.
+      warns.length = 0;
+      const badTile = '<li class="job-tile job-id-999999"><a data-url="/job/x/999999/" href="#"></a></li>';
+      jobs = await sf.fetch({ name: 'BadTile', careers_url: 'https://jobs.badtile.example' }, { sleep: async () => {}, robotsGate: allow, fetchText: async (u) => { const r = Number(new URL(u).searchParams.get('startrow')); return r === 975 ? tilePage(r).split('</li>').slice(0, 24).join('</li>') + '</li>' + badTile : tilePage(r); } });
+      if (warns.length === 1 && /BadTile truncated/.test(warns[0])) pass('successfactors RMK counts source rows, not parsed tiles, when judging a full last page');
+      else fail(`successfactors RMK raw-row fullness wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
       // RMK board that ends naturally: no warning.
       warns.length = 0;
       jobs = await sf.fetch({ name: 'SmallCo', careers_url: 'https://jobs.smallco.example' }, { sleep: async () => {}, fetchText: async (u) => (new URL(u).searchParams.get('startrow') === '0' ? tilePage(0) : '') });

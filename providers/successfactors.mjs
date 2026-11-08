@@ -376,7 +376,7 @@ async function limitsFor(entry, kind, url, ctx) {
 // board is reachable, just empty of tiles), so an all-locales CSB failure must
 // NOT read as a dead board — return [] instead of throwing.
 /** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx @param {{probe?: boolean}} [opts] */
-async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
+async function fetchCsb(entry, cfg, ctx, { probe = false, quiet = false } = {}) {
   // The post-RMK probe only looks for the empty-shell signature: defaults, no
   // robots check, so an RMK entry's raised max_pages is never read as a CSB raise.
   const { maxPages, maxJobs } = probe
@@ -415,6 +415,9 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
     });
     let total = null;
     let failed = false;
+    // True only when a cap (page or job) ended the read of this locale. A short
+    // page, an empty page, the reported total, or a fetch error are not caps.
+    let capHit = false;
     const localeIds = new Set();
     for (let sweep = 0; sweep < CSB_SWEEPS; sweep++) {
       const lastPageFor = (count) => Math.min(maxPages - 1, Math.ceil(count / CSB_PAGE_SIZE) - 1);
@@ -455,8 +458,12 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
             const job = { title: row.title, url: row.url, company: entry.name, location: row.location };
             if (typeof row.postedAt === 'number') job.postedAt = row.postedAt;
             jobs.push(job);
-            if (jobs.length >= maxJobs) break pages;
+            if (jobs.length >= maxJobs) {
+              capHit = total === null || localeIds.size < total;
+              break pages;
+            }
           }
+          if (batch[i] === maxPages - 1 && rawCount >= CSB_PAGE_SIZE && (total === null || (batch[i] + 1) * CSB_PAGE_SIZE < total)) capHit = true;
           // Stop once we've covered the reported total, or on a short page.
           if (total !== null && (batch[i] + 1) * CSB_PAGE_SIZE >= total) break pages;
           if (rawCount < CSB_PAGE_SIZE) break pages;
@@ -465,13 +472,11 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
       }
       if (failed || total === null || localeIds.size >= total || jobs.length >= maxJobs) break;
     }
-    // The API reported more postings than this locale delivered, and the stop
-    // was a cap rather than a failure: say so instead of returning a silent subset.
-    if (!failed && total !== null && localeIds.size < total && (jobs.length >= maxJobs || maxPages < Math.ceil(total / CSB_PAGE_SIZE))) {
-      truncated.push(`${locale} ${localeIds.size} of ${total} jobs`);
-    }
+    // A cap, not a failure or the natural end, stopped this locale: say so instead
+    // of returning a silent subset.
+    if (capHit) truncated.push(total !== null ? `${locale} ${localeIds.size} of ${total} jobs` : `${locale} ${localeIds.size} jobs, total unknown`);
   }
-  if (truncated.length) warnTruncated(entry, truncated.join('; '), 'csb', maxPages, maxJobs);
+  if (truncated.length && !quiet) warnTruncated(entry, truncated.join('; '), 'csb', maxPages, maxJobs);
   if (!probe && !succeededOnce && firstErr) throw firstErr;
   return jobs;
 }
@@ -509,7 +514,10 @@ async function fetchRmk(entry, cfg, ctx) {
     });
     const tiles = parseTiles(htmlText, cfg.jobBase);
     if (tiles.length === 0) break;
-    if (page === 0) pageSize = tiles.length;
+    // Fullness is judged on the rows the source returned, not on the tiles that
+    // survived parseTiles' filtering.
+    const rawTiles = (htmlText.match(/<li class="job-tile job-id-\d+/g) || []).length || tiles.length;
+    if (page === 0) pageSize = rawTiles;
 
     let fresh = 0;
     for (const tile of tiles) {
@@ -528,7 +536,7 @@ async function fetchRmk(entry, cfg, ctx) {
     startrow += tiles.length;
     if (jobs.length >= maxJobs || page === maxPages - 1) {
       // A short final page means the board ended on its own, not at the cap.
-      capped = !probeLimit && (jobs.length >= maxJobs || tiles.length >= pageSize);
+      capped = !probeLimit && (jobs.length >= maxJobs || rawTiles >= pageSize);
       break;
     }
   }
@@ -563,6 +571,11 @@ export default {
     // RMK answered (healthy, possibly legitimately empty) — the CSB call here
     // is only a probe for the empty-shell signature, so it must not turn a
     // failing/absent CSB endpoint into a dead-board throw.
-    return fetchCsb(entry, cfg, ctx, { probe: true });
+    // An opted-in entry (raised max_pages/max_jobs) that turns out to be CSB gets
+    // a second, robots-gated read at its own limits; the bounded probe stays quiet.
+    const raised = resolveLimits(entry, 'csb').raised;
+    const probed = await fetchCsb(entry, cfg, ctx, { probe: true, quiet: raised });
+    if (raised && probed.length > 0) return fetchCsb(entry, cfg, ctx);
+    return probed;
   },
 };
