@@ -68,6 +68,7 @@ import { closesAtIso } from '../lib/posting-close.mjs';
 import { fetchJsonWithRetry, BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SEARCH_URL = 'https://jobsearch.api.jobtechdev.se/search';
 
@@ -303,6 +304,14 @@ export default {
     const byUrl = new Map();
     const errors = [];
     let succeeded = 0;
+    // A walk that stopped on a ceiling or a failed request is a partial
+    // board (#6632): the stderr warning alone is not machine-readable, so
+    // the returned array carries the canonical flag (jobs.truncated) for
+    // scan.mjs to log. Decision: `fetch-error` outranks `cap` — rows lost
+    // to a failed request are unknown, not merely beyond the page budget —
+    // and a keyword failing on its first page while others succeed still
+    // leaves that keyword's rows missing, so it counts too.
+    let truncatedReason = null;
 
     for (const keyword of keywords) {
       let keywordFailed = false;
@@ -325,6 +334,7 @@ export default {
           // classifying THIS failure, and a rewrapped error would hide the
           // status/identity it is reading (`vdab.mjs` behaves the same).
           if (probing) throw err;
+          truncatedReason = 'fetch-error';
           if (page === 1) {
             keywordFailed = true;
             errors.push(`"${keyword}": ${(err && /** @type {Error} */ (err).message) || err}`);
@@ -355,6 +365,7 @@ export default {
             maxPages >= MAX_PAGES_CAP ? 'source' : 'entry',
             entryName,
           );
+          if (truncatedReason !== 'fetch-error') truncatedReason = 'cap';
         }
       }
       if (!keywordFailed) succeeded++;
@@ -367,6 +378,8 @@ export default {
       throw new Error(`platsbanken: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
 
-    return [...byUrl.values()];
+    const jobs = [...byUrl.values()];
+    if (!probing && truncatedReason) markTruncated(jobs, { reason: truncatedReason });
+    return jobs;
   },
 };

@@ -78,6 +78,7 @@ import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { formatPartialBoard, readTruncation } from './lib/board-truncation.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { OBSERVATIONAL_SCAN_HISTORY_STATUSES, SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 import { closesAtIso } from './lib/posting-close.mjs';
@@ -4919,6 +4920,13 @@ async function main() {
   let failedTargets = 0;
   const emptyTargets = [];
   const unverifiedZeroTargets = [];
+  // Boards a provider read only partly (#6632): company name → the
+  // canonical truncation signal read off the jobs array right after the
+  // fetch, before any filter can drop rows. A partial board is not an
+  // error — its fetched postings are still processed — so it is kept apart
+  // from `errors` and only surfaces in portal-health, the summary, and
+  // the --json receipt below.
+  const partialTargets = new Map();
 
   // Arm the failure-path row (#2643) now that the sweep is about to start and
   // every counter it reads is in scope. new_added is hardcoded 0 on a failed
@@ -5028,6 +5036,12 @@ async function main() {
         throw new Error(`${provider.id}: fetch() did not return an array`);
       }
       totalFound += jobs.length;
+      // Read the truncation signal here, on the array the provider returned:
+      // filters below drop rows, so a later read would under-report `fetched`.
+      // A board that returned no jobs cannot be partial — it is `empty` or
+      // `unverified_zero` instead — so only a board with jobs in hand counts.
+      const truncation = readTruncation(jobs, ctx);
+      if (truncation && jobs.length > 0) partialTargets.set(company.name, truncation);
       if (!company._isBoard && jobs.length === 0) {
         if (emptyTargetStatus(observation) === 'empty') emptyTargets.push(company.name);
         else unverifiedZeroTargets.push(company.name);
@@ -5664,11 +5678,20 @@ async function main() {
   const errorKindByCompany = new Map(
     errors.filter((e) => e.kind).map((e) => [e.company, e.kind])
   );
+  // Partial boards in target order, for the summary and the --json receipt.
+  const partialBoards = targets
+    .filter((t) => partialTargets.has(t.name))
+    .map((t) => ({ company: t.name, ...partialTargets.get(t.name) }));
   for (const t of targets) {
     const isEmpty = emptyTargets.includes(t.name);
     const isUnverifiedZero = unverifiedZeroTargets.includes(t.name);
 
     let status = errorKindByCompany.get(t.name) || 'reachable';
+    // An errored board keeps its error kind — a board that threw is not
+    // merely partial. A partial board that returned jobs is neither `empty`
+    // nor `unverified_zero`, so those overrides below cannot fire for it,
+    // but the check is written explicitly anyway.
+    if (status === 'reachable' && partialTargets.has(t.name)) status = 'partial';
     if (status === 'reachable' && isEmpty) status = 'empty';
     if (status === 'reachable' && isUnverifiedZero) status = 'unverified_zero';
 
@@ -5681,6 +5704,19 @@ async function main() {
   const persistentlyDead = [];
   const newlyDeadSlug = [];
   const newlyDeadNetwork = [];
+  // Partial boards reach the same streak threshold as dead ones (#6632):
+  // `computeConsecutiveFailures` already counts `partial` — only
+  // `reachable`/`empty` reset — but the loop below iterates `errors`, so a
+  // partial board would count a streak it never surfaced in. It gets its
+  // own list and its own line, not a place in `persistentlyDead`: a board
+  // that answered with 100 of 394 postings is not "unreachable".
+  const persistentlyPartial = [];
+  for (const p of partialBoards) {
+    const streak = currentStreaks.get(p.company) || 1;
+    if (streak >= STREAK_THRESHOLD && !persistentlyPartial.includes(p.company)) {
+      persistentlyPartial.push(p.company);
+    }
+  }
 
   // All error kinds can reach the 🚨 persistent list (auth/server/unknown
   // included — a WAF that 403s the scanner every run is coverage decay too).
@@ -5703,6 +5739,11 @@ async function main() {
     console.log(`   ${persistentlyDead.join(', ')}`);
     console.log(`   Run: node verify-portals.mjs to check if the ATS migrated, or update their board slugs.`);
   }
+  if (persistentlyPartial.length > 0) {
+    console.log(`\n🚨 PARTIAL BOARDS: ${persistentlyPartial.length} target(s) have been partly read for ${STREAK_THRESHOLD}+ runs:`);
+    console.log(`   ${persistentlyPartial.join(', ')}`);
+    console.log(`   Raise max_pages on their entries, or check whether the ATS moved the rest of the board.`);
+  }
   if (newlyDeadSlug.length > 0) {
     const names = newlyDeadSlug.map(x => x.company).join(', ');
     console.log(`\n⚠️  ${newlyDeadSlug.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
@@ -5712,6 +5753,9 @@ async function main() {
   }
   if (unverifiedZeroTargets.length > 0) {
     console.log(`⚠️  ${unverifiedZeroTargets.length} target(s) returned zero jobs without a successful HTTP response: ${unverifiedZeroTargets.join(', ')}`);
+  }
+  if (partialBoards.length > 0) {
+    console.log(`⚠️  ${partialBoards.length} target(s) partly read (partial board — raise max_pages or check the ATS): ${partialBoards.map(formatPartialBoard).join(', ')}`);
   }
   if (newlyDeadNetwork.length > 0) {
     console.log(`\nNetwork errors (${newlyDeadNetwork.length}):`);
@@ -5790,6 +5834,9 @@ async function main() {
       added_urls: verifiedOffers.map(offer => offer.url),
       errors: errors.map(({ company, error }) => ({ company, error })),
       unverified_zero: unverifiedZeroTargets,
+      partial: partialBoards.map(({ company, reason, fetched, total }) => ({
+        company, reason, fetched, ...(total !== undefined ? { total } : {}),
+      })),
       dry_run: dryRun,
     }, errors.length > 0 ? 2 : 0);
   }

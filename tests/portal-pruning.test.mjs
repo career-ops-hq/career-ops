@@ -51,6 +51,21 @@ check('pruning orders health evidence chronologically before computing the strea
   assert.deepEqual(r.healthyButQuiet.map(x => x.company), ['Rot']);
   assert.equal(r.healthyButQuiet[0].lastObserved, '2026-09-22');
 });
+check('pruning counts a persistent partial board toward the rotted bucket', () => {
+  // #6632: `partial` is a recognised health status, and its streak counts
+  // like any other non-healthy status — a board partly read for 3+ runs
+  // is rotted coverage, not a healthy board.
+  const cfg = 'tracked_companies:\n  - {name: Partial}\n';
+  const sc = 'https://example.com/Partial\t2026-07-01\tats\tEngineer\tPartial\tadded';
+  const h = [
+    '2026-09-20\tPartial\tpartial',
+    '2026-09-21\tPartial\tpartial',
+    '2026-09-22\tPartial\tpartial',
+  ].join('\n');
+  const r = recommend(cfg, sc, h, now);
+  assert.deepEqual(r.rotted.map(x => x.company), ['Partial']);
+  assert.equal(r.rotted[0].streak, 3);
+});
 check('pruning tolerates torn/future rows and keeps exact name matching', () => {
   const r = recommend(config, scan.replace(/Quiet/g, 'Quiet Inc.'), health + '\n2027-01-01\tQuiet\tslug_gone\ntorn', now);
   assert.equal(r.healthyButQuiet.length, 0);

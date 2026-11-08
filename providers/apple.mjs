@@ -5,6 +5,7 @@
 import { fetchTextWithRetry, sleep } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Apple provider — jobs.apple.com is a React Router SSR app with NO usable JSON API.
 //
@@ -236,6 +237,13 @@ export default {
     /** @type {Map<string, Job>} */
     const byUrl = new Map();
     let truncated = false;
+    let fetchFailed = false;
+    // A board that stopped short is a partial board (#6632): the cap and a
+    // mid-walk fetch failure are both machine-readable on the returned
+    // array (jobs.truncated), not only on stderr. Decision: a walk that
+    // broke mid-way is `fetch-error`, not merely `cap` — the missing rows
+    // are unknown, not merely beyond the page budget — so a failed axis
+    // outranks the cap when both happened on the same board.
 
     /** Page through one search axis, stopping early on the last page. */
     const harvest = async (/** @type {Record<string,string>} */ base) => {
@@ -252,6 +260,7 @@ export default {
           // rejection must propagate unwrapped, or verify-portals reads its own
           // request-budget sentinel as a broken board.
           if (probing) throw err;
+          fetchFailed = true;
           return;
         }
         // Throws on a changed page shape rather than returning what we have: a
@@ -269,7 +278,9 @@ export default {
     if (truncated) {
       console.error(`⚠️  apple: ${entry.name} hit the ${maxPages}-page cap on at least one search — raise max_pages on this entry for more`);
     }
-
-    return [...byUrl.values()];
+    const jobs = [...byUrl.values()];
+    if (!probing && fetchFailed) markTruncated(jobs, { reason: 'fetch-error' });
+    else if (!probing && truncated) markTruncated(jobs, { reason: 'cap' });
+    return jobs;
   },
 };

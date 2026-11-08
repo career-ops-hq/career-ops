@@ -347,7 +347,8 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
     let newestProbe = 0;
     for (const r of healthRecords) {
       // Mirrors scan.mjs computeConsecutiveFailures: healthy statuses reset,
-      // every other status (slug_gone/network/auth/server/unknown) counts.
+      // every other status (slug_gone/network/auth/server/unknown/partial)
+      // counts.
       if (r.status === 'reachable' || r.status === 'empty') {
         streaks.set(r.company, 0);
       } else {
@@ -418,7 +419,7 @@ export function computePortalRecommendations(portalsContent, scanContent, health
   const healthRows = [];
   for (const line of String(healthContent ?? '').split('\n')) {
     const [date, company, status] = line.trimEnd().split('\t');
-    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown'].includes(status)) continue;
+    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown', 'partial'].includes(status)) continue;
     healthRows.push({ date, company, status });
   }
   healthRows.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));

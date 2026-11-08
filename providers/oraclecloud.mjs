@@ -43,6 +43,7 @@
 
 import { decodeEntities } from './_html-entities.mjs';
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // `oraclecloud(?:[1-9][0-9]?)?` = oraclecloud.com plus oraclecloud1.com …
 // oraclecloud99.com. No leading zero, at most two digits — a bounded family,
@@ -233,6 +234,13 @@ export default {
 
     const all = [];
     let total = null;
+    // A board the walk stopped short of is a partial board (#6632): when
+    // the loop runs out of pages without reaching a natural end, the rest
+    // of the board is unread, so the returned array carries the canonical
+    // flag (jobs.truncated) for scan.mjs to log. A natural end is an empty
+    // page, a short page with no total to check against, or reaching the
+    // reported total — any of those means the board was fully read.
+    let reachedEnd = false;
     for (let page = 0; page < maxPages; page++) {
       const offset = page * PAGE_SIZE;
       const apiUrl = buildApiUrl(site, offset, PAGE_SIZE);
@@ -263,10 +271,13 @@ export default {
       // than the number requested … even if not at the end of the collection"
       // (Google AIP-158). So a short page only ends the walk when the tenant
       // reports no total to check it against.
-      if (listLen === 0) break;
+      if (listLen === 0) { reachedEnd = true; break; }
       if (total !== null) {
-        if (offset + PAGE_SIZE >= total) break;
-      } else if (listLen < PAGE_SIZE) break;
+        if (offset + PAGE_SIZE >= total) { reachedEnd = true; break; }
+      } else if (listLen < PAGE_SIZE) { reachedEnd = true; break; }
+    }
+    if (!reachedEnd) {
+      markTruncated(all, { reason: 'cap', ...(total !== null ? { total } : {}) });
     }
     return all;
   },

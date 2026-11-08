@@ -518,6 +518,50 @@ try {
     fail(`empty-page stop: ${emptyRequests} requests, ${emptyStop.length} jobs, expected 2 and 200`);
   }
 
+  // A board the walk stopped short of carries the canonical flag (#6632):
+  // the cap with a known total, the cap with no total, and a complete walk.
+  const capped = await oc.fetch(
+    { name: 'Capped', careers_url: careers, max_pages: 2 },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchText: async () => { throw new Error('fetchText should not be called'); },
+      fetchJson: async (url) => {
+        const offset = Number(new URL(url).searchParams.get('offset') || 0);
+        return { items: [{ TotalJobsCount: 1000, requisitionList: Array.from({ length: 200 }, (_, i) => ({ Id: String(offset + i), Title: `C${offset + i}` })) }], hasMore: false };
+      },
+    },
+  );
+  if (JSON.stringify(capped.truncated) === JSON.stringify({ reason: 'cap', fetched: 400, total: 1000 })) {
+    pass('oraclecloud.fetch() marks a page-capped board jobs.truncated { reason: cap, total: 1000 }');
+  } else {
+    fail(`oraclecloud cap flag: ${JSON.stringify(capped.truncated)}`);
+  }
+
+  const cappedNoTotal = await oc.fetch(
+    { name: 'CappedNoTotal', careers_url: careers, max_pages: 2 },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchText: async () => { throw new Error('fetchText should not be called'); },
+      fetchJson: async (url) => {
+        const offset = Number(new URL(url).searchParams.get('offset') || 0);
+        return { items: [{ requisitionList: Array.from({ length: 200 }, (_, i) => ({ Id: String(offset + i), Title: `U${offset + i}` })) }], hasMore: false };
+      },
+    },
+  );
+  if (JSON.stringify(cappedNoTotal.truncated) === JSON.stringify({ reason: 'cap', fetched: 400 })) {
+    pass('oraclecloud.fetch() marks a capped board with no reported total, and omits total');
+  } else {
+    fail(`oraclecloud cap-no-total flag: ${JSON.stringify(cappedNoTotal.truncated)}`);
+  }
+
+  if (pastTotal.truncated === undefined) {
+    pass('oraclecloud.fetch() sets no truncation flag on a walk that reached the reported total');
+  } else {
+    fail(`oraclecloud complete board flag: ${JSON.stringify(pastTotal.truncated)}`);
+  }
+
 } catch (e) {
   fail(`oraclecloud provider tests crashed: ${e.message}`);
 }

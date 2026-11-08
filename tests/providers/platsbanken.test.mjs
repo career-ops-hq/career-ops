@@ -564,6 +564,69 @@ try {
     if (probeText === '') pass('platsbanken.fetch() stays silent during a health probe');
     else fail(`a probe produced output: ${JSON.stringify(probeText)}`);
   }
+
+  // ── fetch(): a truncated walk carries the canonical flag (#6632) — the
+  // stderr warning alone is not machine-readable, so scan.mjs must be able
+  // to read it off the returned array. Cap, source ceiling, a later-page
+  // failure, and a probe that sets nothing.
+  {
+    const fullPages = (url) => response(Array.from({ length: 100 }, (_, i) => ad({ id: `${new URL(url).searchParams.get('offset')}${i}` })));
+    const quiet = { sleep: async () => {}, fetchJson: async (url) => fullPages(url) };
+    const origErr = console.error;
+    console.error = () => {};
+    try {
+      const entryCap = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'CapEntry', platsbanken: { keywords: ['x'] }, max_pages: 2 }, quiet,
+      );
+      JSON.stringify(entryCap.truncated) === JSON.stringify({ reason: 'cap', fetched: 200 })
+        ? pass('platsbanken.fetch() marks an entry-capped board jobs.truncated { reason: cap }')
+        : fail(`platsbanken entry-cap flag: ${JSON.stringify(entryCap.truncated)}`);
+
+      const sourceCap = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'CapSource', platsbanken: { keywords: ['x'] }, max_pages: 21 }, quiet,
+      );
+      JSON.stringify(sourceCap.truncated) === JSON.stringify({ reason: 'cap', fetched: 2100 })
+        ? pass('platsbanken.fetch() marks a source-ceiling board jobs.truncated { reason: cap }')
+        : fail(`platsbanken source-cap flag: ${JSON.stringify(sourceCap.truncated)}`);
+
+      const short = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'Short', platsbanken: { keywords: ['x'] }, max_pages: 5 },
+        { sleep: async () => {}, fetchJson: async () => response([ad()]) },
+      );
+      short.truncated === undefined
+        ? pass('platsbanken.fetch() sets no truncation flag on a walk that ended on a short page')
+        : fail(`platsbanken complete board flag: ${JSON.stringify(short.truncated)}`);
+
+      const probe = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'ProbeSilent', platsbanken: { keywords: ['x'] }, max_pages: 5 },
+        { maxPages: 1, sleep: async () => {}, fetchJson: async (url) => fullPages(url) },
+      );
+      probe.truncated === undefined
+        ? pass('platsbanken.fetch() sets no truncation flag during a probe')
+        : fail(`platsbanken probe flag: ${JSON.stringify(probe.truncated)}`);
+    } finally {
+      console.error = origErr;
+    }
+
+    // A later-page failure keeps the pages already collected and marks the
+    // board fetch-error, not cap — the missing pages are unknown, not
+    // merely beyond the budget.
+    let calls = 0;
+    const failing = await platsbanken.fetch(
+      { provider: 'platsbanken', name: 'LaterFail', platsbanken: { keywords: ['x'] }, max_pages: 5 },
+      {
+        sleep: async () => {},
+        fetchJson: async (url) => {
+          calls++;
+          if (calls === 1) return fullPages(url);
+          throw new Error('HTTP 500');
+        },
+      },
+    );
+    JSON.stringify(failing.truncated) === JSON.stringify({ reason: 'fetch-error', fetched: 100 })
+      ? pass('platsbanken.fetch() marks a board with a later-page failure jobs.truncated { reason: fetch-error }')
+      : fail(`platsbanken later-page flag: ${JSON.stringify(failing.truncated)}`);
+  }
 } catch (e) {
   fail(`platsbanken provider tests crashed: ${e.message}`);
 }

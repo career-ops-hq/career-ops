@@ -21,7 +21,8 @@ that gate is decided on the source's data, not on how the client is written.
 **A single-company ATS adapter** (a new Greenhouse/Workday/Ashby-class
 vendor, or a company on its own careers API) clears this by construction: the
 postings are the employer's own, and the adapter reads exactly one source.
-Nothing to do here: go to section 1.
+Nothing to do here — including the `robots.txt` bullet below, which is a
+board/aggregator gate — go to section 1.
 
 **A job board, aggregator, or talent network** is where the policy bites.
 In short:
@@ -36,12 +37,16 @@ In short:
 - **Complete inventory, no paid placement (rule 3).** The provider must
   traverse the source's full inventory, not a promoted or default-filtered
   view.
-- **Read like a visitor (rule 6).** A provider reads only what any visitor
-  sees without signing in, with a bounded number of requests per host,
-  honouring a `Crawl-delay` the source states. A login, a user account or a
-  CAPTCHA in the way is a stop, and so is a source whose operator has asked
-  career-ops not to read it. `robots.txt` is not a gate: it is written for
-  crawlers, and a provider reads for one person who may apply there.
+- **`robots.txt`, per path (rule 6).** Check the source's `robots.txt`
+  before writing code. A `Disallow` under `User-agent: *` (or a group
+  matching the scanner) that covers the listing paths the provider reads is
+  a stop (precedent: Lagou); a `Disallow` on routes the parser never touches
+  — `/api`, `/data`, a subscribe form — is not (ITviec, CareerViet route
+  around theirs). A rule that only names an AI/agent crawler (`ClaudeBot`,
+  `anthropic-ai`) doesn't name the scanner — a distinct, bounded
+  `career-ops` fetcher — but a scan can still feed a later model-driven
+  `pipeline` step, so honouring it is a maintainer call on a source
+  proposal, not an automatic no.
 
 If such a source is operator-run, or its eligibility is not obvious, open a
 [source proposal](../.github/ISSUE_TEMPLATE/source-proposal.yml) before
@@ -600,6 +605,30 @@ too. Gating the incomplete marker on the page index alone
 truncated. Reference: `eightfold.mjs` ("a short page has to win");
 `jobbankca.mjs` keys the stop off `rawEntryCount`, the feed's own
 `<entry>` count.
+
+**Mark the board, don't just warn about it (#6632).** A stderr warning is
+not machine-readable: `scan.mjs` logs a partly-read board `partial` in
+`data/portal-health.tsv` only when the returned array carries the signal.
+New providers set the canonical flag with `markTruncated()` from
+`lib/board-truncation.mjs`:
+
+```js
+import { markTruncated } from '../lib/board-truncation.mjs';
+// …after the walk, before returning jobs:
+if (stoppedShort) markTruncated(jobs, { reason: 'cap', total });
+```
+
+`reason` is the same stop reason the warning is driven from — `cap`,
+`fetch-error`, `429`, `transient`, `structural`, `unknown` (other
+non-empty provider-specific reasons pass through verbatim) — and `total`
+is the source-reported total when the provider knows one, omitted
+otherwise. `fetched` is filled in from the array's length, so never set
+it by hand. Never set the flag during a probe (`ctx.maxPages` is set):
+a one-page liveness walk is not a truncated board, and
+`readTruncation()` ignores it anyway. Legacy providers keep their own
+`<name>Truncated` tags as-is — `readTruncation()` in the same module
+recognises all twenty — but a new provider must not invent a new tag:
+use `jobs.truncated`.
 
 A paginating JSON API can also hit a hard, source-side result-window
 ceiling that looks nothing like a short page: every page up to some round

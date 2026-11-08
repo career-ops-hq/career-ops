@@ -147,6 +147,41 @@ try {
       : fail(`apple scan recall: ${JSON.stringify(jobs)} in ${calls.length} requests`);
   }
 
+  // A board the walk stopped short of carries the canonical flag (#6632):
+  // cap, fetch-error, and complete — and a probe never sets it, because a
+  // one-page liveness walk is not a truncated board.
+  {
+    const { ctx } = recordingCtx(() => hydration(Array.from({ length: 20 }, (_, i) => row(String(i), `R${i}`)), 100000));
+    const jobs = await provider.fetch({ ...ENTRY, max_pages: 2 }, ctx);
+    JSON.stringify(jobs.truncated) === JSON.stringify({ reason: 'cap', fetched: 20 })
+      ? pass('apple.fetch() marks a page-capped board jobs.truncated { reason: cap }')
+      : fail(`apple cap flag: ${JSON.stringify(jobs.truncated)}`);
+  }
+  {
+    const { ctx } = recordingCtx((call) => {
+      if (call.url.includes('q=alpha') || call.url.includes('search=alpha')) throw new Error('HTTP 500');
+      return hydration([row('9', 'Kept Role')], 1);
+    });
+    const jobs = await provider.fetch({ ...ENTRY, apple: { queries: ['alpha', 'beta'], teams: [] } }, ctx);
+    JSON.stringify(jobs.truncated) === JSON.stringify({ reason: 'fetch-error', fetched: 1 })
+      ? pass('apple.fetch() marks a board with a failed axis jobs.truncated { reason: fetch-error }')
+      : fail(`apple fetch-error flag: ${JSON.stringify(jobs.truncated)}`);
+  }
+  {
+    const { ctx } = recordingCtx(() => hydration([row('9', 'Only Role')], 1));
+    const jobs = await provider.fetch(ENTRY, ctx);
+    jobs.truncated === undefined
+      ? pass('apple.fetch() sets no truncation flag on a fully read board')
+      : fail(`apple complete board flag: ${JSON.stringify(jobs.truncated)}`);
+  }
+  {
+    const { ctx } = recordingCtx(() => hydration(Array.from({ length: 20 }, (_, i) => row(String(i), `Role ${i}`)), 999));
+    const jobs = await provider.fetch(ENTRY, { ...ctx, maxPages: 1 });
+    jobs.truncated === undefined
+      ? pass('apple.fetch() sets no truncation flag during a probe')
+      : fail(`apple probe flag: ${JSON.stringify(jobs.truncated)}`);
+  }
+
   // A layout change must be loud. Returning [] would read as "no matching roles"
   // forever, which is how a dead provider hides.
   {
