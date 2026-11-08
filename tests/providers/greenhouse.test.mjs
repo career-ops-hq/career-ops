@@ -595,9 +595,10 @@ try {
     if (flaky.rows.find((r) => r.title === 'Strategy Manager')?.description === 'ok') pass('greenhouse.fetch() retries a transient detail failure before giving up the body');
     else fail(`greenhouse detail retry: ${JSON.stringify(flaky.rows)}`);
 
-    const failing = await run(optIn, { detail: () => { throw new Error('HTTP 404'); } });
-    if (failing.rows.length === 3 && failing.sleeps.includes(200)) pass('greenhouse.fetch() keeps postings whose detail fetch failed, still paced between attempts');
-    else fail(`greenhouse detail failure: rows=${failing.rows.length} sleeps=${JSON.stringify(failing.sleeps)}`);
+    let notFoundCalls = 0;
+    const failing = await run(optIn, { detail: () => { notFoundCalls++; throw Object.assign(new Error('HTTP 404'), { status: 404 }); } });
+    if (failing.rows.length === 3 && failing.sleeps.includes(200) && notFoundCalls === 2) pass('greenhouse.fetch() keeps postings whose detail fetch failed, paced between attempts, and does not retry a 404');
+    else fail(`greenhouse detail failure: rows=${failing.rows.length} sleeps=${JSON.stringify(failing.sleeps)} calls=${notFoundCalls}`);
 
     try {
       await greenhouse.fetch(
