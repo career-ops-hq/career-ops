@@ -21,8 +21,7 @@ that gate is decided on the source's data, not on how the client is written.
 **A single-company ATS adapter** (a new Greenhouse/Workday/Ashby-class
 vendor, or a company on its own careers API) clears this by construction: the
 postings are the employer's own, and the adapter reads exactly one source.
-Nothing to do here — including the `robots.txt` bullet below, which is a
-board/aggregator gate — go to section 1.
+Nothing to do here: go to section 1.
 
 **A job board, aggregator, or talent network** is where the policy bites.
 In short:
@@ -37,16 +36,12 @@ In short:
 - **Complete inventory, no paid placement (rule 3).** The provider must
   traverse the source's full inventory, not a promoted or default-filtered
   view.
-- **`robots.txt`, per path (rule 6).** Check the source's `robots.txt`
-  before writing code. A `Disallow` under `User-agent: *` (or a group
-  matching the scanner) that covers the listing paths the provider reads is
-  a stop (precedent: Lagou); a `Disallow` on routes the parser never touches
-  — `/api`, `/data`, a subscribe form — is not (ITviec, CareerViet route
-  around theirs). A rule that only names an AI/agent crawler (`ClaudeBot`,
-  `anthropic-ai`) doesn't name the scanner — a distinct, bounded
-  `career-ops` fetcher — but a scan can still feed a later model-driven
-  `pipeline` step, so honouring it is a maintainer call on a source
-  proposal, not an automatic no.
+- **Read like a visitor (rule 6).** A provider reads only what any visitor
+  sees without signing in, with a bounded number of requests per host,
+  honouring a `Crawl-delay` the source states. A login, a user account or a
+  CAPTCHA in the way is a stop, and so is a source whose operator has asked
+  career-ops not to read it. `robots.txt` is not a gate: it is written for
+  crawlers, and a provider reads for one person who may apply there.
 
 If such a source is operator-run, or its eligibility is not obvious, open a
 [source proposal](../.github/ISSUE_TEMPLATE/source-proposal.yml) before
