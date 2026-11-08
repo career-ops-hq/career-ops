@@ -374,6 +374,30 @@ try {
     fail(`pagination: pageReqs=${pageReqs}, total=${paged.length} (expected 3 / 450)`);
   }
 
+  // ── fetch: a reported total past the default 25-page cap is read in full.
+  //    JPMorgan reports ~7,100 jobs; a fixed cap stopped at 5,000 (2026-11-07). ─
+  const BIG = 7118;
+  let bigReqs = 0;
+  const big = await oc.fetch(
+    { name: 'BigCo', careers_url: careers },
+    {
+      transport: 'http',
+      fetchText: async () => {},
+      fetchJson: async (url) => {
+        bigReqs++;
+        const offset = parseInt(new URL(url).searchParams.get('offset') || '0', 10);
+        const n = Math.max(0, Math.min(200, BIG - offset));
+        return { items: [{ TotalJobsCount: BIG, requisitionList: Array.from({ length: n }, (_, i) => ({ Id: `J${offset + i}`, Title: `Role ${offset + i}` })) }], hasMore: false };
+      },
+      sleep: async () => {},
+    },
+  );
+  if (big.length === BIG && bigReqs === Math.ceil(BIG / 200) && !big.truncated) {
+    pass('oraclecloud.fetch() reads a 7,118-job board past the 25-page default cap, untruncated');
+  } else {
+    fail(`total-bounded walk: got ${big.length} in ${bigReqs} requests, truncated=${JSON.stringify(big.truncated)}`);
+  }
+
   // ── fetch: hasMore:false is IGNORED (unreliable on JPMC — false on every
   //    page despite 7000+ jobs). Pagination is driven by list length + total,
   //    so a full page with hasMore:false must still advance. ────────────────

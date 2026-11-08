@@ -50,7 +50,8 @@ import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs'
 const ORACLE_HOST_RE = /^[a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud(?:[1-9][0-9]?)?\.com$/i;
 
 const PAGE_SIZE = 200;
-const MAX_PAGES = 25;             // safety cap (~5000 jobs); hard ceiling like workday
+const MAX_PAGES = 25;             // cap when the tenant reports no total (~5000 jobs)
+const HARD_MAX_PAGES = 100;       // absolute ceiling (~20,000 jobs) for total-bounded walks
 const RETRY_POLICY = { retries: 3 };
 const INTER_PAGE_DELAY_MS = 250;  // WAF-aware spacing between same-host pages
 
@@ -227,8 +228,14 @@ export default {
     const site = resolveSite(entry);
     if (!site) throw new Error(`oraclecloud: cannot derive API URL for ${entry.name}`);
 
-    const maxPages = Number.isInteger(entry.max_pages) && entry.max_pages > 0
-      ? Math.min(entry.max_pages, MAX_PAGES)
+    // MAX_PAGES is the cap for a walk with NO reported total (the only case where
+    // the loop could otherwise run unbounded). When the tenant reports
+    // TotalJobsCount, the walk is already bounded by that total, so the cap rises
+    // to cover it, up to HARD_MAX_PAGES. A fixed 25-page cap read only 5,000 of
+    // JPMorgan's 7,118 jobs (2026-11-07). entry.max_pages may raise the default
+    // the same way, never past HARD_MAX_PAGES.
+    let maxPages = Number.isInteger(entry.max_pages) && entry.max_pages > 0
+      ? Math.min(entry.max_pages, HARD_MAX_PAGES)
       : MAX_PAGES;
 
     const all = [];
@@ -248,7 +255,10 @@ export default {
       all.push(...parsed);
 
       const item = Array.isArray(json?.items) ? json.items[0] : null;
-      if (total === null && item && typeof item.TotalJobsCount === 'number') total = item.TotalJobsCount;
+      if (total === null && item && typeof item.TotalJobsCount === 'number') {
+        total = item.TotalJobsCount;
+        maxPages = Math.max(maxPages, Math.min(Math.ceil(total / PAGE_SIZE), HARD_MAX_PAGES));
+      }
       const listLen = item && Array.isArray(item.requisitionList) ? item.requisitionList.length : 0;
 
       // Stop conditions. NOTE: `hasMore` is unreliable on some tenants (e.g.
