@@ -506,6 +506,7 @@ async function fetchRmk(entry, cfg, ctx) {
   const maxPages = probeLimit ? Math.min(cappedPages, probeLimit) : cappedPages;
   const jobs = [];
   const seen = new Set();
+  const seenRaw = new Set();
   let startrow = 0;
   // True when the loop ended on a cap while the last page was still delivering
   // new postings — i.e. the board very likely has more. The RMK fragment carries
@@ -531,17 +532,20 @@ async function fetchRmk(entry, cfg, ctx) {
       headers: { accept: 'text/html' },
     });
     const tiles = parseTiles(htmlText, cfg.jobBase);
-    if (tiles.length === 0) break;
+    // Pagination follows the rows the source returned, not the ones parseTiles kept:
+    // a title-less tile must not end the walk or leave the next offset overlapping.
+    const rawIds = [...htmlText.matchAll(/<li class="job-tile job-id-(\d+)/g)].map((m) => m[1]);
+    if (rawIds.length === 0) break;
     // Fullness is judged on the rows the source returned, not on the tiles that
     // survived parseTiles' filtering.
-    const rawTiles = (htmlText.match(/<li class="job-tile job-id-\d+/g) || []).length || tiles.length;
+    const rawTiles = rawIds.length;
     if (page === 0) pageSize = rawTiles;
 
-    let fresh = 0;
+    let fresh = rawIds.filter((id) => !seenRaw.has(id)).length;
+    for (const id of rawIds) seenRaw.add(id);
     for (const tile of tiles) {
       if (seen.has(tile.id)) continue;
       seen.add(tile.id);
-      fresh++;
       jobs.push({
         title: tile.title,
         url: tile.url,
@@ -551,7 +555,7 @@ async function fetchRmk(entry, cfg, ctx) {
     }
     // No new ids this page → server ignored the offset (or we've looped). Stop.
     if (fresh === 0) break;
-    startrow += tiles.length;
+    startrow += rawTiles;
     if (jobs.length >= maxJobs || page === maxPages - 1) {
       // A short final page means the board ended on its own, not at the cap.
       capped = !probeLimit && (jobs.length >= maxJobs || rawTiles >= pageSize);

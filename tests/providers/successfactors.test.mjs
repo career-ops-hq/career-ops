@@ -568,6 +568,12 @@ try {
       jobs = await sf.fetch({ name: 'BigPages', careers_url: 'https://jobs.bigpages.example', max_pages: 30, max_jobs: 2500 }, { sleep: async () => {}, robotsGate: async (u) => ({ allowed: Number(new URL(u).searchParams.get('startrow')) < 1000 }), fetchText: async (u) => { calls.n++; return bigPage(Number(new URL(u).searchParams.get('startrow'))); } });
       if (jobs.length === 1000 && calls.n === 10 && warns.some((w) => /startrow=1000/.test(w))) pass('successfactors RMK gates each URL once the default job cap is reached, even before the default page cap');
       else fail(`successfactors RMK job-cap gate wrong: ${jobs.length} jobs, ${calls.n} calls, warns=${JSON.stringify(warns)}`);
+      // RMK walks by source rows: a malformed tile neither ends the walk nor shifts the next offset.
+      const asked = [];
+      const bad2 = (id) => `<li class="job-tile job-id-${id}"><a data-url="/job/x/${id}/" href="#"></a></li>`;
+      jobs = await sf.fetch({ name: 'Malformed', careers_url: 'https://jobs.malformed.example' }, { sleep: async () => {}, robotsGate: allow, fetchText: async (u) => { const r = Number(new URL(u).searchParams.get('startrow')); asked.push(r); if (r === 0) return bad2(9001) + bad2(9002); if (r === 2) return tilePage(100).split('</li>').slice(0, 5).join('</li>') + '</li>'; return ''; } });
+      if (asked.join() === '0,2,7' && jobs.length === 5) pass('successfactors RMK advances by source rows and walks past a page of malformed tiles');
+      else fail(`successfactors RMK malformed-tile walk wrong: asked=${asked.join()} jobs=${jobs.length}`);
       // RMK board that ends naturally: no warning.
       warns.length = 0;
       jobs = await sf.fetch({ name: 'SmallCo', careers_url: 'https://jobs.smallco.example' }, { sleep: async () => {}, fetchText: async (u) => (new URL(u).searchParams.get('startrow') === '0' ? tilePage(0) : '') });
