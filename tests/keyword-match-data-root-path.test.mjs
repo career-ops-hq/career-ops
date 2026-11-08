@@ -58,6 +58,14 @@ writeFileSync(join(staleDir, 'reports', '001-example-2026-01-01.md'), [
   'Rust, Haskell',
   '',
 ].join('\n'));
+// ...and a report that exists only there, which the data root does not have.
+writeFileSync(join(staleDir, 'reports', '002-only-in-cwd-2026-01-01.md'), [
+  '# Evaluation: Example — Platform Engineer (only in the working directory)',
+  '',
+  '## Keywords extracted',
+  'Rust, Haskell',
+  '',
+].join('\n'));
 
 const run = (args, cwd = workDir) => spawnSync(NODE, [join(ROOT, 'keyword-match.mjs'), ...args], {
   encoding: 'utf-8',
@@ -89,6 +97,20 @@ try {
     assert.equal(r.status, 0, describeSpawn(r));
     assert.match(r.stdout, /\*\*Present \(2\):\*\* Python, Docker/);
     assert.doesNotMatch(r.stdout, /Rust|Haskell/);
+  });
+
+  check('a report missing from the data root is not read from a copy in the working directory', () => {
+    const r = run(['reports/002-only-in-cwd-2026-01-01.md'], staleDir);
+    assert.equal(r.status, 1, describeSpawn(r));
+    assert.match(r.stderr, /Report not found: reports\/002-only-in-cwd-2026-01-01\.md/);
+    assert.match(r.stderr, /pass \.\/reports\/002-only-in-cwd-2026-01-01\.md/);
+    assert.doesNotMatch(r.stdout, /Rust|Haskell/);
+  });
+
+  check('an explicit ./ path still reads the working directory', () => {
+    const r = run(['./reports/002-only-in-cwd-2026-01-01.md'], staleDir);
+    assert.equal(r.status, 0, describeSpawn(r));
+    assert.match(r.stdout, /Rust/);
   });
 
   check('a path found in neither place still stops with "Report not found"', () => {

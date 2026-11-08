@@ -724,11 +724,15 @@ function refuseNoSkills(sourceLabel) {
  * A relative report, CV or JD-text path, resolved the way the modes write it.
  * The modes pass `reports/{###}-….md` and `jds/{slug}.md` relative to the data
  * root, which is not the process's working directory when the user layer lives
- * elsewhere (a `.career-ops-data` marker or CAREER_OPS_ROOT). The data root
- * wins whenever the file exists there, so a stale copy in the checkout can
- * never be scored in its place; a path found only under the working directory
- * still resolves there, and a path found in neither place is reported against
- * the working directory, as before.
+ * elsewhere (a `.career-ops-data` marker or CAREER_OPS_ROOT).
+ *
+ * A bare relative path therefore always means the data root, whether or not
+ * the file is there. Falling back to the working directory when the data root
+ * lacks the file would score a stale copy left in the checkout (say, from
+ * before the user layer moved out) instead of saying the report is missing.
+ * A path that starts with `./` or `../` names the working directory on
+ * purpose, so it resolves there. With no data root, the working directory is
+ * used, as before.
  *
  * @param {string} arg
  * @param {string} root
@@ -736,11 +740,8 @@ function refuseNoSkills(sourceLabel) {
  */
 export function resolveUserPath(arg, root) {
   if (isAbsolute(arg)) return arg;
-  if (root) {
-    const fromRoot = join(root, arg);
-    if (existsSync(fromRoot)) return fromRoot;
-  }
-  return join(process.cwd(), arg);
+  if (!root || /^\.\.?(?:[\\/]|$)/.test(arg)) return join(process.cwd(), arg);
+  return join(root, arg);
 }
 
 /**
@@ -790,7 +791,10 @@ export async function resolveKeywords(input, root) {
   const reportArg = input.reportPath;
   const reportPath = resolveUserPath(reportArg, root);
   if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
-    console.error(`Report not found: ${reportArg}`);
+    console.error(`Report not found: ${reportArg} (looked for ${reportPath}).`);
+    if (!isAbsolute(reportArg) && !/^\.\.?(?:[\\/]|$)/.test(reportArg)) {
+      console.error(`A relative path is read from the data root. For a file in the current directory, pass ./${reportArg}.`);
+    }
     console.error(`Example: node keyword-match.mjs ${shellExampleArg(join(getCareerOpsRoot(), 'reports', '001-role.md'))}`);
     process.exit(1);
   }
