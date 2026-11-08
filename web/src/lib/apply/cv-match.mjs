@@ -35,8 +35,21 @@ export function hasToken(filenameLower, token) {
   return re.test(filenameLower);
 }
 
+/**
+ * True for the sibling draft generate-pdf.mjs writes when a render runs over
+ * its page budget: `{name}.overflow.pdf`, then `.overflow-2.pdf` and so on
+ * when that name is taken. The draft is the version the budget rejected, kept
+ * for inspection only, and it is written after the deliverable, so newest-first
+ * resolution would otherwise serve it as the tailored artifact. The suffix is
+ * reserved for drafts: a deliverable deliberately named that way is not found.
+ */
+export function isOverflowDraft(filenameLower) {
+  return /\.overflow(-\d+)?\.pdf$/.test(filenameLower);
+}
+
 export function matchesTailoredCv(filenameLower, slug) {
   if (!filenameLower.startsWith('cv-')) return false;
+  if (isOverflowDraft(filenameLower)) return false;
   return hasToken(filenameLower, slug);
 }
 
@@ -53,6 +66,7 @@ export function matchesTailoredCv(filenameLower, slug) {
  */
 export function matchesTailoredCover(filenameLower, slug) {
   if (filenameLower.startsWith('cv-')) return false;
+  if (isOverflowDraft(filenameLower)) return false;
   if (!hasToken(filenameLower, 'cover')) return false;
   return hasToken(filenameLower, slug);
 }
