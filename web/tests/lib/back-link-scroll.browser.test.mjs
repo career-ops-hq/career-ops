@@ -40,10 +40,16 @@ test("The in-page back link returns to the list where it was left", { skip: live
   }
   assert.equal(mountedCompany, true, "Fixture Company 60 mounts when the list is scrolled");
   await company.scrollIntoViewIfNeeded();
+  // Virtual rows can still move after they mount. Wait for the same stable,
+  // actionable geometry that the real click requires before sampling scroll.
+  await company.click({ trial: true });
   const before = await page.evaluate(() => window.scrollY);
   assert.ok(before > 1000, `the list scrolled to row 60 (scrollY ${before})`);
   const listKey = await entryKey();
   await company.click();
+  await page.getByRole("heading", { name: "Fixture Company 60", exact: true }).waitFor();
+  // Reload so restoration must survive loss of client-module memory.
+  await page.reload();
   await page.getByRole("heading", { name: "Fixture Company 60", exact: true }).waitFor();
   await back().click();
   const returned = await company.waitFor({ timeout: 5_000 }).then(() => true).catch(() => false);

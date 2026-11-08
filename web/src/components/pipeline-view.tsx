@@ -149,7 +149,12 @@ export function PipelineView({
     // if the list is still mounted while the next page loads.
     cancelPendingSearch();
     const entryKey = window.navigation?.currentEntry?.key;
-    if (entryKey) entryScrollPositions.set(entryKey, window.scrollY);
+    if (entryKey) {
+      entryScrollPositions.set(entryKey, window.scrollY);
+      // Next rewrites history.state; keep the entry's snapshot outside that
+      // object, including across a reload of the detail page.
+      try { sessionStorage.setItem(`career-ops:pipeline-scroll:${entryKey}`, String(window.scrollY)); } catch { /* Memory still works without storage. */ }
+    }
     const next = listEntrySync(pathname, params.toString(), q);
     if (!next) return;
     const state = window.history.state;
@@ -378,9 +383,20 @@ export function PipelineView({
     // Back restores the list's scroll position after this commit, and that
     // move does not always emit a scroll event. Keep measuring until it lands.
     const entryKey = window.navigation?.currentEntry?.key;
-    const savedY = entryKey ? entryScrollPositions.get(entryKey) : undefined;
-    let restoring = savedY !== undefined;
-    const stopRestore = () => { restoring = false; };
+    let savedY = entryKey ? entryScrollPositions.get(entryKey) : undefined;
+    if (entryKey) {
+      try {
+        const stored = sessionStorage.getItem(`career-ops:pipeline-scroll:${entryKey}`);
+        if (stored !== null) savedY = Number(stored);
+      } catch { /* Fall back to the in-memory snapshot. */ }
+    }
+    let restoring = typeof savedY === "number" && Number.isFinite(savedY);
+    const forgetSavedPosition = () => {
+      if (!restoring || !entryKey) return;
+      entryScrollPositions.delete(entryKey);
+      try { sessionStorage.removeItem(`career-ops:pipeline-scroll:${entryKey}`); } catch { /* Storage may be disabled. */ }
+    };
+    const stopRestore = () => { forgetSavedPosition(); restoring = false; };
     window.addEventListener("wheel", stopRestore, { passive: true });
     window.addEventListener("touchstart", stopRestore, { passive: true });
     window.addEventListener("keydown", stopRestore);
@@ -394,7 +410,7 @@ export function PipelineView({
       if (restoring) window.scrollTo(0, savedY!);
       frames += 1;
       if (frames < 30) raf = requestAnimationFrame(followScrollRestore);
-      else if (entryKey) entryScrollPositions.delete(entryKey);
+      else forgetSavedPosition();
     };
     raf = requestAnimationFrame(followScrollRestore);
     return () => {
@@ -868,7 +884,7 @@ export function PipelineView({
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table aria-label="Tracked applications" aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
+          <table aria-label="Tracked applications" style={{ overflowAnchor: "none" }} aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
                 <th className="w-8 px-3 py-2.5">
