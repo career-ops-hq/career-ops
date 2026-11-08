@@ -8,11 +8,11 @@ This mode answers: *"Even if I win this process — is this company safe to join
 
 ## Dependency
 
-Requires transcripts produced by `modes/interview/debrief.md` or `modes/interview/practice.md` (#956). Each transcript must be saved under `interview-prep/sessions/` (gitignored). If no session files exist, exit gracefully with an onboarding message.
+Requires real-interview transcripts under `interview-prep/sessions/` (gitignored): those produced by `modes/interview/debrief.md` (#956), or written by hand (`source: manual`). `modes/interview/practice.md` writes to the same directory, but the `**Interviewer:**` turns in its files are the AI's own mock questions, not the company's, so this mode skips them (see Step 1). If no eligible session files exist, exit gracefully with an onboarding message.
 
 ## Inputs
 
-- `interview-prep/sessions/` — Session transcripts (debrief + practice outputs). One file per round.
+- `interview-prep/sessions/` — Session transcripts, one file per round. Only real interviews are analysed: files whose front matter says `source: practice` or `source: mock` are skipped (Step 1). The front matter format is documented in `interview-prep/sessions/README.md`.
 - `interview-prep/{company}-{role}.md` — Company intel file (for context + output target).
 - `config/profile.yml` — User profile (for role/archetype context, and for the candidate's location → jurisdiction derivation used by Step 2c).
 - `templates/protected-grounds.yml` — Jurisdiction-keyed table of protected grounds / do-not-ask topics in hiring (for Step 2c only). A data reference, not instruction logic — adding a jurisdiction row there never requires touching this mode. Reading it is a local file lookup; nothing leaves the machine.
@@ -25,16 +25,23 @@ Expected transcript filename convention (from #956):
 
 ## Minimum Threshold
 
-Check: does `interview-prep/sessions/` contain at least **1** file?
+Check: does `interview-prep/sessions/` contain at least **1** eligible session file? `README.md` is not a session, and a file with `source: practice` or `source: mock` in its front matter is not eligible (Step 1).
 
-If not:
+If there are no session files at all:
 > "No session transcripts found yet. Run `/career-ops interview` on a role after your next interview to generate a debrief, then come back to check for red flags."
 
-Exit gracefully.
+If session files exist but every one is a practice or mock session:
+> "Only practice sessions found. Red flags come from how a real interviewer behaved, and the questions in a practice session were asked by the AI. Run `/career-ops interview` after your next real interview to generate a debrief, then come back to check for red flags."
+
+Either way, exit gracefully.
 
 ## Step 1 — Discover Sessions
 
-List all `.md` files in `interview-prep/sessions/`. Parse each filename using the `YYYY-MM-DD` date segment as the anchor:
+List all `.md` files in `interview-prep/sessions/` except `README.md`, and read each file's YAML front matter `source` field.
+
+**Skip every file with `source: practice` or `source: mock`**, even when its front matter or filename names a real company. In those files the `**Interviewer:**` turns are mock questions (in a `practice` file, the questions the AI asked while role-playing), so they say nothing about how the company interviews. A skipped file contributes nothing to Steps 2–6: no signals, no Step 2c observations, no session count. A file without a `source` field is treated as a real interview, as before.
+
+Parse each remaining filename using the `YYYY-MM-DD` date segment as the anchor:
 
 ```
 {company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md
