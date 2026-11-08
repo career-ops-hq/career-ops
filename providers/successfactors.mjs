@@ -379,9 +379,14 @@ async function limitsFor(entry, kind, url, ctx) {
 async function fetchCsb(entry, cfg, ctx, { probe = false, quiet = false } = {}) {
   // The post-RMK probe only looks for the empty-shell signature: defaults, no
   // robots check, so an RMK entry's raised max_pages is never read as a CSB raise.
-  const { maxPages, maxJobs } = probe
+  const limits = probe
     ? resolveLimits({ ...entry, max_pages: undefined, max_jobs: undefined }, 'csb')
     : await limitsFor(entry, 'csb', cfg.jobsApi, ctx);
+  const { maxPages } = limits;
+  // A quiet probe (the entry will be re-read in full at its own limits) only needs
+  // to learn whether the board has any posting, so it stops at the first one and
+  // the full read does not repeat its requests.
+  const maxJobs = quiet ? 1 : limits.maxJobs;
   let locales = CSB_DEFAULT_LOCALES;
   try {
     const html = await ctx.fetchText(cfg.searchPage, { redirect: 'error', headers: { accept: 'text/html' } });

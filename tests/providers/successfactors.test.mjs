@@ -549,7 +549,7 @@ try {
       // Unflagged CSB entry that opts in: RMK empty -> CSB probe -> full gated read at the entry's limits.
       warns.length = 0; calls = { n: 0 };
       jobs = await sf.fetch({ name: 'AutoCsb', careers_url: 'https://careers.autocsb.example', max_pages: 200, max_jobs: 5000 }, { ...csbCtx(calls, allow), fetchText: async (u) => (/tile-search/.test(u) ? '<!DOCTYPE html>' : '<a href="/search/?locale=en_US">en</a>') });
-      if (jobs.length === TOTAL && warns.length === 0) pass('successfactors unflagged CSB entry with raised limits is read at those limits after the empty-RMK probe');
+      if (jobs.length === TOTAL && warns.length === 0 && calls.n <= 130) pass('successfactors unflagged CSB entry with raised limits is read at those limits after a one-job probe');
       else fail(`successfactors auto-CSB raise wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
       // RMK fullness uses raw tile rows: a full last page containing one title-less tile still counts as capped.
       warns.length = 0;
