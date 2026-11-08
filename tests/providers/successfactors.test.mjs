@@ -562,6 +562,12 @@ try {
       jobs = await sf.fetch({ name: 'OffsetRule', careers_url: 'https://jobs.offsetrule.example', max_pages: 60, max_jobs: 5000 }, rmkCtx(calls, async (u) => ({ allowed: Number(new URL(u).searchParams.get('startrow')) < 1100 })));
       if (jobs.length === 1100 && calls.n === 44 && warns.some((w) => /does not allow \/tile-search-results\/\?startrow=1100/.test(w))) pass('successfactors RMK stops a raised walk at the first startrow robots.txt disallows');
       else fail(`successfactors RMK per-offset gate wrong: ${jobs.length} jobs, ${calls.n} calls, warns=${JSON.stringify(warns)}`);
+      // 100 rows/page with max_jobs 2500: the default job cap (1000) is reached at page 10, well before page 40, and later offsets are still gated.
+      warns.length = 0; calls = { n: 0 };
+      const bigPage = (r) => Array.from({ length: 100 }, (_, i) => `<li class="job-tile job-id-${r + i}"><a data-url="/job/x/${r + i}/" class="jobTitle-link" href="#">Role ${r + i}</a></li>`).join('');
+      jobs = await sf.fetch({ name: 'BigPages', careers_url: 'https://jobs.bigpages.example', max_pages: 30, max_jobs: 2500 }, { sleep: async () => {}, robotsGate: async (u) => ({ allowed: Number(new URL(u).searchParams.get('startrow')) < 1000 }), fetchText: async (u) => { calls.n++; return bigPage(Number(new URL(u).searchParams.get('startrow'))); } });
+      if (jobs.length === 1000 && calls.n === 10 && warns.some((w) => /startrow=1000/.test(w))) pass('successfactors RMK gates each URL once the default job cap is reached, even before the default page cap');
+      else fail(`successfactors RMK job-cap gate wrong: ${jobs.length} jobs, ${calls.n} calls, warns=${JSON.stringify(warns)}`);
       // RMK board that ends naturally: no warning.
       warns.length = 0;
       jobs = await sf.fetch({ name: 'SmallCo', careers_url: 'https://jobs.smallco.example' }, { sleep: async () => {}, fetchText: async (u) => (new URL(u).searchParams.get('startrow') === '0' ? tilePage(0) : '') });

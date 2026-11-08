@@ -517,7 +517,7 @@ async function fetchRmk(entry, cfg, ctx) {
     // Pages past the default cap are extra crawling: check each actual startrow
     // URL (a rule can allow one offset and disallow a later one). On a denial,
     // stop here at what the defaults would have read and say so.
-    if (page >= MAX_PAGES && !probeLimit) {
+    if ((page >= MAX_PAGES || jobs.length >= MAX_JOBS) && !probeLimit) {
       let ok = false;
       try { ok = !!(await gate(`${cfg.tileApi}?startrow=${startrow}`))?.allowed; } catch { ok = false; }
       if (!ok) {
