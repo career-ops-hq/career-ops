@@ -552,12 +552,14 @@ export default {
     } catch (err) {
       if (/** @type {any} */ (err)?.code !== 'response_too_large') throw err;
       console.error(`ℹ️  ashby: ${entry.name} posting API body over ${Math.round((/** @type {any} */ (err).maxBytes || ASHBY_MAX_BYTES) / 1048576)} MB — read the embed listing instead (no descriptions or dates)`);
-      // An entry that pins the board through `api:` (with a corporate
-      // careers_url) names its slug only there, so hand that slug on.
+      // The fallback must read the SAME board the posting API was asked for.
+      // That board is named in the validated apiUrl (from `api:` or derived
+      // from careers_url), which may differ from careers_url when `api:` pins
+      // the board, so its slug takes precedence over resolveBoardSlug().
       const apiSlug = new URL(apiUrl).pathname.match(/^\/posting-api\/job-board\/([^/]+)\/?$/)?.[1];
-      const embedEntry = resolveBoardSlug(entry) || !apiSlug
-        ? entry
-        : { ...entry, ashby: { .../** @type {any} */ (entry).ashby, board: decodeURIComponent(apiSlug) } };
+      const embedEntry = apiSlug
+        ? { ...entry, ashby: { .../** @type {any} */ (entry).ashby, board: decodeURIComponent(apiSlug) } }
+        : entry;
       return await fetchFromEmbed(embedEntry, ctx);
     }
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
