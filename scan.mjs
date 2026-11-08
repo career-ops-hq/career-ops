@@ -4174,11 +4174,23 @@ export function computeConsecutiveFailures(healthRecords) {
     // Inverted (vs. listing failure statuses) so the newer error kinds
     // (auth/server/unknown) can't silently fall outside the streak again.
     // 'empty' is deliberately healthy: a live board with 0 jobs is reachable.
-    if (r.status === 'reachable' || r.status === 'empty') {
+    // 'partial' is reachable too: the board answered, it was only cut short,
+    // often by a cap the user set on purpose. verify-portals and a new slug
+    // cannot fix that, so it has its own streak (computePartialStreaks).
+    if (r.status === 'reachable' || r.status === 'empty' || r.status === 'partial') {
       streaks.set(r.company, 0);
     } else {
       streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
     }
+  }
+  return streaks;
+}
+
+// Consecutive `partial` runs per company: any other status resets it.
+export function computePartialStreaks(healthRecords) {
+  const streaks = new Map();
+  for (const r of healthRecords) {
+    streaks.set(r.company, r.status === 'partial' ? (streaks.get(r.company) || 0) + 1 : 0);
   }
   return streaks;
 }
@@ -5700,9 +5712,10 @@ async function main() {
     const isUnverifiedZero = unverifiedZeroTargets.includes(t.name);
 
     let status = errorKindByCompany.get(t.name) || 'reachable';
-    // A board read only partly is not healthy coverage: logged `partial`, which
-    // computeConsecutiveFailures counts toward the 🚨 streak like any failure.
-    // Checked before `empty`, so a tagged empty read cannot pass as healthy.
+    // A board read only partly is not healthy coverage: logged `partial`, never
+    // `reachable`, with its own repeat warning below (not the 🚨 dead-board
+    // streak). Checked before `empty`, so a tagged empty read cannot pass as
+    // healthy.
     if (status === 'reachable' && partialTargets.has(t.name)) status = 'partial';
     if (status === 'reachable' && isEmpty) status = 'empty';
     if (status === 'reachable' && isUnverifiedZero) status = 'unverified_zero';
@@ -5712,6 +5725,7 @@ async function main() {
 
   const pastHealth = loadPortalHealth();
   const currentStreaks = computeConsecutiveFailures([...pastHealth, ...healthRecords]);
+  const partialStreaks = computePartialStreaks([...pastHealth, ...healthRecords]);
 
   const persistentlyDead = [];
   const newlyDeadSlug = [];
@@ -5722,8 +5736,7 @@ async function main() {
   // Below threshold, only slug_gone/network keep their dedicated warnings;
   // auth/server/unknown stay in the one-off `Errors (N):` print below.
   for (const e of [...unreachableTargets, ...networkTargets, ...otherErrors.filter((x) => x.kind),
-    ...unverifiedZeroTargets.map(company => ({ company, kind: 'unverified_zero' })),
-    ...[...partialTargets.keys()].map(company => ({ company, kind: 'partial' }))]) {
+    ...unverifiedZeroTargets.map(company => ({ company, kind: 'unverified_zero' }))]) {
     const streak = currentStreaks.get(e.company) || 1;
     if (streak >= STREAK_THRESHOLD) {
       if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
@@ -5735,7 +5748,7 @@ async function main() {
   }
 
   if (persistentlyDead.length > 0) {
-    console.log(`\n🚨 FIX NEEDED: ${persistentlyDead.length} target(s) have been unreachable or only partly read for ${STREAK_THRESHOLD}+ runs:`);
+    console.log(`\n🚨 FIX NEEDED: ${persistentlyDead.length} target(s) have been unreachable for ${STREAK_THRESHOLD}+ runs:`);
     console.log(`   ${persistentlyDead.join(', ')}`);
     console.log(`   Run: node verify-portals.mjs to check if the ATS migrated, or update their board slugs.`);
   }
@@ -5750,6 +5763,13 @@ async function main() {
     const parts = [...partialTargets].map(([company, t]) => describeTruncation(company, t));
     console.log(`\n⚠️  ${partialTargets.size} board(s) only PARTLY read — postings beyond the cut were not scanned:`);
     for (const p of parts) console.log(`   • ${p}`);
+    // A repeat is not a dead board: the board answers every run. The usual
+    // cause is a cap on the entry, which only the entry can change.
+    const repeated = [...partialTargets.keys()].filter((c) => (partialStreaks.get(c) || 0) >= STREAK_THRESHOLD);
+    if (repeated.length > 0) {
+      console.log(`   Partly read for ${STREAK_THRESHOLD}+ runs in a row: ${repeated.join(', ')}`);
+      console.log(`   For a page cap, raise max_pages on the entry or narrow its search; a fetch error or rate limit that repeats points at the board's host.`);
+    }
   }
   if (unverifiedZeroTargets.length > 0) {
     console.log(`⚠️  ${unverifiedZeroTargets.length} target(s) returned zero jobs without a successful HTTP response: ${unverifiedZeroTargets.join(', ')}`);
