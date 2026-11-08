@@ -358,7 +358,10 @@ async function limitsFor(entry, kind, url, ctx) {
   }
   if (verdict?.allowed) return limits;
   console.error(`⚠️  successfactors: ${entry.name} asks for a higher max_pages/max_jobs but robots.txt does not allow ${new URL(url).pathname} (${verdict?.reason || 'disallowed'}) — keeping the defaults`);
-  return resolveLimits({ ...entry, max_pages: undefined, max_jobs: undefined }, kind);
+  // Drop only what exceeds the defaults; a lower CSB max_pages still applies.
+  const defPages = kind === 'csb' ? CSB_MAX_PAGES_PER_LOCALE : MAX_PAGES;
+  const keepPages = posInt(entry?.max_pages) !== null && entry.max_pages <= defPages;
+  return resolveLimits({ ...entry, max_pages: keepPages ? entry.max_pages : undefined, max_jobs: undefined }, kind);
 }
 
 // CSB strategy: discover locales, paginate the JSON jobs API per locale, dedup
@@ -476,7 +479,13 @@ function warnTruncated(entry, what, kind, maxPages, maxJobs) {
 // RMK strategy: the original /tile-search-results/ HTML-fragment scraper.
 /** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx */
 async function fetchRmk(entry, cfg, ctx) {
-  const { maxPages, maxJobs } = await limitsFor(entry, 'rmk', cfg.tileApi, ctx);
+  // A bounded probe (ctx.maxPages, e.g. verify-portals) never raises the cap, so
+  // it skips the robots check and stops at ctx.maxPages without warning.
+  const probeLimit = posInt(ctx.maxPages);
+  const { maxPages: cappedPages, maxJobs } = probeLimit
+    ? resolveLimits({ ...entry, max_pages: undefined, max_jobs: undefined }, 'rmk')
+    : await limitsFor(entry, 'rmk', cfg.tileApi, ctx);
+  const maxPages = probeLimit ? Math.min(cappedPages, probeLimit) : cappedPages;
   const jobs = [];
   const seen = new Set();
   let startrow = 0;
@@ -508,7 +517,7 @@ async function fetchRmk(entry, cfg, ctx) {
     if (fresh === 0) break;
     startrow += tiles.length;
     if (jobs.length >= maxJobs || page === maxPages - 1) {
-      capped = true;
+      capped = !probeLimit;
       break;
     }
   }

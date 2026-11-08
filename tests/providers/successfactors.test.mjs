@@ -513,6 +513,15 @@ try {
       jobs = await sf.fetch({ name: 'RmkCo', careers_url: 'https://jobs.rmkco.example', max_pages: 60, max_jobs: 1500 }, rmkCtx(calls, allow));
       if (jobs.length === 1500 && calls.n === 60 && warns.length === 1) pass('successfactors RMK opt-in raises the cap (and still warns when the new cap is hit)');
       else fail(`successfactors RMK opt-in wrong: ${jobs.length} jobs, ${calls.n} calls, warns=${JSON.stringify(warns)}`);
+      // Denied raise keeps a lower CSB max_pages; a probe (ctx.maxPages) stays at one page without warning or robots call.
+      warns.length = 0; calls = { n: 0 };
+      jobs = await sf.fetch({ ...base, max_pages: 5, max_jobs: 5000 }, csbCtx(calls, deny));
+      if (jobs.length === 50 && calls.n <= 10) pass('successfactors robots denial keeps a lower CSB max_pages');
+      else fail(`successfactors denial dropped lower max_pages: ${jobs.length} jobs, ${calls.n} calls`);
+      warns.length = 0; calls = { n: 0 }; let probeGate = false;
+      jobs = await sf.fetch({ name: 'RmkCo', careers_url: 'https://jobs.rmkco.example', max_pages: 60 }, { ...rmkCtx(calls, async () => { probeGate = true; return { allowed: true }; }), maxPages: 1 });
+      if (jobs.length === 25 && calls.n === 1 && !probeGate && warns.length === 0) pass('successfactors RMK probe honors ctx.maxPages without robots check or warning');
+      else fail(`successfactors RMK probe wrong: ${jobs.length} jobs, ${calls.n} calls, gate=${probeGate}, warns=${JSON.stringify(warns)}`);
       // RMK board that ends naturally: no warning.
       warns.length = 0;
       jobs = await sf.fetch({ name: 'SmallCo', careers_url: 'https://jobs.smallco.example' }, { sleep: async () => {}, fetchText: async (u) => (new URL(u).searchParams.get('startrow') === '0' ? tilePage(0) : '') });
