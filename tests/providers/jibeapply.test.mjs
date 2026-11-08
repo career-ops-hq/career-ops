@@ -231,7 +231,55 @@ try {
     fail(`jibeapply fetch max_pages hard cap: requests=${cappedOverrideRequests}, total=${fetchedAbsurd.length} (expected 500/5000)`);
   }
 
-  // fetch() pagination — a failure on a later page returns the jobs gathered
+  // At MAX_PAGES_CAP the warning must say the ceiling, not the entry setting, is the limit.
+  const capWarnings = [];
+  console.error = (msg) => capWarnings.push(msg);
+  try {
+    await jibeapply.fetch(absurdEntry, {
+      transport: 'http',
+      fetchText: async () => { throw new Error('fetchText not expected'); },
+      fetchJson: async () => ({ totalCount: 10_000_000, count: 10, jobs: Array.from({ length: 10 }, (_, i) => ({ title: `Job ${i}`, slug: `job-${i}` })) }),
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
+  if (capWarnings.some(w => /provider ceiling/.test(w) && /5000 of 10000000/.test(w) && /page_size/.test(w))
+      && !capWarnings.some(w => /to raise the cap/.test(w))) {
+    pass('jibeapply.fetch() at MAX_PAGES_CAP warns about the provider ceiling, not max_pages');
+  } else {
+    fail(`jibeapply at-cap warning wrong: ${JSON.stringify(capWarnings)}`);
+  }
+
+  // page_size is opt-in: sends limit=N (capped at 100), reaches more postings per request.
+  const sizeUrls = [];
+  const sizeEntry = { name: 'PetCo', careers_url: 'https://careers.petco.example/jobs', api: 'https://careers.petco.example/api/jobs', page_size: 100 };
+  const fetchedSized = await jibeapply.fetch(sizeEntry, {
+    transport: 'http',
+    fetchText: async () => { throw new Error('fetchText not expected'); },
+    fetchJson: async (url) => {
+      sizeUrls.push(url);
+      const page = parseInt(new URL(url).searchParams.get('page') || '1', 10);
+      const n = page === 3 ? 50 : 100;
+      return { totalCount: 250, count: 250, jobs: Array.from({ length: n }, (_, i) => ({ title: `J${page}-${i}`, slug: `j${page}-${i}` })) };
+    },
+  });
+  if (sizeUrls.length === 3 && fetchedSized.length === 250 && sizeUrls.every(u => new URL(u).searchParams.get('limit') === '100')) {
+    pass('jibeapply.fetch() honors entry.page_size via limit= on every request');
+  } else {
+    fail(`jibeapply page_size: urls=${JSON.stringify(sizeUrls)}, total=${fetchedSized.length}`);
+  }
+  const sizeCapUrls = [];
+  await jibeapply.fetch({ ...sizeEntry, page_size: 5000 }, {
+    transport: 'http',
+    fetchText: async () => { throw new Error('fetchText not expected'); },
+    fetchJson: async (url) => { sizeCapUrls.push(url); return { totalCount: 1, count: 1, jobs: [{ title: 'A', slug: 'a' }] }; },
+  });
+  if (new URL(sizeCapUrls[0]).searchParams.get('limit') === '100') {
+    pass('jibeapply.fetch() caps page_size at 100');
+  } else {
+    fail(`jibeapply page_size cap: ${sizeCapUrls[0]}`);
+  }
+
   // so far instead of discarding everything (sequential, not Promise.all),
   // and the failure itself is visible (console.error), not silent.
   let flakyRequests = 0;
