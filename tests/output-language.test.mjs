@@ -4,7 +4,8 @@
 // the shared pass/fail counters from helpers.mjs and must never terminate the
 // process themselves — a stray exit call here would kill the whole suite
 // mid-run and forge its exit code (see the guard in test-all's runDiscovered).
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
@@ -136,12 +137,13 @@ function runGeminiEval(modesDirYaml) {
     check(childSucceeded, 'gemini-eval.mjs context-only child exits successfully');
     if (!childSucceeded) {
       console.error(stderr || result.error?.message || `child exited ${result.status}`);
-      return { stdout, stderr, tokenBudget: NaN, evalModeFile: null };
+      return { stdout, stderr, tokenBudget: NaN, evalModeFile: null, evalStack: null };
     }
 
     const tokenBudget = Number(stdout.match(/Token budget: (\d+) tokens/)?.[1] ?? NaN);
     const evalModeFile = stdout.match(/Evaluation mode: ([^\r\n]+)/)?.[1]?.trim() ?? null;
-    return { stdout, stderr, tokenBudget, evalModeFile };
+    const evalStack = stdout.match(/Evaluation stack: ([^\r\n]+)/)?.[1]?.trim() ?? null;
+    return { stdout, stderr, tokenBudget, evalModeFile, evalStack };
   } finally {
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   }
@@ -200,6 +202,20 @@ check(
   'gemini-eval.mjs resolves the Arabic fursah evaluation mode',
 );
 
+// Same bytes gemini-eval.mjs hashes: BOM stripped, then trim, which is what
+// readFile() puts into the prompt. The stack line is those fingerprints in
+// prompt order, so a swapped or duplicated file fails without the test
+// having to print the mode text (it names _custom.md).
+function readModeText(path) {
+  const text = readFileSync(path, 'utf8');
+  return (text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text).trim();
+}
+function evaluationFingerprint(text) {
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+const canonicalOfertaText = readModeText(join(ROOT, 'modes', 'oferta.md'));
+const canonicalOfertaFingerprint = evaluationFingerprint(canonicalOfertaText);
+
 // Absent modes_dir keeps the historical default (modes/, oferta.md) — a
 // different token budget than the modes/de config above proves the default
 // files, not modes/de's, were actually read.
@@ -207,6 +223,10 @@ const noMarket = runGeminiEval('  output: en');
 check(
   Number.isFinite(noMarket.tokenBudget) && noMarket.tokenBudget !== oneMarketArray.tokenBudget,
   'gemini-eval.mjs falls back to modes/ (oferta.md) when modes_dir is absent, unchanged from before #3793',
+);
+check(
+  noMarket.evalStack === `modes/oferta.md ${canonicalOfertaFingerprint}`,
+  'the English default sends modes/oferta.md once, with no market override appended',
 );
 
 // Regression (CodeRabbit, PR #3798): the FIRST declared market is primary.
@@ -236,3 +256,63 @@ check(
     && Math.abs(missingPrimary.tokenBudget - oneMarketArray.tokenBudget) > 1000,
   'the second declared market (modes/de) is NOT silently promoted to primary when the first cannot be resolved',
 );
+check(
+  missingPrimary.evalStack === `modes/oferta.md ${canonicalOfertaFingerprint}`,
+  'an unresolvable primary keeps a single modes/oferta.md, with no market file prepended to itself',
+);
+
+// Each market directory ships its own evaluation file. gemini-eval used to
+// pick that file from a hardcoded name list and, for the six markets below
+// plus any later one, fell back to English modes/oferta.md (#6398). The
+// names here are the files on disk; the coverage check fails when a market
+// directory is added or removed without updating them.
+const MARKET_EVAL_FILES = {
+  ar: 'fursah.md',
+  da: 'oferta.md',
+  de: 'angebot.md',
+  es: 'oferta.md',
+  fr: 'offre.md',
+  hi: 'naukri.md',
+  id: 'lowongan.md',
+  it: 'annuncio.md',
+  ja: 'kyujin.md',
+  ko: 'gonggo.md',
+  nl: 'vacature.md',
+  pl: 'oferta.md',
+  pt: 'oferta.md',
+  ru: 'oferta.md',
+  sg: 'offer.md',
+  tr: 'is-ilani.md',
+  ua: 'oferta.md',
+  vi: 'tuyen-dung.md',
+  zh: 'oferta.md',
+  'zh-TW': 'oferta.md',
+};
+const marketDirs = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && existsSync(join(ROOT, 'modes', entry.name, '_shared.md')))
+  .map((entry) => entry.name)
+  .sort();
+const mappedMarkets = Object.keys(MARKET_EVAL_FILES).sort();
+const missingFromMap = marketDirs.filter((name) => !MARKET_EVAL_FILES[name]);
+const extraInMap = mappedMarkets.filter((name) => !marketDirs.includes(name));
+check(
+  missingFromMap.length === 0 && extraInMap.length === 0,
+  `evaluation-file map covers every market directory (${marketDirs.length})`
+    + `${missingFromMap.length ? `; missing ${missingFromMap.join(', ')}` : ''}`
+    + `${extraInMap.length ? `; extra ${extraInMap.join(', ')}` : ''}`,
+);
+for (const [market, file] of Object.entries(MARKET_EVAL_FILES)) {
+  const resolved = runGeminiEval(`  modes_dir: modes/${market}`);
+  const marketRel = `modes/${market}/${file}`;
+  const marketFingerprint = evaluationFingerprint(readModeText(join(ROOT, 'modes', market, file)));
+  check(
+    resolved.evalModeFile === marketRel
+      && !resolved.stderr.includes('No matching evaluation file found'),
+    `gemini-eval.mjs resolves modes/${market} to ${file}`,
+  );
+  check(
+    resolved.evalStack === `modes/oferta.md ${canonicalOfertaFingerprint} -> ${marketRel} ${marketFingerprint}`
+      && resolved.stdout.includes('within'),
+    `gemini-eval.mjs places modes/oferta.md before ${marketRel} inside the budget`,
+  );
+}

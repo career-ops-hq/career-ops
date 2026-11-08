@@ -148,6 +148,19 @@ try {
       fail(`unparseable date produced postedAt = ${JSON.stringify(undated.postedAt)}`);
     }
 
+    if (job.closesAt === '2026-11-11') {
+      pass('parsePlatsbankenResponse keeps application_deadline as the calendar day 2026-11-11');
+    } else {
+      fail(`closesAt = ${JSON.stringify(job.closesAt)}`);
+    }
+
+    const badDeadline = parsePlatsbankenResponse(response([ad({ application_deadline: '2026-02-31T00:00:00' })]))[0];
+    if (!('closesAt' in badDeadline)) {
+      pass('parsePlatsbankenResponse omits closesAt when application_deadline is not a calendar day');
+    } else {
+      fail(`bad deadline produced closesAt = ${JSON.stringify(badDeadline.closesAt)}`);
+    }
+
     // Location is "{city or municipality}, {region}, {country}" from the parts
     // the ad carries, so a location_filter entry for the country matches an
     // ad from any town; repeated parts appear once, and it is '' — never

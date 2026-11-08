@@ -1,9 +1,11 @@
-import { pathToFileURL } from "node:url";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium, type Browser, type BrowserContext, type Page, type Frame, type Response } from "playwright-core";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
-import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
+import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
@@ -12,11 +14,26 @@ import { resolveCli } from "../clis";
 import { fencingReport } from "../cli-fencing.mjs";
 import { CAPS } from "../worker-capabilities.mjs";
 import { assertSafeApplyUrl, installApplyEgressGuard, isUnsafeApplyUrlError, isBlockedNavigation, UnsafeApplyUrlError } from "./url-guard.mjs";
+import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 
 type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
 
+function applyScopeFile(): string {
+  const explicit = (process.env.CAREER_OPS_CODE_ROOT || "").trim();
+  if (explicit) return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope");
+  // resolveCodeRoot assumes cwd is <checkout>/web. node --test from the
+  // checkout walks up to the parent and misses apply-scope.mjs.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope"),
+    resolveRootScript(path.resolve(process.cwd()), "apply-scope"),
+    resolveRootScript(path.resolve(here, "../../../.."), "apply-scope"),
+  ];
+  return candidates.find((file) => existsSync(file)) || candidates[0];
+}
+
 async function applyLaunch(): Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }> {
-  const file = resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope");
+  const file = applyScopeFile();
   return import(/* webpackIgnore: true */ pathToFileURL(file).href) as Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }>;
 }
 
@@ -187,7 +204,13 @@ async function nudgeScroll(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 }
 
-export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+type OpenedApplySession = { id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean };
+type UnsupportedApplySession = { unsupported: { vendor: string; label: string; postingUrl: string }; message: string };
+
+export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<OpenedApplySession | UnsupportedApplySession> {
+  // Workday, iCIMS, and UKG have no in-app fill. Refuse before Chrome starts.
+  const blockedAts = await unsupportedInAppAts(url);
+  if (blockedAts) return { unsupported: blockedAts, message: unsupportedAtsMessage(blockedAts.label) };
   // Refuse before launching any navigation, so an obviously-internal target
   // never reaches Playwright at all.
   await assertSafeApplyUrl(url);
@@ -224,6 +247,14 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     if (SESSIONS.size === 0) scheduleIdleClose();
     throw e;
   }
+  // A career page can redirect onto a blocked portal. Close before scroll,
+  // screenshots, or the Apply click that opens a second window.
+  const landedAts = await unsupportedInAppAts(page.url());
+  if (landedAts) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts.label, true) };
+  }
   await snap(); // first paint
   const sBlock = statusBlock(resp?.status(), resp ? resp.headers() : {});
   if (sBlock) return abort(sBlock.message);
@@ -237,6 +268,12 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 12_000 }).catch(() => null))).catch(() => {});
   await page.waitForTimeout(1200);
   await dropNewTabs(page); // make any "Apply" link/popup navigate in OUR tab
+  const settledAts = await unsupportedInAppAts(page.url());
+  if (settledAts) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts.label, true) };
+  }
   await snap(); // settled
 
   // 4) Extract from the richest frame; if nothing yet, try (a) a scroll pass to
@@ -250,12 +287,30 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     await page.waitForTimeout(400);
     ({ frame, form } = await pickFormFrame(page));
   }
-  if (!noApplyBtn && !looksLikeApplicationForm(form) && (await tryApplyTrigger(page))) {
-    await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
-    await page.waitForTimeout(800);
-    await dropNewTabs(page);
-    ({ frame, form } = await pickFormFrame(page));
-    await snap();
+  if (!noApplyBtn && !looksLikeApplicationForm(form)) {
+    const trigger = await tryApplyTrigger(page);
+    // The Apply control points at Workday, iCIMS, or UKG. Close this window
+    // instead of following it or handing the page to the drive agent.
+    if (trigger && typeof trigger === "object" && "blocked" in trigger) {
+      const hit = await unsupportedInAppAts(trigger.blocked);
+      await context.close().catch(() => {});
+      if (SESSIONS.size === 0) scheduleIdleClose();
+      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit.label, true) };
+    } else if (trigger && typeof trigger === "object" && "followed" in trigger) {
+      await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
+      await page.waitForTimeout(800);
+      await dropNewTabs(page);
+      await waitForBlankPopup(page, trigger.followed);
+      const lateUrl = await blockedAfterAction(page, trigger.followed, false);
+      const lateAts = lateUrl ? await unsupportedInAppAts(lateUrl) : null;
+      if (lateAts) {
+        await context.close().catch(() => {});
+        if (SESSIONS.size === 0) scheduleIdleClose();
+        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts.label, true) };
+      }
+      ({ frame, form } = await pickFormFrame(page));
+      await snap();
+    }
   }
   await enrichFromAts(url, form.fields); // clean labels + real options for known ATS (Greenhouse)
   await snap();

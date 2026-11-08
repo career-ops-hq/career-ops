@@ -71,7 +71,7 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
 
           <WorkerPills />
 
-          <div className="mt-auto space-y-3 pb-16 pt-4">
+          <div className="mt-auto space-y-3 pb-16 pt-4 md-tall:pb-40">
             <UsageMeter />
             <div className="space-y-1.5">
               <div className="flex items-center justify-between px-1">
@@ -79,9 +79,6 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
                 <span className="font-mono text-[10px] text-faint">THEME</span>
               </div>
               <ThemeToggle showLabel />
-              <div className="px-1">
-                <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-              </div>
             </div>
           </div>
         </aside>
