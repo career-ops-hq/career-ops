@@ -8,6 +8,7 @@ import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { CANONICAL_STATES, scoreNum, scoreTone } from "@/lib/format";
+import { EvaluateApplication } from "@/components/evaluate-application";
 import { StatusSelect } from "@/components/status-select";
 import { applicationKey, applySavedStatus, saveStatuses } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
@@ -936,6 +937,7 @@ export function PipelineView({
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+                    <EvaluateApplication n={r.n} company={r.company} role={r.role} url={postingHref(r.url) || postingHref(r.applyLink)} evaluation={r.evaluation} />
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-muted">
                     <StatusSelect

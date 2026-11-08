@@ -63,6 +63,7 @@ const SUITES = {
   "cv-upload": { url: "CV_UPLOAD_TEST_URL", root: "CV_UPLOAD_TEST_ROOT", fixture: "cv-upload" },
   "dialog-focus": { url: "DIALOG_FOCUS_TEST_URL", fixture: "pipeline-status" },
   "employer-preset": { url: "EXPLORE_EMPLOYER_TEST_URL", fixture: "blank" },
+  "evaluate-application": { url: "EVALUATE_APPLICATION_TEST_URL", root: "EVALUATE_APPLICATION_TEST_ROOT", fixture: "evaluate-application" },
   "evaluation-options": { url: "EVALUATION_OPTIONS_TEST_URL", fixture: "inbox-undo" },
   "followups-loading": { url: "FOLLOWUPS_LOADING_TEST_URL", root: "FOLLOWUPS_LOADING_TEST_ROOT", fixture: "pipeline-status" },
   "inbox-keys": { url: "INBOX_KEYS_TEST_URL", root: "INBOX_KEYS_TEST_ROOT", fixture: "inbox-undo" },

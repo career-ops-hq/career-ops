@@ -20,6 +20,7 @@ import {
 } from "../../src/lib/report-persist.mjs";
 import { writeEvaluationArtifacts } from "../../../persist-evaluation-report.mjs";
 import { resolveTsvColumns, TSV_ADDITION_HEADER } from "../../../tracker-parse.mjs";
+import { stampEvaluationScope } from "../../src/lib/evaluation-state.mjs";
 
 function fakeChild({ stdout = "", stderr = "", exitCode = 0, spawnError = null, onStdin = null } = {}) {
   const child = new EventEmitter();
@@ -275,7 +276,7 @@ test("persistEvaluation: writes report + TSV, reserves, merges, releases", async
 
     const reportPath = join(root, "reports", "035-acme-ai-2026-08-04.md");
     const tsvPath = join(root, "batch", "tracker-additions", "035-acme-ai.tsv");
-    assert.equal(readFileSync(reportPath, "utf8"), REPORT);
+    assert.equal(readFileSync(reportPath, "utf8"), stampEvaluationScope(REPORT));
     const { header, fields } = headedRows(readFileSync(tsvPath, "utf8"));
     const { map, missing } = resolveTsvColumns(header);
     assert.deepEqual(missing, []);

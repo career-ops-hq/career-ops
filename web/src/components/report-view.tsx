@@ -33,6 +33,9 @@ import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { cvDiskState } from "@/lib/cv-disk-state.mjs";
 import { reportSpendActions } from "@/lib/report-spend-actions.mjs";
 import { applyPostingUrl } from "@/lib/posting-url.mjs";
+import { EvaluateApplication } from "@/components/evaluate-application";
+import { evaluationState } from "@/lib/evaluation-state.mjs";
+import { postingHref } from "@/lib/posting-url.mjs";
 import { PageFrame } from "@/components/page-frame";
 
 // Progressive disclosure of the report. Current oferta.md writes letter F as
@@ -113,6 +116,8 @@ export function ReportView({
         {meta?.fields.find((field) => field.label === "Evaluation scope") && (
           <p className="mt-2 text-xs text-muted">{meta.fields.find((field) => field.label === "Evaluation scope")?.value}</p>
         )}
+
+        {app && <div className="mt-3 print:hidden"><EvaluateApplication n={app.n} company={app.company} role={app.role} url={postingHref(app.url) || postingHref(app.applyLink) || applyUrl || ""} evaluation={evaluationState(report) as NonNullable<Application["evaluation"]>} /></div>}
 
         {(archetype || date || applyUrl) && (
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">

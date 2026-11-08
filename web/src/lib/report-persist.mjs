@@ -18,6 +18,7 @@ import { setInboxSkip } from "./inbox-skip.mjs";
 import { parseEvaluationOptions } from "./evaluation-options.mjs";
 import { machineSummarySection } from "./machine-summary-section.mjs";
 import { classifyEvaluationGate, evaluationGateConflictsWithReport } from "./evaluation-gate.mjs";
+import { stampEvaluationScope } from "./evaluation-state.mjs";
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 const YAML_FENCE = /^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
@@ -215,23 +216,13 @@ function spawnScript({ spawnFn, execPath, root, cwd = root, script, args = [], i
  * the sentinel. Never throws: the caller routes `{ok:false}` through the same
  * honesty gate as every other evaluate failure.
  *
- * @param {{spawnFn: Function, execPath: string, root: string, coreRoot?: string, markdown: string, url: string, today: string, postedAt?: string, evaluationSections?: string[]}} args
- * @returns {Promise<{ok: true, num: string, reportFile: string, warnings: string[]} | {ok: false, error: string}>}
+ * @param {{spawnFn: Function, execPath: string, root: string, coreRoot?: string, markdown: string, url: string, today: string, postedAt?: string, evaluationSections?: string[], targetApplication?: {num: string, expectedCompany: string, expectedRole: string, expectedReport: string}}} args
+ * @returns {Promise<{ok: true, num: string, applicationN?: string, reportFile: string, warnings: string[]} | {ok: false, error: string}>}
  */
-export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = root, markdown, url, today, postedAt, evaluationSections = undefined }) {
+export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = root, markdown, url, today, postedAt, evaluationSections = undefined, targetApplication = undefined }) {
   const evaluation = parseEvaluationOptions(evaluationSections);
   if (!evaluation.ok) return { ok: false, error: evaluation.error };
-  if (!evaluation.full) {
-    // Scope is user-selected request data, never a model-inferred claim.
-    const scope = evaluation.sections.join(", ") || "fit score only";
-    // Only normalize the report header; matching text in the archived JD is data.
-    const bodyStart = markdown.search(/^##\s|^---\s*$/m);
-    const cut = bodyStart < 0 ? markdown.length : bodyStart;
-    const header = markdown.slice(0, cut)
-      .replace(/^\*\*Evaluation scope:\*\*[^\n]*\n?/gmi, "")
-      .replace(/^(# .+)$/m, `$1\n\n**Evaluation scope:** Focused — ${scope}.`);
-    markdown = header + markdown.slice(cut);
-  }
+  markdown = stampEvaluationScope(markdown, evaluation.sections);
   if (!ISO_DATE_RE.test(String(today ?? ""))) {
     return { ok: false, error: `Invalid evaluation date "${today}" — expected YYYY-MM-DD.` };
   }
@@ -313,6 +304,7 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
       url: postingUrl,
       notes,
       reportFile,
+      ...(targetApplication ? { targetApplication } : {}),
     }),
   });
   if (!written.ok) {
@@ -320,14 +312,17 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
   }
 
   const merged = await spawnScript({
-    spawnFn, execPath, root: coreRoot, cwd: root, script: "merge-tracker.mjs",
+    spawnFn, execPath, root: coreRoot, cwd: root,
+    script: targetApplication ? "tracker.mjs" : "merge-tracker.mjs",
+    args: targetApplication ? ["sync"] : [],
   });
-  if (!merged.ok) {
+  if (!merged.ok && !targetApplication) {
     return finish(`The report was saved but merge-tracker.mjs failed: ${merged.stderr || "non-zero exit"}.`);
   }
   const held = await finish(null);
   if (held) return held;
   const warnings = [];
+  if (!merged.ok && targetApplication) warnings.push("Evaluation saved; the derived tracker index could not be refreshed.");
   if (merged.stderr) warnings.push(merged.stderr);
   // Complete the discovery only after the report and tracker row were saved.
   // A direct URL evaluation may have no inbox entry. Failure here must not
@@ -346,5 +341,5 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
       warnings.push("Evaluation saved, but the inbox checkbox could not be updated.");
     }
   }
-  return { ok: true, num, reportFile, warnings };
+  return { ok: true, num, ...(targetApplication ? { applicationN: targetApplication.num } : {}), reportFile, warnings };
 }
