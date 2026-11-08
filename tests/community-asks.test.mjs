@@ -247,17 +247,17 @@ test('the texts keep their promises', () => {
 });
 
 test('the star drawing is printed whole, in its own block, and only with the star', () => {
-  assert.equal(STAR_ART.length, 9);
+  assert.equal(STAR_ART.length, 8);
   for (const line of STAR_ART) {
-    assert.ok(line.length <= 27, `too wide: ${JSON.stringify(line)}`);
+    assert.ok(line.length <= 17, `too wide: ${JSON.stringify(line)}`);
     // Plain ASCII keeps every column aligned in any terminal; an emoji may only
     // close a row, where drawing it a column wider shifts nothing.
     assert.match(line, /^[\x20-\x7e]*\u2b50?$/, `only ASCII, or an emoji at the end: ${JSON.stringify(line)}`);
   }
   assert.ok(STAR_ART[1].endsWith('\u2b50'));
   const star = askOutput('star', { reports: 1 }).split('\n');
-  assert.deepEqual(star.slice(0, 11), ['```', ...STAR_ART, '```']);
-  assert.equal(star[11], askText('star', { reports: 1 }));
+  assert.deepEqual(star.slice(0, STAR_ART.length + 2), ['```', ...STAR_ART, '```']);
+  assert.equal(star[STAR_ART.length + 2], askText('star', { reports: 1 }));
   assert.ok(!askOutput('manifesto').includes('```'));
 });
 

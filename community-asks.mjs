@@ -51,15 +51,14 @@ export const VETERAN_MIN_REPORTS = 5;
 // block of its own so the agent copies it exactly. Star ask only, never the manifesto.
 // The emoji closes its row: a terminal that draws it one column wider shifts nothing.
 export const STAR_ART = Object.freeze([
-  "   .               . ' `",
-  "             o   ⭐",
-  "            / \\        .",
-  "   +       /   \\",
-  "  *-------*     *-------*",
-  "    `-.._*       *_..-'",
-  ".       /   .*.   \\       .",
-  "       / .-'   '-. \\",
-  "      *-'         '-*",
+  " +          . '",
+  "        o  ⭐",
+  "       / \\",
+  "*-----*   *-----*",
+  " `.           .'",
+  "    *       *",
+  "   /  .-*-.  \\",
+  "  *-'       '-*",
 ]);
 
 const REPORT_FILE = /^\d{3,}-.+\.md$/;
