@@ -4273,6 +4273,54 @@ export function progressTicker(total, { every = PROGRESS_EVERY, write = (line) =
     }
   };
 }
+// ── Transient-failure retry (#6671) ─────────────────────────────────
+// The concurrent sweep can fail a healthy board for reasons that have nothing to
+// do with the board: a timeout or reset while ten other requests share the
+// connection, or a 5xx from a data center that is busy with this very sweep.
+// After the sweep, each board that failed that way gets ONE more attempt,
+// alone, with a short gap before it.
+//
+// Only a fetch failure of kind `network` (timeouts and aborts included) or
+// `server` (5xx) qualifies. A 4xx will not change within seconds, and a failure
+// while processing a board that DID fetch is not a transport problem.
+const RETRYABLE_FETCH_KINDS = new Set(['network', 'server']);
+
+export const DEFAULT_RETRY_GAP_MS = 3000;
+const RETRY_JITTER_RATIO = 0.3;
+// A sequential pass over a very long failure list would outlast the sweep it
+// is repairing. Targets past the cap keep their first error.
+export const MAX_RETRY_TARGETS = 25;
+
+export function resolveRetryGapMs(raw, fallback = DEFAULT_RETRY_GAP_MS) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+export const SCAN_RETRY_GAP_MS = resolveRetryGapMs(process.env.CAREER_OPS_SCAN_RETRY_GAP_MS);
+
+export function isRetryableFetchFailure(entry) {
+  return entry?.stage === 'fetch' && RETRYABLE_FETCH_KINDS.has(entry.kind);
+}
+
+export function retryGapWithJitter(gapMs, random = Math.random) {
+  return gapMs + Math.floor(random() * gapMs * RETRY_JITTER_RATIO);
+}
+
+export async function retryTransientFailures(queue, {
+  retryOne,
+  gapMs = DEFAULT_RETRY_GAP_MS,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  random = Math.random,
+}) {
+  let recovered = 0;
+  for (const item of queue) {
+    await sleep(retryGapWithJitter(gapMs, random));
+    if (await retryOne(item)) recovered++;
+  }
+  return { attempted: queue.length, recovered };
+}
+
 
 // ── Main ────────────────────────────────────────────────────────────
 
@@ -4954,7 +5002,11 @@ async function main() {
   const deferredBoards = [];
   const employerLocationRejected = new Set();
   const employerLocationAccepted = new Set();
-  const tasks = targets.map(company => async () => {
+    // Targets whose first attempt failed on a transient fetch error (#6671).
+  const retryQueue = [];
+  // One scan of one target. The sweep calls it once per target; the retry pass
+  // after the sweep calls it again for the ones queued above, with isRetry set.
+  const runTarget = async (company, { isRetry = false } = {}) => {
     let provider = company._provider;
     const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
     // includeUndated is deliberately ALWAYS true, independent of the window.
@@ -4998,17 +5050,35 @@ async function main() {
     applyEntryResponseCap(ctx, company);
     applyEntryTimeout(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
-    const recordError = err => {
+       
+    
+    // `stage` says where the failure happened: 'fetch' (the provider could not
+    // read the board) or 'process' (it read the board and filtering it threw).
+    // Only a transient fetch failure is queued, and only on the first attempt,
+    // so no target is ever attempted more than twice.
+
+
+
+    const recordError = (err, stage = 'fetch') => {
       failedTargets++;
-      errors.push({
+      const entry = {
         company: company.name,
         error: err.message,
         kind: classifyFetchError(err),
         status: err.status ?? observation.lastStatus,
-      });
+        stage,
+        ...(isRetry ? { retried: true } : {}),
+      };
+      errors.push(entry);
+      if (!isRetry && isRetryableFetchFailure(entry)) retryQueue.push({ company, entry });
     };
+    // Set once the provider has returned its postings. A throw after that point
+    // is a processing failure, whatever its message says.
+    let fetched = false;
     try {
       let jobs;
+
+
       try {
         jobs = await provider.fetch(company, ctx);
       } catch (parserErr) {
@@ -5025,9 +5095,15 @@ async function main() {
         });
       }
       if (!Array.isArray(jobs)) {
+
+
         throw new Error(`${provider.id}: fetch() did not return an array`);
       }
+      fetched = true;
       totalFound += jobs.length;
+
+
+
       if (!company._isBoard && jobs.length === 0) {
         if (emptyTargetStatus(observation) === 'empty') emptyTargets.push(company.name);
         else unverifiedZeroTargets.push(company.name);
@@ -5269,22 +5345,66 @@ async function main() {
         // Never await an employer barrier inside a fetch worker: enough fast
         // boards could occupy every worker before the employer can start.
         deferredBoards.push(async () => {
-          try { await processJobs(); } catch (err) { recordError(err); }
+          try { await processJobs(); } catch (err) { recordError(err, 'process'); }
         });
       } else {
         await processJobs();
       }
     } catch (err) {
-      recordError(err);
+      recordError(err, fetched ? 'process' : 'fetch');
     }
-  });
+  };
+  const tasks = targets.map(company => () => runTarget(company));
+
+  // The retry pass (#6671). Runs after the concurrent sweep and before the
+  // deferred board copies are filtered, so a recovered employer still takes its
+  // place in the location decisions those copies wait on.
+  const retryTransientFetchFailures = async () => {
+    if (retryQueue.length === 0) return;
+    // Every target failing transiently is an outage, not a busy sweep.
+    if (targets.length > 1 && retryQueue.length === targets.length) {
+      console.log(`\nSkipping retry: all ${targets.length} targets failed on a transient error, which looks like an outage rather than a busy sweep.`);
+      return;
+    }
+    const batch = retryQueue.slice(0, MAX_RETRY_TARGETS);
+    console.log(`\n↻ Retrying ${batch.length} target(s) that failed on a transient error, one at a time...`);
+    if (batch.length < retryQueue.length) {
+      console.log(`  (${retryQueue.length - batch.length} more not retried; the limit is ${MAX_RETRY_TARGETS})`);
+    }
+    const { recovered } = await retryTransientFailures(batch, {
+      gapMs: SCAN_RETRY_GAP_MS,
+      retryOne: async ({ company, entry }) => {
+        // Tentatively clear the first failure. If the retry fails too, runTarget
+        // records the new one (marked retried); if it succeeds, nothing is left.
+        const at = errors.indexOf(entry);
+        if (at !== -1) errors.splice(at, 1);
+        failedTargets--;
+        const failedWithoutThisTarget = failedTargets;
+        try {
+          await runTarget(company, { isRetry: true });
+        } catch (err) {
+          failedTargets++;
+          errors.push({ ...entry, error: err.message, retried: true });
+          return false;
+        }
+        const ok = failedTargets === failedWithoutThisTarget;
+        console.log(ok ? `  ✓ ${company.name}: recovered` : `  ✗ ${company.name}: failed again`);
+        return ok;
+      },
+    });
+    console.log(`  ${recovered} of ${batch.length} recovered`);
+  };
 
   const companyFetches = () => parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
     hostLimit: HOST_CONCURRENCY,
     hostOf: (_task, index) => companyFetchHost(targets[index]),
   });
-  if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
+  const sweepAndRetry = async () => {
     await companyFetches();
+    await retryTransientFetchFailures();
+  };
+  if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
+    await sweepAndRetry();
   } else {
     const ttlMs = resolveHttpCacheTtlMs(process.env.CAREER_OPS_HTTP_CACHE_TTL_MS);
     await withHttpCache({
@@ -5292,7 +5412,7 @@ async function main() {
       ttlMs,
       write: !dryRun,
     }, async () => {
-      await companyFetches();
+      await sweepAndRetry();
       const stats = httpCacheStats();
       if (!stats || (stats.hits === 0 && stats.revalidated === 0)) return;
       const parts = [];

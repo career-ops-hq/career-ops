@@ -1180,6 +1180,10 @@ Defaults are unchanged, so a single-lane setup needs none of this. Note that the
 
 **Progress:** every 25 sources, and once at the end, the scan prints a line such as `[14:02:31] scan: 50/120 sources done` to stderr. It prints under `--quiet` too, so a long unattended scan never looks stalled, and it stays out of the `--json` receipt on stdout.
 
+
+**Retry after the sweep (#6671):** boards are fetched concurrently, so a healthy board can time out or get a 5xx just because it shares the burst with others. After the sweep, each target that failed with a `network` (timeout, reset) or `server` (5xx) error is retried once, alone, after a short gap (3 s plus up to 30 % jitter). A 4xx is never retried, nor is a failure while filtering a board that was fetched. A target that recovers is dropped from the errors list; one that fails again is reported once, not twice. If every target failed transiently the pass is skipped as an outage, and at most 25 targets are retried per scan. `CAREER_OPS_SCAN_RETRY_GAP_MS` changes the gap (`0` for none).
+
+
 **Exit codes:** `0` scan completed, `1` configuration error or no portals.yml found.
 
 ---
