@@ -42,11 +42,17 @@ const cliStub = `export const resolveCliOrFallback = () => ({ spec: { id: "claud
 export const cliSubstitutionNotice = () => null;
 export const cliUnavailableError = () => ({ error: "Fixture CLI unavailable" });`;
 const spawnStub = `export function spawnHeadlessCli() { throw new Error("No AI process may start in a data-root test"); }`;
+const nextServerStub = `export class NextResponse extends Response {
+  static json(body, init = {}) {
+    const headers = new Headers(init.headers || {});
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
+    return new Response(JSON.stringify(body), { status: init.status ?? 200, headers });
+  }
+}`;
 register(`data:text/javascript,${encodeURIComponent(`
   export function resolve(specifier, context, nextResolve) {
-    const stubs = ${JSON.stringify({ "@/lib/clis": cliStub, "@/lib/spawn-cli.mjs": spawnStub })};
+    const stubs = ${JSON.stringify({ "@/lib/clis": cliStub, "@/lib/spawn-cli.mjs": spawnStub, "next/server": nextServerStub })};
     if (Object.hasOwn(stubs, specifier)) return { url: "data:text/javascript," + encodeURIComponent(stubs[specifier]), shortCircuit: true };
-    if (specifier === "next/server") return nextResolve("next/server.js", context);
     return nextResolve(specifier, context);
   }
 `)}`, import.meta.url);
@@ -149,7 +155,11 @@ test("PDF render pins the child to the external data folder", async () => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
-    queueMicrotask(() => child.emit("close", 0));
+    child.stderr.setEncoding = () => {};
+    queueMicrotask(() => {
+      if (String(args[0]).endsWith("generate-pdf.mjs")) fs.writeFileSync(args[2], "%PDF-1.4\n");
+      child.emit("close", 0);
+    });
     return child;
   };
   try {

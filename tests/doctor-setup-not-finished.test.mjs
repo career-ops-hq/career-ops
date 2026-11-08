@@ -39,7 +39,7 @@ test('a fresh checkout is told setup is not finished, not that tools are ready',
     const { status, out } = runDoctor(dir);
     assert.equal(status, 1, out);
     assert.match(out, /Setup is not finished \(4 files missing: cv\.md, config\/profile\.yml, modes\/_profile\.md, portals\.yml\)/);
-    assert.match(out, /node onboard-write\.mjs/);
+    assert.match(out, /onboard-write\.mjs/);
     assert.match(out, /Result: 2 issues found/);
     assert.doesNotMatch(out, /Your tools are ready/);
     assert.doesNotMatch(out, /ready to go/);
@@ -69,7 +69,7 @@ test('a fresh checkout with a skill-entrypoint stub does not claim tools are rea
     const { status, out } = runDoctor(dir);
     assert.equal(status, 1, out);
     assert.match(out, /Setup is not finished \(4 files missing:/);
-    assert.match(out, /node onboard-write\.mjs/);
+    assert.match(out, /onboard-write\.mjs/);
     assert.match(out, /Result: 2 issues found/);
     assert.doesNotMatch(out, /Your tools are ready/);
     assert.doesNotMatch(out, /ready to go/);
@@ -88,7 +88,7 @@ test('a failing check still reports the missing setup files', () => {
     assert.match(out, /✗ cv\.md not found/);
     assert.match(out, /✗ config\/profile\.yml not found/);
     assert.match(out, /Result: 3 issues found\./);
-    assert.match(out, /node onboard-write\.mjs/);
+    assert.match(out, /onboard-write\.mjs/);
     assert.match(out, /Setup is not finished \(4 files missing: cv\.md, config\/profile\.yml, modes\/_profile\.md, portals\.yml\)\./);
     assert.match(out, /Open your AI CLI in the checkout \(claude, codex, opencode, qwen, agy or grok\) and it walks you through setup by chatting\./);
   } finally {
@@ -103,7 +103,7 @@ test('a missing cv.md exits non-zero and names onboard-write', () => {
     const { status, out } = runDoctor(dir);
     assert.equal(status, 1, out);
     assert.match(out, /✗ cv\.md not found/);
-    assert.match(out, /node onboard-write\.mjs/);
+    assert.match(out, /onboard-write\.mjs/);
     assert.doesNotMatch(out, /config\/profile\.yml not found/);
     assert.doesNotMatch(out, /ready to go/);
   } finally {
@@ -118,7 +118,7 @@ test('a missing profile exits non-zero and names onboard-write', () => {
     const { status, out } = runDoctor(dir);
     assert.equal(status, 1, out);
     assert.match(out, /✗ config\/profile\.yml not found/);
-    assert.match(out, /node onboard-write\.mjs/);
+    assert.match(out, /onboard-write\.mjs/);
     assert.doesNotMatch(out, /cv\.md not found/);
     assert.doesNotMatch(out, /ready to go/);
   } finally {
@@ -177,5 +177,31 @@ test('a missing default profile overridden by .env exits non-zero', () => {
     assert.doesNotMatch(out, /⚠ config\/profile\.yml not found \(\.env sets CAREER_OPS_PROFILE=/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the onboard command quotes the script path and a data root that contains a space', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'doctor-quote-'));
+  const dir = join(parent, 'career ops $HOME');
+  mkdirSync(dir);
+  copyFileSync(join(ROOT, 'package.json'), join(dir, 'package.json'));
+  assert.equal(linkNodeModules(dir), null);
+  mkdirSync(join(dir, 'modes'));
+  mkdirSync(join(dir, 'config'));
+  try {
+    const { status, out } = runDoctor(dir);
+    assert.equal(status, 1, out);
+    const script = join(dir, 'onboard-write.mjs');
+    const quote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const expected = `node ${quote(script)} --answers <answers.json> --target ${quote(dir)}`;
+    assert.ok(out.includes(expected), out);
+    if (process.platform !== 'win32') {
+      const safe = expected.replace('<answers.json>', 'answers.json');
+      const parsed = spawnSync('sh', ['-c', `set -- ${safe}\nprintf '%s\\0' "$1" "$2" "$3" "$4" "$5" "$6"`], { encoding: 'utf8' });
+      assert.equal(parsed.status, 0, parsed.stderr);
+      assert.deepEqual(parsed.stdout.split('\0').slice(0, 6), ['node', script, '--answers', 'answers.json', '--target', dir]);
+    }
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
   }
 });

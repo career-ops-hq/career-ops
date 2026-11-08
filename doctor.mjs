@@ -1698,9 +1698,12 @@ async function main() {
   const setupNote = setupMissing.length > 0
     ? `Setup is not finished (${setupMissing.length} file${setupMissing.length === 1 ? '' : 's'} missing: ${setupMissing.map(({ path }) => path).join(', ')})`
     : null;
-  const onboardCmd = projectRoot === codeRoot
+  // --target forces codeRoot and projectRoot to the same path, so equality
+  // alone would drop --target and let onboard-write follow getCareerOpsRoot().
+  const quoteOnboard = process.platform === 'win32' ? quotePowerShell : quoteSh;
+  const onboardCmd = !explicitTarget && projectRoot === codeRoot
     ? 'node onboard-write.mjs --answers <answers.json>'
-    : `node ${join(codeRoot, 'onboard-write.mjs')} --answers <answers.json> --target ${projectRoot}`;
+    : `node ${quoteOnboard(join(codeRoot, 'onboard-write.mjs'))} --answers <answers.json> --target ${quoteOnboard(projectRoot)}`;
   const setupHint = `Run \`${onboardCmd}\` from the career-ops checkout. Open your AI CLI in the checkout (${CLI_NAMES}) and it walks you through setup by chatting.`;
   if (failures > 0) {
     console.log(`Result: ${failures} issue${failures === 1 ? '' : 's'} found. Fix them and run \`npm run doctor\` again.`);
