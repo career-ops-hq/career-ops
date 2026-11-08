@@ -554,7 +554,9 @@ try {
               if (extra.detail) return extra.detail(url);
               return { id: 1, content: '&lt;p&gt;Lead strategy.&lt;/p&gt;' };
             }
-            return listing;
+            // A fresh copy per call: the provider writes bodies onto the jobs it
+            // was given, and one run must never see another run's bodies.
+            return structuredClone(listing);
           },
           ...(extra.ctx || {}),
         });
@@ -597,8 +599,10 @@ try {
 
     let notFoundCalls = 0;
     const failing = await run(optIn, { detail: () => { notFoundCalls++; throw Object.assign(new Error('HTTP 404'), { status: 404 }); } });
-    if (failing.rows.length === 3 && failing.sleeps.includes(200) && notFoundCalls === 2) pass('greenhouse.fetch() keeps postings whose detail fetch failed, paced between attempts, and does not retry a 404');
-    else fail(`greenhouse detail failure: rows=${failing.rows.length} sleeps=${JSON.stringify(failing.sleeps)} calls=${notFoundCalls}`);
+    const failedBodies = failing.rows.filter((r) => /strategy/i.test(r.title)).map((r) => r.description);
+    if (failing.rows.length === 3 && failing.sleeps.includes(200) && notFoundCalls === 2
+      && failedBodies.length === 2 && failedBodies.every((d) => d === undefined)) pass('greenhouse.fetch() keeps postings whose detail fetch failed, paced between attempts, and does not retry a 404');
+    else fail(`greenhouse detail failure: rows=${failing.rows.length} sleeps=${JSON.stringify(failing.sleeps)} calls=${notFoundCalls} bodies=${JSON.stringify(failedBodies)}`);
 
     try {
       await greenhouse.fetch(
