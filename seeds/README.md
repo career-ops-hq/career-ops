@@ -1,8 +1,18 @@
-# seeds/ — VC Portfolio Seed Fetchers
+# seeds/: scanner seed sources
+
+| Path | What it is |
+|------|------------|
+| `vc-portfolios.mjs` | Fetchers that pull a public VC portfolio company list and probe each company's ATS, below. |
+| `employers/` | The employer registry: a community-maintained list of employer job boards the local scanner can read, one pointer per board (employer → ATS → board), with no postings and no personal data. Licensed CC BY 4.0. Format, contributing and removal: [employers/README.md](employers/README.md). |
+| `employers-validate.mjs` | The employer registry's static validator. CI runs it on every pull request that touches the registry (`.github/workflows/employers-validate.yml`). |
+
+The scanner does not read the employer registry yet: this folder holds the data and the checks that gate it.
+
+## VC portfolio seed fetchers
 
 A complementary discovery path for startup job-seekers: pull a **public VC portfolio company list** and probe each company's ATS for openings, feeding results into the same pipeline as tracked companies in `portals.yml`.
 
-## What this does
+### What this does
 
 `scan-ats-full.mjs` normally discovers companies by walking public ATS directories (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com, Workable). The `seeds/` layer adds a **high-signal starting point for startup roles**: rather than waiting for companies to appear in ATS directories, we seed the universe from well-known VC portfolios — giving you instant coverage of hundreds of YC/a16z-backed companies.
 
@@ -19,9 +29,9 @@ ATS provider fetches jobs
 data/pipeline.md
 ```
 
-## Usage
+### Usage
 
-### Via scan-ats-full.mjs (recommended)
+#### Via scan-ats-full.mjs (recommended)
 
 ```bash
 # Seed from Y Combinator portfolio, last 7 days
@@ -38,7 +48,7 @@ npm run scan:seeds   # yc + a16z
 npm run scan:yc      # YC only
 ```
 
-### Programmatic
+#### Programmatic
 
 ```js
 import { fetchYCCompanies, fetchA16zCompanies, toPortalEntry, SEED_SOURCES } from './seeds/vc-portfolios.mjs';
@@ -59,7 +69,7 @@ for (const [id, source] of Object.entries(SEED_SOURCES)) {
 }
 ```
 
-## Data sources
+### Data sources
 
 | Source | URL | Format | Auth |
 |--------|-----|--------|------|
@@ -69,13 +79,13 @@ for (const [id, source] of Object.entries(SEED_SOURCES)) {
 - **YC**: Fetches up to 3 pages × 1000 companies. Covers all public YC batches.
 - **a16z**: Parses the public portfolio page. Falls back gracefully if the page structure changes.
 
-## Security
+### Security
 
 - All slugs are validated against `SLUG_RE = /^[A-Za-z0-9._-]+$/` before any URL interpolation — consistent with the guard in `scan-ats-full.mjs`.
 - Constructed ATS URLs go through the existing `entryOnHost()` SSRF guard before reaching any provider.
 - No authentication tokens, no headless browser, no LLM API calls.
 
-## Adding more VC portfolios
+### Adding more VC portfolios
 
 1. Add a `parseXyzPayload(payload)` pure function (no network — testable with inline fixtures).
 2. Add a `fetchXyzCompanies(opts?)` async function that calls the public endpoint and returns `SeedCompany[]`.
@@ -92,6 +102,6 @@ export const SEED_SOURCES = {
 
 4. Add test cases in `test-all.mjs` covering your `parseXyzPayload()` function.
 
-## Prior art
+### Prior art
 
 The VC-portfolio seeding approach is inspired by [adityachaudhary99/job-hunt](https://github.com/adityachaudhary99/job-hunt) (`02-seeds/fetch_yc.py`, `fetch_a16z.py`), which was the original companion reference cited in issue #1370.

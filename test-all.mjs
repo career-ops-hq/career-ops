@@ -2683,6 +2683,9 @@ const allowedFiles = new Set([
   'dashboard/internal/ui/screens/pipeline.go',
   'dashboard/internal/ui/screens/progress.go',
   'dashboard/internal/ui/screens/stats.go',
+  // An employer registry manifest names who granted its license, by design
+  // (signed_by, seeds/employers/README.md). This one is the maintainer's own.
+  'seeds/employers/contributions/2026-11-08-santifer.json',
 ]);
 
 // The English README and every localized translation at the repo root

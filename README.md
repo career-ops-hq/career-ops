@@ -612,6 +612,8 @@ brand are governed by the [Trademark Policy](TRADEMARK.md), permissive
 for community use, reserved for commercial product naming and
 endorsement.
 
+Code is MIT; data in [`seeds/employers/`](seeds/employers/) is [CC BY 4.0](seeds/employers/LICENSE).
+
 ## Star history
 
 <p align="center">

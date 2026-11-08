@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-02-other",
+  "contributor": "@someone",
+  "signed_by": "Fixture Signer",
+  "rows": 7,
+  "source": "community",
+  "origin": "Copied from a list, write to hr@fixture.example",
+  "no_conflicting_contract": true,
+  "personal_data": true,
+  "exclusive": false,
+  "license": "MIT",
+  "also_permits": [
+    "CC0-1.0"
+  ],
+  "attribution": "Bad manifest",
+  "date": "2026-11-03",
+  "notes": "x"
+}

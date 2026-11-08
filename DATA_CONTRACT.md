@@ -171,6 +171,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `plugins.mjs` | Plugin CLI (list/run/available/add/new/enable/skill/trust/remove) |
 | `plugins-registry/` | Curated community plugins, one `<id>.json` per plugin (the trust root) |
 | `plugin-install.mjs` / `plugin-audit.mjs` / `validate-plugin-registry.mjs` | Plugin install/audit/registry-validation utilities |
+| `seeds/` | Scanner seed sources: the VC portfolio fetchers (`seeds/vc-portfolios.mjs`) and the employer registry (`seeds/employers/`, community-maintained pointers from an employer to its ATS board, CC BY 4.0) with its validator (`seeds/employers-validate.mjs`) |
 | `config/plugins.example.yml` | Plugin activation template (seed for `config/plugins.yml`) |
 | `opencode.example.json` | OpenCode project config template (seed for `opencode.json`; ships Playwright MCP registration) |
 | `batch/batch-prompt.md` | Batch worker prompt |
