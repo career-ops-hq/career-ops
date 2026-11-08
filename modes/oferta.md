@@ -864,3 +864,5 @@ If — and only if — the user **explicitly stated a role-specific desired numb
 `{tracker#}` is the row's `#` **after** the merge in step 2, read from `merge-tracker.mjs`'s output. Write this line after merging, never before: until then the row has no number, and the report number is not a safe stand-in because the merge assigns a different `#` when that one is taken.
 
 Never infer a desired number from the JD, the score, or past conversations. The profile default (`config/profile.yml` → `compensation.target_range`) needs no line — `salary-gap.mjs` reads it as the fallback. The advertised figure also needs no line: the report's `advertised_comp` **is** the advertised observation.
+
+**Last step: the community ask (interactive runs only).** When `oferta` runs on its own, not as a step of `auto-pipeline` or `pipeline` (they ask once, at their own end), finish with `node community-asks.mjs next` and follow AGENTS.md → "Community asks": it prints at most one line, and that line ends your reply. When it prints nothing, say nothing about it.
