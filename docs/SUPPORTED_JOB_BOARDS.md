@@ -156,20 +156,22 @@ future evaluation doesn't repeat the same investigation from scratch.
 
 | Board | Reason | Evaluated |
 | --- | --- | --- |
-| Lagou (拉勾网) | Its server-rendered search payload is technically parseable, but every usable `/wn/zhaopin` request needs query parameters and the site's `robots.txt` disallows `/*?*` for `User-agent: *`. The project does not route around that stated restriction. | 2026-08-26 |
-| TopDev (topdev.vn) | Search results ARE server-rendered plain HTTPS (confirmed live), but `robots.txt` disallows `ClaudeBot` via Cloudflare's default managed AI-bot block (alongside `GPTBot`, `Google-Extended`, `Bytespider`, etc. — generic boilerplate, not a TopDev-specific choice, but still a named block). | 2026-08-26 |
-| CareerLink (careerlink.vn) | Search results ARE server-rendered plain HTTPS (confirmed live: 47 job links found on a location listing page), but `robots.txt` individually lists `ClaudeBot`, `Claude-Web` and `anthropic-ai` as disallowed — separate from its generic bad-bot list, reading as a deliberate choice rather than boilerplate. | 2026-08-26 |
+| Lagou (拉勾网) | Its server-rendered search payload is technically parseable, but every usable `/wn/zhaopin` request needs query parameters and the site's `robots.txt` disallows `/*?*` for `User-agent: *`. The project did not route around that stated restriction. Under rule 6 as it stood until 2026-11-08 this was a stop; it no longer is, so the board can be proposed again. | 2026-08-26 |
+| TopDev (topdev.vn) | Search results ARE server-rendered plain HTTPS (confirmed live), but `robots.txt` disallows `ClaudeBot` via Cloudflare's default managed AI-bot block (alongside `GPTBot`, `Google-Extended`, `Bytespider`, etc. — generic boilerplate, not a TopDev-specific choice, but still a named block). Under rule 6 as it stood until 2026-11-08 this was a stop; it no longer is, so the board can be proposed again. | 2026-08-26 |
+| CareerLink (careerlink.vn) | Search results ARE server-rendered plain HTTPS (confirmed live: 47 job links found on a location listing page), but `robots.txt` individually lists `ClaudeBot`, `Claude-Web` and `anthropic-ai` as disallowed — separate from its generic bad-bot list, reading as a deliberate choice rather than boilerplate. Under rule 6 as it stood until 2026-11-08 this was a stop; it no longer is, so the board can be proposed again. | 2026-08-26 |
 | JobsGo (jobsgo.vn) | Listing pages return HTTP 403 behind a Cloudflare-managed JavaScript challenge, confirmed under both a declared-bot User-Agent and a browser-impersonating one — no zero-auth path exists without solving the challenge. | 2026-08-27 |
 | ViecOi (viecoi.vn) | Same failure mode as JobsGo: HTTP 403 behind a Cloudflare-managed JavaScript challenge, consistent across User-Agents — even `/robots.txt` itself returns the challenge page instead of its contents. | 2026-08-27 |
 | Glassdoor (global, not VN-specific) | A reference scraper implementation for this board (goodjobs, a sibling project) requires Playwright **plus `playwright-stealth`** (active bot-detection evasion) to get any content — out of scope on both technical and ethical grounds, independent of `robots.txt`. | 2026-08-26 |
 | Dice (global, not VN-specific) | Same failure mode as Glassdoor: the same reference implementation needs stealth-mode browser automation despite Dice's own docs describing it as static HTML. | 2026-08-26 |
-| TurboHire (`*.turbohire.co`, global, not VN-specific) | Boards load in a browser without a login, but `robots.txt` on the tenant hosts checked (`flipkart`, `jswgroup`, `tatamotors`) and on `app.turbohire.co` has `Disallow: /` under `User-agent: *`, and also names `anthropic-ai` and `Claude-Web`. The listings API sits on another host with no `robots.txt` (`thapi.azurewebsites.net`), but its anonymous token endpoint answers a plain request with HTTP 403 `"Invalid request."`, and the project does not route around the stated restriction. A browser scanner would have to load the disallowed pages. | 2026-11-03 |
+| TurboHire (`*.turbohire.co`, global, not VN-specific) | Boards load in a browser without a login, but `robots.txt` on the tenant hosts checked (`flipkart`, `jswgroup`, `tatamotors`) and on `app.turbohire.co` has `Disallow: /` under `User-agent: *`, and also names `anthropic-ai` and `Claude-Web`. The listings API sits on another host with no `robots.txt` (`thapi.azurewebsites.net`), but its anonymous token endpoint answers a plain request with HTTP 403 `"Invalid request."`, and the project did not route around the stated restriction. A browser scanner would have to load the disallowed pages. Since 2026-11-08 `robots.txt` is not a stop under rule 6; the listings API still answers an anonymous request with HTTP 403, so a plain-HTTP provider cannot read it, and a browser-based path is open for re-evaluation. | 2026-11-03 |
 
-TopDev and CareerLink are the interesting case: both are technically
-scrapable, but this project treats a `robots.txt` entry naming Claude or
-Anthropic's crawler as the site owner's stated intent, not a literal
-User-Agent string to route around under a different name — even though
-`providers/*.mjs` all identify as `career-ops`, not `ClaudeBot`.
+TopDev and CareerLink were the interesting case: both are technically
+scrapable, and until 2026-11-08 this project read a `robots.txt` entry
+naming Claude or Anthropic's crawler as the site owner's stated intent
+toward career-ops. Rule 6 no longer treats `robots.txt` as a gate: a
+provider reads a posting for one person who may apply there, and does not
+crawl the site. What still keeps a board out is a login, a CAPTCHA, or its
+operator asking us not to read it.
 
 When adding a new provider, add a new non-helper module under `providers/` and
 update this table in the same PR — see
