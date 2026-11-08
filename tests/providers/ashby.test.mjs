@@ -663,6 +663,22 @@ try {
     } else {
       fail(`ashby oversized fallback opts=${JSON.stringify(apiOpts)} rows=${JSON.stringify(rows)}`);
     }
+
+    // api: pins the board while careers_url is a corporate site: the
+    // fallback takes its slug from the api URL.
+    let embedUrl = null;
+    const pinnedRows = await ashby.fetch(
+      { name: 'Pinned', careers_url: 'https://www.example.com/careers', api: 'https://api.ashbyhq.com/posting-api/job-board/big?includeCompensation=true' },
+      {
+        fetchJson: async () => { throw Object.assign(new Error('HTTP body exceeded maxBytes'), { code: 'response_too_large', maxBytes: ASHBY_MAX_BYTES }); },
+        fetchText: async (url) => { embedUrl = url; return embedHtml; },
+      },
+    );
+    if (pinnedRows.length === 1 && /^https:\/\/jobs\.ashbyhq\.com\/big\?/.test(String(embedUrl))) {
+      pass('ashby.fetch() falls back to the embed listing of an api:-pinned board');
+    } else {
+      fail(`ashby api-pinned fallback embedUrl=${embedUrl} rows=${JSON.stringify(pinnedRows)}`);
+    }
   }
 
 } catch (e) {

@@ -18,7 +18,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (rel) => import(pathToFileURL(join(ROOT, rel)).href);
 const { probeSlug } = await load('verify-portals.mjs');
 const { LEVER_TIMEOUT_MS } = await load('providers/lever.mjs');
-const { ASHBY_TIMEOUT_MS } = await load('providers/ashby.mjs');
+const { ASHBY_MAX_BYTES, ASHBY_TIMEOUT_MS } = await load('providers/ashby.mjs');
 
 /** Probe one slug against a stub and return the options the probe passed. */
 async function probeOptions(ats, body) {
@@ -46,6 +46,8 @@ test('an Ashby probe uses the Ashby provider timeout', async () => {
   const { result, opts } = await probeOptions('ashby', { jobs: [{ id: 'a' }] });
   assert.equal(result.status, 'live');
   assert.equal(opts?.timeoutMs, ASHBY_TIMEOUT_MS);
+  // Same body ceiling as the provider, so a board the scan reads is never 'missing' here.
+  assert.equal(opts?.maxBytes, ASHBY_MAX_BYTES);
 });
 
 test('a Greenhouse probe keeps the default timeout, as its provider does', async () => {

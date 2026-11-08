@@ -47,7 +47,7 @@ import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
-import { ASHBY_TIMEOUT_MS } from './providers/ashby.mjs';
+import { ASHBY_MAX_BYTES, ASHBY_TIMEOUT_MS } from './providers/ashby.mjs';
 import { LEVER_TIMEOUT_MS } from './providers/lever.mjs';
 import { isBlockedAddress } from './providers/_ip-guard.mjs';
 
@@ -131,6 +131,9 @@ export const ATS = {
     probeUrl: (slug) =>
       `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`,
     timeoutMs: ASHBY_TIMEOUT_MS,
+    // The same body ceiling the provider reads this endpoint with, so a board
+    // the scan can read is never reported missing here.
+    maxBytes: ASHBY_MAX_BYTES,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
     // The posting API returns only {jobs, apiVersion}; the board page titles
     // itself with the owner ('deepset Jobs'), which is the only name either
@@ -537,7 +540,11 @@ export async function probeSlug(
     };
   const url = spec.probeUrl(slug, { eu });
   try {
-    const json = await fetchJson(url, spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : undefined);
+    const probeOpts = {
+      ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
+      ...(spec.maxBytes ? { maxBytes: spec.maxBytes } : {}),
+    };
+    const json = await fetchJson(url, Object.keys(probeOpts).length ? probeOpts : undefined);
     const count = spec.jobCount(json);
     if (count == null)
       return {

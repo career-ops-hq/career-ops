@@ -552,7 +552,13 @@ export default {
     } catch (err) {
       if (/** @type {any} */ (err)?.code !== 'response_too_large') throw err;
       console.error(`ℹ️  ashby: ${entry.name} posting API body over ${Math.round((/** @type {any} */ (err).maxBytes || ASHBY_MAX_BYTES) / 1048576)} MB — read the embed listing instead (no descriptions or dates)`);
-      return await fetchFromEmbed(entry, ctx);
+      // An entry that pins the board through `api:` (with a corporate
+      // careers_url) names its slug only there, so hand that slug on.
+      const apiSlug = new URL(apiUrl).pathname.match(/^\/posting-api\/job-board\/([^/]+)\/?$/)?.[1];
+      const embedEntry = resolveBoardSlug(entry) || !apiSlug
+        ? entry
+        : { ...entry, ashby: { .../** @type {any} */ (entry).ashby, board: decodeURIComponent(apiSlug) } };
+      return await fetchFromEmbed(embedEntry, ctx);
     }
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
     const boardSlug = new URL(apiUrl).pathname.match(/^\/posting-api\/job-board\/([^/]+)\/?$/)?.[1] || '';
