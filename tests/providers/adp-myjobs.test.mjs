@@ -197,6 +197,15 @@ try {
   }
 
   {
+    // The stall is signalled (warning + tag) without blaming max_pages.
+    const warns = [];
+    const origErr = console.error; console.error = (...a) => warns.push(a.join(' '));
+    let jobs;
+    try { jobs = await adp.fetch({ ...entry, adpMyjobs: { orgoid: ORGOID } }, mkCtx(() => ({ count: 1000, jobRequisitions: mkRows(1, 200) }))); } finally { console.error = origErr; }
+    check(jobs.adpMyjobsTruncated === true && warns.some(w => /stopped early/.test(w)) && !warns.some(w => /raise max_pages/.test(w)), 'a stalled walk warns "stopped early" and tags the result, without the max_pages warning');
+  }
+
+  {
     // Pagination + transient failure: keep nothing partial silently — page-2 5xx exhausts retry and throws, no "raise max_pages" warning.
     const warns = [];
     const origErr = console.error; console.error = (...a) => warns.push(a.join(' '));

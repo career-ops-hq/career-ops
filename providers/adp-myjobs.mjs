@@ -270,6 +270,7 @@ export default {
     let skip = 0;
     let total = null;
     let hitCeiling = false; // ran out of page budget with a full page and more to read
+    let stalled = false; // the API stopped advancing ($skip ignored) before the board's own end
 
     for (let page = 0; page < pageLimit; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -289,13 +290,19 @@ export default {
       // Natural end: the source's own count is reached, or (no count) a short page.
       if (total !== null ? skip >= total : rawCount < PAGE_SIZE) break;
       // Every row on this page was a repeat or unusable: $skip is being ignored.
-      if (fresh === 0 && pageJobs.length > 0) break;
+      if (fresh === 0 && pageJobs.length > 0) { stalled = true; break; }
       if (page === pageLimit - 1) hitCeiling = true;
     }
 
     const truncated = hitCeiling && ctxCap === Infinity;
     if (truncated) {
       console.error(`⚠️  adp-myjobs: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs) — raise max_pages on this entry for more`);
+    }
+
+    // A stall is not a ceiling: never blame max_pages for it, but do not let a
+    // partial board pass as complete either.
+    if (stalled) {
+      console.error(`⚠️  adp-myjobs: ${entry.name} stopped early — the API returned only repeated rows at $skip=${skip} (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs); the board may be incomplete`);
     }
 
     // Detail enrichment is opt-in, paced, best-effort, and skipped while a
@@ -319,7 +326,7 @@ export default {
     }
 
     const result = jobs.map(({ _reqId, ...job }) => job);
-    if (truncated) /** @type {any} */ (result).adpMyjobsTruncated = true;
+    if (truncated || stalled) /** @type {any} */ (result).adpMyjobsTruncated = true;
     return /** @type {any} */ (result);
   },
 };
