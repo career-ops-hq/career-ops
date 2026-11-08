@@ -68,6 +68,35 @@ test('a drop folder of eml files becomes canonical pipeline rows once', async ()
   }
 });
 
+test('an alert email keeps the title and company above the job link', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'linkedin-drop-title-'));
+  const dir = join(root, 'data', 'linkedin-alerts');
+  const id = '4242424242';
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(root, 'data', 'pipeline.md'), '# Pipeline\n\n## Pending\n\n## Processed\n');
+  writeFileSync(join(root, 'data', 'applications.md'), '# Applications\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|---|---|---|---|---|---|---|---|\n');
+  writeFileSync(join(dir, 'alert.eml'), [
+    'From: alerts@example.com',
+    'Subject: Jobs for you',
+    '',
+    'Platform Engineer',
+    'Example Labs',
+    `https://www.linkedin.com/jobs/view/${id}`,
+  ].join('\n'));
+  try {
+    await withDataEnv(root, async () => {
+      const result = await importMailDrop({ root, dir });
+      assert.equal(result.added, 1);
+      const row = readFileSync(join(root, 'data', 'pipeline.md'), 'utf8')
+        .split('\n')
+        .find((line) => line.includes(`/jobs/view/${id}`));
+      assert.equal(row, `- [ ] https://www.linkedin.com/jobs/view/${id} | Example Labs | Platform Engineer`);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a dry run says nothing was saved, names a file too large to read, and honors CAREER_OPS_PIPELINE', async () => {
   const root = mkdtempSync(join(tmpdir(), 'linkedin-drop-dry-'));
   const dir = join(root, 'data', 'linkedin-alerts');
