@@ -9,8 +9,8 @@ import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ROOT, NODE } from './helpers.mjs';
 import {
-  askText, countReports, decideAsk, unattendedReason,
-  STAR_URL, MANIFESTO_URL, MANIFESTO_MIN_REPORTS, MANIFESTO_MIN_DAYS_AFTER_STAR,
+  askOutput, askText, countReports, decideAsk, unattendedReason,
+  STAR_ART, STAR_URL, MANIFESTO_URL, MANIFESTO_MIN_REPORTS, MANIFESTO_MIN_DAYS_AFTER_STAR, VETERAN_MIN_REPORTS,
 } from '../community-asks.mjs';
 import { SYSTEM_PATHS } from '../lib/update-manifest.mjs';
 
@@ -73,7 +73,7 @@ test('the first report asks for the star, once', () => {
   const root = workspace(1);
   const first = run(root);
   assert.equal(first.code, 0);
-  assert.equal(first.out, `${askText('star')}\n`);
+  assert.equal(first.out, `${askOutput('star', { reports: 1 })}\n`);
   assert.ok(first.out.includes(STAR_URL));
   assert.ok(existsSync(marker(root, 'star')));
   const second = run(root);
@@ -112,7 +112,7 @@ test('an unattended run never asks and leaves no marker', () => {
 test('an interactive session asks, whatever the terminal', () => {
   for (const extra of [{}, { CLAUDE_CODE_ENTRYPOINT: 'cli' }, { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' }, { CI: 'false' }, { CI: '0' }]) {
     const root = workspace(1);
-    assert.equal(run(root, ['next'], extra).out, `${askText('star')}\n`, JSON.stringify(extra));
+    assert.equal(run(root, ['next'], extra).out, `${askOutput('star', { reports: 1 })}\n`, JSON.stringify(extra));
   }
 });
 
@@ -137,26 +137,26 @@ test('off turns every ask off', () => {
 
 test('the manifesto comes a week after the star, with five reports, once', () => {
   const root = workspace(MANIFESTO_MIN_REPORTS);
-  assert.equal(run(root, ['next', '--now', at(0)]).out, `${askText('star')}\n`);
+  assert.equal(run(root, ['next', '--now', at(0)]).out, `${askOutput('star', { reports: MANIFESTO_MIN_REPORTS })}\n`);
   assert.equal(run(root, ['next', '--now', at(0)]).out, '', 'never two asks in one run');
   assert.equal(run(root, ['next', '--now', at(MANIFESTO_MIN_DAYS_AFTER_STAR - 1)]).out, '');
   const manifesto = run(root, ['next', '--now', at(MANIFESTO_MIN_DAYS_AFTER_STAR)]);
-  assert.equal(manifesto.out, `${askText('manifesto', { reports: MANIFESTO_MIN_REPORTS })}\n`);
-  assert.ok(manifesto.out.includes(`${MANIFESTO_MIN_REPORTS} evaluations`));
+  assert.equal(manifesto.out, `${askOutput('manifesto')}\n`);
   assert.ok(manifesto.out.includes(MANIFESTO_URL));
+  assert.ok(!manifesto.out.includes('```'), 'the drawing goes with the star only');
   assert.equal(run(root, ['next', '--now', at(60)]).out, '');
 });
 
 test('the manifesto waits for five reports', () => {
   const root = workspace(MANIFESTO_MIN_REPORTS - 1);
-  assert.equal(run(root, ['next', '--now', at(0)]).out, `${askText('star')}\n`);
+  assert.equal(run(root, ['next', '--now', at(0)]).out, `${askOutput('star', { reports: MANIFESTO_MIN_REPORTS - 1 })}\n`);
   assert.equal(run(root, ['next', '--now', at(60)]).out, '');
 });
 
 test('whoever saw the old scan note is not asked for the manifesto', () => {
   const root = workspace(MANIFESTO_MIN_REPORTS);
   writeFileSync(join(root, '.manifesto-noted'), `${at(-30)}\n`);
-  assert.equal(run(root, ['next', '--now', at(0)]).out, `${askText('star')}\n`);
+  assert.equal(run(root, ['next', '--now', at(0)]).out, `${askOutput('star', { reports: MANIFESTO_MIN_REPORTS })}\n`);
   assert.equal(run(root, ['next', '--now', at(30)]).out, '');
 });
 
@@ -223,19 +223,37 @@ test('the script makes no request of its own', () => {
 });
 
 test('the texts keep their promises', () => {
-  const star = askText('star');
-  assert.ok(star.includes(STAR_URL));
-  assert.ok(star.endsWith("I won't ask again."));
-  const manifesto = askText('manifesto', { reports: 7 });
-  assert.ok(manifesto.includes('7 evaluations'));
+  const first = askText('star', { reports: 1 });
+  const veteran = askText('star', { reports: 12 });
+  assert.ok(first.startsWith('If this report saved you some time'));
+  assert.ok(veteran.startsWith("You've run 12 evaluations with career-ops so far."));
+  assert.equal(askText('star', { reports: VETERAN_MIN_REPORTS - 1 }), first);
+  for (const star of [first, veteran]) {
+    assert.ok(star.includes(STAR_URL));
+    assert.ok(star.endsWith("I won't ask for a star again."));
+  }
+  const manifesto = askText('manifesto');
   assert.ok(manifesto.includes(MANIFESTO_URL));
-  assert.ok(manifesto.endsWith("I won't ask again."));
+  assert.ok(manifesto.endsWith("I won't ask about the manifesto again."));
+  assert.doesNotMatch(manifesto, /\d/, 'the manifesto ask carries no count');
   // "collects nothing about you" is only true while the disclaimer says so.
-  if (star.includes('collects nothing')) {
+  if ([first, veteran].some((star) => star.includes('collects nothing'))) {
     const legal = readFileSync(join(ROOT, 'LEGAL_DISCLAIMER.md'), 'utf8');
     assert.match(legal, /We do not collect analytics, telemetry, or usage data of any kind/,
       'LEGAL_DISCLAIMER.md changed: revisit the star line in community-asks.mjs in the same PR');
   }
+});
+
+test('the star drawing is printed whole, in its own block, and only with the star', () => {
+  assert.equal(STAR_ART.length, 9);
+  for (const line of STAR_ART) {
+    assert.ok(line.length <= 27, `too wide: ${JSON.stringify(line)}`);
+    assert.match(line, /^[\x20-\x7e]*$/, 'plain ASCII keeps every column aligned in any terminal');
+  }
+  const star = askOutput('star', { reports: 1 }).split('\n');
+  assert.deepEqual(star.slice(0, 11), ['```', ...STAR_ART, '```']);
+  assert.equal(star[11], askText('star', { reports: 1 }));
+  assert.ok(!askOutput('manifesto').includes('```'));
 });
 
 test('the markers are user data that updates never ship or replace', () => {

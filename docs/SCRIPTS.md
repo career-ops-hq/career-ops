@@ -2062,7 +2062,7 @@ Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)
 
 ## community-asks.mjs
 
-The one-time community asks. career-ops never phones home, so it asks for support in words, rarely, and at the right moment: a GitHub star after the first saved evaluation report, then the manifesto after five reports and at least seven days after the star. The Hired Wall ask lives in `hired-share.mjs`. Each ask is shown at most once, never two in one run, and never in CI, batch workers (`CAREER_OPS_HEADLESS`, `CAREER_OPS_BATCH_STATE`) or headless Claude Code (`sdk-*` entrypoints).
+The one-time community asks. career-ops never phones home, so it asks for support in words, rarely, and at the right moment: a GitHub star after the first saved evaluation report, then the manifesto after five reports and at least seven days after the star. The star ask comes with a small drawing in a fenced block of its own, which the agent copies exactly, and names the user's evaluation count from five reports on. The Hired Wall ask lives in `hired-share.mjs`. Each ask is shown at most once, never two in one run, and never in CI, batch workers (`CAREER_OPS_HEADLESS`, `CAREER_OPS_BATCH_STATE`) or headless Claude Code (`sdk-*` entrypoints).
 
 ```bash
 node community-asks.mjs next            # prints the one ask that is due, or nothing; always exits 0

@@ -44,6 +44,22 @@ export const MANIFESTO_URL = 'https://career-ops.org/manifesto?utm_source=ask';
 export const MANIFESTO_MIN_REPORTS = 5;
 export const MANIFESTO_MIN_DAYS_AFTER_STAR = 7;
 export const ASKS = Object.freeze(['star', 'manifesto']);
+/** From this many reports the star ask names the count: the user has run career-ops for a while. */
+export const VETERAN_MIN_REPORTS = 5;
+
+// The drawing for the star ask ("yours is missing"). `next` prints it in a fenced
+// block of its own so the agent copies it exactly. Star ask only, never the manifesto.
+export const STAR_ART = Object.freeze([
+  "   .               . ' `",
+  "             o   *",
+  "            / \\        .",
+  "   +       /   \\",
+  "  *-------*     *-------*",
+  "    `-.._*       *_..-'",
+  ".       /   .*.   \\       .",
+  "       / .-'   '-. \\",
+  "      *-'         '-*",
+]);
 
 const REPORT_FILE = /^\d{3,}-.+\.md$/;
 const DAY_MS = 86_400_000;
@@ -75,17 +91,35 @@ Options:
  */
 export function askText(ask, { reports = 0 } = {}) {
   if (ask === 'star') {
-    return 'If this report saved you some time: career-ops is free and collects nothing about you, '
+    const opening = reports >= VETERAN_MIN_REPORTS
+      ? `You've run ${reports} evaluations with career-ops so far. It's free and collects nothing about you, `
+      : 'If this report saved you some time: career-ops is free and collects nothing about you, ';
+    return opening
       + "so we can't tell whether it helped. A ⭐ on GitHub is one of the few ways we find out, "
       + 'and it helps the next job seeker find career-ops. '
-      + `Say "yes" and I'll open the page (${STAR_URL}). I won't ask again.`;
+      + `Say "yes" and I'll open the page (${STAR_URL}). I won't ask for a star again.`;
   }
   if (ask === 'manifesto') {
-    return `You've now run ${reports} evaluations the CareerOps way. The practice has a manifesto; `
-      + 'if it speaks for you, sign it (your name goes on the public wall). '
-      + `Say "yes" and I'll open it (${MANIFESTO_URL}). I won't ask again.`;
+    return "The way you've been searching has a name: CareerOps, and it has a manifesto. "
+      + 'If it speaks for you, sign it (your name goes on the public wall). '
+      + `Say "yes" and I'll open it (${MANIFESTO_URL}). I won't ask about the manifesto again.`;
   }
   return '';
+}
+
+/**
+ * What `next` prints for an ask: the star ask comes with its drawing in a
+ * fenced block of its own, for the agent to copy exactly; the manifesto ask is
+ * the sentence alone.
+ *
+ * @param {string} ask
+ * @param {{reports?: number}} [context]
+ * @returns {string}
+ */
+export function askOutput(ask, context = {}) {
+  const text = askText(ask, context);
+  if (!text) return '';
+  return ask === 'star' ? `\`\`\`\n${STAR_ART.join('\n')}\n\`\`\`\n${text}` : text;
 }
 
 const isOn = (value) => value !== undefined && value !== null && value !== ''
@@ -249,7 +283,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
       const root = resolve(flags.root || await defaultRoot());
       const state = readState(root, env, now);
       const ask = decideAsk(state);
-      if (ask && claim(state.asksDir, ask, now)) process.stdout.write(`${askText(ask, state)}\n`);
+      if (ask && claim(state.asksDir, ask, now)) process.stdout.write(`${askOutput(ask, state)}\n`);
     } catch { /* an ask is never worth breaking the user's run */ }
     return 0;
   }
