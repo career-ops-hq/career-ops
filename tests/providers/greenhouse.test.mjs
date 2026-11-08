@@ -580,6 +580,15 @@ try {
       fail(`greenhouse redirect opts: ${JSON.stringify(on.calls.map((c) => c.opts))}`);
     }
 
+    // A percent-encoded slug in an explicit api: stays encoded once in detail URLs.
+    const encoded = await run({ name: 'Big', api: 'https://boards-api.greenhouse.io/v1/boards/%62ig/jobs', greenhouse: { fetchDetails: true } });
+    const encodedDetails = details(encoded.calls).map((c) => c.url);
+    if (encodedDetails.length === 2 && encodedDetails.every((u) => u.startsWith('https://boards-api.greenhouse.io/v1/boards/%62ig/jobs/'))) {
+      pass('greenhouse.fetch() keeps a percent-encoded board slug encoded once in detail URLs');
+    } else {
+      fail(`greenhouse encoded slug detail URLs: ${JSON.stringify(encodedDetails)}`);
+    }
+
     const off = await run({ name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big' });
     if (off.rows.length === 3 && details(off.calls).length === 0) pass('greenhouse.fetch() fetches no detail without the fetchDetails opt-in');
     else fail(`greenhouse detail without opt-in: ${JSON.stringify(off.calls.map((c) => c.url))}`);

@@ -283,7 +283,12 @@ export default {
           if (attempted > 0) await sleep(DETAIL_DELAY_MS, ctx);
           attempted++;
           try {
-            const detailUrl = assertGreenhouseUrl(`https://${new URL(apiUrl).hostname}/v1/boards/${encodeURIComponent(boardSlug)}/jobs/${encodeURIComponent(String(j.id))}`);
+            // Built on the list URL's own path, so a board slug that arrived
+            // percent-encoded stays encoded once rather than twice.
+            const detailRef = new URL(apiUrl);
+            detailRef.search = '';
+            detailRef.pathname = `${detailRef.pathname.replace(/\/+$/, '')}/${encodeURIComponent(String(j.id))}`;
+            const detailUrl = assertGreenhouseUrl(detailRef.href);
             const detail = /** @type {any} */ (await fetchJsonWithRetry(ctx, detailUrl, { redirect: 'error' }));
             if (detail && typeof detail.content === 'string') { j.content = detail.content; filled++; }
           } catch {
