@@ -9,7 +9,7 @@ import { EvaluationOptions, useEvaluationOptions } from "@/components/evaluation
 import { FULL_EVALUATION } from "@/lib/evaluation-options.mjs";
 import { postingHref } from "@/lib/posting-url.mjs";
 
-export type EvaluationState = { kind: "none" | "partial" | "full" | "missing"; sections: string[] };
+export type EvaluationState = { kind: "none" | "partial" | "full" | "missing" | "unreadable"; sections: string[] };
 
 /** Evaluation belongs to a job, independently of its workflow status. */
 export function EvaluateApplication({ n, company, role, url, evaluation = { kind: "none", sections: [] } }: {
@@ -30,7 +30,7 @@ export function EvaluateApplication({ n, company, role, url, evaluation = { kind
   const previous = jobs.find(job => job.kind === "evaluate" && job.targetApplication === target);
   const partial = evaluation.kind === "partial";
   const label = partial ? "Complete full evaluation" : evaluation.kind === "none" ? "Evaluate" : "Re-evaluate";
-  const stateLabel = { none: "Not evaluated", partial: "Partial evaluation", full: "Full evaluation", missing: "Report unavailable" }[evaluation.kind];
+  const stateLabel = { none: "Not evaluated", partial: "Partial evaluation", full: "Full evaluation", missing: "Report unavailable", unreadable: "Report could not be read" }[evaluation.kind];
 
   useEffect(() => {
     if (running) { observed.current = running.id; return; }

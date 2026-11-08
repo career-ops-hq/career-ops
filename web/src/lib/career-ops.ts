@@ -220,7 +220,7 @@ export type Application = {
   url: string;
   /** Calendar day the posting closes, from scan history. Absent when that file has no day for this URL. */
   closesAt?: string;
-  evaluation?: { kind: "none" | "partial" | "full" | "missing"; sections: string[] };
+  evaluation?: { kind: "none" | "partial" | "full" | "missing" | "unreadable"; sections: string[] };
 };
 
 /**
@@ -446,9 +446,16 @@ export function pipelineSummary(): PipelineSummary {
   const applications = readApplications();
   const readReport = requestReportReader();
   const withEvaluation = applications.map(app => {
-    const report = readReport(app);
-    const evaluation = report ? evaluationState(report.content)
-      : { kind: firstMarkdownLinkTarget(app.report) ? "missing" : "none", sections: [] };
+    let evaluation;
+    try {
+      const report = readReport(app);
+      evaluation = report ? evaluationState(report.content)
+        : { kind: firstMarkdownLinkTarget(app.report) ? "missing" : "none", sections: [] };
+    } catch {
+      // One unreadable report must not take down the tracker or its back link.
+      // Keep the error distinct from a missing file; the detail page offers retry.
+      evaluation = { kind: "unreadable", sections: [] };
+    }
     return { ...app, evaluation: evaluation as NonNullable<Application["evaluation"]> };
   });
   return {
