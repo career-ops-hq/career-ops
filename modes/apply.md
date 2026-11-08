@@ -505,8 +505,8 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 
 ### Workday — a direct `/apply` link can 404 while the posting is live (#6417)
 
-- **Symptom:** A link that goes straight to `.../job/<slug>/apply`, often from a promoted LinkedIn post with `utm_*`/`source=` parameters, shows "Sorry, the page you are looking for doesn't exist". The same URL without `/apply` loads the full JD. `check-liveness.mjs` only checks the listing URL, so the posting passes every check and then fails at the moment of applying.
-- **Agent:** Don't record the posting as closed. Open the listing URL (drop the `/apply` suffix and the query string) and use the page's own Apply control. If that listing is also gone, it is closed and the normal closed-posting handling applies.
+- **Symptom:** A link that goes straight to `.../job/<slug>/apply`, often from a promoted LinkedIn post with `utm_*`/`source=` parameters, shows "Sorry, the page you are looking for doesn't exist". The same URL without `/apply` loads the full JD. `check-liveness.mjs` checks whatever URL it is given and its Workday API path keeps `/apply`, so a live posting can come back expired.
+- **Agent:** Don't record the posting as closed. Strip the `/apply` suffix and the query string (`utm_*`, `source=`) first, then run the liveness check and open the posting from that listing URL, and use the page's own Apply control. If that listing is also gone, it is closed and the normal closed-posting handling applies.
 - **Candidate:** If they hit the 404 in their own browser, give them the listing URL to start from instead.
 
 ### SuccessFactors-family — uploaded resume can silently diverge from the stored profile (#1870)
