@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 function runWithAlgolia(dir, behaviour) {
   const log = join(dir, 'algolia-requests.jsonl');
@@ -30,6 +31,8 @@ function runWithAlgolia(dir, behaviour) {
   `);
   const env = { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' };
   delete env.CAREER_OPS_PORTALS; delete env.GEMINI_API_KEY; delete env.GEMINI_MODEL;
+  // With a trusted proxy the shared helper switches to undici's own fetch and skips the fixture.
+  delete env.CAREER_OPS_TRUST_PROXY_EGRESS;
   const r = spawnSync(process.execPath, ['--require', preload, fileURLToPath(new URL('../scan-hn.mjs', import.meta.url))],
     { cwd: dir, encoding: 'utf8', timeout: 60000, env });
   const requests = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
@@ -42,8 +45,7 @@ test('a 503 page from Algolia reports the HTTP status, not a JSON syntax error',
     mkdirSync(join(dir, 'data'), { recursive: true });
     const { r } = runWithAlgolia(dir, `return new Response('<html><body>Service Unavailable</body></html>', { status: 503, headers: { 'content-type': 'text/html' } });`);
     const output = `${r.stdout}\n${r.stderr}`;
-    assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
-    assert.notEqual(r.status, 0, 'a failed fetch must not exit 0');
+    assert.ok(exitedNonZero(r), describeSpawn(r, 'a failed fetch must make scan-hn exit non-zero'));
     assert.match(output, /503/, `the HTTP status should be named:\n${output}`);
     assert.doesNotMatch(output, /Unexpected token/, `the raw JSON parse error should not leak:\n${output}`);
   } finally {
