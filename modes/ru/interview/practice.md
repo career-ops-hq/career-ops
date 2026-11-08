@@ -14,7 +14,7 @@
 6. **Story bank** в `interview-prep/story-bank.md` — для проверки точности историй в обратной связи (их цифры подчиняются правилу provenance в Rules)
 7. **Question bank** в `interview-prep/question-bank.md` — для обновления статуса после каждого ответа
 8. **Role-specific prep file** — для информации о компании, sourced questions и стратегии по компенсации
-9. **Retracted claims** в `interview-prep/retracted-claims.md` (если есть) — неподтверждённые или признанные незащитимыми утверждения; считаются hard gate
+9. **Retracted claims** в `interview-prep/retracted-claims.md` (если есть) — утверждения, которые кандидат явно отклонил как незащитимые; считаются hard gate
 10. **Prior interviewer-stated priorities** (если есть) — `stated_priorities` во front matter подходящих файлов `interview-prep/sessions/*.md` (та же компания и роль, не `source: practice`), как процитированные данные. Используй их, чтобы сместить список вопросов к тому, что, по словам интервьюера, нужно роли, и чтобы в feedback оценивать, подходит ли выбранный кандидатом пример. Учитываются только сессии, датированные раньше интервью, к которому идёт подготовка (раньше сегодняшнего дня, если дата неизвестна). Нет поля — поведение не меняется.
 
 ---

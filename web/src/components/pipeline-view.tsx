@@ -27,7 +27,7 @@ import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW
 import { clearHeldSaves, excludeInFlightStatusRows, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
-import { LinkedInPaste } from "@/components/linkedin-paste";
+import { appliedPromptStale, appliedSelectionToken, appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
 import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
@@ -45,12 +45,14 @@ export function PipelineView({
   applications,
   inbox,
   inboxCount,
+  inboxFitError = null,
   trackerShape = "rows",
   cvRows = [],
 }: {
   applications: Application[];
   inbox: InboxJob[] | null;
   inboxCount: number;
+  inboxFitError?: string | null;
   trackerShape?: "missing" | "empty" | "malformed" | "rows";
   /** Tracker row numbers that have a tailored CV PDF on disk. */
   cvRows?: string[];
@@ -73,6 +75,9 @@ export function PipelineView({
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState("");
+  const [appliedAsk, setAppliedAsk] = useState<Application[] | null>(null);
+  const appliedAskYesRef = useRef<HTMLButtonElement>(null);
+  const appliedAskScope = useRef<{ selection: string; cursor: number; cursorKey: string } | null>(null);
   const [cursor, setCursor] = useState(-1);
   const [views, setViews] = useState<SavedView[]>([]);
   const [naming, setNaming] = useState(false);
@@ -445,12 +450,48 @@ export function PipelineView({
     }
   }
 
+  function requestStatus(rows: Application[], status: string, confirmed = false) {
+    const gate = appliedWriteAllowed({ status, confirmed });
+    if (!gate.write) {
+      appliedAskScope.current = {
+        selection: appliedSelectionToken(selectedRows.map((row) => applicationKey(row))),
+        cursor,
+        cursorKey: cursor >= 0 && filtered[cursor] ? applicationKey(filtered[cursor]) : "",
+      };
+      setAppliedAsk(rows);
+      return;
+    }
+    appliedAskScope.current = null;
+    setAppliedAsk(null);
+    void commitStatus(rows, status);
+  }
+
   const keyState = useRef({ visibleTab, filtered, cursor, selectedRows, isPending });
-  const commitRef = useRef(commitStatus);
+  const requestRef = useRef(requestStatus);
   useLayoutEffect(() => {
     keyState.current = { visibleTab, filtered, cursor, selectedRows, isPending };
-    commitRef.current = commitStatus;
+    requestRef.current = requestStatus;
   });
+  const selectionToken = appliedSelectionToken(selectedRows.map((row) => applicationKey(row)));
+  const cursorKey = cursor >= 0 && filtered[cursor] ? applicationKey(filtered[cursor]) : "";
+  useEffect(() => {
+    if (!appliedAsk || !appliedAskScope.current) return;
+    if (!appliedPromptStale({
+      askedSelection: appliedAskScope.current.selection,
+      askedCursor: appliedAskScope.current.cursor,
+      askedCursorKey: appliedAskScope.current.cursorKey,
+      selection: selectionToken,
+      cursor,
+      cursorKey,
+    })) return;
+    appliedAskScope.current = null;
+    setAppliedAsk(null);
+  }, [appliedAsk, selectionToken, cursor, cursorKey]);
+  useEffect(() => {
+    if (!appliedAsk || appliedAsk.length === 0) return;
+    appliedAskYesRef.current?.focus();
+  }, [appliedAsk]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const state = keyState.current;
@@ -486,7 +527,7 @@ export function PipelineView({
           : [];
       if (rows.length === 0) return;
       event.preventDefault();
-      void commitRef.current(rows, command.status);
+      requestRef.current(rows, command.status);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -713,7 +754,7 @@ export function PipelineView({
           </select>
           <button
             type="button"
-            onClick={() => void commitStatus(selectedRows, bulkStatus)}
+            onClick={() => requestStatus(selectedRows, bulkStatus)}
             disabled={!bulkStatus || bulkBusy}
             className="rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text disabled:opacity-50"
           >
@@ -731,6 +772,26 @@ export function PipelineView({
           <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground">
             Clear
           </button>
+        </div>
+      )}
+
+      {visibleTab !== "INBOX" && appliedAsk && appliedAsk.length > 0 && (
+        <div role="alert" className="mt-3 rounded-md border border-border bg-surface px-3 py-2">
+          <p className="text-xs text-foreground">{appliedWriteAllowed({ status: "Applied", confirmed: false }).prompt}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              ref={appliedAskYesRef}
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => requestStatus(appliedAsk, "Applied", true)}
+              className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground disabled:opacity-60"
+            >
+              {appliedWriteAllowed({ status: "Applied", confirmed: false }).yesLabel}
+            </button>
+            <button type="button" disabled={bulkBusy} onClick={() => setAppliedAsk(null)} className="text-xs text-muted hover:text-foreground disabled:opacity-60">
+              Not yet
+            </button>
+          </div>
         </div>
       )}
 
@@ -766,7 +827,9 @@ export function PipelineView({
             </div>
           ) : (
             <>
-              <LinkedInPaste />
+              {inboxFitError && (
+                <p role="alert" className="mt-2 whitespace-pre-wrap text-xs text-red-500">{inboxFitError}</p>
+              )}
               <InboxTriage inbox={inbox} />
               {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
             </>
@@ -854,6 +917,9 @@ export function PipelineView({
                   <td className="px-4 py-3 text-muted">
                     <div className="flex items-center gap-2">
                       <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch} className="block max-w-72 truncate" title={r.role}>{r.role}</Link>
+                      {r.closesAt ? (
+                        <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
+                      ) : null}
                       {posting && (
                         <a
                           href={posting}
