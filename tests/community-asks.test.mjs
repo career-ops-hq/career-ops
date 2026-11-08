@@ -230,6 +230,8 @@ test('the texts keep their promises', () => {
   assert.equal(askText('star', { reports: VETERAN_MIN_REPORTS - 1 }), first);
   for (const star of [first, veteran]) {
     assert.ok(star.includes(STAR_URL));
+    assert.ok(star.includes('A Star on GitHub (the button at the top right of the page)'), 'names the button the user clicks');
+    assert.ok(!star.includes('\u2b50'), 'no emoji in the sentence: some terminals draw it as "*" plus a space');
     assert.ok(star.endsWith("I won't ask for a star again."));
   }
   const manifesto = askText('manifesto');
@@ -248,8 +250,11 @@ test('the star drawing is printed whole, in its own block, and only with the sta
   assert.equal(STAR_ART.length, 9);
   for (const line of STAR_ART) {
     assert.ok(line.length <= 27, `too wide: ${JSON.stringify(line)}`);
-    assert.match(line, /^[\x20-\x7e]*$/, 'plain ASCII keeps every column aligned in any terminal');
+    // Plain ASCII keeps every column aligned in any terminal; an emoji may only
+    // close a row, where drawing it a column wider shifts nothing.
+    assert.match(line, /^[\x20-\x7e]*\u2b50?$/, `only ASCII, or an emoji at the end: ${JSON.stringify(line)}`);
   }
+  assert.ok(STAR_ART[1].endsWith('\u2b50'));
   const star = askOutput('star', { reports: 1 }).split('\n');
   assert.deepEqual(star.slice(0, 11), ['```', ...STAR_ART, '```']);
   assert.equal(star[11], askText('star', { reports: 1 }));
