@@ -14,7 +14,7 @@ import { appendFileSync, existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
-import { buildLocationFilter, normalizeUrlForDedup, PORTALS_PATH, SCAN_HISTORY_PATH, PIPELINE_PATH } from './scan.mjs';
+import { buildLocationFilter, seenJobKey, PORTALS_PATH, SCAN_HISTORY_PATH, PIPELINE_PATH } from './scan.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
@@ -128,7 +128,7 @@ export function diagnose(posting, ctx) {
   const locationOk = location ? buildLocationFilter(ctx.config.location_filter)(location, url, title) : null;
   const target = atsFromUrl(url);
 
-  const seen = ctx.history.get(normalizeUrlForDedup(url));
+  const seen = ctx.history.get(seenJobKey(url));
   if (seen) {
     const [, firstSeen, portal, , , status] = seen;
     evidence.push(`scan-history: ${status} on ${firstSeen} via ${portal}`);
@@ -231,7 +231,7 @@ export function loadContext() {
     for (const line of scanHistoryDataLines(readFileSync(SCAN_HISTORY_PATH, 'utf8'))) {
       const row = line.split('\t');
       if (!row[0]) continue;
-      history.set(normalizeUrlForDedup(row[0]), row);
+      history.set(seenJobKey(row[0]), row);
       const key = companyKey(row[4]);
       if (key) (historyCompanies.get(key) || historyCompanies.set(key, new Set()).get(key)).add(row[2]);
     }
@@ -260,10 +260,10 @@ const clean = (s) => String(s ?? '').replace(/[\t\r\n]+/g, ' ').trim();
 
 export function appendMiss(file, posting, result, note, date) {
   const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
-  const key = normalizeUrlForDedup(posting.url);
+  const key = seenJobKey(posting.url);
   const logged = existing.split('\n').slice(1).some(l => {
     const url = l.split('\t')[1];
-    return Boolean(url) && normalizeUrlForDedup(url) === key;
+    return Boolean(url) && seenJobKey(url) === key;
   });
   if (logged) return false;
   const row = [date, posting.url, posting.company, posting.title, result.gap, result.fix, note].map(clean).join('\t');

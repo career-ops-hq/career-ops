@@ -582,7 +582,7 @@ function latexBody(text) {
 }
 
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
-export function stripMarkup(text, { keepLineBreaks = false } = {}) {
+export function stripMarkup(text, { keepLineBreaks = false, keepBlankLines = false } = {}) {
   text = latexBody(text);
   // An entity is the character it encodes, and a default-ignorable character
   // (zero-width space, joiner, soft hyphen, directional mark, variation
@@ -656,7 +656,8 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     // scan. Horizontal whitespace still collapses, and every claim pattern spans a
     // newline through `\s`, so extraction is unaffected either way.
     .replace(keepLineBreaks ? /[^\S\n]+/g : /\s+/g, ' ')
-    .replace(/ *\n+ */g, keepLineBreaks ? '\n' : ' ')
+    // keepBlankLines keeps each newline of a run, so a blank line stays a blank line.
+    .replace(keepLineBreaks && keepBlankLines ? / *\n */g : / *\n+ */g, keepLineBreaks ? '\n' : ' ')
     .trim();
 }
 
@@ -2356,6 +2357,45 @@ function sourceSpellsFact(sourceText, value) {
  * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], advisoryFacts: object[], forbidden: string[], warnings: string[] }}
  * @throws when the config is invalid
  */
+/**
+ * Reduce markdown links to their visible text, so a claim that spans a link is
+ * compared with the words a reader sees. Handles inline links whose target holds
+ * balanced parentheses or a title (`[a](https://x/Foo_(bar) "t")`), reference
+ * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`, the
+ * title on the same line or on the line right after it).
+ * A bracket pair with no link target after it is left alone.
+ */
+function collapseMarkdownLinks(text) {
+  let out = '';
+  let i = 0;
+  const opener = /\[\s*([^\][]*?)\s*\]\(/y;
+  while (i < text.length) {
+    if (text[i] === '[') {
+      opener.lastIndex = i;
+      const m = opener.exec(text);
+      if (m) {
+        let depth = 1;
+        let j = opener.lastIndex;
+        while (j < text.length && depth > 0) {
+          if (text[j] === '\\') { j += 2; continue; }
+          if (text[j] === '(') depth++;
+          else if (text[j] === ')') depth--;
+          j++;
+        }
+        if (depth === 0) {
+          out += m[1];
+          i = j;
+          continue;
+        }
+      }
+    }
+    out += text[i++];
+  }
+  return out
+    .replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1')
+    .replace(/(?:^|[^\S\r\n])\[[^\][]+\]:[^\S\r\n]*\S+(?:[^\S\r\n]+(?:"[^"]*"|'[^']*'|\([^)]*\))|\r?\n[^\S\r\n]*(?:"[^"]*"|'[^']*'|\([^)]*\)))?[^\S\r\n]*(?=\r?$)/gm, ' ');
+}
+
 export function verifyFacts(targetText, {
   sourcePaths = DEFAULT_SOURCES,
   planTexts = [],
@@ -2365,18 +2405,30 @@ export function verifyFacts(targetText, {
   // Per file, before the join: stripMarkup keeps only the body of a LaTeX
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
-  const sourceText = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd)))).join('\n');
+  const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
+  const sourceText = sourceTexts.join('\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const planned = plannedClaims(targetText, planTexts);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim) && !planned.has(claim));
-  const sourceNormalized = normalizeFact(stripMarkup(sourceText));
+  // A markdown link keeps its target in the stripped source: "[Fabrikam](https://…) (Director)"
+  // reads as "[fabrikam](https://…) (director)", so a claim that spans a link, such as
+  // a "Previous Experience" line of linked employers and titles, never found its own
+  // words in the source. Only the link text is evidence, so the lookup reads that.
+  // Each file is stripped on its own. Bold may span a wrapped line, so an unpaired `**` at
+  // the end of one file paired with the first `**` of the next and left a stray `*` in the
+  // name beside it ("fabrikam* (director)").
+  // A reference definition takes a title only from the line right after it, never across a
+  // blank line, so blank lines are kept while the links collapse.
+  const sourceLookup = normalizeFact(sourceTexts
+    .map(text => collapseMarkdownLinks(stripMarkup(text, { keepLineBreaks: true, keepBlankLines: true })))
+    .join('\n'));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsourced = ({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value);
+  const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
   const namedFacts = [
-    ...factClaims(targetText, sourceNormalized),
+    ...factClaims(targetText, sourceLookup),
     ...delegatedAuthorshipClaims(targetText, sourceText),
     ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);

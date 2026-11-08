@@ -16,8 +16,9 @@ import { fetchJsonWithRetry, sleep } from './_http.mjs';
 // target loudly rather than returning a silently partial board.
 
 const SCHOOLSPRING_HOST_RE = /^[a-z0-9][a-z0-9-]*\.schoolspring\.com$/;
+const API_HOST = 'api.schoolspring.com';
 // `www` and `api` are the platform's own hosts, not districts.
-const NON_DISTRICT = new Set(['www.schoolspring.com', 'api.schoolspring.com']);
+const NON_DISTRICT = new Set(['www.schoolspring.com', API_HOST]);
 
 const PAGE_SIZE = 100;
 const DEFAULT_MAX_PAGES = 20; // 2,000 postings; a district never comes close
@@ -71,12 +72,16 @@ function pageUrl(host, page) {
     size: String(PAGE_SIZE),
     sortDateAscending: 'false',
   });
-  return `https://api.schoolspring.com/api/Jobs/GetPagedJobsWithSearch?${q}`;
+  return `https://${API_HOST}/api/Jobs/GetPagedJobsWithSearch?${q}`;
 }
 
 /** @type {Provider} */
 export default {
   id: 'schoolspring',
+
+  fetchHost() {
+    return API_HOST;
+  },
 
   detect(entry) {
     const host = resolveHost(entry);
