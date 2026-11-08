@@ -46,6 +46,22 @@ try {
   if (hitApi) pass('adp-workforcenow.detect() honors api: over a non-ADP careers_url');
   else fail('adp-workforcenow.detect() should honor api: over careers_url');
 
+  // lang propagation — tenants whose career center is configured for a
+  // non-en_US locale return totalNumber 0 when lang/locale are missing or
+  // mismatched (verified live 2026-11-07 on three en_CA tenants), so the
+  // careers_url's lang must reach the list URL, defaulting to en_US.
+  const hitLang = adp.detect({ name: 'ExampleCo', careers_url: `${CAREERS_URL}&lang=en_CA` });
+  if (hitLang && hitLang.url.includes('lang=en_CA') && hitLang.url.includes('locale=en_CA')) {
+    pass('adp-workforcenow.detect() propagates careers_url lang into the list URL');
+  } else {
+    fail(`adp-workforcenow.detect() should propagate lang, returned ${JSON.stringify(hitLang)}`);
+  }
+  if (hit && hit.url.includes('lang=en_US') && hit.url.includes('locale=en_US')) {
+    pass('adp-workforcenow.detect() defaults lang to en_US');
+  } else {
+    fail(`adp-workforcenow.detect() should default lang to en_US, returned ${JSON.stringify(hit)}`);
+  }
+
   // Missing cid or ccId → null, not a throw.
   if (adp.detect({ name: 'X', careers_url: 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=only-cid' }) === null) {
     pass('adp-workforcenow.detect() returns null when ccId is missing');

@@ -81,8 +81,15 @@ const INTER_PAGE_DELAY_MS = 250;
  * A careers/recruitment page:
  * `https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...`
  * cid/ccId may appear in either order and alongside other query params.
+ *
+ * `lang` matters: some tenants' career centers are configured for a
+ * non-en_US locale (e.g. en_CA), and their job-requisitions endpoints return
+ * totalNumber 0 when lang/locale are missing or mismatched — observed live
+ * 2026-11-07 on three Canadian tenants (GEO Morphix, Resort Municipality of
+ * Whistler, City of Mount Pearl): no lang → 0 rows; lang=en_CA → full board.
+ * The lang param is read from the careers_url when present, default en_US.
  * @param {import('./_types.js').PortalEntry} entry
- * @returns {{ cid: string, ccId: string } | null}
+ * @returns {{ cid: string, ccId: string, lang: string } | null}
  */
 function resolveTenant(entry) {
   for (const raw of [entry?.api, entry?.careers_url]) {
@@ -97,7 +104,8 @@ function resolveTenant(entry) {
     if (parsed.hostname.toLowerCase() !== ADP_HOST) continue;
     const cid = parsed.searchParams.get('cid');
     const ccId = parsed.searchParams.get('ccId');
-    if (cid && ccId) return { cid, ccId };
+    const lang = parsed.searchParams.get('lang') || 'en_US';
+    if (cid && ccId) return { cid, ccId, lang };
   }
   return null;
 }
@@ -106,13 +114,16 @@ function resolveTenant(entry) {
  * @param {string} cid
  * @param {string} ccId
  * @param {number} skip
+ * @param {string} lang
  */
-function buildListUrl(cid, ccId, skip) {
+function buildListUrl(cid, ccId, skip, lang) {
   const u = new URL(`${API_BASE}/job-requisitions`);
   u.searchParams.set('cid', cid);
   u.searchParams.set('ccId', ccId);
   u.searchParams.set('$skip', String(skip));
   u.searchParams.set('$top', String(PAGE_SIZE));
+  u.searchParams.set('lang', lang);
+  u.searchParams.set('locale', lang);
   return u.href;
 }
 
@@ -120,13 +131,14 @@ function buildListUrl(cid, ccId, skip) {
  * @param {string} itemId
  * @param {string} cid
  * @param {string} ccId
+ * @param {string} lang
  */
-function buildDetailUrl(itemId, cid, ccId) {
+function buildDetailUrl(itemId, cid, ccId, lang) {
   const u = new URL(`${API_BASE}/job-requisitions/${safeEncodeURIComponent(itemId)}`);
   u.searchParams.set('cid', cid);
   u.searchParams.set('ccId', ccId);
-  u.searchParams.set('lang', 'en_US');
-  u.searchParams.set('locale', 'en_US');
+  u.searchParams.set('lang', lang);
+  u.searchParams.set('locale', lang);
   return u.href;
 }
 
@@ -353,13 +365,13 @@ export default {
 
   detect(entry) {
     const tenant = resolveTenant(entry);
-    return tenant ? { url: buildListUrl(tenant.cid, tenant.ccId, 1) } : null;
+    return tenant ? { url: buildListUrl(tenant.cid, tenant.ccId, 1, tenant.lang) } : null;
   },
 
   async fetch(entry, ctx) {
     const tenant = resolveTenant(entry);
     if (!tenant) throw new Error(`adp-workforcenow: cannot derive cid/ccId for ${entry.name}`);
-    const { cid, ccId } = tenant;
+    const { cid, ccId, lang } = tenant;
     const cfg = { cid, ccId, companyName: entry.name };
 
     const maxPages = resolveMaxPages(entry);
@@ -383,7 +395,7 @@ export default {
 
     for (let page = 0; page < pageLimit; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
-      const listUrl = assertAdpUrl(buildListUrl(cid, ccId, skip));
+      const listUrl = assertAdpUrl(buildListUrl(cid, ccId, skip, lang));
       const json = await fetchJsonWithRetry(ctx, listUrl, { redirect: 'error' }, RETRY_POLICY);
 
       // The endpoint documents a `jobRequisitions` array — a response that
@@ -447,7 +459,7 @@ export default {
         const job = /** @type {any} */ (target);
         await sleep(INTER_PAGE_DELAY_MS, ctx);
         try {
-          const detailUrl = assertAdpUrl(buildDetailUrl(job._itemId, cid, ccId));
+          const detailUrl = assertAdpUrl(buildDetailUrl(job._itemId, cid, ccId, lang));
           const detail = await fetchJsonWithRetry(ctx, detailUrl, { redirect: 'error' }, RETRY_POLICY);
           const description = htmlToText(detail?.requisitionDescription);
           if (description) job.description = description;
