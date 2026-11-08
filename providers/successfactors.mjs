@@ -507,7 +507,20 @@ async function fetchRmk(entry, cfg, ctx) {
   // no total, so the warning can only say "at least".
   let capped = false;
   let pageSize = 0;
+  const gate = ctx?.robotsGate || robotsAllows;
   for (let page = 0; page < maxPages; page++) {
+    // Pages past the default cap are extra crawling: check each actual startrow
+    // URL (a rule can allow one offset and disallow a later one). On a denial,
+    // stop here at what the defaults would have read and say so.
+    if (page >= MAX_PAGES && !probeLimit) {
+      let ok = false;
+      try { ok = !!(await gate(`${cfg.tileApi}?startrow=${startrow}`))?.allowed; } catch { ok = false; }
+      if (!ok) {
+        console.error(`⚠️  successfactors: ${entry.name} stopped raising max_pages at page ${page + 1} because robots.txt does not allow ${new URL(cfg.tileApi).pathname}?startrow=${startrow} — keeping what the defaults read`);
+        capped = false;
+        break;
+      }
+    }
     const htmlText = await ctx.fetchText(`${cfg.tileApi}?startrow=${startrow}`, {
       redirect: 'error',
       headers: { accept: 'text/html' },

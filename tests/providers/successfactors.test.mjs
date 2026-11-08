@@ -557,6 +557,11 @@ try {
       jobs = await sf.fetch({ name: 'BadTile', careers_url: 'https://jobs.badtile.example' }, { sleep: async () => {}, robotsGate: allow, fetchText: async (u) => { const r = Number(new URL(u).searchParams.get('startrow')); return r === 975 ? tilePage(r).split('</li>').slice(0, 24).join('</li>') + '</li>' + badTile : tilePage(r); } });
       if (warns.length === 1 && /BadTile truncated/.test(warns[0])) pass('successfactors RMK counts source rows, not parsed tiles, when judging a full last page');
       else fail(`successfactors RMK raw-row fullness wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
+      // RMK raised pages are gated per startrow URL: a rule that allows early offsets but not later ones stops the walk.
+      warns.length = 0; calls = { n: 0 };
+      jobs = await sf.fetch({ name: 'OffsetRule', careers_url: 'https://jobs.offsetrule.example', max_pages: 60, max_jobs: 5000 }, rmkCtx(calls, async (u) => ({ allowed: Number(new URL(u).searchParams.get('startrow')) < 1100 })));
+      if (jobs.length === 1100 && calls.n === 44 && warns.some((w) => /does not allow \/tile-search-results\/\?startrow=1100/.test(w))) pass('successfactors RMK stops a raised walk at the first startrow robots.txt disallows');
+      else fail(`successfactors RMK per-offset gate wrong: ${jobs.length} jobs, ${calls.n} calls, warns=${JSON.stringify(warns)}`);
       // RMK board that ends naturally: no warning.
       warns.length = 0;
       jobs = await sf.fetch({ name: 'SmallCo', careers_url: 'https://jobs.smallco.example' }, { sleep: async () => {}, fetchText: async (u) => (new URL(u).searchParams.get('startrow') === '0' ? tilePage(0) : '') });
