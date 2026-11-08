@@ -55,3 +55,17 @@ test('a Greenhouse probe keeps the default timeout, as its provider does', async
   assert.equal(result.status, 'live');
   assert.equal(opts?.timeoutMs, undefined);
 });
+
+test('an Ashby probe over the body ceiling counts the board from its embed listing', async () => {
+  const tooLarge = async () => { throw Object.assign(new Error('HTTP body exceeded maxBytes'), { code: 'response_too_large' }); };
+  const embedHtml = '<script>window.__appData = ' + JSON.stringify({ jobBoard: { jobPostings: [{ id: 'p1' }, { id: 'p2' }] } }) + ';</script>';
+  let embedOpts = null;
+  const live = await probeSlug('ashby', 'big', { fetchJson: tooLarge, fetchEmbed: async (_url, opts) => { embedOpts = opts; return embedHtml; } });
+  assert.equal(live.status, 'live');
+  assert.equal(live.jobCount, 2);
+  assert.equal(embedOpts?.redirect, 'error');
+
+  const gone = await probeSlug('ashby', 'big', { fetchJson: tooLarge, fetchEmbed: async () => { throw new Error('HTTP 503'); } });
+  assert.equal(gone.status, 'missing');
+  assert.match(gone.reason, /maxBytes/);
+});
