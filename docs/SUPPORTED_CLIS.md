@@ -34,7 +34,7 @@ pi -a -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jo
 
 If a Pi build gates project resources behind a trust decision, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
 
-Project trust, and with it `-a` (`--approve`), arrived in Pi 0.79.0. An older Pi has no trust step and loads the project skill without one, but it rejects the flag (`Error: Unknown option: -a`) and exits, so run it there as `pi -p "prompt"`. The Nix dev shell (`flake.nix`) pins a newer Pi.
+Project trust, and with it `-a` (`--approve`), arrived in Pi 0.79.0. Pi 0.54.0 to 0.78.x has no trust step and finds the project skill without one, but it rejects the flag (`Error: Unknown option: -a`) and exits, so run it there as `pi -p "prompt"`. A Pi older than 0.54.0 does not look in `.agents/skills` at all, so upgrade it. The Nix dev shell (`flake.nix`) pins a newer Pi.
 
 ## Oh My Pi (omp)
 
