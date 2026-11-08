@@ -8,7 +8,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MATCHABLE = [".header h1", ".header-title", ".section-title", ".job-company", ".job-role"];
 
 function cssRules(html) {
-  const style = html.match(/<style>([\s\S]*?)<\/style>/i)?.[1] ?? "";
+  const style = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((match) => match[1]).join("\n");
   const clean = style.replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [];
   const re = /([^{}]+)\{([^{}]*)\}/g;
@@ -43,9 +43,11 @@ function markup(html) {
 
 function assertReadable(name, html) {
   const rules = cssRules(html);
+  let checked = 0;
   for (const wanted of MATCHABLE) {
     for (const rule of rules) {
       if (!selectorHits(rule.selector, wanted)) continue;
+      checked += 1;
       const spacing = letterSpacing(rule.body);
       assert.equal(
         isPositiveTracking(spacing),
@@ -55,8 +57,14 @@ function assertReadable(name, html) {
       assert.doesNotMatch(rule.body, /font-variant\s*:\s*small-caps/i, `${name} ${wanted} uses small-caps`);
     }
   }
+  assert.ok(checked > 0, `${name} style block was not checked`);
   assert.doesNotMatch(html, /font-variant\s*:\s*small-caps/i, `${name} declares small-caps`);
 }
+
+test("a style tag with an attribute is still checked for tracking", () => {
+  const html = `<style media="print">.header h1 { letter-spacing: 0.2em; }</style>`;
+  assert.throws(() => assertReadable("attributed", html), /letter-spacing 0\.2em/);
+});
 
 test("Compact and Executive keep matchable strings in reading order", () => {
   const compact = readFileSync(path.join(ROOT, "templates/cv-template.compact.html"), "utf8");

@@ -337,10 +337,10 @@ version: 1.0.0
     break-inside: var(--project-break-inside, auto);
   }
 
-  /* The label is beside its content in a flex row, not above it. Applying
-     break-after: avoid to it also binds the following section in Chromium:
-     a body that fits one full page can then move wholesale past the header.
-     Keep the rail labels free to fragment at section boundaries. */
+  /* The title is a block above its body, so break-after keeps that title
+     with the body. The old side rail left this off. break-after on the flex
+     item pulled the next section along with it. */
+  .section-title,
   .job-company,
   .job-role,
   .job-location,

@@ -127,6 +127,45 @@ test("a JSON envelope builds HTML, warns on a drifted title, and writes the ATS 
   }
 });
 
+test("a marker format replaces a disagreeing page_format in the built CV", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "cv-format-"));
+  const saved = {
+    root: process.env.CAREER_OPS_ROOT,
+    data: process.env.CAREER_OPS_DATA_DIR,
+    profile: process.env.CAREER_OPS_PROFILE,
+  };
+  delete process.env.CAREER_OPS_DATA_DIR;
+  delete process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_ROOT = dir;
+  try {
+    mkdirSync(path.join(dir, "config"), { recursive: true });
+    writeFileSync(path.join(dir, "config", "profile.yml"), "name: Jane Doe\n");
+    writeFileSync(path.join(dir, "cv.md"), CV_MD);
+    const body = payload();
+    body.page_format = "letter";
+    const htmlPath = path.join(dir, "cv.html");
+    const result = await materializeTailoredCv({
+      envelope: { ok: true, kind: "json", format: "a4", payload: body, warnings: [] },
+      coreRoot: CORE,
+      dataRoot: dir,
+      htmlPath,
+      finalPdf: path.join(dir, "output", "cv-jane-doe-018-acme-2026-11-05.pdf"),
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.match(result.html, /max-width:\s*210mm/);
+    assert.doesNotMatch(result.html, /max-width:\s*8\.5in/);
+    assert.match(readFileSync(result.ats.html, "utf8"), /max-width:\s*210mm/);
+  } finally {
+    if (saved.root === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = saved.root;
+    if (saved.data === undefined) delete process.env.CAREER_OPS_DATA_DIR;
+    else process.env.CAREER_OPS_DATA_DIR = saved.data;
+    if (saved.profile === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = saved.profile;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a legacy HTML envelope is kept as emitted and does not grow an ATS sibling", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "cv-html-"));
   try {

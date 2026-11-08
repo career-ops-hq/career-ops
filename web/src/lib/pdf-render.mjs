@@ -165,10 +165,14 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
 }
 
 /**
+ * Exit 0 can still write nothing (#6377). `delivered` is the new file at
+ * `finalPdf`, same rule as spawnGeneratePdf. `ok` alone would leave a previous
+ * ATS PDF in place and let Apply upload it.
  * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4"}} args
- * @returns {Promise<{ok: boolean, stderr: string}>}
+ * @returns {Promise<{ok: boolean, delivered: boolean, stderr: string}>}
  */
 export function spawnAtsPdf({ spawnFn, execPath, coreRoot, html, finalPdf, format }) {
+  const before = pdfFingerprint(finalPdf);
   return new Promise((resolve) => {
     const child = spawnFn(
       execPath,
@@ -180,9 +184,15 @@ export function spawnAtsPdf({ spawnFn, execPath, coreRoot, html, finalPdf, forma
       },
     );
     let stderr = "";
-    child.stderr.on("data", (d) => { stderr += d.toString(); });
-    child.on("close", (code) => resolve({ ok: code === 0, stderr: stderr.trim() }));
-    child.on("error", (e) => resolve({ ok: false, stderr: `ATS PDF rendering failed to start: ${e.message}` }));
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (d) => { stderr += d; });
+    child.on("close", (code) => {
+      const ok = code === 0;
+      const after = pdfFingerprint(finalPdf);
+      const landed = after !== null && after !== before;
+      resolve({ ok, delivered: ok && landed, stderr: stderr.trim() });
+    });
+    child.on("error", (e) => resolve({ ok: false, delivered: false, stderr: `ATS PDF rendering failed to start: ${e.message}` }));
   });
 }
 
@@ -341,8 +351,16 @@ export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, 
   if (render.delivered) keepTailoredHtml(pdfPaths, warnings);
   if (render.delivered && ats?.html && ats?.finalPdf) {
     const atsRender = await spawnAtsPdf({ spawnFn, execPath, coreRoot, html: ats.html, finalPdf: ats.finalPdf, format });
-    if (!atsRender.ok) {
-      warnings.push(`ATS PDF was not created: ${atsRender.stderr || "render failed"}. Apply will use the styled PDF.`);
+    if (!atsRender.delivered) {
+      try {
+        fs.rmSync(ats.finalPdf, { force: true });
+      } catch (err) {
+        warnings.push(`Could not remove the previous ATS PDF ${path.basename(ats.finalPdf)}: ${err.message}`);
+      }
+      const why = atsRender.ok
+        ? undeliveredRenderError(atsRender, ats.finalPdf)
+        : (atsRender.stderr || "render failed");
+      warnings.push(`ATS PDF was not created: ${why}. Apply will use the styled PDF.`);
     }
   }
   cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);

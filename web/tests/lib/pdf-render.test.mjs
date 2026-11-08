@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -839,6 +839,8 @@ test("renderAndMarkPdf: a failed ATS render warns and the styled PDF still count
   writeFileSync(pdfPaths.html, "<html>styled</html>");
   const atsHtml = join(dir, "cv-web-9.ats.html");
   writeFileSync(atsHtml, "<html>ats</html>");
+  const staleAts = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  writeFileSync(staleAts, "stale-ats");
   let generateCalls = 0;
   const spawnFn = (execPath, args) => {
     const script = String(args[0]);
@@ -866,6 +868,88 @@ test("renderAndMarkPdf: a failed ATS render warns and the styled PDF still count
     assert.equal(result.kind, "rendered");
     assert.ok(result.warnings.some((warning) => warning.includes("ATS PDF was not created") && warning.includes("ATS renderer exploded")));
     assert.ok(result.warnings.some((warning) => warning.includes("styled PDF")));
+    assert.equal(existsSync(staleAts), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: an ATS exit 0 that writes nothing removes the previous ATS PDF", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "10");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  const atsHtml = join(dir, "cv-web-10.ats.html");
+  writeFileSync(atsHtml, "<html>ats</html>");
+  const atsPdf = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  writeFileSync(atsPdf, "stale-ats");
+  let generateCalls = 0;
+  const spawnFn = (execPath, args) => {
+    const script = String(args[0]);
+    if (script.endsWith("generate-pdf.mjs")) {
+      generateCalls += 1;
+      return fakeChild(generateCalls === 1
+        ? { exitCode: 0, writes: pdfPaths.finalPdf }
+        : { exitCode: 0 });
+    }
+    if (script.endsWith("mark-pdf-ready.mjs")) {
+      return fakeChild({ exitCode: 0, stdout: JSON.stringify({ changed: true }) });
+    }
+    throw new Error(script);
+  };
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "10",
+      ats: { html: atsHtml, finalPdf: atsPdf },
+    });
+    assert.equal(result.kind, "rendered");
+    assert.equal(existsSync(atsPdf), false);
+    assert.equal(readFileSync(pdfPaths.finalPdf, "utf8"), "%PDF-fake");
+    assert.ok(result.warnings.some((warning) => warning.includes("ATS PDF was not created") && warning.includes("wrote nothing")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: a new ATS PDF replaces the previous file", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "11");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  const atsHtml = join(dir, "cv-web-11.ats.html");
+  writeFileSync(atsHtml, "<html>ats</html>");
+  const atsPdf = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  writeFileSync(atsPdf, "stale-ats");
+  let generateCalls = 0;
+  const spawnFn = (execPath, args) => {
+    const script = String(args[0]);
+    if (script.endsWith("generate-pdf.mjs")) {
+      generateCalls += 1;
+      return fakeChild(generateCalls === 1
+        ? { exitCode: 0, writes: pdfPaths.finalPdf }
+        : { exitCode: 0, writes: atsPdf });
+    }
+    if (script.endsWith("mark-pdf-ready.mjs")) {
+      return fakeChild({ exitCode: 0, stdout: JSON.stringify({ changed: true }) });
+    }
+    throw new Error(script);
+  };
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "11",
+      ats: { html: atsHtml, finalPdf: atsPdf },
+    });
+    assert.equal(result.kind, "rendered");
+    assert.equal(readFileSync(atsPdf, "utf8"), "%PDF-fake");
+    assert.ok(!result.warnings.some((warning) => warning.includes("ATS PDF was not created")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

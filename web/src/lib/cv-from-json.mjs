@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { cvTemplateAbsolute } from "./run-prompts.mjs";
 import { atsPdfPath } from "./apply/ats-pdf.mjs";
+import { PAGE_FORMATS } from "./page-formats.mjs";
 
 async function loadCore(coreRoot, fileName) {
   const href = pathToFileURL(path.join(coreRoot, fileName)).href;
@@ -146,6 +147,9 @@ export async function materializeTailoredCv({
       ? envelope.payload.experience.map((entry) => (entry && typeof entry === "object" ? { ...entry } : entry))
       : envelope.payload.experience,
   };
+  // The sheet is envelope.format. The body width is payload.page_format.
+  // One value here, or a letter body can be printed on an A4 sheet.
+  if (PAGE_FORMATS.has(envelope.format)) payload.page_format = envelope.format;
 
   const titleCheck = await loadCore(coreRoot, "cv-title-check.mjs");
   const titles = titleWarnings(titleCheck, payload, cvMd);
