@@ -15,6 +15,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { atsPdfPath } from "./apply/ats-pdf.mjs";
 
 /**
  * @typedef {Object} PdfRunSignals
@@ -328,6 +329,31 @@ export function failureReason(stderr) {
 }
 
 /**
+ * Drop the ATS sibling of a styled PDF this run did not replace.
+ * Never the styled path itself: a company slug ending in `ats` used to
+ * make those two paths the same file.
+ * @param {string} styledPdf
+ * @param {string[]} warnings
+ */
+function removePreviousAts(styledPdf, warnings) {
+  const stale = atsPdfPath(styledPdf);
+  if (!stale || stale === styledPdf) return;
+  let existed = false;
+  try {
+    existed = fs.existsSync(stale);
+  } catch {
+    return;
+  }
+  if (!existed) return;
+  try {
+    fs.rmSync(stale, { force: true });
+    warnings.push(`Removed the previous ATS PDF ${path.basename(stale)}. Apply will use the styled PDF.`);
+  } catch (err) {
+    warnings.push(`Could not remove the previous ATS PDF ${path.basename(stale)}: ${err.message}`);
+  }
+}
+
+/**
  * Render the tailored HTML to a PDF, then mark the tracker's PDF column
  * ready — only after the render is CONFIRMED successful, never
  * optimistically. Always cleans up scratch files, whether the render
@@ -349,19 +375,25 @@ export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, 
   // delivery from the file itself.
   const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
   if (render.delivered) keepTailoredHtml(pdfPaths, warnings);
-  if (render.delivered && ats?.html && ats?.finalPdf) {
-    const atsRender = await spawnAtsPdf({ spawnFn, execPath, coreRoot, html: ats.html, finalPdf: ats.finalPdf, format });
+  const atsTarget = ats?.html && ats.finalPdf && ats.finalPdf !== pdfPaths.finalPdf ? ats.finalPdf : null;
+  if (render.delivered && atsTarget) {
+    const atsRender = await spawnAtsPdf({ spawnFn, execPath, coreRoot, html: ats.html, finalPdf: atsTarget, format });
     if (!atsRender.delivered) {
       try {
-        fs.rmSync(ats.finalPdf, { force: true });
+        fs.rmSync(atsTarget, { force: true });
       } catch (err) {
-        warnings.push(`Could not remove the previous ATS PDF ${path.basename(ats.finalPdf)}: ${err.message}`);
+        warnings.push(`Could not remove the previous ATS PDF ${path.basename(atsTarget)}: ${err.message}`);
       }
       const why = atsRender.ok
-        ? undeliveredRenderError(atsRender, ats.finalPdf)
+        ? undeliveredRenderError(atsRender, atsTarget)
         : (atsRender.stderr || "render failed");
       warnings.push(`ATS PDF was not created: ${why}. Apply will use the styled PDF.`);
     }
+  } else if (render.delivered) {
+    // This run replaced the styled PDF and did not write a new ATS sibling.
+    // Apply prefers the sibling whenever the file exists, so the previous
+    // one would be uploaded in place of the CV just rendered.
+    removePreviousAts(pdfPaths.finalPdf, warnings);
   }
   cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
 
