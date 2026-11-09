@@ -248,6 +248,33 @@ test('an unreadable alert file is reported and the files after it still import',
   }
 });
 
+test('a failed history write leaves the alert, and the next run records that job once', async () => {
+  const { root, dir } = dropRoot('linkedin-drop-history-retry-');
+  writeFileSync(join(dir, 'alert.eml'), `https://www.linkedin.com/jobs/view/${JOB_ID}\n`);
+  const history = join(root, 'data', 'scan-history.tsv');
+  mkdirSync(history);
+  try {
+    await withDataEnv(root, async () => {
+      const first = await importMailDrop({ root, dir });
+      assert.equal(first.added, 1);
+      assert.match(first.message, /scan history could not be updated/);
+      assert.equal(existsSync(join(dir, 'alert.eml')), true);
+      const pipeline = readFileSync(join(root, 'data', 'pipeline.md'), 'utf8');
+      assert.match(pipeline, new RegExp(JOB_ID));
+      rmSync(history, { recursive: true, force: true });
+      const second = await importMailDrop({ root, dir });
+      assert.equal(second.added, 0);
+      assert.equal(readFileSync(join(root, 'data', 'pipeline.md'), 'utf8'), pipeline);
+      const rows = readFileSync(history, 'utf8').split('\n').filter((line) => line.includes(JOB_ID));
+      assert.equal(rows.length, 1);
+      assert.equal(existsSync(join(dir, 'imported', 'alert.eml')), true);
+      assert.equal(existsSync(join(dir, 'alert.eml')), false);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('each import writes scan history under its own root, not an earlier test\'s', async () => {
   for (const name of ['first', 'second']) {
     const root = mkdtempSync(join(tmpdir(), `linkedin-history-${name}-`));
