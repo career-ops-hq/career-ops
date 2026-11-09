@@ -793,10 +793,9 @@ O TSV carrega:
 | # | Data | Empresa | Vaga | Score | Status | PDF | Report | Notes |
 ```
 
-Com as colunas opcionais, que só aparecem num tracker que já as tenha: Notes ao final e Via (canal intermediário, #1596) após Empresa.
+Com a coluna opcional Via (canal intermediário, #1596) após Empresa:
 
 ```markdown
-| # | Data | Empresa | Vaga | Score | Status | PDF | Report | Notes |
 | # | Data | Empresa | Via | Vaga | Score | Status | PDF | Report | Notes |
 ```
 
