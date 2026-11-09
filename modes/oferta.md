@@ -705,6 +705,8 @@ Apply all language rules from `_writing.md` Professional Writing section to the 
 
 Before saving the report, apply `modes/_shared.md` → Evidence confidence for the Global Score. After Risk Summary, include `## Score Evidence` with one row per scoring dimension (`CV match`, `North Star alignment`, `Compensation`, `Cultural signals`, `Red flags`): evidence status (`supported`, `partial`, `unknown`), concrete source or observation, and unresolved question. Follow it with `**Evidence confidence:** {High | Medium | Low} — {main reason}` and up to three verification priorities. This is confidence in the score's evidence, separate from Block G's posting-legitimacy tier. Mirror the five statuses and priorities in Machine Summary `score_evidence` and `confidence_gaps` using the canonical schema in `batch/batch-prompt.md`.
 
+After `## Score Evidence`, add one line `**Positioning band:** {challenge | target | safety_net | out_of_scope | unknown} - {one sentence naming the evidence}` and mirror it in Machine Summary `positioning_band`, `positioning_band_reason` and `positioning_band_evidence` (rules in `batch/batch-prompt.md`, the schema source of truth). It is optional context beside the Global Score and never changes it; use `unknown` rather than guessing, and never classify from the title alone.
+
 **ALWAYS** after generating blocks A-G:
 
 ### 1. Save report .md
