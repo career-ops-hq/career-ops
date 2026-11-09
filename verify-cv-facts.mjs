@@ -2186,10 +2186,22 @@ const DRIFT_OBJECT_OPENERS = new Set([
   'my', 'our', 'its', 'their', 'his', 'her', 'it', 'them', 'us', 'me',
 ]);
 
+// Irregular forms that are a simple past and nothing else, so they open a
+// clause only as a verb. The rest of IRREGULAR_FORMS can also be a participle,
+// adjective or noun ("and written communication", "and thought leadership",
+// "and cut costs"), so like a regular "-ed" word they are certain only before
+// an object opener.
+const DRIFT_SIMPLE_PASTS = new Set([
+  'led', 'built', 'ran', 'wrote', 'drove', 'grew', 'made', 'took', 'began', 'brought', 'sold',
+  'taught', 'won', 'held', 'kept', 'spent', 'sent', 'gave', 'met', 'oversaw', 'understood',
+  'chose', 'rose', 'knew', 'saw', 'bought', 'did', 'became', 'stood', 'told', 'said', 'paid',
+  'dealt', 'struck', 'spoke', 'broke', 'drew', 'rebuilt', 'rewrote', 'undertook',
+]);
+
 function predicateWords(statement) {
   const words = [];
   const isVerbal = word => /ed$/u.test(word) || IRREGULAR_FORMS.has(word);
-  const takesObject = (word, next) => IRREGULAR_FORMS.has(word) || DRIFT_OBJECT_OPENERS.has(next);
+  const takesObject = (word, next) => DRIFT_SIMPLE_PASTS.has(word) || DRIFT_OBJECT_OPENERS.has(next);
   const text = stripListMarker(statement);
   const label = text.match(/^([^,;:.!?]{1,60}):\s+(?=\S)/u);
   if (label) {
@@ -2248,23 +2260,31 @@ export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], all
     for (const statement of factStatements(bullet).map(stripListMarker)) {
       const content = [...new Set(driftContentWords(statement))];
       if (!content.length) continue;
+      const predicates = predicateWords(statement);
       // Anchor: the source statement sharing the most distinct content words.
       // Two shared words, or every word of a one-word statement: the
       // threshold the scope and authorship checks above use to link entries.
       const required = Math.min(2, content.filter(word => !DRIFT_LINK_NEUTRAL.has(word)).length);
+      // Shared words are counted without the bullet's own predicate words: a
+      // source that shares the verb under test ("Led ...") must not score on
+      // it, tie in as an anchor and then vouch for that verb. The threshold
+      // above still counts the whole bullet, so dropping the verb never lets
+      // one shared tool name link a bullet on its own.
+      const predicateSet = new Set(predicates.map(({ word }) => word));
+      const linking = content.filter(word => !DRIFT_LINK_NEUTRAL.has(word) && !predicateSet.has(word));
       // Ties keep every tied statement: which one is "the" anchor would
       // otherwise depend on the order of cv.md, and a word any of them
       // supports is supported.
       let anchors = [];
       let best = 0;
       for (const source of sources) {
-        const shared = content.filter(word => !DRIFT_LINK_NEUTRAL.has(word) && hasKey(source.keys, word)).length;
+        const shared = linking.filter(word => hasKey(source.keys, word)).length;
         if (shared > best) { best = shared; anchors = [source]; } else if (shared === best && shared) anchors.push(source);
       }
       if (!anchors.length || !required || best < required) continue;
       const allowedBy = (anchor, word) => hasKey(anchor.keys, word) || hasKey(declared, word)
         || swaps.some(swap => hasKey(swap.to, word) && [...swap.from].some(key => anchor.keys.has(key)));
-      const unsupported = predicateWords(statement)
+      const unsupported = predicates
         .filter(({ word }) => !anchors.some(anchor => allowedBy(anchor, word)));
       if (!unsupported.length) continue;
       claims.push({
@@ -3506,9 +3526,18 @@ function runSelfTest() {
   return failed ? 1 : 0;
 }
 
-/** Print adoption claims no source makes, for a human to confirm. */
+/** Print advisory facts (unsourced adoption claims, possible verb drift) for a human to confirm. */
 export function printAdvisoryFacts(facts = [], print = console.warn) {
-  for (const { kind, value, line } of facts) {
+  for (const claim of facts) {
+    const { kind, value, line, sourceLine } = claim;
+    if (kind === 'drift') {
+      print(`  - possible verb drift: ${value}`);
+      if (line && line !== value) print(`      CV:     ${line}`);
+      if (sourceLine) print(`      source: ${sourceLine}`);
+      const advice = driftClaimAdvice(claim);
+      print(`      ${advice[0].toUpperCase()}${advice.slice(1)}`);
+      continue;
+    }
     print(`  - unsourced ${kind} claim: ${value}`);
     if (line && line !== value) print(`      CV: ${line}`);
   }

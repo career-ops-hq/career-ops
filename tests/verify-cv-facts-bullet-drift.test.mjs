@@ -2,7 +2,7 @@
 // the candidate did ("Used Kafka" -> "Led a Kafka migration") is anchored to
 // its source bullet and blocked unless every edit is an allowed one.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
-import { assertFacts, bulletDriftClaims, driftClaimAdvice, verifyFacts } from '../verify-cv-facts.mjs';
+import { assertFacts, bulletDriftClaims, driftClaimAdvice, printAdvisoryFacts, verifyFacts } from '../verify-cv-facts.mjs';
 import { spawnSync } from 'child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -92,6 +92,28 @@ check('-ing list nouns in later clauses are not read as verbs',
   const [verb] = drift(ul('Built a Python ETL pipeline for finance reporting and managed the vendors'));
   check('"and managed the vendors" still blocks', verb?.blocking === true, verb);
 }
+// Review on #6630: an irregular participle or noun opening a later clause is
+// ambiguous like a regular "-ed" word; a simple past still blocks.
+{
+  const src = '- Delivered verbal communication training\n- Led product marketing\n';
+  const [written] = bulletDriftClaims(ul('Delivered verbal and written communication training'), src);
+  check('"and written communication" warns instead of blocking', written?.blocking === false, written);
+  const [thought] = bulletDriftClaims(ul('Delivered verbal communication training and thought leadership'), src);
+  check('"and thought leadership" warns instead of blocking', thought?.blocking === false, thought);
+  const [wrote] = bulletDriftClaims(ul('Delivered verbal communication training and wrote curriculum'), src);
+  check('"and wrote curriculum" still blocks', wrote?.blocking === true, wrote);
+}
+// Review on #6630: the bullet's own verb must not score an anchor, or a source
+// that shares only that verb ties in and vouches for it.
+{
+  const src = '- Used Kafka for event ingestion in the billing service\n- Led the migration of the auth service\n';
+  const claims = bulletDriftClaims(ul('Led a Kafka migration for the billing service'), src);
+  check('a source sharing only the verb does not vouch for it',
+    claims.length === 1 && claims[0].added.includes('led')
+      && claims[0].sourceLine.startsWith('Used Kafka'), claims);
+  check('one shared non-verb word is still not an anchor',
+    bulletDriftClaims(ul('Built it using a 3CX'), '- Ran it on 3CX.\n').length === 0, null);
+}
 check('a bullet with no source anchor is left to the other checks',
   drift(ul('Organised the company hackathon')).length === 0, null);
 
@@ -142,6 +164,14 @@ try {
   check('verifyFacts reports an ambiguous drift as advisory, not a block',
     ambiguous.verdict === 'warn' && ambiguous.advisoryFacts.some(claim => claim.kind === 'drift')
       && !ambiguous.unsupportedFacts.some(claim => claim.kind === 'drift'), ambiguous);
+  {
+    const printed = [];
+    printAdvisoryFacts(ambiguous.advisoryFacts.filter(claim => claim.kind === 'drift'), line => printed.push(line));
+    const out = printed.join('\n');
+    check('an advisory drift prints the verb, the source bullet and allow_swaps',
+      /possible verb drift/.test(out) && /"automated"/.test(out) && /source: Built a Python ETL pipeline/.test(out)
+        && /allow_swaps/.test(out) && !/unsourced drift/.test(out), out);
+  }
 
   check('verifyFacts passes the source bullet verbatim',
     run(ul('Used Kafka for event ingestion in the billing service')).verdict === 'pass', null);
