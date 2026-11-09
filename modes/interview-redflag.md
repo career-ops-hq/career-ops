@@ -31,7 +31,7 @@ If there are no session files at all:
 > "No session transcripts found yet. Run `/career-ops interview/debrief` on a role after your next interview to generate a debrief, then come back to check for red flags."
 
 If session files exist but every one is a practice or mock session:
-> "Only practice sessions found. Red flags come from how a real interviewer behaved, and the questions in a practice session were asked by the AI. Run `/career-ops interview/debrief` after your next real interview to generate a debrief, then come back to check for red flags."
+> "Only practice or mock sessions found. Red flags come from how a real interviewer at the company behaved, and practice or mock sessions don't show that: in a practice session the AI asks the questions. Run `/career-ops interview/debrief` after your next real interview to generate a debrief, then come back to check for red flags."
 
 In that case, run the stale red-flag file check (Step 1) before exiting.
 
@@ -43,7 +43,13 @@ List all `.md` files in `interview-prep/sessions/` except `README.md`, and read 
 
 **Skip every file with `source: practice` or `source: mock`**, even when its front matter or filename names a real company. In those files the `**Interviewer:**` turns are mock questions (in a `practice` file, the questions the AI asked while role-playing), so they say nothing about how the company interviews. A skipped file contributes nothing to Steps 2–6: no signals, no Step 2c observations, no session count. A file without a `source` field is treated as a real interview, as before.
 
-**Stale red-flag file check.** Earlier versions of this mode counted practice sessions, so an existing `interview-prep/{company-slug}-redflags.md` may rest on them, and the evaluation report's Risk Summary (`modes/oferta.md`) still shows its warning level. A company with at least one eligible session gets that file rewritten in Step 5 from eligible sessions only. Start from the files: for each existing `interview-prep/*-redflags.md`, take its `{company-slug}`. If no eligible session belongs to that company but at least one skipped file does (its front matter `company`, slugified, equals the slug; for a file without that field, its filename starts with `{company-slug}-`), tell the user that red-flag file may have been built from practice sessions and offer to delete it. Delete it only on the user's explicit yes; otherwise leave it in place and say so in the summary.
+**Stale red-flag file check.** Earlier versions of this mode counted practice sessions, so an existing `interview-prep/{company-slug}-redflags.md` may rest on them, and the evaluation report's Risk Summary (`modes/oferta.md`) still shows its warning level. A company with at least one eligible session gets that file rewritten in Step 5 from eligible sessions only. Start from the files: for each existing `interview-prep/*-redflags.md`, take its `{company-slug}`. If no eligible session belongs to that company but at least one skipped file does (its front matter `company`, slugified, equals the slug; for a file without that field, its filename starts with `{company-slug}-`), tell the user that red-flag file may have been built from practice sessions and offer to delete it. Delete it only on the user's explicit yes. Otherwise keep it, add this note on the line below its `# Red-Flag Analysis` heading (once; skip it if the note is already there), and say so in the summary:
+
+```markdown
+> [Render in {language.output}: "Unverified: this analysis may rest on practice or mock sessions, which this mode no longer counts, and no real-interview session for this company is on file. Do not treat its warning level as evidence about how the company interviews."]
+```
+
+A later run that finds an eligible session for the company rewrites the file in Step 5, which drops the note.
 
 Parse each remaining filename using the `YYYY-MM-DD` date segment as the anchor:
 

@@ -58,6 +58,14 @@ check('Onboarding messages point to /career-ops interview/debrief, not the CV in
 check('Stale red-flag file is deleted only on the user\'s explicit yes',
   /offer to delete it/.test(step1) && /Delete it only on the user's explicit yes/.test(step1),
   'deletion not gated on consent');
+// A kept stale file still feeds oferta's Risk Summary, so it carries a note saying
+// its warning level is unverified (added once, dropped when Step 5 rewrites it).
+check('A kept stale red-flag file gets an unverified note under its heading, once',
+  /add this note on the line below its `# Red-Flag Analysis` heading/.test(step1) &&
+    /skip it if the note is already there/.test(step1) &&
+    /Unverified: this analysis may rest on practice or mock sessions/.test(step1) &&
+    /rewrites the file in Step 5, which drops the note/.test(step1),
+  'kept file is left unmarked');
 check('Practice-only exit runs the stale red-flag file check',
   /run the stale red-flag file check \(Step 1\) before exiting/.test(threshold), 'practice-only exit skips the check');
 check('Step 5 replaces an existing -redflags.md instead of keeping it',
@@ -66,9 +74,13 @@ check('Step 5 replaces an existing -redflags.md instead of keeping it',
 check('Minimum Threshold counts eligible sessions, not any file',
   /at least \*\*1\*\* eligible session file/.test(threshold) && /`README\.md` is not a session/.test(threshold),
   'threshold still counts every file');
-check('Minimum Threshold has its own message when only practice sessions exist',
-  /every one is a practice or mock session/.test(threshold) && /Only practice sessions found/.test(threshold),
-  'practice-only message missing');
+check('Minimum Threshold has its own message when only practice or mock sessions exist',
+  /every one is a practice or mock session/.test(threshold) && /Only practice or mock sessions found/.test(threshold),
+  'practice/mock-only message missing');
+// mock is a separate source value; its questions were not necessarily asked by the AI.
+check('Practice/mock-only message does not say every mock question came from the AI',
+  !/questions in a (practice|mock) session were asked by the AI/.test(threshold) && /in a practice session the AI asks the questions/.test(threshold),
+  'message still attributes mock questions to the AI');
 
 check('Dependency no longer lists practice.md as a transcript source',
   !/Requires transcripts produced by `modes\/interview\/debrief\.md` or `modes\/interview\/practice\.md`/.test(dependency),
