@@ -130,6 +130,15 @@ try {
       ? pass('google.fetch() walks more pages when max_pages is raised')
       : fail(`google raised max_pages made ${calls.length} requests`);
   }
+  {
+    // A short page that lands exactly on the cap is the end of the results,
+    // not a truncation: no cap warning.
+    const { ctx, calls } = recordingCtx((c) => (Number(pageOf(c.url) || '1') === 1 ? linkPage(fullPageIds(3000)) : linkPage(['3100', '3101'])));
+    const logged = await captureErrors(() => provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 2 }, ctx));
+    calls.length === 2 && !logged.some((l) => /-page cap/.test(l))
+      ? pass('google.fetch() does not warn when the last page allowed is a short one')
+      : fail(`google short page at the cap: ${calls.length} requests, ${JSON.stringify(logged)}`);
+  }
 
   // resolveMaxPages(): positive integer up to the hard ceiling, else the default.
   resolveMaxPages({}) === 10 && resolveMaxPages({ max_pages: 3 }) === 3
@@ -232,6 +241,20 @@ try {
     jobs?.length === PAGE_SIZE && logged.some((l) => /stopped "strategy" at page 2/.test(l)) && !logged.some((l) => /raise max_pages/.test(l))
       ? pass('google.fetch() keeps the pages collected when a later page fails, warns, and does not blame max_pages')
       : fail(`google later-page failure: ${jobs?.length} jobs, ${JSON.stringify(logged)}`);
+  }
+  {
+    // A later query whose first request fails keeps the earlier query's jobs,
+    // warns, and does not throw.
+    const err404 = Object.assign(new Error('Not Found'), { status: 404 });
+    const query = (url) => { if (qOf(url) === 'beta') throw err404; return linkPage(['4000', '4001']); };
+    const { ctx } = recordingCtx((c) => query(c.url));
+    let jobs; let threw = null;
+    const logged = await captureErrors(async () => {
+      try { jobs = await provider.fetch({ name: 'Google', google: { queries: ['alpha', 'beta'] } }, ctx); } catch (e) { threw = e; }
+    });
+    !threw && jobs?.length === 2 && logged.some((l) => /stopped "beta" at page 1/.test(l))
+      ? pass('google.fetch() keeps an earlier query\'s jobs when a later query\'s first request fails, and warns')
+      : fail(`google later-query failure: threw=${threw?.message} jobs=${jobs?.length} ${JSON.stringify(logged)}`);
   }
   {
     // While probing, a rejection propagates unwrapped (verify-portals needs it).
