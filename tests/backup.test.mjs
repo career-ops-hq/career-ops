@@ -250,6 +250,9 @@ try {
   assert.equal(synced.status, 2);
   assert.match(JSON.parse(synced.stdout).error, /inside dropbox/);
   assert.equal(existsSync(syncedDest), false);
+  const mixedCase = spawnSync(NODE, ['backup.mjs', '--dest', join(fakeHome, 'dropbox', 'Backups', 'career-ops'), '--include-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
+  assert.equal(mixedCase.status, 2);
+  assert.match(JSON.parse(mixedCase.stdout).error, /inside dropbox/);
   // Without the flag the same destination is fine, and a non-synced one is fine with it.
   const syncedOk = spawnSync(NODE, ['backup.mjs', '--dest', syncedDest, '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
   assert.equal(syncedOk.status, 0);

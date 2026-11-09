@@ -201,10 +201,12 @@ const within = (child, parent) => {
  * `--provider` resolves, so a `--dest` pointed into one is recognised too.
  */
 export function syncProviderOf(dest, machine = {}) {
-  const d = canonical(dest);
+  // Compared case-insensitively: macOS and Windows volumes ignore case, and a
+  // false match only refuses a flag, so erring wide is safe.
+  const d = canonical(dest).toLowerCase();
   for (const name of PROVIDERS) {
     for (const root of providerRoots(name, machine)) {
-      if (within(d, canonical(root.path))) return name;
+      if (within(d, canonical(root.path).toLowerCase())) return name;
     }
   }
   return null;
