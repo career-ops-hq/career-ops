@@ -2923,8 +2923,10 @@ export function verifyFacts(targetText, {
   const languageGap = scopeLanguageGap(targetText, sourceText);
   const scopeFacts = languageGap ? [] : scopeInflationClaims(targetText, sourceText);
   // A bullet the scope check already reported is not reported twice: the
-  // scope finding names the tier, which is the more specific diagnosis.
-  const scopeLines = new Set(scopeFacts.map(({ line }) => line));
+  // scope finding names the tier, which is the more specific diagnosis. A
+  // scope finding the user waived in allow_facts reports nothing, so it must
+  // not hide a drift elsewhere in the same bullet.
+  const scopeLines = new Set(scopeFacts.filter(({ value }) => !allowedFacts.has(value)).map(({ line }) => line));
   // The drift check's closed word class and inflection folding are English,
   // so it skips a non-English document the way the scope check does.
   const driftFacts = (languageGap ? [] : bulletDriftClaims(targetText, sourceText, { allowSwaps: config.allow_swaps, allowFacts: config.allow_facts }))

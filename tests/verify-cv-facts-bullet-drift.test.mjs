@@ -199,6 +199,16 @@ try {
   check('a non-array allow_swaps is a config error', configThrew, null);
   write();
 
+  {
+    const bullet = 'Owned the 2024 repricing analysis and wrote the pricing model';
+    const scope = run(ul(bullet)).unsupportedFacts.find(claim => claim.kind === 'scope');
+    write({ allow_facts: [scope?.value ?? ''] });
+    const waived = run(ul(bullet));
+    check('a waived scope finding does not hide a drift in the same bullet',
+      Boolean(scope) && waived.verdict === 'block'
+        && waived.unsupportedFacts.some(claim => claim.kind === 'drift' && claim.added.includes('wrote')), { scope, waived: waived.unsupportedFacts });
+    write();
+  }
   const owned = run(ul('Owned the 2024 repricing analysis end to end'));
   check('a bullet the scope check reports is not reported twice',
     owned.unsupportedFacts.filter(claim => claim.kind === 'scope').length === 1
