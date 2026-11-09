@@ -79,7 +79,7 @@ check(
 );
 check('existing tables only, no new table', secHas(/Existing tables only/) && secHas(/templates\/agency-licensing\.yml/) && secHas(/adds no table/), 'table restriction missing');
 check('no row means skipped silently ("no verified data")', secHas(/no row in the table a pass needs means that pass is skipped silently/) && secHas(/"no row" means "no verified data", never "no regime"/), 'no-row silence rule missing');
-check('no research or fetching; registry link printed only', secHas(/nothing is fetched or searched/) && secHas(/registry link .* printed for the candidate to click/), 'no-research rule missing');
+check('no research or fetching; resource link printed only', secHas(/nothing is fetched or searched/) && secHas(/resource link .* printed for the candidate to click/), 'no-research rule missing');
 check('quotes the contract verbatim and names pattern and source', secHas(/quoted verbatim/) && secHas(/pattern's name and its source/), 'quote/source rule missing');
 check('every finding ends in a lawyer question', secHas(/Every finding ends in a question for the lawyer list/), 'lawyer-question rule missing');
 check(
@@ -90,8 +90,8 @@ check(
   'silence rule missing or conflicts with the agency pass evidence',
 );
 check(
-  'agency pass states no regime facts (hard guard: sole statutory-facts source) and keeps the registry link',
-  secHas(/the finding states no regime facts/) && secHas(/templates\/restrictive-covenants\.yml/) && secHas(/registry link/),
+  'agency pass states no regime facts (hard guard: sole statutory-facts source) and keeps the resource link',
+  secHas(/the finding states no regime facts/) && secHas(/templates\/restrictive-covenants\.yml/) && secHas(/resource link/),
   'agency pass still conflicts with the statutory-facts guard',
 );
 

@@ -389,7 +389,7 @@ reuses the existing signal definition and its existing table, unchanged.
   term table for the terminology pass. A jurisdiction with no row in the
   table a pass needs means that pass is skipped silently ("no row" means "no
   verified data", never "no regime").
-- **No research:** nothing is fetched or searched. A registry link from a
+- **No research:** nothing is fetched or searched. A resource link from a
   table row is printed for the candidate to click, as Signal 10 does at JD
   time.
 - **Wording:** never say "this is misclassification", "this licence is
@@ -409,7 +409,7 @@ candidate would do (wording such as "on behalf of our client", "assignment",
 employer with an end client named separately; or the candidate states, or the
 tracker `via=` field shows, that the offer came through an agency), and (b)
 the Step 1 jurisdiction has a row in the table. The row is the gate and the
-source of the registry link; the finding states no regime facts, because the
+source of the resource link; the finding states no regime facts, because the
 hard guard names `templates/restrictive-covenants.yml` as the sole source of
 statutory facts. The finding states the entity named as employer, the end
 client if one is named, and the row's resource link, and says plainly that
