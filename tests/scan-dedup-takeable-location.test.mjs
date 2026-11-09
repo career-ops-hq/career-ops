@@ -83,11 +83,19 @@ function urlsOf(label, dir) {
   }
 }
 
+function sameHref(url, raw) {
+  try {
+    return new URL(url).href === new URL(raw).href;
+  } catch {
+    return false;
+  }
+}
+
 function expectTakeable(label, urls) {
   if (!urls) return;
-  const remote = urls.includes('https://boards.example.com/fixture/remote');
+  const remote = urls.some((url) => sameHref(url, 'https://boards.example.com/fixture/remote'));
   const harbor = urls.filter((url) => url.includes('/harbor'));
-  const pebbleford = urls.includes('https://boards.example.com/fixture/pebbleford');
+  const pebbleford = urls.some((url) => sameHref(url, 'https://boards.example.com/fixture/pebbleford'));
   if (remote && harbor.length === 1 && !pebbleford) {
     pass(label);
   } else {
