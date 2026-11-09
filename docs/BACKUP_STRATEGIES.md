@@ -24,6 +24,10 @@ exception: `config/local-paths.txt`, if you have one, stays in the checkout beca
 `update-system.mjs` reads it from there. It is not in the data root, so keep a copy of it
 with your backup.
 
+The same applies to any agent-tool files that are still in the checkout rather than the data
+root (`.claude/settings.json`, `.claude/hooks/`, `opencode.json`, `plugins.local/`,
+`plugins.lock`): `backup.mjs` reads them only from the data root, so copy them separately.
+
 Once your data is in one folder, backing it up is one path, and none of the patterns
 below have to know which files under the checkout are yours.
 
