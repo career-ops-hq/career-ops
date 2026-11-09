@@ -258,3 +258,24 @@ Re-read against rule 3 after the feed's documentation ([jobi.cy/apidocs](https:/
 **Fair use.** The documentation asks integrations to start an automated pass no more than once an hour and to follow its cursor pages in order. One scan is one pass per `provider: jobicy` entry, with 250 ms between pages.
 
 **Rules 1, 4 and 5.** Not re-verified here.
+
+## tes.com
+
+| | |
+|---|---|
+| **Proposed by** | [#6685](https://github.com/career-ops-hq/career-ops/issues/6685) |
+| **Provider** | `providers/tes.mjs` |
+| **PR** | this PR |
+| **Status** | Listed |
+
+UK and international teaching jobs from schools and other education employers. Tes publishes no API; the search page at `https://www.tes.com/jobs/search` fills itself from a public tRPC query, `GET /jobs/api/trpc/jobs.search?batch=1&input=<json>`, which the provider reads with the input shape the page sends (captured 2026-11-09).
+
+**Rule 1 (real, attributed, free).** Every posting names its school or employer and is free to read and apply to; no account is needed to read a posting.
+
+**Rule 2 (canonical URL).** The search payload carries one URL per posting, the Tes vacancy page (`canonicalUrl`), and `url` is that page. The per-posting detail query (`jobs.getById`) also exposes the school's own application link (`item.application.url`, for example an international-school ATS), but reading it costs one request per posting, about 5,700 for the whole board, so the provider does not read it. The Tes vacancy page links to it. A bounded, opt-in detail pass that carries that link is a possible follow-up.
+
+**Rule 3 (complete inventory, no paid placement).** Measured on 2026-11-09 with career-ops' default User-Agent, no key, cookie or session: sorted by `date`, the board returned 5,679 postings over 114 pages of 50, zero duplicate URLs, the last page short and the next one empty. A `limit` above 50 passes the endpoint's validation (`<= 100`) but returns zero rows, so the page size is 50. Rows carry a `promoted` flag and the payload a `sponsoredJobIds` list; the provider keeps every row in the order the date sort returns and never moves or filters by either. The optional `keywords` key is Tes's own search, chosen by the user per entry; the endpoint ignores `locations`, which the provider therefore does not send.
+
+**Rule 6 (read like a visitor).** The requests are the ones the public search page makes, one per page, 250 ms apart, bounded by `max_pages` (default 150, cap 400). `robots.txt` (checked 2026-11-09) disallows `/auth/`, `/registration/`, attachment paths and `/api/career-profile`, `/api/job-application` and `/api/schools` at the root; none covers `/jobs/api/trpc/jobs.search` or `/jobs/vacancy/`.
+
+**Rules 4 and 5.** The provider reads only Tes; nothing is ranked or merged at the source.
