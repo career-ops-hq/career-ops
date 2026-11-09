@@ -59,7 +59,7 @@ try {
   assert.equal(b.resolveDestination({ ...opts, folder: 'Work/co' }).dest.endsWith(join('My Drive', 'Work', 'co')), true);
   assert.throws(() => b.resolveDestination({ ...opts, folder: '../x' }), /relative path/);
 
-  mkdirSync(join(cloud, 'GoogleDrive-work@corp.com', 'My Drive'), { recursive: true });
+  mkdirSync(join(cloud, 'GoogleDrive-work@example.com', 'My Drive'), { recursive: true });
   assert.throws(() => b.resolveDestination(opts), /will not guess/);
   assert.match(b.resolveDestination({ ...opts, account: 'work@' }).dest, /work@corp\.com/);
   assert.throws(() => b.resolveDestination({ ...opts, account: 'nobody' }), /matches --account/);

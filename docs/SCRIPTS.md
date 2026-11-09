@@ -2025,7 +2025,7 @@ Nothing is chosen for you: pass `--dest` or `--provider`, or set `CAREER_OPS_BAC
 ```bash
 node backup.mjs --dest ~/Backups/career-ops
 node backup.mjs --provider google-drive    # <Google Drive>/Backups/career-ops; also dropbox | onedrive | icloud
-node backup.mjs --provider google-drive --account work@corp.com   # when several accounts are signed in
+node backup.mjs --provider google-drive --account work@example.com   # when several accounts are signed in
 node backup.mjs --provider dropbox --folder Work/career-ops       # folder under the drive (default Backups/career-ops)
 node backup.mjs --dest ~/Backups/career-ops --include-contacts # also copy the three contact files
 node backup.mjs --dest ~/Backups/career-ops --dry-run             # list what would be copied, copy nothing
