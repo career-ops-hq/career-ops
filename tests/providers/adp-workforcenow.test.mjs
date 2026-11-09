@@ -387,6 +387,50 @@ try {
   }
 
   {
+    // Same-tenant api+careers_url where only careers_url carries lang: the
+    // resolved en_CA must reach EVERY request the provider makes — first list
+    // page, the next page, and each detail call — as both lang and locale.
+    // detect() only proves the list URL it builds, so a builder that dropped
+    // one of the two params (or the detail URL entirely) would pass that test
+    // and still read an empty en_CA board in production.
+    const seen = [];
+    const listPages = [
+      { jobRequisitions: fullPage(1), meta: { totalNumber: 22 } },
+      { jobRequisitions: [mkJob('item-21', 'Job 21', 'ext-21'), mkJob('item-22', 'Job 22', 'ext-22')], meta: { totalNumber: 22 } },
+    ];
+    let listCall = 0;
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async (url) => {
+        const u = new URL(url);
+        seen.push(u);
+        if (/\/job-requisitions\/[^/]+$/.test(u.pathname)) return { requisitionDescription: '<p>Detail body</p>' };
+        return listPages[listCall++] ?? { jobRequisitions: [], meta: { totalNumber: 22 } };
+      },
+    };
+    const jobs = await adp.fetch({
+      name: 'ExampleCo',
+      api: CAREERS_URL,
+      careers_url: `${CAREERS_URL}&lang=en_CA`,
+      adpWorkforcenow: { fetchDetails: true, detailLimit: 3 },
+    }, mockCtx);
+    const listUrls = seen.filter((u) => /\/job-requisitions$/.test(u.pathname));
+    const detailUrls = seen.filter((u) => /\/job-requisitions\/[^/]+$/.test(u.pathname));
+    const carries = (u) => u.searchParams.get('lang') === 'en_CA' && u.searchParams.get('locale') === 'en_CA';
+    const offenders = seen.filter((u) => !carries(u)).map((u) => u.href);
+    if (listUrls.length === 2 && detailUrls.length === 3) {
+      pass('adp-workforcenow.fetch() same-tenant lang: requests the first list page, the second page and every detail');
+    } else {
+      fail(`adp-workforcenow.fetch() same-tenant lang: saw ${listUrls.length} list and ${detailUrls.length} detail requests, expected 2 and 3`);
+    }
+    if (jobs.length === 22 && offenders.length === 0) {
+      pass('adp-workforcenow.fetch() carries lang=en_CA and locale=en_CA on every list and detail request');
+    } else {
+      fail(`adp-workforcenow.fetch() dropped lang/locale on ${offenders.length} request(s): ${JSON.stringify(offenders)}`);
+    }
+  }
+
+  {
     // The provider's own page ceiling must apply even when the feed never
     // becomes empty and reports more rows than the ceiling can cover.
     let calls = 0;
