@@ -64,6 +64,9 @@ const tokenMapPath = path.join(root, TOKEN_MAP_NAME);
 /** Escape a literal so it can be used inside a RegExp. */
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const METADATA_KEYS = new Set(['__files__']);
+const isTokenKey = (k) => !METADATA_KEYS.has(k);
+
 function loadTokenMap(explicitPath) {
   const mapPath = explicitPath ?? tokenMapPath;
   if (!fs.existsSync(mapPath)) return {};
@@ -105,7 +108,7 @@ function scrub(text, guard, map) {
     const re = new RegExp(escapeRe(value), 'gi');
     out = out.replace(re, (matched) => {
       // Reuse an existing token only when the spelling and casing match exactly.
-      const existing = Object.entries(map).find(([k, v]) => !k.startsWith('__') && v === matched);
+      const existing = Object.entries(map).find(([k, v]) => isTokenKey(k) && v === matched);
       if (existing) return existing[0];
       // Use an identifier valid as an unquoted YAML scalar (no braces).
       const token = `PRIVACY_VALUE_${++index}`;
@@ -125,7 +128,7 @@ function rehydrate(text, map, restoredTokens = null) {
   // corrupting longer ones, and a single pass ensures inserted values are not
   // processed again.
   const extraTokens = Object.keys(map)
-    .filter((k) => !/^PRIVACY_VALUE_\d+$/.test(k) && !k.startsWith('__'))
+    .filter((k) => !/^PRIVACY_VALUE_\d+$/.test(k) && isTokenKey(k))
     .sort((a, b) => b.length - a.length);
 
   const pattern = new RegExp(
@@ -242,12 +245,12 @@ async function main() {
       }
     }
 
-    if (mode === 'scrub' && Object.keys(map).filter((k) => !k.startsWith('__')).length > 0) {
+    if (mode === 'scrub' && Object.keys(map).filter(isTokenKey).length > 0) {
       saveTokenMap(map);
     } else if (mode === 'restore') {
       const tokenizedFiles = Array.isArray(map.__files__) ? map.__files__ : [];
       const absentTokenized = tokenizedFiles.filter((f) => !fs.existsSync(path.join(root, f)));
-      const mapTokens = Object.keys(map).filter((k) => !k.startsWith('__'));
+      const mapTokens = Object.keys(map).filter(isTokenKey);
       const unrestored = mapTokens.filter((t) => !restoredTokens.has(t));
       if (unrestored.length > 0) {
         console.warn(
@@ -292,5 +295,6 @@ export {
   saveTokenMap,
   scrub,
   rehydrate,
+  isTokenKey,
   main,
 };

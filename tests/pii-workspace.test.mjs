@@ -14,6 +14,7 @@ import {
   loadTokenMap,
   saveTokenMap,
   replaceUserFile,
+  isTokenKey,
 } from '../pii-workspace.mjs';
 
 function withTempDir(fn) {
@@ -417,6 +418,68 @@ test('scrub records tokenized files and restore removes map when all tokenized f
     assert.equal(resRestore.status, 0);
     assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Jane Doe');
     assert.equal(fs.existsSync(tokenMap), false, 'token map should be unlinked after all tokenized files restored');
+  });
+});
+
+test('isTokenKey distinguishes metadata __files__ from tokens including double-underscore tokens', () => {
+  assert.equal(isTokenKey('__files__'), false);
+  assert.equal(isTokenKey('__NAME__'), true);
+  assert.equal(isTokenKey('__EMAIL__'), true);
+  assert.equal(isTokenKey('PRIVACY_VALUE_1'), true);
+  assert.equal(isTokenKey('TOKEN_A'), true);
+});
+
+test('rehydrate and restore preserve and restore legacy double-underscore tokens like __NAME__ while treating __files__ as metadata', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+
+    // Token map contains legacy __NAME__ token and __files__ metadata
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({
+        __files__: ['cv.md'],
+        __NAME__: 'Alice Smith',
+        PRIVACY_VALUE_1: 'Acme Corp',
+      }),
+      'utf8'
+    );
+    fs.writeFileSync(cvFile, 'Candidate: __NAME__ at PRIVACY_VALUE_1', 'utf8');
+
+    const res = spawnSync(process.execPath, [scriptPath, 'restore'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(res.status, 0);
+    assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Alice Smith at Acme Corp');
+    assert.equal(fs.existsSync(tokenMap), false, 'token map should be unlinked after all tokens including __NAME__ are restored');
+  });
+});
+
+test('restore retains token map when legacy double-underscore token like __NAME__ is unrestored', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({
+        __files__: ['cv.md'],
+        __NAME__: 'Alice Smith',
+      }),
+      'utf8'
+    );
+    fs.writeFileSync(cvFile, 'Candidate: Someone Else', 'utf8');
+
+    const res = spawnSync(process.execPath, [scriptPath, 'restore'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(res.status, 0);
+    assert.equal(fs.existsSync(tokenMap), true, 'token map must be kept when __NAME__ is not restored');
+    assert.match(res.stderr + res.stdout, /1 token map entry\(ies\) not restored; retaining/);
   });
 });
 
