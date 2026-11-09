@@ -46,7 +46,7 @@
  */
 
 import { execFile, execFileSync, execSync, spawnSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync, writeSync } from 'fs';
 import { join, dirname, basename, resolve, posix as pathPosix } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes, timingSafeEqual } from 'crypto';
@@ -3548,25 +3548,61 @@ function rebuildDashboardBinaryIfNeeded() {
 
 // ── CHECK ───────────────────────────────────────────────────────
 
+// Session-start latency budget for check(): AGENTS.md runs the check on the
+// first message of every session, so its worst case is user-visible dead time
+// before the first interaction. The default channel makes one curl call, so
+// its worst case is the curl JS backstop (12s). `--channel main` runs its curl
+// calls in parallel (one wall-clock leg) and the git probe after them, so its
+// worst case is the backstop + CHECK_GIT_PROBE_TIMEOUT_MS = 17s, paid
+// ONLY when curl hangs (black-hole egress that swallows packets):
+// deterministic failures — DNS, connection refused, curl missing from PATH —
+// exit immediately regardless of the budget. The curl budget is deliberately
+// not shortened to pay for the probe: on a slow-but-working connection with
+// the git transport blocked, a shorter curl hangs up on an answer that was
+// about to arrive and reports a false "offline" — the bug the git fallback
+// exists to kill, one network over (#2550 review). (The stderr retry notice in
+// checkMainChannel() serves direct terminal invocation; agent harnesses
+// buffer stderr and surface it only after the process exits.)
+const CHECK_CURL_MAX_TIME_S = 10;
+const CHECK_CURL_BACKSTOP_MS = CHECK_CURL_MAX_TIME_S * 1000 + 2000;
+const CHECK_GIT_PROBE_TIMEOUT_MS = 5000;
+
 // curl helper used by check() — curl works inside the Claude Code sandbox
 // where Node's built-in fetch() fails (ENOTFOUND) because the sandbox
 // routes network traffic through an HTTP/HTTPS proxy that fetch() does
 // not respect but curl handles transparently.  The --silent / --fail flags
 // match the failure-handling already used throughout apply().
-function curlGet(url, extraArgs = []) {
+//
+// Resolves the body, or null on any failure. `onError` receives the failure
+// reason, so an "offline" answer can say what failed: ENOENT (curl not on
+// PATH), HTTP 403 (--fail, e.g. API rate limit), a proxy/TLS failure and a
+// real outage all land there. Exported for tests: the broken-curl guard is
+// verified behaviorally by invoking this with a sabotaged PATH.
+export function curlGet(url, extraArgs = [], onError = () => {}) {
   return new Promise((resolve) => {
-    execFile(
-      'curl',
-      ['--silent', '--fail', '--max-time', '10', ...extraArgs, url],
-      { encoding: 'utf-8', timeout: 12000 },
-      (error, stdout) => {
-        if (error) {
-          resolve(null);
-        } else {
-          resolve(stdout.trim());
+    const failed = (detail) => { onError(detail); resolve(null); };
+    // A corrupt or non-executable curl on PATH makes execFile throw
+    // synchronously on Windows (spawn EFTYPE) instead of calling back —
+    // catch that too, so a broken curl degrades to null instead of crashing
+    // check(), which runs silently at the start of every session.
+    try {
+      execFile(
+        'curl',
+        ['--silent', '--fail', '--max-time', String(CHECK_CURL_MAX_TIME_S), ...extraArgs, url],
+        { encoding: 'utf-8', timeout: CHECK_CURL_BACKSTOP_MS },
+        (error, stdout) => {
+          if (!error) return resolve(stdout.trim());
+          // Killed by the JS backstop: error.code is null and the message is
+          // the whole command line. curl hitting its own --max-time exits 28.
+          // Name both, or the rendered detail is a bare "28" or a tautology.
+          if (error.killed) return failed(`timeout (${CHECK_CURL_BACKSTOP_MS / 1000}s)`);
+          if (error.code === 28) return failed(`timeout (${CHECK_CURL_MAX_TIME_S}s)`);
+          failed(String(error.code || error.message.split('\n')[0]));
         }
-      }
-    );
+      );
+    } catch (error) {
+      failed(String(error.code || error.message.split('\n')[0]));
+    }
   });
 }
 
@@ -3715,6 +3751,74 @@ export const RELEASE_TAG_RE = new RegExp(`^${RELEASE_TAG_PREFIX}(\\d+\\.\\d+\\.\
 export function releaseTagVersion(tagName) {
   const match = String(tagName || '').trim().match(RELEASE_TAG_RE);
   return match ? match[1] : '';
+}
+
+/**
+ * The highest career-ops release named in raw `git ls-remote --tags` output,
+ * or '' when there is none. Each tag goes through releaseTagVersion(), so the
+ * git fallback and the releases API agree on what counts as a release: the
+ * sibling `web-v*` component, historical bare tags and malformed
+ * `career-ops-v…` tags are all ignored. Peeled `^{}` refs collapse onto their
+ * tag; a stray \r from a CRLF-translating wrapper is stripped before matching.
+ *
+ * @param {string} lsRemoteOutput
+ * @returns {string}
+ */
+export function highestReleaseTag(lsRemoteOutput) {
+  let best = '';
+  for (const line of String(lsRemoteOutput || '').split('\n')) {
+    const tag = (line.split('\t')[1] || '')
+      .replace(/\r$/, '')
+      .replace(/^refs\/tags\//, '')
+      .replace(/\^\{\}$/, '');
+    const version = releaseTagVersion(tag);
+    if (version && (!best || compareVersions(version, best) > 0)) best = version;
+  }
+  return best;
+}
+
+/**
+ * The latest career-ops release as seen over git, the transport apply() uses
+ * on `--channel main`. Consulted by checkMainChannel() only when both curl
+ * sources failed: curl failing is not proof of being offline — curl may be
+ * missing from PATH, the proxy may be configured only in git config
+ * (http.proxy), or raw.githubusercontent.com / api.github.com may be filtered
+ * while github.com is reachable. In all of those, apply would succeed, so
+ * check must not report "offline".
+ *
+ * Returns { ok: true, version } when upstream answered (version is '' when it
+ * carries no release tag) and { ok: false, detail } when git failed too.
+ * Never throws.
+ *
+ * @param {string} [repoUrl] - fixture injection only (a deterministic failing
+ *   remote); the production caller always uses CANONICAL_REPO.
+ * @returns {{ok: true, version: string} | {ok: false, detail: string}}
+ */
+export function gitRemoteVersion(repoUrl = CANONICAL_REPO) {
+  try {
+    // Direct execFileSync rather than gitQuiet: this probe runs at session
+    // start, so it takes the check's tight budget, not the general git one.
+    // GIT_TERMINAL_PROMPT=0 suppresses terminal credential prompts, but on
+    // Windows Git Credential Manager pops a GUI dialog that flag does not
+    // cover — `-c credential.helper=` disables helpers entirely (safe: an
+    // anonymous read of a public repo) and GCM_INTERACTIVE=never covers
+    // gitconfigs that force GCM some other way.
+    const out = execFileSync('git', ['-c', 'credential.helper=', 'ls-remote', '--tags', repoUrl], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: CHECK_GIT_PROBE_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    });
+    return { ok: true, version: highestReleaseTag(out) };
+  } catch (error) {
+    // Keep the reason. A non-zero git exit sets error.status, not error.code,
+    // and leaves the diagnosis ("fatal: unable to access …") in stderr; the
+    // message is only the "Command failed: git …" tautology. error.code covers
+    // spawn-level failures with empty stderr (ENOENT, ETIMEDOUT).
+    const stderrLine = String(error.stderr || '').trim().split('\n')[0].replace(/\r$/, '');
+    return { ok: false, detail: stderrLine || error.code || String(error.message || error).split('\n')[0] };
+  }
 }
 
 /**
@@ -3883,14 +3987,19 @@ function readDismissMarker() {
  *
  * @param {typeof curlGet} runCurlGet
  * @returns {Promise<{status: 'ok', tagName: string, version: string, publishedAt: string, changelog: string}
- *   | {status: 'offline'|'no-remote-version', tag?: string}>}
+ *   | {status: 'offline'|'no-remote-version', tag?: string, detail?: string}>}
  */
 async function latestRelease(runCurlGet) {
+  let detail = '';
   const releaseRaw = await runCurlGet(RELEASES_API, [
     '--header', 'Accept: application/vnd.github.v3+json',
     '--header', 'User-Agent: career-ops-update-checker',
-  ]);
-  if (releaseRaw === null) return { status: 'offline' };
+  ], (reason) => { detail = reason; });
+  // No git fallback here, unlike checkMainChannel(): on this channel apply()
+  // resolves its target through the same releases API (resolveTargetRef) and
+  // refuses when it cannot, so a version found over git would offer an update
+  // that apply then declines. The reason still travels, so "offline" says why.
+  if (releaseRaw === null) return { status: 'offline', ...(detail ? { detail: `curl releases: ${detail}` } : {}) };
   let release = null;
   try { release = JSON.parse(releaseRaw); } catch { /* unparseable body */ }
   const tagName = String(release?.tag_name || '').trim();
@@ -3919,17 +4028,17 @@ async function latestRelease(runCurlGet) {
  *
  * @param {string[]} argv
  * @param {NodeJS.ProcessEnv} env
- * @param {{curlGet?: typeof curlGet, localVersion?: () => string, readMarker?: () => (string|null)}} [ctx] - test seams.
+ * @param {{curlGet?: typeof curlGet, gitRemoteVersion?: typeof gitRemoteVersion, localVersion?: () => string, readMarker?: () => (string|null)}} [ctx] - test seams.
  */
 export async function checkStatus(argv, env, ctx = {}) {
   const runCurlGet = ctx.curlGet || curlGet;
   const local = (ctx.localVersion || localVersion)();
   const localSha = (ctx.localShortSha || localShortSha)();
   const marker = argv.includes('--force') ? null : parseDismissMarker((ctx.readMarker || readDismissMarker)());
-  if (resolveChannel(argv, env) === 'main') return checkMainChannel(local, marker, runCurlGet, localSha);
+  if (resolveChannel(argv, env) === 'main') return checkMainChannel(local, marker, runCurlGet, localSha, ctx.gitRemoteVersion || gitRemoteVersion);
 
   const latest = await latestRelease(runCurlGet);
-  if (latest.status !== 'ok') return { status: latest.status, local, ...(localSha ? { local_sha: localSha } : {}), ...(latest.tag ? { tag: latest.tag } : {}) };
+  if (latest.status !== 'ok') return { status: latest.status, local, ...(localSha ? { local_sha: localSha } : {}), ...(latest.tag ? { tag: latest.tag } : {}), ...(latest.detail ? { detail: latest.detail } : {}) };
   const remote = latest.version;
   if (compareVersions(local, remote) >= 0) return { status: 'up-to-date', local, remote, ...(localSha ? { local_sha: localSha } : {}) };
   if (dismissalCovers(marker, remote, latest.publishedAt)) return { status: 'dismissed', local, remote, ...(localSha ? { local_sha: localSha } : {}) };
@@ -3937,34 +4046,39 @@ export async function checkStatus(argv, env, ctx = {}) {
 }
 
 /**
- * check() for `--channel main`: the pre-#3845 logic, unchanged apart from
- * returning its answer and honouring a per-release dismissal.
+ * check() for `--channel main`: the pre-#3845 logic, apart from returning its
+ * answer, honouring a per-release dismissal, and asking git (the transport
+ * apply() uses on this channel) before reporting "offline".
+ *
+ * @param {(() => ReturnType<typeof gitRemoteVersion>)} runGitProbe - gitRemoteVersion, or a test double.
  */
-async function checkMainChannel(local, marker, runCurlGet, localSha) {
+async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe) {
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
   let localCommit = '';
-  let remoteCommit = '';
+  const failed = { version: 'failed', releases: 'failed' };
 
   // Use curl instead of fetch() so the check works inside the Claude Code
   // sandbox (see curlGet() above for rationale).  Two sources are tried;
-  // both failing is the only true-offline signal.
-  const [rawVersion, releaseRaw] = await Promise.all([
-    runCurlGet(RAW_VERSION_URL),
-    runCurlGet(RELEASES_API, [
-      '--header', 'Accept: application/vnd.github.v3+json',
-      '--header', 'User-Agent: career-ops-update-checker',
-    ]),
-  ]);
-
+  // both failing sends the check to the git fallback below.
+  //
   // VERSION is release metadata, not a complete description of the system
   // tree. Compare the installed commit with main as well, so same-version
   // manifest/file drift is visible (#2630). A failed commit lookup is
   // deliberately conservative: version checks still work offline/behind a
-  // restricted git transport.
+  // restricted git transport. The main-ref lookup runs alongside the version
+  // sources, not after them: sequentially, a black-holed network paid the curl
+  // budget twice before the git fallback even started.
+  const [rawVersion, releaseRaw, remoteCommit] = await Promise.all([
+    runCurlGet(RAW_VERSION_URL, [], (reason) => { failed.version = reason; }),
+    runCurlGet(RELEASES_API, [
+      '--header', 'Accept: application/vnd.github.v3+json',
+      '--header', 'User-Agent: career-ops-update-checker',
+    ], (reason) => { failed.releases = reason; }),
+    upstreamRefCommit('refs/heads/main', runCurlGet),
+  ]);
   try { localCommit = gitQuiet('rev-parse', 'HEAD'); } catch { /* no git checkout */ }
-  remoteCommit = await upstreamRefCommit('refs/heads/main', runCurlGet);
 
   if (rawVersion !== null) {
     try {
@@ -3989,12 +4103,39 @@ async function checkMainChannel(local, marker, runCurlGet, localSha) {
   }
 
   if (!remote && !releaseVersion) {
-    // Both curl calls returned null → genuine network failure.
-    // If one returned non-null but unparseable, remote/releaseVersion are
-    // empty strings, which still reaches the offline branch — that's the
-    // right conservative behaviour (no version = can't determine status).
+    // If one call answered but was unparseable, remote/releaseVersion are
+    // empty strings and this is no-remote-version — the conservative answer
+    // (no version = can't determine status), and no reason to probe further.
+    // Both calls failing is a curl-level failure, not yet proof of being
+    // offline: apply() on this channel fetches over git, so ask git before
+    // saying "offline" to a machine whose apply would succeed.
     const bothNetworkFailed = rawVersion === null && releaseRaw === null;
-    return { status: bothNetworkFailed ? 'offline' : 'no-remote-version', local, ...(localSha ? { local_sha: localSha } : {}) };
+    let gitProbe = null;
+    if (bothNetworkFailed) {
+      // Progress goes to stderr: stdout carries the single JSON line the
+      // agent parses, and a silent multi-second retry looks like a hang.
+      // writeSync, not console.error: on Windows, stderr writes to a pipe are
+      // async, and the execFileSync probe blocks the event loop — a queued
+      // console.error would flush only AFTER the wait it announces.
+      writeSync(
+        process.stderr.fd,
+        `career-ops update check: GitHub unreachable over curl (VERSION: ${failed.version}; ` +
+        `releases: ${failed.releases}) — retrying over git, ≤${CHECK_GIT_PROBE_TIMEOUT_MS / 1000}s…\n`,
+      );
+      gitProbe = runGitProbe();
+      if (gitProbe.ok) remote = gitProbe.version;
+    }
+    if (!remote) {
+      // git failed too → offline. git reached upstream but found no release
+      // tag → the network is fine, the version is what's missing.
+      const gitFailed = gitProbe !== null && !gitProbe.ok;
+      const result = { status: gitFailed ? 'offline' : 'no-remote-version', local, ...(localSha ? { local_sha: localSha } : {}) };
+      if (bothNetworkFailed) {
+        result.detail = `curl VERSION: ${failed.version}; curl releases: ${failed.releases}; ` +
+          (gitFailed ? `git ls-remote also failed: ${gitProbe.detail}` : 'git ls-remote reachable but returned no career-ops release tags');
+      }
+      return result;
+    }
   }
 
   // Use the higher version between VERSION file and GitHub Release
