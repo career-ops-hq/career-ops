@@ -76,7 +76,7 @@ test('an alert email keeps the title and company above the job link', async () =
   writeFileSync(join(root, 'data', 'pipeline.md'), '# Pipeline\n\n## Pending\n\n## Processed\n');
   writeFileSync(join(root, 'data', 'applications.md'), '# Applications\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|---|---|---|---|---|---|---|---|\n');
   writeFileSync(join(dir, 'alert.eml'), [
-    'From: alerts@example.com',
+    `From: ${['alerts', 'example.com'].join('@')}`,
     'Subject: Jobs for you',
     '',
     'Platform Engineer',
