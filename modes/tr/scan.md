@@ -8,17 +8,9 @@ Yapılandırılmış iş portallarını tara, başlık ilgisine göre filtrele v
 
 ## Önerilen Çalıştırma (Recommended Execution)
 
-Ana etkileşimli bağlamı (interactive context) tüketmekten kaçınmak için, eğer komut satırı arayüzün (CLI) destekliyorsa bunu bir çalışan (worker) / alt ajan (subagent) olarak yürüt:
+`.agents/skills/career-ops/SKILL.md` → **Modes delegated to subagent** bölümündeki devretme kılavuzuna göre worker/subagent olarak çalıştırın. Bu, ana etkileşimli bağlamı tüketmeyi önler. **CLI destekliyorsa arka plan çalıştırması (`run_in_background: true`) kullanın**, böylece tarama ana oturumla eşzamanlı çalışır.
 
-```python
-Agent(
-    subagent_type="general-purpose",
-    prompt="[content of this file + specific data]",
-    run_in_background=True
-)
-```
-
-Oluşturulan alt ajan bir **tek geçişli çalışandır** (single-pass worker): aşağıda adlandırılan ayrıştırıcılar (parsers)/API'ler/Playwright/WebSearch ile taramayı doğrudan çalıştırır. Başka alt ajanlar oluşturmamalı veya diğer becerileri (skills) çağırmamalıdır (bkz. `modes/_shared.md` → Subagent delegation). Tarama işlemi `portals.yml` ile sınırlandırılmıştır; asla açık uçlu bir araştırma görevi değildir.
+Oluşturulan worker **tek geçişli bir çalışandır** (single-pass worker): aşağıda adlandırılan ayrıştırıcılar (parsers)/API'ler/Playwright/WebSearch ile taramayı doğrudan çalıştırır. Başka alt ajanlar oluşturmamalı veya diğer becerileri (skills) çağırmamalıdır (bkz. `modes/_shared.md` → Subagent delegation). Tarama işlemi `portals.yml` ile sınırlandırılmıştır; asla açık uçlu bir araştırma görevi değildir.
 
 ## Yapılandırma (Configuration)
 

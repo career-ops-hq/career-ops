@@ -285,6 +285,8 @@ A mode may tell you to run work in a background subagent (e.g. `scan`, or parall
 - Company, role, and compensation research is ALWAYS done **inline**, with the small explicit set of WebSearch/WebFetch queries the mode names (e.g. `oferta` Blocks C/D) — never delegated to a recursive research harness.
 - One `/career-ops <JD>` evaluates one role; it must never explode into a self-replicating swarm of agents. If you are about to delegate research or nest agents, stop and do it inline, bounded.
 
+**Delegation mechanism per CLI:** See `.agents/skills/career-ops/SKILL.md` → **Modes delegated to subagent** for the current mechanisms (Claude Code `Agent()`, OpenCode `task` tool → `general` subagent, VS Code Copilot Chat `runSubagent` (Local session) / `task` tool with `agent_type: general-purpose` (Copilot session), GitHub Copilot CLI `task` tool with `agent_type: general-purpose`, others: direct execution).
+
 <!-- guardrail:agency-confirmation -->
 **RULE: Agency confirmation must happen before any tracker, report, or CV write.** If the JD suggests an agency/recruiter intermediary ("our client", agency domain, undisclosed end employer), and the user has not explicitly identified or confirmed the agency for this posting, stop before evaluating or writing artifacts. A guessed agency, a Via value from the JD, blanket batch authorization, silence, and elapsed time are not confirmation.
 
