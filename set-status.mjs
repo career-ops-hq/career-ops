@@ -47,6 +47,7 @@
  * idempotent — re-running the same command is always safe. With --replace-note
  * OLD, --note NEW instead replaces whole notes at "; " boundaries (including
  * idempotent retries); a missing match fails without writing anything.
+ * --remove-note OLD removes one whole note; --expect-notes TEXT guards stale deletions.
  *
  * The read-modify-write runs under the shared tracker lock (tracker-utils.mjs,
  * same lock as merge-tracker.mjs) and the file is replaced atomically. Only the
@@ -163,6 +164,10 @@ const USAGE = `Usage: node set-status.mjs <tracker#|company> <state> [--note "..
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
   --note=VALUE       Pass a literal note, including text beginning with --
   --replace-note "OLD" Replace whole OLD notes with --note text; fail if neither is present
+  --remove-note "OLD" Remove one whole note; requires --expect-notes
+  --note-index N     Edit only the Nth displayed note (zero-based); requires
+                     --replace-note, --note and --expect-notes
+  --expect-notes "TEXT" Require the current Notes cell to match before writing
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
@@ -236,8 +241,8 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, undo: false, repairStatusLog: false, repairFollowup: false, detachJdArchive: false, json: false, expectTracker: null, expectRow: null, expectStatus: null };
-const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source', '--expect-tracker': 'expectTracker', '--expect-row': 'expectRow', '--expect-status': 'expectStatus' };
+const flags = { note: null, replaceNote: null, removeNote: null, expectNotes: null, noteIndex: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, undo: false, repairStatusLog: false, repairFollowup: false, detachJdArchive: false, json: false, expectTracker: null, expectRow: null, expectStatus: null };
+const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--remove-note': 'removeNote', '--expect-notes': 'expectNotes', '--note-index': 'noteIndex', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source', '--expect-tracker': 'expectTracker', '--expect-row': 'expectRow', '--expect-status': 'expectStatus' };
 
 /**
  * Is the caller asking for help, rather than passing "--help" as a VALUE?
@@ -285,8 +290,9 @@ const failUsage = makeCliFailUsage({
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
-  if (a.startsWith('--note=')) {
-    flags.note = a.slice('--note='.length);
+  const literalFlag = ['--note', '--replace-note', '--remove-note', '--expect-notes', '--note-index'].find(flag => a.startsWith(flag + '='));
+  if (literalFlag) {
+    flags[VALUE_FLAGS[literalFlag]] = a.slice(literalFlag.length + 1);
   } else if (a in VALUE_FLAGS) {
     // Never consume a following flag as the value: "--note --dry-run" would
     // silently disable dry-run and turn a preview into a real write.
@@ -319,6 +325,15 @@ for (let i = 0; i < rawArgs.length; i++) {
   else { positional.push(a); }
 }
 
+if (flags.removeNote !== null && (!cell(flags.removeNote) || flags.note !== null || flags.replaceNote !== null)) {
+  failUsage('--remove-note requires non-empty text and cannot be combined with --note or --replace-note');
+}
+if (flags.removeNote !== null && flags.expectNotes === null) {
+  failUsage('--remove-note requires --expect-notes with the Notes snapshot you reviewed');
+}
+if (flags.noteIndex !== null && (!/^(0|[1-9]\d*)$/.test(flags.noteIndex) || !Number.isSafeInteger(Number(flags.noteIndex)) || flags.replaceNote === null || flags.expectNotes === null)) {
+  failUsage('--note-index requires a non-negative integer, --replace-note, --note and --expect-notes');
+}
 if (flags.replaceNote !== null && (!cell(flags.replaceNote) || flags.note === null || !cell(flags.note))) {
   failUsage('--replace-note requires non-empty OLD and --note NEW values');
 }
@@ -333,7 +348,7 @@ const explicitSelector = flags.row !== null || flags.report !== null || flags.re
 
 if (flags.undo) {
   const conflicting = [
-    [flags.note !== null, '--note'], [flags.replaceNote !== null, '--replace-note'], [flags.on !== null, '--on'],
+    [flags.note !== null, '--note'], [flags.replaceNote !== null, '--replace-note'], [flags.removeNote !== null, '--remove-note'], [flags.noteIndex !== null, '--note-index'], [flags.on !== null, '--on'],
     [flags.repairStatusLog, '--repair-status-log'], [flags.repairFollowup, '--repair-followup'],
   ].filter(([set]) => set).map(([, name]) => name);
   if (conflicting.length) failUsage(`--undo cannot be combined with ${conflicting.join(', ')}`);
@@ -751,6 +766,9 @@ if (flags.expectStatus !== null && statusKey(oldStatus) !== newStatus
     `Tracker #${target.num} is now ${oldStatus}, not ${flags.expectStatus}; review it again before retrying`,
     { currentStatus: oldStatus });
 }
+if (flags.expectNotes !== null && String(target.notes ?? '').trim() !== flags.expectNotes.trim()) {
+  failWith(EXIT_AMBIGUOUS, 'notes-changed', 'The notes have changed since you opened them. Refresh before editing or deleting.');
+}
 const rawLine = lines[target.lineIdx];
 const separator = trackerRowSeparator(rawLine);
 // A tab is a cell delimiter in a legacy TSV row. Neutralize tabs only there;
@@ -782,6 +800,7 @@ let statusLogged = false;
 let statusLogRepaired = false;
 let statusLogRepair = null;
 const replacedNote = flags.replaceNote !== null ? cell(flags.replaceNote) : null;
+const removedNote = flags.removeNote !== null ? cell(separator === '\t' ? flags.removeNote.replace(/\t/g, ' ') : flags.removeNote) : null;
 try {
   // Rebuild only the matched line: change the Status cell, append the note, keep
   // every other cell exactly as parsed.
@@ -814,22 +833,62 @@ try {
     if (!hasNoteEntry(kept, moved)) replaceCellValue(colmap.notes, prependNote(kept, moved));
   }
 
-  if (note) {
+  if (note || removedNote !== null) {
     if (colmap.notes == null) {
-      failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
+      failWith(EXIT_USAGE, 'no-notes-column', `Tracker has no Notes column — cannot apply ${removedNote !== null ? '--remove-note' : '--note'}`);
     }
     const existing = (parts[colmap.notes] ?? '').trim();
-    if (replacedNote !== null) {
+    if (removedNote !== null) {
+      // Remove one whole note, never a substring of a longer note. The web
+      // supplies --expect-notes so a stale click/retry cannot remove a duplicate.
+      const escaped = removedNote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const match = new RegExp(`(^|; )(\\s*)${escaped}\\s*(?=; |$)`).exec(existing);
+      if (!match) failWith(EXIT_USAGE, 'remove-note-not-found', 'This note is no longer present. Refresh before trying again.');
+      let start = match.index + match[1].length + match[2].length;
+      let end = match.index + match[0].length;
+      const followingSeparator = /^;\s+/.exec(existing.slice(end));
+      if (followingSeparator) end += followingSeparator[0].length;
+      else {
+        const precedingSeparator = /\s*;\s*$/.exec(existing.slice(0, start));
+        if (precedingSeparator) start = precedingSeparator.index;
+      }
+      const updated = existing.slice(0, start) + existing.slice(end);
+      replaceCellValue(colmap.notes, updated.trim() ? updated : '—');
+      noteChanged = true;
+    } else if (replacedNote !== null && flags.noteIndex !== null) {
+      // Match the displayed note position while preserving every surrounding
+      // byte. The snapshot is checked under the same lock before this branch.
+      const reviewedNotes = String(target.notes ?? '').trim();
+      // Canonicalizing an old status may prepend its dated text to Notes.
+      const prefixLength = existing.length - reviewedNotes.length;
+      let offset = prefixLength;
+      const notes = [];
+      for (const raw of reviewedNotes.split('; ')) {
+        const text = raw.trim();
+        if (text && text !== '—' && text !== '-') {
+          const start = offset + raw.indexOf(text);
+          notes.push({ text, start, end: start + text.length });
+        }
+        offset += raw.length + 2;
+      }
+      const selectedNote = notes[Number(flags.noteIndex)];
+      if (!selectedNote || selectedNote.text !== replacedNote) {
+        failWith(EXIT_USAGE, 'replace-note-not-found', 'This note is no longer at the selected position. Refresh before trying again.');
+      }
+      const updated = existing.slice(0, selectedNote.start) + note + existing.slice(selectedNote.end);
+      replaceCellValue(colmap.notes, updated);
+      noteChanged = updated !== existing;
+    } else if (replacedNote !== null) {
       // Use the same whole-note boundaries as append idempotency. Prefer the
       // longer complete span so NEW containing OLD (including "; ") is not
       // expanded again on retry, and OLD containing NEW is still replaced.
       const alternatives = [note, replacedNote].sort((a, b) => b.length - a.length)
         .map(text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-      const wholeNotes = new RegExp(`(^|; )(${alternatives.join('|')})(?=; |$)`, 'g');
+      const wholeNotes = new RegExp(`(^|; )(\\s*)(${alternatives.join('|')})(\\s*)(?=; |$)`, 'g');
       let found = false;
-      const updated = existing.replace(wholeNotes, (_match, prefix, entry) => {
+      const updated = existing.replace(wholeNotes, (_match, prefix, leading, entry, trailing) => {
         found = true;
-        return prefix + (entry === replacedNote ? note : entry);
+        return prefix + leading + (entry === replacedNote ? note : entry) + trailing;
       });
       if (!found) {
         failWith(EXIT_USAGE, 'replace-note-not-found', 'Neither --replace-note nor --note matches a whole note in the Notes cell');
@@ -1048,6 +1107,7 @@ const result = {
   newStatus,
   ...(note != null ? { note } : {}),
   ...(replacedNote !== null ? { replacedNote } : {}),
+  ...(removedNote !== null ? { removedNote } : {}),
   ...(flags.dryRun ? { dryRun: true } : {}),
   // Fire the #1430 hook on an actual transition INTO Applied or an explicit
   // lifecycle repair retry. The seeder itself is idempotent, so a repair retry

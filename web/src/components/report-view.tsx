@@ -15,6 +15,7 @@ import {
   splitSections,
   verdictReason,
 } from "@/lib/report-sections.mjs";
+import { JobNotes } from "@/components/job-notes";
 import { StatusSelect } from "@/components/status-select";
 import { BackLink } from "@/components/back-link";
 import { CompanyLogo } from "@/components/company-logo";
@@ -171,6 +172,7 @@ export function ReportView({
             const actions = (
               <div className="mt-4 flex flex-wrap items-center gap-2.5 print:hidden">
                 {app && <StatusSelect n={id} current={app.status} />}
+                {app && <JobNotes n={app.n} status={app.status} notes={app.notes} label={`${companyName} — ${app.role} (#${app.n})`} />}
                 {spend.generateCv && (
                   <GeneratePdfButton n={id} company={app?.company || meta?.title || id} onDisk={disk.exists} />
                 )}
@@ -293,6 +295,7 @@ export function ReportView({
           {app && (
             <div className="mt-4 print:hidden">
               <StatusSelect n={id} current={app.status} />
+              <JobNotes n={app.n} status={app.status} notes={app.notes} label={`${companyName} — ${app.role} (#${app.n})`} />
             </div>
           )}
           {app && canDelete && (
