@@ -80,6 +80,9 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   ENV
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_TIMEOUT_MS
+    CAREER_OPS_MAX_TOKENS  Output cap per tailored CV (default 32768). Keeps a
+                     gateway like OpenRouter from reserving credit for the
+                     model's whole output window (HTTP 402 on a low balance).
 
   EXAMPLES
     OPENAI_API_KEY=sk-... node openai-tailor.mjs --jd ./jds/job.txt --report reports/001-company-2026-01-01.md
@@ -262,6 +265,22 @@ export function buildSystemMessage(prompt, host) {
 }
 
 // ---------------------------------------------------------------------------
+// Output cap, as in openai-eval.mjs. With no limit in the request, a gateway
+// budgets the call for the model's whole output window: OpenRouter reserves
+// prompt + max output at the model's price before generating anything, and
+// answers HTTP 402 when the balance cannot cover that reservation, even when
+// the tailored CV costs cents. The variable and its default are openai-eval's,
+// so one setting covers both steps of the budget workflow.
+const DEFAULT_MAX_TOKENS = 32768;
+
+// Same host gate as buildSystemMessage: api.openai.com's reasoning models
+// reject `max_tokens` and take `max_completion_tokens`, which its other chat
+// models accept as well; gateways and local servers read `max_tokens`.
+function buildTokenLimit(limit, host) {
+  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
+}
+
+// ---------------------------------------------------------------------------
 // Call the OpenAI-compatible endpoint
 // ---------------------------------------------------------------------------
 const timeoutMs = parseInt(process.env.OPENAI_TIMEOUT_MS || '300000', 10);
@@ -270,8 +289,17 @@ if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
   process.exit(1);
 }
 
+// Empty means unset, as for every other variable here. Digits only, so "8k"
+// is refused instead of being read as 8.
+const maxTokensEnv = process.env.CAREER_OPS_MAX_TOKENS?.trim();
+const maxTokens = maxTokensEnv ? (/^\d+$/.test(maxTokensEnv) ? Number(maxTokensEnv) : NaN) : DEFAULT_MAX_TOKENS;
+if (!(maxTokens > 0)) {
+  console.error(`❌  Invalid CAREER_OPS_MAX_TOKENS: "${process.env.CAREER_OPS_MAX_TOKENS}" — must be a positive integer (output tokens).`);
+  process.exit(1);
+}
+
 console.log(`\n🔒  Privacy: your cv.md + JD will be sent to ${endpointHost}.`);
-console.log(`🤖  Calling ${modelName} via ${endpointHost}... this may take a minute.\n`);
+console.log(`🤖  Calling ${modelName} via ${endpointHost} (output cap ${maxTokens} tokens)... this may take a minute.\n`);
 
 const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -288,6 +316,7 @@ try {
     ],
     stream:      false,
     temperature: 0.2,
+    ...buildTokenLimit(maxTokens, endpointHost),
   });
   assertLlmRequestAllowed(endpoint, requestBody);
   const res = await fetch(endpoint, {
@@ -301,11 +330,24 @@ try {
     const body = await res.text();
     console.error(`❌  API error: HTTP ${res.status}`);
     console.error(`    ${body.slice(0, 300)}`);
+    if (res.status === 402) {
+      console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
+      console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);
+    }
     process.exit(1);
   }
 
   const data = await res.json();
   tailoredHtml = data.choices?.[0]?.message?.content?.trim();
+  // Before the empty check: a thinking model can spend the whole cap on
+  // reasoning, and then this is the only explanation the user gets. A reply
+  // cut off at the cap is a CV without its last sections, and saving it would
+  // hand that to generate-pdf as the tailored CV, so nothing is saved.
+  if (data.choices?.[0]?.finish_reason === 'length') {
+    console.error(`❌  The reply stopped at the ${maxTokens}-token output cap, so the tailored CV is cut short. Nothing was saved.`);
+    console.error(`    Raise CAREER_OPS_MAX_TOKENS to allow a longer reply.`);
+    process.exit(1);
+  }
   if (!tailoredHtml) {
     console.error('❌  The endpoint returned an empty response.');
     process.exit(1);
