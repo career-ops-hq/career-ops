@@ -1203,9 +1203,8 @@ const USER_LAYER_PREREQS = [
     path: 'cv.md',
     blocksExit: true,
     fix: [
-      'Run: node onboard-write.mjs --answers <answers.json> [--target <data-root>]',
       'Create cv.md in the project root with your CV in markdown',
-      'See examples/ for reference CVs',
+      'See examples/cv-example.md for the format',
     ],
   },
   {
@@ -1704,7 +1703,17 @@ async function main() {
   const onboardCmd = !explicitTarget && projectRoot === codeRoot
     ? 'node onboard-write.mjs --answers <answers.json>'
     : `node ${quoteOnboard(join(codeRoot, 'onboard-write.mjs'))} --answers <answers.json> --target ${quoteOnboard(projectRoot)}`;
-  const setupHint = `Run \`${onboardCmd}\` from the career-ops checkout. Open your AI CLI in the checkout (${CLI_NAMES}) and it walks you through setup by chatting.`;
+  // onboard-write only writes config/profile.yml and portals.yml, so cv.md
+  // gets its own step instead of a command that would not create it.
+  const setupSteps = [];
+  if (setupMissing.some(({ path }) => path === 'config/profile.yml' || path === 'portals.yml')) {
+    setupSteps.push(`Run \`${onboardCmd}\` from the career-ops checkout.`);
+  }
+  if (setupMissing.some(({ path }) => path === 'cv.md')) {
+    setupSteps.push(`Add your CV as cv.md in ${projectRoot} (examples/cv-example.md shows the format).`);
+  }
+  setupSteps.push(`Open your AI CLI in the checkout (${CLI_NAMES}) and it walks you through setup by chatting.`);
+  const setupHint = setupSteps.join(' ');
   if (failures > 0) {
     console.log(`Result: ${failures} issue${failures === 1 ? '' : 's'} found. Fix them and run \`npm run doctor\` again.`);
     if (setupNote) {

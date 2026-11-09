@@ -96,14 +96,16 @@ test('a failing check still reports the missing setup files', () => {
   }
 });
 
-test('a missing cv.md exits non-zero and names onboard-write', () => {
+test('a missing cv.md exits non-zero and points at creating cv.md, not onboard-write', () => {
   const dir = checkout({ withSetup: true });
   try {
     rmSync(join(dir, 'cv.md'));
     const { status, out } = runDoctor(dir);
     assert.equal(status, 1, out);
     assert.match(out, /✗ cv\.md not found/);
-    assert.match(out, /onboard-write\.mjs/);
+    assert.match(out, /Create cv\.md in the project root/);
+    assert.match(out, /Add your CV as cv\.md in .*examples\/cv-example\.md shows the format/);
+    assert.doesNotMatch(out, /onboard-write\.mjs/);
     assert.doesNotMatch(out, /config\/profile\.yml not found/);
     assert.doesNotMatch(out, /ready to go/);
   } finally {
