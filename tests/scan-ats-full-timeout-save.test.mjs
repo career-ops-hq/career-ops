@@ -141,7 +141,9 @@ try {
     resumeAt = cp.current?.resumeAt ?? null;
     partialSaved = cp.partialSave?.saved === true ? cp.partialSave.postingsKept : null;
   }
-  if (!signalReachesHandler && !saved && !cpExists && !stopped.stdout.includes('"stoppedEarly"')) {
+  const sawFirstRole = textHasUrl(stopped.stderr, FIRST);
+  const sigtermSent = stopped.signal === 'SIGTERM';
+  if (!signalReachesHandler && sawFirstRole && sigtermSent && !saved && !cpExists && !stopped.stdout.includes('"stoppedEarly"')) {
     pass('windows ends the sweep before the save handler can run');
   } else if (signalReachesHandler && saved && cpExists && resumeAt >= 1 && partialSaved >= 1 && stopped.status === 0) {
     pass('a timed-out full sweep keeps the role it already found and a resume point');
@@ -189,7 +191,9 @@ try {
   const { preload } = prepare(dryDir);
   const stopped = await stopSweep(dryDir, preload, ['--dry-run']);
   const text = pipeline(dryDir);
-  if (!signalReachesHandler && !textHasUrl(text, FIRST) && !existsSync(checkpointPath(dryDir)) && !stopped.stdout.includes('"stoppedEarly"')) {
+  const drySawRole = textHasUrl(stopped.stderr, FIRST);
+  const drySigterm = stopped.signal === 'SIGTERM';
+  if (!signalReachesHandler && drySawRole && drySigterm && !textHasUrl(text, FIRST) && !existsSync(checkpointPath(dryDir)) && !stopped.stdout.includes('"stoppedEarly"')) {
     pass('windows ends a dry run before the handler can print or write');
   } else if (signalReachesHandler && !textHasUrl(text, FIRST) && !existsSync(checkpointPath(dryDir)) && stopped.stdout.includes('"stoppedEarly":true')) {
     pass('a dry run still only prints the partial result and writes nothing');
