@@ -33,6 +33,7 @@ import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
@@ -540,6 +541,7 @@ const trackable  = Boolean(summary?.company && summary.role && summary.role.toLo
 // ---------------------------------------------------------------------------
 if (saveReport) {
   let reservedNumbers = [];
+  let saveStage = 'report';
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
@@ -577,7 +579,7 @@ if (saveReport) {
 ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim()}
 `;
 
-    writeFileSync(reportPath, reportContent, 'utf-8');
+    writeFileSync(reportPath, withJdArchiveSection(reportContent, jdText), 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
     if (!trackable) {
@@ -611,6 +613,7 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
       // needs its own label -- values are read BY label, so a tenth field the
       // header does not name is not mis-mapped, it is dropped.
       const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+      saveStage = 'tracker addition';
       mkdirSync(PATHS.trackerAdditions, { recursive: true });
       writeFileSync(
         join(PATHS.trackerAdditions, additionName),
@@ -621,7 +624,8 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
       console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
     }
   } catch (err) {
-    console.warn(`⚠️   Could not save report: ${err.message}`);
+    console.warn(`⚠️   Could not save evaluation (${saveStage}): ${err.message}`);
+    process.exitCode = 1;
   } finally {
     if (reservedNumbers.length > 0) {
       try {
