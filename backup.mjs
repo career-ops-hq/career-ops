@@ -30,7 +30,7 @@
  */
 
 import {
-  copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync,
+  accessSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync,
   renameSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'fs';
 import { homedir, platform as osPlatform } from 'os';
@@ -38,7 +38,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'pat
 import { fileURLToPath } from 'url';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { isScratchDir } from './lib/scratch-dirs.mjs';
+import { walkTree } from './lib/walk-tree.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import {
   LOCAL_PATHS_FILE,
@@ -96,23 +96,19 @@ function templateUserFiles(dataRoot, warnings) {
     }
   }
   const found = [];
-  const scan = (relDir, depth) => {
-    let entries;
+  const listDir = (relDir) => {
     try {
-      entries = readdirSync(join(dataRoot, relDir), { withFileTypes: true });
+      return readdirSync(join(dataRoot, relDir), { withFileTypes: true }).map((e) => ({ rel: `${relDir}/${e.name}`, entry: e }));
     } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const rel = `${relDir}/${entry.name}`;
-      if (entry.isFile() && (isGeneratedTemplateArtifact(rel) || isUserConfiguredTemplateVariant(rel, variants))) {
-        found.push(rel);
-      } else if (entry.isDirectory() && depth === 0) {
-        scan(rel, 1);
-      }
+      return [];
     }
   };
-  scan('templates', 0);
+  // templates/ itself, then one level down for template packs; no deeper.
+  const top = listDir('templates');
+  const levels = [top, ...top.filter(({ entry }) => entry.isDirectory()).map(({ rel }) => listDir(rel))];
+  for (const { rel, entry } of levels.flat()) {
+    if (entry.isFile() && (isGeneratedTemplateArtifact(rel) || isUserConfiguredTemplateVariant(rel, variants))) found.push(rel);
+  }
   return found.sort();
 }
 
@@ -319,27 +315,31 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
     return [];
   }
   if (isExcluded(entry, include)) return [];
-  // Symlinks are skipped, so the backup never follows a link out of the data
-  // root. Nested checkouts (a git-cloned plugin under plugins.local/) are the
-  // user's own work, so they are copied. An unreadable folder is reported and the
-  // walk carries on with the rest.
-  const walk = (dir, out = []) => {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch (error) {
-      onError(relative(dataRoot, dir), error);
-      return out;
-    }
-    for (const e of entries) {
-      const p = join(dir, e.name);
-      if (isScratchDir(e.name) || isExcluded(relative(dataRoot, p), include)) continue;
-      if (e.isDirectory()) walk(p, out);
-      else if (e.isFile()) out.push(p);
-    }
-    return out;
-  };
-  const paths = st.isDirectory() ? walk(abs) : [abs];
+  const paths = st.isDirectory()
+    ? walkTree(abs, {
+      // Symlinks are skipped (the default), so the backup never follows a link
+      // out of the data root.
+      // Nested checkouts (a git-cloned plugin under plugins.local/) are the
+      // user's own work, so they are copied rather than skipped.
+      allowNestedCheckouts: true,
+      skip: (dirent, dir) => {
+        const p = join(dir, dirent.name);
+        if (isExcluded(relative(dataRoot, p), include)) return true;
+        // walkTree throws on a folder it cannot read, which would lose every
+        // other file under this entry. Report that folder and carry on without it.
+        if (dirent.isDirectory()) {
+          try {
+            accessSync(p, fsConstants.R_OK | fsConstants.X_OK);
+            readdirSync(p);
+          } catch (error) {
+            onError(relative(dataRoot, p), error);
+            return true;
+          }
+        }
+        return false;
+      },
+    })
+    : [abs];
   const files = [];
   for (const p of paths) {
     try {
