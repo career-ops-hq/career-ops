@@ -103,14 +103,20 @@ try {
   const apiHome = join(tmp, 'api-home');
   mkdirSync(join(apiHome, 'Dropbox'), { recursive: true });
   const savedHome = process.env.HOME;
+  const savedProfile = process.env.USERPROFILE;
   process.env.HOME = apiHome;
+  process.env.USERPROFILE = apiHome;
   try {
     const syncedDest = join(apiHome, 'Dropbox', 'Backups', 'career-ops');
     assert.throws(() => b.runBackup({ dataRoot: root, dest: syncedDest, includeContacts: true }), /inside dropbox/);
     assert.equal(existsSync(syncedDest), false);
     assert.doesNotThrow(() => b.runBackup({ dataRoot: root, dest: syncedDest, dryRun: true }));
   } finally {
-    process.env.HOME = savedHome;
+    // Assigning undefined would store the string "undefined", so delete when unset.
+    for (const [key, value] of [['HOME', savedHome], ['USERPROFILE', savedProfile]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 
   const dry = b.runBackup({ dataRoot: root, dest, dryRun: true });
