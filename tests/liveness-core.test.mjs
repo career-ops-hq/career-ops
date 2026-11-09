@@ -943,3 +943,31 @@ for (const label of ['Søk', 'Søk etter stillinger', 'Søknadsfrist', 'Søk sen
     ? pass(`"${label}" is not an Apply control`)
     : fail(`"${label}" classified ${norwegianNotApply.result}/${norwegianNotApply.code}, expected uncertain/no_apply_control`);
 }
+
+// A closed Norwegian posting can keep its "Søk her" link next to the closure
+// banner. The banner wins; a deadline still ahead does not (#6620).
+for (const notice of ['Søknadsfristen er utløpt', 'Søknadsfristen har gått ut', 'Stillingen er ikke lenger ledig', 'Denne annonsen er utløpt', 'Stillingen er besatt']) {
+  const closed = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
+    finalUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
+    bodyText: `${notice}\n${norwegianBody}`,
+    applyControls: ['Søk her'],
+  });
+  closed.result === 'expired'
+    ? pass(`"${notice}" marks a Norwegian posting closed despite "Søk her"`)
+    : fail(`"${notice}" classified ${closed.result}/${closed.code}, expected expired`);
+}
+
+for (const notice of ['Søknadsfrist: 20.11.2026', 'Søknadsfristen utløper 20. november', 'Søknadsfristen er 20. november', 'Stillingen er ledig fra 1. januar', 'Stillingen vil bli besatt så snart som mulig']) {
+  const open = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
+    finalUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
+    bodyText: `${notice}\n${norwegianBody}`,
+    applyControls: ['Søk her'],
+  });
+  open.result === 'active' && open.code === 'apply_control_visible'
+    ? pass(`"${notice}" leaves a Norwegian posting active`)
+    : fail(`"${notice}" classified ${open.result}/${open.code}, expected active/apply_control_visible`);
+}

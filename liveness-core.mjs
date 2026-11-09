@@ -103,6 +103,14 @@ const HARD_EXPIRED_PATTERNS = [
   /oferta (jest )?nieaktualna/i,
   /oferta archiwalna/i,
   /kandydaci nie sa juz akceptowani/i,
+  // Norwegian closure banners. arbeidsplassen.no, Jobbnorge and employer
+  // career sites can keep a closed posting's "Søk her" link, so this has to be
+  // a hard pattern (#6620). normalizeForMatch() folds å to a but not ø, hence
+  // [øo] and "gatt". Only the past tense and statements that the post is gone
+  // match: a deadline still ahead ("Søknadsfrist: 20.11.2026", "Søknadsfristen
+  // utløper 20. november") and "Stillingen vil bli besatt" never do.
+  /s[øo]knadsfristen (?:er utl[øo]pt|har gatt ut)/i,
+  /\b(?:stillingen|annonsen) er (?:ikke lenger (?:ledig|aktiv|tilgjengelig)|besatt|utl[øo]pt)\b/i,
 ];
 
 const LISTING_PAGE_PATTERNS = [
