@@ -129,6 +129,7 @@ check(
 check(
   'case A uses the full Signal 6 omission set and requires a service-invoice context',
   secHas(/no standard\s+employment-standards phrasing/) && secHas(/statutory deductions or\s+withholding/)
+    && secHas(/no\s+benefits/) && secHas(/no\s+vacation\s+or\s+PTO/) && secHas(/no\s+defined\s+end\s+date/)
     && secHas(/instruction for the candidate to invoice/) && secHas(/bare "invoice" in an expense-reimbursement or billing clause\s+is not contractor-status wording/),
   'case A omission set or invoice context incomplete',
 );
@@ -202,7 +203,9 @@ check(
 );
 
 // Marker lists, each verified to be covered by the mode text they come from.
-const CONTRACTOR_TERMS = ['invoice for services', 'independent contractor', 'T4A', '1099'];
+const CONTRACTOR_TERMS = ['invoice for services', 'independent contractor', 'T4A', '1099', 'labour contract'];
+// Consultant-status wording (not a consultant job title alone) must also stay out of silent fixtures.
+const CONSULTANT_STATUS = /(as an? (independent )?consultant|consultant (status|agreement)|engaged as a consultant|self-employed)/i;
 const TERMINOLOGY_STRONG = ['401(k)', 'W-2 employment', 'RRSP', 'T4'];
 const AGENCY_WORDING = ['on behalf of our client', 'assignment', 'placement', 'client site'];
 check(
@@ -240,6 +243,7 @@ check(
 const forbiddenInSilent = [...CONTRACTOR_TERMS, ...TERMINOLOGY_STRONG, ...AGENCY_WORDING, 'on behalf of'];
 for (const f of silent) {
   const hits = forbiddenInSilent.filter((t) => mentions(f.body, t));
+  if (CONSULTANT_STATUS.test(f.body)) hits.push('consultant status wording');
   check(`near-miss ${f.name} contains no strong marker from the term lists`, hits.length === 0, `found: ${hits.join(', ')}`);
 }
 const direct = byName('silent-direct-employer-letter.md');

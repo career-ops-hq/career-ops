@@ -412,13 +412,20 @@ the Step 1 jurisdiction has a row in the table. The row is the gate and the
 source of the registry link; the finding states no regime facts, because the
 hard guard names `templates/restrictive-covenants.yml` as the sole source of
 statutory facts. The finding states the entity named as employer, the end
-client if one is named, and the registry link, and says plainly that licence
-status cannot be read from the contract. It never asserts that any agency is
-unlicensed. Lawyer-list entries: "Is {named entity} the employer of record,
-and who is liable for wages, deductions and termination notice, the agency or
-the client?" and "Which agency-licensing rules apply to {named entity} in
-{jurisdiction}, and is it listed on the official registry?" Not tripped: a
-direct employer's letter, even if a recruiter introduced the candidate.
+client if one is named, and the row's resource link, and says plainly that
+licence status cannot be read from the contract. It never asserts that any
+agency is unlicensed. The intermediary is identified separately from the named
+employer: it is the agency that issued or signed the offer, or, when the
+contract does not make that clear, the candidate is asked to name it. Lawyer-list
+entries: "Is {named entity} the employer of record, and who is liable for
+wages, deductions and termination notice, the agency or the client?" and
+"Which agency-licensing rules apply to {the intermediary agency} in
+{jurisdiction}?" The second question adds "and is it listed on the official
+registry?" only when the jurisdiction row describes an official agency registry
+lookup; where the row's link is guidance or rules rather than a registry, the
+licensing-rules question stands alone and no registry is asserted. Not
+tripped: a direct employer's letter, even if a recruiter introduced the
+candidate.
 
 **Pass 2 — Employment classification (Signal 6 term table).** Two cases:
 
