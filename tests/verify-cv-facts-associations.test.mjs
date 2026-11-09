@@ -76,7 +76,12 @@ function check(change = {}, sourceText = CV, config = {}) {
   writeFileSync(source, sourceText);
   writeFileSync(configPath, JSON.stringify(config));
   writeFileSync(input, JSON.stringify(payload({ ...TRUE, ...change })));
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../build-cv-html.mjs', import.meta.url)), input, output], { encoding: 'utf8' });
+  // Pin the builder to the fixture so a developer's profile, tracker or data
+  // root can't reach it.
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../build-cv-html.mjs', import.meta.url)), input, output], {
+    encoding: 'utf8',
+    env: { ...process.env, CAREER_OPS_ROOT: tmp, CAREER_OPS_PROFILE: '', CAREER_OPS_TRACKER: '' },
+  });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   return verifyFacts(readFileSync(output, 'utf8'), { sourcePaths: [source], configPath });
 }
