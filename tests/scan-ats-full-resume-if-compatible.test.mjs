@@ -95,6 +95,16 @@ assertFresh(
   '--resume-if-compatible',
 );
 
+assertFresh(
+  '--resume-if-compatible starts fresh when the company list changed',
+  {
+    ...baseCheckpoint,
+    ats: ['greenhouse'],
+    current: { name: 'greenhouse', resumeAt: 0, datasetLen: 2, datasetHash: '0123456789abcdef' },
+  },
+  '--resume-if-compatible',
+);
+
 const matchDir = mkdtempSync(join(tmpdir(), 'ats-full-soft-match-'));
 try {
   const { preload, fetched } = prepare(matchDir);
@@ -114,6 +124,24 @@ try {
   }
 } finally {
   rmSync(matchDir, { recursive: true, force: true });
+}
+
+const datasetStrictDir = mkdtempSync(join(tmpdir(), 'ats-full-strict-dataset-'));
+try {
+  const { preload } = prepare(datasetStrictDir);
+  writeCheckpoint(datasetStrictDir, {
+    ...baseCheckpoint,
+    ats: ['greenhouse'],
+    current: { name: 'greenhouse', resumeAt: 0, datasetLen: 2, datasetHash: '0123456789abcdef' },
+  });
+  const refused = run(datasetStrictDir, preload, ['--resume']);
+  if (refused.status === 1 && /company dataset changed since the checkpoint/.test(refused.stderr || '')) {
+    pass('--resume still refuses a changed company list and exits 1');
+  } else {
+    fail(`--resume did not refuse a changed company list: status=${refused.status}\n${(refused.stderr || '').slice(-500)}`);
+  }
+} finally {
+  rmSync(datasetStrictDir, { recursive: true, force: true });
 }
 
 const strictDir = mkdtempSync(join(tmpdir(), 'ats-full-strict-resume-'));

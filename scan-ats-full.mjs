@@ -1416,6 +1416,26 @@ async function main() {
   // second time at this run's persist step. A match from a run that died
   // before persisting is in neither file, so it is not in seenUrls and stays.
   // Same token as the reseed below and the sweep's own dedup check.
+  // The company list is not known when settings and filters are checked. A
+  // scheduled resume has to drop the checkpoint before its offers and counters
+  // are copied, or a changed list exits 1 on every later run. --resume stays
+  // strict.
+  if (checkpoint?.current?.name && SOURCES[checkpoint.current.name]) {
+    const sourceName = checkpoint.current.name;
+    const source = SOURCES[sourceName];
+    const { list } = await loadCompanyList(sourceName, source.dataset, source.parseDataset);
+    const hashMismatch = checkpoint.current.datasetHash != null
+      && checkpoint.current.datasetHash !== datasetFingerprint(list);
+    if (checkpoint.current.datasetLen !== list.length || hashMismatch) {
+      if (opts.resume) {
+        console.error(`Error: ${sourceName} company dataset changed since the checkpoint — resume order is no longer valid. Delete ${CHECKPOINT_PATH} and rerun.`);
+        process.exit(1);
+      }
+      console.error(`⚠️  Checkpoint at ${CHECKPOINT_PATH} does not match this run (${sourceName} company list). Starting a fresh sweep. The checkpoint will be overwritten.`);
+      checkpoint = null;
+    }
+  }
+
   const newOffers = (checkpoint?.offers || [])
     .filter(o => !seenUrls.has(dedupTokenFor(o, providerForSource(o.source))));
   // Checkpointed matches were already deduped once — without re-seeding, a
