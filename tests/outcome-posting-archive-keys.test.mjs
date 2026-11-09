@@ -122,3 +122,16 @@ for (const [company, role] of [['株式会社アクメ', 'エンジニア'], ['�
     assert.deepStrictEqual(archiveCalls, [], 'a capture was found, so nothing is re-archived');
   });
 }
+
+// The `?` placeholder employer has no captureSlug() at all. The lookup falls
+// back to 'unknown', the name archive-posting gives a posting whose company it
+// could not detect, as it did while outcome.mjs used its own slugify().
+ok('a capture filed under unknown is found for the ? placeholder employer', () => {
+  const { read, archiveCalls } = outcome(
+    ['| 8 | 2026-10-01 | ? | Platform Engineer | 4.2/5 | Applied | ❌ | [15](../reports/015-unknown-2026-10-01.md) | via agency | https://job-boards.greenhouse.io/acme/jobs/7009 |'],
+    { '015-2026-10-01_unknown_platform-engineer_0123456789abcdef.pdf': '%PDF capture for report 15' },
+    8,
+  );
+  assert.strictEqual(read('posting.pdf'), '%PDF capture for report 15', 'the unknown capture must be the archived posting');
+  assert.deepStrictEqual(archiveCalls, [], 'a capture was found, so nothing is re-archived');
+});

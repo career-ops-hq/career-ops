@@ -509,8 +509,11 @@ const captureKey = linkedReports.length === 1 ? linkedReports[0] : matchedRow.nu
 // so the lookup uses that slug and not this file's slugify(). The two agree on
 // a Latin name, but slugify() turns one written only in another script
 // (株式会社アクメ, Яндекс) into 'unknown', which no capture carries: the posting
-// was never found, and each run asked archive-posting for it again.
-const captureCompanySlug = captureSlug(matchedRow.company);
+// was never found, and each run asked archive-posting for it again. A name with
+// no letter or digit at all, such as the `?` placeholder employer, has no slug,
+// so it still looks for 'unknown': the name archive-posting gives a posting
+// whose company it could not detect.
+const captureCompanySlug = captureSlug(matchedRow.company) || 'unknown';
 
 // Case 1: Check if there's already an archived posting link in the notes column
 const notesLink = matchedRow.notes && matchedRow.notes.match(/local:(jds\/[^\s|)]+)/)?.[1];
