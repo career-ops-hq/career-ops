@@ -41,10 +41,10 @@ try {
     const { ctx, calls } = recordingCtx(() => RESULTS_HTML);
     const jobs = await provider.fetch(ENTRY, ctx);
 
-    // google.com/robots.txt disallows every results URL carrying page=, for
-    // every crawler. No request this provider builds may contain it.
+    // With no `max_pages` the provider keeps its single-page behavior: page 1
+    // is the bare URL and no request carries page=.
     calls.every((c) => !/[?&]page=/.test(c.url))
-      ? pass('google.fetch() never sends the robots-disallowed page= parameter')
+      ? pass('google.fetch() sends no page= parameter without max_pages')
       : fail(`google sent a paginated URL: ${calls.map((c) => c.url).join(' ')}`);
 
     calls.every((c) => /[?&]sort_by=date\b/.test(c.url))
@@ -110,14 +110,40 @@ try {
       : fail(`google decoded markup: ${JSON.stringify(j && [j.title, j.company, j.location])}`);
   }
 
-  // max_pages does not apply here: pages past the first are unreachable without
-  // the disallowed parameter, so raising it must not add requests.
+  // Rule 6 changed in #6691: robots.txt no longer gates the paginated URLs, so
+  // max_pages pages through the results (#6694). One query here: page 2 brings
+  // one new id and one duplicate, page 3 brings nothing new, so the walk stops
+  // before the budget runs out.
+  {
+    const PAGE2_HTML = `<!doctype html><a href="/about/careers/applications/jobs/results/555666777-head-of-strategy">z</a>
+      <a href="/about/careers/applications/jobs/results/123456789-senior-business-strategy-manager">x</a>`;
+    const { ctx, calls } = recordingCtx((call) => (/[?&]page=2\b/.test(call.url) ? PAGE2_HTML : RESULTS_HTML));
+    const jobs = await provider.fetch({ ...ENTRY, max_pages: 5, google: { queries: ['business strategy'], location: 'United States' } }, ctx);
+
+    calls.length === 3 && !/[?&]page=/.test(calls[0].url) && /[?&]page=2\b/.test(calls[1].url) && /[?&]page=3\b/.test(calls[2].url)
+      ? pass('google.fetch() pages with page=N and stops when a page adds no new ids')
+      : fail(`google paging walk: ${calls.map((c) => c.url).join(' ')}`);
+
+    jobs.filter((x) => x.externalId === '123456789').length === 1
+      ? pass('google.fetch() dedupes an id that repeats on a later page')
+      : fail(`google dedupe across pages: ${JSON.stringify(jobs.map((x) => x.externalId))}`);
+
+    jobs.some((x) => x.externalId === '555666777')
+      ? pass('google.fetch() keeps the postings only a deeper page carries')
+      : fail(`google page-2 posting missing: ${JSON.stringify(jobs.map((x) => x.externalId))}`);
+
+    calls.every((c) => c.opts?.redirect === 'error')
+      ? pass('google.fetch() passes redirect:"error" on paginated requests too')
+      : fail(`google paginated redirect opts: ${JSON.stringify(calls.map((c) => c.opts))}`);
+  }
+
+  // The probe budget caps paging: ctx.maxPages wins over the entry's max_pages.
   {
     const { ctx, calls } = recordingCtx(() => RESULTS_HTML);
-    await provider.fetch({ ...ENTRY, max_pages: 25 }, ctx);
-    calls.length === 2 && calls.every((c) => !/[?&]page=/.test(c.url))
-      ? pass('google.fetch() ignores max_pages — one page per query is all robots.txt allows')
-      : fail(`google with max_pages=25 made ${calls.length} requests`);
+    await provider.fetch({ ...ENTRY, max_pages: 25 }, { ...ctx, maxPages: 1 });
+    calls.length === 1
+      ? pass('google.fetch() lets the probe budget cap max_pages')
+      : fail(`google probe with max_pages=25 made ${calls.length} requests`);
   }
 
   // The probe spends one query, not the whole list.
