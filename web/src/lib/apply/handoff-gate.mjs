@@ -14,7 +14,7 @@ import { isResumeLabel } from "./resume-label.mjs";
 const EEO_OR_STATUS =
   /\b(citizen|citizenship|nationality|gender|race|racial|ethnicity|ethnic|disability|disabled|veteran|permanent basis|permanent resident)\b/i;
 const SALARY_HISTORY =
-  /\b(salary history|compensation history|previous salary|prior salary|current salary|last salary)\b/i;
+  /\b(salary history|compensation history|(?:current|previous|prior|last) (?:salary|compensation|pay))\b/i;
 const SPONSORSHIP = /\b(sponsor|sponsorship|visa)\b/i;
 const AUTHORIZATION =
   /\b(work authori[sz]ation|authori[sz]ed to work|legally authori[sz]ed|eligible to work)\b/i;
@@ -132,6 +132,15 @@ export function handoffDecision({
   return { handoff: gaps.length === 0, gaps };
 }
 
+const HANDOFF_GAP = new Set(["screening-empty", "resume-missing"]);
+
+/**
+ * @param {{ code?: string }[]} issues
+ */
+export function withoutHandoffGaps(issues) {
+  return (Array.isArray(issues) ? issues : []).filter((issue) => !HANDOFF_GAP.has(issue?.code));
+}
+
 /**
  * Map labeled drive answers onto field ids. A blank value stays blank so the
  * gate can see it.
@@ -144,7 +153,8 @@ export function answersByFieldId(fields, labeled = []) {
   const answers = {};
   for (const field of fields) {
     if (!field.id) continue;
-    const hit = labeled.find((item) => item && (item.id === field.id || (item.label && item.label === field.label)));
+    const hit = labeled.find((item) => item && item.id === field.id)
+      ?? labeled.find((item) => item && !item.id && item.label && item.label === field.label);
     if (hit && hit.value != null) answers[field.id] = String(hit.value);
   }
   return answers;

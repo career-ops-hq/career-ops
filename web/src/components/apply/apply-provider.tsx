@@ -5,6 +5,7 @@ import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
 import { readFillResult, screenForFill } from "@/lib/apply/fill-stream.mjs";
+import { withoutHandoffGaps } from "@/lib/apply/handoff-gate.mjs";
 import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
@@ -341,6 +342,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     const gen = generation.current;
     setStatus("filling");
     setSteps([]);
+    setIssues((prev) => withoutHandoffGaps(prev));
     try {
       const r = await fetch("/api/apply/fill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, answers, fields, handoff: true, company: companyRef.current, application: nRef.current }) });
       const d = await r.json();
@@ -394,6 +396,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setDriveSteps([]);
     setError("");
     setStatus("filling");
+    setIssues((prev) => withoutHandoffGaps(prev));
     fillAbort.current?.abort();
     const controller = new AbortController();
     fillAbort.current = controller;

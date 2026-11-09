@@ -7,7 +7,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answersByFieldId, handoffDecision, resumeFieldNotice, screeningKind } from "../../src/lib/apply/handoff-gate.mjs";
+import { readFileSync } from "node:fs";
+import { answersByFieldId, handoffDecision, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
 
 const sponsorship = { id: "visa", type: "select", label: "Will you require visa sponsorship?", required: true };
 const salary = { id: "pay", type: "text", label: "Desired salary", required: true };
@@ -60,7 +61,7 @@ test("identity questions stay out of the gate even when they are required and em
 });
 
 test("salary history is not a compensation question this page fills", () => {
-  for (const label of ["Salary history", "Current salary", "Previous compensation history"]) {
+  for (const label of ["Salary history", "Current salary", "Previous compensation history", "Current compensation", "Previous pay", "Last compensation"]) {
     assert.equal(screeningKind(label), null, label);
     const decision = handoffDecision({
       fields: [{ id: "hist", type: "text", label, required: true }],
@@ -198,4 +199,27 @@ test("labeled answers land on field ids, and a blank stays blank", () => {
   ]);
   assert.deepEqual(mapped, { visa: "No", pay: "  " });
   assert.equal(handoffDecision({ fields, answers: mapped }).handoff, false);
+});
+
+test("two fields that share a label keep the answer stored on each id", () => {
+  const fields = [
+    { id: "visa-a", label: "Will you require visa sponsorship?" },
+    { id: "visa-b", label: "Will you require visa sponsorship?" },
+  ];
+  const mapped = answersByFieldId(fields, [
+    { id: "visa-a", label: "Will you require visa sponsorship?", value: "No" },
+    { id: "visa-b", label: "Will you require visa sponsorship?", value: "" },
+  ]);
+  assert.deepEqual(mapped, { "visa-a": "No", "visa-b": "" });
+});
+
+test("a retry can drop the previous handoff gaps without dropping other issues", () => {
+  const next = withoutHandoffGaps([
+    { code: "screening-empty", message: "Required sponsorship question is still empty" },
+    { code: "resume-missing", message: "The tailored CV did not attach" },
+    { code: "fill-mismatch", message: "A field did not match" },
+  ]);
+  assert.deepEqual(next, [{ code: "fill-mismatch", message: "A field did not match" }]);
+  const provider = readFileSync(new URL("../../src/components/apply/apply-provider.tsx", import.meta.url), "utf8");
+  assert.equal(provider.split("withoutHandoffGaps(").length - 1, 2);
 });

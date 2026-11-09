@@ -68,6 +68,7 @@ For each field give the best answer:
 - work authorization, visa sponsorship, and compensation expectations → from ${profile} when it states them (location.authorized_in, location.visa_status, location.needs_sponsorship, compensation.target_range). Use the exact option text. If ${profile} does not state that answer, set needs_confirmation:true and value:"".
 - NEVER invent a work-authorization, visa, sponsorship, or salary answer the profile does not state.
 - NEVER fill citizenship, nationality, permanent resident, gender, race, ethnicity, disability, or veteran questions → set needs_confirmation:true and value:"".
+- NEVER fill criminal history, non-compete, security clearance, age or date of birth, sexual orientation, religion, or marital status questions → set needs_confirmation:true and value:"".
 - NEVER invent years of experience, a degree, or a credential to meet a minimum. If the source does not state it, set needs_confirmation:true and value:"".
 - NEVER fill a legal consent, privacy, or terms checkbox → set needs_confirmation:true and value:"".
 

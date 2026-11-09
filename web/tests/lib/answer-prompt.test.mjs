@@ -36,7 +36,7 @@ test("profile-backed screening is filled from the profile, and identity question
   assert.doesNotMatch(prompt, /NEVER fill[^\n]*work-authorization/);
   assert.doesNotMatch(prompt, /NEVER fill[^\n]*\bsalary\b/);
   assert.match(prompt, /NEVER invent a work-authorization, visa, sponsorship, or salary answer/);
-  for (const word of ["citizenship", "gender", "race", "disability", "veteran"]) {
+  for (const word of ["citizenship", "gender", "race", "disability", "veteran", "criminal history", "non-compete", "security clearance", "date of birth", "sexual orientation", "religion", "marital status"]) {
     assert.match(prompt, new RegExp(`NEVER fill[^\\n]*${word}`));
   }
   assert.match(prompt, /NEVER invent years of experience/);
