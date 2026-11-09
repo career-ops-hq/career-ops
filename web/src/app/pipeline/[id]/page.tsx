@@ -6,6 +6,7 @@ import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { readCvDiskState } from "@/lib/read-cv-disk";
 import { parseReport } from "@/lib/format";
+import { missingTrackedJob } from "@/lib/job-route.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export default async function ReportPage({ params, searchParams }: {
   const query = pipelineQuery(await searchParams);
   const app = findApplication(id);
   const report = readReport(id);
-  if (!app && !report) notFound();
+  if (missingTrackedJob({ hasApplication: !!app, hasReport: !!report })) notFound();
   // Resolved here rather than in the component so the link is only rendered when
   // THIS application's cover is actually on disk. `id` is passed as the
   // application number, never as a company: a report with no tracker row has no
