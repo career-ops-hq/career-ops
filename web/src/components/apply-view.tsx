@@ -9,7 +9,7 @@ import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs"
 import { markAppliedEnabled } from "@/lib/apply/mark-applied.mjs";
 import { reopenApplyOptions } from "@/lib/apply/reopen-options.mjs";
 import { checklistHrefFor } from "@/lib/apply/checklist-href.mjs";
-import { isResumeLabel } from "@/lib/apply/resume-label.mjs";
+import { resumeFieldNotice } from "@/lib/apply/handoff-gate.mjs";
 import type { ApplyField } from "@/lib/apply/extract";
 import { cn } from "@/lib/cn";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
@@ -208,6 +208,7 @@ export function ApplyView() {
                   needs={!!a.meta[f.id]?.needsConfirmation}
                   index={i}
                   drafting={prefilling}
+                  cvAttached={a.cvAttached}
                   onChange={(v) => a.setAnswer(f.id, v)}
                 />
               </div>
@@ -564,12 +565,29 @@ function FieldSkeleton() {
   );
 }
 
+function FileNotice({ label, cvAttached }: { label: string; cvAttached: boolean }) {
+  const notice = resumeFieldNotice({ label, cvAttached });
+  if (notice.claim) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-400">
+        <FileCheck2 className="size-4 shrink-0" /> {notice.text}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted">
+      <Paperclip className="size-4 shrink-0" /> {notice.text}
+    </div>
+  );
+}
+
 function FieldRow({
   field: f,
   value,
   needs,
   index,
   drafting,
+  cvAttached,
   onChange,
 }: {
   field: ApplyField;
@@ -577,6 +595,7 @@ function FieldRow({
   needs: boolean;
   index: number;
   drafting: boolean;
+  cvAttached: boolean;
   onChange: (v: string) => void;
 }) {
   const controlId = useId();
@@ -640,15 +659,7 @@ function FieldRow({
           <input {...controlProps} type="checkbox" checked={value === "true" || value === "yes"} onChange={(e) => onChange(e.target.checked ? "true" : "")} className="size-4 accent-brand" /> {f.label || "Yes"}
         </label>
       ) : f.type === "file" ? (
-        isResumeLabel(f.label) ? (
-          <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-400">
-            <FileCheck2 className="size-4 shrink-0" /> Your tailored CV (PDF) will be attached automatically — you can swap it on the real form.
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted">
-            <Paperclip className="size-4 shrink-0" /> Attach this file yourself on the real form at the handoff.
-          </div>
-        )
+        <FileNotice label={f.label} cvAttached={cvAttached} />
       ) : (
         <input {...controlProps} type={["email", "tel", "url", "number", "date"].includes(f.type) ? f.type : "text"} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={base} />
       )}

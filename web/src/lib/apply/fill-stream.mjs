@@ -7,7 +7,7 @@
  * @param {() => boolean} isCurrent
  * @param {AbortSignal} [signal] Aborts the pending read when the session generation is dropped.
  *   A generation check alone cannot unblock `reader.read()` if no further chunk arrives.
- * @returns {Promise<{status: "done", filled: boolean} | {status: "ready", error: string} | null>}
+ * @returns {Promise<{status: "done", filled: boolean, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error: string} | null>}
  */
 export async function readFillResult(response, onStep, isCurrent, signal) {
   const failed = (error) => ({ status: /** @type {const} */ ("ready"), error });
@@ -38,9 +38,10 @@ export async function readFillResult(response, onStep, isCurrent, signal) {
       return unreadable();
     }
     if (event?.t === "done") {
-      return typeof event.filled === "boolean"
-        ? { status: /** @type {const} */ ("done"), filled: event.filled }
-        : unreadable();
+      if (typeof event.filled !== "boolean") return unreadable();
+      const done = { status: /** @type {const} */ ("done"), filled: event.filled };
+      if (Array.isArray(event.gaps) && event.gaps.length) done.gaps = event.gaps;
+      return done;
     }
     if (event?.t === "error") {
       return failed(typeof event.message === "string" && event.message.trim()
@@ -87,10 +88,13 @@ export async function readFillResult(response, onStep, isCurrent, signal) {
  * in `filled`. `filled: false` means the agent stopped short, so the editor
  * stays up and the drafted answers stay put.
  *
- * @param {{status: "done", filled: boolean} | {status: "ready", error: string}} result
- * @returns {{status: "done", issue: string} | {status: "ready", error: string}}
+ * @param {{status: "done", filled: boolean, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error: string}} result
+ * @returns {{status: "done", issue: string} | {status: "ready", error?: string, gaps?: {level: "warn", code: string, message: string, field?: string}[]}}
  */
 export function screenForFill(result) {
+  if (result.status === "done" && Array.isArray(result.gaps) && result.gaps.length) {
+    return { status: /** @type {const} */ ("ready"), gaps: result.gaps };
+  }
   if (result.status === "done" && result.filled) {
     return {
       status: /** @type {const} */ ("done"),

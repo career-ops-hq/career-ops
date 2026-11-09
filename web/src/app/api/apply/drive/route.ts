@@ -1,6 +1,8 @@
-import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession } from "@/lib/apply/session";
+import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession, fillSession } from "@/lib/apply/session";
 import { driveSession } from "@/lib/apply/drive";
-import { classifyEmpty } from "@/lib/apply/diagnose";
+import { classifyEmpty, verifyFill } from "@/lib/apply/diagnose";
+import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
+import { answersByFieldId, handoffDecision } from "@/lib/apply/handoff-gate.mjs";
 import { resolveCliOrFallback } from "@/lib/clis";
 import { readJsonObject } from "@/lib/json-body";
 
@@ -12,7 +14,7 @@ export const maxDuration = 300;
 // REACH a fillable application form (the user watches each step live), then we
 // extract + finalize. NEVER submits (enforced in driveSession).
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ sessionId?: string; cliId?: string; goal?: "reach" | "full"; answers?: { label: string; value: string }[] }>(req);
+  const body = await readJsonObject<{ sessionId?: string; cliId?: string; goal?: "reach" | "full"; answers?: { id?: string; label: string; value: string }[]; company?: string; application?: string }>(req);
   if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const { sessionId, goal = "reach", answers } = body;
   // Same fallback as the session open that precedes every drive, which is where
@@ -44,10 +46,36 @@ export async function POST(req: Request) {
         const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, answers);
 
         if (goal === "full") {
-          // The agent filled the real form — bring it to the front for the human
-          // to review + submit themselves. We never submit.
-          if (result.reached) await handoffSession(s.id).catch(() => {});
-          emit({ t: "done", filled: result.reached, turns: result.turns, reason: result.reason });
+          // Open the window only when required screening answers have values and a claimed résumé file landed.
+          if (!result.reached) {
+            emit({ t: "done", filled: false, turns: result.turns, reason: result.reason });
+            return;
+          }
+          const company = typeof body.company === "string" ? body.company : undefined;
+          const application = typeof body.application === "string" ? body.application : undefined;
+          const cvPath = await resolveSessionCv({ company, application, title: s.title });
+          const cvUploadName = cvPath ? uploadNameForCv({ application, title: s.title }) : undefined;
+          const attached = cvPath
+            ? await fillSession(s.id, {}, s.fields, cvPath, cvUploadName)
+            : { steps: [], issues: await verifyFill(s.frame, s.fields, {}) };
+          const unmetLabels = (attached.issues ?? []).flatMap((issue) =>
+            issue.code === "required-empty" && Array.isArray(issue.labels) ? issue.labels : [],
+          );
+          const decision = handoffDecision({
+            fields: s.fields,
+            answers: answersByFieldId(s.fields, body.answers),
+            cvAttached: !!cvPath,
+            steps: attached.steps,
+            unmetLabels,
+          });
+          if (decision.handoff) await handoffSession(s.id).catch(() => {});
+          emit({
+            t: "done",
+            filled: decision.handoff,
+            turns: result.turns,
+            reason: result.reason,
+            gaps: decision.gaps,
+          });
           return;
         }
 

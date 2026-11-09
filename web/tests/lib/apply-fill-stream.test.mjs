@@ -57,6 +57,38 @@ test("filled true stays on the success screen", () => {
   assert.equal(outcome.issue, "AI filled the form for you — review every answer on the real form, then submit it yourself.");
 });
 
+test("a held handoff keeps its gaps and stays on the editor", async () => {
+  const gaps = [{
+    level: "warn",
+    code: "screening-empty",
+    field: "Visa sponsorship",
+    message: "Required sponsorship question is still empty (Visa sponsorship). Fill it on this page before the employer form opens.",
+  }];
+  const result = await read(responseFor([record({ t: "done", filled: false, gaps })]));
+  assert.deepEqual(result, { status: "done", filled: false, gaps });
+  const outcome = screenForFill(result);
+  assert.deepEqual(outcome, { status: "ready", gaps });
+  assert.equal(outcome.error, undefined);
+  assert.doesNotMatch(JSON.stringify(outcome), /couldn't finish/);
+});
+
+test("gaps keep the editor up even when the stream says the fill finished", () => {
+  const gaps = [{
+    level: "warn",
+    code: "resume-missing",
+    field: "Resume",
+    message: "No tailored CV was resolved for Resume, so nothing will be attached. The employer form stays on this page until a file is attached.",
+  }];
+  const outcome = screenForFill({ status: "done", filled: true, gaps });
+  assert.equal(outcome.status, "ready");
+  assert.deepEqual(outcome.gaps, gaps);
+  assert.equal(outcome.error, undefined);
+});
+
+test("an empty gaps list does not change a completed fill", async () => {
+  assert.deepEqual(await read(responseFor([record({ t: "done", filled: true, gaps: [] })])), { status: "done", filled: true });
+});
+
 test("a stream failure keeps its own error on the editor", () => {
   assert.deepEqual(screenForFill({ status: "ready", error: "Page closed" }), { status: "ready", error: "Page closed" });
 });
