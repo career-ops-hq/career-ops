@@ -88,3 +88,34 @@ export function groupAwaiting(awaiting, legitimacyOf = () => undefined) {
     .map((label) => /** @type {[string, T[]]} */ ([label, awaiting.filter((a) => labelOf(a) === label)]))
     .filter(([, group]) => group.length > 0);
 }
+
+/**
+ * The one-click target. The stored call decides. Score and date order match
+ * the cards and pick which Apply. A Skip, Research first, Consider, or
+ * missing call is not a target. The score cell is not rewritten.
+ *
+ * @template {{date?: string, score?: string, status?: string, n?: string}} T
+ * @param {T[]} applications
+ * @param {(score: string) => number} scoreOf
+ * @param {(row: T) => string | null | undefined} [decisionOf]
+ * @returns {T | null}
+ */
+export function pickApplyNext(applications, scoreOf, decisionOf = () => "") {
+  const ordered = pickAwaitingDecision(applications, scoreOf, Infinity);
+  return ordered.find((row) => decisionOf(row) === "Apply") ?? null;
+}
+
+/**
+ * Keep the ranked cards, and keep the apply target on the page when the
+ * score cut left it off. Does not drop a row.
+ *
+ * @template {{n?: string}} T
+ * @param {T[]} shown
+ * @param {T | null | undefined} target
+ * @returns {T[]}
+ */
+export function includeApplyTarget(shown, target) {
+  if (!target) return shown;
+  if (shown.some((row) => row === target || (target.n != null && row.n === target.n))) return shown;
+  return [...shown, target];
+}

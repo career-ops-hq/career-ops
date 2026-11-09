@@ -10,7 +10,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pickAwaitingDecision, groupAwaiting } from "../../src/lib/home/awaiting.mjs";
+import { pickAwaitingDecision, groupAwaiting, pickApplyNext, includeApplyTarget } from "../../src/lib/home/awaiting.mjs";
+import { cardReason } from "../../src/lib/machine-summary.mjs";
 
 // The real parser is lib/format.ts's scoreNum, which a .mjs test cannot import.
 // This stub must stay behaviourally identical for the cases below: a leading
@@ -155,17 +156,8 @@ test("a flagged posting above the line is not Recommended", () => {
   );
 });
 
-// The one-click target is whichever row the page would hand to Apply next:
-// the first Recommended card among the six on screen. Recommended is a score
-// band, so a stored Skip at 4.9 beats a stored Apply at 4.1, and the Apply
-// past the sixth card is not on the page at all.
-function applyNextTarget(rows) {
-  const shown = pickAwaitingDecision(rows, scoreOf);
-  const recommended = groupAwaiting(shown, () => "High Confidence").find(([label]) => label === "Recommended")?.[1] ?? [];
-  return recommended[0] ?? null;
-}
-
 const queued = (n, score, company) => ({ n, date: "2026-11-01", score, status: "Evaluated", company });
+const callOf = (calls) => (row) => calls[row.n] ?? "";
 
 test("Apply next names the best stored Apply, and a Skip stays on the page", () => {
   const rows = [
@@ -187,10 +179,16 @@ test("Apply next names the best stored Apply, and a Skip stays on the page", () 
     "7": "Apply",
   };
   const shown = pickAwaitingDecision(rows, scoreOf);
-  assert.ok(shown.some((row) => row.company === "Fixture Northwind" && calls[row.n] === "Skip"));
+  const target = pickApplyNext(rows, scoreOf, callOf(calls));
+  const cards = includeApplyTarget(shown, target);
+  assert.equal(target?.company, "Fixture Apply Co");
+  assert.equal(target?.score, "4.1/5");
+  assert.equal(shown.some((row) => row.company === "Fixture Apply Co"), false);
+  assert.ok(cards.some((row) => row.company === "Fixture Northwind" && calls[row.n] === "Skip"));
+  assert.ok(cards.some((row) => row.company === "Fixture Apply Co"));
   assert.equal(rows.find((row) => row.n === "1").score, "4.9/5");
-  assert.equal(rows.find((row) => row.n === "7").score, "4.1/5");
-  assert.equal(applyNextTarget(rows)?.company, "Fixture Apply Co");
+  const recommended = groupAwaiting(cards, () => "High Confidence").find(([label]) => label === "Recommended")?.[1] ?? [];
+  assert.equal(recommended[0]?.company, "Fixture Northwind");
 });
 
 test("within the six cards, a lower Apply is the one-click target", () => {
@@ -198,11 +196,69 @@ test("within the six cards, a lower Apply is the one-click target", () => {
     queued("10", "4.8/5", "Fixture High Skip"),
     queued("11", "4.2/5", "Fixture Lower Apply"),
   ];
+  const calls = { "10": "Skip", "11": "Apply" };
   const shown = pickAwaitingDecision(rows, scoreOf);
+  const target = pickApplyNext(rows, scoreOf, callOf(calls));
   assert.ok(shown.some((row) => row.company === "Fixture High Skip"));
   assert.ok(shown.some((row) => row.company === "Fixture Lower Apply"));
-  assert.equal(applyNextTarget(rows)?.company, "Fixture Lower Apply");
+  assert.equal(target?.company, "Fixture Lower Apply");
+  assert.equal(includeApplyTarget(shown, target).length, 2);
   assert.equal(rows.find((row) => row.n === "10").score, "4.8/5");
+});
+
+test("Research first and Consider are not the one-click target", () => {
+  const rows = [
+    queued("1", "5.0/5", "Fixture Research"),
+    queued("2", "4.9/5", "Fixture Consider"),
+    queued("3", "3.2/5", "Fixture Apply Co"),
+  ];
+  const target = pickApplyNext(rows, scoreOf, callOf({ "1": "Research first", "2": "Consider", "3": "Apply" }));
+  assert.equal(target?.company, "Fixture Apply Co");
+  assert.equal(rows.find((row) => row.n === "3").score, "3.2/5");
+});
+
+test("a missing call is not Apply next, and no Apply means no target", () => {
+  const rows = [
+    queued("1", "4.9/5", "Fixture Old Report"),
+    queued("2", "3.5/5", "Fixture Apply Co"),
+  ];
+  assert.equal(pickApplyNext(rows, scoreOf, (row) => (row.n === "2" ? "Apply" : ""))?.company, "Fixture Apply Co");
+  assert.equal(pickApplyNext([queued("1", "4.9/5", "Fixture Northwind")], scoreOf, () => "Skip"), null);
+  assert.equal(pickApplyNext([queued("1", "4.9/5", "Fixture Translated")], scoreOf, () => "Søg"), null);
+});
+
+test("the newer Apply wins a score tie", () => {
+  const older = queued("1", "4.2/5", "Fixture Older");
+  const newer = queued("2", "4.2/5", "Fixture Newer");
+  newer.date = "2026-11-08";
+  assert.equal(pickApplyNext([older, newer], scoreOf, () => "Apply")?.company, "Fixture Newer");
+});
+
+test("a hard stop does not remove a Skip or override an Apply", () => {
+  const report = (decision, extra) => `## Machine Summary\n\n\`\`\`yaml\nfinal_decision: "${decision}"\n${extra}\n\`\`\`\n`;
+  const rows = [
+    {
+      ...queued("1", "4.9/5", "Fixture Blocked Skip"),
+      report: report("Skip", 'hard_stops:\n  - "No sponsorship"\ndiscard_reasons:\n  - "geo_restriction"'),
+    },
+    {
+      ...queued("2", "4.0/5", "Fixture Apply Co"),
+      report: report("Apply", "discard_reasons: []\nhard_stops: []"),
+    },
+  ];
+  const decisionOf = (row) => cardReason(row.report)?.decision ?? "";
+  assert.equal(decisionOf(rows[0]), "Skip");
+  assert.equal(pickApplyNext(rows, scoreOf, decisionOf)?.company, "Fixture Apply Co");
+  assert.ok(pickAwaitingDecision(rows, scoreOf).some((row) => row.company === "Fixture Blocked Skip"));
+  assert.equal(rows[0].score, "4.9/5");
+});
+
+test("an Applied row is not Apply next", () => {
+  const rows = [
+    { ...queued("1", "4.9/5", "Fixture Already"), status: "Applied" },
+    queued("2", "4.0/5", "Fixture Apply Co"),
+  ];
+  assert.equal(pickApplyNext(rows, scoreOf, () => "Apply")?.company, "Fixture Apply Co");
 });
 
 test("without legitimacy, grouping is by score alone", () => {

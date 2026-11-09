@@ -17,7 +17,7 @@ import { LinkedInPaste } from "@/components/linkedin-paste";
 import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons";
 import { scoreNum } from "@/lib/format";
 import { undoStatus } from "@/lib/pipeline-status.mjs";
-import { pickAwaitingDecision, groupAwaiting } from "@/lib/home/awaiting.mjs";
+import { pickAwaitingDecision, groupAwaiting, pickApplyNext, includeApplyTarget } from "@/lib/home/awaiting.mjs";
 import { orderTodayQueue } from "@/lib/home/today-queue.mjs";
 import { selectDueFollowups } from "@/lib/core/followup-view.mjs";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
@@ -141,11 +141,15 @@ export function TodayDashboard({
   // Awaiting decision: scored (Evaluated) but no terminal status yet. The
   // ordering lives in lib/home/awaiting.mjs so it can be tested — see the file
   // for why "first six in the array" was a bug waiting for #3529.
-  const awaiting = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
+  const ranked = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
+  const applyTarget = useMemo(
+    () => pickApplyNext(applications, scoreNum, (row) => reasons[row.n]?.decision ?? ""),
+    [applications, reasons],
+  );
+  const awaiting = useMemo(() => includeApplyTarget(ranked, applyTarget), [ranked, applyTarget]);
   // With the legitimacy, a flagged posting is grouped as the report page
-  // labels it (#5300), so "Apply next" below never points at one.
+  // labels it (#5300).
   const awaitingGroups = useMemo(() => groupAwaiting(awaiting, (a) => legitimacy[a.n]), [awaiting, legitimacy]);
-  const recommended = awaitingGroups.find(([label]) => label === "Recommended")?.[1] ?? [];
 
   const newThisWeek = freshCount;
   const dataLoading = followupsLoading || freshLoading;
@@ -296,13 +300,13 @@ export function TodayDashboard({
       {/* B. Awaiting your decision */}
       {awaiting.length > 0 && (
         <Section icon={CircleHelp} title="Awaiting your decision" hint="Best score first">
-          {recommended.length > 0 && (
+          {applyTarget && (
             <ApplyNext
-              n={recommended[0].n}
-              company={companyPresentation(recommended[0]).label}
-              score={recommended[0].score}
-              pdfOnDisk={applyFacts[recommended[0].n]?.pdfOnDisk ?? false}
-              postingUrl={applyFacts[recommended[0].n]?.postingUrl ?? ""}
+              n={applyTarget.n}
+              company={companyPresentation(applyTarget).label}
+              score={applyTarget.score}
+              pdfOnDisk={applyFacts[applyTarget.n]?.pdfOnDisk ?? false}
+              postingUrl={applyFacts[applyTarget.n]?.postingUrl ?? ""}
             />
           )}
           {awaitingGroups.map(([label, group]) => (
