@@ -172,6 +172,48 @@ try {
       : fail('google probe swallowed a deeper-page rejection');
   }
 
+  // Overlapping queries are the norm, so a later query's page 1 can repeat ids
+  // an earlier query already collected. That is not the ignored-page re-serve
+  // the stop rule guards against: the query's own walk is only one page in and
+  // its page 2 can still carry new postings. The stop decision is per query.
+  {
+    const Q2_PAGE2_HTML = `<!doctype html><a href="/about/careers/applications/jobs/results/111222333-strategy-ops-lead">w</a>`;
+    const { ctx, calls } = recordingCtx((call) =>
+      (/q=corporate/.test(call.url) && /[?&]page=2\b/.test(call.url) ? Q2_PAGE2_HTML : RESULTS_HTML));
+    const jobs = await provider.fetch({ ...ENTRY, max_pages: 5 }, ctx);
+
+    calls.some((c) => /q=corporate/.test(c.url) && /[?&]page=2\b/.test(c.url))
+      ? pass('google.fetch() keeps paging a later query whose page 1 repeats an earlier query\'s ids')
+      : fail(`google cut the second query at page 1: ${calls.map((c) => c.url).join(' ')}`);
+
+    jobs.some((x) => x.externalId === '111222333')
+      ? pass('google.fetch() keeps the postings a later query\'s page 2 carries')
+      : fail(`google lost the later query's page-2 posting: ${JSON.stringify(jobs.map((x) => x.externalId))}`);
+
+    calls.filter((c) => /q=business/.test(c.url)).length === 2
+      ? pass('google.fetch() still stops a query whose own pages repeat (re-serve stop intact)')
+      : fail(`google first-query walk: ${calls.filter((c) => /q=business/.test(c.url)).map((c) => c.url).join(' ')}`);
+  }
+
+  // The page budget clamps to the provider's own 20-page ceiling when an entry
+  // asks for more, and a page of all-new ids never trips the stop rule.
+  {
+    const { ctx, calls } = recordingCtx((call) => {
+      const m = /[?&]page=(\d+)/.exec(call.url);
+      const n = m ? m[1] : '1';
+      return `<!doctype html><a href="/about/careers/applications/jobs/results/9999000${n}-x">x</a>`;
+    });
+    const jobs = await provider.fetch({ ...ENTRY, max_pages: 100, google: { queries: ['business strategy'], location: 'United States' } }, ctx);
+
+    calls.length === 20 && !calls.some((c) => /[?&]page=21\b/.test(c.url))
+      ? pass('google.fetch() clamps an oversized max_pages to its 20-page ceiling')
+      : fail(`google max_pages=100 walk: ${calls.length} requests`);
+
+    jobs.length === 20
+      ? pass('google.fetch() collects one posting from each of the 20 pages')
+      : fail(`google 20-page walk collected ${jobs.length} jobs`);
+  }
+
   // The probe budget caps paging: ctx.maxPages wins over the entry's max_pages.
   {
     const { ctx, calls } = recordingCtx(() => RESULTS_HTML);
