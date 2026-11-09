@@ -8,6 +8,7 @@ import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { CANONICAL_STATES, scoreNum, scoreTone } from "@/lib/format";
+import { EvaluateApplication } from "@/components/evaluate-application";
 import { StatusSelect } from "@/components/status-select";
 import { applicationKey, applySavedStatus, saveStatuses } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
@@ -35,6 +36,12 @@ import { listEntrySync } from "@/lib/history-back.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
 type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
+
+// Reuse the measured row height when returning from a detail page. Otherwise
+// the shorter first-paint spacers clamp the browser's restored scroll position
+// before layout can measure the taller source/evaluation controls again.
+const measuredRowHeights = new Map<number, number>();
+const entryScrollPositions = new Map<string, number>();
 
 const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
 const VIEWS_KEY = "career-ops:pipeline-views";
@@ -142,6 +149,13 @@ export function PipelineView({
     // The search timer would router.replace this list and can steal the click
     // if the list is still mounted while the next page loads.
     cancelPendingSearch();
+    const entryKey = window.navigation?.currentEntry?.key;
+    if (entryKey) {
+      entryScrollPositions.set(entryKey, window.scrollY);
+      // Next rewrites history.state; keep the entry's snapshot outside that
+      // object, including across a reload of the detail page.
+      try { sessionStorage.setItem(`career-ops:pipeline-scroll:${entryKey}`, String(window.scrollY)); } catch { /* Memory still works without storage. */ }
+    }
     const next = listEntrySync(pathname, params.toString(), q);
     if (!next) return;
     const state = window.history.state;
@@ -323,7 +337,9 @@ export function PipelineView({
   const bodyRef = useRef<HTMLTableSectionElement>(null);
   // TRACKER_ROW_PX is the first-paint guess. The status cell wraps to two
   // lines at some widths, so the spacers use the height a mounted row has.
-  const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
+  const [rowPx, setRowPx] = useState(() =>
+    typeof window === "undefined" ? TRACKER_ROW_PX : measuredRowHeights.get(window.innerWidth) ?? TRACKER_ROW_PX,
+  );
   const mountedRows = filtered.slice(span.start, span.end);
   const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
   // The checkbox, the sortable columns and the resume column.
@@ -349,6 +365,7 @@ export function PipelineView({
         rowHeight = row.getBoundingClientRect().height || rowPx;
         break;
       }
+      measuredRowHeights.set(window.innerWidth, rowHeight);
       if (rowHeight !== rowPx) setRowPx(rowHeight);
       const next = trackerWindow({
         count: filtered.length,
@@ -366,16 +383,42 @@ export function PipelineView({
     window.addEventListener("resize", measure);
     // Back restores the list's scroll position after this commit, and that
     // move does not always emit a scroll event. Keep measuring until it lands.
+    const entryKey = window.navigation?.currentEntry?.key;
+    let savedY = entryKey ? entryScrollPositions.get(entryKey) : undefined;
+    if (entryKey) {
+      try {
+        const stored = sessionStorage.getItem(`career-ops:pipeline-scroll:${entryKey}`);
+        if (stored !== null) savedY = Number(stored);
+      } catch { /* Fall back to the in-memory snapshot. */ }
+    }
+    let restoring = typeof savedY === "number" && Number.isFinite(savedY);
+    const forgetSavedPosition = () => {
+      if (!restoring || !entryKey) return;
+      entryScrollPositions.delete(entryKey);
+      try { sessionStorage.removeItem(`career-ops:pipeline-scroll:${entryKey}`); } catch { /* Storage may be disabled. */ }
+    };
+    const stopRestore = () => { forgetSavedPosition(); restoring = false; };
+    window.addEventListener("wheel", stopRestore, { passive: true });
+    window.addEventListener("touchstart", stopRestore, { passive: true });
+    window.addEventListener("keydown", stopRestore);
     let frames = 0;
     let raf = 0;
     const followScrollRestore = () => {
       measure();
+      // Native history restoration can run before the virtual table reaches
+      // its measured height. Retry the saved entry's position after layout,
+      // without fighting a user who has started scrolling or using the keys.
+      if (restoring) window.scrollTo(0, savedY!);
       frames += 1;
       if (frames < 30) raf = requestAnimationFrame(followScrollRestore);
+      else forgetSavedPosition();
     };
     raf = requestAnimationFrame(followScrollRestore);
     return () => {
       cancelAnimationFrame(raf);
+      window.removeEventListener("wheel", stopRestore);
+      window.removeEventListener("touchstart", stopRestore);
+      window.removeEventListener("keydown", stopRestore);
       window.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
     };
@@ -842,7 +885,7 @@ export function PipelineView({
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table aria-label="Tracked applications" aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
+          <table aria-label="Tracked applications" style={{ overflowAnchor: "none" }} aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
                 <th className="w-8 px-3 py-2.5">
@@ -936,6 +979,7 @@ export function PipelineView({
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+                    <EvaluateApplication n={r.n} company={r.company} role={r.role} url={postingHref(r.url) || postingHref(r.applyLink)} evaluation={r.evaluation} />
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-muted">
                     <StatusSelect

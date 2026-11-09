@@ -2,13 +2,14 @@
 /**
  * persist-evaluation-report.mjs
  *
- * Write one evaluation report and one headed tracker-addition TSV.
+ * Write one evaluation report and one headed tracker-addition TSV, or attach
+ * a new report version to an existing targetApplication under the tracker lock.
  * Stdin is one JSON object:
  * { markdown, num, today, company, role, score, via, url, notes, reportFile }
  *
- * The web app validates the report, reserves the number, and merges.
- * This script does neither. It writes under the process cwd, which the
- * caller sets to the data root.
+ * The caller reserves the report number. Untargeted reports are merged by
+ * the caller; targeted saves update only the existing row's evaluation cells.
+ * Files are written under the process cwd, which the caller sets to the data root.
  *
  * Success prints {"ok":true} and exits 0. Failure prints on stderr and
  * exits 1. A failed write removes only files this call created.
@@ -17,6 +18,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { isPostingUrl, trackerTsvLine } from "./lib/tracker-addition.mjs";
+import { resolveTrackerPath } from "./path-resolver.mjs";
+import { openTrackerTransaction, writeFileAtomic } from "./tracker-utils.mjs";
+import { attachEvaluationToRow } from "./lib/evaluation-target.mjs";
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 const NUM_RE = /^\d{3,}$/;
@@ -39,9 +43,10 @@ function textProblem(name, value) {
  * @param {string} root
  * @param {object} payload
  * @param {Pick<typeof fs, "mkdirSync"|"existsSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
+ * @param {{reportOnly?: boolean}} [options]
  * @returns {{ok: true} | {ok: false, error: string}}
  */
-export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
+export function writeEvaluationArtifacts(root, payload, fsImpl = fs, { reportOnly = false } = {}) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return fail("expected one JSON object");
   }
@@ -93,15 +98,43 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
   const attempted = [];
   try {
     fsImpl.mkdirSync(reportsDir, { recursive: true });
-    fsImpl.mkdirSync(additionsDir, { recursive: true });
+    if (!reportOnly) fsImpl.mkdirSync(additionsDir, { recursive: true });
     writeNew(fsImpl, reportPath, markdown, attempted);
-    writeNew(fsImpl, tsvPath, tsv, attempted);
+    if (!reportOnly) writeNew(fsImpl, tsvPath, tsv, attempted);
   } catch (err) {
     const cleanupError = cleanupNew(fsImpl, attempted);
     const message = `Could not save the evaluation report: ${err.message}`;
     return fail(cleanupError ? `${message} ${cleanupError}` : message);
   }
   return { ok: true };
+}
+
+/** Save a new report version onto one existing application under the tracker lock. */
+export async function writeTargetedEvaluation(root, payload) {
+  const transaction = await openTrackerTransaction(resolveTrackerPath(root));
+  let reportPath;
+  try {
+    const before = transaction.read();
+    // Validate the target before creating any report or addition.
+    const prospectivePath = path.join(root, 'reports', String(payload.reportFile ?? ''));
+    const after = attachEvaluationToRow(before, {
+      target: payload.targetApplication, url: payload.url, score: payload.score,
+      reportPath: prospectivePath, trackerPath: transaction.path, reportNum: payload.num,
+    });
+    if (fs.existsSync(prospectivePath)) return fail('A report already occupies this version; the previous report was kept.');
+    const written = writeEvaluationArtifacts(root, payload, fs, { reportOnly: true });
+    if (!written.ok) return written;
+    reportPath = prospectivePath;
+    writeFileAtomic(`${transaction.path}.bak`, before);
+    transaction.replace(after);
+    reportPath = undefined; // Markdown is committed; never remove its report.
+    return { ok: true };
+  } catch (error) {
+    if (reportPath) fs.unlinkSync(reportPath);
+    return fail(error.message);
+  } finally {
+    transaction.close();
+  }
 }
 
 function writeNew(fsImpl, filePath, content, attempted) {
@@ -137,6 +170,7 @@ const USAGE_LINES = [
   "",
   "Read one JSON object on stdin and write the evaluation report plus a",
   "headed tracker-addition TSV under the process cwd (the data root).",
+  "With targetApplication, attach a new report to that job instead of adding a TSV.",
   "Does not reserve a report number and does not merge the tracker.",
   "",
   "  --help, -h    print this help and exit",
@@ -161,7 +195,9 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const result = writeEvaluationArtifacts(process.cwd(), payload);
+  const result = payload?.targetApplication
+    ? await writeTargetedEvaluation(process.cwd(), payload)
+    : writeEvaluationArtifacts(process.cwd(), payload);
   if (!result.ok) {
     process.stderr.write(`${result.error}\n`);
     process.exitCode = 1;
