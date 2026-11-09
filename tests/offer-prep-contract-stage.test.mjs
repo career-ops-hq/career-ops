@@ -205,7 +205,7 @@ check(
 // Marker lists, each verified to be covered by the mode text they come from.
 const CONTRACTOR_TERMS = ['invoice for services', 'independent contractor', 'T4A', '1099', 'labour contract'];
 // Consultant-status wording (not a consultant job title alone) must also stay out of silent fixtures.
-const CONSULTANT_STATUS = /(as an? (independent )?consultant|consultant (status|agreement)|engaged as a consultant|self-employed)/i;
+const CONSULTANT_STATUS = /\b(as an? (independent )?consultant|consultant (status|agreement)|engaged as a consultant|self-employed)\b/i;
 const TERMINOLOGY_STRONG = ['401(k)', 'W-2 employment', 'RRSP', 'T4'];
 const AGENCY_WORDING = ['on behalf of our client', 'assignment', 'placement', 'client site'];
 check(
