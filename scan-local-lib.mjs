@@ -74,7 +74,16 @@ export function decodeHtml(text) {
 export function createLocalGate({ config = {}, gateOptions = {}, seenRoles } = {}) {
   const gate = createAdmissionGate({ config, ...gateOptions });
   const includeLocation = resolveDedupIncludeLocation(config);
-  const roles = seenRoles ?? new Set(loadDedupSnapshot({}, normalizeCompanyName, { includeLocation }).seenCompanyRoles);
+  let roles;
+  let locatedBases;
+  if (seenRoles) {
+    roles = seenRoles;
+    locatedBases = new Set();
+  } else {
+    const snapshot = loadDedupSnapshot({}, normalizeCompanyName, { includeLocation });
+    roles = new Set(snapshot.seenCompanyRoles);
+    locatedBases = new Set(snapshot.seenCompanyRoleBases);
+  }
   const counts = gate.counts;
   counts.duplicateRole = 0;
 
@@ -90,17 +99,18 @@ export function createLocalGate({ config = {}, gateOptions = {}, seenRoles } = {
       const reason = gate.check(offer);
       if (reason) return reason;
       const key = roleKey(offer);
-      // A tracker row with no city is the wildcard. A located posting still
-      // matches that bare key, the same way the main scan does. A key that
-      // already names a different city does not.
+      // A tracker row with no city is the wildcard, and a located row is the
+      // wildcard for a later offer that names no city. A different city does
+      // not match either of those.
       const bare = includeLocation ? baseKeyOf(offer) : key;
-      if (roles.has(key) || (key !== bare && roles.has(bare))) {
+      if (roles.has(key) || (key !== bare && roles.has(bare)) || (key === bare && locatedBases.has(bare))) {
         // gate.check already counted this posting as admitted.
         counts.admitted--;
         counts.duplicateRole++;
         return 'duplicate-role';
       }
       roles.add(key);
+      if (key !== bare) locatedBases.add(bare);
       return null;
     },
   };

@@ -97,6 +97,32 @@ test('a locationless seen role still blocks a located local offer, and another c
   );
 });
 
+test('a located role blocks a later offer with no city, and a different city still comes through', () => {
+  const open = {
+    titleFilter: () => true,
+    locationFilter: () => true,
+    blacklist: new Map(),
+    seen: new Set(),
+  };
+  const config = { location_filter: { workplace_policy: { onsite_locations: ['Harbor Bay'] } } };
+  const harbor = { url: 'https://boards.example/jobs/1', company: 'Lumenfield', title: 'Automation Analyst', location: 'Harbor Bay' };
+  const noCity = { url: 'https://boards.example/jobs/2', company: 'Lumenfield', title: 'Automation Analyst' };
+  const pebble = { url: 'https://boards.example/jobs/3', company: 'Lumenfield', title: 'Automation Analyst', location: 'Pebbleford, TX' };
+
+  const locatedFirst = createLocalGate({ config, gateOptions: open, seenRoles: new Set() });
+  assert.strictEqual(locatedFirst.check(harbor), null);
+  assert.strictEqual(locatedFirst.check(noCity), 'duplicate-role');
+  assert.strictEqual(locatedFirst.check(pebble), null);
+
+  const bareFirst = createLocalGate({
+    config,
+    gateOptions: { ...open, seen: new Set() },
+    seenRoles: new Set(),
+  });
+  assert.strictEqual(bareFirst.check(noCity), null);
+  assert.strictEqual(bareFirst.check({ ...harbor, url: 'https://boards.example/jobs/4' }), 'duplicate-role');
+});
+
 test('writeRunLog appends a scan-runs.tsv row stats.mjs can read by header name', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'local-scan-'));
   try {
