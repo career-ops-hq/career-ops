@@ -463,3 +463,20 @@ test('the scheduled poll logs alert files it had to skip', async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a drop folder given as . parks each mail under its full name', async () => {
+  const { root, dir } = dropRoot('linkedin-drop-dot-dir-');
+  writeFileSync(join(dir, 'alert.eml'), `https://www.linkedin.com/jobs/view/${JOB_ID}?trk=eml\n`);
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await withDataEnv(root, async () => {
+      const result = await importMailDrop({ root, dir: '.' });
+      assert.equal(result.added, 1);
+      assert.ok(existsSync(join(dir, 'imported', 'alert.eml')), readdirSync(join(dir, 'imported')).join(', '));
+    });
+  } finally {
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
