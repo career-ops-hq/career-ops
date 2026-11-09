@@ -102,12 +102,14 @@ if (sourceNames.length < 6) {
   fail(`localized source-exclusivity rules leave sources unnamed: ${unnamedSources.join('; ')}`);
 }
 
-// #2395: most market sets ship no cover.md, email.md or contacto.md, so their
-// never-send rules reach a localized user only through the English file. The
-// router has to say so, or the fallback holds by accident.
+// #2395/#6627: most market sets ship no cover.md, email.md or contacto.md, and
+// even the modes they do ship only carry the rules a translator copied. A
+// scalar modes_dir must therefore layer the market files on the English canon,
+// not swap them in: the router always reads the English modes/_shared.md and
+// modes/{mode}.md first, or every uncopied rule silently disappears.
 const router = readFileSync(join(ROOT, '.agents', 'skills', 'career-ops', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
-if (/When it provides no file for the selected mode[^\n]*load the English `modes\/\{mode\}\.md`/.test(router)) {
-  pass('router falls back to the English mode file when a market set has none');
+if (/always read the English `modes\/_shared\.md` and the English `modes\/\{mode\}\.md` first/.test(router)) {
+  pass('router layers localized files on the English canon for a scalar modes_dir');
 } else {
-  fail('router no longer says a market set without the selected mode file loads the English modes/{mode}.md');
+  fail('router no longer says a scalar modes_dir reads the English modes/_shared.md and modes/{mode}.md first');
 }
