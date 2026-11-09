@@ -446,9 +446,11 @@ candidate.
   needs contractor wording plus an omission, and the contract stage is where
   both vocabularies can finally be seen together.
 
-The finding quotes both phrase sets side by side with their clause locations
-and adds one neutral line: the document uses terms associated with both
-statuses. Lawyer-list entry: "Does this document create an employment or a
+For Case A without Case B, the finding quotes the contractor wording with its
+clause location and identifies the corroborating omission. For Case B, the
+finding quotes both phrase sets side by side with their clause locations and
+adds one neutral line: the document uses terms associated with both statuses.
+Lawyer-list entry: "Does this document create an employment or a
 services relationship under {jurisdiction} law, and what follows for tax
 withholding, benefits and termination?" When `notes.md` records that the
 candidate was told the role is employment and the contract text points the
