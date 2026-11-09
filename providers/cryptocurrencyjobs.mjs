@@ -98,6 +98,11 @@ export function parseCryptocurrencyJobsRss(xml) {
       //   Canada"). That clause is the feed's only country signal; carrying it
       //   needs an input other than `description`, since the content filter
       //   would read it as the JD.
+      // - content_filter.rescue_title_misses can't rescue a title miss from
+      //   this board. The teaser only repeats the title the title filter
+      //   already rejected and adds the company name and location, so a
+      //   rescue it allowed would be an accident (a `protocol` keyword
+      //   matching the company "Acme Protocol").
       //
       // Location stays 'Remote' as before, although some teasers name an
       // on-site city ("is based in New York NY").
