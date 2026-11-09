@@ -4954,6 +4954,13 @@ async function main() {
   const deferredBoards = [];
   const employerLocationRejected = new Set();
   const employerLocationAccepted = new Set();
+  // Boards whose fetch failed on a transient error, retried once after the
+  // sweep (see retryTransientFailures below).
+  const TRANSIENT_KINDS = new Set(['network', 'server']);
+  const TRANSIENT_RETRY_GAP_MS = 3_000;
+  /** @type {Array<{ company: any, entry: any }>} */
+  const transientFailures = [];
+  const retriedTargets = new Set();
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
@@ -4998,14 +5005,18 @@ async function main() {
     applyEntryResponseCap(ctx, company);
     applyEntryTimeout(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
-    const recordError = err => {
+    const recordError = (err, { retryable = false } = {}) => {
       failedTargets++;
-      errors.push({
+      const entry = {
         company: company.name,
         error: err.message,
         kind: classifyFetchError(err),
         status: err.status ?? observation.lastStatus,
-      });
+      };
+      errors.push(entry);
+      if (retryable && TRANSIENT_KINDS.has(entry.kind) && !retriedTargets.has(company)) {
+        transientFailures.push({ company, entry });
+      }
     };
     try {
       let jobs;
@@ -5275,14 +5286,42 @@ async function main() {
         await processJobs();
       }
     } catch (err) {
-      recordError(err);
+      recordError(err, { retryable: true });
     }
   });
 
-  const companyFetches = () => parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
-    hostLimit: HOST_CONCURRENCY,
-    hostOf: (_task, index) => companyFetchHost(targets[index]),
-  });
+  // Second pass for boards that failed on a TRANSIENT error (timeout, reset,
+  // 5xx) during the concurrent sweep. A provider already retries each request
+  // with backoff, but those retries run inside the same burst that caused the
+  // failure: on 2026-11-07 Marvell's first page timed out four times while
+  // other Workday boards on the same data center were paging, then read in
+  // full in 26 s on its own. Re-running the failed boards one at a time after
+  // the sweep removes the contention instead of repeating into it: the same
+  // deferred sequential retry scan-ats-full.mjs runs, and the AWS Builders'
+  // Library advice to retry with the load reduced rather than amplify it
+  // ("Timeouts, retries, and backoff with jitter"). Bounded: one extra attempt
+  // per board, never for a 4xx (a 403 or 404 will not change in seconds).
+  const retryTransientFailures = async () => {
+    if (transientFailures.length === 0) return;
+    const pending = transientFailures.splice(0);
+    process.stderr.write(`scan: retrying ${pending.length} board(s) that failed on a transient error, one at a time: ${pending.map((p) => p.company.name).join(', ')}\n`);
+    for (const { company, entry } of pending) {
+      retriedTargets.add(company);
+      const at = errors.indexOf(entry);
+      if (at !== -1) errors.splice(at, 1);
+      failedTargets--;
+      await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_GAP_MS));
+      await tasks[targets.indexOf(company)]();
+    }
+  };
+
+  const companyFetches = async () => {
+    await parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
+      hostLimit: HOST_CONCURRENCY,
+      hostOf: (_task, index) => companyFetchHost(targets[index]),
+    });
+    await retryTransientFailures();
+  };
   if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
     await companyFetches();
   } else {
