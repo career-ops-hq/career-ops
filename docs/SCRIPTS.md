@@ -82,6 +82,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run prepare:application` | `prepare-application.mjs` | Print an ATS prefill summary (read-only, never POSTs) |
 | `npm run build:dashboard` | `build-dashboard.mjs` | Build the Go TUI dashboard binary cross-platform |
 | `npm run manifesto` | `manifesto.mjs` | Print the manifesto couplet and open the signing page in a browser |
+| `node community-asks.mjs next` | `community-asks.mjs` | The one-time community asks (star, then manifesto): prints at most one line, never in CI or headless runs; `off` turns them off |
 | `node upgrade-tests.mjs --pr-gate` | `upgrade-tests.mjs` | Upgrade an install seeded from the newest old release to this commit and prove user data survived (CI gate; `--canary` proves the gate can fail) |
 | `node linkedin-join.mjs` | `linkedin-join.mjs` | Warm-intro finder — join a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?" (offline, zero-token, read-only; see [LINKEDIN_JOIN.md](LINKEDIN_JOIN.md)) |
 
@@ -2058,6 +2059,19 @@ Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)
 ```
 
 ---
+
+## community-asks.mjs
+
+The one-time community asks. career-ops never phones home, so it asks for support in words, rarely, and at the right moment: a GitHub star after the first saved evaluation report, then the manifesto after five reports and at least seven days after the star. The star ask comes with a small drawing in a fenced block of its own, which the agent copies exactly, and names the user's evaluation count from five reports on. The Hired Wall ask lives in `hired-share.mjs`. Each ask is shown at most once, never two in one run, and never in CI, batch workers (`CAREER_OPS_HEADLESS`, `CAREER_OPS_BATCH_STATE`) or headless Claude Code (`sdk-*` entrypoints).
+
+```bash
+node community-asks.mjs next            # prints the one ask that is due, or nothing; always exits 0
+node community-asks.mjs open star       # opens the page after the user said yes (or: open manifesto)
+node community-asks.mjs status          # the state as JSON
+node community-asks.mjs off             # never ask again; CAREER_OPS_NO_ASKS=1 does the same without writing
+```
+
+`next` claims `data/.community-asks/<ask>` with an exclusive create before it prints, so an ask comes once even with two sessions open, and a data folder it cannot write means no ask at all. The script makes no request of its own: `open` hands one fixed URL to the system's browser opener, and starring or signing is always the user's own click.
 
 ## data/scan-runs.tsv
 

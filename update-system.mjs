@@ -5421,11 +5421,6 @@ async function apply() {
     console.log(`Updated ${updated.length} system paths.${skippedBranchCommit ? ' Staged, not committed (see above).' : ''}`);
     console.log(`Rollback available: node update-system.mjs rollback`);
 
-    console.log('\n-- The CareerOps Manifesto ------------------------------');
-    console.log('A new way of job searching is taking shape. You are');
-    console.log('already practicing it. Read it, sign it if you want to help:');
-    console.log('    npm run manifesto  ·  https://career-ops.org/manifesto?utm_source=updater');
-
   } finally {
     // Remove lock
     if (!isReexec && existsSync(lockFile)) unlinkSync(lockFile);

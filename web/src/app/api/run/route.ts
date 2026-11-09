@@ -28,6 +28,7 @@ import { profileRef } from "@/lib/core/profile-path.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 import { readJsonObject } from "@/lib/json-body";
+import { writeEvaluationInstructions } from "@/lib/evaluation-instructions-file.mjs";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 
 export const runtime = "nodejs";
@@ -181,15 +182,12 @@ export async function POST(req: Request) {
   const userTemplatesDir = dataRoot
     ? await resolveUserTemplatesDir(codeRoot, dataRoot)
     : undefined;
-  // Tracker-mutating runs hold a write token so a row delete can't race their
-  // merge (tracker.mjs delete doesn't yet share a lock with merge-tracker,
-  // see run-registry). evaluate's agent no longer writes; the backend persist
-  // path below still merges the tracker, so the token stays. It is taken before
-  // the JD prefetch, so a row delete cannot land in that window either.
+  // Hold the tracker guard through evaluation persistence / PDF marking. Build
+  // the prompt inside the same try so preparation failures release it too. It is
+  // taken before the JD prefetch, so a row delete cannot land in that window.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
-  let prompt: string;
-  let isClaude: boolean;
-  let args: string[];
+  let child;
+  let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
   try {
     // Read the JD here, not in the worker: WebFetch drops script content, so a
     // board that renders its JD from script data looks like an empty shell to the
@@ -209,7 +207,10 @@ export async function POST(req: Request) {
     }
     const prefetchedJd = prefetch?.text ?? null;
     const closedEvidence = prefetch?.closedEvidence ?? null;
-    prompt = buildPrompt({
+    if (evaluationInstructions) {
+      instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
+    }
+    const prompt = buildPrompt({
       kind,
       input,
       memory: readMemory(),
@@ -223,12 +224,12 @@ export async function POST(req: Request) {
       reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
       coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
       profile: profileRef(careerOpsRoot()),
-      evaluationInstructions,
+      evaluationInstructions: instructionFile?.reference,
       prefetchedJd,
       closedEvidence,
     });
 
-    isClaude = cliId === "claude";
+    const isClaude = cliId === "claude";
     // Which tools each kind gets, and the whole claude argv, live in
     // claude-invocation.mjs — see its header for the policy and for why it is asserted on
     // built values rather than on this file's source. NEVER auto-submits; that
@@ -242,30 +243,16 @@ export async function POST(req: Request) {
     // A CLI with its own structured stream gets the argv that turns it on, so its
     // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
     // envelope-parsing routes rely on.
-    args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
-  } catch (e) {
-    // Nothing spawned yet, so nothing else will release the guard.
-    if (writeToken !== null) releaseTrackerWrite(writeToken);
-    throw e;
-  }
-
-  // stdin must reach EOF or the CLI waits on piped input that never comes: Codex's
-  // `exec` blocks reading stdin for additional context, hangs until the kill timer,
-  // and then reports a generic "installed and authenticated?" error that reads as an
-  // auth failure even though the CLI is fully signed in. #1973 fixed that here with
-  // an inline `stdio: ["ignore", …]`; spawnHeadlessCli generalizes the same fix to
-  // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
-  // which had the identical bug, and puts it behind one tested helper so it cannot
-  // drift back in on any single call site.
-  let child;
-  try {
+    const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
     child = spawnHeadlessCli(
       binPath,
       args,
       { cwd: careerOpsRoot(), env: process.env },
       { cliId, capabilities },
     );
+    if (instructionFile) child.once("close", instructionFile.cleanup);
   } catch (e) {
+    instructionFile?.cleanup();
     // Fencing refuses an argv that contradicts the capability record, so nothing
     // spawned and the stream below — which owns finishRun — is never
     // constructed. Release the tracker guard HERE or it is held for the lifetime
@@ -521,7 +508,7 @@ export async function POST(req: Request) {
             evaluationSections: evaluation?.ok ? evaluation.sections : undefined,
           });
           if (!result.ok) {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           sendWarnings(result.warnings);
@@ -554,7 +541,7 @@ export async function POST(req: Request) {
             reportNum: paths.reportNum,
           });
           if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
