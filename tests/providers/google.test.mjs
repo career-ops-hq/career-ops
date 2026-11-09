@@ -211,12 +211,10 @@ try {
   // ── probe: ctx.maxPages walks one query, one page, one request ──
   {
     const { ctx, calls } = recordingCtx(() => linkPage(fullPageIds(100))); // a full page
-    const base = recordingCtx(() => linkPage(fullPageIds(100)));
-    await provider.fetch(ENTRY, { ...base.ctx, maxPages: 1 });
-    base.calls.length === 1 && pageOf(base.calls[0].url) === null
+    await provider.fetch(ENTRY, { ...ctx, maxPages: 1 });
+    calls.length === 1 && pageOf(calls[0].url) === null
       ? pass('google.fetch() spends exactly one request under ctx.maxPages, even with a full page and two queries')
-      : fail(`google probe made ${base.calls.length} requests: ${base.calls.map((c) => c.url)}`);
-    void ctx; void calls;
+      : fail(`google probe made ${calls.length} requests: ${calls.map((c) => c.url)}`);
   }
 
   // ── error handling ──
