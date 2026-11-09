@@ -2185,7 +2185,9 @@ const ZH_ADVERB_RE = /^(?:主要|深度|全程|全面|积极|具体|核心|曾�
 const ZH_CONNECTOR_RE = /^(?:并且|并|同时|以及)/u;
 // The same two characters are a noun when a person or product suffix follows:
 // 负责人, 设计师, 开发者, 设计稿, 领导力. A noun opening a line claims no scope.
-const ZH_VERB_AS_NOUN_RE = /^[人师者稿力]/u;
+// 人 is that suffix only when it does not open the object: 主导人工智能平台,
+// 负责人员招聘 and 支持人力资源系统 are the verb.
+const ZH_VERB_AS_NOUN_RE = /^(?:人(?![工员事力才脸机])|[师者稿力])/u;
 // Particles dropped before object tokens are built, so 计费系统的迁移 and
 // 计费系统迁移 read as the same item.
 const ZH_PARTICLE_RE = /[的了和与及等]/gu;
@@ -2204,10 +2206,18 @@ function zhFactStatements(text) {
     .filter(Boolean);
 }
 
-/** Split a Chinese statement into clauses at ，、：, dropping a coordinator that opens one (，并主导…). */
+// A coordinator joins two verbs without a comma too: 参与A并主导B. It splits
+// only before a scope verb, and 并 not after 合/兼/吞, so 合并, 并发 and 并行
+// stay whole.
+const ZH_CLAUSE_SPLIT_RE = new RegExp(
+  `\\s*[，、：,:]\\s*|(?:并且|(?<![合兼吞])并|同时|以及)(?=${ZH_SCOPE_VERBS.join('|')})`,
+  'u',
+);
+
+/** Split a Chinese statement into clauses at ，、： and at a coordinator before a scope verb (并主导…). */
 function zhScopeClauses(statement) {
   return String(statement ?? '')
-    .split(/\s*[，、：,:]\s*/u)
+    .split(ZH_CLAUSE_SPLIT_RE)
     .map(clause => clause.trim().replace(ZH_CONNECTOR_RE, '').trim())
     .filter(Boolean);
 }
@@ -3585,6 +3595,18 @@ function runSelfTest() {
     zhScopeOf('主导了支付模块重构。', '参与了计费系统迁移，主导了支付模块重构。'), []);
   equal('zh: a noun that starts with a verb is not a scope claim',
     zhScopeOf('负责人：计费系统迁移。', '参与了计费系统迁移。'), []);
+  equal('zh: 负责人 with no punctuation after it is still a noun',
+    zhScopeOf('负责人计费系统迁移。', '参与了计费系统迁移。'), []);
+  equal('zh: an object that opens with 人 keeps the verb (主导人工智能)',
+    zhScopeOf('主导人工智能平台建设。', '参与人工智能平台建设。'), ['主导人工智能平台建设']);
+  equal('zh: 支持人工智能… is ranked, so it does not vouch for 主导',
+    zhScopeOf('主导人工智能平台建设。', '支持人工智能平台建设。'), ['主导人工智能平台建设']);
+  equal('zh: 参与A并主导B still vouches for 主导B',
+    zhScopeOf('主导了支付模块重构。', '参与了计费系统迁移并主导了支付模块重构。'), []);
+  equal('zh: 参与A并主导B does not vouch for 主导A',
+    zhScopeOf('主导了计费系统迁移。', '参与了计费系统迁移并主导了支付模块重构。'), ['主导了计费系统迁移']);
+  equal('zh: 合并 before a scope verb is not split',
+    zhScopeOf('主导了代码合并完成流程改造。', '参与了代码合并完成流程改造。'), ['主导了代码合并完成流程改造']);
   equal('zh: an adverb before a weaker source verb does not make it vouch',
     zhScopeOf('主导了计费系统迁移。', '深度参与了计费系统迁移。'), ['主导了计费系统迁移']);
   equal('zh: an adverb before an equal source verb still vouches',
@@ -3608,6 +3630,8 @@ function runSelfTest() {
     zhScopeOf('主导了计费系统迁移。', '推动了计费系统迁移。'), []);
   equal('zh: the target side is clause-scoped too',
     zhScopeOf('参与了日志系统重构，并主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: a comma-less 并 splits the target too',
+    zhScopeOf('参与了日志系统重构并主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
   equal('zh: a markdown bullet is read like a sentence',
     zhScopeOf('- 主导了计费系统迁移', '- 参与了计费系统迁移'), ['主导了计费系统迁移']);
 
