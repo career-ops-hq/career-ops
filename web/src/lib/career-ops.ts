@@ -13,6 +13,7 @@ import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
 import { parseInbox, splitLines } from "@/lib/pipeline-table.mjs";
+import { jobSource, sourceIndex } from "@/lib/job-source.mjs";
 import { reconcileInbox } from "@/lib/inbox-pending.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
@@ -102,12 +103,19 @@ function read(rel: string): string | null {
   }
 }
 
+function readSourceIndex(pipeline = parseInbox(read("data/pipeline.md") || "")) {
+  let monitors = null;
+  const text = read("data/portal-monitors.json");
+  if (text !== null) monitors = JSON.parse(text);
+  return sourceIndex({ pipeline, history: readScanHistoryLines()?.join("\n") || "", monitors });
+}
+
 export type InboxFit = { score: number; reason: string };
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; rankStamp?: string; fit?: InboxFit | null };
+export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; rankStamp?: string; fit?: InboxFit | null; source?: string; sourceInferred?: boolean };
 
 /** Parse data/pipeline.md. The row grammar and its labeled-segment handling
  *  live in pipeline-table.mjs — see there for the column rules (#1015, #1017). */
-export function readInbox(applications: Pick<Application, "url">[] = readApplications()): InboxJob[] {
+export function readInbox(applications: Pick<Application, "url">[] = readApplications(), sourceLookup?: Map<string, string>): InboxJob[] {
   const file = path.join(careerOpsRoot(), "data", "pipeline.md");
   // A missing pipeline.md is null here. Any other read error throws, so an
   // unreadable inbox does not show up as an empty one (web/AGENTS.md).
@@ -115,7 +123,11 @@ export function readInbox(applications: Pick<Application, "url">[] = readApplica
   if (!jobs) return [];
   // Copy each cached row before reconcile. reconcileInbox passes unmatched
   // jobs through as-is, so a caller editing one would edit the cache.
-  return reconcileInbox(jobs.map((job) => ({ ...job })), applications);
+  const index = sourceLookup ?? readSourceIndex(jobs);
+  return reconcileInbox(jobs.map(job => {
+    const source = jobSource(job, index);
+    return { ...job, source: source.label, sourceInferred: source.inferred };
+  }), applications);
 }
 
 /**
@@ -126,25 +138,27 @@ export function readInbox(applications: Pick<Application, "url">[] = readApplica
  * Tolerant by construction: no file → empty map (freshness facet just hides);
  * a malformed row is skipped, never thrown (missing ≠ corrupt).
  */
+const scanDatesCache = new WeakMap<string[], Map<string, string>>();
 export function readScanDates(): Map<string, string> {
-  const file = path.join(careerOpsRoot(), "data", "scan-history.tsv");
-  // Missing file: null, so an empty map. Other read errors throw.
-  const dates = cachedFileValue(file, "scan-dates", (tsv) => {
-    const parsed = new Map<string, string>();
-    const lines = splitLines(tsv);
+  const lines = readScanHistoryLines();
+  if (!lines) return new Map();
+  let dates = scanDatesCache.get(lines);
+  if (!dates) {
+    dates = new Map();
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+      const line = lines[i].replace(/\r$/, "");
       if (!line || (i === 0 && line.startsWith("url\t"))) continue;
       const tab = line.indexOf("\t");
       if (tab < 1) continue;
       const url = line.slice(0, tab);
       const firstSeen = line.slice(tab + 1).split("\t")[0]?.trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(firstSeen) && !parsed.has(url)) parsed.set(url, firstSeen);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(firstSeen) && !dates.has(url)) dates.set(url, firstSeen);
     }
-    return parsed;
-  });
-  // Copy so a caller that mutates the Map cannot poison the cache.
-  return dates ? new Map(dates) : new Map();
+    scanDatesCache.set(lines, dates);
+  }
+  // Share the cached raw history with provenance readers, but never expose the
+  // cached Map to callers that might mutate it.
+  return new Map(dates);
 }
 
 /** Raw scan-history lines, reused until the file's mtime or size changes.
@@ -219,6 +233,8 @@ export type Application = {
   url: string;
   /** Calendar day the posting closes, from scan history. Absent when that file has no day for this URL. */
   closesAt?: string;
+  source?: string;
+  sourceInferred?: boolean;
 };
 
 /**
@@ -229,7 +245,7 @@ export type Application = {
  * web-side mirror to drift (#954, PR #1598 review). A data-only root falls back
  * to the running system checkout for that system-layer alias table.
  */
-export function readApplications(): Application[] {
+export function readApplications(sourceLookup?: Map<string, string>): Application[] {
   const root = careerOpsRoot();
   const file = resolveTrackerPath(root);
   const codeRoot = path.resolve(process.cwd(), "..");
@@ -240,14 +256,18 @@ export function readApplications(): Application[] {
     path.resolve(codeRoot, "tracker-aliases.json"),
   ])];
   const rows = cachedFileValue(file, "applications", (md) =>
-    parseApplications(md, root, codeRoot) as Application[],
+    parseApplications(md, root, codeRoot) as unknown as Application[],
     aliasFiles,
   );
   // A new array of new row objects each call. The cache keeps the parsed rows;
   // a caller that pushes, splices or edits a field cannot poison the next read,
   // and each request gets its own list identity for React. Row fields are
   // strings, so a shallow copy is enough.
-  return rows ? rows.map((row) => ({ ...row })) : [];
+  return rows ? rows.map(row => {
+    if (!sourceLookup) return { ...row };
+    const source = jobSource({ url: postingHref(row.url) || postingHref(row.applyLink) || row.url }, sourceLookup);
+    return { ...row, source: source.label, sourceInferred: source.inferred };
+  }) : [];
 }
 
 export type TrackerShape = "missing" | "empty" | "malformed" | "rows";
@@ -441,13 +461,14 @@ export type PipelineSummary = {
 export function pipelineSummary(): PipelineSummary {
   const root = careerOpsRoot();
   const scanDates = readScanDates();
-  const applications = readApplications();
+  const sources = readSourceIndex();
+  const applications = readApplications(sources);
   return {
     root,
     rootExists: fs.existsSync(root),
     // join the freshness date (first_seen) onto each raw posting — the inbox's
     // triage view orders/faceted-filters on it entirely client-side.
-    inbox: readInbox(applications).map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
+    inbox: readInbox(applications, sources).map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
     applications,
   };
 }

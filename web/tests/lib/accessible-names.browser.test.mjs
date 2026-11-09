@@ -88,7 +88,7 @@ test("visible labels are part of accessible names, and shell content sits in lan
   await page.goto(`${origin.origin}/scheduled-scans`);
   await jobsLoaded;
   await t.test("/scheduled-scans: heading levels never skip", async () => {
-    await page.getByText("No scheduled scans found").waitFor();
+    await page.getByText("No scheduled searches found").waitFor();
     const levels = await page.evaluate(() => [...document.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((h) => Number(h.tagName[1])));
     assert.equal(levels[0], 1, "page starts with an h1");
     for (let i = 1; i < levels.length; i++) {

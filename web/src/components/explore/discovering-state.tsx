@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import { ApplyBackdrop } from "@/components/apply/apply-backdrop";
 import { instrumentSerif } from "@/lib/fonts";
-import { ATS_LABEL, ATS_SOURCES, type AtsSource } from "@/lib/explore";
+import { ATS_LABEL } from "@/lib/explore";
 import { useExplore, type SourceState } from "./explore-provider";
 
 const STYLE = `
@@ -14,6 +14,7 @@ const STYLE = `
 .co-src__chip{display:flex;align-items:center;gap:.5rem;border-radius:.8rem;border:1px solid var(--border,hsl(0 0% 50% / .2));padding:.5rem .8rem;min-width:9.5rem;background:color-mix(in srgb, var(--bg) 70%, transparent);transition:opacity .3s,border-color .3s}
 .co-src__chip[data-state="queued"]{opacity:.4;border-style:dashed}
 .co-src__chip[data-state="active"]{border-color:hsl(26 73% 51% / .45)}
+.co-src__chip[data-state="failed"]{border-color:hsl(0 65% 50% / .45)}
 .co-src__orb{width:.55rem;height:.55rem;border-radius:50%;background:hsl(26 80% 55%);box-shadow:0 0 0 0 hsl(26 80% 55% / .5);animation:co-orb 1.4s ease-out infinite}
 .co-src__bar{height:3px;border-radius:2px;background:hsl(26 73% 51%);transition:width .4s ease}
 .co-src__track{height:3px;border-radius:2px;background:color-mix(in srgb, var(--fg) 14%, transparent);overflow:hidden;width:3.5rem}
@@ -45,20 +46,23 @@ export function useCountUp(target: number): number {
   return Math.round(val);
 }
 
-function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
+function SourceChip({ label, s }: { label: string; s?: SourceState }) {
   const state = s?.state ?? "queued";
   const pct = s?.total ? Math.min(100, Math.round(((s.done ?? 0) / s.total) * 100)) : state === "swept" || state === "noisy" ? 100 : 0;
   return (
     <div className="co-src__chip" data-state={state === "noisy" ? "active" : state}>
       {state === "active" ? (
         <span className="co-src__orb" />
+      ) : state === "failed" ? (
+        <AlertTriangle className="size-3.5 text-red-800 dark:text-red-400" />
       ) : state === "swept" || state === "noisy" ? (
         <Check className="size-3.5 text-emerald-500" />
       ) : (
         <span className="size-2.5 rounded-full border border-current opacity-40" />
       )}
-      <span className="text-[13px] font-medium text-foreground">{ATS_LABEL[ats]}</span>
+      <span className="text-[13px] font-medium text-foreground">{label}</span>
       <div className="ml-auto flex flex-col items-end gap-1">
+        {state === "failed" && <span className="text-[10px] text-red-800 dark:text-red-400">unavailable</span>}
         {state === "noisy" && <span className="text-[10px] text-faint">~{s?.unreachable} skipped</span>}
         <div className="co-src__track">
           <div className="co-src__bar" style={{ width: `${pct}%` }} />
@@ -69,7 +73,17 @@ function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
 }
 
 export function DiscoveringState() {
-  const { sources, matchCount, companiesScanned, status, phase } = useExplore();
+  const { filters, sources, matchCount, companiesScanned, status, phase } = useExplore();
+  const [websiteNames, setWebsiteNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!(filters.websiteIds?.length)) return;
+    let mounted = true;
+    void fetch("/api/portals/monitors", { cache: "no-store" }).then(response => response.ok ? response.json() : null).then(data => {
+      if (!mounted || !Array.isArray(data?.sources)) return;
+      setWebsiteNames(Object.fromEntries(data.sources.map((source: { id: string; name: string }) => [source.id, source.name])));
+    }).catch(() => { /* The scan's own failure and source status remain visible. */ });
+    return () => { mounted = false; };
+  }, [filters.websiteIds]);
   const shown = useCountUp(matchCount);
   const companies = useCountUp(companiesScanned);
 
@@ -87,19 +101,18 @@ export function DiscoveringState() {
         <div>
           <div className={`${instrumentSerif.className} co-disc__counter text-foreground`}>{shown}</div>
           <p className="mt-1 text-sm text-muted">
-            {phase === "revealing" ? "fresh roles found — free" : matchCount > 0 ? "fresh roles and counting…" : "scanning the network…"}
+            {phase === "revealing" ? "roles found — free" : matchCount > 0 ? "roles and counting…" : "checking selected sources…"}
           </p>
         </div>
 
         <div className="co-src">
-          {ATS_SOURCES.map((a) => (
-            <SourceChip key={a} ats={a} s={sources[a]} />
-          ))}
+          {filters.ats.map(a => <SourceChip key={a} label={ATS_LABEL[a]} s={sources[a]} />)}
+          {(filters.websiteIds ?? []).map((id, index) => <SourceChip key={id} label={sources[id]?.name || websiteNames[id] || `Saved website ${index + 1}`} s={sources[id]} />)}
         </div>
 
         <p className="flex items-center gap-2 text-[13px] text-faint">
           <Loader2 className="size-3.5 animate-spin" />
-          {status || "Casting the net across the ATS network…"}
+          {status || "Checking selected sources…"}
         </p>
       </div>
     </>

@@ -282,3 +282,15 @@ test("census masker: launcher names inside comments, strings and regexes are not
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("monitor CLI gets a bounded longer timeout while ordinary writes keep their original budget", async () => {
+  standIn("portal-monitor", "console.log('{}');");
+  const { runCoreCli } = await import("@/lib/core-cli.ts");
+  for (const [options, timeout] of [[undefined, 30000], [{ timeoutMs: 280000 }, 280000], [{ timeoutMs: 900000 }, 280000], [{ timeoutMs: -1 }, 30000]]) {
+    launches.length = 0;
+    const result = await runCoreCli("portal-monitor", ["list"], options);
+    assert.equal(result.code, 0);
+    assert.equal(launches[0].options.timeout, timeout);
+    assert.ok(Number(launches[0].options.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) < timeout);
+  }
+});

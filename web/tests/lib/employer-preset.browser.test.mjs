@@ -50,7 +50,7 @@ test(
     });
     await page.goto(`${origin.origin}/explore`);
     const preset = page.getByRole("radio", {
-      name: "Public ATS network",
+      name: "Public job sources",
       exact: true,
     });
     await preset.waitFor();
@@ -328,7 +328,7 @@ test(
       });
       await page.goto(`${new URL(base).origin}/explore`);
       const preset = page.getByRole("radio", {
-        name: "Public ATS network",
+        name: "Public job sources",
         exact: true,
       });
       await preset.waitFor();
@@ -343,7 +343,7 @@ test(
       await discover.focus();
       await page.keyboard.press("Enter");
       const add = page.getByRole("button", {
-        name: "Add to pipeline",
+        name: "Add to inbox",
         exact: true,
       });
       await add.waitFor();
@@ -365,7 +365,7 @@ test(
       await page.keyboard.press("Enter");
       await addResponse;
       await page
-        .getByRole("button", { name: "In pipeline", exact: true })
+        .getByRole("button", { name: "In inbox", exact: true })
         .waitFor();
       assert.equal(added.length, 1);
       assert.equal(added[0].offers[0].url, offer.url);
