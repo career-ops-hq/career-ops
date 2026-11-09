@@ -62,6 +62,7 @@ test('a pin that equals the latest release commit is fresh', async () => {
     });
     assert.equal(res.length, 1);
     assert.equal(res[0].status, 'fresh');
+    assert.equal(res[0].position, 'identical');
     assert.equal(res[0].id, 'alpha');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -74,6 +75,7 @@ test('a pin behind the latest release is stale, and names both commits', async (
       comparePin: async () => ({ status: 'behind', aheadBy: 0 }),
     });
     assert.equal(res[0].status, 'stale');
+    assert.equal(res[0].position, 'behind');
     assert.equal(res[0].detail, 'pin trails v0.2.0');
     assert.equal(res[0].pinnedSha, SHA_A);
     assert.equal(res[0].releaseSha, SHA_B);
@@ -94,6 +96,7 @@ test('a pin AFTER the latest release is ahead, not stale', async () => {
       comparePin: async (repo, base, head) => { calls.push([base, head]); return { status: 'ahead', aheadBy: 2 }; },
     });
     assert.equal(res[0].status, 'ahead');
+    assert.equal(res[0].position, 'ahead');
     assert.notEqual(res[0].status, 'stale');
     assert.equal(res[0].detail, 'pin is 2 commits after v0.1.0, the latest published release');
     // release first, pin second: compare/{release}...{pin} reads "pin ahead of release"
@@ -109,6 +112,8 @@ test('a pin that diverged from the latest release is stale, and says so', async 
       comparePin: async () => ({ status: 'diverged', aheadBy: 1 }),
     });
     assert.equal(res[0].status, 'stale');
+    // The CLI picks its "diverged from" wording from this field, not from the detail text.
+    assert.equal(res[0].position, 'diverged');
     assert.equal(res[0].detail, 'pin diverged from v0.2.0');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -121,6 +126,7 @@ test('a failed pin comparison reports error, never ahead or fresh', async () => 
       comparePin: async () => { throw new Error('pinned commit aaaaaaaaaa not found in someone/x'); },
     });
     assert.equal(res[0].status, 'error');
+    assert.equal(res[0].position, null);
     assert.match(res[0].detail, /not found/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

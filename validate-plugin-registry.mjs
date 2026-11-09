@@ -140,7 +140,11 @@ export async function fetchPinPosition(repoUrl, releaseSha, pinSha, { fetchImpl 
  * The compare request is made only when the SHAs differ, so a fresh pin costs
  * nothing extra.
  *
- * @returns {Promise<Array<{id, name, repo, pinnedSha, pinnedVersion, status, releaseTag, releaseSha, detail}>>}
+ * `position` is where the pin sits against the release (`identical`, `ahead`,
+ * `behind` or `diverged`), or null when there was no release to compare with
+ * or the lookup failed.
+ *
+ * @returns {Promise<Array<{id, name, repo, pinnedSha, pinnedVersion, status, position, releaseTag, releaseSha, detail}>>}
  */
 export async function checkRegistryFreshness(root, { fetchRelease = fetchLatestRelease, comparePin = fetchPinPosition } = {}) {
   const out = [];
@@ -148,7 +152,7 @@ export async function checkRegistryFreshness(root, { fetchRelease = fetchLatestR
     const row = {
       id: e.id, name: e.name, repo: e.repo,
       pinnedSha: e.sha, pinnedVersion: e.version,
-      status: 'error', releaseTag: null, releaseSha: null, detail: '',
+      status: 'error', position: null, releaseTag: null, releaseSha: null, detail: '',
     };
     try {
       const rel = await fetchRelease(e.repo);
@@ -156,9 +160,10 @@ export async function checkRegistryFreshness(root, { fetchRelease = fetchLatestR
       else {
         row.releaseTag = rel.tag; row.releaseSha = rel.sha;
         const same = String(rel.sha).toLowerCase() === String(e.sha).toLowerCase();
-        if (same) { row.status = 'fresh'; row.detail = `pinned at ${rel.tag}`; }
+        if (same) { row.status = 'fresh'; row.position = 'identical'; row.detail = `pinned at ${rel.tag}`; }
         else {
           const pos = await comparePin(e.repo, rel.sha, e.sha);
+          row.position = pos.status;
           if (pos.status === 'ahead') {
             row.status = 'ahead';
             row.detail = `pin is ${pos.aheadBy} commit${pos.aheadBy === 1 ? '' : 's'} after ${rel.tag}, the latest published release`;
@@ -204,7 +209,7 @@ if (isMainModule(import.meta.url)) {
     }
     const stale = rows.filter(r => r.status === 'stale');
     const errored = rows.filter(r => r.status === 'error');
-    for (const r of stale) problems.push(`${r.name || r.id}: pin ${String(r.pinnedSha).slice(0, 10)} ${r.detail.startsWith('pin diverged') ? 'diverged from' : 'trails'} release ${r.releaseTag} (${String(r.releaseSha).slice(0, 10)}) — bump plugins-registry/${r.id}.json`);
+    for (const r of stale) problems.push(`${r.name || r.id}: pin ${String(r.pinnedSha).slice(0, 10)} ${r.position === 'diverged' ? 'diverged from' : 'trails'} release ${r.releaseTag} (${String(r.releaseSha).slice(0, 10)}) — bump plugins-registry/${r.id}.json`);
     // An unreachable repo fails the run rather than passing quietly. A check
     // that cannot see is not a check that found nothing.
     for (const r of errored) problems.push(`${r.name || r.id}: could not resolve latest release — ${r.detail}`);
