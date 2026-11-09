@@ -79,17 +79,21 @@ export function parseCryptocurrencyJobsRss(xml) {
       const pubDateStr = extractTag(block, 'pubDate');
       const postedAt = pubDateStr ? new Date(pubDateStr).getTime() : undefined;
 
-      // The feed carries the job description for free in the same payload;
-      // populate it so scan.mjs's content_filter can run (it's a remote-only
-      // board, so location stays 'Remote').
-      const description = decodeFeedText(extractTag(block, 'description'));
-
+      // No `description`: the feed's <description> is not the job description.
+      // Every item carries the same one-sentence template ("{Company} is
+      // looking to hire a {Role} to join their team. This is a full-time
+      // position that ...", verified 2026-11-09: 54 of 54 live items, 96-253
+      // characters) and never names a stack. scan.mjs's content_filter passes
+      // a posting with no description but treats any text as the JD, so the
+      // teaser would drop every posting from this board for a user with
+      // `content_filter.positive` set (visa_filter with require_mention too).
+      // Same decision as _wp-job-feed.mjs, which refuses WordPress's excerpt.
+      // It's a remote-only board, so location stays 'Remote'.
       results.push({
         title,
         url: link,
         company,
         location: 'Remote',
-        ...(description ? { description } : {}),
         ...(postedAt && Number.isFinite(postedAt) ? { postedAt } : {}),
       });
     } catch {
