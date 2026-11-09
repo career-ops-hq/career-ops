@@ -66,7 +66,7 @@ export function releaseTags(cwd = ROOT) {
 // than seeding a state from the wrong side of the boundary.
 export function fixtureStateFor(tag) {
   const [maj, min] = semverKey(tag);
-  if (maj > 1 || min >= 18) return 'state-v1.18';
+  if (maj > 1 || (maj === 1 && min >= 18)) return 'state-v1.18';
   throw new Error(`no upgrade fixture state for ${tag}: fixtures start at career-ops-v1.18.0`);
 }
 

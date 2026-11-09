@@ -21,8 +21,9 @@ test('a tag at or past v1.18.0 seeds state-v1.18, which exists', () => {
 });
 
 test('a tag before v1.18.0 has no fixture state and throws', () => {
-  for (const tag of ['career-ops-v1.16.0', 'career-ops-v1.17.9']) {
-    assert.throws(() => fixtureStateFor(tag), /no upgrade fixture state for career-ops-v1\.1[67]/, tag);
+  // v0.18.0 shares the minor number but sits before the boundary.
+  for (const tag of ['career-ops-v1.16.0', 'career-ops-v1.17.9', 'career-ops-v0.18.0']) {
+    assert.throws(() => fixtureStateFor(tag), new RegExp(`no upgrade fixture state for ${tag.replaceAll('.', '\\.')}`), tag);
   }
   assert.equal(existsSync(join(FIXTURES, 'state-v1.16')), false);
 });
