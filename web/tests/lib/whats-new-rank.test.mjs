@@ -1,7 +1,3 @@
-// What's new ranks the week's matches by fit, then returns a page.
-// The scan-history walk stays newest-line-first. This drives the route so
-// the JSON the home paints is the order a person sees.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -9,11 +5,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { DEFAULT_OFFER_LIMIT, MAX_OFFER_LIMIT } from "../../src/lib/whats-new.mjs";
 
 const WEB = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const LOADER = pathToFileURL(join(WEB, "tests", "helpers", "web-ts-alias-loader.mjs")).href;
-
-import { DEFAULT_OFFER_LIMIT, MAX_OFFER_LIMIT } from "../../src/lib/whats-new.mjs";
 
 const DRIVER = `
 const { GET } = await import("@/app/api/whats-new/route.ts");

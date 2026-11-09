@@ -137,7 +137,6 @@ export function orderInbox(rows, mode = "fit") {
 
 /**
  * Fit order for the what's-new payload. `fit` is not returned.
- * Reorders the offers it is given, then slices to the caller's render limit.
  *
  * @param {Array<Record<string, unknown>>} offers
  * @param {Parameters<typeof scorePosting>[1]} targets

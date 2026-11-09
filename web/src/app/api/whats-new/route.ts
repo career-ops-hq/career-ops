@@ -75,13 +75,10 @@ export async function GET(req: Request) {
   // is "URL unknown", any other read failure throws from readLinkedReport. The
   // reads are lazy, inside toOffer, so they surface here.
   try {
-    // Rank the whole lookback, then page it. The collector stops once
-    // offerLimit fills, and it walks newest line first, so a render ceiling
-    // here would leave an earlier match in this window unscored.
     const { offers: pool, count } = collectWhatsNew(rows, {
       cutoff,
       toOffer,
-      offerLimit: rows.length,
+      offerLimit: Number.POSITIVE_INFINITY,
     });
     const offers = rankOffers(pool, loadFitTargets(), offerLimit);
     return Response.json({ offers, count });
