@@ -1,6 +1,7 @@
 import type { Page, Frame } from "playwright-core";
 import type { ApplyField } from "./extract";
 import type { ApplyIssue } from "./issue";
+import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 
 export type { ApplyIssue };
 
@@ -85,19 +86,112 @@ export async function dropNewTabs(page: Page): Promise<void> {
   }
 }
 
+/** Absolute posting URL when this href is Workday, iCIMS, or UKG. */
+async function blockedTriggerHref(page: Page, href: string | null): Promise<string | null> {
+  if (!href) return null;
+  let abs = href;
+  try {
+    abs = new URL(href, page.url()).href;
+  } catch {
+    return null;
+  }
+  const hit = await unsupportedInAppAts(abs);
+  return hit ? hit.postingUrl : null;
+}
+
+type OpenPage = { url: () => string };
+
+function pageUrl(candidate: OpenPage): string {
+  try {
+    return candidate.url() || "";
+  } catch {
+    return "";
+  }
+}
+
+function contextPages(page: Page): OpenPage[] {
+  try {
+    const opened = page.context().pages();
+    return Array.isArray(opened) ? opened : [];
+  } catch {
+    return [];
+  }
+}
+
+function urlSnapshot(page: Page): Map<OpenPage, string> {
+  const snap = new Map<OpenPage, string>();
+  snap.set(page, pageUrl(page));
+  for (const opened of contextPages(page)) snap.set(opened, pageUrl(opened));
+  return snap;
+}
+
+async function blockedAmong(page: Page, candidates: OpenPage[]): Promise<string | null> {
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const landed = pageUrl(candidate);
+    if (!landed || seen.has(landed)) continue;
+    seen.add(landed);
+    const blocked = await blockedTriggerHref(page, landed);
+    if (blocked) return blocked;
+  }
+  return null;
+}
+
+// Consent can leave another tab open. Only the main page, a new tab, or a tab
+// whose URL changed during this Apply action can refuse the posting. A click
+// can open its popup after click() returns, so that path looks a second time.
+export async function blockedAfterAction(page: Page, before: Map<OpenPage, string>, retry: boolean): Promise<string | null> {
+  const read = () => {
+    const now = [page, ...contextPages(page)];
+    const seen = new Set<OpenPage>();
+    const changed: OpenPage[] = [];
+    for (const candidate of now) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      if (candidate === page || !before.has(candidate) || before.get(candidate) !== pageUrl(candidate)) changed.push(candidate);
+    }
+    return blockedAmong(page, changed);
+  };
+  const first = await read();
+  if (first || !retry) return first;
+  await page.waitForTimeout(400).catch(() => {});
+  return read();
+}
+
+export async function waitForBlankPopup(page: Page, before: Map<OpenPage, string>): Promise<void> {
+  const pending = () => {
+    const seen = new Set<OpenPage>();
+    for (const candidate of contextPages(page)) {
+      if (seen.has(candidate) || candidate === page || before.has(candidate)) continue;
+      seen.add(candidate);
+      const landed = pageUrl(candidate);
+      if (!landed || landed === "about:blank") return true;
+    }
+    return false;
+  };
+  if (!pending()) return;
+  await page.waitForTimeout(1000).catch(() => {});
+}
+
 /** SPA / apply-behind-a-button: if no form yet, click the first visible Apply CTA
  *  (NEVER a submit) to reveal the form. If it's an <a> with an application href,
- *  NAVIGATE there directly (robust vs popups). Returns true if it acted. */
-export async function tryApplyTrigger(page: Page): Promise<boolean> {
+ *  NAVIGATE there directly (robust vs popups). Returns true if it acted.
+ *  A Workday, iCIMS, or UKG href is returned as `{ blocked }` and is not opened. */
+export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: string } | { followed: Map<OpenPage, string> }> {
   try {
     // 1) Most reliable: an <a> linking straight to a known ATS application (e.g.
     //    openai.com → jobs.ashbyhq.com/…/application). Navigate there in-tab.
-    const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="/apply"], a[href*="/application"]').first();
+    const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]').first();
     if (await atsLink.count().catch(() => 0)) {
       const href = await atsLink.getAttribute("href").catch(() => null);
       if (href && /^https?:\/\//i.test(href) && !/submit/i.test(href)) {
+        const blocked = await blockedTriggerHref(page, href);
+        if (blocked) return { blocked };
+        const before = urlSnapshot(page);
         await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-        return true;
+        const landed = await blockedAfterAction(page, before, false);
+        if (landed) return { blocked: landed };
+        return { followed: before };
       }
     }
     // 2) Otherwise click a visible Apply CTA (never a submit). dropNewTabs() has
@@ -109,8 +203,14 @@ export async function tryApplyTrigger(page: Page): Promise<boolean> {
     if ((await t.count().catch(() => 0)) && (await t.isVisible().catch(() => false))) {
       const label = (await t.innerText().catch(() => "")).toLowerCase();
       if (/submit|applied|withdraw/.test(label)) return false;
+      const href = await t.getAttribute("href").catch(() => null);
+      const blocked = await blockedTriggerHref(page, href);
+      if (blocked) return { blocked };
+      const before = urlSnapshot(page);
       await t.click({ timeout: 3000 }).catch(() => {});
-      return true;
+      const landed = await blockedAfterAction(page, before, true);
+      if (landed) return { blocked: landed };
+      return { followed: before };
     }
   } catch {
     /* ignore */
@@ -121,13 +221,6 @@ export async function tryApplyTrigger(page: Page): Promise<boolean> {
 /** When extraction yields 0 fields, classify WHY so we abort with the RIGHT
  *  message (bot-challenge vs login wall vs closed posting vs unsupported). */
 export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue> {
-  const host = (() => {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return "";
-    }
-  })();
   const sig = await page
     .evaluate(() => {
       const t = (document.title || "").toLowerCase();
@@ -153,8 +246,15 @@ export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue
   if (/no longer accepting|position has been filled|posting is closed|no longer available|this (job|position|posting) (is |has )?(closed|expired|been filled)/.test(sig.body) || /not found|no longer|removed|closed/.test(sig.t)) {
     return { level: "block", code: "expired", message: "This job posting is closed or expired — it's no longer accepting applications." };
   }
-  if (/myworkdayjobs\.com$/i.test(host)) {
-    return { level: "block", code: "workday", message: "Workday forms aren't supported for in-app fill yet (multi-step, account-gated). Open the posting and apply there directly." };
+  let landedUrl = "";
+  try {
+    landedUrl = page.url();
+  } catch {
+    landedUrl = "";
+  }
+  const blockedAts = (await unsupportedInAppAts(landedUrl)) || (await unsupportedInAppAts(url));
+  if (blockedAts) {
+    return { level: "block", code: blockedAts.vendor, message: unsupportedAtsMessage(blockedAts.label, true) };
   }
   if (/^(jobs|careers|empleos|empregos|all jobs|open (positions|roles)|search jobs|current openings)/i.test(sig.t) || /\/(jobs|careers|search|positions)\/?(\?|$)/.test(u)) {
     return { level: "block", code: "listing-page", message: "This looks like the careers listing, not a single application — the posting may have moved or closed. Open the specific job and paste its “Apply” URL." };

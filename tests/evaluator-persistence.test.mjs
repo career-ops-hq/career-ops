@@ -1,145 +1,110 @@
+// Real CLI persistence checks for OpenAI-compatible and Ollama evaluators.
+// Fetch is replaced before startup; no model calls or user data are involved.
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
-import { fail, linkRepoPackage, NODE, pass, rmSync, ROOT } from './helpers.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { extractStrippedJdSection } from '../check-jd-archive.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
-const exec = promisify(execFile);
-const evaluation = 'Synthetic evaluation: caf\u00e9.\n---SCORE_SUMMARY---\nCOMPANY: Example\nROLE: Engineer\nSCORE: 4.2\nARCHETYPE: IC\nLEGITIMACY: High Confidence\n---END_SUMMARY---';
-const jd = 'Synthetic JD marker: build reliable software with a team of engineers.\n## Responsibilities\nWrite tests.';
-const systemText = message => typeof message.content === 'string' ? message.content : message.content.map(p => p.text).join('');
-function write(path, text) {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, text, 'utf8');
-}
-async function fixture(engine, scenario, check) {
-  const sandbox = mkdtempSync(join(tmpdir(), 'co-eval-contract-'));
-  const code = join(sandbox, 'code');
-  const data = join(sandbox, 'data');
-  let server;
-  const requests = [];
-  try {
-    for (const file of [
-      `${engine}-eval.mjs`, 'path-resolver.mjs', 'profile-language.mjs',
-      'reserve-report-num.mjs', 'tracker-parse.mjs', 'tracker-aliases.json',
-      'tracker-utils.mjs', 'pipeline-lock.mjs', 'lib/is-main-module.mjs',
-      'lib/context-budget.mjs', 'utils/token-tracker.mjs',
-    ]) {
-      const dest = join(code, file);
-      mkdirSync(dirname(dest), { recursive: true });
-      copyFileSync(join(ROOT, file), dest);
-    }
-    linkRepoPackage(code, 'js-yaml');
-    write(join(code, 'modes/_shared.md'), '## Scoring System\nUse evidence.\n');
-    write(join(code, 'modes/oferta.md'), 'Evaluate the job.\n');
-    write(join(data, 'cv.md'), '# Synthetic Candidate\nWrites reliable software.\n');
-    write(join(data, 'config/profile.yml'), 'language:\n  output: en\n');
-    write(join(data, 'modes/_profile.md'), 'SYNTHETIC_PROFILE_TARGET: engineering roles.\n');
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-      !/^(CAREER_OPS_|OPENAI_|OLLAMA_|DOTENV_|NODE_OPTIONS$|NODE_PATH$|HTTPS?_PROXY$|ALL_PROXY$)/i.test(key)));
-    Object.assign(env, { CAREER_OPS_ROOT: data, OPENAI_API_KEY: '', OPENAI_TIMEOUT_MS: '10000',
-      OLLAMA_TIMEOUT_MS: '10000', OLLAMA_NUM_CTX: '32768' });
-    await scenario.setup?.({ code, data, env });
-    server = createServer((req, res) => {
-      if (req.url === '/api/tags') { res.end('{"models":[]}'); return; }
-      let raw = '';
-      req.on('data', chunk => { raw += chunk; });
-      req.on('end', () => {
-        requests.push(JSON.parse(raw));
-        res.setHeader('Content-Type', engine === 'openai' ? 'text/event-stream' : 'application/x-ndjson');
-        const body = Buffer.from(scenario.body ?? complete(engine));
-        if (scenario.fragment) {
-          // Separate writes across turns, including inside the two-byte UTF-8 e-acute.
-          const split = body.indexOf(Buffer.from('\u00e9')) + 1;
-          res.write(body.subarray(0, split));
-          setImmediate(() => res.end(body.subarray(split)));
-        } else res.end(body);
-      });
-    });
-    await new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const url = `http://127.0.0.1:${server.address().port}`;
-    let output;
-    try {
-      output = { code: 0, ...await exec(NODE, [join(code, `${engine}-eval.mjs`), '--url',
-        engine === 'openai' ? `${url}/v1` : url, '--model', 'synthetic-test',
-        ...(scenario.args ?? []), jd], { cwd: sandbox, env, timeout: 20000, maxBuffer: 2 * 1024 * 1024 }) };
-    } catch (error) {
-      output = { code: error.code, stdout: error.stdout ?? '', stderr: error.stderr ?? '' };
-    }
-    await check({ ...output, requests, codeRoot: code, data, env });
-    pass(`${engine}: ${scenario.name}`);
-  } catch (error) {
-    fail(`${engine}: ${scenario.name}: ${error.message}`);
-  } finally {
-    if (server?.listening) {
-      server.closeAllConnections();
-      await new Promise(resolve => server.close(resolve));
-    }
-    rmSync(sandbox, { recursive: true, force: true });
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const JD = 'Synthetic job: build reliable software with a team of engineers.\n\n## Responsibilities\nWrite tests for café systems.';
+const SUMMARY = '---SCORE_SUMMARY---\nCOMPANY: Example\nROLE: Engineer\nSCORE: 4.2\nARCHETYPE: IC\nLEGITIMACY: High Confidence\n---END_SUMMARY---';
+
+function fixture(t, engine, scenario) {
+  const dir = mkdtempSync(join(tmpdir(), 'co-eval-persistence-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10 }));
+  mkdirSync(join(dir, 'config'));
+  writeFileSync(join(dir, 'cv.md'), '# Synthetic candidate\nWrites reliable software.\n');
+  writeFileSync(join(dir, 'config/profile.yml'), 'language:\n  output: en\n');
+  if (scenario === 'blocked report' || scenario === 'no-save') {
+    writeFileSync(join(dir, 'reports'), 'report blocker');
   }
+  if (scenario === 'blocked tracker addition') {
+    mkdirSync(join(dir, 'batch'));
+    writeFileSync(join(dir, 'batch/tracker-additions'), 'addition blocker');
+  }
+  // An existing capture belongs to the user, even when this evaluation receives
+  // the same report number. Embedding the source must leave it untouched.
+  mkdirSync(join(dir, 'jds'));
+  writeFileSync(join(dir, 'jds/001-existing.md'), 'previous capture');
+  const reply = 'Synthetic evaluation.\n'
+    + (scenario === 'no summary' ? '' : SUMMARY)
+    + (scenario === 'model paraphrase'
+      ? '\n\n## Job Description (archived verbatim)\n\nA model paraphrase, not the source.\n' : '');
+  const hook = join(dir, 'fetch.mjs');
+  writeFileSync(hook, `
+const text = ${JSON.stringify(reply)};
+globalThis.fetch = async (url) => {
+  if (String(url).endsWith('/api/tags')) return new Response('{"models":[]}');
+  const openai = String(url).includes('/chat/completions');
+  const body = openai
+    ? 'data: ' + JSON.stringify({choices:[{delta:{content:text}}]}) + '\\n\\n'
+      + 'data: ' + JSON.stringify({choices:[{delta:{},finish_reason:'stop'}]}) + '\\n\\ndata: [DONE]\\n\\n'
+    : JSON.stringify({message:{content:text},done:false}) + '\\n'
+      + JSON.stringify({message:{content:''},done:true,done_reason:'stop'}) + '\\n';
+  return new Response(body, {headers:{'content-type':openai ? 'text/event-stream' : 'application/x-ndjson'}});
+};
+`);
+  const env = {
+    PATH: process.env.PATH, HOME: dir, USERPROFILE: dir,
+    SystemRoot: process.env.SystemRoot, TEMP: dir, TMP: dir,
+    CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: dir,
+    OPENAI_API_KEY: 'fixture-key', OLLAMA_NUM_CTX: '32768',
+  };
+  const args = ['--import', pathToFileURL(hook).href, join(ROOT, `${engine}-eval.mjs`),
+    '--url', engine === 'openai' ? 'http://127.0.0.1:11434/v1' : 'http://127.0.0.1:11434',
+    '--model', 'synthetic-test'];
+  if (scenario === 'no-save') args.push('--no-save');
+  if (scenario === 'file input') {
+    const path = join(dir, 'jd.txt');
+    writeFileSync(path, JD);
+    args.push('--file', path);
+  } else args.push(JD);
+  const result = spawnSync(process.execPath, args, {cwd: dir, env, encoding: 'utf8', timeout: 30_000});
+  return {dir, env, result};
 }
-function content(engine, text = evaluation) {
-  return engine === 'openai'
-    ? `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
-    : JSON.stringify({ message: { content: text }, done: false }) + '\n';
-}
-function terminal(engine, reason = 'stop') {
-  return engine === 'openai'
-    ? `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: reason }] })}\n\ndata: [DONE]\n\n`
-    : JSON.stringify({ message: { content: '' }, done: true, done_reason: reason, prompt_eval_count: 321, eval_count: 123 }) + '\n';
-}
-function complete(engine) { return content(engine) + terminal(engine); }
-function files(path) { return existsSync(path) ? readdirSync(path) : []; }
 
-console.log('\nEvaluator persistence contract');
 for (const engine of ['openai', 'ollama']) {
-  for (const name of ['successful save archives JD', 'report directory blocked', 'archive directory blocked', 'addition directory blocked', 'existing archive is not overwritten', 'no-save']) {
-    await fixture(engine, { name, args: name === 'no-save' ? ['--no-save'] : [], setup: ({ data }) => {
-      if (name === 'report directory blocked' || name === 'no-save') write(join(data, 'reports'), 'blocker');
-      if (name === 'archive directory blocked') write(join(data, 'jds'), 'blocker');
-      if (name === 'addition directory blocked') write(join(data, 'batch/tracker-additions'), 'blocker');
-      if (name === 'existing archive is not overwritten') {
-        const today = new Date().toISOString().split('T')[0];
-        write(join(data, 'jds', `001-example-${today}.md`), 'original archive');
-      }
-    } }, async ({ code, stdout, stderr, data, env }) => {
-      if (name === 'no-save') {
-        assert.equal(code, 0, stderr);
-        assert.equal(readFileSync(join(data, 'reports'), 'utf8'), 'blocker');
-        assert.equal(existsSync(join(data, 'jds')), false);
-        assert.equal(existsSync(join(data, 'batch')), false);
+  for (const scenario of ['successful save', 'file input', 'model paraphrase', 'no summary',
+    'blocked report', 'blocked tracker addition', 'no-save']) {
+    test(`${engine}: ${scenario}`, (t) => {
+      const {dir, env, result} = fixture(t, engine, scenario);
+      const failed = scenario.startsWith('blocked');
+      assert.equal(result.status, failed ? 1 : 0, describeSpawn(result, 'unexpected evaluator exit: '));
+      assert.equal(readFileSync(join(dir, 'jds/001-existing.md'), 'utf8'), 'previous capture');
+      assert.deepEqual(readdirSync(join(dir, 'jds')), ['001-existing.md']);
+      if (scenario === 'blocked report' || scenario === 'no-save') {
+        assert.equal(readFileSync(join(dir, 'reports'), 'utf8'), 'report blocker');
+        assert.equal(existsSync(join(dir, 'batch')), false);
+        if (failed) assert.match(result.stderr, /Could not save evaluation \(report\)/);
         return;
       }
-      if (name === 'successful save archives JD') {
-        assert.equal(code, 0, stderr);
-        const report = files(join(data, 'reports'))[0];
-        assert.equal(readFileSync(join(data, 'jds', report), 'utf8'), jd);
-        assert.equal(files(join(data, 'batch/tracker-additions')).length, 1);
-        const checked = await exec(NODE, [join(ROOT, 'check-jd-archive.mjs'), '--no-tracker',
-          '--reports-dir', join(data, 'reports'), '--jds-dir', join(data, 'jds')], { env, timeout: 15000 });
-        assert.doesNotMatch(checked.stdout, /missing-jd-archive/);
+      const files = readdirSync(join(dir, 'reports'));
+      const reports = files.filter(f => f.endsWith('.md'));
+      assert.equal(reports.length, 1, 'one report, with no leftover reservation');
+      assert.equal(files.some(f => f.startsWith('.') || f.includes('RESERVED')), false);
+      const report = readFileSync(join(dir, 'reports', reports[0]), 'utf8');
+      assert.equal(extractStrippedJdSection(report), JD, 'archive is the actual JD, not model text');
+      assert.doesNotMatch(report, /A model paraphrase/);
+      // Check the report itself without allowing an older jds capture to mask
+      // a missing embedded section. No fixed filename or UTC-day assumption.
+      const checked = spawnSync(process.execPath, [join(ROOT, 'check-jd-archive.mjs'),
+        '--no-tracker', '--reports-dir', join(dir, 'reports'), '--jds-dir', join(dir, 'no-captures')],
+      {cwd: dir, env, encoding: 'utf8', timeout: 30_000});
+      assert.equal(checked.status, 0, describeSpawn(checked, 'archive checker failed: '));
+      if (scenario === 'blocked tracker addition') {
+        assert.match(result.stderr, /Could not save evaluation \(tracker addition\)/);
+        assert.equal(readFileSync(join(dir, 'batch/tracker-additions'), 'utf8'), 'addition blocker');
+        // The saved report and its archive survive a later failure: this is not
+        // a multi-file transaction and does not claim rollback.
+      } else if (scenario === 'no summary') {
+        assert.equal(existsSync(join(dir, 'batch')), false, 'untrackable replies must not add a row');
       } else {
-        assert.equal(code, 1, 'failed persistence must exit 1');
-        assert.match(stderr, /Could not save evaluation/);
-        if (name === 'addition directory blocked') {
-          assert.equal(readFileSync(join(data, 'batch/tracker-additions'), 'utf8'), 'blocker');
-          assert.equal(files(join(data, 'reports')).filter(f => f.endsWith('.md')).length, 1);
-          assert.match(stderr, /tracker addition/);
-        } else assert.deepEqual(files(join(data, 'batch/tracker-additions')), []);
-        if (name === 'existing archive is not overwritten') {
-          const archive = files(join(data, 'jds'))[0];
-          assert.equal(readFileSync(join(data, 'jds', archive), 'utf8'), 'original archive');
-          assert.equal(files(join(data, 'reports')).filter(f => f.endsWith('.md')).length, 0);
-        }
-        if (name !== 'report directory blocked') {
-          assert.equal(files(join(data, 'reports')).some(f => f.startsWith('.')), false, 'release reservations on failure');
-        }
+        assert.equal(readdirSync(join(dir, 'batch/tracker-additions')).length, 1);
       }
     });
   }

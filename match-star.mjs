@@ -7,6 +7,12 @@
  * question text (and optionally a JD file), and returns the top match(es)
  * formatted to ATS paste length (250–500 words).
  *
+ * The answer is meant to be pasted as-is, so its figures are checked here
+ * rather than left to whoever reads it (AGENTS.md, Source-of-Truth Boundary):
+ * a story marked `**Provenance:** user-cannot-confirm` has every number
+ * replaced by a placeholder, and every other figure that does not trace to
+ * cv.md gets a ⚠️ line, using story-provenance-check.mjs's classifier.
+ *
  * Usage:
  *   node match-star.mjs "Tell me about a time you led a project under pressure"
  *   node match-star.mjs "Describe a conflict you resolved" --jd jds/acme.md
@@ -16,76 +22,49 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { join } from 'path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { parseStories, splitStoryBlocks, isValidStory } from './lib/story-bank.mjs';
+import { parseStoryBlocks, classifyEntries } from './story-provenance-check.mjs';
+import { flagValue, safeIntFlag, validateFlags } from './lib/cli-flags.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const STORY_BANK_PATH = 'interview-prep/story-bank.md';
+// From the data root, not the cwd. interview-prep/ is USER_PATHS in
+// update-system.mjs, and a bare relative path resolves against wherever the
+// process was started — so this read the checkout's story bank (usually absent)
+// for anyone whose data lives elsewhere.
+const STORY_BANK_PATH = join(getCareerOpsRoot(), 'interview-prep', 'story-bank.md');
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
+const UNCONFIRMED = '[unconfirmed figure]';
+
+const USAGE = `Usage: node match-star.mjs "<behavioural question>" [--jd <file>] [--top <n>]
+       node match-star.mjs --list
+
+  --jd <file>   Also score the stories against this JD
+  --top <n>     Print the n best matches (default 1)
+  --list        List the stories in the bank with their tags
+  --help, -h    Show this help`;
+const KNOWN_FLAGS = ['--jd', '--top', '--list', '--help', '-h'];
+const VALUE_FLAGS = ['--jd', '--top'];
+
+// flagValue() reads `--jd=jds/acme.md` as well as `--jd jds/acme.md`. The
+// indexOf() lookup this replaces saw only the second, so the first ran without
+// the JD, and `--top=2` printed one match.
 const args       = process.argv.slice(2);
 const LIST_MODE  = args.includes('--list');
-const jdFlag     = args.indexOf('--jd');
-const jdPath     = jdFlag !== -1 ? args[jdFlag + 1] : null;
-const topFlag    = args.indexOf('--top');
-const topRaw     = topFlag !== -1 ? parseInt(args[topFlag + 1], 10) : NaN;
-const TOP_N      = Number.isInteger(topRaw) && topRaw > 0 ? topRaw : 1;
+const jdPath     = flagValue(args, '--jd') ?? null;
+const TOP_N      = safeIntFlag(flagValue(args, '--top'), 1) || 1;
 // Exclude flag operands by index position, not by value, to preserve repeated text in the question
-const excludeIdx = new Set([
-  ...(jdFlag  !== -1 ? [jdFlag + 1]  : []),
-  ...(topFlag !== -1 ? [topFlag + 1] : []),
-]);
+const excludeIdx = new Set(args.flatMap((a, i) => (VALUE_FLAGS.includes(a) ? [i + 1] : [])));
 const question = args
   .filter((a, i) => !a.startsWith('--') && !excludeIdx.has(i))
   .join(' ').trim();
 
 // ── Parser ───────────────────────────────────────────────────────────
-
-/**
- * Parse story-bank.md into structured story objects.
- * @param {string} content
- * @returns {Array<{title, theme, source, situation, task, action, result, reflection, tags}>}
- */
-function parseStories(content) {
-  const stories = [];
-  // Split on story headings: ### [Theme] Title
-  const blocks = content.split(/^### /m).slice(1);
-
-  for (const block of blocks) {
-    const lines  = block.trim().split('\n');
-    const header = lines[0].trim();
-
-    // Extract theme from [Theme] prefix if present
-    const themeMatch = header.match(/^\[([^\]]+)\]\s*(.+)/);
-    const theme = themeMatch ? themeMatch[1].trim() : '';
-    const title = themeMatch ? themeMatch[2].trim() : header;
-
-    const get = (label) => {
-      const re  = new RegExp(`\\*\\*${label}:\\*\\*\\s*(.+)`);
-      const hit = block.match(re);
-      return hit ? hit[1].trim() : '';
-    };
-
-    const tagsRaw = get('Best for questions about');
-    const tags    = tagsRaw
-      ? tagsRaw.split(/[,;]/).map(t => t.trim().toLowerCase()).filter(Boolean)
-      : [];
-
-    if (!title || (!get('A \\(Action\\)') && !get('Action'))) continue; // skip template/empty blocks
-
-    stories.push({
-      title,
-      theme,
-      source:     get('Source'),
-      situation:  get('S \\(Situation\\)') || get('Situation'),
-      task:       get('T \\(Task\\)') || get('Task'),
-      action:     get('A \\(Action\\)') || get('Action'),
-      result:     get('R \\(Result\\)') || get('Result'),
-      reflection: get('Reflection'),
-      tags,
-    });
-  }
-
-  return stories;
-}
+// parseStories lives in lib/story-bank.mjs so every story-bank reader shares
+// one definition of a story (#4514). Re-exported below for existing callers.
 
 // ── Scoring ──────────────────────────────────────────────────────────
 
@@ -160,13 +139,51 @@ function score(story, queryTokens, jdTokens) {
 
 // ── Formatter ────────────────────────────────────────────────────────
 
+// A number with what makes it a figure: a currency sign before it, and a
+// magnitude, `%`, `+`, `x`, `h` or `/unit` rate after it ("$60/hr", "$40K",
+// "3.5x", "1,200+", "8h"). Not inside a word, so "Q3" and "B2B" stay.
+const FIGURE_RE = /(?<![\p{L}\p{N}])[$€£¥]?\d[\d,.]*(?:\s?(?:%|[kmbh]\b|x\b))?\+?(?:\/\p{L}+)?/giu;
+
 /**
- * Format a STAR story as ATS-ready prose (250–500 words).
- * @param {object} story
- * @param {string} question
+ * Replace every number in `text` with a placeholder, so a story the user
+ * could not confirm can't carry its figures into a paste. Every number, not
+ * only the checker's claims: its patterns are not exhaustive (a rate like
+ * "$60/hr" is none of them), and a number the user could not confirm is not
+ * safe to paste whatever its shape.
+ * @param {string} text
  * @returns {string}
  */
-function formatAts(story, question) {
+function maskFigures(text) {
+  return String(text ?? '').replace(FIGURE_RE, UNCONFIRMED);
+}
+
+/**
+ * ⚠️ lines for the figures in `prose` that do not trace to cv.md.
+ * @param {object} story
+ * @param {string} prose - the exact text about to be printed
+ * @param {string} cvText
+ * @returns {string[]}
+ */
+function provenanceWarnings(story, prose, cvText) {
+  if (story.provenance === 'user-cannot-confirm') {
+    return [`   ⚠️  Provenance: user-cannot-confirm. Every number is replaced with ${UNCONFIRMED}: use this story as narrative only.`];
+  }
+  const buckets = classifyEntries([{ title: story.title, provenance: story.provenance ?? null, body: prose }], cvText);
+  return [
+    ...buckets.derivedUnverified.map((c) => `   ⚠️  "${c.claim}" is not in cv.md (derived-unverified): confirm it before pasting.`),
+    ...buckets.supportedByResume.map((c) => `   ⚠️  "${c.claim}": cv.md supports the fact but not this figure (supportedByResume): confirm it before pasting.`),
+  ];
+}
+
+/**
+ * Format a STAR story as ATS-ready prose (250–500 words).
+ * @param {object} story - a parseStories() story, plus `provenance` (its
+ *   Provenance marker, lowercased, or null)
+ * @param {string} question
+ * @param {{cvText?: string}} [opts] - cv.md, to check the figures against
+ * @returns {string}
+ */
+function formatAts(story, question, { cvText = '' } = {}) {
   const parts = [];
 
   if (story.situation) parts.push(story.situation);
@@ -175,7 +192,13 @@ function formatAts(story, question) {
   if (story.result)    parts.push(story.result);
   if (story.reflection) parts.push(story.reflection);
 
-  const wordArr = parts.filter(Boolean).join(' ').split(/\s+/).filter(Boolean);
+  // Every field this prints, not only the prose: a figure in a title or a tag
+  // is still a figure. Source is left as written: it says where the story
+  // came from ("Report #042"), which is what the user needs to check it.
+  const cannotConfirm = story.provenance === 'user-cannot-confirm';
+  const safe = (text) => (cannotConfirm ? maskFigures(text) : text);
+  const joined = safe(parts.filter(Boolean).join(' '));
+  const wordArr = joined.split(/\s+/).filter(Boolean);
   // Enforce 500-word ceiling; prose below 250 words gets a warning
   const prose   = wordArr.slice(0, 500).join(' ');
   const words   = Math.min(wordArr.length, 500);
@@ -184,9 +207,10 @@ function formatAts(story, question) {
     : '';
 
   return [
-    `— ${story.title}${story.theme ? ` [${story.theme}]` : ''}`,
+    `— ${safe(story.title)}${story.theme ? ` [${safe(story.theme)}]` : ''}`,
     story.source ? `   Source: ${story.source}` : '',
-    story.tags.length ? `   Tags: ${story.tags.join(', ')}` : '',
+    story.tags.length ? `   Tags: ${story.tags.map(safe).join(', ')}` : '',
+    ...provenanceWarnings(story, prose, cvText),
     '',
     prose,
     '',
@@ -195,11 +219,15 @@ function formatAts(story, question) {
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { parseStories, tokenize, score, STOPWORDS };
+export { parseStories, tokenize, score, formatAts, STOPWORDS };
 
 // ── Main ─────────────────────────────────────────────────────────────
 
 if (isMainModule(import.meta.url)) {
+// Before the story bank is read: a mistyped flag was dropped and its value
+// joined the question, and --help without a bank printed the missing-bank error.
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
 if (!existsSync(STORY_BANK_PATH)) {
   console.error(`Error: ${STORY_BANK_PATH} not found.`);
   console.error('Run /career-ops interview-prep on a role first to populate your story bank.');
@@ -207,7 +235,24 @@ if (!existsSync(STORY_BANK_PATH)) {
 }
 
 const content = readFileSync(STORY_BANK_PATH, 'utf-8');
-const stories = parseStories(content);
+// The checker's own reading of each story's marker, matched by heading line,
+// so a marker it honours is honoured here.
+const provenanceAt = new Map(parseStoryBlocks(content)
+  .filter(e => e.kind === 'story').map(e => [e.line, e.provenance]));
+const stories = parseStories(content).map(s => ({ ...s, provenance: provenanceAt.get(s.line) ?? null }));
+const cvText = existsSync(CV_PATH) ? readFileSync(CV_PATH, 'utf-8') : '';
+
+// Say what is in the file but cannot be read, so an empty or short bank is
+// never mistaken for the whole story (#4514). Never rewrites the file: it is
+// user data, and converting it is the agent's job, with the user's say-so.
+const { blocks, tableRows } = splitStoryBlocks(content);
+const invalid = blocks.filter(b => !isValidStory(b));
+if (tableRows.length || invalid.length) {
+  console.error('⚠️  story-bank.md has entries this matcher cannot read:');
+  if (tableRows.length) console.error(`   - ${tableRows.length} table row(s) (lines ${tableRows.map(r => r.line).join(', ')})`);
+  for (const b of invalid) console.error(`   - "${b.title || '(untitled)'}" (line ${b.line}): no **A (Action):** line`);
+  console.error('   Ask your agent to convert them to the format in templates/story-bank.template.md.\n');
+}
 
 if (stories.length === 0) {
   console.error('No stories found in story-bank.md yet.');
@@ -227,8 +272,7 @@ if (LIST_MODE) {
 }
 
 if (!question) {
-  console.error('Usage: node match-star.mjs "<behavioural question>" [--jd <file>] [--top <n>]');
-  console.error('       node match-star.mjs --list');
+  console.error(USAGE);
   process.exit(1);
 }
 
@@ -258,7 +302,7 @@ for (let i = 0; i < ranked.length; i++) {
   const { story, score: s } = ranked[i];
   console.log(`${'─'.repeat(40)}`);
   console.log(`Match ${i + 1} of ${ranked.length} (score: ${s})\n`);
-  console.log(formatAts(story, question));
+  console.log(formatAts(story, question, { cvText }));
   console.log('');
 }
 

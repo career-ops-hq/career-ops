@@ -24,23 +24,38 @@
 //   entry-level field names (COMPANY, PERIOD, ROLE, etc.). When no partial file
 //   is found the built-in fallback builder is used, preserving full backward
 //   compatibility.
+//
+// Section completeness (#3852):
+//   A template's manifest may declare the sections it owns (`sections: all`,
+//   or a list — see lib/template-manifest.mjs). A declared section
+//   never falls back: a missing, malformed, or empty partial fails the render
+//   with the file named. Templates that declare nothing keep the silent
+//   fallback above.
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, realpathSync } from 'fs';
 import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { stripEmptySections } from './cv-sections-core.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
-import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
+import { readLockedSections } from './theme-style.mjs';
+import { hasRequiredFields, templateSlotWarnings, validatePayload } from './lib/cv-payload-schema.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
+import { PARTIAL_SECTIONS, declaredSections, parseMeta } from './lib/template-manifest.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
+const trackerPath = resolveTrackerPath(DATA_ROOT);
+const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
-const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
+const TITLE_BLOCK_RE = /\n([ \t]*)\{\{TITLE_BLOCK\}\}/g;
 
-const PAGE_WIDTHS = { letter: '8.5in', a4: '210mm' };
+const PROFILE_PATH = getProfilePath();
 const PHOTO_MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -67,6 +82,10 @@ const DEFAULT_SECTION_TITLES = {
 // that change meaning in markup so tailored bullets containing &, <, >, quotes
 // (e.g. "R&D", "scaled 10x < budget", 'the "north star" metric') render as
 // literal text instead of breaking the document or injecting tags.
+//
+// Braces too, so candidate text in a filled section is distinct from template
+// syntax. A bullet quoting {{ .Values.x }} renders literally and cannot
+// become a substitution or an unresolved placeholder.
 function escapeHtml(text) {
   // Blank out only truly absent/structural values. A number or boolean scalar
   // (e.g. a payload with `year: 2024` instead of `"2024"`) must render its value,
@@ -78,13 +97,15 @@ function escapeHtml(text) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/'/g, '&#39;')
+    .replace(/\{/g, '&#123;')
+    .replace(/\}/g, '&#125;');
 }
 
-// Sanitize a URL for an href attribute: only allow the schemes the template's
-// contact row uses, coerce bare emails/domains, drop javascript:/data: and other
-// script-bearing schemes, then HTML-escape for the attribute context.
-function sanitizeUrl(url) {
+// Normalize a URL: only allow the schemes the template's contact row uses,
+// coerce bare emails/domains, and drop javascript:/data: and other
+// script-bearing schemes. Returns '' when the URL is rejected.
+function normalizeUrl(url) {
   if (typeof url !== 'string') return '';
   url = url.trim();
   if (!url) return '';
@@ -102,7 +123,12 @@ function sanitizeUrl(url) {
       url = 'https://' + url;
     }
   }
-  return escapeHtml(url);
+  return url;
+}
+
+// normalizeUrl(), HTML-escaped for an href attribute.
+function sanitizeUrl(url) {
+  return escapeHtml(normalizeUrl(url));
 }
 
 function sanitizeImageSrc(src) {
@@ -111,6 +137,34 @@ function sanitizeImageSrc(src) {
   if (IMAGE_DATA_URL_RE.test(value)) return escapeHtml(value);
   if (/^https?:\/\//i.test(value)) return sanitizeUrl(value);
   return '';
+}
+
+// The payload is written by the tailoring model from an untrusted posting, so a
+// local photo path is honoured only when it is the one the user set in
+// config/profile.yml (#5094). data: and http(s) URLs carry no local read.
+function profilePhotoValue() {
+  try {
+    const doc = loadYaml(readFileSync(PROFILE_PATH, 'utf-8'));
+    const value = doc?.candidate?.photo;
+    return typeof value === 'string' ? value.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+// A relative candidate.photo comes from config/profile.yml, a user-layer file,
+// so it is read from the data root, where that file and the user's other files
+// live. It used to resolve against this script's directory, so with the user
+// layer moved out of the checkout (CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR or a
+// .career-ops-data marker) the photo sitting next to the profile was never
+// found and the build failed. The checkout stays as a fallback, so a photo kept
+// there by an install that moved its data root still resolves. Without a data
+// root override the two are the same directory.
+function resolveProfileRelative(photo) {
+  const fromDataRoot = resolve(DATA_ROOT, photo);
+  if (existsSync(fromDataRoot)) return fromDataRoot;
+  const fromCheckout = resolve(__dirname, photo);
+  return existsSync(fromCheckout) ? fromCheckout : fromDataRoot;
 }
 
 async function prepareCandidatePhoto(candidate) {
@@ -144,7 +198,11 @@ async function prepareCandidatePhoto(candidate) {
     throw new Error(`Unsupported profile photo URL scheme: ${photo.split(':', 1)[0]}`);
   }
 
-  const photoPath = isAbsolute(photo) ? photo : resolve(__dirname, photo);
+  if (photo !== profilePhotoValue()) {
+    throw new Error(`Profile photo path ${photo} does not match candidate.photo in config/profile.yml; a local photo path is read only from the profile`);
+  }
+
+  const photoPath = isAbsolute(photo) ? photo : resolveProfileRelative(photo);
   const mime = PHOTO_MIME_BY_EXT.get(extname(photoPath).toLowerCase());
   if (!mime) {
     throw new Error(`Unsupported profile photo format: ${photo} (expected PNG, JPEG, WebP, or GIF)`);
@@ -166,6 +224,44 @@ async function prepareCandidatePhoto(candidate) {
 function joinItems(items) {
   if (Array.isArray(items)) return items.join(', ');
   return typeof items === 'string' ? items : '';
+}
+
+// A token starts at {{ and ends at }} outside any balanced inner braces.
+// If inner braces are unbalanced, still report the token through the first
+// closing pair. Empty tokens also need to be reported (#6396).
+function* templateTokens(source) {
+  let start = source.indexOf('{{');
+  while (start !== -1) {
+    const firstClose = source.indexOf('}}', start + 2);
+    if (firstClose === -1) return;
+
+    let end = firstClose + 2;
+    let depth = 0;
+    for (let i = start + 2; i < source.length - 1; i++) {
+      if (source[i] === '{') depth++;
+      if (source[i] !== '}') continue;
+      if (depth > 0) {
+        depth--;
+      } else if (source[i + 1] === '}') {
+        end = i + 2;
+        break;
+      }
+    }
+
+    yield { start, end, key: source.slice(start + 2, end - 2) };
+    start = source.indexOf('{{', end);
+  }
+}
+
+function fillTemplateTokens(source, fields) {
+  let out = '';
+  let offset = 0;
+  for (const { start, end, key } of templateTokens(source)) {
+    if (!Object.hasOwn(fields, key)) continue;
+    out += source.slice(offset, start) + fields[key];
+    offset = end;
+  }
+  return out + source.slice(offset);
 }
 
 // ── Section partials (#2183) ────────────────────────────────────────────────
@@ -272,12 +368,6 @@ function parsePartial(source) {
 function fillEntry(entryTemplate, blocks, fields, blockValues) {
   let out = entryTemplate;
 
-  // Every replacement below passes a FUNCTION rather than the value directly.
-  // A string replacement argument is scanned by JS for $-patterns, so candidate
-  // text containing $&, $', $` or $$ (escaping leaves those sequences intact)
-  // would splice part of the template into the CV instead of being inserted
-  // literally. A replacer function's return value is never interpreted.
-
   // Resolve conditional blocks: replace {{BLOCK_NAME}} with the
   // present/absent markup depending on whether the field has a value.
   if (blockValues) {
@@ -285,42 +375,74 @@ function fillEntry(entryTemplate, blocks, fields, blockValues) {
       const block = blocks.get(name);
       if (!block) continue;
       const scalarKey = name.endsWith('_BLOCK') ? name.slice(0, -6) : name;
-      const markup = present 
-        ? block.present.replace(new RegExp(`\\{\\{(${name}|${scalarKey})\\}\\}`, 'g'), () => value) 
+      const markup = present
+        ? fillTemplateTokens(block.present, { [name]: value, [scalarKey]: value })
         : block.absent;
-      out = out.replace(new RegExp(`\\{\\{${name}\\}\\}`, 'g'), () => markup);
+      out = fillTemplateTokens(out, { [name]: markup });
     }
   }
 
   // Fill remaining scalar placeholders.
-  for (const [key, value] of Object.entries(fields)) {
-    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
-  }
-
-  return out;
+  return fillTemplateTokens(out, fields);
 }
 
 // Load section partials from the sections/ directory co-located with the
 // template. Returns a Map<sectionName, { entryTemplate, blocks }> for each
-// partial file found. Sections with no partial file are absent from the map
-// and fall back to the built-in builders.
+// partial file found.
+//
+// Two contracts, chosen by the template's manifest (#3852):
+//
+//   - A section the manifest declares (`sections: all`, or a list) is owned by
+//     the template. Its partial must exist, parse, and carry a non-empty ENTRY
+//     zone, or this throws and the render fails. Falling back would emit the
+//     built-in DOM the pack exists to replace, with nothing in the output
+//     saying so: a typo in experience.html produced a CV that rendered,
+//     validated, and passed the placeholder check with the two-column markup
+//     the pack was written to avoid.
+//   - A section the manifest does not declare keeps the original contract:
+//     absent from the map when there is no partial or the partial is
+//     malformed, so the built-in builder renders it.
+//
+// Every problem is collected before throwing so one run names them all.
 function loadSectionPartials(templatePath) {
   const sectionsDir = join(dirname(templatePath), 'sections');
+  let declared;
+  try {
+    declared = declaredSections(parseMeta(templatePath));
+  } catch (err) {
+    throw new Error(`Template ${templatePath}: ${err.message}`);
+  }
+  const owned = declared || new Set();
   const partials = new Map();
-  if (!existsSync(sectionsDir)) return partials;
+  const problems = [];
 
-  const sectionNames = [
-    'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills',
-  ];
-  for (const name of sectionNames) {
+  for (const name of PARTIAL_SECTIONS) {
     const partialPath = join(sectionsDir, `${name}.html`);
-    if (!existsSync(partialPath)) continue;
-    try {
-      const source = readFileSync(partialPath, 'utf-8');
-      partials.set(name, parsePartial(source));
-    } catch {
-      // Silently skip malformed partial files — fall back to built-in builder.
+    const rel = `sections/${name}.html`;
+    if (!existsSync(partialPath)) {
+      if (owned.has(name)) problems.push(`${rel} is declared but does not exist`);
+      continue;
     }
+    let parsed;
+    try {
+      parsed = parsePartial(readFileSync(partialPath, 'utf-8'));
+    } catch (err) {
+      if (owned.has(name)) problems.push(`${rel} is declared but malformed: ${err.message}`);
+      continue; // undeclared: fall back to the built-in builder, as before
+    }
+    if (owned.has(name) && !parsed.entryTemplate) {
+      problems.push(`${rel} is declared but its ENTRY zone is empty`);
+      continue;
+    }
+    partials.set(name, parsed);
+  }
+
+  if (problems.length) {
+    throw new Error(
+      `Template ${templatePath} declares sections it cannot render:\n`
+        + problems.map((p) => `  - ${p}`).join('\n')
+        + '\nA declared section must ship a partial that parses — fix the file, or drop it from the manifest\'s "sections" list.'
+    );
   }
   return partials;
 }
@@ -356,12 +478,15 @@ function buildExperience(entries, partial) {
       const location = e.location
         ? `\n    <div class="job-location">${escapeHtml(e.location)}</div>`
         : '';
+      const context = e.context
+        ? `\n    <div class="job-context">${escapeHtml(e.context)}</div>`
+        : '';
       return `<div class="job">
     <div class="job-header">
       <span class="job-company">${escapeHtml(e.company)}</span>
       <span class="job-period">${escapeHtml(e.dates || e.period || '')}</span>
     </div>
-    <div class="job-role">${escapeHtml(e.role)}</div>${location}
+    <div class="job-role">${escapeHtml(e.role)}</div>${context}${location}
     <ul>
 ${bullets}
     </ul>
@@ -376,12 +501,14 @@ ${bullets}
       : '';
     const blockValues = new Map([
       ['LOCATION_BLOCK', { value: escapeHtml(e.location || ''), present: Boolean(e.location) }],
+      ['CONTEXT_BLOCK', { value: escapeHtml(e.context || ''), present: Boolean(e.context) }],
     ]);
     return fillEntry(entryTemplate, blocks, {
       COMPANY: escapeHtml(e.company || ''),
       PERIOD: escapeHtml(e.dates || e.period || ''),
       ROLE: escapeHtml(e.role || ''),
       LOCATION: escapeHtml(e.location || ''),
+      CONTEXT: escapeHtml(e.context || ''),
       BULLETS: bullets,
     }, blockValues);
   }).join('\n  ');
@@ -429,7 +556,24 @@ function buildProjects(entries, partial) {
     const nameHtml = url
       ? `<a href="${url}">${nameText}</a>`
       : nameText;
-    return fillEntry(entryTemplate, blocks, {
+    // A bullets array with 2+ items and no description renders one DESC_BLOCK
+    // per bullet, matching how experience renders one <li> per bullet, instead
+    // of joining them into a single block.
+    let entryBlocks = blocks;
+    const multi = !e.description && Array.isArray(e.bullets)
+      ? e.bullets.filter(Boolean) : [];
+    const descBlock = blocks.get('DESC_BLOCK');
+    if (multi.length > 1 && descBlock) {
+      const present = multi
+        .map(b => {
+          const value = escapeHtml(b);
+          return fillTemplateTokens(descBlock.present, { DESC_BLOCK: value, DESC: value });
+        })
+        .join('\n  ');
+      entryBlocks = new Map(blocks);
+      entryBlocks.set('DESC_BLOCK', { ...descBlock, present });
+    }
+    return fillEntry(entryTemplate, entryBlocks, {
       NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
       DESC:  escapeHtml(descText),
@@ -615,8 +759,12 @@ function buildContactRow(candidate) {
   if (c.location) {
     items.push(`<span>${escapeHtml(c.location)}</span>`);
   }
-  const sep = '\n      <span class="separator">|</span>\n      ';
-  return `<div class="contact-row">\n      ${items.join(sep)}\n    </div>`;
+  // Separators are generated by CSS (`.contact-row > *:not(:last-child)::after`)
+  // rather than emitted as their own elements. An element of its own is an
+  // independent box on both the flex and the inline path, so wrapping could put
+  // a separator at the start of a line; generated content belongs to the item
+  // before it and cannot be separated from it by a line break.
+  return `<div class="contact-row">\n      ${items.join('\n      ')}\n    </div>`;
 }
 
 function buildPhoto(candidate, name) {
@@ -626,17 +774,28 @@ function buildPhoto(candidate, name) {
   return `<img class="cv-photo cv-photo--${style}" src="${sanitizeImageSrc(photo)}" alt="${escapeHtml(name || '')}">`;
 }
 
+// Professional title / headline under the name (candidate.title). An ATS reads
+// this first to place the candidate ("Backend Engineer" vs "Accountant"); a CV
+// with no title forces the reader to infer the role. Empty/absent → no element,
+// so a payload without a title renders byte-identical to before.
+function buildTitle(candidate) {
+  const title = candidate && candidate.title != null ? String(candidate.title).trim() : '';
+  return title ? `<div class="header-title">${escapeHtml(title)}</div>` : '';
+}
+
 function renderReport(payload, partials) {
   const sectionTitles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
   const candidate = payload.candidate || {};
-  const pageWidth = PAGE_WIDTHS[payload.page_format] || PAGE_WIDTHS.letter;
+  // The sheet this body has to fit is chosen by generate-pdf.mjs, so both read
+  // the same resolver rather than each keeping a fallback of their own.
+  const pageWidth = PAGE_WIDTHS[resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH, country: payload.country })];
 
   const substitutions = {
     LANG: escapeHtml(payload.lang || 'en'),
     PAGE_WIDTH: pageWidth,
     NAME: escapeHtml(candidate.name || ''),
     SECTION_SUMMARY: escapeHtml(sectionTitles.summary),
-    SUMMARY_TEXT: escapeHtml(payload.summary || ''),
+    SUMMARY_TEXT: escapeHtml(payload.summary),
     SECTION_COMPETENCIES: escapeHtml(sectionTitles.competencies),
     COMPETENCIES: buildCompetencies(payload.competencies, partials.get('competencies')),
     SECTION_EXPERIENCE: escapeHtml(sectionTitles.experience),
@@ -653,36 +812,56 @@ function renderReport(payload, partials) {
     INTERESTS: buildInterests(payload.interests),
     SECTION_SKILLS: escapeHtml(sectionTitles.skills),
     SKILLS: buildSkills(payload.skills, partials.get('skills')),
+    CONSENT: escapeHtml((payload.consent || '').trim()),
   };
   return { substitutions, candidate };
 }
 
+function checkTemplateTokens(source, isResolved = () => false) {
+  const unresolved = new Set();
+  for (const token of templateTokens(source)) {
+    if (!isResolved(token)) unresolved.add(source.slice(token.start, token.end));
+  }
+  if (unresolved.size) {
+    throw new Error(`Unresolved placeholders: ${[...unresolved].join(', ')}`);
+  }
+}
+
 // Merge a payload into the template and return the final HTML (throws on any
-// unresolved {{PLACEHOLDER}} so a malformed payload fails loudly, not silently).
+// unresolved placeholder so a malformed template fails loudly, not silently).
 function renderHtml(template, payload, templatePath) {
   // Load section partials from the sections/ directory co-located with the
   // template. Falls back to built-in builders when no partials directory exists.
   const partials = templatePath ? loadSectionPartials(templatePath) : new Map();
 
   const { substitutions, candidate } = renderReport(payload, partials);
+  substitutions.PHOTO = buildPhoto(candidate, candidate.name);
 
-  // The contact row and photo carry conditional markup (dropped separators /
-  // no <img>), so they are rebuilt as whole blocks before placeholder fill.
+  // Check the outer template before removing optional sections. The contact
+  // row is replaced as a unit, and only a line-leading TITLE_BLOCK is filled.
+  const source = template.replace(CONTACT_ROW_RE, '');
+  const titleSlots = new Set(Array.from(source.matchAll(TITLE_BLOCK_RE), (match) => match.index + 1 + match[1].length));
+  checkTemplateTokens(source, ({ start, key }) => Object.hasOwn(substitutions, key) || titleSlots.has(start));
+
+  // The contact row is rebuilt before placeholder fill to drop separators.
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
-  html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
+  // Captures the placeholder's own leading newline + indentation so an empty
+  // title drops the whole line — matching just the token (as every other
+  // {{PLACEHOLDER}} above does) would leave a blank line where the token sat,
+  // which is not byte-identical to a template that never had the slot
+  // (CodeRabbit, #3763). With a title, the indentation is reused verbatim so
+  // output is unchanged from the token-only replace this replaces.
+  const titleBlock = buildTitle(candidate);
+  html = html.replace(TITLE_BLOCK_RE, (_, indent) => (titleBlock ? `\n${indent}${titleBlock}` : ''));
 
   // Drop the optional sections (projects, education) that have no entries, so
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.
   html = stripEmptySections(html, payload, 'html');
 
-  for (const [key, value] of Object.entries(substitutions)) {
-    html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
-  }
-
-  const unresolved = html.match(PLACEHOLDER_RE);
-  if (unresolved) {
-    throw new Error(`Unresolved placeholders: ${[...new Set(unresolved)].join(', ')}`);
-  }
+  html = fillTemplateTokens(html, substitutions);
+  // Only emitted partial markup can leave a token here. Candidate text was
+  // escaped before insertion, and the outer fill never reuses an inserted token.
+  checkTemplateTokens(html);
   return html;
 }
 
@@ -703,6 +882,12 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
   const { warnings = [], ...rest } = extra;
   const outDir = dirname(absOutput);
   if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
+
+  const lockedKeys = readLockedSections(PROFILE_PATH, sectionKey);
+  const cvPath = resolve(workspaceRoot, 'cv.md');
+  const cvMarkdown = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
+  validateLockedSections(html, cvMarkdown, lockedKeys);
+
   await writeFile(absOutput, html, 'utf-8');
 
   const fileInfo = await stat(absOutput);
@@ -727,6 +912,192 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
   console.log(JSON.stringify(report, null, 2));
 }
 
+// ── Markdown rendering (#4824) ──────────────────────────────────────────────
+//
+// A zero-token, read-only view of the same payload the HTML builder renders, so
+// a built CV can be reviewed or diffed against cv.md without a browser. It
+// resolves section titles exactly like renderReport() (DEFAULT_SECTION_TITLES
+// plus payload.sections) and applies the same entry filter (hasRequiredFields),
+// so the markdown lists what the PDF contains. Sections are emitted in the order
+// their {{SECTION_*}} placeholders appear in the template (the default one, or
+// the same [template.html] the HTML build was given), and a section the template
+// does not carry is left out, as it is in the HTML.
+function mdLine(value) {
+  return String(value ?? '').replace(/\s*\r?\n\s*/g, ' ').trim();
+}
+
+function mdJoin(parts, sep) {
+  return parts.map(mdLine).filter(Boolean).join(sep);
+}
+
+// A normalized URL with the characters that delimit a Markdown link
+// destination (parentheses, angle brackets, whitespace, backslash)
+// percent-encoded, so e.g. an unmatched ')' cannot end the link early.
+function mdUrl(url) {
+  return normalizeUrl(url).replace(/[()<>\\\s]/g,
+    c => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+}
+
+// The {{TOKEN}} that renders each payload section, for templateSlotWarnings.
+// renderHtml fills the content slot; renderMarkdown keeps a section only where
+// the template places its title (templateSectionOrder below), and the consent
+// footer only where the template has one.
+const HTML_SECTION_SLOTS = {
+  summary: 'SUMMARY_TEXT', competencies: 'COMPETENCIES', experience: 'EXPERIENCE',
+  projects: 'PROJECTS', education: 'EDUCATION', certifications: 'CERTIFICATIONS',
+  awards: 'AWARDS', interests: 'INTERESTS', skills: 'SKILLS', consent: 'CONSENT',
+};
+function markdownSectionSlots() {
+  return {
+    ...Object.fromEntries(Object.keys(DEFAULT_SECTION_TITLES).map((key) => [key, `SECTION_${key.toUpperCase()}`])),
+    consent: 'CONSENT',
+  };
+}
+
+// Section keys in the order the template places their {{SECTION_*}} titles.
+function templateSectionOrder(template) {
+  return Object.keys(DEFAULT_SECTION_TITLES)
+    .map(key => [key, template.indexOf(`{{SECTION_${key.toUpperCase()}}}`)])
+    .filter(([, idx]) => idx !== -1)
+    .sort((a, b) => a[1] - b[1])
+    .map(([key]) => key);
+}
+
+function renderMarkdown(payload, template) {
+  const titles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
+  const candidate = payload.candidate || {};
+  const out = [];
+  const bodies = new Map();
+  const section = (key, body) => {
+    if (body.length) bodies.set(key, [`## ${mdLine(titles[key])}`, '', ...body]);
+  };
+  const link = (c) => (c && c.url ? mdLine(c.display || c.url) : '');
+
+  out.push(`# ${mdLine(candidate.name)}`, '');
+  if (mdLine(candidate.title)) out.push(mdLine(candidate.title), '');
+  const contact = mdJoin([
+    candidate.phone, candidate.email, link(candidate.linkedin),
+    link(candidate.github), link(candidate.portfolio), candidate.location,
+  ], ' | ');
+  if (contact) out.push(contact, '');
+
+  const list = (v) => (Array.isArray(v) ? v : []);
+
+  if (mdLine(payload.summary)) section('summary', [mdLine(payload.summary), '']);
+
+  const tags = list(payload.competencies).filter(Boolean).map(mdLine);
+  if (tags.length) section('competencies', [tags.join(', '), '']);
+
+  const exp = [];
+  for (const e of list(payload.experience).filter(e => hasRequiredFields(e, 'experience', 'html'))) {
+    exp.push(`### ${mdJoin([e.company, e.role], ' — ')}`, '');
+    const meta = mdJoin([e.location, e.dates || e.period], ' · ');
+    if (meta) exp.push(`*${meta}*`, '');
+    if (mdLine(e.context)) exp.push(mdLine(e.context), '');
+    const bullets = list(e.bullets).filter(Boolean);
+    for (const b of bullets) exp.push(`- ${mdLine(b)}`);
+    if (bullets.length) exp.push('');
+  }
+  section('experience', exp);
+
+  const proj = [];
+  for (const e of list(payload.projects).filter(e => hasRequiredFields(e, 'projects', 'html'))) {
+    const url = mdUrl(e.url);
+    // Escape the label's own delimiters so a name cannot close the link early.
+    const name = url ? `[${mdLine(e.name).replace(/[\\[\]]/g, '\\$&')}](${url})` : mdLine(e.name);
+    proj.push(`### ${mdJoin([name, e.badge], ' · ')}`, '');
+    const desc = e.description || list(e.bullets).filter(Boolean).join(' ');
+    if (mdLine(desc)) proj.push(mdLine(desc), '');
+    if (mdLine(e.tech)) proj.push(`*${mdLine(e.tech)}*`, '');
+  }
+  section('projects', proj);
+
+  const edu = [];
+  for (const e of list(payload.education).filter(e => hasRequiredFields(e, 'education', 'html'))) {
+    edu.push(`**${mdJoin([e.title, e.org], ' — ')}**${mdLine(e.year) ? ` · ${mdLine(e.year)}` : ''}`, '');
+    if (mdLine(e.location)) edu.push(mdLine(e.location), '');
+    if (mdLine(e.description)) edu.push(mdLine(e.description), '');
+  }
+  section('education', edu);
+
+  for (const key of ['certifications', 'awards']) {
+    const rows = list(payload[key]).filter(e => hasRequiredFields(e, key, 'html')).map(e =>
+      `- **${mdLine(e.title)}**${mdLine(e.org) ? ` — ${mdLine(e.org)}` : ''}${mdLine(e.year) ? ` · ${mdLine(e.year)}` : ''}`);
+    section(key, rows.length ? [...rows, ''] : []);
+  }
+
+  const interests = list(payload.interests).filter(Boolean).map(String)
+    .map((item, idx) => (idx === 0 ? item : item.charAt(0).toLowerCase() + item.slice(1)))
+    .join(', ');
+  if (mdLine(interests)) section('interests', [mdLine(interests), '']);
+
+  const skills = list(payload.skills).filter(c => hasRequiredFields(c, 'skills', 'html')).map(c =>
+    `- ${mdLine(c.category) ? `**${mdLine(c.category)}:** ` : ''}${mdLine(joinItems(c.items))}`);
+  section('skills', skills.length ? [...skills, ''] : []);
+
+  for (const key of templateSectionOrder(template)) {
+    if (bodies.has(key)) out.push(...bodies.get(key));
+  }
+  // The GDPR/RODO consent footer, where the template carries one (as the HTML does).
+  if (template.includes('{{CONSENT}}') && mdLine(payload.consent)) out.push('---', '', mdLine(payload.consent), '');
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
+async function runMarkdown(args) {
+  const outIdx = args.indexOf('--markdown');
+  const outputPath = args[outIdx + 1];
+  const [inputPath, templateArg] = args.filter((a, i) => i !== outIdx && i !== outIdx + 1);
+  if (!inputPath || !outputPath || outputPath.startsWith('--')) {
+    console.error('Usage: node build-cv-html.mjs <input.json> --markdown <output.md> [template.html]');
+    process.exit(1);
+  }
+  const absInput = resolve(inputPath);
+  const absOutput = resolve(outputPath);
+  const templatePath = templateArg ? resolve(templateArg) : TEMPLATE_PATH;
+  if (!existsSync(absInput)) {
+    console.error(`Input file not found: ${absInput}`);
+    process.exit(1);
+  }
+  const inputStat = await stat(absInput, { bigint: true });
+  const outputStat = existsSync(absOutput) ? await stat(absOutput, { bigint: true }) : null;
+  if (outputStat && (realpathSync.native(absOutput) === realpathSync.native(absInput)
+    || (inputStat.ino !== 0n && inputStat.dev === outputStat.dev && inputStat.ino === outputStat.ino))) {
+    console.error(`Output path is the input file: ${absOutput}`);
+    process.exit(1);
+  }
+  // Never overwrite the source payload with its own rendering (a swapped or
+  // repeated argument). realpath also catches a symlink or a ./-relative alias.
+  if (absOutput === absInput || (existsSync(absOutput) && realpathSync(absOutput) === realpathSync(absInput))) {
+    console.error(`Output path is the input file: ${absOutput}`);
+    process.exit(1);
+  }
+  if (!existsSync(templatePath)) {
+    console.error(`Template not found: ${templatePath}`);
+    process.exit(1);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(await readFile(absInput, 'utf-8'));
+  } catch (err) {
+    console.error(`Failed to read CV input: ${err.message}`);
+    process.exit(1);
+  }
+  const { errors, warnings } = validatePayload(payload, 'html');
+  if (errors.length) {
+    console.error('Invalid CV payload:');
+    for (const message of errors) console.error(`  - ${message}`);
+    console.error(JSON.stringify({ valid: false, errors, warnings }, null, 2));
+    process.exit(1);
+  }
+  const template = await readFile(templatePath, 'utf-8');
+  warnings.push(...templateSlotWarnings(payload, template, markdownSectionSlots(), basename(templatePath)));
+  for (const message of warnings) console.error(`Warning: ${message}`);
+  await mkdir(dirname(absOutput), { recursive: true });
+  await writeFile(absOutput, renderMarkdown(payload, template), 'utf-8');
+  console.log(JSON.stringify({ file: basename(absOutput), path: absOutput, format: 'markdown', warnings, valid: true }, null, 2));
+  process.exit(0);
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -734,6 +1105,7 @@ async function main() {
     console.error('Usage:');
     console.error('  node build-cv-html.mjs <input.json> <output.html> [template.html]');
     console.error('  node build-cv-html.mjs --preview <input.json> [template.html]');
+    console.error('  node build-cv-html.mjs <input.json> --markdown <output.md> [template.html]');
     console.error('  node build-cv-html.mjs --test');
     console.error('');
     console.error('  [template.html] defaults to templates/cv-template.html. Pass the path');
@@ -744,12 +1116,21 @@ async function main() {
     console.error('  the builder loads per-section HTML partial files from it');
     console.error('  (e.g. sections/experience.html). Partials control the DOM');
     console.error('  structure, tag names, and class names for each section.');
-    console.error('  When no partial file is found the built-in builder is used.');
+    console.error('  When no partial file is found the built-in builder is used —');
+    console.error('  unless the template manifest declares the section (#3852):');
+    console.error('  `sections: all` or `sections: experience, education` in the');
+    console.error('  <!-- career-ops-template --> block makes a missing or malformed');
+    console.error('  partial fail the build instead of falling back.');
     process.exit(args.includes('--help') ? 0 : 1);
   }
 
   if (args.includes('--test')) {
     await runSelfTest();
+    return;
+  }
+
+  if (args.includes('--markdown')) {
+    await runMarkdown(args);
     return;
   }
 
@@ -768,6 +1149,13 @@ async function main() {
 
   if (!existsSync(absInput)) {
     console.error(`Input file not found: ${absInput}`);
+    process.exit(1);
+  }
+  const inputStat = await stat(absInput, { bigint: true });
+  const outputStat = existsSync(absOutput) ? await stat(absOutput, { bigint: true }) : null;
+  if (outputStat && (realpathSync.native(absOutput) === realpathSync.native(absInput)
+    || (inputStat.ino !== 0n && inputStat.dev === outputStat.dev && inputStat.ino === outputStat.ino))) {
+    console.error(`Output path is the input file: ${absOutput}`);
     process.exit(1);
   }
   if (!existsSync(templatePath)) {
@@ -791,9 +1179,10 @@ async function main() {
     console.error(JSON.stringify({ valid: false, errors, warnings }, null, 2));
     process.exit(1);
   }
-  for (const message of warnings) console.error(`Warning: ${message}`);
 
   const template = await readFile(templatePath, 'utf-8');
+  warnings.push(...templateSlotWarnings(payload, template, HTML_SECTION_SLOTS, basename(templatePath)));
+  for (const message of warnings) console.error(`Warning: ${message}`);
 
   let html;
   try {
@@ -826,6 +1215,7 @@ async function runSelfTest() {
       company: 'Test Corp',
       role: 'Test Engineer',
       location: 'Remote',
+      context: 'Seed-stage startup; joined as employee #7.',
       dates: 'June 2024 - Present',
       bullets: [
         'Built automated testing pipelines with CI/CD integration',
@@ -895,10 +1285,18 @@ async function runSelfTest() {
   }
 
   // Guard the absent-field side of the same case: omitting candidate.github
-  // must drop both its anchor and its separator, leaving no dangling item.
+  // must drop its whole contact item, leaving no dangling one.
+  //
+  // Counted as ITEMS, not separator elements: separators are generated by CSS
+  // on each item but the last, so there is no separator node to count and an
+  // off-by-one in the item list is what a dangling separator would now look
+  // like. One fewer item is exactly the old "one fewer separator" assertion.
   const { github, ...candidateWithoutGithub } = sample.candidate;
   const htmlWithoutGithub = renderHtml(template, { ...sample, candidate: candidateWithoutGithub });
-  const countSeparators = (h) => (h.match(/class="separator"/g) || []).length;
+  const countSeparators = (h) => {
+    const row = h.match(/<div class="contact-row">([\s\S]*?)<\/div>/);
+    return row ? (row[1].match(/<\/a>|<\/span>/g) || []).length : 0;
+  };
   if (htmlWithoutGithub.includes('github.com/test')) {
     console.error('Self-test failed: github contact link rendered when candidate.github is absent');
     process.exit(1);
@@ -966,8 +1364,53 @@ async function runSelfTest() {
     console.error('Self-test failed: job-location block not rendered when location is present');
     process.exit(1);
   }
+  if (!html.includes('class="job-context"') || !html.includes('Seed-stage startup; joined as employee #7.')) {
+    console.error('Self-test failed: job-context block not rendered when context is present');
+    process.exit(1);
+  }
+  // context sits directly under the role, ahead of the location, on both paths:
+  // the section partial and the built-in builder (templates with no sections/).
+  const contextDiv = '<div class="job-context">Seed-stage startup; joined as employee #7.</div>';
+  for (const [path, out] of [['partial', html], ['built-in', buildExperience(sample.experience)]]) {
+    const [role, context, location] = ['class="job-role"', contextDiv, 'class="job-location"'].map(s => out.indexOf(s));
+    if (role === -1 || !(role < context && context < location)) {
+      console.error(`Self-test failed: ${path} builder did not render job-context between the role and the location`);
+      process.exit(1);
+    }
+  }
   if (!html.includes('class="edu-location"')) {
     console.error('Self-test failed: edu-location block not rendered when education location is present');
+    process.exit(1);
+  }
+
+  // Guard that a project's bullets array renders one DESC_BLOCK per bullet
+  // (2+ bullets, no description), while a plain description stays a single block.
+  const multiBulletHtml = renderHtml(template, {
+    ...sample,
+    projects: [{ name: 'Multi', bullets: ['First bullet', 'Second bullet', 'Third bullet'] }],
+  }, TEMPLATE_PATH);
+  // Literal placeholder text inside a bullet must render as text, not be
+  // re-read as a template reference (which would fail as an unresolved marker).
+  let literalHtml;
+  try {
+    literalHtml = renderHtml(template, {
+      ...sample,
+      projects: [{ name: 'Literal', bullets: ['Uses {{DESC}} syntax', 'Also {{DESC_BLOCK}} here'] }],
+    }, TEMPLATE_PATH);
+  } catch (err) {
+    console.error(`Self-test failed: literal placeholder text in a project bullet: ${err.message}`);
+    process.exit(1);
+  }
+  if (!literalHtml.includes('&#123;&#123;DESC&#125;&#125;') || !literalHtml.includes('&#123;&#123;DESC_BLOCK&#125;&#125;')) {
+    console.error('Self-test failed: literal placeholders in project bullets were not preserved');
+    process.exit(1);
+  }
+  if ((multiBulletHtml.match(/class="project-desc"/g) || []).length !== 3) {
+    console.error('Self-test failed: project bullets did not render one block per bullet');
+    process.exit(1);
+  }
+  if ((html.match(/class="project-desc"/g) || []).length !== 1) {
+    console.error('Self-test failed: project description should render as a single block');
     process.exit(1);
   }
 
@@ -988,6 +1431,10 @@ async function runSelfTest() {
   }
   if (noLocHtml.includes('class="job-location"')) {
     console.error('Self-test failed: job-location block rendered when location is absent');
+    process.exit(1);
+  }
+  if (noLocHtml.includes('class="job-context"') || buildExperience(noLocSample.experience).includes('class="job-context"')) {
+    console.error('Self-test failed: job-context block rendered when context is absent');
     process.exit(1);
   }
   if (noLocHtml.includes('class="edu-location"')) {

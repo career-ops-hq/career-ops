@@ -35,15 +35,18 @@ console.log('\nupdate-system.mjs — no shadowed SYSTEM_PATHS entries');
 // updater considers an entry is exactly what is checked here, and
 // tests/updater-extract-array-syntax.test.mjs already covers the parser itself.
 
-// A missing or renamed update-system.mjs must report as a controlled failure,
+// The list itself is in lib/update-manifest.mjs (#5554), which the updater
+// reads with that same extractor.
+//
+// A missing or renamed manifest must report as a controlled failure,
 // not an uncaught throw: the throw is contained by test-all.mjs's #2828 guard,
 // but it reads as "suite crashed" rather than "the manifest is not where this
 // expects", which is the actionable half.
 let src = null;
 try {
-  src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  src = readFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), 'utf-8');
 } catch (err) {
-  fail(`update-system.mjs is unreadable at ${ROOT} (${err.code || err.message}) — the manifest was never parsed, so this is not a clean result`);
+  fail(`lib/update-manifest.mjs is unreadable at ${ROOT} (${err.code || err.message}) — the manifest was never parsed, so this is not a clean result`);
 }
 
 const entries = src ? extractArrayFromSource(src, 'SYSTEM_PATHS') : [];

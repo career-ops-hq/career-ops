@@ -21,7 +21,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, sealProcessGitEnv } from './helpers.mjs';
 import { gitIn, gitRawIn, stagedPathsOutside } from '../update-system.mjs';
 
 // A throwaway repo pinned to core.fileMode=false, which is what makes the bug
@@ -35,6 +35,7 @@ function makeRepo() {
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   g('config', 'core.fileMode', 'false');
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
   // stagedPathsOutside needs the RAW runner: gitIn trims, which would strip a
   // leading space off a path and defeat the very case test 7 pins.
   const raw = (...args) => gitRawIn(dir, ...args);
@@ -53,6 +54,9 @@ function repoWithStagedModeBump(name) {
   g('update-index', '--chmod=+x', name);
   return { dir, g };
 }
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\n🧪 Testing update-commit file-mode preservation...');
 

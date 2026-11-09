@@ -3,6 +3,7 @@
 
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
 import { intInRange } from './_config-utils.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 // VDAB (Flanders' public employment service) provider — hits the public
 // vindeenjob search API directly (the same endpoint vdab.be's own frontend
@@ -43,8 +44,9 @@ const DETAIL_API = 'https://www.vdab.be/rest/vindeenjob/v4/vacatures/';
 // Public, build-time constant baked into VDAB's own frontend JS bundle (an
 // Angular HTTP interceptor stamps this on every request) — not a per-visitor
 // session token. Verified live: works from a cold request with no cookies.
-// Same trust tier as arbeitsagentur.mjs's public API_KEY below.
-const VEJ_KEY_MONITOR = 'b277002f-e1fa-4fc5-868a-fdab633c3851';
+// Same trust tier as arbeitsagentur.mjs's public API_KEY below. Exported for
+// liveness-api.mjs, whose VDAB rung reads the same detail endpoint.
+export const VEJ_KEY_MONITOR = 'b277002f-e1fa-4fc5-868a-fdab633c3851';
 // Plural + no slug is the correct canonical form and resolves without a
 // redirect (verified live). The singular form ("/vacature/{id}", no 's')
 // looks plausible but silently redirects to the generic listing page —
@@ -126,9 +128,14 @@ export function normalizeJob(job) {
   const id = job && job.id && job.id.id;
   const title = String((job && job.vacaturefunctie && job.vacaturefunctie.naam) || '').trim();
   if (!id || !title) return null;
+  // A lone surrogate in id would throw URIError out of encodeURIComponent and
+  // abort the caller's per-job loop; id is also the dedup key (byId / the `id`
+  // field below). Drop this one.
+  const encodedId = safeEncodeURIComponent(id);
+  if (encodedId === null) return null;
   const result = {
     title,
-    url: DETAIL_BASE + encodeURIComponent(String(id)),
+    url: DETAIL_BASE + encodedId,
     company: String((job && job.vacatureBedrijfsnaam) || '').trim(),
     location: String((job && job.tewerkstellingsLocatieRegioOfAdres) || '').trim(),
     id: String(id),

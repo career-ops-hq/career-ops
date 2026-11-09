@@ -233,11 +233,35 @@ Rules for the transcript:
 
 ---
 
+## Step 10 — Record the call on the tracker
+
+Setelah debrief disimpan, catat fakta yang sudah dikonfirmasi pada lamaran. Cocokkan setiap fakta baru dengan dealbreaker yang sudah ditulis pengguna di `modes/_profile.md` atau `config/profile.yml`. Tanyakan setiap kecocokan secara terpisah dan tunjukkan fakta tersebut serta kalimat dari profil. `debrief-sync.mjs` menolak nilai `--dealbreaker` yang berisi titik koma (`;`), tab, atau baris baru, dan itu menghentikan seluruh panggilan. Jika kalimatnya berisi salah satunya, beri tahu pengguna karakter mana itu dan minta versi satu baris tanpa karakter tersebut yang maknanya sama. Jangan menghapus karakter itu atau menulis ulang kalimatnya sendiri. Periksa versi pengguna untuk ketiga karakter itu, dan minta lagi sampai tidak ada satu pun. Lalu tanyakan `Record this dealbreaker on the report and the tracker? [y/N]`. Simpan setiap kalimat yang dikonfirmasi pengguna, atau versi satu barisnya. Buang setiap kalimat yang ditolak pengguna.
+
+Untuk setiap orang yang disebut namanya, tanyakan `Save this contact to data/contacts.tsv? [y/N]`. Jika ya, berikan nama, email jika ada, dan type jika pengguna menyebutkannya. `--contact-type` hanya menerima `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` atau `other`, dalam huruf kecil. Petakan kata yang dipakai pengguna ke nilai yang dimaksud, dalam bahasa apa pun ("talent partner" adalah `recruiter`, "calon atasan saya" adalah `hiring-manager`). Jika kata itu tidak jelas cocok dengan satu nilai, hilangkan `--contact-type` dan tetap simpan kontaknya. `debrief-sync.mjs` menolak nilai lain, dan itu menghentikan seluruh panggilan, termasuk dealbreaker dan `--next`.
+
+Jika langkah berikutnya menyebut satu hari kalender yang jelas, berikan `--next YYYY-MM-DD` tanpa pertanyaan kedua. Tentukan nama hari dari hari kalender lokal, dan hari ini ikut dihitung. Jika frasanya tidak menyebut hari, hilangkan `--next`. Jika ambigu (`next week`, dua hari), minta satu tanggal lalu berikan tanggal itu.
+
+Jalankan `node debrief-sync.mjs --app <tracker#>` dengan flag tersebut, di mana `<tracker#>` adalah `#` lamaran di tracker (bukan nomor report-nya). `--dealbreaker` menerima satu kalimat dan hanya boleh muncul sekali per panggilan, jadi jalankan satu perintah untuk setiap kalimat yang dikonfirmasi. Jangan pernah menggabungkan dua kalimat menjadi satu nilai: script menolak titik koma. Letakkan flag kontak dan `--next` hanya di perintah pertama. Setiap perintah berikutnya hanya memberikan `--app <tracker#>` dan satu `--dealbreaker`, tidak ada yang lain. Apit setiap nilai dengan tanda kutip tunggal agar shell meneruskan `$` dan backtick apa adanya. Tulis tanda kutip tunggal di dalam nilai sebagai `'\''` di Git Bash atau shell POSIX lain. Di PowerShell, tulis sebagai `''`, dan gandakan tanda kutip lengkung (`‘`, `’`, `‚` atau `‛`) dengan cara yang sama, karena PowerShell juga membacanya sebagai tanda kutip:
+
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
+
+Jalankan perintah satu per satu dan periksa exit status masing-masing. Jika sebuah perintah gagal, berhenti, perbaiki, lalu jalankan ulang daftar dari perintah pertama. Jika tidak ada dealbreaker, kontak, atau hari `--next` untuk diberikan, lewati perintahnya: script menolak panggilan yang tidak punya apa pun untuk dicatat. Setelah perintah terakhir, jika kontak disimpan, jalankan `node contacts.mjs --summary`. Jika hari sudah ditetapkan, jalankan `node followup-cadence.mjs --summary`.
+
+Jangan ubah status kecuali pengguna menyebut status baru. Itu panggilan `set-status.mjs` terpisah, sebelum perintah-perintah ini.
+
+Menjalankan ulang perintah yang sama aman: kalimat, kontak, atau tanggal yang sudah dicatat tidak ditulis lagi.
+
+---
+
 ## Rules
 
 * **Debrief immediately.** Ingatan mengenai detail wawancara cepat menurun — dalam hitungan jam, pertanyaan dan reaksi spesifik mulai terlupakan. Jalankan skill ini pada hari yang sama.
 * **Don't soften gaps.** Gap 🔴 yang diberi label 🟡 karena ingin bersikap baik akan muncul lagi pada round berikutnya.
-* **Never put invented claims in the candidate's mouth.** Correct/complete answers boleh menggunakan general domain knowledge, tetapi setiap personal claim atau metric yang disarankan harus berasal dari apa yang kandidat katakan, `cv.md`, `article-digest.md`, atau story bank.
+* **Never put invented claims in the candidate's mouth.** Correct/complete answers boleh menggunakan general domain knowledge, tetapi setiap personal claim atau metric yang disarankan harus berasal dari apa yang kandidat katakan, `cv.md`, `article-digest.md`, atau story bank sesuai aturan provenance di bawah.
+* **Story-bank figures need provenance.** Story bank menyediakan narasi dan phrasing; angka-angkanya tidak setara dengan `cv.md` (AGENTS.md, Source-of-Truth Boundary). Sebelum angka dari story bank masuk ke corrected answer, gap fix, atau story baru, jalankan `node story-provenance-check.mjs --summary` dan ikuti bucket-nya untuk angka tersebut: `existing` boleh digunakan; `supportedByResume` dan `derived-unverified` tidak pernah dinyatakan ulang sebagai fakta, jadi hilangkan angkanya atau tanyakan kepada kandidat dengan empat outcome dari AGENTS.md (konfirmasi sesuai yang tertulis, berikan angka yang benar, narasi saja, "saya tidak tahu") alih-alih pertanyaan konfirmasi/bantah yang mengarahkan; `user-cannot-confirm` tidak pernah digunakan sebagai angka, hanya sebagai narasi. Mode ini tidak menulis marker `**Provenance:**`; jawaban kandidat berlaku untuk sesi ini.
 * **Retracted claims are a hard gate.** Jika sebuah claim muncul di `interview-prep/retracted-claims.md`, jangan pernah menyarankan kandidat menggunakannya — bahkan jika mereka mengatakannya dalam wawancara sebenarnya. Tandai: "Claim tersebut ada dalam daftar retracted Anda — claim itu tidak dapat dipertahankan di bawah tekanan. Berikut versi yang tidak bergantung padanya."
 * **Record new retractions.** Jika debrief mengungkapkan claim yang digunakan kandidat dalam wawancara sebenarnya dan sekarang mereka setuju bahwa claim tersebut tidak dapat dipertahankan, tawarkan untuk menambahkannya ke `interview-prep/retracted-claims.md`: `**"[claim]"** ([context]). Reason: [one-line reason + correct framing if applicable].`
 * **Extract vocabulary gaps explicitly.** Jika kandidat menggunakan istilah yang tidak tepat padahal ada istilah yang lebih presisi, tambahkan ke `interview-prep/interview-prep-guide.md` di bawah bagian vocabulary (jika kandidat memelihara satu).

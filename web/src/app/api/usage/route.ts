@@ -1,86 +1,63 @@
 import { NextResponse } from "next/server";
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createUsageScanner } from "@/lib/claude-usage-scan.mjs";
+import { desktopBinaries, readPlanUsage } from "@/lib/claude-plan-usage.mjs";
+import { findBin } from "@/lib/clis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Reads Claude Code's per-message usage across ALL projects (~/.claude/projects/
-// **/*.jsonl) and sums tokens in the rolling 5h and 7d windows — the same scope
-// as the account's rate-limit windows. Cached 60s (the read is heavy).
+// Two sources. Plan limits come from `claude -p "/usage"` (real percentages
+// and reset times; lib/claude-plan-usage.mjs). When no Claude binary answers,
+// the estimate below is used: Claude Code's per-message usage across ALL
+// projects (~/.claude/projects/**/*.jsonl) summed over the rolling 5h and 7d
+// windows. The estimate is cached 60s and scans incrementally with async fs
+// (lib/claude-usage-scan.mjs); plan limits are cached 5 minutes, and a failed
+// lookup is cached too so a missing binary is not retried every poll.
 
 type Usage = { window5h: { tokens: number; messages: number }; window7d: { tokens: number; messages: number }; computedAt: number };
+type Plan = { rows: { label: string; percent: number; resets: string | null }[] } | null;
 let cache: { at: number; data: Usage } | null = null;
+let planCache: { at: number; plan: Plan } | null = null;
+let planInFlight: Promise<Plan> | null = null;
 
-function projectsDir(): string {
-  return path.join(os.homedir(), ".claude", "projects");
-}
+const PLAN_TTL_MS = 5 * 60_000;
+const scanner = createUsageScanner({ root: path.join(os.homedir(), ".claude", "projects") });
 
-function* walkJsonl(dir: string): Generator<string> {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
+// Wait this long for a fresh plan lookup before answering with what is cached.
+// A normal lookup takes under a second; a slow or hung one (each candidate binary
+// can take up to its timeout) must not hold up the estimate or hide the meter.
+const PLAN_GRACE_MS = 1500;
+
+async function plan(): Promise<Plan> {
+  if (planCache && Date.now() - planCache.at < PLAN_TTL_MS) return planCache.plan;
+  if (!planInFlight) {
+    // `claude` via the same lookup the run routes use (PATH plus the usual install
+    // dirs, PATHEXT on Windows), then the binary the Claude desktop app bundles.
+    planInFlight = desktopBinaries()
+      .then((desktop: string[]) => readPlanUsage({ candidates: [findBin("claude"), ...desktop].filter((b): b is string => !!b) }))
+      .then((p: Plan) => {
+        planCache = { at: Date.now(), plan: p };
+        return p;
+      })
+      .finally(() => {
+        planInFlight = null;
+      });
   }
-  for (const e of entries) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) yield* walkJsonl(p);
-    else if (e.isFile() && e.name.endsWith(".jsonl")) yield p;
-  }
-}
-
-function compute(): Usage {
-  const now = Date.now();
-  const w5 = now - 5 * 3600 * 1000;
-  const w7 = now - 7 * 24 * 3600 * 1000;
-  const cutoffMtime = w7 - 3600 * 1000;
-  let t5 = 0;
-  let t7 = 0;
-  let m5 = 0;
-  let m7 = 0;
-
-  for (const file of walkJsonl(projectsDir())) {
-    let st: fs.Stats;
-    try {
-      st = fs.statSync(file);
-    } catch {
-      continue;
-    }
-    if (st.mtimeMs < cutoffMtime) continue;
-    let content: string;
-    try {
-      content = fs.readFileSync(file, "utf8");
-    } catch {
-      continue;
-    }
-    for (const line of content.split("\n")) {
-      if (!line.includes('"usage"')) continue;
-      let d: { message?: { usage?: Record<string, number> }; timestamp?: string };
-      try {
-        d = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      const u = d.message?.usage;
-      const ts = d.timestamp ? Date.parse(d.timestamp) : NaN;
-      if (!u || Number.isNaN(ts) || ts < w7) continue;
-      const tok = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
-      t7 += tok;
-      m7 += 1;
-      if (ts >= w5) {
-        t5 += tok;
-        m5 += 1;
-      }
-    }
-  }
-  return { window5h: { tokens: t5, messages: m5 }, window7d: { tokens: t7, messages: m7 }, computedAt: now };
+  // The lookup keeps running and fills the cache for later polls; if it is slow
+  // the response carries the last known plan (or none, so the estimate shows).
+  const stale = planCache?.plan ?? null;
+  let timer: ReturnType<typeof setTimeout>;
+  const grace = new Promise<Plan>((resolve) => {
+    timer = setTimeout(() => resolve(stale), PLAN_GRACE_MS);
+  });
+  return Promise.race([planInFlight, grace]).finally(() => clearTimeout(timer));
 }
 
 export async function GET() {
-  if (cache && Date.now() - cache.at < 60_000) return NextResponse.json(cache.data);
-  const data = compute();
-  cache = { at: Date.now(), data };
-  return NextResponse.json(data);
+  if (!cache || Date.now() - cache.at >= 60_000) {
+    cache = { at: Date.now(), data: await scanner.compute() };
+  }
+  return NextResponse.json({ ...cache.data, plan: await plan() });
 }

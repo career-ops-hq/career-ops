@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { citySlug } from './_city-slug.mjs';
 
 // ITviec provider — Vietnam's largest IT job board (https://itviec.com), the
 // project's first Vietnamese source. Wire in via a `job_boards:` entry with
@@ -31,8 +32,11 @@
 // That silent-zero failure is the whole risk of scraping and the reason for
 // `assertParsedSomething` below.
 
-import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { visibleText } from './_html-to-text.mjs';
+
+export { visibleText } from './_html-to-text.mjs';
 
 const TRUSTED_HOST = 'itviec.com';
 const LIST_URL = 'https://itviec.com/it-jobs';
@@ -67,12 +71,6 @@ const LOCATION_RE = /#map-pin"?><\/use><\/svg>\s*<div[^>]*title=["']([^"']*)["']
 const POSTED_LABEL_RE =
   /(?:Posted|Đăng)\s*:?\s*(?:<\/\w+>\s*)?([^.<]{0,40}?(?:ago|trước)|today|hôm nay)/i;
 
-/** @param {any} ctx @param {number} ms */
-function sleep(ctx, ms) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 /** @param {string} url */
 function assertItviecUrl(url) {
   let parsed;
@@ -86,21 +84,6 @@ function assertItviecUrl(url) {
     throw new Error(`itviec: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
   }
   return url;
-}
-
-/**
- * Collapse a markup fragment to its visible text.
- * @param {string} fragment
- * @returns {string}
- */
-export function visibleText(fragment) {
-  return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 const CITY_SLUGS = /** @type {const} */ ({
@@ -121,16 +104,7 @@ const CITY_SLUGS = /** @type {const} */ ({
  * @returns {string | null}
  */
 export function cityPath(location) {
-  const key = String(location ?? '').trim().toLowerCase();
-  if (!key) return null;
-  // Own-property check: a user string like "constructor" or "toString" must
-  // resolve to null, not to an inherited Object.prototype member whose source
-  // text would then be interpolated into the request URL.
-  if (Object.hasOwn(CITY_SLUGS, key)) return CITY_SLUGS[key];
-  for (const [candidate, slug] of Object.entries(CITY_SLUGS)) {
-    if (key.includes(candidate)) return slug;
-  }
-  return null;
+  return citySlug(location, CITY_SLUGS);
 }
 
 /**
@@ -279,7 +253,7 @@ export default {
     const seen = new Set();
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await sleep(ctx, INTER_PAGE_DELAY_MS);
+      if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       const url = assertItviecUrl(buildListUrl(entry, page));
       const html = await fetchTextWithRetry(ctx, url, {

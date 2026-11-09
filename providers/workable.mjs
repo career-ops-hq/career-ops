@@ -35,7 +35,7 @@
 // stalling on it.
 
 import { decodeEntities } from './_html-entities.mjs';
-import { BROWSER_LIKE_USER_AGENT, isRetryableError, parseRetryAfterMs } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, isRetryableError, parseRetryAfterMs, sleep } from './_http.mjs';
 
 const ALLOWED_WORKABLE_HOSTS = new Set(['apply.workable.com']);
 
@@ -67,11 +67,6 @@ const RETRY_MAX_DELAY_MS = 8_000;
 // on the widget API immediately and fall through to the markdown feed instead
 // of stalling the scan for it.
 const GIVE_UP_RETRY_AFTER_MS = 30_000;
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Runs `fn`, retrying transient failures with backoff + jitter. Gives up
@@ -205,14 +200,34 @@ function safeJobUrl(raw) {
   }
 }
 
+// Joins the locations of a multi-country posting into one cell. This is the
+// shape location_filter already expects — see buildLocationFilter in scan.mjs,
+// whose always_allow tier exists precisely so "Stockholm · London · Madrid"
+// survives one blocked city — and the shape the Ashby provider already emits.
+const LOCATION_SEPARATOR = ' · ';
+
 /**
- * Build the location string. The markdown feed rendered "<city>, <country>"; we
- * match that shape so location_filter behaves identically across both paths.
+ * Build the location string for ONE widget entry. The markdown feed rendered
+ * "<city>, <country>"; we match that shape so location_filter behaves
+ * identically across both paths.
+ *
+ * State is the place only when the city is blank. A state with no city
+ * (Queensland, New South Wales) otherwise collapses to the country. When a
+ * city is set, state stays off the string: adding it would rewrite history
+ * keys that already stored "city, country".
+ *
+ * telecommuting with a place is applied once by the fold below. Here it is
+ * only the fallback for a row that has no place at all.
  */
 function formatLocation(job) {
-  const parts = [job?.city, job?.country].filter(v => typeof v === 'string' && v.trim());
-  const joined = parts.map(v => v.trim()).join(', ');
-  if (joined) return joined;
+  const city = typeof job?.city === 'string' ? job.city.trim() : '';
+  const state = typeof job?.state === 'string' ? job.state.trim() : '';
+  const country = typeof job?.country === 'string' ? job.country.trim() : '';
+  const parts = [];
+  if (city) parts.push(city);
+  else if (state) parts.push(state);
+  if (country) parts.push(country);
+  if (parts.length) return parts.join(', ');
   return job?.telecommuting ? 'Remote' : '';
 }
 
@@ -231,6 +246,29 @@ function toPlainText(html) {
 /**
  * Parse the widget API payload. Exported for unit tests.
  *
+ * A multi-country posting is FANNED OUT by this endpoint into one entry per
+ * location, every one carrying the same shortlink, title, description and
+ * published_on and differing only in city/state/country. Verified live
+ * 2026-10-06 against DigitalGenius: "Implementation Engineer" (801183DB79)
+ * comes back as four entries — London/United Kingdom, Romania, Poland,
+ * Croatia — and "Solutions Engineer" (7C59A413E4) as three more.
+ *
+ * The siblings are therefore folded together here: the first entry supplies
+ * every field, the rest contribute only their location, and the accumulated
+ * set is joined with LOCATION_SEPARATOR. Discarding them (first-wins on URL,
+ * which is what this did before) recorded that role as "London, United
+ * Kingdom" alone, so a UK block rule rejected a posting that had three viable
+ * EU alternatives.
+ *
+ * Two dead ends, both measured rather than assumed:
+ *   · each entry's own `locations[]` array holds ONLY that entry's single
+ *     location, so it is not a shortcut to the full set;
+ *   · the per-job detail endpoint (/api/v1/accounts/<slug>/jobs/<shortcode>)
+ *     does carry a complete array, but costs one extra request per posting.
+ * The markdown fallback in parseWorkableMarkdown cannot be fixed the same way:
+ * it does not fan out, it just prints the primary location and drops the rest
+ * at the source, so nothing is left in its rows to accumulate.
+ *
  * @param {any} payload — parsed JSON body of the widget endpoint
  * @param {string} companyName — value to write into job.company
  * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>}
@@ -238,7 +276,8 @@ function toPlainText(html) {
 export function parseWorkableWidget(payload, companyName) {
   if (!payload || !Array.isArray(payload.jobs)) return [];
   const jobs = [];
-  const seen = new Set();
+  /** @type {Map<string, {job: any, locations: Set<string>, tele: boolean}>} */
+  const byUrl = new Map();
   for (const raw of payload.jobs) {
     const title = typeof raw?.title === 'string' ? raw.title.trim() : '';
     if (!title) continue;
@@ -246,11 +285,25 @@ export function parseWorkableWidget(payload, companyName) {
     // shortlink is the canonical public permalink; url is the same host. Either
     // is fine, both are validated. Off-domain or non-https entries are dropped.
     const url = safeJobUrl(raw?.shortlink) || safeJobUrl(raw?.url);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
+    if (!url) continue;
+
+    const location = formatLocation(raw);
+    // Same truthiness as the empty-place fallback above. Any sibling can carry
+    // the flag; the folded posting says Remote once.
+    const tele = Boolean(raw?.telecommuting);
+
+    const merged = byUrl.get(url);
+    if (merged) {
+      // Fanned-out sibling of a posting already emitted: it contributes its
+      // location and the telecommuting flag. Empty locations add nothing; a
+      // repeated one collapses, so the cell never says "Romania · Romania".
+      if (location) merged.locations.add(location);
+      if (tele) merged.tele = true;
+      continue;
+    }
 
     /** @type {any} */
-    const job = { title, url, location: formatLocation(raw), company: companyName };
+    const job = { title, url, location, company: companyName };
 
     const description = toPlainText(raw?.description);
     if (description) job.description = description;
@@ -259,6 +312,19 @@ export function parseWorkableWidget(payload, companyName) {
     if (Number.isFinite(stamp)) job.postedAt = stamp;
 
     jobs.push(job);
+    byUrl.set(url, { job, locations: new Set(location ? [location] : []), tele });
+  }
+
+  // A Set iterates in insertion order, so the joined cell follows payload order
+  // and a single-location posting re-joins to the exact string it already had.
+  // Remote is appended once, after the join, and only when no place already
+  // says it — an empty-place row already contributed the word "Remote".
+  for (const { job, locations, tele } of byUrl.values()) {
+    let location = [...locations].join(LOCATION_SEPARATOR);
+    if (tele && !/remote/i.test(location)) {
+      location = location ? `${location}${LOCATION_SEPARATOR}Remote` : 'Remote';
+    }
+    job.location = location;
   }
   return jobs;
 }

@@ -1,7 +1,7 @@
 // Every CLI with a documented headless invocation must be selectable in the web UI.
 //
 // This guards the drift that let Grok Build CLI go missing: it was wired into
-// doctor.mjs (VALID_CLIS), the scaffolder, docs/SUPPORTED_CLIS.md, the README
+// lib/agent-cli.mjs (AGENT_CLIS), the scaffolder, docs/SUPPORTED_CLIS.md, the README
 // and .grok/skills/, yet KNOWN in web/src/lib/clis.ts never listed it — so the
 // web UI silently could not run on it. Nothing tied the two lists together.
 //
@@ -47,6 +47,12 @@ test("every documented headless CLI is selectable in the web UI", () => {
   const known = knownBins(src);
   const missing = [...documentedHeadlessBins(md)].filter((bin) => !known.has(bin));
   assert.deepEqual(missing, [], `documented headless but absent from KNOWN in clis.ts: ${missing.join(", ")}`);
+});
+
+test("Hermes Agent is wired up with one-shot args", () => {
+  assert.match(src, /id:\s*"hermes"/, "KNOWN is missing the hermes entry");
+  assert.match(src, /bin:\s*"hermes"/, "the hermes entry must spawn the `hermes` binary");
+  assert.match(src, /\["chat",\s*"-q",\s*p,\s*"--oneshot",\s*"-Q",\s*"--no-restore-cwd"\]/, "Hermes must use non-resuming quiet one-shot mode");
 });
 
 test("Grok Build CLI is wired up", () => {

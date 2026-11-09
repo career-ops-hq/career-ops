@@ -16,6 +16,7 @@ import { pass, fail, ROOT, NODE } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { pathToFileURL } from 'url';
 import { execFileSync } from 'child_process';
 
 console.log('\nscan.mjs - pipeline and scan-history paths are env-overridable (#2271)');
@@ -242,5 +243,43 @@ function entries(pipelinePath) {
     }
     rmSync(dir, { recursive: true, force: true });
     rmSync(ambientRoot, { recursive: true, force: true });
+  }
+}
+
+
+// 6. Importing scan.mjs must not create data/ on its own - the module has three
+//    write-time paths (pipeline, scan-history, scan-runs) and none of them
+//    should fire before a caller actually asks for a write (#3159).
+//
+//    CAREER_OPS_ROOT is pinned to the temp dir, and that pin is the whole test.
+//    scan.mjs anchors its paths to getCareerOpsRoot(), NOT to the cwd, so with
+//    the variable unset an import-time mkdir lands in the REPO's own data/ --
+//    a directory that already exists on every developer machine and in CI. The
+//    assertion below would look at the empty temp dir, see no data/, and pass
+//    while the regression it guards was live. Setting cwd alone is inert here.
+//    With the root pinned, the only data/ scan.mjs can create is this one.
+{
+  const dir = mkdtempSync(join(tmpdir(), 'scan-outpaths-import-'));
+  try {
+    const scanUrl = pathToFileURL(join(ROOT, 'scan.mjs')).href;
+    // The two overrides are cleared so an ambient value in the developer's own
+    // shell cannot redirect scan-history/pipeline out of the directory watched.
+    const env = { ...process.env, CAREER_OPS_ROOT: dir };
+    delete env.CAREER_OPS_SCAN_HISTORY;
+    delete env.CAREER_OPS_PIPELINE;
+    execFileSync(NODE, ['--input-type=module', '-e', `import(${JSON.stringify(scanUrl)})`], {
+      cwd: dir,
+      env,
+      encoding: 'utf-8',
+    });
+    if (!existsSync(join(dir, 'data'))) {
+      pass('importing scan.mjs does not create data/ as a side effect (#3159)');
+    } else {
+      fail('importing scan.mjs created a data/ directory with no write ever requested (#3159)');
+    }
+  } catch (err) {
+    fail(`import-only spawn failed: ${err.message}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }

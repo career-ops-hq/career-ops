@@ -49,6 +49,10 @@ const P_HASHTAG_NO_TITLE = post(12479, '2026-09-04T09:00:00+00:00', `#middle #у
 // Same template, but the third line is a bare pasted link — t.me autolinks a
 // raw URL with the URL itself as the anchor's visible text — not a title.
 const P_HASHTAG_BARE_LINK = post(12478, '2026-09-04T08:00:00+00:00', `#middle #удаленка<br/>Т1<br/>${A('https://career.t1.ru/vacancies/vacancy-detail?id=136067001')}`);
+// Same template, but the line after the tags is a role, not an employer. The
+// shape has no marker pinning that line to "employer", so a role there must
+// drop the post rather than emit `company: 'Product Owner'`.
+const P_HASHTAG_ROLE = post(12477, '2026-09-04T07:00:00+00:00', `#middle #удаленка<br/>Product Owner<br/>Senior Python Developer<br/>${A('https://career.t1.ru/vacancies/vacancy-detail?id=136067001')}`);
 // The shapes the policy drops.
 const P_NO_NAME = post(12503, '2026-08-25T10:00:00+00:00', `Ищем UE5 разработчика (кооп / прототип выживача)<br/>О проекте: делаем прототип.<br/>Писать: @hr_handle · ${A('https://ll-games.com/en/jobs/ue5')}`);
 const P_NO_LINK = post(12502, '2026-08-24T10:00:00+00:00', `🔵 Финансовый аналитик<br/>🏢 Компания: deeplay<br/>📍 Локация: Санкт-Петербург${FOOTER}`);
@@ -133,6 +137,14 @@ try {
     [['Engineering Manager @ Constructor‍.io'], 'Constructor.io', 'zero-width characters are stripped from the name'],
     [['#middle #удаленка', 'Т1', 'Data Science (LLM/NLP)'], 'Т1', 'a hashtag-only first line, bare employer alone on the next (measured live 2026-09-05)'],
     [['#senior #гибрид #москва', 'X5 Медиа', 'Ведущий backend-разработчик'], 'X5 Медиа', 'a hashtag-only first line, employer name carrying a digit'],
+    [['#middle #офис', 'ПАО Сбербанк', 'Java-разработчик'], 'ПАО Сбербанк', 'a hashtag-only first line, employer name carrying a legal form'],
+    [['#senior #удаленка', 'Лаборатория Касперского', 'Инженер по безопасности'], 'Лаборатория Касперского', 'a hashtag-only first line, a two-word employer name'],
+    [['#middle', 'Product Hunt', 'Backend Engineer'], 'Product Hunt', 'a hashtag-only first line, an employer name that starts with a role modifier'],
+    // #4479 (CodeRabbit review on #4455's fix): the single-pipe ROLE_WORD_RE
+    // guard must reject only a BARE role word, not any employer name that
+    // happens to contain one as a substring — "Senior Labs" is a legitimate
+    // company name, not the bare word "Senior".
+    [['Engineer | Senior Labs'], 'Senior Labs', 'a single-pipe employer name that legitimately contains a role word as part of it'],
   ];
   for (const [lines, want, label] of names) {
     const got = employerName(lines);
@@ -151,8 +163,89 @@ try {
     [['#senior #удаленка', 'Senior Engineer'], 'a hashtag-only first line whose next line is a short role title, not an employer'],
     [['#middle #гибрид', 'Ведущий инженер'], 'a hashtag-only first line whose next line is a short Russian role title (JS \\b never matches around Cyrillic)'],
     [['#tag1 #tag2'], 'a hashtag-only first line with no second line at all'],
+    [['#job #python', 'Product Owner', 'Senior Python Developer'], 'a hashtag-only first line whose next line is a role with no role noun of the first list ("Product Owner")'],
+    [['#senior #удаленка', 'QA Engineer'], 'a hashtag-only first line whose next line is a role acronym'],
+    [['#middle #гибрид', 'Тестировщик'], 'a hashtag-only first line whose next line is a one-word Russian role'],
+    [['#lead', 'Руководитель отдела'], 'a hashtag-only first line whose next line names a head of department'],
+    [['#remote', 'Релокация', 'Senior Engineer'], 'a relocation term on the hashtag template'],
+    [['#remote', 'Relocation to Serbia', 'Senior Engineer'], 'a relocation phrase on the hashtag template'],
+    [['#remote', 'Гибрид Москва', 'Senior Engineer'], 'a work format and a city on the hashtag template'],
+    [['#remote', 'Гибрид (Москва)', 'Senior Engineer'], 'a work format and a parenthesised city on the hashtag template'],
+    [['Data Engineer', 'от 200 000 до 230 000 ₽', 'Relocation available'], 'a relocation phrase after the salary line'],
+    [['Go Developer в Relocation available'], 'a relocation phrase after `в`'],
+    // #4455: a title packing several pipe-delimited metadata tags is a
+    // different shape from "Title | Employer" — the non-greedy `[^|]`
+    // capture can only land on the LAST segment, which is whichever tag the
+    // template puts there (here, "IC"), never the employer. Both are
+    // measured live on @revacancy, 2026-09-24.
+    [['🟥 Ten Square Games - Mid/ Senior UI/UX Designer | 3 year(s) | Senior | IC', '▫️ Ten Square Games | Gaming'], 'a title with 3 pipes (multi-field template), employer named on the next line but not recovered by this heuristic'],
+    [['🟥 Senior Backend Developer | 5 year(s) | Senior | IC', '▫️ Financial technology'], 'a title with 3 pipes and no employer named anywhere in the post'],
+    // Defense in depth for the ordinary single-pipe shape: even with exactly
+    // one `|`, a bare seniority/role word after it is never a real employer.
+    [['Some Role Title | Senior'], 'a single-pipe title whose captured segment is a bare seniority word'],
   ];
   for (const [lines, label] of noNames) {
+    const got = employerName(lines);
+    if (got === '') pass(`employerName() refuses ${label}`);
+    else fail(`employerName(${label}) = ${JSON.stringify(got)}, want ''`);
+  }
+  // Every role token added for the hashtag template (#3928), one bare second
+  // line each, so a typo in any alternative of ROLE_WORD_RE fails its own row.
+  const roleTokens = ['Product Owner', 'QA', 'Tester', 'DevOps', 'SRE', 'Тестировщик', 'Тимлид', 'Владелец продукта', 'Руководитель', 'Маркетолог', 'Программист'];
+  for (const token of roleTokens) {
+    const got = employerName(['#middle #удаленка', token, 'Описание']);
+    if (got === '') pass(`employerName() refuses the role token "${token}" on the hashtag template`);
+    else fail(`employerName(hashtag + "${token}") = ${JSON.stringify(got)}, want ''`);
+  }
+
+  // Positional shapes (2026-10-31): the employer is read from where the
+  // channel template puts it, with no label. Each line below is a real
+  // first line (or first lines) from the channel named.
+  const positional = [
+    [['Chief Technology Officer в MadOut Games', 'РФ или удаленно'], 'MadOut Games', '"Title в Employer" on the title line (@gdjobs)'],
+    [['✈️ Product Analyst в Авиасейлс (команда SERP)'], 'Авиасейлс', '"Title в Employer (team)" behind an emoji (@sparklesjobs)'],
+    [['Senior Product Manager, Core Platform в Tabby : https://www.remocate.app/jobs/senior-product-manager-core-platform-tabby'], 'Tabby', '"Title в Employer : link" (@evacuatejobs)'],
+    [['🛰 Go-разработчик в TATLIN.UNIFIED — YADRO'], 'YADRO', '"Title в Team — Company" keeps the company (@godevjob)'],
+    [['🛰 Golang-разработчик в БЮРО 1440'], 'БЮРО 1440', 'a positional employer may carry digits'],
+    [['💻 Wildberries ищет iOS-разработчика для мессенджера WB Chat'], 'Wildberries', '"Employer ищет …" (@mobiledevjob)'],
+    [['💻 МТС Банк ищет iOS-разработчика для кредитных продуктов в «Мой МТС»'], 'МТС Банк', '"Employer ищет …" ahead of a later `в` (@mobiledevjob)'],
+    [['Требуется « Full-stack разработчик на Go» (от 256 000 до 280 000 ₽)', 'Компания «Top Selection» ищет хорошего специалиста'], 'Top Selection', '"Компания «Employer» ищет" on the second line (@progjob)'],
+    [['📑 Вакансия Senior Frontend Developer', 'Удалённо · Полная занятость', '💎 Plus8Soft ищет Senior Frontend Developer'], 'Plus8Soft', '"Employer ищет" on the third line (@frontend_jobs_vakansii)'],
+    [['#backend', 'YLAB Development', 'Python Backend Developer'], 'YLAB Development', 'a brand token keeps a name ending in a department word'],
+    [['Senior Python Developer в Moscow Exchange'], 'Moscow Exchange', 'a name that only starts with a place keeps it'],
+    [['Backend Developer', 'Компания: NDA Group'], 'NDA Group', 'a name that only starts with NDA keeps it'],
+    [['#remote', 'Relocation Today', 'Backend Engineer'], 'Relocation Today', 'a name that holds a format word keeps it on the hashtag template'],
+    [['Backend Developer в Relocation Today'], 'Relocation Today', 'a name that holds a format word keeps it after `в`'],
+    [['Backend Engineer', 'The Trade Desk is a global advertising technology company.'], 'The Trade Desk', 'a three-word name opening with "The" before "is a"'],
+    [['iOS Engineer – Creative App', 'ElevenLabs is an AI research and product company.'], 'ElevenLabs', '"Employer is a …" on the second line (@forallmobile)'],
+    [['Data Engineer (со знанием Java или Groovy)', 'от 200 000 до 230 000 ₽', 'WILIX', 'WILIX - аккредитованная IT - компания.'], 'WILIX', 'a finder.work mirror\'s employer after the salary line (@jc_it)'],
+  ];
+  for (const [lines, want, label] of positional) {
+    const got = employerName(lines);
+    if (got === want) pass(`employerName() reads ${label}`);
+    else fail(`employerName(${label}) = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  }
+  // What the same positions hold when it is not an employer, all measured.
+  const positionalRefused = [
+    [['🇦🇪 Вакансия Executive Assistant / Chief of Staff с переездом в Дубай'], 'a destination after "с переездом в"'],
+    [['🇨🇿 🇪🇸 Вакансия Senior Commercial Manager в Чехии или Испании'], 'a phrase of places after `в`'],
+    [['🇵🇹 Вакансия для парфюмера в Лиссабоне'], 'one declined Cyrillic word after `в` (a city)'],
+    [['💻 Golang-разработчик в команду CDP, 2ГИС'], 'a team after `в`'],
+    [['Sales Manager в FinTech'], 'a sector after `в`'],
+    [['Требуется «ML Engineer в Поиск»'], 'a `в` inside a quoted title'],
+    [['Крупная российская ИТ-компания ищет сильного Head of Mobile Engineering'], 'an unnamed company that "ищет"'],
+    [['Рекрутер Vital Partners ищет архитектора для неназванной финтех-организации'], 'a recruiter that "ищет"'],
+    [['😀 Senior JavaScript Developer', 'от 250 000 ₽ в месяц', 'Удаленно (Москва)'], 'a work format after the salary line'],
+    [['Golang-разработчик (Middle+), продуктовая команда', 'от 350 000 ₽', 'Иванова Мария Петровна'], 'a person after the salary line (fictional name, real shape)'],
+    [['Backend Engineer', 'This is a full-time role.'], 'a pronoun before "is a"'],
+    [['Backend Engineer', 'This role is a full-time position.'], 'a determiner and one word before "is a"'],
+    [['Go Developer в Алматы'], 'an undeclined city after `в`'],
+    [['Data Engineer', 'от 200 000 до 230 000 ₽', 'Москва'], 'a city after the salary line'],
+    [['#Develpment', 'Custom Software Development', 'Worldwide 🌏'], 'a line of business on the hashtag template'],
+    [['#Marketing', 'Worldwide 🌏', 'SEO / AI, Affiliate iGaming', 'remote'], 'a reach on the hashtag template (@remote_jobs_relocate)'],
+    [['AI-разработчик (Python/Go) — автоматизация в AdTech', 'Локация: Удалённо', 'Компания: NDA'], 'an NDA after the `Компания:` label (@backend_frontend_jobs)'],
+  ];
+  for (const [lines, label] of positionalRefused) {
     const got = employerName(lines);
     if (got === '') pass(`employerName() refuses ${label}`);
     else fail(`employerName(${label}) = ${JSON.stringify(got)}, want ''`);
@@ -165,6 +258,21 @@ try {
     ['https://neklo.peopleforce.io/careers/v/1234', 'employer', 'a tenant ATS host'],
     ['https://getmatch.ru/vacancies/33927-data-engineer?s=bot', 'board', 'a board\'s per-vacancy page'],
     ['https://www.linkedin.com/jobs/view/4123456789/', 'board', 'a LinkedIn job page'],
+    // career.habr.com is a subdomain of habr.com, a long-read host: the board
+    // check must come first, or every Proglib channel's links are dropped.
+    ['https://career.habr.com/vacancies/1000169492', 'board', 'a Habr Career vacancy (a habr.com subdomain)'],
+    ['https://career.habr.com/vacancies/1000169492/?utm_source=tg', 'board', 'a Habr Career vacancy with a trailing slash and a tracking tail'],
+    ['https://career.habr.com/companies/job', null, 'a Habr Career company profile whose slug is a vacancy word'],
+    ['https://career.habr.com/companies/yandex/vacancies', null, 'a Habr Career company\'s vacancy list'],
+    ['https://career.habr.com/vacancies?q=go', null, 'a Habr Career search'],
+    ['https://habr.com/ru/articles/912345/', null, 'a Habr article'],
+    ['https://www.vseti.app/vakansii/3474384343943943943434343', null, 'a vseti.app aggregator page'],
+    ['https://ingamejob.com/en/job/qa-game-tester', 'board', 'an InGame Job vacancy page (operator declared)'],
+    // A mirror whose operator is not declared yet is refused, not read as
+    // the employer's own site.
+    ['https://www.remocate.app/jobs/staff-software-engineer-backend-recoveries-affirm', null, 'a Remocate mirror page (operator not declared yet)'],
+    ['https://offerclaw.app/vacancy/chief-technology-officer-tekhnicheskiy-direktor-83351aab', null, 'an offerclaw mirror page (operator not declared yet)'],
+    ['https://hellowehire.com/jobs/middle-business-analyst-t24-vietnam-company-fdcfb8fcb5', null, 'a recruiter intake page on a shared ATS'],
     ['https://getmatch.ru/companies/PLln3LRJ-ostrovok', null, 'a board\'s company page'],
     ['https://www.linkedin.com/posts/example-user-000000000_activity-1', null, 'a LinkedIn post'],
     ['https://acme.example/blog/2024/company-update', null, 'a dated blog post (a bare year segment is not a vacancy id)'],
@@ -262,6 +370,95 @@ try {
   const hashtagBareLinkJob = postToJob(parseChannelPage(page(P_HASHTAG_BARE_LINK), 'devjobs').posts[0]);
   if (hashtagBareLinkJob === null) pass('a hashtag-first post whose only remaining line is the bare vacancy URL is dropped rather than emitting the URL as title');
   else fail(`hashtag post with bare-link-only line = ${JSON.stringify(hashtagBareLinkJob)}`);
+
+  // A hashtag-first post whose second line is a role: the vacancy link is
+  // valid, so the only thing that can drop the post is the employer check.
+  const hashtagRoleJob = postToJob(parseChannelPage(page(P_HASHTAG_ROLE), 'devjobs').posts[0]);
+  if (hashtagRoleJob === null) pass('a hashtag-first post whose employer line is a role ("Product Owner") is dropped rather than attributed to that role');
+  else fail(`hashtag post with a role on the employer line = ${JSON.stringify(hashtagRoleJob)}`);
+
+  // The matched employer can be a labelled field or a second-line at/в
+  // phrase, not just the bare name. These fixtures exercise the HTML path.
+  const hashtagEmployerCases = [
+    ['RU company field', '<b>🏢 Компания:</b> Контур', 'Контур', 'MLOps-инженер'],
+    ['EN company field', 'Company: Picnic', 'Picnic', 'Backend Developer'],
+    ['RU second-line employer', 'в Kaspi — fintech-экосистема.', 'Kaspi', 'Backend Developer'],
+    ['EN second-line employer', 'at Picnic — grocery delivery.', 'Picnic', 'Backend Developer'],
+    ['mixed-case EN employer metadata', 'Company: Picnic<br/>at PICNIC — Backend Developer', 'Picnic', 'Platform Engineer'],
+    ['mixed-case RU employer metadata', 'Компания: Контур<br/>в КОНТУР — разработка сервисов.', 'Контур', 'MLOps-инженер'],
+    ['mixed-case bare employer', 'Company: Picnic<br/>PICNIC', 'Picnic', 'Platform Engineer'],
+  ];
+  const hashtagApplyUrl = 'https://example.com/jobs/12345';
+  for (const [label, employerHtml, company, role] of hashtagEmployerCases) {
+    const date = '2026-09-04T10:00:00+00:00';
+    const html = post(12470, date, `#middle #удаленка<br/>${employerHtml}<br/>${role}<br/>${A(hashtagApplyUrl)}`);
+    const [parsedPost] = parseChannelPage(page(html), 'devjobs').posts;
+    const job = postToJob(parsedPost);
+    if (job?.title === role) pass(`hashtag title skips the recognized ${label}`);
+    else fail(`${label} title = ${JSON.stringify(job?.title)}, expected ${JSON.stringify(role)}`);
+    if (job?.company === company && job.url === hashtagApplyUrl
+        && job.description === `${parsedPost.description}\n\nSource: https://t.me/devjobs/12470`
+        && job.postedAt === Date.parse(date)) {
+      pass(`${label} keeps the employer, vacancy URL, full post and source attribution`);
+    } else fail(`${label} attribution = ${JSON.stringify(job)}`);
+
+    const noTitleHtml = post(12469, date, `#middle #удаленка<br/>${employerHtml}<br/>#remote<br/>${A(hashtagApplyUrl)}`);
+    const noTitle = postToJob(parseChannelPage(page(noTitleHtml), 'devjobs').posts[0]);
+    if (noTitle === null) pass(`${label} with only tags and a bare link has no title and is dropped`);
+    else fail(`${label} without a role = ${JSON.stringify(noTitle)}`);
+  }
+
+  // Parsing a candidate as a whole post would mistake @/| role headlines for
+  // employer-only metadata; broad at/в prefixes would also discard real titles.
+  for (const role of ['Backend Developer @ Picnic', 'Backend Developer @ PICNIC', 'Backend Developer | Picnic', 'at-scale Backend Developer', 'внутренний IT-аналитик']) {
+    const html = post(12468, '2026-09-04T10:00:00+00:00', `#middle #remote<br/>Company: Picnic<br/>${role}<br/>${A(hashtagApplyUrl)}`);
+    const job = postToJob(parseChannelPage(page(html), 'devjobs').posts[0]);
+    if (job?.title === role && job.company === 'Picnic' && job.url === hashtagApplyUrl) {
+      pass(`hashtag metadata skipping preserves the actual role: ${role}`);
+    } else fail(`actual role ${JSON.stringify(role)} became ${JSON.stringify(job)}`);
+  }
+
+  // A post that names the agency up top and says further down that the
+  // employer is withheld is the agency's post: dropped. A post that only
+  // withholds the salary is not (both measured on Proglib, 2026-10-31).
+  const HABR = 'https://career.habr.com/vacancies/1000168612';
+  const agencyJob = postToJob(parseChannelPage(page(post(12460, '2026-09-04T10:00:00+00:00', `💻 Top Selection ищет Angular-разработчика<br/>Удалённо · зарплата не указана<br/>Подбор ведёт агентство Top Selection, название компании-заказчика не раскрыто.<br/>${A(HABR, 'Откликнуться')}`)), 'devjobs').posts[0]);
+  if (agencyJob === null) pass('a post saying the employer\'s name is withheld ("название компании-заказчика не раскрыто") is dropped, wherever the line sits');
+  else fail(`agency post = ${JSON.stringify(agencyJob)}`);
+  for (const withheld of ['название компании заказчика не раскрыто', 'наименование компании не раскрывается']) {
+    const job = postToJob(parseChannelPage(page(post(12461, '2026-09-04T10:00:00+00:00', `💻 Top Selection ищет Angular-разработчика<br/>Подбор ведёт агентство Top Selection, ${withheld}.<br/>${A(HABR, 'Откликнуться')}`)), 'devjobs').posts[0]);
+    if (job === null) pass(`a post saying "${withheld}" is dropped too`);
+    else fail(`"${withheld}" post = ${JSON.stringify(job)}`);
+  }
+  const salaryHidden = postToJob(parseChannelPage(page(post(12459, '2026-09-04T10:00:00+00:00', `💻 YADRO ищет C++ разработчика для серверных прошивок<br/>Нижний Новгород. Зарплата не раскрыта.<br/>${A(HABR, 'Откликнуться')}`)), 'devjobs').posts[0]);
+  if (salaryHidden?.company === 'YADRO' && salaryHidden.url === HABR) pass('a post that withholds only the salary ("Зарплата не раскрыта") keeps its employer and Habr Career link');
+  else fail(`salary-hidden post = ${JSON.stringify(salaryHidden)}`);
+
+  // A Remocate-template title carries the link it points to; cut at TITLE_CAP it would
+  // end in "… :…".
+  const remocateUrl = 'https://tabby.ai/careers/senior-product-manager-core-platform-with-a-long-slug';
+  const remocate = postToJob(parseChannelPage(page(post(12458, '2026-09-04T10:00:00+00:00', `Senior Product Manager, Core Platform в Tabby : ${A(remocateUrl)}<br/>Помогают с релокацией (Сербия).`)), 'devjobs').posts[0]);
+  if (remocate?.title === 'Senior Product Manager, Core Platform в Tabby' && remocate.company === 'Tabby' && remocate.url === remocateUrl) pass('a pasted link at the end of the title line is the url, not part of the title');
+  else fail(`remocate post = ${JSON.stringify(remocate)}`);
+
+  // On the hashtag template a "Worldwide 🌏" / "remote" line is not a title.
+  const reach = postToJob(parseChannelPage(page(post(12457, '2026-09-04T10:00:00+00:00', `#Analytics<br/>Plurio<br/>Worldwide 🌏<br/>Senior Marketing Analyst (Americas)<br/>remote<br/>${A('https://www.plurio.ai/careers/senior-marketing-analyst')}`)), 'devjobs').posts[0]);
+  if (reach?.title === 'Senior Marketing Analyst (Americas)' && reach.company === 'Plurio') pass('the hashtag template skips a work-format line ("Worldwide 🌏") when choosing the title');
+  else fail(`hashtag reach post = ${JSON.stringify(reach)}`);
+  for (const term of ['Full-time', 'Part-time', 'Релокация']) {
+    const job = postToJob(parseChannelPage(page(post(12455, '2026-09-04T10:00:00+00:00', `#Analytics<br/>Plurio<br/>${term}<br/>Senior Marketing Analyst<br/>${A('https://www.plurio.ai/careers/senior-marketing-analyst')}`)), 'devjobs').posts[0]);
+    if (job?.title === 'Senior Marketing Analyst') pass(`the hashtag template skips a "${term}" line when choosing the title`);
+    else fail(`hashtag "${term}" post = ${JSON.stringify(job)}`);
+  }
+
+  // A run of adjacent work-format words ending in a digit used to backtrack
+  // exponentially in FORMAT_ONLY_RE while choosing the hashtag-template
+  // title: at 60 words the scan would never return.
+  const started = performance.now();
+  const formatRun = postToJob(parseChannelPage(page(post(12456, '2026-09-04T10:00:00+00:00', `#Analytics<br/>Plurio<br/>${'офис'.repeat(60)}1<br/>${A('https://www.plurio.ai/careers/senior-marketing-analyst')}`)), 'devjobs').posts[0]);
+  const elapsed = performance.now() - started;
+  if (elapsed < 1000 && formatRun?.title.startsWith('офисофис')) pass(`a run of 60 work-format words ending in a digit is read in ${elapsed.toFixed(0)}ms, not backtracked`);
+  else fail(`format run took ${elapsed.toFixed(0)}ms, post = ${JSON.stringify(formatRun)}`);
 
   // --- fetch: redirect guard, mapping, paging ------------------------------
   const calls = [];

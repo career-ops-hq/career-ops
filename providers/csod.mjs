@@ -33,6 +33,7 @@
 // vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
 // radancy (#2487, #2921).
 import { decodeEntities } from './_html-entities.mjs';
+import { sleep } from './_http.mjs';
 
 const PAGE_SIZE = 25; // server default; verified OHB serves exactly 25/page
 const MAX_PAGES = 40; // safety cap on request count (40*25 = 1000 postings)
@@ -206,14 +207,13 @@ export default {
     const token = extractToken(html);
     if (!token) throw new Error(`csod: no anonymous token on ${cfg.homeUrl}`);
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const jobs = [];
     const seen = new Set();
     let total = null;
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await wait(PAGE_DELAY_MS);
+      if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       const json = await ctx.fetchJson(cfg.searchApi, {
         method: 'POST',
         redirect: 'error',
@@ -246,6 +246,10 @@ export default {
         total = typeof json?.data?.totalCount === 'number' ? json.data.totalCount : null;
       }
       const rows = parseRequisitions(json, cfg);
+      // Rows the source returned, before parseRequisitions() dropped any. The
+      // short-page stop below must use this: a full page with one untitled
+      // requisition would otherwise read as the last page.
+      const rawCount = Array.isArray(json?.data?.requisitions) ? json.data.requisitions.length : 0;
       if (rows.length === 0) break;
 
       let fresh = 0;
@@ -262,7 +266,7 @@ export default {
       if (fresh === 0) break;
       if (jobs.length >= MAX_JOBS) break;
       if (total !== null && page * PAGE_SIZE >= total) break;
-      if (rows.length < PAGE_SIZE) break;
+      if (rawCount < PAGE_SIZE) break;
     }
     return jobs;
   },

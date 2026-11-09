@@ -1,26 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
+import { useListSearch } from "@/lib/use-list-search";
 import { CalendarClock, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { LogDialog } from "@/components/followups/log-dialog";
+import { QuietCompanies } from "@/components/followups/quiet-companies";
 import { NextDateDialog } from "@/components/followups/next-date-dialog";
+import { FollowupStatusSelect } from "@/components/followups/followup-status-select";
 import { scoreTone } from "@/lib/format";
 import {
   type CadenceEntry,
   type CadenceMetadata,
   type Urgency,
   daysHeatClass,
-  followupStatusTone,
   oxfordJoin,
   relativeDays,
   urgencyRank,
   urgencyTone,
 } from "@/lib/followups";
 import { cn } from "@/lib/cn";
+import { FollowupsTableRowsSkeleton } from "@/components/page-loading-skeletons";
+import { startRouteProgress } from "@/components/route-progress";
+import { selectUpcomingFollowups } from "@/lib/core/followup-view.mjs";
+import { followupsSummarySlot } from "@/lib/followups-summary-slot.mjs";
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
 // touch is due, and the permanent history of every follow-up sent. The verdict
@@ -76,12 +83,14 @@ type CadenceResponse = {
   available: boolean;
   metadata: CadenceMetadata | null;
   entries: CadenceEntry[];
+  upcoming?: CadenceEntry[];
 };
 
 export function FollowupsView() {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
 
   const [data, setData] = useState<CadenceResponse | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -106,30 +115,33 @@ export function FollowupsView() {
   const sortKey: SortKey | null = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : null;
   const dir = (params.get("dir") === "-1" ? -1 : 1) as 1 | -1;
 
-  const [q, setQ] = useState(params.get("q") ?? "");
-  const lastUrlQ = useRef(params.get("q") ?? "");
-  useEffect(() => {
-    const urlQ = params.get("q") ?? "";
-    if (urlQ !== lastUrlQ.current) {
-      lastUrlQ.current = urlQ;
-      setQ(urlQ);
-    }
-  }, [params]);
-
-  const setParams = useCallback(
+  const qRef = useRef(params.get("q") ?? "");
+  const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
-      const sp = new URLSearchParams(params.toString());
-      for (const [k, v] of Object.entries(updates)) {
-        if (v == null || v === "") sp.delete(k);
-        else sp.set(k, String(v));
+      const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
+      if (qs === params.toString()) return false;
+      const href = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Search already filtered the rows. A transition would hide them.
+      if (isSearchOnlyWrite(updates)) {
+        router.replace(href, { scroll: false });
+        return true;
       }
-      const qs = sp.toString();
-      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+      startRouteProgress();
+      startTransition(() => {
+        router.replace(href, { scroll: false });
+      });
+      return true;
     },
-    [params, router, pathname],
+    [params, router, pathname, startTransition],
   );
+  const { q, setQ, setParams } = useListSearch(params, commitParams, qRef);
 
   const entries = useMemo(() => (data?.available ? data.entries : []), [data]);
+  const upcoming = useMemo(() => {
+    if (!data?.available) return [];
+    if (Array.isArray(data.upcoming)) return data.upcoming;
+    return selectUpcomingFollowups(data.entries);
+  }, [data]);
   const meta = data?.available ? data.metadata : null;
 
   const filtering = tab !== "ALL" || q.trim().length > 0;
@@ -198,6 +210,9 @@ export function FollowupsView() {
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">Follow-up Tracker</h1>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
+          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-faint">
+            Use <span className="font-medium text-muted">Log</span> after you actually send an email, LinkedIn message, or call. The count and next date update automatically; status changes recalculate urgency, while <span className="font-medium text-muted">Next date</span> lets you pin a custom reminder.
+          </p>
         </div>
         <div className="relative w-56 max-w-[35vw]">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
@@ -210,7 +225,18 @@ export function FollowupsView() {
         </div>
       </div>
 
-      {meta && !filtering && <NarrativeCard meta={meta} entries={entries} />}
+      {followupsSummarySlot({
+        pending: !data,
+        filtering,
+        hasSummary: Boolean(meta),
+        due: (meta?.overdue ?? 0) + (meta?.urgent ?? 0),
+      }) === "reserved" ? (
+        <div className="mt-5 rounded-xl border border-transparent px-4 py-3 text-sm leading-5" aria-hidden="true">
+          <div className="h-10" />
+        </div>
+      ) : (
+        meta && !filtering && <NarrativeCard meta={meta} entries={entries} />
+      )}
 
       {/* urgency filter */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
@@ -233,9 +259,9 @@ export function FollowupsView() {
 
       {actionError && <p className="mt-3 text-xs text-red-500">{actionError}</p>}
 
-      {!data ? null : !data.available ? (
+      {data && !data.available ? (
         <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
-      ) : filtered.length === 0 ? (
+      ) : data && !isPending && filtered.length === 0 ? (
         filtering ? (
           <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />
         ) : (
@@ -246,7 +272,7 @@ export function FollowupsView() {
           <table className="w-full min-w-[880px] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
-                <th className="w-8 px-2 py-2.5" aria-label="Expand" />
+                <th className="w-8 px-2 py-2.5"><span className="sr-only">Expand</span></th>
                 {COLUMNS.map((c) => {
                   const active = sortKey === c.key;
                   return (
@@ -271,8 +297,8 @@ export function FollowupsView() {
                 <th className="px-2.5 py-2.5 font-medium">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map((e) => (
+            <tbody className="divide-y divide-border" aria-busy={!data || isPending}>
+              {!data || isPending ? <FollowupsTableRowsSkeleton /> : filtered.map((e) => (
                 <FollowupRow
                   key={e.num}
                   entry={e}
@@ -280,6 +306,7 @@ export function FollowupsView() {
                   onToggle={() => toggleExpand(e.num)}
                   onLog={() => setDialogFor(e)}
                   onPin={() => setPinFor(e)}
+                  onStatusSaved={refetch}
                   onRemove={removeLogged}
                 />
               ))}
@@ -287,6 +314,28 @@ export function FollowupsView() {
           </table>
         </div>
       )}
+
+      {data?.available && upcoming.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">Upcoming</h2>
+          <p className="mt-1 text-xs text-faint">These have a next date and are not due yet.</p>
+          <ul className="mt-3 divide-y divide-border rounded-2xl border border-border">
+            {upcoming.map((entry) => (
+              <li key={entry.num} className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 text-sm">
+                <Link href={`/pipeline/${entry.num}`} className="font-medium text-foreground hover:text-brand-text">
+                  {entry.company}
+                  {entry.role ? <span className="font-normal text-muted"> · {entry.role}</span> : null}
+                </Link>
+                <span className="tabular-nums text-faint">{entry.nextFollowupDate}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Below the due list: a follow-up you can still send outranks a company
+          that has already stopped replying. */}
+      {data && <QuietCompanies />}
 
       {dialogFor && <LogDialog entry={dialogFor} onClose={() => setDialogFor(null)} onLogged={refetch} />}
       {pinFor && <NextDateDialog entry={pinFor} onClose={() => setPinFor(null)} onChanged={refetch} />}
@@ -300,10 +349,7 @@ function NarrativeCard({ meta, entries }: { meta: CadenceMetadata; entries: Cade
   const due = meta.overdue + meta.urgent;
   if (due <= 0) return null;
 
-  const pressing = [...entries]
-    .filter((e) => e.urgency === "overdue" || e.urgency === "urgent")
-    .sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || b.daysSinceApplication - a.daysSinceApplication)
-    .slice(0, 4);
+  const pressing = entries.filter((e) => e.urgency === "overdue" || e.urgency === "urgent").slice(0, 4);
 
   const parts: string[] = [];
   if (meta.overdue > 0) parts.push(`Overdue follow-ups: ${meta.overdue}`);
@@ -333,6 +379,7 @@ function FollowupRow({
   onToggle,
   onLog,
   onPin,
+  onStatusSaved,
   onRemove,
 }: {
   entry: CadenceEntry;
@@ -340,6 +387,7 @@ function FollowupRow({
   onToggle: () => void;
   onLog: () => void;
   onPin: () => void;
+  onStatusSaved: () => void;
   onRemove: (num: number) => void;
 }) {
   const statusLabel = e.status.charAt(0).toUpperCase() + e.status.slice(1);
@@ -360,7 +408,7 @@ function FollowupRow({
         </td>
         <td className="px-2.5 py-3 font-medium">
           {e.reportPath ? (
-            <Link href={`/pipeline/${e.num}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+            <Link href={`/pipeline/${e.num}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
               <CompanyLogo name={e.company} size={20} />
               {e.company}
             </Link>
@@ -376,17 +424,22 @@ function FollowupRow({
           <Badge tone={scoreTone(e.score)}>{e.score || "—"}</Badge>
         </td>
         <td className="px-2.5 py-3">
-          <Badge tone={followupStatusTone(e.status)}>{statusLabel}</Badge>
+          <FollowupStatusSelect n={e.num} current={statusLabel} onSaved={onStatusSaved} />
         </td>
         <td className="px-2.5 py-3">
-          <Badge tone={urgencyTone(e.urgency)}>{e.urgency}</Badge>
+          <Badge
+            tone={urgencyTone(e.urgency)}
+            title="Urgency is calculated from status, follow-up history, and the next follow-up date"
+          >
+            {e.urgency}
+          </Badge>
         </td>
         <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceApplication))}>{e.daysSinceApplication}</td>
         <td className="whitespace-nowrap px-2.5 py-3">
           {e.daysUntilNext == null ? (
             <span className="text-faint">—</span>
           ) : (
-            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-600 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
+            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-700 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
               {relativeDays(e.daysUntilNext)}
             </span>
           )}
@@ -396,7 +449,7 @@ function FollowupRow({
               title={`Pinned to ${e.nextOverride} — cleared when you log a follow-up`}
               aria-label="Pinned manually"
             >
-              <Pin className="size-3 text-brand" />
+              <Pin className="size-3 text-brand-text" />
             </span>
           )}
         </td>
@@ -409,21 +462,24 @@ function FollowupRow({
             <button
               type="button"
               onClick={onLog}
+              aria-label={`Log follow-up for ${e.company}`}
               title="Log a follow-up (date, channel, contact, notes)"
-              className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand"
+              className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand-text"
             >
               Log
             </button>
             <button
               type="button"
               onClick={onPin}
+              aria-label={`Next date for ${e.company}`}
               title={e.nextOverride ? `Next date pinned to ${e.nextOverride} — change or clear` : "Pin a custom next follow-up date"}
               className={cn(
-                "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand",
-                e.nextOverride ? "text-brand" : "text-faint",
+                "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand-text",
+                e.nextOverride ? "text-brand-text" : "text-faint",
               )}
             >
               <CalendarClock className="size-3.5" />
+              <span className="hidden xl:inline">Next date</span>
             </button>
           </span>
         </td>
@@ -480,7 +536,7 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
           {e.contacts.map((c, i) => (
             <span key={c.email}>
               {i > 0 && ", "}
-              <a href={`mailto:${c.email}`} className="text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-brand">
+              <a href={`mailto:${c.email}`} className="text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-brand-text">
                 {c.name ? `${c.name} <${c.email}>` : c.email}
               </a>
             </span>

@@ -28,6 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { outcomeDirsFor, resolveOutcomeDir } from '../lib/outcome-dir.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -57,7 +58,7 @@ function record(dir, args) {
   // it updates the tracker, so a failure after the journal write leaves every
   // file these tests look for while r.error stays undefined — the assertions
   // below would pass on a command that failed.
-  assert.equal(r.status, 0, `outcome.mjs ${args.join(' ')} exited ${r.status}: ${r.stderr || r.stdout}`);
+  assert.equal(r.status, 0, describeSpawn(r, `outcome.mjs ${args.join(' ')} exited ${r.status}: ${r.stderr || r.stdout}`));
   return r;
 }
 

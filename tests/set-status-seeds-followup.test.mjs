@@ -21,10 +21,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-function sandbox(status = 'Evaluated') {
+function sandbox(status = 'Evaluated', notes = 'notes') {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-seed-'));
   mkdirSync(join(dir, 'data'), { recursive: true });
   writeFileSync(join(dir, 'data', 'applications.md'), [
@@ -32,7 +33,7 @@ function sandbox(status = 'Evaluated') {
     '',
     '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
     '|---|------|---------|------|-------|--------|-----|--------|-------|',
-    `| 7 | 2026-02-01 | Acme | Backend Engineer | 4.4/5 | ${status} | ✅ | [7](../reports/007-acme-2026-02-01.md) | notes |`,
+    `| 7 | 2026-02-01 | Acme | Backend Engineer | 4.4/5 | ${status} | ✅ | [7](../reports/007-acme-2026-02-01.md) | ${notes} |`,
     '',
   ].join('\n'));
   return dir;
@@ -59,7 +60,7 @@ test('a transition into Applied seeds the first follow-up', () => {
   const dir = sandbox();
   try {
     const r = setStatus(dir, ['--row', '7', 'Applied']);
-    assert.equal(r.status, 0, r.all);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.equal(pinsFor(dir, 7), 1, `nothing was scheduled:\n${r.all}`);
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
@@ -102,7 +103,7 @@ test('--dry-run previews the seed and writes nothing', () => {
   const dir = sandbox();
   try {
     const r = setStatus(dir, ['--row', '7', 'Applied', '--dry-run']);
-    assert.equal(r.status, 0, r.all);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.match(r.all, /Follow-up would be seeded/, `dry run did not preview the seed:\n${r.all}`);
     assert.doesNotMatch(r.all, /follow-up seeding failed/, 'dry run reported a failure');
     assert.ok(!existsSync(followups(dir)), 'dry run wrote a follow-ups file');
@@ -145,7 +146,7 @@ test('a seeding failure never fails the status change', () => {
   try {
     mkdirSync(followups(dir), { recursive: true });   // a DIRECTORY where the file goes
     const r = setStatus(dir, ['--row', '7', 'Applied']);
-    assert.equal(r.status, 0, `the status change was failed by a seeding problem:\n${r.all}`);
+    assert.equal(r.status, 0, describeSpawn(r, `the status change was failed by a seeding problem:\n`));
     assert.match(readFileSync(join(dir, 'data', 'applications.md'), 'utf-8'), /Applied/, 'the status was not written');
     assert.match(r.all, /follow-up seeding failed/, 'the seeding failure was not reported');
   } finally {
@@ -158,29 +159,38 @@ const daysBetween = (a, b) =>
   Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 
 test('--on anchors the follow-up on the day the application was really sent', () => {
-  // --on is the day the transition REALLY happened, and for a transition into
-  // Applied that is the day the application went out. Nothing else carries it:
-  // the tracker's date column is the EVALUATION date (2026-02-01 in the
-  // fixture) and set-status never rewrites it, so a dropped --on silently
-  // anchors the cadence on the wrong day.
-  //
-  // Asserted as a difference between two runs rather than against a hardcoded
-  // date, so the cadence length stays configurable: backdating the anchor by
-  // 27 days must move the first follow-up back by exactly 27 days.
+  // The tracker's date column is the EVALUATION date (2026-02-01 in the
+  // fixture). The anchor is --on when given and today otherwise, the same day
+  // the transition ledger records. Compared as offsets so the cadence length
+  // stays configurable.
   const withOn = sandbox();
   const withoutOn = sandbox();
   try {
     const anchored = jsonOf(setStatus(withOn, ['--row', '7', 'Applied', '--on', '2026-01-05', '--json']));
     const unanchored = jsonOf(setStatus(withoutOn, ['--row', '7', 'Applied', '--json']));
-    const shift = daysBetween(anchored.followupSeeded.nextDate, unanchored.followupSeeded.nextDate);
+    const cadence = daysBetween('2026-01-05', anchored.followupSeeded.nextDate);
+    assert.ok(cadence > 0, `--on did not reach the seeder: ${anchored.followupSeeded.nextDate}`);
+    const transitionDate = readFileSync(join(withoutOn, 'data', 'status-log.tsv'), 'utf-8').trim().split('\n').pop().split('\t')[1];
     assert.equal(
-      shift,
-      daysBetween('2026-01-05', '2026-02-01'),
-      `--on did not reach the seeder: it scheduled ${anchored.followupSeeded.nextDate} from a 2026-01-05 apply date, ` +
-      `the same as the ${unanchored.followupSeeded.nextDate} it picks off the evaluation-date column with no --on at all`,
+      daysBetween(transitionDate, unanchored.followupSeeded.nextDate),
+      cadence,
+      `with no --on the first follow-up (${unanchored.followupSeeded.nextDate}) was not anchored on today`,
     );
   } finally {
     for (const d of [withOn, withoutOn]) rmSync(d, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('an apply date in the notes outranks today when --on is absent', () => {
+  const fromNotes = sandbox('Evaluated', 'Applied 2026-09-20');
+  const fromOn = sandbox();
+  try {
+    const noted = jsonOf(setStatus(fromNotes, ['--row', '7', 'Applied', '--json']));
+    const explicit = jsonOf(setStatus(fromOn, ['--row', '7', 'Applied', '--on', '2026-09-20', '--json']));
+    assert.equal(noted.followupSeeded.nextDate, explicit.followupSeeded.nextDate);
+  } finally {
+    rmSync(fromNotes, { recursive: true, force: true, maxRetries: 10 });
+    rmSync(fromOn, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 

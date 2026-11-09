@@ -1,12 +1,14 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchResponseWithRetry, sleep } from './_http.mjs';
 
-// Consider provider — VC "talent network" portfolio boards on getconsider.com
-// (Founderful, Creandum, Balderton, Lightspeed, Notion Capital, …). The board
-// is a JS app, but its data comes from a same-origin JSON endpoint we can hit
-// directly (discovered via a headless capture of the board's network calls):
+// Consider provider — multi-employer board adapter for `job_boards:`.
+// VC "talent network" portfolio boards built on Consider (consider.com) and
+// served from each fund's own host (Founderful, Creandum, Balderton,
+// Lightspeed, Notion Capital, …). The board is a JS app, but its data comes
+// from a same-origin JSON endpoint we can hit directly (discovered via a
+// headless capture of the board's network calls):
 //
 //   POST {board_origin}/api-boards/search-jobs
 //   body: {"meta":{"size":N},"board":{"id":"<board_id>","isParent":true},
@@ -15,16 +17,30 @@ import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
 //
 // `url` is the clean destination ATS link (dedups with the ashby/greenhouse
 // providers); `companyName` is the portfolio company. The board id is NOT the
-// host (Founderful's is "wingman"), so set it explicitly in portals.yml:
+// host (Founderful's is "wingman"). The board page GET that the CSRF handshake
+// below needs anyway carries it, next to the token in the page's server
+// state, as the same `"board":{"id":...,"isParent":...}` object the POST
+// sends, so it is read from there:
 //
 //   - name: Founderful (portfolio)
 //     provider: consider
-//     consider_board: wingman
 //     careers_url: https://jobs.founderful.com/jobs
 //     enabled: true
 //
-// `consider_size` (default 500) caps how many newest/featured jobs are pulled in
-// the single request. Boards larger than that are truncated (rare for VC boards).
+// The id is not kept in `ctx.idCache`: the page has to be read on every scan
+// for the token (the POST answers 412 INVALID_CSRF without it), so a cached
+// id would save no request. `consider_board: <id>` on the entry wins over the
+// page; it is needed only when the page stops carrying the id.
+//
+// `consider_size` (default 500, maximum 1000) is how many jobs one request pulls.
+// A full page carries `meta.sequence`, a cursor sent back in the next request's
+// `meta`, so the walk reads the whole board up to `max_pages` (default 10, hard
+// cap 100). The API orders jobs by its own score, so the newest jobs come first
+// only roughly, and the walk has no age cutoff.
+//
+// All requests are retried on a transient failure, through the shared helpers
+// in _http.mjs. A verify-portals probe (ctx.maxPages set) gets no retries, so it
+// receives a failure at once.
 
 // Consider's `timeStamp` arrives as epoch ms on some boards and an ISO string
 // on others, so both shapes are handled. Non-positive values are treated as
@@ -43,6 +59,13 @@ function toEpochMs(value) {
 
 const ENDPOINT_PATH = '/api-boards/search-jobs';
 const DEFAULT_SIZE = 500;
+// The API answers HTTP 500 to a larger size, so an entry's value is clamped to it.
+const MAX_SIZE = 1000;
+// Page ceiling, independent of what `total` and `meta.sequence` report. 10 pages
+// of the default size is 5,000 postings.
+const DEFAULT_MAX_PAGES = 10;
+const MAX_PAGES_CAP = 100;
+const INTER_PAGE_DELAY_MS = 250;
 // Budget for the anonymous GET that seeds the session cookie and csrfToken.
 // Shorter than the POST budget so a slow board page can't eat the full timeout.
 const HANDSHAKE_TIMEOUT_MS = 8_000;
@@ -73,31 +96,98 @@ function resolveOrigin(entry) {
   return parsed.origin;
 }
 
+// The board page carries its server state as one JSON object on a single
+// line of an inline script: `window.serverInitialData = {...};`, which ends
+// that line or is followed by the script's closing tag. The CSRF token and
+// the board are top-level keys of that object, so they are read from it and
+// from nowhere else on the page: a "csrfToken" or "board" key in some other
+// script cannot be picked up.
+/**
+ * @param {string} html
+ * @returns {Record<string, any> | null}
+ */
+function extractServerData(html) {
+  const m = html.match(/window\.serverInitialData\s*=\s*(\{.*?\})\s*;?\s*(?:<\/script>|$)/m);
+  if (!m) return null;
+  try {
+    const data = JSON.parse(m[1]);
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The CSRF token from the server state. The 8-char lower bound rules out
+ * placeholder strings and short error tokens.
+ * @param {Record<string, any> | null} data
+ * @returns {string | null}
+ */
+function extractCsrfToken(data) {
+  const token = data?.csrfToken;
+  return typeof token === 'string' && token.length >= 8 ? token : null;
+}
+
+/**
+ * The board from the server state, as { id, isParent }: the same object the
+ * POST sends. Null when it has no usable id.
+ * @param {Record<string, any> | null} data
+ * @returns {{ id: string, isParent: boolean } | null}
+ */
+function extractBoard(data) {
+  const board = data?.board;
+  const id = typeof board?.id === 'string' ? board.id.trim() : '';
+  if (!id) return null;
+  return { id, isParent: typeof board.isParent === 'boolean' ? board.isParent : true };
+}
+
 // Perform the anonymous GET /jobs handshake that Consider requires before
-// accepting a POST. Returns { cookie, csrfToken } — either field is null if
-// the server did not supply it. On any network failure the catch returns both
+// accepting a POST. Returns { cookie, csrfToken, board } — each is null if
+// the page did not supply it. On any network failure the catch returns all
 // null so the caller can still attempt the POST (it will 412, but that is a
 // cleaner signal than a silent skip — and it keeps the same observable
-// behaviour as the pre-fix code for boards that don't enforce CSRF).
-async function acquireCsrfHandshake(origin) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HANDSHAKE_TIMEOUT_MS);
+// behaviour for boards that don't enforce CSRF).
+//
+// The GET goes through ctx.fetchResponse, never bare fetch. resolveOrigin()
+// only vets the hostname as written; the address it resolves to is checked by
+// the provider DNS guard, and that guard applies only inside the ctx fetch
+// helpers (#3096). A bare fetch here left this one hop unvalidated while the
+// POST right after it was covered. A ctx without fetchResponse (an older
+// embedder, a test stub) degrades to all null rather than falling back to an
+// unguarded request.
+const NO_HANDSHAKE = Object.freeze({ cookie: null, csrfToken: null, board: null });
+
+/** A verify-portals probe sets ctx.maxPages. */
+function isProbe(ctx) {
+  return Number(ctx?.maxPages) > 0;
+}
+
+/** The retry policy for one request: none for a probe, the shared default otherwise. */
+function retryPolicy(ctx) {
+  return isProbe(ctx) ? { retries: 0 } : {};
+}
+
+async function acquireCsrfHandshake(origin, ctx) {
+  if (typeof ctx.fetchResponse !== 'function') return NO_HANDSHAKE;
   try {
     // redirect:'error' blocks every redirect unconditionally. A redirect-to-
     // private-IP (169.254.169.254, ::1, …) would otherwise bypass the host
     // guard in resolveOrigin() and make a request to an internal target.
-    // redirect:'manual' cannot be used here: the WHATWG opaque-redirect
-    // response (Node ≥18 / undici) returns status 0 and empty headers, so
-    // the Location value is unreadable without implementation-specific APIs.
-    // redirect:'error' gives the same security outcome — zero redirects
-    // followed — and the catch below treats the resulting TypeError as a
-    // degraded handshake (null/null), which is correct.
-    const res = await fetch(`${origin}/jobs`, {
+    // 'manual' would refuse to follow too, and on Node's fetch (undici) a
+    // manual 3xx is readable — a real non-ok response with a Location header,
+    // not a browser-style opaque one (jobvite.mjs uses that to classify a
+    // redirect target). This handshake never needs to look at the redirect,
+    // only refuse it, so 'error' is the simpler choice — the resulting
+    // TypeError is caught below as a degraded handshake (all null), which is
+    // correct.
+    const res = await fetchResponseWithRetry(ctx, `${origin}/jobs`, {
       headers: { 'user-agent': BROWSER_LIKE_USER_AGENT, accept: 'text/html,*/*' },
       redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return { cookie: null, csrfToken: null };
+      timeoutMs: HANDSHAKE_TIMEOUT_MS,
+    }, retryPolicy(ctx));
+    // ctx.fetchResponse throws on a non-2xx, so this only fires for a ctx that
+    // hands one back anyway. Either way a refused GET must not be scraped.
+    if (!res.ok) return NO_HANDSHAKE;
     const html = await res.text();
 
     // getSetCookie() returns each Set-Cookie header as its own string, avoiding
@@ -112,18 +202,23 @@ async function acquireCsrfHandshake(origin) {
       .filter(Boolean)
       .join('; ') || null;
 
-    // Consider embeds the CSRF token as `"csrfToken":"<value>"` inside a JSON
-    // payload in a <script> tag on the board landing page. The 8-char lower
-    // bound rules out placeholder strings and short error tokens.
-    const m = html.match(/"csrfToken"\s*:\s*"([^"]{8,})"/);
-    const csrfToken = m ? m[1] : null;
-
-    return { cookie, csrfToken };
+    const data = extractServerData(html);
+    return { cookie, csrfToken: extractCsrfToken(data), board: extractBoard(data) };
   } catch {
-    return { cookie: null, csrfToken: null };
-  } finally {
-    clearTimeout(timer);
+    return NO_HANDSHAKE;
   }
+}
+
+/**
+ * The board the POST asks for: `consider_board` on the entry, else the one the
+ * board page names.
+ * @param {any} entry
+ * @param {{ id: string, isParent: boolean } | null} pageBoard
+ * @returns {{ id: string, isParent: boolean } | null}
+ */
+function resolveBoard(entry, pageBoard) {
+  if (entry.consider_board) return { id: String(entry.consider_board), isParent: true };
+  return pageBoard;
 }
 
 function locationString(job) {
@@ -136,10 +231,40 @@ function locationString(job) {
   return job.remote ? 'Remote' : '';
 }
 
+/** A job row from the search response, or null when it has no usable URL. */
+function toRow(job, origin, entry) {
+  const rawUrl = job.url || job.applyUrl || '';
+  if (!rawUrl) return null;
+  // Normalize to an absolute URL so the dedup key matches what the
+  // ashby/greenhouse providers emit (Consider returns absolute ATS links,
+  // but resolve defensively in case a relative path ever appears).
+  let url;
+  try {
+    url = new URL(rawUrl, origin).toString();
+  } catch {
+    return null;
+  }
+  return {
+    title: job.title || '',
+    url,
+    company: job.companyName || entry.name,
+    location: locationString(job),
+    postedAt: toEpochMs(job.timeStamp),
+  };
+}
+
+function resolveMaxPages(entry) {
+  const value = entry?.max_pages;
+  return Number.isInteger(value) && value > 0 ? Math.min(value, MAX_PAGES_CAP) : DEFAULT_MAX_PAGES;
+}
+
 /** @type {Provider} */
 export default {
   id: 'consider',
 
+  // Consider boards live on vanity hosts with no common suffix, so only an
+  // entry that sets consider_board is detected; any other one selects the
+  // provider with `provider: consider`.
   detect(entry) {
     const origin = resolveOrigin(entry);
     return entry.consider_board && origin ? { url: origin + ENDPOINT_PATH } : null;
@@ -148,61 +273,94 @@ export default {
   async fetch(entry, ctx) {
     const origin = resolveOrigin(entry);
     if (!origin) throw new Error(`consider: ${entry.name} needs an https careers_url on a public host`);
-    if (!entry.consider_board) throw new Error(`consider: ${entry.name} needs a 'consider_board' id in portals.yml`);
-    const size = Number.isInteger(entry.consider_size) && entry.consider_size > 0 ? entry.consider_size : DEFAULT_SIZE;
+    const size = Number.isInteger(entry.consider_size) && entry.consider_size > 0
+      ? Math.min(entry.consider_size, MAX_SIZE) : DEFAULT_SIZE;
 
     // Perform the CSRF handshake before the POST. ctx._acquireHandshake is a
     // test seam: set it to a stub in unit tests so no real network call is made.
-    const { cookie, csrfToken } = await (
+    const { cookie, csrfToken, board: pageBoard = null } = await (
       typeof ctx._acquireHandshake === 'function'
         ? ctx._acquireHandshake(origin)
-        : acquireCsrfHandshake(origin)
+        : acquireCsrfHandshake(origin, ctx)
     );
+    const board = resolveBoard(entry, pageBoard);
+    if (!board) {
+      throw new Error(
+        `consider: ${entry.name} — could not read the board id from ${origin}/jobs ` +
+        `(set consider_board: <id> on this entry as a fallback)`,
+      );
+    }
 
     const csrfHeaders = {};
     if (cookie) csrfHeaders.cookie = cookie;
     if (csrfToken) csrfHeaders['x-csrf-token'] = csrfToken;
 
-    const json = await ctx.fetchJson(origin + ENDPOINT_PATH, {
-      method: 'POST',
-      // redirect:'error' so a 3xx from the (config-driven) board host can't be
-      // followed to a private/metadata IP — the host guard above pins the first hop.
-      redirect: 'error',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        referer: origin + '/jobs',
-        ...csrfHeaders,
-      },
-      body: JSON.stringify({
-        meta: { size },
-        board: { id: String(entry.consider_board), isParent: true },
-        query: { promoteFeatured: true },
-      }),
-    });
+    const maxPages = resolveMaxPages(entry);
+    const probing = isProbe(ctx);
+    const pagesToFetch = probing ? Math.min(maxPages, Number(ctx.maxPages)) : maxPages;
 
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
-    return jobs
-      .map(j => {
-        const rawUrl = j.url || j.applyUrl || '';
-        if (!rawUrl) return null;
-        // Normalize to an absolute URL so the dedup key matches what the
-        // ashby/greenhouse providers emit (Consider returns absolute ATS links,
-        // but resolve defensively in case a relative path ever appears).
-        let url;
-        try {
-          url = new URL(rawUrl, origin).toString();
-        } catch {
-          return null;
-        }
-        return {
-          title: j.title || '',
-          url,
-          company: j.companyName || entry.name,
-          location: locationString(j),
-          postedAt: toEpochMs(j.timeStamp),
-        };
-      })
-      .filter(Boolean);
+    const rows = [];
+    let total = null;
+    let sequence = null;
+    let page = 0;
+    for (; page < pagesToFetch; page++) {
+      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+
+      let json;
+      try {
+        json = await fetchJsonWithRetry(ctx, origin + ENDPOINT_PATH, {
+          method: 'POST',
+          // redirect:'error' so a 3xx from the (config-driven) board host can't be
+          // followed to a private/metadata IP — the host guard above pins the first hop.
+          redirect: 'error',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json',
+            referer: origin + '/jobs',
+            ...csrfHeaders,
+          },
+          body: JSON.stringify({
+            meta: sequence ? { size, sequence } : { size },
+            board: { id: board.id, isParent: board.isParent },
+            query: { promoteFeatured: true },
+          }),
+        }, retryPolicy(ctx));
+      } catch (err) {
+        // The first page failing means the board is unreachable, and a probe
+        // must see the rejection as it is. A later page keeps what was read.
+        if (probing || page === 0) throw err;
+        const attempts = err?.attempts;
+        const attemptsText = attempts === undefined
+          ? 'an unknown number of attempts'
+          : `${attempts} attempt${attempts === 1 ? '' : 's'}`;
+        const cause = err instanceof Error ? err.message : String(err);
+        console.error(`⚠️  consider: ${entry.name} truncated at page ${page + 1} of ${pagesToFetch} after ${attemptsText} (${rows.length} jobs): ${cause}`);
+        return rows;
+      }
+
+      const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+      if (Number.isInteger(json?.total)) total = json.total;
+      for (const job of jobs) {
+        const row = toRow(job, origin, entry);
+        if (row) rows.push(row);
+      }
+
+      // The board ended: a short page, no cursor, or a cursor that does not move.
+      // Leaves `page` below the ceiling, so the check after the loop stays silent.
+      const next = json?.meta?.sequence;
+      if (jobs.length < size || !next || next === sequence) break;
+      sequence = next;
+    }
+
+    if (!probing && page >= maxPages) {
+      const of = total !== null ? ` of ${total}` : '';
+      // At the hard ceiling a higher max_pages is clamped back to it, so raising
+      // the entry's value would read nothing more.
+      const advice = maxPages >= MAX_PAGES_CAP
+        ? `the ${MAX_PAGES_CAP}-page hard cap, so raising max_pages reads no more`
+        : 'raise max_pages on this entry for more';
+      console.error(`⚠️  consider: ${entry.name} truncated at max_pages=${maxPages} (${rows.length}${of} jobs) — ${advice}`);
+    }
+    return rows;
   },
 };

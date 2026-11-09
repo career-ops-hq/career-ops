@@ -3,8 +3,8 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Together, Groq, DeepSeek, Zhipu GLM, MiniMax,
- * Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, cheapaimodel, UberLLM, Standard Compute, Together, Groq, DeepSeek, Zhipu GLM,
+ * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
  * Reads evaluation logic from modes/oferta.md + modes/_shared.md, reads the
@@ -30,7 +30,10 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { randomUUID } from 'crypto';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
@@ -38,6 +41,16 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
+import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import {
+  isPostingUrl, normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
+} from './lib/tracker-addition.mjs';
+
+// Ambient guard over global fetch (idempotent); the explicit gate below is the
+// primary layer, this covers anything the script hands to fetch directly.
+installPiiInterceptor();
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -58,7 +71,9 @@ const PATHS = {
   shared:  join(ROOT, 'modes', '_shared.md'),
   oferta:  join(ROOT, 'modes', 'oferta.md'),
   cv:        join(DATA_ROOT, 'cv.md'),
-  profileYml: join(DATA_ROOT, 'config', 'profile.yml'),
+  profileYml: getProfilePath(),
+  profile:    join(DATA_ROOT, 'modes', '_profile.md'),
+  custom:     join(DATA_ROOT, 'modes', '_custom.md'),
   reports:    join(DATA_ROOT, 'reports'),
   // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
   // regardless would drop the addition somewhere the merge it instructs never
@@ -88,7 +103,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <id>     Model id            (env OPENAI_MODEL, default gpt-4o-mini)
+    --model <id>     Model id            (env OPENAI_MODEL; MiniMax direct default
+                                         MiniMax-M3.1-Flash, otherwise gpt-4o-mini)
     --url <base>     OpenAI-compatible base URL, including any /v1
                      (env OPENAI_BASE_URL, default https://api.openai.com/v1)
     --key <key>      API key             (env OPENAI_API_KEY)
@@ -100,13 +116,26 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   ENV
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_TIMEOUT_MS
+    CAREER_OPS_MAX_TOKENS  Output cap per evaluation (default 32768). Keeps a
+                     gateway like OpenRouter from reserving credit for the
+                     model's whole output window (HTTP 402 on a low balance).
 
   PROVIDER EXAMPLES (cheap / free-tier friendly — addresses token cost)
     OpenRouter:  --url https://openrouter.ai/api/v1   --model deepseek/deepseek-chat
+    Requesty:    --url https://router.requesty.ai/v1  --model deepseek/deepseek-chat
+    Cheaper Inference: --url https://api.cheaperinference.com/v1  --model gpt-5.4-mini
+    API Route:   --url https://global.api-route.com/v1  --model gpt-5.5
+    Runcrate:    --url https://api.runcrate.ai/v1  --model deepseek-ai/DeepSeek-V4.1-Flash
+    CloudGPU:    --url https://cloudgpu.app/v1  --model deepseek-v4.1-flash
+    cheapaimodel: --url https://api.cheapaimodel.ai/v1  --model deepseek-v4-1-flash
+    UberLLM:     --url https://api.uberllm.dev/v1  --model deepseek/deepseek-v4-flash
+    Standard Compute: --url https://api.stdcmpt.com/v1  --model StandardCompute
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
     Zhipu GLM:   --url https://open.bigmodel.cn/api/paas/v4  --model glm-4-flash
+    MiniMax:     --url https://api.minimax.io/v1       --model MiniMax-M3.1-Flash
+                 --url https://api.minimax.cn/v1       --model MiniMax-M3
     LM Studio:   --url http://localhost:1234/v1        --model <loaded-model>   (no key)
 
   EXAMPLES
@@ -119,7 +148,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 // Parse flags
 let jdText     = '';
 let postingUrl = '';
-let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+let modelName  = process.env.OPENAI_MODEL || '';
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 let apiKey     = process.env.OPENAI_API_KEY || '';
 let saveReport = true;
@@ -189,6 +218,13 @@ let endpointHost;
     process.exit(1);
   }
   endpointHost = parsed.hostname;
+  // Resolve the default after CLI flags, without replacing saved/custom models.
+  // Limit this to the direct API; subscription and gateway routes are separate.
+  if (!modelName) {
+    const isMiniMax = ['https://api.minimax.io', 'https://api.minimax.cn'].includes(parsed.origin)
+      && parsed.pathname === '/v1';
+    modelName = isMiniMax ? 'MiniMax-M3.1-Flash' : 'gpt-4o-mini';
+  }
   const isLoopback = endpointHost === 'localhost' || endpointHost === '127.0.0.1' || endpointHost === '::1';
 
   if (!isLoopback && parsed.protocol !== 'https:') {
@@ -235,80 +271,6 @@ function readFile(path, label) {
 }
 
 // ---------------------------------------------------------------------------
-// Tracker-addition helpers
-// ---------------------------------------------------------------------------
-/**
- * Whether a value is a complete http(s) URL, and so can become a dedup key.
- * @param {string} value - Candidate posting URL.
- * @returns {boolean} True only for a parseable http/https URL with a host.
- */
-function isPostingUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname !== '';
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Slugify a company name for report/addition filenames.
- * @param {string} value - Raw company name.
- * @returns {string} Lowercase dash slug, or "unknown" when nothing survives.
- */
-function slugifyCompany(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '') || 'unknown';
-}
-
-/**
- * Flatten a value into a single TSV cell (tabs and newlines would shift columns).
- * @param {*} value - Raw cell value.
- * @returns {string} Single-line, trimmed cell.
- */
-function tsvSafe(value) {
-  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
-}
-
-/**
- * Normalize a model-reported score into the tracker's score cell.
- *
- * A missing or unparseable score becomes the documented `N/A` sentinel rather
- * than an empty cell — `looksLikeScoreCell` in tracker-parse.mjs recognizes
- * `N/A`, and a blank or unrecognized placeholder makes the row ambiguous and
- * gets it skipped with a warning (#1799).
- *
- * @param {string} value - Score as extracted from the model's summary block.
- * @returns {string} `X.X/5` or `N/A`.
- */
-function normalizedTrackerScore(value) {
-  const clean = tsvSafe(value);
-  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
-  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
-  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
-  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
-  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
-  // Trailing prose is tolerated because models produce it; a denominator that is
-  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
-  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
-  if (!parsed) return 'N/A';
-  const score = parseFloat(parsed[1]);
-  // The denominator is load-bearing wherever it sits. Requiring it immediately
-  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
-  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
-  // `8/10` used to produce. The first denominator in the cell is taken and must
-  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
-  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
-  // N/A is recoverable, a wrong score is not.
-  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
-  const scale = denominator ? parseFloat(denominator[1]) : 5;
-  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
-  return `${score}/5`;
-}
-
-// ---------------------------------------------------------------------------
 // Load context files
 // ---------------------------------------------------------------------------
 console.log('\n📂  Loading context files...');
@@ -317,6 +279,9 @@ const sharedContext = readFile(PATHS.shared,     'modes/_shared.md');
 const ofertaLogic   = readFile(PATHS.oferta,     'modes/oferta.md');
 const cvContent     = readFile(PATHS.cv,         'cv.md');
 const profileYml    = readFile(PATHS.profileYml, 'config/profile.yml');
+const profileContent = readFile(PATHS.profile,   'modes/_profile.md');
+// _custom.md is optional: an absent file is a valid end state, so no warning.
+const customContent = existsSync(PATHS.custom) ? readFileSync(PATHS.custom, 'utf-8').trim() : '';
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
@@ -327,9 +292,11 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   ofertaContent: ofertaLogic,
   cvContent,
   profileYml,
+  profileContent,
+  customContent,
   jdText,
   noCompress,
-  maxTokens: 128_000, // gpt-4o-mini context window
+  modelName,
 });
 
 // Log token budget info
@@ -377,7 +344,7 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 // OpenRouter runner. The static prefix (shared + oferta + cv, ~12K tokens) is
 // byte-identical across every offer, yet was re-sent and re-billed each call.
 //
-// Host-gated on purpose: OpenAI-compatible gateways (OpenRouter, DeepSeek, …)
+// Host-gated on purpose: OpenAI-compatible gateways (OpenRouter, Requesty, DeepSeek, …)
 // honor an ephemeral `cache_control` breakpoint on the prefix and reuse it
 // across back-to-back calls within the cache TTL. api.openai.com instead caches
 // long prefixes automatically and may reject the non-standard field, so it gets
@@ -391,6 +358,24 @@ export function buildSystemMessage(prompt, host) {
 }
 
 // ---------------------------------------------------------------------------
+// Output cap. With no limit in the request, a gateway budgets the call for the
+// model's whole output window: OpenRouter reserves prompt + max output at the
+// model's price before generating anything, and answers HTTP 402 when the
+// balance cannot cover that reservation, even when the report costs cents.
+//
+// 32768 holds a full A-G report (about 9K tokens at the 99th percentile) plus
+// the reasoning a thinking model spends before it (up to ~26K seen), so the cap
+// bounds the reservation without cutting a normal evaluation short.
+const DEFAULT_MAX_TOKENS = 32768;
+
+// Same host gate as buildSystemMessage: api.openai.com's reasoning models
+// reject `max_tokens` and take `max_completion_tokens`, which its other chat
+// models accept as well; gateways and local servers read `max_tokens`.
+function buildTokenLimit(limit, host) {
+  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
+}
+
+// ---------------------------------------------------------------------------
 // Call the OpenAI-compatible endpoint
 // ---------------------------------------------------------------------------
 const timeoutMs = parseInt(process.env.OPENAI_TIMEOUT_MS || '300000', 10);
@@ -399,38 +384,76 @@ if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
   process.exit(1);
 }
 
+// Empty means unset, as for every other variable here. Digits only, so "8k"
+// is refused instead of being read as 8.
+const maxTokensEnv = process.env.CAREER_OPS_MAX_TOKENS?.trim();
+const maxTokens = maxTokensEnv ? (/^\d+$/.test(maxTokensEnv) ? Number(maxTokensEnv) : NaN) : DEFAULT_MAX_TOKENS;
+if (!(maxTokens > 0)) {
+  console.error(`❌  Invalid CAREER_OPS_MAX_TOKENS: "${process.env.CAREER_OPS_MAX_TOKENS}" — must be a positive integer (output tokens).`);
+  process.exit(1);
+}
+
 console.log(`\n🔒  Privacy: your cv.md + JD will be sent to ${endpointHost}.`);
-console.log(`🤖  Calling ${modelName} via ${endpointHost}... this may take a minute.\n`);
+console.log(`🤖  Calling ${modelName} via ${endpointHost} (output cap ${maxTokens} tokens)... this may take a minute.\n`);
+
+// One evaluation is one conversation: a single id for every request in this run.
+const SESSION_ID = randomUUID();
+// VERSION may carry a release-please marker ("1.38.0 # x-release-please-version").
+let careerOpsVersion;
+try { careerOpsVersion = readFileSync(join(ROOT, 'VERSION'), 'utf-8').trim().split(/\s+/)[0] || undefined; } catch { /* default User-Agent version */ }
 
 const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+// OpenCode Go asks for a session id and an own user agent (observed: HTTP 400 MissingSessionID without it):
+// https://opencode.ai/v2/docs/console/go/#where-can-i-use-it
+Object.assign(headers, endpointHeaders(endpointHost, SESSION_ID, careerOpsVersion));
 
 let evaluationText;
 try {
+  // Privacy gate: inspect the complete serialized request before it leaves the
+  // machine. Shared boundary so openai-eval and openai-tailor cannot diverge.
+  // The retry is a second body, so it is checked on its own.
   // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
   // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
   // Header-Timeout, bevor die erste Zeile ankommt (8 t/s × 22k-Prefill).
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
+  const signal = AbortSignal.timeout(timeoutMs);
+  const send = (withUsage) => {
+    const requestBody = JSON.stringify({
       model:    modelName,
       messages: [
         buildSystemMessage(systemPrompt, endpointHost),
         { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
       stream:      true,
+      ...(withUsage && { stream_options: { include_usage: true } }),
       temperature: 0.4,
-    }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+      ...buildTokenLimit(maxTokens, endpointHost),
+    });
+    assertLlmRequestAllowed(endpoint, requestBody);
+    return fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: requestBody,
+      signal,
+    });
+  };
+
+  let res = await send(true);
+  let body = res.ok ? '' : await res.text();
+  // Mistral, among others, answers an unknown field with 400/422 and names it.
+  if ((res.status === 400 || res.status === 422) && /stream_options|include_usage/.test(body)) {
+    res = await send(false);
+    body = res.ok ? '' : await res.text();
+  }
 
   if (!res.ok) {
-    const body = await res.text();
     console.error(`❌  API error: HTTP ${res.status}`);
     console.error(`    ${body.slice(0, 300)}`);
     if (res.status === 401 || res.status === 403) {
       console.error(`    → Check your API key for ${endpointHost}.`);
+    } else if (res.status === 402) {
+      console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
+      console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);
     } else if (res.status === 404) {
       console.error(`    → Check --url (it should include any /v1 segment) and --model id.`);
     }
@@ -443,6 +466,8 @@ try {
   const decoder = new TextDecoder();
   let sseBuf = '';
   let thinkOpen = false;
+  let streamUsage;
+  let finishReason = null;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -456,6 +481,8 @@ try {
       if (payload === '[DONE]') continue;
       let delta;
       try { delta = JSON.parse(payload); } catch { continue; }
+      streamUsage = delta.usage ?? delta.x_groq?.usage ?? streamUsage;
+      finishReason = delta.choices?.[0]?.finish_reason ?? finishReason;
       const d = delta.choices?.[0]?.delta ?? {};
       if (d.reasoning_content) {
         if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
@@ -467,7 +494,14 @@ try {
     }
   }
   if (thinkOpen) parts.push('\n</think>\n');
+  if (streamUsage) tracker.record('evaluation', normalizeOpenAIUsage(streamUsage));
   evaluationText = parts.join('').trim();
+  // Before the empty check: a thinking model can spend the whole cap on
+  // reasoning, and then this is the only explanation the user gets.
+  if (finishReason === 'length') {
+    console.error(`⚠️   The reply stopped at the ${maxTokens}-token output cap, so the evaluation may be truncated (missing blocks or score summary).`);
+    console.error(`    Raise CAREER_OPS_MAX_TOKENS to allow a longer reply.`);
+  }
   if (!evaluationText) {
     console.error('❌  The endpoint returned an empty response.');
     process.exit(1);
@@ -493,32 +527,21 @@ console.log(evaluationText);
 // ---------------------------------------------------------------------------
 // Parse score summary
 // ---------------------------------------------------------------------------
-const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
-
-let company    = 'unknown';
-let role       = 'unknown';
-let score      = '?';
-let archetype  = 'unknown';
-let legitimacy = 'unknown';
-
-if (summaryMatch) {
-  const extract = (key) => {
-    const m = summaryMatch[1].match(new RegExp(`${key}:\\s*(.+)`));
-    return m ? m[1].trim() : 'unknown';
-  };
-  company    = extract('COMPANY');
-  role       = extract('ROLE');
-  score      = extract('SCORE');
-  archetype  = extract('ARCHETYPE');
-  legitimacy = extract('LEGITIMACY');
-}
+const summary    = parseScoreSummary(evaluationText);
+const company    = summary?.company    || 'unknown';
+const role       = summary?.role       || 'unknown';
+const score      = summary?.score      || '?';
+const archetype  = summary?.archetype  || 'unknown';
+const legitimacy = summary?.legitimacy || 'unknown';
+// An addition for company and role "unknown" would merge as a real application.
+const trackable  = Boolean(summary?.company && summary.role && summary.role.toLowerCase() !== 'unknown');
 
 // ---------------------------------------------------------------------------
 // Save report
 // ---------------------------------------------------------------------------
 if (saveReport) {
   let reservedNumbers = [];
-  let saveStage = 'report directory';
+  let saveStage = 'report';
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
@@ -526,18 +549,21 @@ if (saveReport) {
 
     reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
     const num         = formatReportNumber(reservedNumbers[0]);
-    const today       = new Date().toISOString().split('T')[0];
+    // LOCAL calendar day (#3070). This one value becomes three things that have to
+    // agree with each other and with the user's calendar: the report FILENAME
+    // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+    // column of the tracker row written for it.
+    //
+    // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+    // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+    // while every other date the user sees, and every date the other scripts now
+    // stamp, says the 17th. The filename is the part that cannot be corrected
+    // later: reports are addressed by it.
+    const today       = localToday();
     const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);
 
-    // Preserve the actual input, not a model's reconstruction of the posting.
-    // The report-number prefix is the existing jd-capture.mjs lookup contract.
-    saveStage = 'JD archive';
-    const jdsDir = join(DATA_ROOT, 'jds');
-    mkdirSync(jdsDir, { recursive: true });
-    writeFileSync(join(jdsDir, filename), jdText, { encoding: 'utf8', flag: 'wx' });
-    saveStage = 'report';
     const reportContent = `# Evaluation: ${company} — ${role}
 
 **Date:** ${today}
@@ -553,45 +579,50 @@ if (saveReport) {
 ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim()}
 `;
 
-    writeFileSync(reportPath, reportContent, 'utf-8');
+    writeFileSync(reportPath, withJdArchiveSection(reportContent, jdText), 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
-    // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
-    // into data/applications.md. Evaluations persist as a tracker addition and
-    // merge-tracker.mjs applies dedup, status validation, report-link
-    // normalization and the tracker lock. A pasted literal skipped all of that,
-    // and at 8 cells it was also silently dropped by every reader's width guard.
-    // Field order is the TSV contract's -- status BEFORE score; merge-tracker
-    // swaps them into the tracker's own column order, resolved by name.
-    const additionName = `${num}-${companySlug}.tsv`;
-    saveStage = 'tracker addition';
-    const trackerFields = [
-      String(parseInt(num, 10)),
-      today,
-      tsvSafe(company),
-      tsvSafe(role),
-      'Evaluated',
-      normalizedTrackerScore(score),
-      '❌',
-      `[${num}](reports/${filename})`,
-      tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
-    ];
-    // Optional tenth field, labelled in the header below so it resolves by name.
-    // Pass 0 can then match on it instead of waiting for --backfill-urls.
-    if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
-    // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
-    // so this row cannot be ingested into the wrong columns. The optional URL
-    // needs its own label -- values are read BY label, so a tenth field the
-    // header does not name is not mis-mapped, it is dropped.
-    const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
-    mkdirSync(PATHS.trackerAdditions, { recursive: true });
-    writeFileSync(
-      join(PATHS.trackerAdditions, additionName),
-      `${additionHeader}\n${trackerFields.join('\t')}\n`,
-      'utf-8',
-    );
-    console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
-    console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
+    if (!trackable) {
+      console.warn(`\n⚠️   The reply has no ${summary ? 'company and role in its SCORE_SUMMARY' : 'SCORE_SUMMARY block'}, so no tracker row was written.`);
+      console.warn('    Re-run the evaluation, or use a model that follows the report format.');
+    } else {
+      // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
+      // into data/applications.md. Evaluations persist as a tracker addition and
+      // merge-tracker.mjs applies dedup, status validation, report-link
+      // normalization and the tracker lock. A pasted literal skipped all of that,
+      // and at 8 cells it was also silently dropped by every reader's width guard.
+      // Field order is the TSV contract's -- status BEFORE score; merge-tracker
+      // swaps them into the tracker's own column order, resolved by name.
+      const additionName = `${num}-${companySlug}.tsv`;
+      const trackerFields = [
+        String(parseInt(num, 10)),
+        today,
+        tsvSafe(company),
+        tsvSafe(role),
+        'Evaluated',
+        normalizedTrackerScore(score),
+        '❌',
+        `[${num}](reports/${filename})`,
+        tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
+      ];
+      // Optional tenth field, labelled in the header below so it resolves by name.
+      // Pass 0 can then match on it instead of waiting for --backfill-urls.
+      if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
+      // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
+      // so this row cannot be ingested into the wrong columns. The optional URL
+      // needs its own label -- values are read BY label, so a tenth field the
+      // header does not name is not mis-mapped, it is dropped.
+      const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+      saveStage = 'tracker addition';
+      mkdirSync(PATHS.trackerAdditions, { recursive: true });
+      writeFileSync(
+        join(PATHS.trackerAdditions, additionName),
+        `${additionHeader}\n${trackerFields.join('\t')}\n`,
+        'utf-8',
+      );
+      console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
+      console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
+    }
   } catch (err) {
     console.warn(`⚠️   Could not save evaluation (${saveStage}): ${err.message}`);
     process.exitCode = 1;

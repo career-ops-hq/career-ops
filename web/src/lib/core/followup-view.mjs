@@ -44,14 +44,21 @@ function nextDateValue(entry) {
 }
 
 /**
- * The single nearest not-yet-due follow-up, for the empty state ("nothing is
- * due, but here's what's next") — never mislabeled as due. Entries with no
- * nextFollowupDate (cold, or no cadence) are excluded. Returns null when
- * there is nothing upcoming.
+ * Not-yet-due follow-ups that already have a next date, soonest first.
+ *
+ * These are the entries selectDueFollowups drops. The home card and
+ * /followups show them in an Upcoming section instead of omitting them.
+ * `limit` defaults to no cap so a page can list every one; pass a number
+ * to keep a card short.
  */
-export function pickNextUpcoming(entries) {
+export function selectUpcomingFollowups(entries, limit) {
   const upcoming = (Array.isArray(entries) ? entries : [])
     .filter((e) => !isDue(e) && e?.nextFollowupDate)
     .sort((a, b) => nextDateValue(a) - nextDateValue(b));
-  return upcoming[0] ?? null;
+  if (limit == null) return upcoming;
+  return upcoming.slice(0, limit);
+}
+
+export function pickNextUpcoming(entries) {
+  return selectUpcomingFollowups(entries)[0] ?? null;
 }
