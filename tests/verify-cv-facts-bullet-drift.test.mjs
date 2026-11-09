@@ -123,6 +123,16 @@ check('-ing list nouns in later clauses are not read as verbs',
   check('a present-tense opening verb before a determiner still blocks',
     present?.blocking === true, present);
 }
+// Review on #6630: numbered "1)" markers, same-form participles, swap config.
+check('reads "1)" numbered bullets',
+  drift('## Experience\n1) Spearheaded the 2024 repricing analysis\n').length === 1, null);
+{
+  const src = '- Developed a data platform on AWS and Kafka\n';
+  const [participle] = bulletDriftClaims(ul('Developed a data platform, built on AWS and Kafka'), src);
+  check('"…, built on AWS" warns instead of blocking', participle?.blocking === false, participle);
+  const [bare] = bulletDriftClaims(ul('Developed a data platform on AWS and built Kafka pipelines'), src);
+  check('"and built Kafka pipelines" still blocks', bare?.blocking === true, bare);
+}
 check('a bullet with no source anchor is left to the other checks',
   drift(ul('Organised the company hackathon')).length === 0, null);
 
@@ -193,6 +203,12 @@ try {
   check('allow_facts waives a drifted bullet by value',
     run(ul('Led a Kafka migration for the billing service')).verdict === 'pass', null);
 
+  for (const entry of ['used -> led -> x', 'used ->', ' -> led']) {
+    write({ allow_swaps: [entry] });
+    let error = '';
+    try { run(ul('Used Kafka for event ingestion in the billing service')); } catch (err) { error = err.message; }
+    check(`allow_swaps entry ${JSON.stringify(entry)} is a config error naming the file`, error.includes(config), error);
+  }
   write({ allow_swaps: 'used -> led' });
   let configThrew = false;
   try { run(ul('Rebuilt the payments service')); } catch { configThrew = true; }

@@ -2302,7 +2302,9 @@ function renderedBullets(text) {
   }
   if (!bullets.length) {
     for (const line of raw.split(/\r?\n/u)) {
-      if (/^\s*(?:[-*+\u2022]|\d+[.)])\s+\S/u.test(line)) bullets.push(stripMarkup(line).replace(LIST_MARKER_RE, ''));
+      // A numbered marker is stripped too: "1) Led ..." would otherwise read
+      // "1" as the opening word and skip the check.
+      if (/^\s*(?:[-*+\u2022]|\d+[.)])\s+\S/u.test(line)) bullets.push(stripMarkup(line).replace(LIST_MARKER_RE, '').replace(/^\d+[.)]\s+/u, ''));
     }
   }
   return bullets.map(bullet => bullet.replace(/^[\s.]+|[\s.]+$/gu, '').trim()).filter(Boolean);
@@ -2353,10 +2355,19 @@ const DRIFT_SIMPLE_PASTS = new Set([
   'dealt', 'struck', 'spoke', 'broke', 'drew', 'rebuilt', 'rewrote', 'undertook',
 ]);
 
+// Prepositions that follow a passive participle used as a modifier.
+const DRIFT_PASSIVE_PREPOSITIONS = new Set([
+  'by', 'on', 'in', 'with', 'from', 'into', 'upon', 'around', 'across', 'via', 'through', 'under', 'over', 'within', 'atop',
+]);
+
 function predicateWords(statement) {
   const words = [];
   const isVerbal = word => /ed$/u.test(word) || IRREGULAR_FORMS.has(word);
-  const takesObject = (word, next) => DRIFT_SIMPLE_PASTS.has(word) || DRIFT_OBJECT_OPENERS.has(next);
+  // A simple past that shares its form with the passive participle ("built",
+  // "led", "made") is a modifier before a passive preposition ("a platform,
+  // built on AWS", "a team led by the CTO"), so only then does it warn.
+  const takesObject = (word, next) => DRIFT_OBJECT_OPENERS.has(next)
+    || (DRIFT_SIMPLE_PASTS.has(word) && !DRIFT_PASSIVE_PREPOSITIONS.has(next));
   const text = stripListMarker(statement);
   const label = text.match(/^([^,;:.!?]{1,60}):\s+(?=\S)/u);
   if (label) {
@@ -2379,11 +2390,24 @@ function predicateWords(statement) {
   return words;
 }
 
+/**
+ * Split one `allow_swaps` entry ("used -> led") into its two sides, or return
+ * null when it is not exactly two non-empty sides of words.
+ */
+function splitSwap(entry) {
+  const parts = String(entry).split(/\s*(?:->|\u2192)\s*/u);
+  if (parts.length !== 2 || parts.some(part => !driftWords(part).length)) return null;
+  return parts;
+}
+
+const SWAP_FORMAT = 'allow_swaps entries must read "source word -> CV word"';
+
 /** Parse `allow_swaps` entries ("used -> led") into source-key/target-key pairs. */
 function parseSwaps(entries = []) {
   return entries.map((entry) => {
-    const [from, to] = String(entry).split(/\s*(?:->|\u2192)\s*/u);
-    if (!from || !to) throw new Error(`allow_swaps entries must read "source word -> CV word", got: ${entry}`);
+    const parts = splitSwap(entry);
+    if (!parts) throw new Error(`${SWAP_FORMAT}, got: ${entry}`);
+    const [from, to] = parts;
     return { from: driftKeySet(driftWords(from)), to: driftKeySet(driftWords(to)) };
   });
 }
@@ -2882,6 +2906,10 @@ export function loadFactConfig(path) {
     if (config[key] == null) config[key] = [];
     else if (!Array.isArray(config[key])) throw new Error(`${key} must be an array in ${path}`);
   }
+  // Validated here, not only when the drift check runs, so a malformed entry
+  // fails the same way for every document and caller and names the file.
+  const badSwap = config.allow_swaps.find(entry => !splitSwap(entry));
+  if (badSwap !== undefined) throw new Error(`${SWAP_FORMAT} in ${path}, got: ${badSwap}`);
   return { missing: false, config };
 }
 
