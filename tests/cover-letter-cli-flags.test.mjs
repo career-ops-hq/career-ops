@@ -17,7 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseCoverArgs, DEFAULT_COVER_MAX_PAGES } from '../generate-cover-letter.mjs';
 import { enforcePageBudget } from '../generate-pdf.mjs';
 
@@ -109,7 +109,7 @@ function runCover(flags) {
     output_path: 'output/letter.pdf',
   }));
   const res = spawnSync(process.execPath, [
-    '--import', CAPTURE_REGISTER,
+    '--import', pathToFileURL(CAPTURE_REGISTER).href,
     join(ROOT, 'generate-cover-letter.mjs'),
     '--payload', payloadPath,
     ...flags,
