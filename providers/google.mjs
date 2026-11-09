@@ -153,6 +153,7 @@ export default {
       // URLSearchParams, not hand-built encodeURIComponent: q and location come from
       // portals.yml, and URLSearchParams never throws on a malformed string.
       const params = new URLSearchParams({ q: String(q), location: String(location), sort_by: 'date' });
+      const seen = new Set();
       for (let page = 1; page <= pageBudget; page++) {
         if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
         // Page 1 keeps the bare URL; deeper pages carry page=N.
@@ -169,10 +170,16 @@ export default {
           console.warn(`google: page ${page} failed - ${err.message}`);
           break;
         }
+        // The stop rule is per query: `seen` tracks this query's walk, while
+        // byId dedupes what the board emits. A later query whose page 1
+        // repeats ids an earlier query collected is not the ignored-page
+        // re-serve the stop guards against - its deeper pages still count.
         let added = 0;
         for (const { id, slug, title, employer, locations } of parseResultsPage(html)) {
-          if (byId.has(id)) continue;
+          if (seen.has(id)) continue;
+          seen.add(id);
           added++;
+          if (byId.has(id)) continue;
           byId.set(id, {
             title,
             url: `${BASE}${id}-${slug}`,
