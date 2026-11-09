@@ -223,7 +223,9 @@ test('supervisor: a "Reports to:" label line names the reporting line', () => {
 });
 
 test('supervisor: a name that starts with a non-ASCII letter names the reporting line', () => {
-  for (const line of ['Reports to: Élodie Martin', 'Reports to: Øystein Berg', 'Reporting to: Łukasz Nowak']) {
+    // "Aïcha" starts like the article "a", and 'A\u0301lvaro' is "Álvaro" typed as A plus a combining accent.
+  for (const line of ['Reports to: Élodie Martin', 'Reports to: Øystein Berg', 'Reporting to: Łukasz Nowak',
+    'Reports to: Aïcha Diallo', 'Reports to: A\u0301lvaro Gómez'])  {
     const p = analyzeRoleClarity(line).points.find((x) => x.id === 'supervisor');
     assert.equal(p.status, 'partial', line);
     assert.deepEqual(p.evidence, [line], line);
