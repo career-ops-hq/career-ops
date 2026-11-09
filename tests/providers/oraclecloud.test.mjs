@@ -632,11 +632,11 @@ try {
 
   // A health probe asks for one page via ctx.maxPages: honoured, and not reported as truncation.
   const probeCount = { n: 0 };
-  const probe = await captureWarn(() => oc.fetch({ name: 'Probe', careers_url: careers }, { ...pagedCtx(7118, probeCount), maxPages: 1 }));
-  if (probeCount.n === 1 && probe.result.length === 200 && probe.lines.length === 0 && !probe.result.oraclecloudTruncated) {
+  const probeRun = await captureWarn(() => oc.fetch({ name: 'Probe', careers_url: careers }, { ...pagedCtx(7118, probeCount), maxPages: 1 }));
+  if (probeCount.n === 1 && probeRun.result.length === 200 && probeRun.lines.length === 0 && !probeRun.result.oraclecloudTruncated) {
     pass('oraclecloud.fetch() honours ctx.maxPages (health probe) and stays silent about that stop');
   } else {
-    fail(`probe cap: ${probeCount.n} requests, ${probe.result.length} jobs, warnings ${JSON.stringify(probe.lines)}`);
+    fail(`probe cap: ${probeCount.n} requests, ${probeRun.result.length} jobs, warnings ${JSON.stringify(probeRun.lines)}`);
   }
 
   // Entry cap equal to the probe cap: still a probe stop, still silent.
