@@ -29,6 +29,7 @@ import {
   companyRoleDedupKey,
   loadDedupSnapshot,
   appendScanRunSummary,
+  resolveDedupIncludeLocation,
 } from './scan.mjs';
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,11 +73,12 @@ export function decodeHtml(text) {
  */
 export function createLocalGate({ config = {}, gateOptions = {}, seenRoles } = {}) {
   const gate = createAdmissionGate({ config, ...gateOptions });
-  const roles = seenRoles ?? new Set(loadDedupSnapshot({}, normalizeCompanyName).seenCompanyRoles);
+  const includeLocation = resolveDedupIncludeLocation(config);
+  const roles = seenRoles ?? new Set(loadDedupSnapshot({}, normalizeCompanyName, { includeLocation }).seenCompanyRoles);
   const counts = gate.counts;
   counts.duplicateRole = 0;
 
-  const roleKey = (offer) => companyRoleDedupKey(offer.company, offer.title, normalizeCompanyName);
+  const roleKey = (offer) => companyRoleDedupKey(offer.company, offer.title, normalizeCompanyName, includeLocation ? offer.location : undefined);
 
   return {
     counts,

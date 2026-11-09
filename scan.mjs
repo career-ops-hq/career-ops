@@ -1845,25 +1845,20 @@ function historyPolicyFromPortals() {
 }
 
 /**
- * Read the opt-in `scan_history.dedup_include_location` switch.
+ * Whether the company+role dedupe key includes location.
  *
- * Collapsing every city of one role into a single pipeline entry is deliberate
- * (see `collectSeenCompanyRoles`) and stays the default: companies that open one
- * req per city would otherwise leak a city variant per scan. But the survivor is
- * whichever twin the provider returned first, which is wrong for anyone whose
- * eligibility is location-bound — an EU-based candidate's `location_filter`
- * passes both "London, UK" and "Dublin, IE", so the filter cannot choose between
- * them and dedupe silently keeps the city he cannot legally work in.
- *
- * Strict boolean `true` only: a stray string or number is a typo, and the safe
- * reading of a typo is the default behavior, not a pipeline full of city
- * variants the user never asked for.
+ * True when `scan_history.dedup_include_location` is true. An explicit
+ * `false` stays off. When the flag is missing, a non-array
+ * `location_filter.workplace_policy` turns it on.
  *
  * @param {object} [config] - Parsed portals.yml.
  * @returns {boolean} Whether the location joins the company+role dedupe key.
  */
 export function resolveDedupIncludeLocation(config = {}) {
-  return config.scan_history?.dedup_include_location === true;
+  if (config.scan_history?.dedup_include_location === true) return true;
+  if (config.scan_history?.dedup_include_location === false) return false;
+  const policy = config.location_filter?.workplace_policy;
+  return !!policy && typeof policy === 'object' && !Array.isArray(policy);
 }
 
 /**

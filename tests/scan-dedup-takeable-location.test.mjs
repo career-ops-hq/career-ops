@@ -124,6 +124,23 @@ function expectTakeable(label, urls) {
 }
 
 {
+  const { dir, portals } = sandbox({ portalsBlock: 'scan_history:\n  dedup_include_location: false\n' + POLICY });
+  try {
+    runScan(dir, portals);
+    const urls = urlsOf('explicit-off scan', dir);
+    if (urls && urls.length === 1 && urls[0] === 'https://boards.example.com/fixture/remote') {
+      pass('an explicit dedup_include_location false still collapses allowed cities');
+    } else if (urls) {
+      fail(`explicit false did not collapse: ${JSON.stringify(urls)}`);
+    }
+  } catch (err) {
+    fail(`explicit-off scan failed: ${err.stderr || err.message}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
   const { dir, portals } = sandbox({ portalsBlock: '' });
   try {
     runScan(dir, portals);
