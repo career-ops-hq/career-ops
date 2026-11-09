@@ -260,6 +260,29 @@ try {
   // A missing first component directly under a root must keep its full name.
   assert.equal(b.canonical(join(process.platform === 'win32' ? process.cwd().slice(0, 3) : '/', 'career-ops-no-such-dir', 'x')).endsWith(join('career-ops-no-such-dir', 'x')), true);
 
+  // templates/ holds shipped files and yours: only generated CVs/covers and the
+  // configured variant are backed up.
+  const tplRoot = join(tmp, 'tpl-root');
+  put(tplRoot, 'cv.md', 'cv');
+  put(tplRoot, 'config/profile.yml', 'cv:\n  template: mine\n');
+  put(tplRoot, 'templates/cv-jane-acme.html', 'generated');
+  put(tplRoot, 'templates/cover-jane-acme.html', 'generated');
+  put(tplRoot, 'templates/cv-template.html', 'shipped');
+  put(tplRoot, 'templates/cv-template.mine.html', 'configured variant');
+  put(tplRoot, 'templates/cv-template.other.html', 'unconfigured variant');
+  put(tplRoot, 'templates/cover-letter-template.html', 'shipped');
+  const tplRun = b.runBackup({ dataRoot: tplRoot, dest: join(tmp, 'backup', 'tpl') });
+  const has = (f) => existsSync(join(tmp, 'backup', 'tpl', 'templates', f));
+  assert.deepEqual(
+    ['cv-jane-acme.html', 'cover-jane-acme.html', 'cv-template.mine.html'].map(has),
+    [true, true, true],
+  );
+  assert.deepEqual(
+    ['cv-template.html', 'cv-template.other.html', 'cover-letter-template.html'].map(has),
+    [false, false, false],
+  );
+  assert.equal(tplRun.failed.length, 0);
+
   // A declaration file that cannot be parsed falls back to the built-in list.
   const decl = join(tmp, 'decl-root');
   put(decl, 'cv.md', 'cv');

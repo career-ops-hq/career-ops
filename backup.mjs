@@ -30,7 +30,7 @@
  */
 
 import {
-  copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync,
+  copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync,
   renameSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'fs';
 import { homedir, platform as osPlatform } from 'os';
@@ -40,7 +40,14 @@ import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { LOCAL_PATHS_FILE, USER_PATHS, effectiveUserPaths } from './update-system.mjs';
+import {
+  LOCAL_PATHS_FILE,
+  USER_PATHS,
+  configuredTemplateVariantsFromProfileSource,
+  effectiveUserPaths,
+  isGeneratedTemplateArtifact,
+  isUserConfiguredTemplateVariant,
+} from './update-system.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -68,7 +75,45 @@ export function backupPaths(dataRoot, warnings = []) {
   } catch (error) {
     warnings.push(`${error.message}; backing up the built-in user paths only.`);
   }
-  return [...new Set([...paths, LOCAL_PATHS_FILE].map((p) => p.replace(/\/+$/, '')))];
+  return [...new Set([...paths, LOCAL_PATHS_FILE, ...templateUserFiles(dataRoot, warnings)].map((p) => p.replace(/\/+$/, '')))];
+}
+
+/**
+ * Files under templates/ that are yours, not the shipped templates: generated
+ * per-application CVs and cover letters, and the named variants config/profile.yml
+ * selects. The updater tells them apart by name (the `templates/` prefix alone
+ * cannot), so this reuses its recognizers and looks one folder down for packs,
+ * as the updater does.
+ */
+function templateUserFiles(dataRoot, warnings) {
+  let variants = {};
+  const profile = join(dataRoot, 'config', 'profile.yml');
+  if (existsSync(profile)) {
+    try {
+      variants = configuredTemplateVariantsFromProfileSource(readFileSync(profile, 'utf8'));
+    } catch (error) {
+      warnings.push(`${profile} could not be read for its configured template variants (${error.message}); they are not backed up.`);
+    }
+  }
+  const found = [];
+  const scan = (relDir, depth) => {
+    let entries;
+    try {
+      entries = readdirSync(join(dataRoot, relDir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const rel = `${relDir}/${entry.name}`;
+      if (entry.isFile() && (isGeneratedTemplateArtifact(rel) || isUserConfiguredTemplateVariant(rel, variants))) {
+        found.push(rel);
+      } else if (entry.isDirectory() && depth === 0) {
+        scan(rel, 1);
+      }
+    }
+  };
+  scan('templates', 0);
+  return found.sort();
 }
 
 /**
