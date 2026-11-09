@@ -41,8 +41,15 @@ test("concurrent workers read distinct Unicode files inside their data root", t 
   const second = writeEvaluationInstructions(root, "Other selected sections");
   const files = fs.readdirSync(root).map(dir => path.join(root, dir, "instructions.md"));
   const file = files.find(file => fs.readFileSync(file, "utf8") === text);
-  const child = spawnSync(process.execPath, ["-e", "process.stdout.write(require('node:fs').readFileSync(process.argv[1], 'utf8'))", file], { cwd: root, encoding: "utf8" });
-  assert.equal(child.status, 0, child.stderr);
+  const child = spawnSync(
+  process.execPath,
+  ["-e", "process.stdout.write(require('node:fs').readFileSync(process.env.EVALUATION_TEST_FILE, 'utf8'))"],
+  {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, EVALUATION_TEST_FILE: file },
+  },
+);
   assert.equal(child.stdout, text);
   first.cleanup();
   assert.equal(fs.readdirSync(root).length, 1);

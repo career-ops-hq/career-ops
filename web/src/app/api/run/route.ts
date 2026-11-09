@@ -203,7 +203,7 @@ export async function POST(req: Request) {
       reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
       coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
       profile: profileRef(careerOpsRoot()),
-      evaluationInstructions: instructionFile?.reference ?? evaluationInstructions,
+      evaluationInstructions: instructionFile?.reference,
     });
 
     const isClaude = cliId === "claude";
