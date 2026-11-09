@@ -40,11 +40,9 @@
 import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
-// Only validateFlags: this module keeps its own flagValue (see below), so
-// importing the shared one too would shadow it.
-import { validateFlags } from './lib/cli-flags.mjs';
+import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -95,29 +93,6 @@ function inRange(dateStr, from, to) {
   return isValidDateStr(dateStr) && dateStr >= from && dateStr <= to;
 }
 
-/**
- * Value of a value-taking flag, accepting BOTH `--flag value` and `--flag=value`.
- *
- * `args.indexOf('--from')` is -1 for the `=` form, so a space-separated-only
- * lookup silently DISCARDS the bound the caller supplied and the digest then
- * reports a different week than the one that was asked for — the same silent
- * discard `computeWeeklyDigest` already refuses to perform for a half-supplied
- * range. company-history.mjs carries this same note and the same fix.
- *
- * @param {string[]} args - argv slice.
- * @param {string} flag - Flag name including leading dashes, e.g. '--from'.
- * @returns {string|undefined} The value, or undefined when the flag is absent.
- */
-export function flagValue(args, flag) {
-  // `--flag=value` first: indexOf() can't see it, so checking it second would
-  // let the space-separated lookup fall through and drop the value.
-  const eq = args.find((a) => a.startsWith(`${flag}=`));
-  if (eq) return eq.slice(flag.length + 1);
-  const idx = args.indexOf(flag);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 // ── Session file parsing ────────────────────────────────────────────
 
 /**
@@ -134,7 +109,7 @@ export function parseSessionFile(content) {
   if (!match) return null;
   let front;
   try {
-    front = yaml.load(match[1]) || {};
+    front = loadYaml(match[1]) || {};
   } catch {
     return null;
   }
@@ -379,6 +354,8 @@ function printSummary(result) {
       ? '(interview-prep/sessions/ not found)'
       : '(no session files fall inside this range)';
     console.log(`No interviews recorded in this range ${reason}.`);
+    console.log('This reads interview notes in interview-prep/sessions, not job-scan results. A scan saves new roles to data/pipeline.md, or to CAREER_OPS_PIPELINE when set.');
+    console.log('Example: node scan.mjs');
     console.log('');
     return;
   }
@@ -702,6 +679,10 @@ const USAGE = `Usage:
   node weekly-digest.mjs --self-test            # run the built-in fixtures
   node weekly-digest.mjs --help                 # show this message
 
+Reads interview notes in interview-prep/sessions. It does not list jobs from a scan.
+node scan.mjs saves new roles to data/pipeline.md (or CAREER_OPS_PIPELINE).
+node scan.mjs --dry-run previews them and saves nothing.
+
 Both bounds are optional; supplying one without the other is rejected rather
 than silently widened.`;
 
@@ -738,6 +719,7 @@ if (isMainModule(import.meta.url)) {
   // session — silently widening the window instead of reporting the mistake.
   if ((from !== undefined && !isValidDateStr(from)) || (to !== undefined && !isValidDateStr(to))) {
     console.error('  Invalid --from/--to date — expected YYYY-MM-DD');
+    console.error('  Example: node weekly-digest.mjs --summary --from 2026-07-20 --to 2026-07-26');
     process.exit(1);
   }
 

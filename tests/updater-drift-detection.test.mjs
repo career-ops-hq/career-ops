@@ -51,6 +51,7 @@ function makeOrigin() {
   g('config', 'user.name', 'Test');
   g('config', 'core.autocrlf', 'false');
   g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
   mkdirSync(join(dir, 'modes'), { recursive: true });
   mkdirSync(join(dir, 'data'), { recursive: true });
   writeFileSync(join(dir, 'scan.mjs'), '// scan v1\n');
@@ -69,6 +70,7 @@ function cloneInstall(originDir) {
   g('config', 'user.name', 'Test');
   g('config', 'core.autocrlf', 'false');
   g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
   return { dir, g };
 }
 

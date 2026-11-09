@@ -6,12 +6,20 @@
 //
 //   F1 — drive-by: any web page the user visits can POST to
 //        http://localhost:3000/api/... in the background (classic CSRF).
-//   F2 — LAN: if the dev server is bound to 0.0.0.0, anyone on the same
-//        network can hit those routes directly.
+//   F2 — LAN: a server bound to every interface answers anyone on the same
+//        network directly — no browser, no user, no page visit involved.
 //
-// This module is the pure decision logic behind `proxy.ts`. It is kept free of
-// node/next imports so it runs on the edge runtime and is unit testable in
-// isolation. Two independent layers, both must pass:
+// F1 covers more than the API. A page that re-resolves its own domain to
+// 127.0.0.1 (DNS rebinding) reaches the dashboard from the user's own browser as
+// same-origin, so the page routes — which render the CV, pipeline and reports —
+// are as sensitive as /api and are gated too; see src/proxy.ts's matcher. A
+// loopback bind does not close that, because the browser making the request is
+// already on the machine. What closes it is the Host filter below: the rebound
+// request still carries the attacker's domain in Host.
+//
+// This module is the pure decision logic behind `src/proxy.ts` (Next 16's
+// name for what used to be middleware.ts). It is kept free of node/next
+// imports so it runs on the edge runtime and is unit testable in isolation.
 //
 //   Origin layer (F1): trust Sec-Fetch-Site when the browser sends it, fall
 //     back to comparing Origin against Host for older/non-browser clients.
@@ -21,8 +29,18 @@
 //     sound a signal as same-origin is. That is what a local companion client
 //     needs — a browser extension speaks from a chrome-extension:// origin,
 //     which is always "cross-site" to Fetch Metadata and so blocked outright.
-//   Host layer (F2): only answer on a loopback Host by default; extra hosts
-//     require an explicit opt-in (CAREER_OPS_WEB_ALLOWED_HOSTS).
+//   Host filter: answer only for loopback OR a host that was opted in via
+//     CAREER_OPS_WEB_ALLOWED_HOSTS. Note the loopback half is unconditional and
+//     is NOT derived from that variable.
+//
+// Nothing here closes F2, and nothing here can: Host is chosen by the client,
+// so a direct LAN request spelling `Host: localhost` satisfies the filter above.
+// Only the interface the server listens on decides who can open the connection
+// at all — see bind-host.mjs, which reads the same env value through the same
+// parseAllowedHosts so the two cannot disagree about what is exposed. The
+// division is by attacker, not by route: the bind answers callers who connect
+// directly, this module answers callers who arrive through a browser the user
+// already trusts.
 
 /** Lowercase a Host/authority, drop the port, unwrap a bracketed IPv6 literal. */
 export function normalizeHost(hostHeader) {
@@ -114,7 +132,8 @@ function block(reason) {
  * @returns {{ok: true} | {ok: false, status: number, reason: string}}
  */
 export function checkRequest({ secFetchSite, origin, host, allowedHosts, allowedOrigins }) {
-  // Host layer (F2): must be loopback, or an explicitly opted-in host.
+  // Host filter (see header — NOT the LAN control): loopback, or an opted-in
+  // host. A direct client picks its own Host, so this cannot be what closes F2.
   const normalizedHost = normalizeHost(host);
   if (!normalizedHost) return block("missing Host header");
   const hostAllowed = isLoopbackHost(normalizedHost) || (allowedHosts && allowedHosts.has(normalizedHost));

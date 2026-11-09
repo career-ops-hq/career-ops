@@ -73,17 +73,17 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const DEFAULT_CSV = join(DATA_ROOT, 'data/Connections.csv');
-const TRACKER_PATH = join(DATA_ROOT, 'data/applications.md');
+export const TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
 const PORTALS_PATH = join(DATA_ROOT, 'portals.yml');
 const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
 
@@ -445,7 +445,7 @@ export function parseTrackerTargets(content) {
 export function parsePortalTargets(content) {
   let doc;
   try {
-    doc = yaml.load(String(content || ''));
+    doc = loadYaml(String(content || ''));
   } catch {
     return { targets: [], skipped: [{ company: '(portals.yml)', reason: 'YAML parse error' }] };
   }

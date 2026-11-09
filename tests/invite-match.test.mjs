@@ -15,7 +15,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { matchInvite, normalizeCompanyName, extractCompany, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyRejectionStatus, selectApplyTarget } from '../invite-match.mjs';
+import { matchInvite, normalizeCompanyName, companySimilarity, extractCompany, extractDate, extractReqId, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyRejectionStatus, selectApplyTarget } from '../invite-match.mjs';
 import { pass, fail } from './helpers.mjs';
 
 console.log('\ninvite-match.mjs — interview invite matching');
@@ -464,4 +464,180 @@ eq('CLI: --help --bogus does not print usage on error', helpBogusResult.stdout.i
 const mistypedResult = runCli(['--sumary']);
 eq('CLI: mistyped flag (--sumary) exits non-zero (code 1)', mistypedResult.status, 1);
 eq('CLI: mistyped flag stderr names the mistyped flag', mistypedResult.stderr.includes('--sumary'), true);
+
+// --- Cases ported from invite-match.mjs runSelfTest() (#5182) ---
+
+// normalizeCompanyName: corporate suffixes, branding, whitespace, and Unicode script preservation
+eq('strips "Corp." suffix', normalizeCompanyName('Acme Corp.'), 'acme');
+eq('strips chained suffixes', normalizeCompanyName('Acme Technologies Inc.'), 'acme');
+eq('drops parenthetical branding', normalizeCompanyName('Acme (Example Group)'), 'acme');
+eq('"&" normalizes the same as "and"', normalizeCompanyName('Acme & Co') === normalizeCompanyName('Acme and Co'), true);
+eq('trims and lowercases whitespace-padded input', normalizeCompanyName('  ACME   '), 'acme');
+eq('a Japanese company name survives normalization', normalizeCompanyName('アクメ株式会社'), 'アクメ株式会社');
+eq('a Cyrillic company name survives normalization and case-folds', normalizeCompanyName('Яндекс'), 'яндекс');
+eq('two different non-Latin companies keep distinct keys', normalizeCompanyName('北京字节跳动') !== normalizeCompanyName('アクメ株式会社'), true);
+eq('NFKC folds full-width to half-width', normalizeCompanyName('ＡＣＭＥ') === normalizeCompanyName('ACME'), true);
+eq('a Korean company name survives normalization', normalizeCompanyName('삼성전자'), '삼성전자');
+eq('a Ukrainian company name survives normalization and case-folds', normalizeCompanyName('Київстар'), 'київстар');
+eq('an Arabic company name survives normalization, spaces intact', normalizeCompanyName('شركة النور'), 'شركة النور');
+eq('a Devanagari name survives normalization', normalizeCompanyName('हिन्दी टेक'), 'हिन्दी टेक');
+eq('Devanagari names differing only in matras keep distinct keys', normalizeCompanyName('कंपनी') !== normalizeCompanyName('कपनी'), true);
+{
+  const nonLatinRows = [
+    { num: 1, company: 'アクメ株式会社', role: 'エンジニア', status: 'Applied', notes: '' },
+    { num: 2, company: 'Acme Inc', role: 'Engineer', status: 'Applied', notes: '' },
+  ];
+  const jp = matchInvite({ company: 'アクメ株式会社' }, nonLatinRows);
+  eq('an invite from a non-Latin company matches its own tracker row', jp.length === 1 && jp[0].appNumber === 1, true);
+  const latin = matchInvite({ company: 'Acme Inc' }, nonLatinRows);
+  eq('the Latin path still matches its own row, unchanged', latin.length === 1 && latin[0].appNumber === 2, true);
+}
+
+// companySimilarity
+eq('identical strings score 1', companySimilarity('acme', 'acme'), 1);
+eq('substring containment scores high', companySimilarity('acme example', 'acme') > 0.5, true);
+eq('unrelated names score 0', companySimilarity('acme', 'globex'), 0);
+eq('empty string never matches', companySimilarity('', 'acme'), 0);
+
+// extractCompany heuristics
+eq('extracts from "Company:" line', extractCompany('Company: Example Industries\nRole: Analyst'), 'Example Industries');
+eq('extracts from generic "Schedule Your Phone Screen" subject', extractCompany('Schedule Your Phone Screen – Acme Opportunity'), 'Acme');
+eq('extracts from "interviewing with X" phrasing', extractCompany('Looking forward to interviewing with Example Corp for the role.'), 'Example Corp');
+eq('returns null when nothing plausible is found', extractCompany('no company signal here at all'), null);
+
+// extractDate
+eq('extracts ISO date', extractDate('Interview scheduled for 2026-07-09 at 4pm'), '2026-07-09');
+eq('extracts named-month date', extractDate('See you on July 9, 2026'), '2026-07-09');
+eq('returns null when no date is present', extractDate('no date mentioned'), null);
+
+// extractReqId: labels, separator guards, and ReDoS probe
+eq('extracts "Req ID:" token', extractReqId('Req ID: R260013984'), 'R260013984');
+eq('extracts "Job ID:" token', extractReqId('Job ID: 43683'), '43683');
+eq('returns null when no req-like token is present', extractReqId('no id here'), null);
+eq('extracts a bare "requisition" label', extractReqId('requisition 26023019'), '26023019');
+eq('extracts an abbreviated "Req" label', extractReqId('Req 32807'), '32807');
+eq('extracts a letter-prefixed token via the labelled branch', extractReqId('Job Requisition ID: JR1234'), 'JR1234');
+eq('returns null for empty text', extractReqId(''), null);
+eq('a date after "job" is not a req id', extractReqId('your job application on 2026-08-16'), null);
+eq('a colon before "id" does not make a req label', extractReqId('req:id 12345'), null);
+eq('a hash before "id" does not make a req label', extractReqId('req#id 999888'), null);
+eq('the job branch still requires whitespace before "id"', extractReqId('job#id 43683'), null);
+eq('req: followed by id12345 captures the whole token, letters included', extractReqId('req:id12345'), 'id12345');
+{
+  const redosProbe = `Requisition ${' '.repeat(64000)}x`;
+  const redosStart = Date.now();
+  eq('a long non-matching run still yields null', extractReqId(redosProbe), null);
+  const redosMs = Date.now() - redosStart;
+  eq(`extractReqId does not backtrack quadratically (64K-space probe took ${redosMs}ms, was ~2.8s)`, redosMs < 1000, true);
+}
+
+// extractPlatform edge cases
+eq('returns null for empty text (extractPlatform)', extractPlatform(''), null);
+
+// matchInvite signal and tiebreak variations
+{
+  const fixtureRows = [
+    { num: 101, company: 'Example Industries', role: 'Training Coordinator', status: 'Applied', date: '2026-06-01', notes: 'Req EX9001' },
+    { num: 102, company: 'Example Industries', role: 'HR Generalist', status: 'Rejected', date: '2026-05-10', notes: 'Rejected 2026-05-20' },
+    { num: 103, company: 'Acme Corp', role: 'Program Coordinator', status: 'Interview', date: '2026-06-15', notes: '' },
+    { num: 104, company: 'Globex LLC', role: 'Analyst', status: 'Applied', date: '2026-06-20', notes: '' },
+  ];
+  const noSignal = matchInvite({ company: null, date: null, reqId: null }, fixtureRows);
+  eq('no company signal → no candidates', noSignal.length, 0);
+
+  const acmeMatch = matchInvite({ company: 'Acme Corp.', date: null, reqId: null }, fixtureRows);
+  eq('matches "Acme Corp." to the Acme Corp tracker row despite suffix punctuation', acmeMatch.length === 1 && acmeMatch[0].appNumber === 103, true);
+
+  const exampleMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, fixtureRows);
+  const reqBoosted = matchInvite({ company: 'Example Industries', date: null, reqId: 'EX9001' }, fixtureRows);
+  eq('a req ID found in notes boosts that candidate\'s confidence', reqBoosted[0].appNumber === 101 && reqBoosted[0].matchConfidence > exampleMatch[0].matchConfidence, true);
+
+  const noMatch = matchInvite({ company: 'Totally Unrelated Co', date: null, reqId: null }, fixtureRows);
+  eq('unrelated company name returns no candidates', noMatch.length, 0);
+}
+
+// analyzeInvite end-to-end signal extraction
+{
+  const fixtureRows = [
+    { num: 103, company: 'Acme Corp', role: 'Program Coordinator', status: 'Interview', date: '2026-06-15', notes: '' },
+  ];
+  const fullText = 'Schedule Your Phone Screen – Acme Opportunity\nInterview scheduled for 2026-07-09.\nJoin via Zoom: https://zoom.us/j/1234567890';
+  const res = analyzeInvite(fullText, fixtureRows);
+  eq('analyzeInvite extracts company end-to-end', res.signals.company, 'Acme');
+  eq('analyzeInvite extracts date end-to-end', res.signals.date, '2026-07-09');
+  eq('analyzeInvite extracts platform end-to-end', res.signals.platform, 'Zoom');
+  eq('analyzeInvite returns the matched candidate end-to-end', res.candidates.length === 1 && res.candidates[0].appNumber === 103, true);
+}
+
+// classifyEmail phrase variants, precedence, and demoted phrases
+eq('detects "decided not to move forward" as rejection', classifyEmail('Unfortunately, we have decided not to move forward with your application.').classification, 'rejection');
+eq('detects "regret to inform" / "not been selected to advance" as rejection', classifyEmail('Thank you for your interest. We regret to inform you that you have not been selected to advance.').classification, 'rejection');
+eq('detects "move forward with other candidates" as rejection', classifyEmail('After careful consideration, we have decided to move forward with other candidates whose qualifications more closely align with this role.').classification, 'rejection');
+eq('detects "not able to offer you a position" as rejection', classifyEmail('Unfortunately, we are not able to offer you a position at this time.').classification, 'rejection');
+eq('detects invite phrasing as "invite"', classifyEmail('We would like to invite you to schedule your phone screen for next week.').classification, 'invite');
+eq('detects "interviewing with" as "invite"', classifyEmail('Looking forward to interviewing with you next Tuesday.').classification, 'invite');
+eq('unrelated text classifies as "unknown"', classifyEmail('Thanks for your recent purchase, here is your receipt.').classification, 'unknown');
+eq('empty text classifies as "unknown"', classifyEmail('').classification, 'unknown');
+eq('rejection language wins when both invite and rejection phrasing appear (references a past interview)', classifyEmail('Thank you for interviewing with us last week. Unfortunately, we will not be moving forward with your application.').classification, 'rejection');
+
+{
+  const rescheduleOnly = classifyEmail('Unfortunately we need to push your interview to next Tuesday due to a scheduling conflict.');
+  eq('"unfortunately"-only reschedule email classifies as unknown, not invite or rejection', rescheduleOnly.classification, 'unknown');
+
+  const weakPlusStrong = classifyEmail('Unfortunately, we have decided not to move forward with your application at this time.');
+  eq('matchedPhrases includes both the weak and strong phrase that co-occurred', weakPlusStrong.matchedPhrases.includes('unfortunately') && weakPlusStrong.matchedPhrases.includes('decided not to move forward'), true);
+}
+
+{
+  const fixtureRows = [
+    { num: 101, company: 'Example Industries', role: 'Training Coordinator', status: 'Applied', date: '2026-06-01', notes: '' },
+    { num: 102, company: 'Example Industries', role: 'HR Generalist', status: 'Rejected', date: '2026-05-10', notes: '' },
+  ];
+  const rejectionText = 'Dear Candidate,\n\nCompany: Example Industries\nThank you for applying. Unfortunately, we have decided not to move forward with your application at this time.';
+  const rejectionResult = analyzeInvite(rejectionText, fixtureRows);
+  eq('analyzeInvite classifies a rejection email as "rejection"', rejectionResult.classification, 'rejection');
+  eq('a rejection email still returns ranked candidates (matching is unaffected by classification), active row ranked first', rejectionResult.candidates.length === 2 && rejectionResult.candidates[0].appNumber === 101, true);
+  eq('analyzeInvite exposes matchedPhrases for a rejection classification', Array.isArray(rejectionResult.matchedPhrases) && rejectionResult.matchedPhrases.length > 0, true);
+}
+
+// classifyEmail phraseStrength & demoted phrases
+eq('a strong rejection phrase reports phraseStrength "strong"', classifyEmail('We are sorry to inform you that we have decided not to move forward with your application.').phraseStrength, 'strong');
+eq('an invite classification reports phraseStrength null', classifyEmail('We would like to invite you to schedule your phone screen.').phraseStrength, null);
+eq('an unknown classification reports phraseStrength null', classifyEmail('Thanks for your recent purchase.').phraseStrength, null);
+eq('"not successful" alone (demoted phrase, unrelated context) does not classify as rejection', classifyEmail('We are sorry to report the negotiation was not successful.').classification !== 'rejection', true);
+eq('"regret to inform" alone (demoted phrase, non-candidate-directed context) does not classify as rejection', classifyEmail('We regret to inform all staff that the downtown office lease will not be renewed.').classification !== 'rejection', true);
+eq('"will not be moving forward" alone (demoted phrase, unrelated project context) does not classify as rejection', classifyEmail('Please note the Q3 expansion will not be moving forward due to budget constraints.').classification !== 'rejection', true);
+eq('"unable to offer you" alone (demoted phrase, non-rejection context) does not classify as rejection', classifyEmail('We are currently unable to offer you a start date earlier than March.').classification !== 'rejection', true);
+
+// matchInvite nameScore & selectApplyTarget gate variations
+{
+  const exactNameRows = [{ num: 501, company: 'Example Industries', role: 'Analyst', status: 'Applied', date: null, notes: '' }];
+  const exactNameMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, exactNameRows);
+  eq('matchInvite exposes nameScore 1 for an exact company-name match', exactNameMatch[0].nameScore, 1);
+  const fuzzyNameRows = [{ num: 502, company: 'Example Industries Global Holdings', role: 'Analyst', status: 'Applied', date: null, notes: '' }];
+  const fuzzyNameMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, fuzzyNameRows);
+  eq('matchInvite exposes nameScore < 1 for a partial/fuzzy company-name match', fuzzyNameMatch[0].nameScore < 1, true);
+
+  const weakOnlySelection = selectApplyTarget(
+    { candidates: [{ appNumber: 502, nameScore: 1 }], phraseStrength: 'weak' },
+    null
+  );
+  eq('selectApplyTarget refuses to auto-apply a sole candidate when the rejection classification is only weak, even with an exact company match', !!weakOnlySelection.error && weakOnlySelection.code === 2, true);
+
+  const idOverrideSelection = selectApplyTarget(
+    { candidates: [{ appNumber: 503, nameScore: 0.4 }], phraseStrength: 'weak' },
+    503
+  );
+  eq('selectApplyTarget honors an explicit --id even when the sole-candidate confidence gate would otherwise refuse', !idOverrideSelection.error && idOverrideSelection.target.appNumber === 503, true);
+
+  const noCandidateSelection = selectApplyTarget({ candidates: [], phraseStrength: 'strong' }, null);
+  eq('selectApplyTarget refuses with code 2 when no candidates matched', !!noCandidateSelection.error && noCandidateSelection.code === 2, true);
+
+  const ambiguousSelection = selectApplyTarget(
+    { candidates: [{ appNumber: 601, nameScore: 1 }, { appNumber: 602, nameScore: 1 }], phraseStrength: 'strong' },
+    null
+  );
+  eq('selectApplyTarget refuses with code 3 when multiple candidates matched', !!ambiguousSelection.error && ambiguousSelection.code === 3, true);
+  eq('selectApplyTarget exposes the ranked candidate list on an ambiguous refusal', Array.isArray(ambiguousSelection.candidates) && ambiguousSelection.candidates.length === 2, true);
+}
 

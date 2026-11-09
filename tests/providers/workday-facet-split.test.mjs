@@ -6,6 +6,13 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — workday facet-split');
 
+// Expected jobs.workdayTruncated values, spelled out locally rather than
+// imported from providers/workday.mjs: these strings are the module's public
+// contract with scan-ats-full.mjs, and a test importing the same constant the
+// source uses can no longer catch that constant's value drifting by accident.
+const TRANSIENT = 'transient';
+const STRUCTURAL = 'structural';
+
 // Trimmed from a live dickssportinggoods|wd1|dsg page-0 response (2026-08-25).
 // `total` came back 2,000 while the facet counts sum to ~8,4xx — the clamp this
 // whole feature exists to route around. Counts are the real ones; the value
@@ -58,6 +65,51 @@ const DSG_FACETS = [
   },
 ];
 
+// The same board with `locationMainGroup` in the fuller shape a live tenant
+// ships (page 0, 2026-08-28): the id-less group parents above, each carrying
+// nested children that *do* have their own ids and counts.
+//
+// Those children double-count. A requisition open in several locations is
+// counted once per location, so the live facet's 938 children summed to 16,732
+// against a board of ~8,366 — almost exactly 2.00x — while every other counted
+// facet on the board agreed within 0.9% and erred downward. The children below
+// are collapsed from 938 to 4 with that sum preserved, since the sum is the
+// property under test.
+//
+// Neither function should reach them: `facetCoverage()` sums a facet's own
+// `values`, and `chooseSplitFacet()` filters on a string `id`. Recursing into
+// `values[].values` looks like a free improvement — more values, a finer
+// partition — and would instead double the true total, so every healthy board
+// would compare its honest `total` against it and read as offset-clamped. The
+// two assertions below go red if that refactor ever lands. See #3875.
+const DSG_NESTED_FACETS = [
+  ...DSG_FACETS.filter((f) => f.facetParameter !== 'locationMainGroup'),
+  {
+    facetParameter: 'locationMainGroup',
+    descriptor: null,
+    values: [
+      {
+        id: null,
+        descriptor: 'Location - State',
+        count: null,
+        values: [
+          { id: 'loc-pa', descriptor: 'Pennsylvania', count: 4183 },
+          { id: 'loc-ny', descriptor: 'New York', count: 4183 },
+        ],
+      },
+      {
+        id: null,
+        descriptor: 'Locations',
+        count: null,
+        values: [
+          { id: 'loc-pgh', descriptor: 'Pittsburgh', count: 4183 },
+          { id: 'loc-nyc', descriptor: 'New York City', count: 4183 },
+        ],
+      },
+    ],
+  },
+];
+
 try {
   const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
   const workday = workdayModule.default;
@@ -81,6 +133,22 @@ try {
     fail('trueTotalFromFacets() should return null for empty/absent facets');
   }
 
+  // Workday counts facets disjunctively: an APPLIED facet's counts describe the
+  // board without that filter. Measured on Nvidia 2026-11-07: slice
+  // jobFamilyGroup=X & workerSubType=Regular reported total 1594 while its own
+  // jobFamilyGroup facet summed to 2308 and workerSubType to 1780.
+  const NVIDIA_SLICE_FACETS = [
+    { facetParameter: 'jobFamilyGroup', values: [{ id: 'x', count: 1594 }, { id: 'y', count: 714 }] },
+    { facetParameter: 'workerSubType', values: [{ id: 'reg', count: 1594 }, { id: 'int', count: 186 }] },
+    { facetParameter: 'timeType', values: [{ id: 'ft', count: 1594 }] },
+  ];
+  const sliceTrue = trueTotalFromFacets(NVIDIA_SLICE_FACETS, { exclude: ['jobFamilyGroup', 'workerSubType'] });
+  if (sliceTrue === 1594) {
+    pass('trueTotalFromFacets() ignores the facets a slice already applies (disjunctive counts)');
+  } else {
+    fail(`trueTotalFromFacets(Nvidia slice, exclude applied) returned ${sliceTrue}, expected 1594`);
+  }
+
   // A facet whose values carry no counts tells us nothing about board size —
   // summing them would report 0 and read as "empty board".
   const uncounted = trueTotalFromFacets([
@@ -90,6 +158,19 @@ try {
     pass('trueTotalFromFacets() ignores facets whose values carry no usable counts');
   } else {
     fail(`trueTotalFromFacets(uncounted) returned ${uncounted}, expected null`);
+  }
+
+  // The board size must not move when the nested children are present. An
+  // implementation that summed them would return 16,732 and, because this
+  // function takes the maximum, every healthy tenant would then read as clamped.
+  const nestedTrue = trueTotalFromFacets(DSG_NESTED_FACETS);
+  if (nestedTrue === 8425) {
+    pass('trueTotalFromFacets() ignores nested facet children — locationMainGroup cannot double the board');
+  } else {
+    fail(
+      `trueTotalFromFacets(DSG_NESTED) returned ${nestedTrue}, expected 8425` +
+        ' — 16732 means the nested children were summed (#3875)',
+    );
   }
 
   // ── chooseSplitFacet ──────────────────────────────────────────────
@@ -134,6 +215,17 @@ try {
     pass('chooseSplitFacet() rejects facets whose values have no id (id-less group headers)');
   } else {
     fail('chooseSplitFacet() should reject id-less facet values');
+  }
+
+  // Same rejection, but against the shape that makes descending tempting: the
+  // parents are still id-less, yet their children carry usable ids and counts.
+  const nestedChosen = chooseSplitFacet(DSG_NESTED_FACETS);
+  if (nestedChosen && nestedChosen.facetParameter === 'jobFamily') {
+    pass('chooseSplitFacet() never picks a nested group facet, even when its children carry ids and counts');
+  } else {
+    fail(
+      `chooseSplitFacet(DSG_NESTED) chose ${JSON.stringify(nestedChosen?.facetParameter)}, expected "jobFamily" (#3875)`,
+    );
   }
 
   const locationFirst = chooseSplitFacet([
@@ -291,6 +383,39 @@ try {
     fail(`nested split issued ${JSON.stringify([...new Set(nestedCalls)])}, expected jobFamily=a x timeType slices`);
   }
 
+  // A slice whose only "big" count is its own applied facet (disjunctive) is
+  // complete: it must not re-split and must not be tagged truncated.
+  const DISJ = {
+    '': {
+      total: 20,
+      facets: [{ facetParameter: 'jobFamily', values: [{ id: 'a', count: 2600 }, { id: 'b', count: 100 }] }],
+      tag: 'unfaceted',
+    },
+    'jobFamily=a': {
+      total: 20,
+      facets: [
+        { facetParameter: 'jobFamily', values: [{ id: 'a', count: 2600 }, { id: 'b', count: 100 }] },
+        { facetParameter: 'timeType', values: [{ id: 'p', count: 10 }, { id: 'f', count: 10 }] },
+      ],
+      tag: 'a',
+    },
+    'jobFamily=b': { total: 20, facets: [], tag: 'b' },
+  };
+  const disjCalls = [];
+  const disjJobs = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    disjCalls.push(key);
+    const res = DISJ[key];
+    if (!res) throw new Error(`unexpected slice ${JSON.stringify(key)}`);
+    return { total: res.total, facets: res.facets, jobPostings: postings(res.tag, body.offset) };
+  }, { includeUndated: true }))).then((r) => r.result);
+  if (!disjCalls.some((k) => k.includes('timeType')) && disjJobs.workdayTruncated === undefined) {
+    pass('workday.fetch() does not read a slice\'s own (disjunctive) facet counts as a clamp');
+  } else {
+    fail(`disjunctive slice: calls ${JSON.stringify([...new Set(disjCalls)])}, workdayTruncated=${disjJobs.workdayTruncated}`);
+  }
+
   if (nestedJobs.length === 100) {
     pass('workday.fetch() returns the union across both split levels (unfaceted + a + b + ap + af)');
   } else {
@@ -318,17 +443,17 @@ try {
     fail(`facet split made ${deepCalls} requests — unbounded`);
   }
 
-  if (deepJobs.workdayTruncated === true) {
-    pass('workday.fetch() tags a board it could not fully cover as truncated rather than reporting it complete');
+  if (deepJobs.workdayTruncated === STRUCTURAL) {
+    pass('workday.fetch() tags a board it could not fully cover as structurally truncated rather than reporting it complete');
   } else {
-    fail('facet split that ran out of depth should tag jobs.workdayTruncated');
+    fail(`facet split that ran out of depth should tag jobs.workdayTruncated='${STRUCTURAL}', got ${deepJobs.workdayTruncated}`);
   }
 
   // A pathological facet fan-out must not be able to spend a whole sweep on one
   // tenant: the live DSG board splits into 24 values whose dominant slice stays
   // clamped at every level, so the page budget is the only thing bounding it.
   let budgetCalls = 0;
-  await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+  const { result: budgetJobs } = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
     const body = JSON.parse(opts.body);
     budgetCalls++;
     if (budgetCalls > 2000) throw new Error('page budget not enforced');
@@ -348,6 +473,14 @@ try {
     pass('workday.fetch() caps total pages per tenant so one pathological board cannot eat a sweep');
   } else {
     fail(`clamped fan-out spent ${budgetCalls} requests, expected <= 501`);
+  }
+
+  // The page budget is a fixed resource, exhausted identically on a repeat
+  // run — a sequential retry would just spend it again for the same result.
+  if (budgetJobs.workdayTruncated === STRUCTURAL) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${STRUCTURAL}' when the tenant page budget runs out`);
+  } else {
+    fail(`a board that exhausted its page budget should tag jobs.workdayTruncated='${STRUCTURAL}', got ${budgetJobs.workdayTruncated}`);
   }
 
 
@@ -383,10 +516,10 @@ try {
     fail(`slice that failed mid-pagination produced recovery line ${JSON.stringify(dyingRecoveryLine)}, expected it to carry "(still incomplete)"`);
   }
 
-  if (dyingJobs.workdayTruncated === true) {
-    pass('workday.fetch() tags jobs.workdayTruncated when a slice died mid-fetch, so the sweep retries the tenant');
+  if (dyingJobs.workdayTruncated === TRANSIENT) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${TRANSIENT}' when a slice died mid-fetch, so the sweep retries the tenant`);
   } else {
-    fail('a split whose slice hit fetch-error should tag jobs.workdayTruncated, not report the board complete');
+    fail(`a split whose slice hit fetch-error should tag jobs.workdayTruncated='${TRANSIENT}', got ${dyingJobs.workdayTruncated}`);
   }
 
   // 'cap' is the same shape of partial result: the slice stopped at max_pages
@@ -407,10 +540,10 @@ try {
     return { total: 20, facets: [], jobPostings: body.offset === 0 ? postings('b', 0) : [] };
   }, { includeUndated: true })));
 
-  if (cappedJobs.workdayTruncated === true) {
-    pass('workday.fetch() tags jobs.workdayTruncated when a slice stopped at the page cap with pages left');
+  if (cappedJobs.workdayTruncated === STRUCTURAL) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${STRUCTURAL}' when a slice stopped at the page cap with pages left`);
   } else {
-    fail('a split whose slice hit the page cap should tag jobs.workdayTruncated');
+    fail(`a split whose slice hit the page cap should tag jobs.workdayTruncated='${STRUCTURAL}', got ${cappedJobs.workdayTruncated}`);
   }
 
   // A slice whose PAGE 0 dies is the dangerous shape: runQuery()'s first fetch
@@ -451,10 +584,10 @@ try {
     fail('a slice failing on page 0 stopped the split from trying the other slices');
   }
 
-  if (page0Jobs.workdayTruncated === true) {
-    pass('workday.fetch() tags jobs.workdayTruncated when a slice failed on page 0');
+  if (page0Jobs.workdayTruncated === TRANSIENT) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${TRANSIENT}' when a slice failed on page 0`);
   } else {
-    fail('a split whose slice failed on page 0 should tag jobs.workdayTruncated, not report the board complete');
+    fail(`a split whose slice failed on page 0 should tag jobs.workdayTruncated='${TRANSIENT}', got ${page0Jobs.workdayTruncated}`);
   }
 
   const page0RecoveryLine = page0Errors.find((e) => String(e).includes('offset-clamped at'));
@@ -535,10 +668,10 @@ try {
     mkCtx(coverageResponder(UNDERCOVERING, ['tier=t1', 'tier=t2']), { includeUndated: true }),
   ));
 
-  if (underJobs.workdayTruncated === true) {
-    pass('workday.fetch() tags a split whose chosen facet covers materially less than the board');
+  if (underJobs.workdayTruncated === STRUCTURAL) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${STRUCTURAL}' for a split whose chosen facet covers materially less than the board`);
   } else {
-    fail('a split facet covering 600 of a 2700 board leaves 2100 postings unreachable and must tag workdayTruncated');
+    fail(`a split facet covering 600 of a 2700 board leaves 2100 postings unreachable and must tag workdayTruncated='${STRUCTURAL}', got ${underJobs.workdayTruncated}`);
   }
 
   const underLine = underErrors.find((e) => String(e).includes('offset-clamped at'));

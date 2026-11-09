@@ -1,28 +1,43 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
+import { evaluationGateForJob } from "@/lib/job-gate.mjs";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { LinkedInPaste } from "@/components/linkedin-paste";
+import { orderInbox } from "@/lib/core/inbox-rank.mjs";
+import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
+import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
+import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
+import { createInboxSkipActions, queueInboxSkip, reportSkipRejections, restoreSkippedUrls } from "@/lib/inbox-skip-client.mjs";
+import { useEvaluationOptions } from "@/components/evaluation-options";
+import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
-const CONFIG_KEY = "career-ops:config";
 const BATCH = 20;
+type UndoNotice = { label: string; fn: () => Promise<void>; busy?: boolean; error?: string };
 
 // The inbox as a TRIAGE surface: Abundance → Triage → Shortlist → Opt-in Score.
-// Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
-// it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
-// role relevant — order is freshness with a single documented plug point.
+// Default is the best 20 fits (never the full wall). Newest is a local toggle.
+// Free facets + Save/Skip narrow the list. Only "Score shortlist" spends tokens.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
+  const router = useRouter();
   const { jobs, startJob } = useJobs();
+  const { sections, setSections } = useEvaluationOptions();
+  // Serialize skip/undo per URL so a fast Undo cannot lose the race to Skip.
+  const skipChain = useRef(new Map<string, Promise<void>>());
+  const undoRunning = useRef(new Set<UndoNotice["fn"]>());
+  const restoreRunning = useRef(false);
 
   // facets
   const [within, setWithin] = useState<number | null>(null);
@@ -31,12 +46,16 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [sortMode, setSortMode] = useState<"fit" | "newest">("fit");
 
   // persisted triage state + ephemeral selection/undo
   const [shortlist, setShortlist] = useState<ShortItem[]>([]);
   const [hidden, setHidden] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  const [undo, setUndo] = useState<{ label: string; fn: () => void } | null>(null);
+  const [cursor, setCursor] = useState(-1);
+  const [undo, setUndo] = useState<UndoNotice | null>(null);
+  const [writeError, setWriteError] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const [hasCli, setHasCli] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -45,13 +64,29 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       const s = localStorage.getItem(SHORTLIST_KEY);
       if (s) setShortlist(JSON.parse(s));
       const h = localStorage.getItem(HIDDEN_KEY);
-      if (h) setHidden(JSON.parse(h));
-      const c = localStorage.getItem(CONFIG_KEY);
-      setHasCli(!!(c && JSON.parse(c).cliId));
+      if (h) {
+        const parsed = JSON.parse(h) as unknown;
+        const urls = Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === "string") : [];
+        const pending = new Set(inbox.map((j) => j.url));
+        setHidden(urls.filter((u) => pending.has(u)));
+      }
     } catch {
       /* ignore */
     }
     setLoaded(true);
+    // First SSR inbox only — later refreshes prune via the inbox effect below.
+  }, []);
+  useEffect(() => {
+    function read() {
+      try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        setHasCli(!!(raw && JSON.parse(raw).cliId));
+      } catch {
+        setHasCli(false);
+      }
+    }
+    read();
+    return subscribeConfig(window, read);
   }, []);
   useEffect(() => {
     if (loaded) try { localStorage.setItem(SHORTLIST_KEY, JSON.stringify(shortlist)); } catch { /* quota */ }
@@ -59,10 +94,19 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   useEffect(() => {
     if (loaded) try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden)); } catch { /* quota */ }
   }, [hidden, loaded]);
+  // After SSR refresh, pipeline.md [x] rows are already gone from `inbox`.
+  // Drop them from the localStorage cache so "N hidden" does not linger.
+  useEffect(() => {
+    const pending = new Set(inbox.map((j) => j.url));
+    setHidden((h) => {
+      const next = h.filter((u) => pending.has(u));
+      return next.length === h.length ? h : next;
+    });
+  }, [inbox]);
   // auto-dismiss the undo toast
   useEffect(() => {
-    if (!undo) return;
-    const t = setTimeout(() => setUndo(null), 5000);
+    if (!undo || undo.busy || undo.error) return;
+    const t = setTimeout(() => setUndo((current) => current?.fn === undo.fn && !current.busy && !current.error ? null : current), 5000);
     return () => clearTimeout(t);
   }, [undo]);
 
@@ -92,7 +136,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     }
     const m = new Map<string, RowScore>();
     for (const [url, j] of best) {
-      m.set(url, { score: j.result?.score ?? null, tone: j.result?.tone ?? "muted", jobId: j.id, running: j.status === "running" });
+      m.set(url, { score: j.result?.score ?? null, tone: j.result?.tone ?? "muted", jobId: j.id, running: j.status === "running", reportN: j.reportN, needsReview: j.status === "gated" || Boolean(evaluationGateForJob(j)) });
     }
     return m;
   }, [jobs]);
@@ -123,25 +167,96 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     [enriched, hidden, within, sources, seniorities, locQ, kw],
   );
 
-  // 🔴 SINGLE ORDER PLUG POINT — freshness only (newest first_seen first; unknown last).
-  // A smarter ranker replaces ONLY this comparator; facets/triage/shortlist/score never
-  // touch relevance. This is the whole firewall in one line.
-  const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
+  // Fit order lives in core/inbox-rank.mjs. This is the only sort.
+  const ordered = useMemo(() => orderInbox(filtered.map((entry) => ({
+    ...entry,
+    postedAt: entry.job.postedAt,
+    fit: entry.job.fit ?? null,
+  })), sortMode), [filtered, sortMode]);
 
   const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
-  const capped = !showAll && !anyFacet;
+  // Keep the batch cap with filters on too: filters sit under the list, so an
+  // uncapped match set pushes what the filter did off screen.
+  const capped = !showAll;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
+  const listTopRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setShowAll(false);
+  }, [within, sources, seniorities, locQ, kw]);
+  // Chip/facet changes only — scrolling on every locQ/kw keystroke pulls the
+  // focused text input out of view while the user is still typing.
+  useEffect(() => {
+    if (within == null && sources.size === 0 && seniorities.size === 0) return;
+    listTopRef.current?.scrollIntoView({ block: "nearest" });
+  }, [within, sources, seniorities]);
+  useEffect(() => {
+    setCursor((index) => (visible.length === 0 ? -1 : index < 0 ? index : Math.min(index, visible.length - 1)));
+  }, [visible.length]);
+  useEffect(() => {
+    if (cursor < 0) return;
+    document.querySelector(`[data-triage-index="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [cursor]);
 
   const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
+
+  const persistSkip = async (url: string, done: boolean) => {
+    await queueInboxSkip(skipChain.current, url, done);
+    router.refresh();
+  };
+  const handleUndo = async (notice: UndoNotice) => {
+    if (undoRunning.current.has(notice.fn)) return;
+    undoRunning.current.add(notice.fn);
+    setUndo((current) => current?.fn === notice.fn ? { ...current, busy: true, error: undefined } : current);
+    try {
+      await notice.fn();
+      setUndo((current) => current?.fn === notice.fn ? null : current);
+    } catch (cause) {
+      const error = cause instanceof Error ? cause.message : "Could not undo this skip. Please try again.";
+      setUndo((current) => current?.fn === notice.fn ? { ...current, busy: false, error } : current);
+    } finally {
+      undoRunning.current.delete(notice.fn);
+    }
+  };
 
   const save = (job: InboxJob) => {
     if (isShortlisted(job.url)) return;
     setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
   };
   const skip = (job: InboxJob) => {
+    setWriteError("");
+    setSelected((current) => selectionWithout(current, job.url));
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
-    setUndo({ label: `Skipped ${job.company}`, fn: () => setHidden((h) => h.filter((u) => u !== job.url)) });
+    const actions = createInboxSkipActions((done) => persistSkip(job.url, done), () => {
+      setHidden((h) => h.filter((u) => u !== job.url));
+      setUndo((current) => current?.fn === notice.fn && !current.busy ? null : current);
+      setWriteError(`Could not skip ${job.company}. Please try Skip again.`);
+    });
+    const notice: UndoNotice = {
+      label: `Skipped ${job.company}`,
+      fn: async () => {
+        await actions.undo();
+        setHidden((h) => h.filter((u) => u !== job.url));
+      },
+    };
+    setUndo(notice);
+    void actions.skip();
+  };
+  const restoreHidden = async () => {
+    if (restoreRunning.current) return;
+    restoreRunning.current = true;
+    setRestoring(true);
+    const urls = hidden;
+    setWriteError("");
+    try {
+      await Promise.all(urls.map((url) => persistSkip(url, false).then(() => {
+        setHidden((h) => h.filter((u) => u !== url));
+      }).catch(() => setWriteError("Some jobs could not be restored. Try restore again."))));
+    } finally {
+      restoreRunning.current = false;
+      setRestoring(false);
+    }
   };
   const toggleSelect = (url: string) =>
     setSelected((s) => {
@@ -157,30 +272,205 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     if (add.length) setShortlist((s) => [...s, ...add]);
     setSelected(new Set());
   };
+  const skipUrls = (jobs: InboxJob[], label: string) => {
+    const urls = [...new Set(jobs.map((job) => job.url))];
+    if (urls.length === 0) return;
+    setWriteError("");
+    setHidden((h) => [...h, ...urls.filter((url) => !h.includes(url))]);
+    setSelected(new Set());
+    const notice: UndoNotice = {
+      label,
+      fn: async () => {
+        await restoreSkippedUrls(urls, (url) => persistSkip(url, false), (url) => {
+          setHidden((h) => h.filter((item) => item !== url));
+        });
+      },
+    };
+    setUndo(notice);
+    // Each failure shows as soon as that request rejects. A hung request must
+    // not hide it. The page still refreshes once, after the whole batch settles.
+    const alreadyHidden = new Set(hidden);
+    void reportSkipRejections(
+      urls.map((url) => queueInboxSkip(skipChain.current, url, true)),
+      (index) => {
+        const url = urls[index];
+        if (!alreadyHidden.has(url)) setHidden((h) => h.filter((item) => item !== url));
+        setWriteError("Could not skip every selected role.");
+        setUndo((current) => current?.fn === notice.fn ? { ...current, error: "Could not skip every selected role." } : current);
+      },
+    ).finally(() => router.refresh());
+  };
+  const skipSelected = () => {
+    const jobs = skippableJobs(enriched.filter((e) => selected.has(e.job.url)).map((e) => e.job), scoreByUrl);
+    skipUrls(jobs, `Skipped ${jobs.length}`);
+  };
+
+  const keyActions = useRef({
+    save, skip, skipSelected, selectedSize: selected.size, visible, cursor, capped, orderedLength: ordered.length, scoreByUrl,
+  });
+  useLayoutEffect(() => {
+    keyActions.current = { save, skip, skipSelected, selectedSize: selected.size, visible, cursor, capped, orderedLength: ordered.length, scoreByUrl };
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      const typing = typingFromTarget(target instanceof Element ? {
+        tagName: target.tagName,
+        type: target instanceof HTMLInputElement ? target.type : undefined,
+        isContentEditable: target instanceof HTMLElement && target.isContentEditable,
+        closestDialog: Boolean(target.closest("dialog, [role='dialog']")),
+      } : null);
+      const current = keyActions.current;
+      const command = inboxCommand({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        typing,
+        composing: event.isComposing || event.key === "Process",
+        selected: current.selectedSize,
+        repeat: event.repeat,
+      });
+      if (!command) return;
+      if (command === "next" || command === "prev") {
+        event.preventDefault();
+        const delta = command === "next" ? 1 : -1;
+        if (command === "next" && current.capped && current.cursor >= current.visible.length - 1 && current.orderedLength > current.visible.length) {
+          setShowAll(true);
+          return;
+        }
+        setCursor((index) => moveCursor(index, current.visible.length, delta));
+        return;
+      }
+      if (command === "skip-selected") {
+        event.preventDefault();
+        current.skipSelected();
+        return;
+      }
+      // With no cursor yet, s or x only shows it on the first row. Acting on a
+      // row the user cannot see yet would save or skip it unseen.
+      if (current.cursor < 0) {
+        if (current.visible.length === 0) return;
+        event.preventDefault();
+        setCursor(0);
+        return;
+      }
+      const index = current.cursor;
+      const row = current.visible[index];
+      if (!row || inboxScoreTarget(current.scoreByUrl.get(row.job.url)).evaluated) return;
+      event.preventDefault();
+      if (command === "save") {
+        current.save(row.job);
+        setCursor(moveCursor(index, current.visible.length, 1));
+        return;
+      }
+      if (command === "skip") {
+        current.skip(row.job);
+        setCursor(cursorAfterRemoval(index, index));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const estimate = useMemo(() => {
-    const samples = jobs.filter((j) => j.kind === "evaluate" && j.status === "done" && j.cost?.tokens).map((j) => j.cost!);
-    if (!samples.length || shortlist.length === 0) return {};
-    const avgT = samples.reduce((a, c) => a + c.tokens, 0) / samples.length;
-    const usds = samples.filter((s) => s.usd != null).map((s) => s.usd!);
-    const avgUsd = usds.length ? usds.reduce((a, c) => a + c, 0) / usds.length : undefined;
-    return { tokens: Math.round(avgT * shortlist.length), usd: avgUsd != null ? +(avgUsd * shortlist.length).toFixed(2) : undefined };
-  }, [jobs, shortlist.length]);
+    if (shortlist.length === 0) return {};
+    return estimateRunCost(jobs, "evaluate", shortlist.length, sections);
+  }, [jobs, shortlist.length, sections]);
 
   const scoreShortlist = () => {
     const batchId = `shortlist-${Date.now()}`;
     for (const it of shortlist) {
-      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
+      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId, evaluationSections: sections });
     }
     setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
   };
 
-  // The parent (PipelineView) renders the rich empty-inbox card; here we always
-  // have ≥1 raw posting.
-  if (inbox.length === 0) return null;
-
   return (
     <div className={cn("mx-auto mt-4 max-w-3xl", shortlist.length > 0 && "pb-28 sm:pb-24")}>
+      {writeError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-400">{writeError}</p>}
+      {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
+      <div hidden={inbox.length === 0}>
+      {/* batch header: fresh/filtered slice by default; "See all" lifts the cap */}
+      <div ref={listTopRef} className="mt-4 flex items-baseline justify-between gap-3">
+        <p className="text-sm font-medium text-foreground">
+          {anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : capped ? (sortMode === "newest" ? "Fresh — worth a look" : "Best fits") : "All roles"}
+        </p>
+        <div className="flex items-center gap-3">
+          <div role="group" aria-label="Sort inbox" className="flex items-center gap-2 text-xs">
+            <button type="button" aria-pressed={sortMode === "fit"} onClick={() => setSortMode("fit")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
+            <button type="button" aria-pressed={sortMode === "newest"} onClick={() => setSortMode("newest")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")}>Newest</button>
+          </div>
+          {hiddenCount > 0 && (
+            <button type="button" onClick={() => void restoreHidden()} disabled={restoring} aria-busy={restoring} className="text-xs text-faint transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]">
+              {hiddenCount} hidden · {restoring ? "restoring…" : "restore"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* multi-select action bar */}
+      {selected.size > 0 && (
+        <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm">
+          <span className="font-medium text-brand-text tabular-nums">{selected.size} selected</span>
+          <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
+            Save to shortlist
+          </button>
+          <button type="button" onClick={skipSelected} className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 max-sm:min-h-[44px]">
+            Skip selected
+          </button>
+          <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
+            Clear
+          </button>
+        </div>
+      )}
+
+      {visible.length > 0 ? (
+        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
+          {visible.map((e, index) => (
+            <TriageRow
+              key={e.job.url}
+              index={index}
+              cursor={cursor === index}
+              job={e.job}
+              source={e.source}
+              age={e.age}
+              reason={e.fit?.reason ?? ""}
+              scored={scoreByUrl.get(e.job.url)}
+              selected={selected.has(e.job.url)}
+              shortlisted={isShortlisted(e.job.url)}
+              onToggleSelect={() => toggleSelect(e.job.url)}
+              onSave={() => save(e.job)}
+              onSkip={() => skip(e.job)}
+            />
+          ))}
+        </ul>
+      ) : (
+        <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
+          <p className="font-display text-lg">No matches</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Loosen the filters to see more of your inbox.</p>
+        </div>
+      )}
+
+      {/* "See all N" — when the batch is capping a larger (optionally filtered) list */}
+      {capped && ordered.length > BATCH && (
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
+        >
+          See all {ordered.length}{anyFacet ? " matches" : " in inbox"} →
+        </button>
+      )}
+
+      {/* empty-shortlist guidance (only once there's nothing saved) */}
+      {shortlist.length === 0 && (
+        <p className="mt-4 text-center text-xs text-faint">Save roles worth a look, then score them together — one token spend.</p>
+      )}
+      </div>
+      <LinkedInPaste />
+      <div hidden={inbox.length === 0}>
       <FacetChips
         within={within}
         setWithin={setWithin}
@@ -199,79 +489,19 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         anyActive={anyFacet}
         onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
       />
-
-      {/* batch header: fresh slice by default, or the full filtered set */}
-      <div className="mt-4 flex items-baseline justify-between gap-3">
-        <p className="text-sm font-medium text-foreground">
-          {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
-        </p>
-        {hiddenCount > 0 && (
-          <button type="button" onClick={() => setHidden([])} className="text-xs text-faint transition-colors hover:text-foreground">
-            {hiddenCount} hidden · restore
-          </button>
-        )}
+      <p className="mt-3 text-xs text-faint">j and k move. s saves. x skips. Shift+X skips the checked rows.</p>
       </div>
-
-      {/* multi-select action bar */}
-      {selected.size > 0 && (
-        <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm">
-          <span className="font-medium text-brand tabular-nums">{selected.size} selected</span>
-          <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
-            Save to shortlist
-          </button>
-          <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
-            Clear
-          </button>
-        </div>
-      )}
-
-      {visible.length > 0 ? (
-        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
-          {visible.map((e) => (
-            <TriageRow
-              key={e.job.url}
-              job={e.job}
-              source={e.source}
-              age={e.age}
-              scored={scoreByUrl.get(e.job.url)}
-              selected={selected.has(e.job.url)}
-              shortlisted={isShortlisted(e.job.url)}
-              onToggleSelect={() => toggleSelect(e.job.url)}
-              onSave={() => save(e.job)}
-              onSkip={() => skip(e.job)}
-            />
-          ))}
-        </ul>
-      ) : (
-        <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
-          <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Loosen the filters to see more of your inbox.</p>
-        </div>
-      )}
-
-      {/* "See all N" — only when the fresh batch is capping a larger list */}
-      {capped && ordered.length > BATCH && (
-        <button
-          type="button"
-          onClick={() => setShowAll(true)}
-          className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
-        >
-          See all {ordered.length} in inbox →
-        </button>
-      )}
-
-      {/* empty-shortlist guidance (only once there's nothing saved) */}
-      {shortlist.length === 0 && (
-        <p className="mt-4 text-center text-xs text-faint">Save roles worth a look, then score them together — one token spend.</p>
-      )}
 
       {/* undo toast (sits above the tray) */}
       {undo && (
-        <div className={cn("fixed inset-x-0 z-40 flex justify-center px-4", shortlist.length > 0 ? "bottom-24 sm:bottom-24" : "bottom-6")}>
-          <div className="inline-flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 text-sm shadow-lg">
-            <span className="text-muted">{undo.label}</span>
-            <button type="button" onClick={() => { undo.fn(); setUndo(null); }} className="inline-flex items-center gap-1 font-medium text-brand max-sm:min-h-[44px]">
-              <Undo2 className="size-3.5" /> Undo
+        <div className={cn("fixed inset-x-0 z-40 flex justify-center px-4", shortlist.length > 0 ? "bottom-24 sm:bottom-24" : "bottom-20 sm:bottom-6")}>
+          <div className="inline-flex max-w-full flex-wrap items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-2 text-sm shadow-lg">
+            <div className="min-w-0 flex-1 break-words">
+              <span className="text-muted" role="status">{undo.label}</span>
+              {undo.error && <p role="alert" className="text-red-700 dark:text-red-400">{undo.error}</p>}
+            </div>
+            <button type="button" onClick={() => void handleUndo(undo)} disabled={undo.busy} aria-busy={Boolean(undo.busy)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-text disabled:opacity-50 max-sm:min-h-[44px]">
+              <Undo2 className="size-3.5" /> {undo.busy ? "Undoing…" : undo.error ? "Retry undo" : "Undo"}
             </button>
           </div>
         </div>
@@ -279,6 +509,8 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
       <ShortlistTray
         items={shortlist}
+        sections={sections}
+        onSectionsChange={setSections}
         estimate={estimate}
         hasCli={hasCli}
         onRemove={(url) => setShortlist((s) => s.filter((x) => x.url !== url))}

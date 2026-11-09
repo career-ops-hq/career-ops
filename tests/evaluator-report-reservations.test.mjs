@@ -2,7 +2,7 @@
 // A relocated tracker still owns its IDs when its old report files are absent.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -34,11 +34,14 @@ function trackerText(row, report) {
 // Copy only the evaluator's code and system inputs. Running from the developer's
 // real checkout could let its tracker mask the regression or read their CV.
 function prepareCode(codeRoot, engine) {
+  // Shared evaluator dependencies now include privacy/outbound guards and
+  // tracker-addition helpers. Match the existing evaluator fixture pattern:
+  // copy lib/ together so newly shared imports do not silently stale this test.
+  cpSync(join(ROOT, 'lib'), join(codeRoot, 'lib'), { recursive: true });
   const files = [
     `${engine}-eval.mjs`, 'path-resolver.mjs', 'profile-language.mjs',
     'reserve-report-num.mjs', 'tracker-parse.mjs', 'tracker-aliases.json',
-    'tracker-utils.mjs', 'pipeline-lock.mjs', 'lib/is-main-module.mjs',
-    'lib/context-budget.mjs', 'utils/token-tracker.mjs',
+    'tracker-utils.mjs', 'pipeline-lock.mjs', 'utils/token-tracker.mjs',
     'modes/_shared.md', 'modes/oferta.md',
   ];
   for (const file of files) {
@@ -52,7 +55,7 @@ function prepareCode(codeRoot, engine) {
 
 function isolatedEnv() {
   return Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-    !/^(CAREER_OPS_|OPENAI_|OLLAMA_|DOTENV_|NODE_OPTIONS$|NODE_PATH$|HTTPS?_PROXY$|ALL_PROXY$)/i.test(key),
+    !/^(CAREER_OPS_|OPENAI_|OLLAMA_|PRIVACY_|DOTENV_|NODE_OPTIONS$|NODE_PATH$|HTTPS?_PROXY$|ALL_PROXY$)/i.test(key),
   ));
 }
 
@@ -65,6 +68,12 @@ const cases = [
   { name: 'explicit tracker wins', envKey: 'CAREER_OPS_ROOT', override: true, expected: 109 },
   { name: 'default code/data root', defaultRoot: true, expected: 8 },
   { name: 'first run without tracker', envKey: 'CAREER_OPS_ROOT', noTracker: true, expected: 1 },
+  { name: 'deleted row retained in status log', envKey: 'CAREER_OPS_ROOT', noTracker: true, ledger: 'status-log.tsv', expected: 121 },
+  { name: 'deleted row retained in salary ledger', envKey: 'CAREER_OPS_ROOT', noTracker: true, ledger: 'salary-observations.tsv', expected: 122 },
+  { name: 'deleted row retained in contacts', envKey: 'CAREER_OPS_ROOT', noTracker: true, ledger: 'contacts.tsv', expected: 123 },
+  { name: 'deleted row retained in follow-ups', envKey: 'CAREER_OPS_ROOT', noTracker: true, ledger: 'follow-ups.md', expected: 124 },
+  { name: 'checkout failed batch row', envKey: 'CAREER_OPS_ROOT', codeBatch: true, expected: 130 },
+  { name: 'data-root failed batch row', envKey: 'CAREER_OPS_ROOT', codeBatch: true, dataBatch: true, expected: 141 },
   { name: 'report files also reserve IDs', envKey: 'CAREER_OPS_ROOT', existingReport: true, expected: 91 },
 ];
 
@@ -94,7 +103,29 @@ for (const engine of ['openai', 'ollama']) {
         write(env.CAREER_OPS_TRACKER, trackerText(108, 108));
       }
       if (scenario.existingReport) write(join(dataRoot, 'reports/090-existing.md'), 'Existing report.\n');
-      const trackerPaths = [join(codeRoot, 'data/applications.md'), dataTracker, env.CAREER_OPS_TRACKER]
+      const retainedPaths = [];
+      if (scenario.ledger) {
+        const num = scenario.expected - 1;
+        // With no tracker present, the read resolver falls back to the legacy
+        // path, so its status log is beside that path; the other ledgers are data/.
+        const ledgerPath = join(dataRoot, scenario.ledger === 'status-log.tsv' ? '' : 'data', scenario.ledger);
+        const contents = scenario.ledger === 'contacts.tsv'
+          ? ['1', 'Synthetic Contact', '-', '-', '-', '-', '-', String(num)].join('\t') + '\n'
+          : scenario.ledger === 'follow-ups.md'
+            ? `- 2026-01-01 · #${num} Synthetic follow-up\n`
+            : `${num}\t2026-01-01\tsynthetic\n`;
+        write(ledgerPath, contents);
+        retainedPaths.push(ledgerPath);
+      }
+      for (const [enabled, root, num] of [
+        [scenario.codeBatch, codeRoot, 129], [scenario.dataBatch, dataRoot, 140],
+      ]) {
+        if (!enabled) continue;
+        const batchPath = join(root, 'batch/batch-state.tsv');
+        write(batchPath, `id\turl\tstatus\tengine\tmodel\treport\n1\thttps://example.invalid/job\tfailed\tsynthetic\tsynthetic\t${num}\n`);
+        retainedPaths.push(batchPath);
+      }
+      const trackerPaths = [join(codeRoot, 'data/applications.md'), dataTracker, env.CAREER_OPS_TRACKER, ...retainedPaths]
         .filter(path => path && existsSync(path));
       const before = new Map(trackerPaths.map(path => [path, readFileSync(path, 'utf-8')]));
 

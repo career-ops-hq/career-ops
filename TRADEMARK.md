@@ -63,6 +63,22 @@ endorsement, or sponsorship:
 This list is illustrative, not exhaustive. The principle is: if your
 use suggests an official relationship that doesn't exist, please ask.
 
+## Official surfaces
+
+Some surfaces are the project's own: the official web experience and the
+opt-in shared service. Running them takes infrastructure the project does
+not run itself, so the maintainer may license an operating entity to run
+one. These conditions are part of that licence, not a courtesy:
+
+- The operator is bound by the nine rights in MANIFESTO.md.
+- It may not charge candidates for anything, and may not paywall or
+  degrade what the open core already does.
+- It is disclosed by name wherever it operates, for as long as it does.
+- The licence runs for a renewable term and reverts on change of control
+  of the operator.
+- The licence places nothing inside the product: no position, no ranking,
+  no default that money can buy.
+
 ## How to request permission
 
 Email **hi@santifer.io** with subject **"Trademark request — [your use case]"**
@@ -74,8 +90,10 @@ and include:
 4. The duration and scope of the requested use
 
 We aim to respond to thoughtful requests within two weeks. Permission,
-when granted, is non-exclusive, revocable, and limited to the specific
-use case described.
+when granted, is revocable and limited to the specific use case
+described. It is non-exclusive by default; an exclusive licence for a
+named official surface may be granted in writing, for a renewable
+term, and is disclosed publicly for as long as it is in force.
 
 ## Why this policy exists
 

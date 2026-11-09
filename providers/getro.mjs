@@ -1,8 +1,9 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-// Getro provider — VC "talent network" portfolio job boards (jobs at a fund's
-// portfolio companies). Powers b2venture, Earlybird, Point Nine, Speedinvest,
+// Getro provider — multi-employer board adapter for `job_boards:`.
+// VC "talent network" portfolio job boards (jobs at a fund's portfolio
+// companies). Powers b2venture, Earlybird, Point Nine, Speedinvest,
 // Cherry, HV Capital, Atomico, and many other VC boards, all on independently
 // hosted vanity domains — no common host suffix to auto-detect against, so
 // this is opt-in only via `provider: getro`.
@@ -13,26 +14,30 @@
 //   -> { results: { jobs: [ {title,url,organization:{name},locations[],created_at,...} ], count } }
 //
 // A board's numeric collection_id is the `network.id` embedded in the board
-// page's __NEXT_DATA__. Set it explicitly with `getro_collection` in
-// portals.yml, or leave it out and it auto-resolves from `careers_url` (a GET
-// of the board's own jobs page, parsed for __NEXT_DATA__) — no manual lookup
-// required. `careers_url` is required either way: it also supplies the
-// `referer` header the search API needs (a bare request without one has been
-// observed returning 406).
+// page's __NEXT_DATA__. It resolves from `careers_url` (a GET of the board's
+// own jobs page, parsed for __NEXT_DATA__) and is kept in `ctx.idCache`
+// (provider-id-cache.mjs), so the page is read again only once the id is older
+// than DEFAULT_RECHECK_MS (_cached-lookup.mjs).
+// `getro_collection: N` in portals.yml sets it by hand; it is needed only when
+// the page stops carrying the id, and a set id is never checked again.
+// `careers_url` is required either way: it also supplies the `referer` header
+// the search API needs (a bare request without one has been observed
+// returning 406).
 //
 //   - name: b2venture (portfolio)
 //     provider: getro
 //     careers_url: https://jobs.b2venture.vc/jobs
-//     # getro_collection: 4283   # optional — skips the auto-resolve fetch
 //     enabled: true
 //
 // These boards are large (1000-2000+ jobs) but the API returns them
 // created_at-DESCENDING (newest first), so we paginate newest-first and STOP
-// once postings fall older than `getro_max_age_days`. This is a PAGINATION
+// once postings fall older than `getro_max_age_days` (a pinned `featured`
+// posting sits above that order and does not count). This is a PAGINATION
 // BOUND for efficiency (don't page through thousands of stale jobs); each job
 // still carries `postedAt` (epoch ms) for any downstream freshness handling.
 // The bound default (90d) is deliberately wide. `getro_max_pages` (default
-// 40, hard-capped at 1500) is a safety ceiling independent of the age cutoff.
+// 40, hard-capped at 1500) is a safety ceiling independent of the age cutoff;
+// a walk that reaches it with postings left warns, naming the entry.
 // Jobs with no created_at are kept ("missing data = pass", same rule as the
 // location filter).
 //
@@ -44,7 +49,8 @@
 // via the shared fetchJsonWithRetry — a large board runs into the hundreds of
 // pages, so one blip mid-sweep shouldn't truncate the whole run (#2506).
 
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
+import { cachedLookup } from './_cached-lookup.mjs';
 
 // Getro returns `created_at` as Unix seconds, but older boards have been seen
 // emitting ISO strings, so both shapes are handled. Non-positive values return
@@ -78,11 +84,6 @@ const DEFAULT_MAX_AGE_DAYS = 90;   // pagination bound only; global filter does 
 // but a large board is still a long burst of same-host requests without some
 // pacing.
 const INTER_PAGE_DELAY_MS = 250;
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /** Manual override: `entry.getro_collection`, a positive integer or all-digit string. */
 function resolveCollectionOverride(entry) {
@@ -139,27 +140,41 @@ export function extractCollectionId(html) {
   return null;
 }
 
-/** Override wins; otherwise fetch careers_url and parse __NEXT_DATA__. */
+/** ctx.idCache key for a board: its host, which is one Getro network. */
+function cacheKey(careersUrl) {
+  return careersUrl.host.toLowerCase();
+}
+
+/**
+ * Override wins; otherwise the id kept in ctx.idCache from an earlier scan
+ * (checked against the board page again once it is older than
+ * DEFAULT_RECHECK_MS, see _cached-lookup.mjs); otherwise fetch careers_url and
+ * parse __NEXT_DATA__.
+ * A failed board page never drops a cached id: the search API answers an
+ * unknown collection with its own 404, which fetch() handles below.
+ */
 async function resolveCollectionId(entry, ctx, careersUrl) {
   const override = resolveCollectionOverride(entry);
   if (override) return override;
 
   const label = entry?.name || careersUrl.href;
-  // Retried like every page fetch below — this single request runs BEFORE
-  // pagination even starts, so without a retry a transient blip here (DNS/TLS/
-  // connection reset) fails the whole board before a single page is fetched.
-  const html = await fetchTextWithRetry(ctx, careersUrl.href, {
-    redirect: 'error',
-    headers: { accept: 'text/html', 'user-agent': BROWSER_LIKE_USER_AGENT },
-  });
-  const id = extractCollectionId(html);
-  if (!id) {
-    throw new Error(
-      `getro: ${label} — could not resolve collection_id from ${careersUrl.href} (no network.id found in ` +
-      `__NEXT_DATA__; page structure may have changed — set getro_collection: N on this entry as a fallback)`,
-    );
-  }
-  return id;
+  return cachedLookup(ctx?.idCache, cacheKey(careersUrl), async () => {
+    // Retried like every page fetch below — this single request runs BEFORE
+    // pagination even starts, so without a retry a transient blip here (DNS/TLS/
+    // connection reset) fails the whole board before a single page is fetched.
+    const html = await fetchTextWithRetry(ctx, careersUrl.href, {
+      redirect: 'error',
+      headers: { accept: 'text/html', 'user-agent': BROWSER_LIKE_USER_AGENT },
+    });
+    const id = extractCollectionId(html);
+    if (!id) {
+      throw new Error(
+        `getro: ${label} — could not resolve collection_id from ${careersUrl.href} (no network.id found in ` +
+        `__NEXT_DATA__; page structure may have changed — set getro_collection: N on this entry as a fallback)`,
+      );
+    }
+    return id;
+  }, { isValid: (v) => typeof v === 'string' && /^\d+$/.test(v) && /[1-9]/.test(v) });
 }
 
 /**
@@ -194,6 +209,10 @@ function locationString(job) {
 export default {
   id: 'getro',
 
+  fetchHost() {
+    return new URL(API_BASE).hostname;
+  },
+
   // Getro tenants live on arbitrary vanity domains (careers.atomico.com,
   // talent.cherry.vc, ...) with no common suffix to auto-detect against.
   // Still reports a hit when `getro_collection` is set explicitly, so
@@ -221,7 +240,14 @@ export default {
 
     const out = [];
     let total = Infinity;
-    for (let page = 0; page < maxPages && page * HITS_PER_PAGE < total; page++) {
+    // Declared outside the loop so the cap check below can tell a walk that
+    // used every page it was allowed from one that ended on its own: every
+    // `break` leaves `page` below `maxPages`.
+    let page = 0;
+    // Rows the API returned on the last page read, before any is dropped: a
+    // short last page means the board ended there, whatever the cap.
+    let lastPageRows = 0;
+    for (; page < maxPages && page * HITS_PER_PAGE < total; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       let json;
@@ -249,6 +275,10 @@ export default {
         // catch, defeating the graceful-truncate guarantee here.
         const cause = err instanceof Error ? err.message : String(err);
         if (page === 0) {
+          // An unknown collection answers 404. Drop a cached id for this board
+          // so the next scan reads the board page again, in case the network
+          // moved to a new collection.
+          if (err?.status === 404 && !resolveCollectionOverride(entry)) ctx?.idCache?.delete(cacheKey(careersUrl));
           // The FIRST page failing after retries means the board itself is
           // unreachable, not that it has zero listings — returning [] here
           // would misreport "dead board" as "0 open roles". Every other
@@ -257,13 +287,22 @@ export default {
           // page one, truncate-with-warning on a later page.
           throw err instanceof Error ? err : new Error(cause);
         }
-        console.error(`⚠️  getro: ${entry.name || collectionId} truncated at page ${page} after retries (${out.length} jobs): ${cause}`);
+        // err.attempts is the real request count: a non-retryable error ends the
+        // retry loop after one attempt. A rejection that is not an object cannot
+        // carry the count, so the warning says it is unknown.
+        const attempts = err?.attempts;
+        const attemptsText = attempts === undefined
+          ? 'an unknown number of attempts'
+          : `${attempts} attempt${attempts === 1 ? '' : 's'}`;
+        const pagesToFetch = Math.min(maxPages, Math.ceil(total / HITS_PER_PAGE));
+        console.error(`⚠️  getro: ${entry.name || collectionId} truncated at page ${page + 1} of ${pagesToFetch} after ${attemptsText} (${out.length} jobs): ${cause}`);
         break;
       }
 
       const results = json?.results || {};
       const jobs = Array.isArray(results.jobs) ? results.jobs : [];
       if (typeof results.count === 'number') total = results.count;
+      lastPageRows = jobs.length;
       if (jobs.length === 0) break;
 
       let reachedOld = false;
@@ -272,9 +311,14 @@ export default {
         if (!url) continue;
         // Jobs are newest-first; a dated posting older than the cutoff (and
         // everything after it) is stale. Keep undated jobs (missing = pass).
+        // A board can pin `featured` postings above that order: Earlybird's
+        // first page opened with pins 10, 91 and 152 days old over postings
+        // two days old (2026-11-02). An old pin is dropped like any old posting,
+        // but it says nothing about the pages after it, so it does not stop
+        // the walk.
         const createdMs = toEpochMs(j.created_at);
         if (cutoffMs > 0 && createdMs != null && createdMs < cutoffMs) {
-          reachedOld = true;
+          if (j.featured !== true) reachedOld = true;
           continue;
         }
         const row = {
@@ -292,6 +336,22 @@ export default {
       }
       // Once we've crossed the age cutoff, all later pages are older still.
       if (reachedOld) break;
+    }
+    // The page cap ended the walk while the board still had postings left, so
+    // the list is partial: every allowed page was read, the last one was full,
+    // and the board's count (when it gives one) says more remain. Only the
+    // entry's own cap warns: when a ctx.maxPages cut (a health probe) is at or
+    // below it, the probe is what stopped the walk, and that is not something
+    // to raise on the entry.
+    if (page >= maxPages && lastPageRows >= HITS_PER_PAGE && page * HITS_PER_PAGE < total
+        && requestedMaxPages < ctxCap) {
+      const of = Number.isFinite(total) ? ` of ${total}` : '';
+      // At the hard ceiling a higher getro_max_pages is clamped back to it, so
+      // raising the entry's value would read nothing more: say so instead.
+      const advice = requestedMaxPages >= HARD_MAX_PAGES
+        ? `the ${HARD_MAX_PAGES}-page hard cap, so raising getro_max_pages reads no more`
+        : 'raise getro_max_pages on this entry for more';
+      console.error(`⚠️  getro: ${entry.name || collectionId} truncated at getro_max_pages=${maxPages} (${out.length}${of} jobs) — ${advice}`);
     }
     return out;
   },

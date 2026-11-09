@@ -4,7 +4,7 @@ Traite les URLs d'offres accumulees dans `data/pipeline.md`. Le candidat ajoute 
 
 ## Workflow
 
-1. **Lire** `data/pipeline.md` -> trouver les items `- [ ]` dans la section "En attente" / "Pending" / "Pendientes"
+1. **Lire** `data/pipeline.md` (chercher avec `grep -n -m 20 '^- \[ \] ' data/pipeline.md` et relancer la recherche après chaque lot jusqu'à ce qu'elle ne montre que des items laissés en attente pendant ce passage, ne pas lire tout le fichier) -> trouver les items `- [ ]` dans la section "En attente" / "Pending" / "Pendientes"
 2. **Pour chaque URL en attente** :
    a. Reserver le prochain `REPORT_NUM` sequentiel de maniere atomique en executant `node reserve-report-num.mjs` (et liberer le sentinel en executant `node reserve-report-num.mjs --release <num>` une fois le rapport ecrit)
    b. **Extraire l'offre** avec Playwright (`browser_navigate` + `browser_snapshot`) -> WebFetch -> WebSearch

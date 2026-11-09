@@ -129,6 +129,63 @@ try {
     fail(`Envelope extraction failed: ${JSON.stringify(envJobs[0])}`);
   }
 
+  // 7b. Fetch - Optional postedAt coercion
+  const postedEntry = {
+    careers_url: 'https://example.com/careers',
+    parser: {
+      command: 'node',
+      script: 'tests/providers/_fixture-local-parser.mjs',
+      args: ['posted-at']
+    }
+  };
+  const postedJobs = await localParser.fetch(postedEntry);
+  const byTitle = Object.fromEntries(postedJobs.map(j => [j.title, j]));
+
+  if (postedJobs.length === 16) {
+    pass('localParser.fetch() keeps rows whose postedAt is bad or absent');
+  } else {
+    fail(`localParser.fetch() returned ${postedJobs.length} posted-at rows, expected 16`);
+  }
+
+  if (byTitle['ISO date']?.postedAt === Date.parse('2026-09-08')
+    && byTitle['Epoch ms']?.postedAt === 1757289600000
+    && byTitle['Snake case']?.postedAt === Date.parse('2026-01-15T10:00:00Z')
+    && byTitle['Camel alias']?.postedAt === Date.parse('2026-03-20')
+    && byTitle['Snake alias']?.postedAt === Date.parse('2026-04-01T00:00:00Z')
+    && byTitle['Breezy spelling']?.postedAt === Date.parse('2026-05-10T00:00:00Z')
+    && byTitle['JSON-LD spelling']?.postedAt === Date.parse('2026-06-01')
+    && byTitle['JSON-LD snake spelling']?.postedAt === Date.parse('2026-07-04T00:00:00Z')) {
+    pass('localParser.fetch() coerces ISO / epoch-ms / posted_at / publishedAt / published_at / published_date / datePosted / date_posted into postedAt');
+  } else {
+    fail(`postedAt coercion = ${JSON.stringify(postedJobs.map(j => [j.title, j.postedAt]))}`);
+  }
+
+  if (!('postedAt' in byTitle['Epoch zero'])
+    && !('postedAt' in byTitle['Negative epoch'])
+    && !('postedAt' in byTitle['Pre-epoch date string'])) {
+    pass('localParser.fetch() omits postedAt at or before the Unix epoch (no real posting predates 1970)');
+  } else {
+    fail(`at-or-before-epoch postedAt should be absent: ${JSON.stringify([byTitle['Epoch zero'], byTitle['Negative epoch'], byTitle['Pre-epoch date string']])}`);
+  }
+
+  if (!('postedAt' in byTitle['Bad date']) && !('postedAt' in byTitle['No date'])) {
+    pass('localParser.fetch() omits postedAt for an unparseable or missing date');
+  } else {
+    fail(`postedAt should be absent: ${JSON.stringify([byTitle['Bad date'], byTitle['No date']])}`);
+  }
+
+  if (!('postedAt' in byTitle['Out-of-range epoch']) && !('postedAt' in byTitle['Wrong-shaped date'])) {
+    pass('localParser.fetch() omits postedAt for an out-of-range epoch or a non-date-shaped value');
+  } else {
+    fail(`postedAt should be absent: ${JSON.stringify([byTitle['Out-of-range epoch'], byTitle['Wrong-shaped date']])}`);
+  }
+
+  if (byTitle['Bad alias falls back to good one']?.postedAt === Date.parse('2026-08-01')) {
+    pass('localParser.fetch() skips a bad earlier alias and uses the next one that parses');
+  } else {
+    fail(`alias fallback = ${JSON.stringify(byTitle['Bad alias falls back to good one'])}`);
+  }
+
   // 8. Fetch - Invalid JSON
   try {
     await localParser.fetch({

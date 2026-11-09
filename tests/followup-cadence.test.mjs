@@ -93,6 +93,18 @@ eq(
   addDays(parseDate('2026-07-02'), DEFAULT_CADENCE.responded_subsequent),
 );
 
+eq(
+  'assessment, no prior follow-up uses responded_initial',
+  computeNextFollowupDate('assessment', APP, null, 0),
+  addDays(parseDate(APP), DEFAULT_CADENCE.responded_initial),
+);
+
+eq(
+  'assessment, with prior follow-up uses responded_subsequent',
+  computeNextFollowupDate('assessment', APP, '2026-07-02', 1),
+  addDays(parseDate('2026-07-02'), DEFAULT_CADENCE.responded_subsequent),
+);
+
 // The initial next-date must not land after the overdue threshold, otherwise a row can be
 // flagged "overdue" (daysSinceApp >= responded_subsequent) while its own next-follow-up
 // date is still in the future, which is impossible for a date meant to trigger "overdue".
@@ -212,6 +224,8 @@ eq(
 for (const raw of ['Hired', 'Accepted', 'accept', 'Contratado', 'contratada']) {
   eq(`normalizeStatus('${raw}') canonicalizes to hired`, normalizeStatus(raw), 'hired');
 }
+eq('normalizeStatus(Assessment) canonicalizes to assessment', normalizeStatus('Assessment'), 'assessment');
+eq('normalizeStatus(online screening) canonicalizes to assessment', normalizeStatus('online screening'), 'assessment');
 
 // #2268 — the suite pins the profile so a user's own followup_cadence can't
 // turn a healthy install red. These two guard the pin from the opposite
@@ -267,3 +281,20 @@ eq(
   DEFAULT_CADENCE.applied_first,
 );
 
+
+
+// ── parseAppliedDate: a requisition hash is not a row reference ──────────────
+// `isCrossReferencedMention` skips an apply-date that is cited ABOUT ANOTHER
+// ROW (`see #12, applied 2026-09-01`). A `#` preceded by a requisition label
+// is the row's own req number, not a row reference, and REQ_LABELLED_HASH_RE
+// shares tracker-parse.mjs's label vocabulary so the two never disagree. The
+// `r_` label was missing from that list (PR #4267 review), so
+// `R_#1311 Applied 2026-09-01` lost its own applied date while the equivalent
+// `req #1311` kept it.
+console.log('\nfollowup-cadence.mjs — parseAppliedDate vs requisition hashes');
+for (const label of ['R_#1311', 'r_#1311', 'req #1311', 'Req #1311']) {
+  eq(`parseAppliedDate: ${label} is the row's own requisition, so its applied date is kept`,
+    cadence.parseAppliedDate(`${label} Applied 2026-09-01`), '2026-09-01');
+}
+eq('parseAppliedDate: an unlabelled #N before the date is a row reference, so the date is not this row\'s',
+  cadence.parseAppliedDate('Sibling #1311 Applied 2026-09-01'), null);

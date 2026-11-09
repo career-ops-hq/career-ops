@@ -1,0 +1,17 @@
+<!--
+  skills.html — ATS section partial for Skills.
+
+  Field placeholders filled per skill category:
+    CATEGORY_BLOCK — conditional: category label span when category is present; omitted otherwise
+    ITEMS_TEXT     — comma-joined items string
+
+  One block-level line per category. The builder wraps every entry in a
+  <div class="skills-grid"> it emits itself; this template leaves that class
+  unstyled on purpose, so the wrapper is a plain block and the lines stack.
+
+  Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
+-->
+<!--ENTRY-->
+<div class="skill-item">{{CATEGORY_BLOCK}}{{ITEMS_TEXT}}</div>
+<!--CATEGORY_BLOCK--><span class="skill-category">{{CATEGORY}}: </span><!--/CATEGORY_BLOCK-->
+<!--/ENTRY-->

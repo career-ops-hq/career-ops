@@ -4,7 +4,7 @@ Przetwarza URL-e ofert nagromadzone w `data/pipeline.md`. Kandydat dodaje URL-e,
 
 ## Workflow
 
-1. **Przeczytaj** `data/pipeline.md` -> znajdź itemy `- [ ]` w sekcji "Oczekujące" / "Pending" / "Pendientes"
+1. **Przeczytaj** `data/pipeline.md` (wyszukaj przez `grep -n -m 20 '^- \[ \] ' data/pipeline.md` i powtarzaj wyszukiwanie po każdej partii, aż pokaże tylko itemy pozostawione w Pending w tym przebiegu, nie czytaj całego pliku) -> znajdź itemy `- [ ]` w sekcji "Oczekujące" / "Pending" / "Pendientes"
 2. **Dla każdego oczekującego URL-a**:
    a. Zarezerwuj następny kolejny `REPORT_NUM` atomowo, uruchamiając `node reserve-report-num.mjs` (i zwolnij sentinel, uruchamiając `node reserve-report-num.mjs --release <num>`, gdy report zostanie zapisany)
    b. **Wyciągnij ofertę** za pomocą Playwright (`browser_navigate` + `browser_snapshot`) -> WebFetch -> WebSearch
