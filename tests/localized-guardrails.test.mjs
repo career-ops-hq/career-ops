@@ -116,8 +116,10 @@ const workerPrecedence = /when a localized file contradicts an English workflow 
 const dedupesBaseline = /already covered by the English read, so never read it twice/.test(router);
 const workerListModes = /each declared modes_dir directory's version of that mode file, skipping a declared entry that resolves to the English modes directory already read/.test(router);
 const workerSkipsBaselineTwice = (router.match(/skipping a declared entry that resolves to the English modes directory already read/g) || []).length === 2;
-if (layersCanon && englishWins && keepsTriageLean && listRespectsModes && workerPrecedence && dedupesBaseline && workerListModes && workerSkipsBaselineTwice) {
+const evalFirstRouter = /use only the FIRST entry's evaluation-mode file for Blocks A-F/.test(router);
+const evalFirstWorker = /only the FIRST entry's evaluation-mode file, later entries contribute context/.test(router);
+if (layersCanon && englishWins && keepsTriageLean && listRespectsModes && workerPrecedence && dedupesBaseline && workerListModes && workerSkipsBaselineTwice && evalFirstRouter && evalFirstWorker) {
   pass('router layers localized files on the English canon for a scalar modes_dir, with English precedence, no extra files, list dedupe, and the precedence rule carried into worker prompts');
 } else {
-  fail('router layering contract regressed: canon-first=' + layersCanon + ' english-precedence=' + englishWins + ' no-extra-files=' + keepsTriageLean + ' list-respects-modes=' + listRespectsModes + ' worker-precedence=' + workerPrecedence + ' dedupes-baseline=' + dedupesBaseline + ' worker-list-modes=' + workerListModes + ' worker-skips-baseline-both-segments=' + workerSkipsBaselineTwice);
+  fail('router layering contract regressed: canon-first=' + layersCanon + ' english-precedence=' + englishWins + ' no-extra-files=' + keepsTriageLean + ' list-respects-modes=' + listRespectsModes + ' worker-precedence=' + workerPrecedence + ' dedupes-baseline=' + dedupesBaseline + ' worker-list-modes=' + workerListModes + ' worker-skips-baseline-both-segments=' + workerSkipsBaselineTwice + ' eval-first-router=' + evalFirstRouter + ' eval-first-worker=' + evalFirstWorker);
 }
