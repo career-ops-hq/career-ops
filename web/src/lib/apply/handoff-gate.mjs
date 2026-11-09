@@ -135,10 +135,17 @@ export function handoffDecision({
 const HANDOFF_GAP = new Set(["screening-empty", "resume-missing"]);
 
 /**
- * @param {{ code?: string }[]} issues
+ * Drop the empty-field warnings a retry asks about again. The element type
+ * stays whatever the caller stored, so a list of apply issues comes back as
+ * that same list.
+ *
+ * @template {{ code?: string }} T
+ * @param {T[] | null | undefined} issues
+ * @returns {T[]}
  */
 export function withoutHandoffGaps(issues) {
-  return (Array.isArray(issues) ? issues : []).filter((issue) => !HANDOFF_GAP.has(issue?.code));
+  const list = Array.isArray(issues) ? issues : [];
+  return list.filter((issue) => !HANDOFF_GAP.has(issue && issue.code));
 }
 
 /**
