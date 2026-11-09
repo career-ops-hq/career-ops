@@ -54,8 +54,10 @@ Options:
   --migrate-via    Add the Via column to a legacy tracker
   --migrate-urls   Render the URL column as markdown links
   --backfill-urls  Add the URL column and populate it from report metadata
+  --allow-headerless  Accept legacy headerless positional TSV additions
+                      (refused by default: score/status order is ambiguous)
   -h, --help       Show this help and exit`;
-const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--migrate-urls', '--backfill-urls', '--help', '-h'];
+const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--migrate-urls', '--backfill-urls', '--allow-headerless', '--help', '-h'];
 
 // Executable hooks live beside this script even when user data is redirected
 // through CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
@@ -358,6 +360,7 @@ export async function mergeTracker(options = {}) {
   const BACKFILL_URLS = Boolean(flags.backfillUrls);
   const MERGE_HOLD_MS = options.holdMs || 0;
   const MERGE_READY_IPC = Boolean(options.readyIpc);
+  const ALLOW_HEADERLESS = Boolean(flags.allowHeaderless);
 
   const TRACKER_LOCK_DIR = options.lockDir ?? trackerLockDirFor(APPS_FILE);
 
@@ -1209,6 +1212,24 @@ export async function mergeTracker(options = {}) {
         return null;
       }
       return headed;
+    }
+
+    // Headerless: the positional form — a 9- or 8-column TSV, or a
+    // pipe-delimited Markdown row. Its score/status pair must be disentangled by
+    // content (#1427), and `—` is both a score sentinel (#1799) and the Discarded
+    // status, so a discarded, never-scored row carries `—` in both cells with no
+    // content rule that can order them — an undecidable case no positional
+    // consumer can resolve, in either spelling. Headed form (#3517) has no such
+    // case and resolves every field by name instead. Default: refuse headerless,
+    // loud and named; --allow-headerless keeps the legacy positional form for
+    // emitters that cannot write headers yet. The label list names the optional
+    // via/location/url columns too: a legacy row that carries one of those values
+    // and is re-headed with the nine core labels only would leave the extra cell
+    // unlabelled, and parseHeadedAddition reads by label, so the value is dropped
+    // while the file is archived.
+    if (!ALLOW_HEADERLESS) {
+      console.warn(`⚠️  Skipping ${filename}: headerless tracker-addition refused — a positional file (TSV or Markdown row) cannot say which cell is the score and which is the status (#1427/#1799). Add a header row with one matching label for every populated field — num, date, company, role, status, score, pdf, report, notes, plus via, location or url when the row carries them — in the same order as the data cells, so every field resolves by name; or re-run with --allow-headerless to accept this legacy file`);
+      return null;
     }
 
     let parts;
@@ -2440,6 +2461,7 @@ if (isMainModule(import.meta.url)) {
       migrateVia: argv.includes('--migrate-via'),
       migrateUrls: argv.includes('--migrate-urls'),
       backfillUrls: argv.includes('--backfill-urls'),
+      allowHeaderless: argv.includes('--allow-headerless'),
     },
     holdMs: Number(process.env.CAREER_OPS_MERGE_HOLD_MS) || 0,
     readyIpc: process.env.CAREER_OPS_MERGE_READY_IPC === '1',

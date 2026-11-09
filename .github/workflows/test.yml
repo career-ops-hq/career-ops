@@ -24,10 +24,10 @@ concurrency:
 jobs:
   changes:
     name: Classify the change
-    # Answers one question for the jobs below: does this PR change only docs?
-    # A job of its own so that one diff decides for all of them. Its failure is
-    # not a way to lose checks: they read an empty answer as "not docs-only".
-    if: github.event_name == 'pull_request'
+    # Answers one question for the jobs below: does this PR or merge queue entry
+    # change only docs? A job of its own so that one diff decides for all of them.
+    # Its failure is not a way to lose checks: they read an empty answer as "not
+    # docs-only".
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -35,11 +35,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The test merge and its parents: the first parent is the PR's base.
+          # A PR's test merge with its parents, the first being the PR's base. In
+          # the merge queue, the entry's squash commit with its parent, the base.
           fetch-depth: 2
           persist-credentials: false
       - id: classify
         run: node .github/scripts/docs-only-change.mjs
+        env:
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
 
   test:
     needs: changes
@@ -58,9 +61,10 @@ jobs:
     # but its inline sections and the install steps have no limit of their
     # own. The slowest leg (macOS) takes about 11 minutes.
     timeout-minutes: 30
-    # A docs-only PR runs the suite on Ubuntu only (#6402). The other two legs
-    # stay in the matrix and skip their steps, because these three check names
-    # are required, and a job-level `if` cannot read `matrix` to skip just them.
+    # A docs-only change runs the suite on Ubuntu only (#6402, #5723). The other
+    # two legs stay in the matrix and skip their steps, because these three check
+    # names are required, and a job-level `if` cannot read `matrix` to skip just
+    # them.
     # Ubuntu keeps the whole suite: about 45 test files read docs-type files, and
     # the inline sections of test-all.mjs scan every tracked file.
     env:
