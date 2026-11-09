@@ -61,7 +61,7 @@ try {
 
   mkdirSync(join(cloud, 'GoogleDrive-work@example.com', 'My Drive'), { recursive: true });
   assert.throws(() => b.resolveDestination(opts), /will not guess/);
-  assert.match(b.resolveDestination({ ...opts, account: 'work@' }).dest, /work@corp\.com/);
+  assert.match(b.resolveDestination({ ...opts, account: 'work@' }).dest, /work@example\.com/);
   assert.throws(() => b.resolveDestination({ ...opts, account: 'nobody' }), /matches --account/);
   assert.throws(() => b.resolveDestination({ ...opts, provider: 'box' }), /Unknown provider/);
   pass('no default drive, --provider google-drive, --account for several drives, no guessing');
