@@ -108,8 +108,11 @@ if (sourceNames.length < 6) {
 // not swap them in: the router always reads the English modes/_shared.md and
 // modes/{mode}.md first, or every uncopied rule silently disappears.
 const router = readFileSync(join(ROOT, '.agents', 'skills', 'career-ops', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
-if (/always read the English `modes\/_shared\.md` and the English `modes\/\{mode\}\.md` first/.test(router)) {
-  pass('router layers localized files on the English canon for a scalar modes_dir');
+const layersCanon = /always read the English version first \(the English `modes\/_shared\.md` and the English `modes\/\{mode\}\.md`/.test(router);
+const englishWins = /the English rule wins/.test(router);
+const keepsTriageLean = /never adds a file the mode's section does not load/.test(router);
+if (layersCanon && englishWins && keepsTriageLean) {
+  pass('router layers localized files on the English canon for a scalar modes_dir, with English precedence and no extra files');
 } else {
-  fail('router no longer says a scalar modes_dir reads the English modes/_shared.md and modes/{mode}.md first');
+  fail('router layering contract regressed: canon-first=' + layersCanon + ' english-precedence=' + englishWins + ' no-extra-files=' + keepsTriageLean);
 }
