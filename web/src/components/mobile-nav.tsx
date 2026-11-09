@@ -34,6 +34,7 @@ const STYLE = `
 .co-pulse{animation:co-pulse 1.6s ease-in-out infinite}
 @keyframes co-pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @media(prefers-reduced-motion:reduce){.co-mdrawer,.co-mscrim{transition:none}.co-pulse{animation:none}}
+@media print{.co-mnav,.co-mscrim,.co-mdrawer{display:none}}
 `;
 
 export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {
@@ -196,7 +197,7 @@ export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {
           <UsageMeter />
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Appearance</span>
               <span className="font-mono text-[10px] text-faint">THEME</span>
             </div>
             <ThemeToggle showLabel className="bg-surface-hover/40" />

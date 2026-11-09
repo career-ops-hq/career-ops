@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { findExperienceSections, headingText, boldLineText, toPlainText, normalizePandocLine } from './lib/cv-markdown.mjs';
 
 // Two roots, because this gate compares user-layer files against a user-layer
 // config and previously resolved neither from the user's data root.
@@ -134,7 +135,7 @@ const METRIC_NOUNS = [
   'enrollments', 'enrolments', 'completions', 'courses', 'certifications',
   'certificates', 'sessions', 'responses', 'surveys', 'cohorts',
   'commits', 'contributions', 'repositories', 'repos', 'modules', 'tools',
-  'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
+  'servers', 'nodes', 'guides', 'articles', 'datasets', 'examples', 'deployments',
   'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
   // Headcount outside software. The list above counts users, engineers and
   // repos, so a CV in operations, facilities, healthcare, education or the
@@ -582,7 +583,7 @@ function latexBody(text) {
 }
 
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
-export function stripMarkup(text, { keepLineBreaks = false } = {}) {
+export function stripMarkup(text, { keepLineBreaks = false, keepBlankLines = false } = {}) {
   text = latexBody(text);
   // An entity is the character it encodes, and a default-ignorable character
   // (zero-width space, joiner, soft hyphen, directional mark, variation
@@ -656,7 +657,8 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     // scan. Horizontal whitespace still collapses, and every claim pattern spans a
     // newline through `\s`, so extraction is unaffected either way.
     .replace(keepLineBreaks ? /[^\S\n]+/g : /\s+/g, ' ')
-    .replace(/ *\n+ */g, keepLineBreaks ? '\n' : ' ')
+    // keepBlankLines keeps each newline of a run, so a blank line stays a blank line.
+    .replace(keepLineBreaks && keepBlankLines ? / *\n */g : / *\n+ */g, keepLineBreaks ? '\n' : ' ')
     .trim();
 }
 
@@ -961,6 +963,76 @@ function tidyToolName(name) {
   return Array.from(stem).length < 2 ? '' : stem;
 }
 
+// An employer is also named by where the work happened, with no "worked at":
+//
+//   "At Globex Corporation, I cut claim-form rendering 92%"
+//   "In my current role as a Data Scientist at Globex, I have shipped ..."
+//
+// The employer pattern in factClaims never read either, so a made-up employer in
+// the sentence a cover letter is built around was not compared with cv.md
+// (#6371). On 1,162 public letters that record each applicant's jobs, the pattern
+// read an employer in 54, and 574 hold this shape, only 24 of them with "At"
+// opening a sentence.
+//
+// A company named this way is often not an employer, because a letter also talks
+// about the company it is addressed to, which cv.md never names: "At Stripe, I
+// would ...", "the standards expected at Facebook, I have prepared ...". Blocking
+// those would stop a truthful letter, so a claim needs two things. The words
+// before the name state a job, or the name opens the clause. The verb after it
+// reports work, so intent ("I would", "I am eager", "I hope") claims nothing, and
+// neither does a clause that talks to the company ("I learned how your team ships").
+// A sentence that misses either stays unread, as all of these were before.
+// A dot only inside a word ("Booking.com"): "at Amazon. I have ..." ends a sentence.
+const AT_NAME_CHAR = "[\\p{L}\\p{N}_&'\\u2019-]";
+const AT_NAME_WORD = `\\p{Lu}${AT_NAME_CHAR}*(?:\\.${AT_NAME_CHAR}+)*`;
+const AT_NAME = `${AT_NAME_WORD}(?: (?:of |& )?${AT_NAME_WORD}){0,4}`;
+// "never" is not an adverb here and "did" is not a verb below, because each can deny
+// the job: "At Stripe, I have never worked there", "At Stripe, I did not work there".
+const WORK_ADVERBS = '(?:[a-z]+ly |also |then |further |first |later |once |often |since |still |even |not only )*';
+// Verbs a letter uses about a company it has only read about, and past intent. The
+// -eed words are here because the pattern below is reading "-ed" as the past tense.
+const NOT_WORK_VERBS = 'need|feed|proceed|succeed|exceed|speed|embed|shed|noticed|admired|appreciated|watched|visited|interviewed|attended|followed|wanted|hoped|wished';
+const PAST_VERB = `(?!(?:${NOT_WORK_VERBS})\\b)[a-z-]+ed`;
+// "was", "been" and "had" report nothing alone ("I was impressed by ...", "I have
+// been following ..."), so the words after them have to.
+const WORK_STATES = `(?:been|was|were) ${WORK_ADVERBS}(?:responsible|part|involved|instrumental|fortunate|privileged|entrusted|trained|tasked|promoted|hired|able|for|working|leading|managing|building|developing)|had the (?:distinct )?(?:privilege|pleasure|honou?r|opportunity)`;
+const WORK_VERBS = `(?:${PAST_VERB}|${WORK_STATES}|led|built|ran|run|grew|grown|wrote|written|made|won|drove|driven|took|taken|set|cut|taught|spent|oversaw|overseen|began|begun|became|become|kept|held|got|gotten|brought|sold|done|gave|given|manage|lead|oversee|own|handle|serve|work|design|build|develop|maintain|supervise|head|direct|spearhead)`;
+// "your" in the verb's own clause talks to the company. Past a comma it usually
+// doesn't: "I honed my skills, which I would bring to your team" still states a job.
+const NOT_ADDRESSED = '(?![^,;:.!?\\n]{0,200}\\byour?\\b)';
+// "At Globex, where I currently excel ..." states a job whatever the verb. Without
+// "where", the verb has to report work: "At Stripe, I currently see an opening".
+const AT_EMPLOYER_RE = new RegExp(`\\b[Aa]t (?:The )?(${AT_NAME}(?: and ${AT_NAME})?)(?:\\.?, | (?=(?:I|we)\\b))(?:where I currently|(?:where )?(?:I|we)(?:(?:['\u2019]ve| have)? ${WORK_ADVERBS}${WORK_VERBS}|['\u2019]d ${WORK_ADVERBS}${PAST_VERB}))\\b${NOT_ADDRESSED}`, 'gu');
+// The name opens the sentence, a list item, or a clause joined to the last one.
+const AT_OPENS_CLAUSE_RE = /(?:^|[;:]\s*|\b(?:and|but|then|later|while|whilst|previously|recently|currently),?\s*)[\s•‣◦⁃∙*+-]*$/iu;
+// Words that turn "as a ..." or "I am a ..." into something other than a job.
+const NOT_A_JOB = "(?:(?!\\b(?:candidate|applicant|user|customer|admirer|fan|follower|reader|visitor|believer|result|fit|interest|who|for|your)\\b)[^.;!?])*";
+const AT_JOB_LEAD_RE = new RegExp([
+  // The words between "my" and the job noun describe it ("my most recent role"). A
+  // function word means they lead somewhere else ("my interest in the role").
+  `\\b[Mm]y (?:(?!(?:in|for|of|the|to|at|with|on|an?) )[\\w-]+ ){0,3}?(?:roles?|positions?|job|tenures?|time|stint|years|experience|career)(?: as [^.;!?]*)?$`,
+  `(?<!such |well )\\b[Aa]s (?:(?:an?|the) |(?!I\\b)\\p{Lu})${NOT_A_JOB}$`,
+  `\\bI(?:['\u2019]m| am)(?: currently| presently| now)? (?:(?:an?|the) |employed\\b)${NOT_A_JOB}$`,
+  `\\bI (?:currently |presently |have )?(?:serve|served|hold|held|work|worked)\\b${NOT_A_JOB}$`,
+  '\\b(?:roles|tenures?|years|months)$',
+].join('|'), 'u');
+
+/** Employers named by "at <Name>, I ..." where the sentence states a job there. */
+function atEmployerClaims(text) {
+  const clean = stripMarkup(text, { keepLineBreaks: true });
+  const claims = [];
+  for (const match of clean.matchAll(AT_EMPLOYER_RE)) {
+    // A letter's job statement fits well inside this, and the cap keeps a page
+    // with no sentence break from being rescanned for every match.
+    const before = clean.slice(Math.max(0, match.index - 200), match.index);
+    const lead = before.slice(Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? '), before.lastIndexOf('\n')) + 1).trim();
+    if (!AT_OPENS_CLAUSE_RE.test(lead) && !AT_JOB_LEAD_RE.test(lead)) continue;
+    // Without its "'s", so "Macy’s" here matches a cv.md that says "Macy's".
+    for (const name of match[1].split(' and ')) claims.push({ kind: 'employer', value: normalizeFact(name.replace(POSSESSIVE_SUFFIX_RE, '')) });
+  }
+  return claims;
+}
+
 /**
  * Extract explicitly asserted employer, title, and tool claims from text.
  *
@@ -1080,6 +1152,9 @@ export function factClaims(text, sourceNormalized = null) {
       }
     }
   }
+  // Pushed one at a time, like the tool names: spread into push(), a page of
+  // 150,000 statements overflows the call stack.
+  for (const claim of atEmployerClaims(text)) claims.push(claim);
   // Report each claim once. Both tool patterns read most names, so without
   // this every tool would be listed twice. Repeated employer and title claims
   // collapse too, as they already did in verifyFacts.
@@ -1094,7 +1169,7 @@ export function factClaims(text, sourceNormalized = null) {
 // or a certification rendered and passed the gate, which is the fabrication
 // AGENTS.md treats as most serious.
 //
-// Employer, education and certification fields BLOCK when no source contains
+// Employer, education, certification and award fields BLOCK when no source contains
 // them. The job title only WARNS: cv-title-check.mjs is deliberately warn-only
 // about titles, because reframing one is sometimes the candidate's call, and a
 // second check that blocked on the same field would overrule that choice.
@@ -1108,6 +1183,8 @@ const STRUCTURED_HTML_FIELDS = [
   ['edu-title', 'education', true],
   ['edu-org', 'education', true],
   ['cert-title', 'certification', true],
+  // Standards/authorship credits are rendered in awards too (#1411).
+  ['award-title', 'award', true],
   ['job-role', 'title', false],
 ];
 // One level of nested braces, enough for `\textbf{...}` inside an argument.
@@ -1186,7 +1263,7 @@ function extractStructuredFieldInners(raw, cls) {
 }
 
 /**
- * Employer, education, certification and title claims a CV builder emitted as
+ * Employer, education, certification, award and title claims a CV builder emitted as
  * structured fields.
  *
  * @param {string} text - generated HTML or LaTeX
@@ -1222,6 +1299,154 @@ export function structuredFieldClaims(text) {
   }
   const seen = new Set();
   return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
+}
+
+// Association checks compare bounded records, never the joined source bag.
+// Unsupported source conventions warn; explicit contradictions in recognized
+// records block. Titles and lexical metric context remain advisory.
+function sourceExperience(text) {
+  return findExperienceSections(text).flatMap(lines => {
+    const starts = lines.flatMap((line, i) => headingText(line, 3) === null ? [] : [i]);
+    return starts.flatMap((start, i) => {
+      const block = lines.slice(start, starts[i + 1] ?? lines.length);
+      const company = headingText(block[0], 3).split(/\s+[-–—]+\s+/)[0];
+      const body = block.slice(1).filter(line => line.trim());
+      const title = boldLineText(body[0]);
+      // Keep incomplete headers as evidence of employment. Dropping one
+      // could misclassify a genuine employer mentioned elsewhere as a client.
+      return [{ company, title: title || '', dates: title && body[1] ? toPlainText(body[1]) : '', body: body.join('\n') }];
+    });
+  });
+}
+
+function sourceEducation(text) {
+  const entries = [];
+  let complete = true;
+  let inEducation = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = normalizePandocLine(raw);
+    const heading = headingText(line, 2);
+    if (heading !== null) { inEducation = /^education$/i.test(heading); continue; }
+    if (!inEducation || !line.trim() || /^\s*[-*_]{3,}\s*$/.test(line)) continue;
+    // The flat convention used in examples/cv-example.md. A multiline or
+    // table convention needs its own parser; don't infer a tuple from prose.
+    const match = toPlainText(line).replace(/^\s*[-*+]\s+/, '').match(/^([^,]+),\s*(.+?)(?:\s*\(((?:19|20)\d{2})\))?\s*$/);
+    // Extra comma-separated detail may be a location, GPA or part of the
+    // school name. It is not evidence of a different degree-school pair.
+    if (match && !match[2].includes(',')) entries.push({ title: match[1].trim(), org: match[2].trim(), year: match[3] || '' });
+    else complete = false;
+  }
+  return { entries, complete };
+}
+
+const DATE_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function dateEndpoints(value) {
+  const clean = normalizeFact(stripMarkup(value)).replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
+  const parts = clean.split(/\s*[-–—]+\s*|\s+to\s+/);
+  if (parts.length > 2) return null;
+  const dates = parts.map(part => {
+    if (/^(?:present|current|now)$/.test(part)) return { year: 'present', month: '' };
+    const m = part.trim().match(/^(?:(\d{1,2})[/.]|([a-z]+)\s+)?((?:19|20)\d{2})$/);
+    if (!m) return null;
+    const month = m[1] ? Number(m[1]) : m[2] ? DATE_MONTHS.indexOf(m[2].slice(0, 3)) + 1 : '';
+    return month === 0 || month > 12 ? null : { year: m[3], month };
+  });
+  return dates.every(Boolean) ? dates : null;
+}
+
+// null means the source does not expose enough date precision to compare.
+function datesSupported(target, source) {
+  const a = dateEndpoints(target), b = dateEndpoints(source);
+  if (!a || !b || a.length !== b.length) return null;
+  if (a.some((date, i) => date.year !== b[i].year)) return false;
+  if (a.some((date, i) => date.month && !b[i].month)) return null;
+  return a.every((date, i) => !date.month || date.month === b[i].month);
+}
+
+/** Source-bound contradictions and explicit coverage gaps in default HTML CV records. */
+export function structuredAssociationClaims(targetText, sourceTexts, config = {}) {
+  const blocked = [], advisory = [], gaps = new Set();
+  const norm = value => normalizeFact(stripMarkup(value));
+  const field = (html, cls) => extractStructuredFieldInners(html, cls).map(inner => stripMarkup(inner)).join(' ').trim();
+  const blocks = cls => extractStructuredFieldInners(String(targetText), cls);
+  const experience = sourceTexts.flatMap(sourceExperience);
+  const educationSources = sourceTexts.map(sourceEducation);
+  const education = educationSources.flatMap(source => source.entries);
+  const educationComplete = educationSources.every(source => source.complete);
+  const add = (list, kind, value) => list.push({ kind, value: norm(value) });
+  const jobs = blocks('job');
+  const jobContexts = [];
+  const allowedFacts = new Set((config.allow_facts || []).map(norm));
+  for (const job of jobs) {
+    const company = field(job, 'job-company'), role = field(job, 'job-role'), dates = field(job, 'job-period');
+    if (!company) continue;
+    const matches = experience.filter(entry => norm(entry.company) === norm(company));
+    if (!matches.length) {
+      // An explicit customer mention is evidence of the wrong relationship,
+      // not merely a name somewhere in the source. Other unknown employers
+      // are already handled by the named-field gate, or remain unverified.
+      const escaped = norm(company).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const customer = new RegExp(`\\b(?:customer|client)(?:s)?[,: ]+(?:named |called )?${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+      if (sourceTexts.some(text => customer.test(norm(text)))) add(blocked, 'employer-association', company);
+      else if (!allowedFacts.has(norm(company))) gaps.add('Employment date/title associations could not be checked for an unmatched employer.');
+      continue;
+    }
+    const byRole = matches.filter(entry => norm(entry.title) === norm(role));
+    // Dates are checked against the employer's records; a reframed title
+    // must never turn the intentionally advisory title check into a block.
+    const candidates = matches;
+    const byDate = dates ? candidates.filter(entry => datesSupported(dates, entry.dates) === true) : candidates;
+    jobContexts.push({ html: job, sources: (byDate.length ? byDate : byRole.length ? byRole : candidates).map(entry => entry.body) });
+    if (dates && !byDate.length) {
+      const results = candidates.map(entry => datesSupported(dates, entry.dates));
+      if (results.every(result => result === false)) add(blocked, 'employment-dates', `${company}: ${dates}`);
+      else gaps.add('Employment dates could not be compared at the source date precision or format.');
+    }
+    if (role && experience.some(entry => norm(entry.title) === norm(role))
+      && (!byRole.length || (dates && byDate.length && !byDate.some(entry => norm(entry.title) === norm(role))))) {
+      add(advisory, 'title-association', `${company}: ${role}`);
+    }
+  }
+  for (const item of blocks('edu-item')) {
+    const rawTitle = extractStructuredFieldInners(item, 'edu-title')[0] || '';
+    const title = norm(removeBalancedElements(rawTitle, /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])edu-org(?![\w-])[^"]*"[^>]*>/gi));
+    const org = field(item, 'edu-org'), year = field(item, 'edu-year');
+    if (!title || !org) { gaps.add('Education associations require both a degree and a school.'); continue; }
+    const pairs = education.filter(entry => norm(entry.org) === norm(org) && norm(entry.title) === title);
+    if (!pairs.length) {
+      if (educationComplete && education.some(entry => norm(entry.org) === norm(org)) && education.some(entry => norm(entry.title) === title)) {
+        add(blocked, 'education-association', `${title}, ${org}`);
+      } else gaps.add('Education associations could not be checked against a recognized degree, school entry.');
+    } else if (year && !pairs.some(entry => entry.year && datesSupported(year, entry.year) === true)) {
+      if (educationComplete && pairs.every(entry => entry.year && datesSupported(year, entry.year) === false)) add(blocked, 'graduation-date', `${title}, ${org}: ${year}`);
+      else gaps.add('Graduation year could not be compared with a source year.');
+    }
+  }
+  // Lexical context cannot prove a paraphrase false. Surface uncertainty, not
+  // a hard fabrication verdict, when the same number is reused for a new
+  // outcome. Never let a different bullet's figure silently support it.
+  const stop = new Set(['with', 'from', 'into', 'over', 'have', 'that', 'were', 'while', 'about', 'their', 'there', 'which', 'through', 'across', 'within', 'after', 'before', 'during', 'being', 'been', 'each', 'every', 'other', 'than', 'then', 'them', 'they', 'when', 'where', 'what', 'more', 'most', 'some', 'such', 'only', 'also', 'just', 'like', 'very', 'used', 'using']);
+  const words = text => new Set(norm(text).match(/\p{L}{4,}/gu)?.filter(word => !stop.has(word)) || []);
+  const linesWithMetrics = texts => texts.flatMap(text => text.split(/\r?\n/).map(line => ({ line, metrics: metricClaims(line) })));
+  const allSourceLines = linesWithMetrics(sourceTexts);
+  const explicitlyAllowed = allowedMetricSet('', config.allow_metrics || []);
+  for (const context of jobContexts) {
+    const sourceLines = linesWithMetrics(context.sources);
+    for (const el of findBalancedElements(context.html, /<(li)\b[^>]*>/gi)) {
+      const line = stripMarkup(context.html.slice(el.contentStart, el.contentEnd));
+      for (const metric of metricClaims(line)) {
+        if (explicitlyAllowed.has(metric)) continue;
+        const sources = sourceLines.filter(entry => entry.metrics.has(metric));
+        if (sources.some(entry => norm(entry.line).replace(/^[-*+]\s*/, '') === norm(line))) continue;
+        if (!allSourceLines.some(entry => entry.metrics.has(metric))) continue;
+        const targetWords = words(line);
+        if (!sources.some(entry => [...words(entry.line)].filter(word => targetWords.has(word)).length >= 2)) {
+          add(advisory, 'metric-context', `${metric}: ${line}`);
+        }
+      }
+    }
+  }
+  return { blocked, advisory, warnings: [...gaps] };
 }
 
 /** Split generated/source documents into bounded statements for attribution checks. */
@@ -1944,7 +2169,16 @@ function compactMagnitude(raw) {
 
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text, { keepPlanHorizons = false } = {}) {
-  const clean = spellNumbers(stripMarkup(text, { keepLineBreaks: true }));
+  // Expand only known count units in numeric compounds, then run the same
+  // plan/disclosure filters as spaced counts. Product IDs remain untouched.
+  const clean = spellNumbers(stripMarkup(text, { keepLineBreaks: true })).replace(
+    /(?<![\p{L}\p{N}-])(\d[\d,.]*)[-‑–]([\p{L}]+)(?![\p{L}])/gu,
+    (whole, number, rawNoun) => {
+      const noun = rawNoun.toLowerCase();
+      const plural = METRIC_NOUNS.includes(noun) ? noun : METRIC_NOUNS.includes(`${noun}s`) ? `${noun}s` : null;
+      return plural ? `${number} ${plural}` : whole;
+    },
+  );
   const claims = new Set();
   for (const pattern of SIMPLE_CLAIM_PATTERNS) {
     for (const match of clean.matchAll(pattern)) claims.add(canonicalMetric(match[0]));
@@ -2092,12 +2326,28 @@ export function diagnoseCoverage(targetText) {
  * instead of widening them. The union can only ever allow more, never less.
  */
 function allowedMetricSet(sourceText, allowMetrics) {
-  const allowed = new Set(metricClaims(sourceText));
+  const allowed = sourceMetricClaims(sourceText);
   for (const entry of allowMetrics || []) {
     allowed.add(normalizeClaim(entry));
-    for (const canonical of metricClaims(String(entry))) allowed.add(canonical);
+    for (const canonical of sourceMetricClaims(String(entry))) allowed.add(canonical);
   }
   return allowed;
+}
+
+// normalizeTextForATS in generate-pdf.mjs prints € and £ as currency codes, and
+// the gate reads the printed document. The metric patterns read "50 000 EUR" but
+// not "50 000 €", the way French, German and Spanish write it, so a source read
+// only as written could not back the amount it states (#6361). foldAtsGlyphs
+// does the same for titles.
+function spellAtsCurrency(text) {
+  return text.replace(/€/g, 'EUR ').replace(/£/g, 'GBP ');
+}
+
+/** Metric claims a source supports, read as written and as the text pass prints it. */
+function sourceMetricClaims(text, options) {
+  const claims = metricClaims(text, options);
+  for (const claim of metricClaims(spellAtsCurrency(text), options)) claims.add(claim);
+  return claims;
 }
 
 /** Compare generated metric claims against source text without reading files. */
@@ -2224,12 +2474,36 @@ function resolveInputPath(path, cwd = process.cwd()) {
 // blocks, instead of throwing.
 const MAX_SOURCE_LOOKUP_LENGTH = 500;
 
+// The glyphs normalizeTextForATS in generate-pdf.mjs rewrites. The gate reads the
+// rewritten document and cv.md keeps the original, so a title copied verbatim
+// with an arrow or a dash in it read as unsourced. A dash folded in the source
+// stays a marker and not a hyphen, so that "Acme\u2014Staff Engineer" still has a
+// token boundary before the title while "Staff Engineer - Platform" matches it.
+const FOLDED_DASH = '\uE000';
+function foldAtsGlyphs(text) {
+  return text
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/\s*\u2192\s*/g, ' to ')
+    .replace(/\s*\u2190\s*/g, ' from ')
+    .replace(/\s*[\u2191\u2193]\s*/g, ' ')
+    .replace(/(?<![lL])\s*\u00B7\s*|\s*\u00B7\s*(?![lL])|\s+\u00B7\s*|\s*\u00B7\s+/g, ' | ')
+    .replace(/\s*\u2022\s*/g, ' | ');
+}
+
 /** Check a normalized fact as a complete token or phrase, not a substring. */
 function sourceContainsFact(sourceText, value) {
+  if (sourceSpellsFact(sourceText, value)) return true;
+  const source = foldAtsGlyphs(sourceText).replace(/[\u2014\u2013]/g, FOLDED_DASH);
+  return sourceSpellsFact(source, foldAtsGlyphs(value).replace(/[\u2014\u2013]/g, '-'));
+}
+
+function sourceSpellsFact(sourceText, value) {
   if (value.length > MAX_SOURCE_LOOKUP_LENGTH) return false;
   const escaped = value
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\s+/g, '\\s+');
+    .replace(/\s+/g, '\\s+')
+    .replace(/-/g, `[-${FOLDED_DASH}]`);
   return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(sourceText);
 }
 
@@ -2243,6 +2517,45 @@ function sourceContainsFact(sourceText, value) {
  * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], advisoryFacts: object[], forbidden: string[], warnings: string[] }}
  * @throws when the config is invalid
  */
+/**
+ * Reduce markdown links to their visible text, so a claim that spans a link is
+ * compared with the words a reader sees. Handles inline links whose target holds
+ * balanced parentheses or a title (`[a](https://x/Foo_(bar) "t")`), reference
+ * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`, the
+ * title on the same line or on the line right after it).
+ * A bracket pair with no link target after it is left alone.
+ */
+function collapseMarkdownLinks(text) {
+  let out = '';
+  let i = 0;
+  const opener = /\[\s*([^\][]*?)\s*\]\(/y;
+  while (i < text.length) {
+    if (text[i] === '[') {
+      opener.lastIndex = i;
+      const m = opener.exec(text);
+      if (m) {
+        let depth = 1;
+        let j = opener.lastIndex;
+        while (j < text.length && depth > 0) {
+          if (text[j] === '\\') { j += 2; continue; }
+          if (text[j] === '(') depth++;
+          else if (text[j] === ')') depth--;
+          j++;
+        }
+        if (depth === 0) {
+          out += m[1];
+          i = j;
+          continue;
+        }
+      }
+    }
+    out += text[i++];
+  }
+  return out
+    .replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1')
+    .replace(/(?:^|[^\S\r\n])\[[^\][]+\]:[^\S\r\n]*\S+(?:[^\S\r\n]+(?:"[^"]*"|'[^']*'|\([^)]*\))|\r?\n[^\S\r\n]*(?:"[^"]*"|'[^']*'|\([^)]*\)))?[^\S\r\n]*(?=\r?$)/gm, ' ');
+}
+
 export function verifyFacts(targetText, {
   sourcePaths = DEFAULT_SOURCES,
   planTexts = [],
@@ -2252,18 +2565,31 @@ export function verifyFacts(targetText, {
   // Per file, before the join: stripMarkup keeps only the body of a LaTeX
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
-  const sourceText = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd)))).join('\n');
+  const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
+  const sourceText = sourceTexts.join('\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const planned = plannedClaims(targetText, planTexts);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim) && !planned.has(claim));
-  const sourceNormalized = normalizeFact(stripMarkup(sourceText));
+  // A markdown link keeps its target in the stripped source: "[Fabrikam](https://…) (Director)"
+  // reads as "[fabrikam](https://…) (director)", so a claim that spans a link, such as
+  // a "Previous Experience" line of linked employers and titles, never found its own
+  // words in the source. Only the link text is evidence, so the lookup reads that.
+  // Each file is stripped on its own. Bold may span a wrapped line, so an unpaired `**` at
+  // the end of one file paired with the first `**` of the next and left a stray `*` in the
+  // name beside it ("fabrikam* (director)").
+  // A reference definition takes a title only from the line right after it, never across a
+  // blank line, so blank lines are kept while the links collapse.
+  const sourceLookup = normalizeFact(sourceTexts
+    .map(text => collapseMarkdownLinks(stripMarkup(text, { keepLineBreaks: true, keepBlankLines: true })))
+    .join('\n'));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsourced = ({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value);
+  const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
+  const associations = structuredAssociationClaims(targetText, sourceTexts, config);
   const namedFacts = [
-    ...factClaims(targetText, sourceNormalized),
+    ...factClaims(targetText, sourceLookup),
     ...delegatedAuthorshipClaims(targetText, sourceText),
     ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);
@@ -2274,13 +2600,14 @@ export function verifyFacts(targetText, {
   // words happen to occur elsewhere in cv.md would be dropped, and the whole
   // finding is that the source says something WEAKER about the same entry.
   const languageGap = scopeLanguageGap(targetText, sourceText);
-  const comparedFacts = (languageGap ? [] : scopeInflationClaims(targetText, sourceText))
+  const comparedFacts = [...(languageGap ? [] : scopeInflationClaims(targetText, sourceText)), ...associations.blocked]
     .filter(({ value }) => !allowedFacts.has(value));
   // Adoption claims warn instead of block. The phrase list cannot see every
   // way a source states reach, and a block makes the PDF step tell the agent to
   // stop and fix, so a missed paraphrase would get a true bullet rewritten.
   const advisoryFacts = [
     ...(languageGap ? [] : adoptionClaims(targetText, sourceText)),
+    ...associations.advisory,
     ...fieldClaims.filter(claim => !claim.blocking).map(({ kind, value, line }) => ({ kind, value, line })),
   ].filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
@@ -2297,9 +2624,13 @@ export function verifyFacts(targetText, {
   // One coverage object, so callers that read `coverage.reason` keep working.
   // A count gap keeps its reason and gains the scope sentence.
   const countGap = diagnoseCoverage(targetText);
-  const coverage = !languageGap ? countGap
+  const priorCoverage = !languageGap ? countGap
     : countGap ? { ...countGap, message: `${countGap.message} ${languageGap}` }
       : { reason: 'scope-not-checked', message: languageGap, spans: [] };
+  const coverage = associations.warnings.length
+    ? { reason: 'associations-not-checked', spans: [], ...priorCoverage,
+      message: [priorCoverage?.message, ...associations.warnings].filter(Boolean).join(' ') }
+    : priorCoverage;
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
     verdict: blocked ? 'block' : (warnings.length || advisoryFacts.length || coverage) ? 'warn' : 'pass',
@@ -2382,7 +2713,7 @@ function plannedClaims(targetText, planTexts) {
   // keepPlanHorizons: answers often say "In my first 6 months I will…"; the
   // target-side horizon rule still drops those from invented claims, but the
   // plan evidence must retain the number so the letter can restate it.
-  const inPlans = metricClaims(planText, { keepPlanHorizons: true });
+  const inPlans = sourceMetricClaims(planText, { keepPlanHorizons: true });
   const clean = spellNumbers(stripMarkup(targetText, { keepLineBreaks: true }));
   const forward = new Set();
   const past = new Set();
@@ -3059,6 +3390,25 @@ export function printFactWarnings(result, print = console.warn) {
     print(`  - not checked: ${result.coverage.message}`);
     for (const span of result.coverage.spans.slice(0, 8)) print(`      ${span}`);
   }
+}
+
+/**
+ * What a second check of a document found that the first did not, ready for
+ * printFactWarnings(): a caller that checks twice has already reported the rest.
+ *
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} first
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} second
+ * @returns {{warnings: string[], advisoryFacts: object[], coverage: object|null}|null}
+ *   null when there is nothing new.
+ */
+export function newFactWarnings(first, second) {
+  const factKey = ({ kind, value }) => `${kind}\u0000${value}`;
+  const seenFacts = new Set((first.advisoryFacts ?? []).map(factKey));
+  const seenPhrases = new Set(first.warnings ?? []);
+  const warnings = (second.warnings ?? []).filter((phrase) => !seenPhrases.has(phrase));
+  const advisoryFacts = (second.advisoryFacts ?? []).filter((fact) => !seenFacts.has(factKey(fact)));
+  const coverage = first.coverage ? null : (second.coverage ?? null);
+  return warnings.length || advisoryFacts.length || coverage ? { warnings, advisoryFacts, coverage } : null;
 }
 
 /** Run the fact validator CLI and return its process exit code. */

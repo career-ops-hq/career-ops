@@ -804,6 +804,62 @@ try {
   } else {
     fail(`allow_facts did not reach the scope check: ${JSON.stringify(allowed)}`);
   }
+
+  // generate-pdf.mjs normalizes the document before the gate reads it, and cv.md
+  // keeps its glyphs: a title copied verbatim must still pass (#6352).
+  const atsSource = join(tmp, 'ats-cv.md');
+  const roleWarnings = (sourceRole, printedRole) => {
+    writeFileSync(atsSource, `### Acme \u2014 ${sourceRole}\n`);
+    return verifyFacts(`<div class="job-role">${printedRole}</div>`, {
+      sourcePaths: [atsSource], configPath: config,
+    }).advisoryFacts.map(claim => claim.value);
+  };
+  for (const [glyph, sourceRole, printedRole] of [
+    ['right arrow', 'Technical Writer \u2192 Senior Technical Writer', 'Technical Writer to Senior Technical Writer'],
+    ['left arrow', 'Writer \u2190 Editor', 'Writer from Editor'],
+    ['em dash', 'Staff Engineer \u2014 Platform', 'Staff Engineer - Platform'],
+    ['en dash', 'Staff Engineer \u2013 Platform', 'Staff Engineer - Platform'],
+    ['middot', 'Staff Engineer \u00B7 Platform', 'Staff Engineer | Platform'],
+    ['bullet', 'Staff Engineer \u2022 Platform', 'Staff Engineer | Platform'],
+    ['smart quote', 'Director of Devs\u2019 Tools', "Director of Devs' Tools"],
+  ]) {
+    const warnings = roleWarnings(sourceRole, printedRole);
+    if (warnings.length === 0) {
+      pass(`a title with a ${glyph} in cv.md matches its ATS-normalized form`);
+    } else {
+      fail(`${glyph} title read as unsourced: ${JSON.stringify(warnings)}`);
+    }
+  }
+  const verbatim = roleWarnings('Technical Writer \u2192 Senior Technical Writer', 'Technical Writer \u2192 Senior Technical Writer');
+  if (verbatim.length === 0) {
+    pass('a title still carrying the arrow matches too (verify-cv-facts.mjs run on its own)');
+  } else {
+    fail(`arrow title read as unsourced: ${JSON.stringify(verbatim)}`);
+  }
+  const inflated = roleWarnings('Technical Writer \u2192 Senior Technical Writer', 'Technical Writer to Chief Technical Writer');
+  if (inflated.length === 1) {
+    pass('folding the glyphs does not let a different title through');
+  } else {
+    fail(`inflated title not flagged: ${JSON.stringify(inflated)}`);
+  }
+  writeFileSync(atsSource, '### Acme\u2014Staff Engineer\n');
+  const glued = verifyFacts('<div class="job-role">Staff Engineer</div>', {
+    sourcePaths: [atsSource], configPath: config,
+  }).advisoryFacts;
+  if (glued.length === 0) {
+    pass('an unspaced dash still separates the employer from the title');
+  } else {
+    fail(`title after an unspaced dash read as unsourced: ${JSON.stringify(glued)}`);
+  }
+  writeFileSync(atsSource, '### Certification\u2014AWS Certified Developer \u2013 Associate\n');
+  const gluedAndFolded = verifyFacts('<div class="job-role">AWS Certified Developer - Associate</div>', {
+    sourcePaths: [atsSource], configPath: config,
+  }).advisoryFacts;
+  if (gluedAndFolded.length === 0) {
+    pass('an unspaced dash still separates a title that needs folding');
+  } else {
+    fail(`folded title after an unspaced dash read as unsourced: ${JSON.stringify(gluedAndFolded)}`);
+  }
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

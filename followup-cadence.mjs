@@ -798,14 +798,23 @@ export function contactLabel(contact) {
 export function resolveReportPath(reportField, appsFile = APPS_FILE, repoRoot = CAREER_OPS) {
   const target = firstLinkTarget(reportField);
   if (target == null) return null;
-  // Report links in the tracker are normalized relative to the tracker file's
-  // own directory (see PR #760 — `merge-tracker.mjs --migrate`). Resolve against
-  // dirname(APPS_FILE), not the project root, otherwise relative paths like
-  // `../reports/...` (the data/applications.md layout) escape above the project.
-  const fullPath = join(dirname(appsFile), target);
-  const repoRelative = relative(repoRoot, fullPath).split(sep).join('/');
-  if (repoRelative.startsWith('../') || repoRelative === '..' || !repoRelative.startsWith('reports/')) return null;
-  return existsSync(fullPath) ? repoRelative : null;
+  // Two shapes name the same file. Writers emit a repo-root link,
+  // `(reports/file.md)`, and merge-tracker rewrites it relative to the tracker
+  // directory, `(../reports/file.md)` (PR #760). Try the tracker-relative path
+  // first. A link with no `..` segment is also tried from the repo root, which
+  // is where the unmigrated shape actually lives. A `..` segment is not given
+  // that second try, so the link cannot walk out of reports/.
+  const candidates = [join(dirname(appsFile), target)];
+  if (!target.startsWith('/') && !target.split(/[\\/]/).includes('..')) {
+    const fromRoot = join(repoRoot, target);
+    if (fromRoot !== candidates[0]) candidates.push(fromRoot);
+  }
+  for (const fullPath of candidates) {
+    const repoRelative = relative(repoRoot, fullPath).split(sep).join('/');
+    if (repoRelative.startsWith('../') || repoRelative === '..' || !repoRelative.startsWith('reports/')) continue;
+    if (existsSync(fullPath)) return repoRelative;
+  }
+  return null;
 }
 
 // --- Compute urgency ---

@@ -2,7 +2,10 @@
 // BODY read, not just the header phase. A server that sends headers and then
 // stalls the body used to hang fetchJson forever, which could silently freeze
 // a full-directory sweep partway through with no error output.
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT, withLocalServerAs } from '../helpers.mjs';
@@ -123,18 +126,17 @@ const isAbort = (err) => { const e = err?.cause ?? err; return e?.name === 'Abor
 }
 
 // 5. The env var reaches the real request budget, not just the helper.
-// The default is read once at module load, so load a fresh instance with the
-// variable set and stall a request that passes no timeoutMs. If the env read
-// is ever disconnected (e.g. DEFAULT_TIMEOUT_MS hardcoded back to 10_000), the
-// request waits out the 10s default and the hard timeout below fails the test.
+// The module is already loaded here, so this also checks that the value is read
+// per request. Stall a request that passes no timeoutMs. If the env read is ever
+// disconnected, the request waits out the 10s default and the hard timeout below
+// fails the test.
 {
   const prev = process.env.CAREER_OPS_HTTP_TIMEOUT_MS;
   process.env.CAREER_OPS_HTTP_TIMEOUT_MS = '300';
   try {
-    const fresh = await import(`${pathToFileURL(join(ROOT, 'providers/_http.mjs')).href}?env-timeout`);
     const t0 = Date.now();
     try {
-      await hardTimeout(viaLocal(() => fresh.fetchJson(`${base}/stall`)), 4_000, 'fetchJson /stall with env budget');
+      await hardTimeout(viaLocal(() => fetchJson(`${base}/stall`)), 4_000, 'fetchJson /stall with env budget');
       fail('fetchJson resolved on a stalled body under CAREER_OPS_HTTP_TIMEOUT_MS');
     } catch (err) {
       const elapsed = Date.now() - t0;
@@ -145,6 +147,47 @@ const isAbort = (err) => { const e = err?.cause ?? err; return e?.name === 'Abor
   } finally {
     if (prev === undefined) delete process.env.CAREER_OPS_HTTP_TIMEOUT_MS;
     else process.env.CAREER_OPS_HTTP_TIMEOUT_MS = prev;
+  }
+}
+
+// 6. A value set only in the data root's .env reaches the request budget.
+// scan.mjs imports _http.mjs statically and loads .env after that, so this runs
+// the real import order in a child process. Its fetch never answers and uses no
+// network, so the time to the abort shows which budget was in force.
+{
+  const dataRoot = mkdtempSync(join(tmpdir(), 'co-http-timeout-env-'));
+  try {
+    writeFileSync(join(dataRoot, '.env'), 'CAREER_OPS_HTTP_TIMEOUT_MS=300\n');
+    const script = `
+      await import(${JSON.stringify(pathToFileURL(join(ROOT, 'scan.mjs')).href)});
+      const { fetchJson } = await import(${JSON.stringify(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href)});
+      let fetchCalled = false;
+      globalThis.fetch = (_url, { signal }) => {
+        fetchCalled = true;
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason));
+        });
+      };
+      const t0 = Date.now();
+      let error;
+      try {
+        await fetchJson('https://stalls.example.test/');
+      } catch (err) {
+        error = err;
+      }
+      const elapsed = Date.now() - t0;
+      if (!fetchCalled) throw new Error('the request never reached fetch: ' + error?.message);
+      if (error?.name !== 'AbortError') throw new Error('expected an abort, got: ' + (error?.message ?? 'no error'));
+      console.log(elapsed);
+    `;
+    const env = { ...process.env, CAREER_OPS_ROOT: dataRoot };
+    delete env.CAREER_OPS_HTTP_TIMEOUT_MS;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env, timeout: 30_000 });
+    const elapsed = Number(child.stdout.trim().split('\n').pop());
+    if (child.status === 0 && elapsed < 5_000) pass(`CAREER_OPS_HTTP_TIMEOUT_MS from .env aborted a request in ${elapsed}ms`);
+    else fail(`CAREER_OPS_HTTP_TIMEOUT_MS from .env not applied: status ${child.status}, elapsed ${elapsed}ms, ${child.stderr}`);
+  } finally {
+    rmSync(dataRoot, { recursive: true, force: true });
   }
 }
 

@@ -260,6 +260,7 @@ function coverSandbox() {
     copyFileSync(join(ROOT, f), join(dir, f));
   }
   copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(dir, 'lib', 'is-main-module.mjs'));
+  copyFileSync(join(ROOT, 'lib', 'cv-markdown.mjs'), join(dir, 'lib', 'cv-markdown.mjs'));
   copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(dir, 'lib', 'yaml-document.mjs'));
   // cv-templates.mjs decodes HTML entities when it reads a template's meta
   // block, so the sandbox needs this too. Without it the copied script dies at
@@ -285,6 +286,8 @@ function coverSandbox() {
     "import { writeFileSync } from 'node:fs';",
     "import { dirname, join } from 'node:path';",
     "import { fileURLToPath } from 'node:url';",
+    'export const normalizeTextForATS = (html) => ({ html, replacements: {} });',
+    'export const reportAtsReplacements = () => {};',
     'export async function renderHtmlToPdf(html, outputPath, opts = {}) {',
     "  const here = dirname(fileURLToPath(import.meta.url));",
     "  writeFileSync(join(here, 'render-opts.json'), JSON.stringify({ format: opts.format ?? null }));",

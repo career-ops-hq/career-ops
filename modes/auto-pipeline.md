@@ -24,7 +24,7 @@ If the input is a **URL** (not pasted JD text), follow this strategy to extract 
 
 **If the input is JD text** (not a URL): use directly, without needing to fetch.
 
-**Session title:** once a real JD is read and the role and employer are known, apply the router's **Session Title** rule (`SKILL.md`, #5303): rename an interactive session to `{Role}, {Company}` when the host allows it. An undisclosed-employer agency posting waits for Step 1's **Agency confirmation handoff**, then becomes `{Role}, via {Agency}`.
+**Session title:** apply the router's **Session Title** rule (`SKILL.md`, #5303) in an interactive session when the host allows it. The session is `Career-ops eval (fetching)` while this step reads the JD. Once a real JD gives the role and employer, rename it to `{Role}, {Company} (evaluating)`, then to `{Role}, {Company} (CV)` at Step 3, and end on plain `{Role}, {Company}` after Step 5. A gate that stops the run (Steps 0.5 to 0.7, or Step 1's agency question) ends it on `(on hold)` instead. An undisclosed-employer agency posting waits for Step 1's **Agency confirmation handoff**, then becomes `{Role}, via {Agency}`. Inside a scan's `pipeline` run, the scan's counter title applies until one posting remains.
 
 ## Step 0.5 — Liveness gate
 
@@ -114,3 +114,5 @@ If the final score is >= 4.5, generate a draft of responses for the application 
 Record it in the tracker the way `oferta` does ("Record in tracker"): a tracker-addition TSV merged by `node merge-tracker.mjs`, never a row written into `data/applications.md` by hand. Fill every field, including the Report link and PDF as ✅.
 
 **If an artifact-generation step fails after the JD and gates are resolved**, continue with the next ones and mark the failed step as pending in the tracker. An unavailable JD or unresolved liveness/confirmation gate stops the pipeline before evaluation and all artifact/tracker writes.
+
+**Last step: the community ask (interactive runs only).** When `auto-pipeline` runs on its own, not inside `pipeline` (which asks once, at the end of its run), and this run saved its evaluation report, finish with `node community-asks.mjs next` and follow AGENTS.md → "Community asks".

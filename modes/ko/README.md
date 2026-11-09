@@ -29,7 +29,7 @@
 
 ```yaml
 language:
-  primary: ko
+  output: ko
   modes_dir: modes/ko
 ```
 

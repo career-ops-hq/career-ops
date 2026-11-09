@@ -290,13 +290,16 @@ export const MIN_STEM_CHARS = 3;
  *
  * @param {string} a - Company cell from one side of the comparison.
  * @param {string} b - Company cell from the other side.
+ * @param {Set<string>} [formWords] - Tokens that may differ. Defaults to legal
+ *   suffixes plus generic descriptors. A caller that must not treat "Canada"
+ *   as optional passes the legal-suffix set alone.
  * @returns {boolean} True when the two cells name the same employer under a
  *   different corporate form.
  */
-export function companiesMatchIgnoringCorporateForm(a, b) {
+export function companiesMatchIgnoringCorporateForm(a, b, formWords = CORPORATE_FORM_WORDS) {
   const ta = normalizeTextKey(a, ' ').split(' ').filter(Boolean);
   const tb = normalizeTextKey(b, ' ').split(' ').filter(Boolean);
-  return corporateFormTokensMatch(ta, tb);
+  return corporateFormTokensMatch(ta, tb, formWords);
 }
 
 /**
@@ -311,14 +314,15 @@ export function companiesMatchIgnoringCorporateForm(a, b) {
  *
  * @param {string[]} ta - Tokens of one company cell.
  * @param {string[]} tb - Tokens of the other company cell.
+ * @param {Set<string>} [formWords] - Same override as companiesMatchIgnoringCorporateForm.
  * @returns {boolean}
  */
-export function corporateFormTokensMatch(ta, tb) {
+export function corporateFormTokensMatch(ta, tb, formWords = CORPORATE_FORM_WORDS) {
   const [stem, full] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
   if (stem.length === 0 || stem.length === full.length) return false;
   if (stem.join('').length < MIN_STEM_CHARS) return false;
   if (stem.some((token, i) => token !== full[i])) return false;
-  return full.slice(stem.length).every(token => CORPORATE_FORM_WORDS.has(token));
+  return full.slice(stem.length).every(token => formWords.has(token));
 }
 
 /**
@@ -972,10 +976,23 @@ export function resolveCanonicalState(input, states) {
   return null;
 }
 
+// A date in a Status cell and whatever joins it to the state: `Applied 2026-01-02`,
+// `Applied - 2026-01-02`, `Applied: 2026-01-02`, `Applied (2026-01-02)`,
+// `Applied on 2026-01-02`. Group 1 is the text after it.
+const STATUS_DATE_RE = /\s*(?:[-–—,:/(]\s*)?(?:\bon\s+)?\d{4}-\d{2}-\d{2}\)?(.*)$/i;
+// The same date written ahead of the state: `2026-01-02 Applied`.
+const LEADING_STATUS_DATE_RE = /^\d{4}-\d{2}-\d{2}\b[\s,:–—-]*/;
+
+/** A Status cell without its bold or a leading date. */
+function withoutBoldOrLeadingDate(input) {
+  return String(input ?? '').replace(/\*\*/g, '').trim().replace(LEADING_STATUS_DATE_RE, '');
+}
+
 /**
  * A raw Status cell without the decoration legacy trackers carry: markdown
- * bold and a trailing date (`**Applied**`, `Applied 2026-01-02`). What is left
- * is the spelling states.yml resolves, a label or an alias, unchanged.
+ * bold and a date (`**Applied**`, `Applied 2026-01-02`, `Applied (2026-01-02)`).
+ * What is left is the spelling states.yml resolves, a label or an alias,
+ * unchanged.
  *
  * The read side resolves a cell through this (resolveCanonicalStateId()), so a
  * writer that copies a cell must strip it the same way. Otherwise it writes a
@@ -986,7 +1003,48 @@ export function resolveCanonicalState(input, states) {
  * @returns {string}
  */
 export function stripStatusDecoration(input) {
-  return String(input ?? '').replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
+  return withoutBoldOrLeadingDate(input).replace(STATUS_DATE_RE, '').trim();
+}
+
+/**
+ * What a Status cell says after its date (`Applied 2026-01-02 via referral`).
+ * It is no part of any state, so a writer that strips the date has to put it
+ * somewhere else. Empty when the cell has no date, or nothing after one.
+ *
+ * @param {*} input - Raw status cell from applications.md.
+ * @returns {string}
+ */
+export function statusTextAfterDate(input) {
+  return withoutBoldOrLeadingDate(input).match(STATUS_DATE_RE)?.[1].trim() ?? '';
+}
+
+/**
+ * A Notes cell with `entry` put first, as its own entry. set-status.mjs reads
+ * Notes as "; "-separated entries (--note, --replace-note), so text a writer
+ * moves out of another cell is joined the same way, or the note beside it can
+ * no longer be found. A "—" or "-" placeholder is no note, and gives way.
+ *
+ * @param {*} notes - The Notes cell as it stands.
+ * @param {string} entry - Text to put first.
+ * @returns {string}
+ */
+export function prependNote(notes, entry) {
+  const kept = String(notes ?? '').trim();
+  return kept && kept !== '—' && kept !== '-' ? `${entry}; ${kept}` : entry;
+}
+
+/**
+ * Whether `entry` is already a whole "; "-separated entry of a Notes cell, or
+ * the whole cell. Text inside a longer entry ("sent" in "sent CV") is not:
+ * --replace-note can replace that entry, and the text would go with it.
+ *
+ * @param {*} notes - The Notes cell as it stands.
+ * @param {string} entry - Text to look for.
+ * @returns {boolean}
+ */
+export function hasNoteEntry(notes, entry) {
+  const kept = String(notes ?? '').trim();
+  return kept === entry || kept.startsWith(`${entry}; `) || kept.endsWith(`; ${entry}`) || kept.includes(`; ${entry}; `);
 }
 
 /**
