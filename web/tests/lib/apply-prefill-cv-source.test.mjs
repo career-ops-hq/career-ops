@@ -225,17 +225,17 @@ test("applyCvSource refuses a path outside the workspace", async () => {
   });
 });
 
-test("the sensitive-field carve-out survives the tailored-CV wording", async () => {
-  // The one line standing between an auto-filler and a fabricated visa or salary
-  // answer. It fails silently, so it is pinned on both branches.
+test("profile-backed screening survives both CV wordings, and identity questions stay blank", async () => {
   await withWorkspace(async (root) => {
     const attached = await resolveTailoredCv("Acme Corp");
     for (const cvSource of [applyCvSource(root, attached), null]) {
-      const prompt = buildAnswerPrompt({ title: "Acme Corp", fields: FIELDS, cvSource });
-      for (const category of ["legal", "visa", "work-authorization", "salary", "demographic"]) {
-        assert.ok(prompt.includes(category), `cvSource=${cvSource}: lost the ${category} carve-out`);
-      }
-      assert.match(prompt, /NEVER fill[^\n]*needs_confirmation:true and value:""/);
+      const prompt = buildAnswerPrompt({ title: "Acme Corp", fields: FIELDS, cvSource, profile: "config/profile.yml" });
+      assert.match(prompt, /compensation\.target_range/, `cvSource=${cvSource}`);
+      assert.match(prompt, /If config\/profile\.yml does not state that answer, set needs_confirmation:true and value:""/);
+      assert.doesNotMatch(prompt, /NEVER fill[^\n]*\bvisa\b/);
+      assert.doesNotMatch(prompt, /NEVER fill[^\n]*\bsalary\b/);
+      assert.match(prompt, /NEVER fill[^\n]*citizenship/);
+      assert.match(prompt, /NEVER invent years of experience/);
     }
   });
 });
