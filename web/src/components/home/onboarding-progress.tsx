@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Check, Circle, CircleDashed } from "lucide-react";
 import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
-import { PREREQS, onboardingChecklist } from "@/lib/home/onboarding-checklist.mjs";
+import { PREREQS } from "@/lib/home/onboarding-checklist.mjs";
+import { setupPanelLabel, setupPanelMode } from "@/lib/home/setup-panel.mjs";
 
 // The "profile that grows while you talk": a live checklist of the four setup
 // prerequisites plus the eight personalization sections, read from the same
@@ -22,6 +23,7 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   // null while resolveCliId() is in flight: the action shows, disabled, so it
   // neither flashes nor opens an assistant that has no CLI to send with.
   const [cli, setCli] = useState<boolean | null>(null);
+  const [optionalOpen, setOptionalOpen] = useState(false);
 
   const refetch = useCallback(() => {
     fetch("/api/doctor").then((r) => r.json()).then(setDoctor).catch(() => {});
@@ -53,31 +55,54 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   if (!doctor.available) return null;
 
   const missing = new Set(doctor.missing);
-  // First-run home passes compact and leads with the four setup files.
-  // The eight evaluation sections stay on the full Today checklist.
-  const { showSections, done, total, asks } = onboardingChecklist({ missing: doctor.missing, sections, compact });
-  if (done === total) return null; // fully personalized: the panel has done its job
+  // Required files still open: the full checklist. Required files done, with
+  // optional sections left: one link, so a full queue is not sitting under "4/12".
+  const panel = setupPanelMode({ missing: doctor.missing, sections, compact });
+  if (panel.mode === "hidden") return null;
+  if (panel.mode === "link" && !optionalOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOptionalOpen(true)}
+        className="text-sm font-medium text-muted underline-offset-2 hover:text-brand-text hover:underline"
+      >
+        {setupPanelLabel(panel)}
+      </button>
+    );
+  }
 
+  const { showSections, done, total, asks } = panel;
   const kickoff = `Let's finish setting me up. Still to do: ${asks.join("; ")}. Walk me through it like a recruiter building my brief — one or two things at a time, propose what you infer from my CV, and let me confirm each piece. Don't ask for anything already on file.`;
+  const visibleSections = panel.mode === "link" ? sections.filter((s) => s.state !== "filled") : sections;
 
   return (
     <aside className={`rounded-2xl border border-border bg-surface/40 ${compact ? "p-4" : "p-5"}`} aria-label="Setup progress">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-medium text-foreground">Your profile, as it takes shape</h2>
-        <span className="font-mono text-xs text-muted">{done}/{total}</span>
+        <h2 className="text-sm font-medium text-foreground">
+          {panel.mode === "link" ? "Optional profile details" : "Your profile, as it takes shape"}
+        </h2>
+        {panel.mode === "checklist" ? (
+          <span className="font-mono text-xs text-muted">{done}/{total}</span>
+        ) : (
+          <button type="button" onClick={() => setOptionalOpen(false)} className="text-xs text-muted hover:text-foreground">
+            Hide
+          </button>
+        )}
       </div>
-      <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-surface-hover">
-        <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${Math.round((done / total) * 100)}%` }} />
-      </div>
+      {panel.mode === "checklist" && (
+        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-surface-hover">
+          <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${Math.round((done / total) * 100)}%` }} />
+        </div>
+      )}
 
       <ul className="mt-4 space-y-1.5 text-sm">
-        {PREREQS.map((p) => (
+        {panel.mode === "checklist" && PREREQS.map((p) => (
           <Row key={p.key} state={missing.has(p.key) ? "missing" : "filled"} label={p.label} />
         ))}
-        {showSections && (
+        {showSections && panel.mode === "checklist" && (
           <li className="pt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-faint">personalization — what evaluations score against</li>
         )}
-        {showSections && sections.map((s) => (
+        {showSections && visibleSections.map((s) => (
           <Row key={s.id} state={s.state} label={s.heading.replace(/^## Your /, "")} />
         ))}
       </ul>
