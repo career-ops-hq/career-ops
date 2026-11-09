@@ -106,9 +106,6 @@ If yes:
    of the plain success line: include the staged state, all three recovery options and their exact
    commands, and the `--commit-on-branch` opt-in (#3846).
 
-   If the updater's output ended with its note about the CareerOps Manifesto, relay it once (do not drop it when summarizing):
-   > "One more thing: this project ships with the CareerOps Manifesto — a new way of job searching is taking shape, and you are already practicing it. Run `npm run manifesto` to read it and sign it if you want to help. No action needed."
-
 If no:
 1. Run `node update-system.mjs dismiss --version {remote}`
 2. Tell the user they will be asked again when a newer release is out, and can run `/career-ops update` anytime to check again.

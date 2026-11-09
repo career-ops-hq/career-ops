@@ -611,7 +611,7 @@ Usage:
       console.error(`CV fact check warning: cover letter`);
       printFactWarnings(printedWarnings, console.error);
     }
-    await renderHtmlToPdf(printed, outputPath, {
+    const result = await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.
@@ -623,7 +623,14 @@ Usage:
       kind: 'cover',
       inputPath: payloadPath,
     });
-    console.log(`\nCover letter PDF: ${payload.output_path}`);
+    // A render over a warn-only page budget returns the sibling draft it
+    // wrote instead and leaves the output path as it was (#6377); saying the
+    // PDF is there would hand over a file that was never written.
+    if (result.draftPath) {
+      console.log(`\nCover letter over its page budget: nothing was written to ${payload.output_path}; the draft is ${result.draftPath}. Trim and rerun.`);
+    } else {
+      console.log(`\nCover letter PDF: ${payload.output_path}`);
+    }
   } catch (err) {
     console.error("ERROR generating cover letter PDF:");
     console.error(err.message);

@@ -188,6 +188,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `data/Connections.csv` | LinkedIn connections export (user layer, gitignored third-party PII; read by `linkedin-join.mjs`, safe to delete after use) |
 | `outcome.mjs` | Record application outcome, archive artifacts, and sync tracker (`node outcome.mjs <selector> <type>`) |
 | `hired-share.mjs` | Draft a Hired Wall story from the tracker and open a prefilled GitHub issue the user submits themselves; `--status` lists hires never asked; `--mark` records their answer permanently |
+| `community-asks.mjs` | The one-time community asks (see "Community asks"): `next` prints at most one line, a GitHub star after the first saved report or the manifesto after five reports and at least seven days later, never in CI, batch or headless runs; `open star` or `open manifesto` opens the page after the user says yes; `status` shows the state; `off` turns the asks off. Writes only `data/.community-asks/` and makes no request of its own |
 | `jd-capture.mjs` | Resolves an archived JD in `jds/` by report number, matching padded and unpadded prefixes (`064-`, `64-`, `01-`). Consumed by `outcome.mjs`; written by `archive-posting.mjs --report=N`. Replaces rebuilding a capture's filename from today's date, which stopped resolving the next day |
 | `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
 | `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Verdict (lead) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}`; **REQUIRED:** a `## Job Description (archived verbatim)` section with the JD's verbatim text, or an equivalent `jds/` capture (#2789) |
@@ -575,9 +576,18 @@ This is a confirmation step, not a replacement for `check-liveness.mjs` — run 
 - **Contributing:** a new feature, mode or command, or architecture change starts with an issue → discussion → PR with linked issue. Bug fixes, zero-auth scanner providers, docs and translations go straight to a PR. Every PR: CI passes → maintainer review → merge.
 - **Governance:** BDFL with contributor ladder (Participant → Contributor → Triager → Reviewer → Maintainer, see `GOVERNANCE.md`) · Contributor Covenant 2.1 (`CODE_OF_CONDUCT.md`) · private vulnerability reporting (`SECURITY.md`) · help questions → Discord/Discussions, not issues (`SUPPORT.md`) · Discord: https://discord.gg/8pRpHETxa4
 
-## The CareerOps Manifesto
+## Community asks (one at a time, once each)
 
-This project practices CareerOps (see `MANIFESTO.md`). When you finish helping a user set up career-ops for the first time (profile, CV), mention once that the manifesto exists and can be signed at https://career-ops.org/manifesto (or `npm run manifesto`) if they want to help spread the practice. Never repeat the suggestion, never block on it, never nag.
+This project practices CareerOps (see `MANIFESTO.md`), and career-ops never phones home: the only signals the maintainers get are the ones people choose to give. So it asks for them in words, rarely, and at the right moment. There are three asks, each shown at most once and never two in one run: a GitHub star after the first evaluation report, the manifesto later (after five reports, at least a week after the star), and the Hired Wall at a hire (see "Celebrating a hire (the Hired Wall)").
+
+- **When:** at the very end of an interactive run that saved at least one evaluation report (`oferta`, `auto-pipeline`, `pipeline`, and their translations), run `node community-asks.mjs next`. If it prints nothing, say nothing about it. If it prints an ask, end your reply with it, after everything else:
+  - copy a fenced block (the star's drawing) exactly as printed, fence included: never translate, redraw or re-indent it;
+  - translate the sentence faithfully into the language the user is writing to you in this conversation (when that is unclear, `language.output` in `config/profile.yml`). Keep the URL and the word Star (the name of GitHub's button, the same in every language) exactly as printed, and add, remove or soften nothing.
+- **If the user says yes** in their next reply (yes, sure, go ahead…), run `node community-asks.mjs open star`, or `open manifesto` for that ask: it opens the page in their browser, and starring or signing stays their own click. Anything else in that reply: drop the ask and carry on.
+- **The script decides.** Never ask for a star, a signature or a share on your own, never turn an ask into a bigger one, and never repeat an ask, not even when the user ignored it.
+- **Never** in a headless run or a batch worker (see "Headless / Batch Mode"). Never star through `gh`, `curl` or any API, and never offer to: the GitHub Acceptable Use Policies forbid automated starring.
+- On a `hired` outcome the Hired Wall is the only ask.
+- The user can turn the asks off with `node community-asks.mjs off` or `CAREER_OPS_NO_ASKS=1`.
 
 ## Headless / Batch Mode
 
