@@ -13,6 +13,24 @@ const FIRST = 'https://jobs.example/sandbox-co-0/jobs/1';
 const SECOND = 'https://jobs.example/sandbox-co-1/jobs/2';
 const COMPANIES = 8;
 
+function urlCount(text, raw) {
+  let want;
+  try { want = new URL(raw); } catch { return 0; }
+  let count = 0;
+  for (const match of String(text).matchAll(/https?:\/\/[^\s)<>"']+/g)) {
+    try {
+      if (new URL(match[0]).href === want.href) count += 1;
+    } catch {
+      // The match is not a URL.
+    }
+  }
+  return count;
+}
+
+function textHasUrl(text, raw) {
+  return urlCount(text, raw) > 0;
+}
+
 function childEnv(dir, mode) {
   return {
     ...process.env,
@@ -96,7 +114,7 @@ function stopSweep(dir, preload, extraArgs) {
     };
     child.stderr.on('data', (buf) => {
       stderr += buf.toString();
-      if (stderr.includes(FIRST)) stop();
+      if (textHasUrl(stderr, FIRST)) stop();
     });
     child.stdout.on('data', (buf) => { stdout += buf.toString(); });
     child.on('close', (status, signal) => {
@@ -110,7 +128,7 @@ const dir = mkdtempSync(join(tmpdir(), 'ats-full-timeout-save-'));
 try {
   const { preload, fetched } = prepare(dir);
   const stopped = await stopSweep(dir, preload, []);
-  const saved = pipeline(dir).includes(FIRST);
+  const saved = textHasUrl(pipeline(dir), FIRST);
   const cpExists = existsSync(checkpointPath(dir));
   let resumeAt = null;
   let partialSaved = null;
@@ -133,7 +151,7 @@ try {
       join(ROOT, 'scan-ats-full.mjs'),
       '--ats', 'greenhouse', '--limit', String(COMPANIES), '--since', '7', '--json', '--resume',
     ], { cwd: dir, encoding: 'utf-8', timeout: 30_000, env: childEnv(dir, 'continue') });
-    if (refused.status === 1 && /company dataset changed since the checkpoint/.test(refused.stderr) && pipeline(dir).includes(FIRST) && existsSync(checkpointPath(dir))) {
+    if (refused.status === 1 && /company dataset changed since the checkpoint/.test(refused.stderr) && textHasUrl(pipeline(dir), FIRST) && existsSync(checkpointPath(dir))) {
       pass('a changed company list still refuses to resume, and the saved role stays put');
     } else {
       fail(`dataset change did not refuse resume: status=${refused.status}\n${(refused.stderr || '').slice(-500)}`);
@@ -148,8 +166,8 @@ try {
     ], { cwd: dir, encoding: 'utf-8', timeout: 30_000, env: childEnv(dir, 'continue') });
     const text = pipeline(dir);
     const fetchedNames = readFileSync(fetched, 'utf-8').split('\n').filter(Boolean);
-    const firstCount = text.split(FIRST).length - 1;
-    const secondCount = text.split(SECOND).length - 1;
+    const firstCount = urlCount(text, FIRST);
+    const secondCount = urlCount(text, SECOND);
     if (resumed.status === 0 && firstCount === 1 && secondCount === 1 && !fetchedNames.includes('sandbox-co-0') && !existsSync(checkpointPath(dir))) {
       pass('the next run continues past the saved prefix and does not append the first role again');
     } else {
@@ -165,10 +183,10 @@ try {
   const { preload } = prepare(dryDir);
   const stopped = await stopSweep(dryDir, preload, ['--dry-run']);
   const text = pipeline(dryDir);
-  if (!text.includes(FIRST) && !existsSync(checkpointPath(dryDir)) && stopped.stdout.includes('"stoppedEarly":true')) {
+  if (!textHasUrl(text, FIRST) && !existsSync(checkpointPath(dryDir)) && stopped.stdout.includes('"stoppedEarly":true')) {
     pass('a dry run still only prints the partial result and writes nothing');
   } else {
-    fail(`dry run wrote state: pipelineHasRole=${text.includes(FIRST)} checkpoint=${existsSync(checkpointPath(dryDir))} status=${stopped.status} stdout=${stopped.stdout.slice(-300)}`);
+    fail(`dry run wrote state: pipelineHasRole=${textHasUrl(text, FIRST)} checkpoint=${existsSync(checkpointPath(dryDir))} status=${stopped.status} stdout=${stopped.stdout.slice(-300)}`);
   }
 } finally {
   rmSync(dryDir, { recursive: true, force: true });

@@ -256,7 +256,7 @@ export function executeJob(root, job, options = {}) {
       tempPortals = writeJobPortals(root, job);
       const command = buildScanCommand(job);
       const args = [...command.args];
-      if (command.script === "scan-ats-full.mjs" && hasResumableCheckpointShape(root)) args.push("--resume");
+      if (command.script === "scan-ats-full.mjs" && hasResumableCheckpointShape(root)) args.push("--resume-if-compatible");
       const result = spawnFn(
         process.execPath,
         [command.script, ...args],

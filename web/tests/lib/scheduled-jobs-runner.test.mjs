@@ -790,7 +790,8 @@ test("a full scan continues a matching checkpoint and leaves the portals command
     });
     assert.equal(resumed.state, "success");
     assert.equal(args[0], "scan-ats-full.mjs");
-    assert.equal(args.includes("--resume"), true);
+    assert.equal(args.includes("--resume-if-compatible"), true);
+    assert.equal(args.includes("--resume"), false);
 
     writeCheckpoint(temp, { version: 1, current: { name: "greenhouse" } });
     executeJob(temp, job, {

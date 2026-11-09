@@ -47,6 +47,7 @@
  *   node scan-ats-full.mjs --verbose            # log per-board fetch failures
  *   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
  *   node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
+ *   node scan-ats-full.mjs --resume-if-compatible # resume when the checkpoint matches, otherwise start fresh
  *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
@@ -441,7 +442,7 @@ export const SOURCES = {
 const KNOWN_FLAGS = [
   '--since', '--limit', '--ats', '--seeds', '--history-seeds', '--probe-unknown-hosts', '--dry-run', '--liveness',
   '--verbose', '--md-out', '--json', '--include-undated', '--include-blacklisted',
-  '--shuffle', '--resume', '--help', '-h',
+  '--shuffle', '--resume', '--resume-if-compatible', '--help', '-h',
 ];
 
 // Flags that consume the next argv token as a value (space-separated form —
@@ -462,6 +463,7 @@ const USAGE = `Usage:
   node scan-ats-full.mjs --verbose            # log per-board fetch failures
   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
   node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
+  node scan-ats-full.mjs --resume-if-compatible # resume when it matches; otherwise start fresh
   node scan-ats-full.mjs --help               # print this usage block and exit`;
 
 export function parseArgs(argv) {
@@ -567,6 +569,7 @@ export function parseArgs(argv) {
     includeBlacklisted: args.includes('--include-blacklisted'),
     shuffle: args.includes('--shuffle'),
     resume: args.includes('--resume'),
+    resumeIfCompatible: args.includes('--resume-if-compatible'),
   };
 }
 
@@ -1242,20 +1245,46 @@ function isoDay(v) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
+function resumeRejected(cp, opts, filters, { freshOnMismatch = false } = {}) {
+  const changed = changedFilterKeys(cp, filters);
+  const settingsDiffer = !checkpointCompatible(cp, opts);
+  if (!settingsDiffer && changed.length === 0) return false;
+  if (freshOnMismatch) {
+    const why = settingsDiffer
+      ? 'different settings (--ats, --limit, --include-undated, or --shuffle)'
+      : `portals.yml ${changed.join(', ')}`;
+    console.error(`⚠️  Checkpoint at ${CHECKPOINT_PATH} does not match this run (${why}). Starting a fresh sweep. The checkpoint will be overwritten.`);
+    return true;
+  }
+  if (settingsDiffer) {
+    console.error('Error: checkpoint was written with different settings (--ats/--limit/--include-undated, or --shuffle is set) — rerun with the original flags, or delete the checkpoint to start fresh.');
+  } else {
+    console.error(`Error: portals.yml ${changed.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, or delete ${CHECKPOINT_PATH} to start fresh.`);
+  }
+  return true;
+}
+
 async function main() {
   const opts = parseArgs(process.argv);
+  if (!existsSync(PORTALS_PATH)) {
+    console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
+    process.exit(1);
+  }
+  const config = loadYaml(readFileSync(PORTALS_PATH, 'utf-8'));
+  const filters = filterFingerprints(config);
   let checkpoint = null;
-  if (opts.resume) {
+  if (opts.resume || opts.resumeIfCompatible) {
     const cp = loadCheckpoint();
-    if (!cp) {
-      console.error(`Error: --resume passed but no checkpoint found at ${CHECKPOINT_PATH}.`);
-      process.exit(1);
+    if (opts.resume) {
+      if (!cp) {
+        console.error(`Error: --resume passed but no checkpoint found at ${CHECKPOINT_PATH}.`);
+        process.exit(1);
+      }
+      if (resumeRejected(cp, opts, filters)) process.exit(1);
+      checkpoint = cp;
+    } else if (cp && !resumeRejected(cp, opts, filters, { freshOnMismatch: true })) {
+      checkpoint = cp;
     }
-    if (!checkpointCompatible(cp, opts)) {
-      console.error('Error: checkpoint was written with different settings (--ats/--limit/--include-undated, or --shuffle is set) — rerun with the original flags, or delete the checkpoint to start fresh.');
-      process.exit(1);
-    }
-    checkpoint = cp;
   } else if (loadCheckpoint() && !opts.dryRun) {
     console.error(`⚠️  Unfinished sweep checkpoint found at ${CHECKPOINT_PATH} — pass --resume to continue it; this fresh run will overwrite it.`);
   }
@@ -1278,11 +1307,6 @@ async function main() {
     else process.stdout.write(s);
   };
 
-  if (!existsSync(PORTALS_PATH)) {
-    console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
-    process.exit(1);
-  }
-  const config = loadYaml(readFileSync(PORTALS_PATH, 'utf-8'));
   const fullTitleFilterConfig = resolveTitleFilterConfig(config);
   // title_filter_overrides is independent of title_filter_full: it broadens
   // the net for specific companies on top of whichever title filter config
@@ -1309,12 +1333,6 @@ async function main() {
     process.exit(1);
   }
   const domainFilter = buildDomainFilter(config?.domain_filter);
-  const filters = filterFingerprints(config);
-  const changedFilters = changedFilterKeys(checkpoint, filters);
-  if (changedFilters.length) {
-    console.error(`Error: portals.yml ${changedFilters.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, or delete ${CHECKPOINT_PATH} to start fresh.`);
-    process.exit(1);
-  }
   if (!fullTitleFilterConfig?.positive?.length) {
     const key = config?.title_filter_full ? 'title_filter_full' : 'title_filter';
     console.error(`⚠️  portals.yml has no ${key}.positive — every fresh posting on every board will match. Consider adding keywords.`);
