@@ -1448,10 +1448,12 @@ async function main() {
   // we instead flush the matches collected up to this point as a well-formed but
   // PARTIAL result (`stoppedEarly: true`) so the caller can still surface those
   // roles. CLI/human runs keep the default terminate behavior (no handler).
+  // spawnSync with a timeout drops the JSON this handler writes to stdout.
   // Live deltas for the partial (stoppedEarly) report, so a mid-source SIGTERM
   // reports the work ACTUALLY done. totalCompaniesScanned is bumped by a whole
   // source's planned entries up front, and its errors fold into totalErrors only
   // once it finishes — the handler applies the same correction the checkpoint uses.
+  let writeStopCheckpoint = () => false;
   let curEntries = 0;
   let curDone = 0;
   let curErrors = 0;
@@ -1461,38 +1463,71 @@ async function main() {
     process.on('SIGTERM', () => {
       if (flushed) return;
       flushed = true;
-      try {
-        const partial = filterBlacklistedOffers(newOffers, blacklist, {
-          includeBlacklisted: opts.includeBlacklisted,
-        }).offers.map((o) => ({
-          company: o.company,
-          title: o.title,
-          url: o.url,
-          location: o.location || null,
-          ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
-          postedAt: isoDay(o.postedAt),
-          dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
-          source: o.source,
-        }));
-        process.stdout.write(JSON.stringify({
-          date,
-          sources: opts.ats,
-          stoppedEarly: true,
-          companiesAvailable: totalCompaniesAvailable,
-          companiesScanned: Math.max(0, totalCompaniesScanned - (curEntries - curDone) - curDeadSkipped),
-          capHit,
-          datasetStatus,
-          postingsKept: partial.length,
-          postingsDroppedNoDate: droppedNoDate,
-          unreachableBoards: totalErrors + curErrors,
-          domainFilterActive: Boolean(domainFilter),
-          domainGatedBoards,
-          domainGatedPostings,
-          offers: partial,
-        }) + '\n', () => process.exit(0));
-      } catch {
-        process.exit(0);
-      }
+      void (async () => {
+        let saved = false;
+        let kept = [];
+        try {
+          kept = filterBlacklistedOffers(newOffers.slice(), blacklist, {
+            includeBlacklisted: opts.includeBlacklisted,
+          }).offers;
+          if (!opts.dryRun && kept.length) {
+            if (!existsSync(PIPELINE_PATH)) {
+              mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
+              writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
+            }
+            await appendToPipeline(kept);
+            saved = true;
+          }
+        } catch {
+          saved = false;
+        }
+        if (saved) {
+          try {
+            await appendToScanHistory(kept, date);
+          } catch {
+            // pipeline.md already has the roles
+          }
+        }
+        try {
+          const partialSave = { saved, postingsKept: kept.length };
+          if (!opts.dryRun) {
+            const wrote = writeStopCheckpoint(partialSave);
+            if (!wrote) {
+              const existing = loadCheckpoint();
+              if (existing) writeCheckpoint({ ...existing, partialSave });
+            }
+          }
+          const partial = kept.map((o) => ({
+            company: o.company,
+            title: o.title,
+            url: o.url,
+            location: o.location || null,
+            ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
+            postedAt: isoDay(o.postedAt),
+            dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
+            source: o.source,
+          }));
+          process.stdout.write(JSON.stringify({
+            date,
+            sources: opts.ats,
+            stoppedEarly: true,
+            companiesAvailable: totalCompaniesAvailable,
+            companiesScanned: Math.max(0, totalCompaniesScanned - (curEntries - curDone) - curDeadSkipped),
+            capHit,
+            datasetStatus,
+            postingsKept: partial.length,
+            postingsDroppedNoDate: droppedNoDate,
+            unreachableBoards: totalErrors + curErrors,
+            domainFilterActive: Boolean(domainFilter),
+            domainGatedBoards,
+            domainGatedPostings,
+            saved,
+            offers: partial,
+          }) + '\n', () => process.exit(0));
+        } catch {
+          process.exit(0);
+        }
+      })();
     });
   }
 
@@ -1629,6 +1664,26 @@ async function main() {
       deferred.set(entriesAll[index], { index, jobs: null });
     }
     const deferredIndices = () => [...deferred.values()].map((d) => d.index);
+    let checkpointPhase = 'sweep';
+    writeStopCheckpoint = (partialSave) => {
+      if (opts.dryRun) return false;
+      const counters = checkpointPhase === 'folded'
+        ? snapshotCounters()
+        : {
+            ...snapshotCounters(),
+            totalRetiredBoardsSkipped: totalRetiredBoardsSkipped + deadBoardsSkipped,
+            totalCompaniesScanned: checkpointPhase === 'retry'
+              ? totalCompaniesScanned - (entries.length - lastDone)
+              : totalCompaniesScanned - (entries.length - lastDone) - deadBoardsSkipped,
+            totalErrors: totalErrors + errors,
+          };
+      return writeCheckpoint({
+        ...checkpointBase(),
+        ...(partialSave ? { partialSave } : {}),
+        current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
+        counters,
+      });
+    };
     await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry, idx) => {
       const deadBoard = boardKey(entry);
       if (shouldSkipDeadBoard(deadBoards, name, deadBoard)) {
@@ -1722,27 +1777,14 @@ async function main() {
         saveDeadBoardsBestEffort(deadBoards);
         // So a sweep that dies later keeps the ids it resolved so far.
         void saveProviderIdCacheBestEffort(idCaches);
-        writeCheckpoint({
-          ...checkpointBase(),
-          current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
-          counters: {
-            ...snapshotCounters(),
-            totalRetiredBoardsSkipped: totalRetiredBoardsSkipped + deadBoardsSkipped,
-            // totalCompaniesScanned was bumped by the FULL entries.length up
-            // front; a checkpoint must store only work actually attempted, or
-            // a resumed run (which re-adds its own slice) double-counts the
-            // completed portion in the final summary. Retired boards were not
-            // attempted and must not be counted as scanned either.
-            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done) - deadBoardsSkipped,
-            totalErrors: totalErrors + errors,
-          },
-        });
+        writeStopCheckpoint();
       }
     }, () => resolverOutage);
     // parallelEach reports a completed callback even when a retired board was
     // skipped, so remove those entries from the live scan total after the
     // source pass. The retired count remains visible separately.
     totalCompaniesScanned -= deadBoardsSkipped;
+    checkpointPhase = 'retry';
     // Second chance for boards the parallel sweep truncated: retry alone on a
     // quiet line. Re-processing the full board is safe — seenUrls already
     // holds every match from the partial first pass.
@@ -1800,6 +1842,7 @@ async function main() {
     }
     totalErrors += errors;
     totalRetiredBoardsSkipped += deadBoardsSkipped;
+    checkpointPhase = 'folded';
     if (!opts.dryRun) {
       saveDeadBoardsBestEffort(deadBoards);
       await saveProviderIdCacheBestEffort(idCaches);
@@ -1829,6 +1872,7 @@ async function main() {
           counters: snapshotCounters(),
         });
       }
+      writeStopCheckpoint = () => false;
       log(`\n  ⛔ stopped ${name}/${resolverOutageCompany}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
       log(`     Your resolver is refusing queries — it may be rate-limiting this host.`);
       log(`     Lower CONCURRENCY, raise the resolver's per-client limit, or set`);
@@ -1846,6 +1890,7 @@ async function main() {
     if (!opts.dryRun) {
       writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
     }
+    writeStopCheckpoint = () => false;
     log(`\n  done (${errors} unreachable boards, ${deadBoardsSkipped} retired boards skipped)`);
   }
 
