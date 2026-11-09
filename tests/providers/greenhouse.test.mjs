@@ -513,6 +513,50 @@ try {
     else fail(`greenhouse.fetch() non-Error rejection (${label}): threw=${threw?.message}, rows=${JSON.stringify(nonErrRows)}, warnings=${JSON.stringify(nonErrWarnings)}`);
   }
 
+  // A board whose content=true body exceeds the HTTP size cap falls back to
+  // the list without bodies instead of losing the whole board.
+  {
+    const urls = [];
+    const warnings = [];
+    const origError = console.error;
+    console.error = (msg) => warnings.push(String(msg));
+    let rows;
+    try {
+      rows = await greenhouse.fetch(
+        { name: 'BigBoard', careers_url: 'https://job-boards.greenhouse.io/bigboard' },
+        {
+          fetchJson: async (url) => {
+            urls.push(url);
+            if (url.includes('content=true')) {
+              throw Object.assign(new Error('HTTP body exceeded maxBytes of 10485760'), { maxBytes: 10485760 });
+            }
+            return { jobs: [{ id: 1, title: 'Engineer', absolute_url: 'https://job-boards.greenhouse.io/bigboard/jobs/1', location: { name: 'Riyadh' } }] };
+          },
+        },
+      );
+    } finally {
+      console.error = origError;
+    }
+    if (urls.length === 2 && !urls[1].includes('content=') && rows?.length === 1 && rows[0].location === 'Riyadh'
+        && !('description' in rows[0]) && warnings.some(w => /BigBoard/.test(w) && /without posting bodies/.test(w))) {
+      pass('greenhouse.fetch() retries without content=true when the body exceeds maxBytes, and warns');
+    } else {
+      fail(`greenhouse.fetch() oversized fallback: urls=${JSON.stringify(urls)}, rows=${JSON.stringify(rows)}, warnings=${JSON.stringify(warnings)}`);
+    }
+
+    let otherCalls = 0;
+    try {
+      await greenhouse.fetch(
+        { name: 'Flaky', careers_url: 'https://job-boards.greenhouse.io/flaky' },
+        { fetchJson: async () => { otherCalls++; throw new Error('HTTP 503'); } },
+      );
+      fail('greenhouse.fetch() should rethrow a non-size error');
+    } catch (e) {
+      if (/HTTP 503/.test(e.message) && otherCalls === 1) pass('greenhouse.fetch() rethrows other fetch errors without retrying');
+      else fail(`greenhouse.fetch() non-size error: ${e.message}, calls=${otherCalls}`);
+    }
+  }
+
   // Underivable entry → typed error, no request.
   try {
     await greenhouse.fetch(
