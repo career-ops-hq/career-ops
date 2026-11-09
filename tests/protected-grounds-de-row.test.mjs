@@ -32,10 +32,17 @@ check('protected-grounds: DE legal_basis cites the AGG',
   basis.includes('AGG') && basis.includes('Allgemeines Gleichbehandlungsgesetz') && /§1\b/.test(basis) && /§7\b/.test(basis),
   'AGG / §1 / §7 missing from legal_basis');
 
+// Both decisions are about the pregnancy question, so look for them on the
+// Geschlecht ground only ("Geschlecht (" keeps Geschlechtsidentität out).
+const pregnancyGround = (de?.grounds || []).find((g) => g?.topic?.startsWith('Geschlecht ('));
+const pregnancyContexts = pregnancyGround?.legitimate_contexts || [];
+check('protected-grounds: DE row has the Geschlecht (pregnancy) ground with legitimate_contexts',
+  pregnancyContexts.length > 0, 'ground or its legitimate_contexts missing');
+
 const deText = JSON.stringify(de || {});
-check('protected-grounds: DE row cites BAG 2 AZR 621/01, not 7 AZR 621/01',
-  deText.includes('2 AZR 621/01') && !deText.includes('7 AZR 621/01'),
+check('protected-grounds: DE pregnancy ground cites BAG 2 AZR 621/01, and the row never cites 7 AZR 621/01',
+  pregnancyContexts.some((c) => c.includes('(BAG 2 AZR 621/01)')) && !deText.includes('7 AZR 621/01'),
   'wrong or missing BAG case number');
-check('protected-grounds: DE row credits fixed-term maternity cover to LAG Köln 6 Sa 641/12',
-  (de?.grounds || []).some((g) => (g.legitimate_contexts || []).some((c) => /maternity cover \(LAG Köln 6 Sa 641\/12\)/.test(c))),
+check('protected-grounds: DE pregnancy ground credits fixed-term maternity cover to LAG Köln 6 Sa 641/12',
+  pregnancyContexts.some((c) => /maternity cover \(LAG Köln 6 Sa 641\/12\)/.test(c)),
   'maternity-cover attribution missing');
