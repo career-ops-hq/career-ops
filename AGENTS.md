@@ -429,7 +429,7 @@ Two separate axes:
 > Write all human-facing output in `{language.output}` regardless of the language of these instructions or the job description. Keep market-specific terms from `language.modes_dir` when they are relevant, but explain them in the output language when needed.
 
 **When to use a market mode set** (same rule for every market in the table above): the user is targeting job postings in that language or market, lives in that market, or explicitly asks for it. Any of these selects it:
-1. User says "use {market} modes" → read from that dir instead of `modes/`
+1. User says "use {market} modes" → layer that dir on the English `modes/` canon: read each mode-loaded English file first, then that dir's version when it provides one, and English workflow rules win conflicts
 2. User sets `language.modes_dir: modes/de` (or their market's dir) in `config/profile.yml` → always use that dir
 3. You detect a JD written in that language → *suggest* switching
 
@@ -445,12 +445,12 @@ language:
 
 Declared, not inferred: the user states which markets they are actually running campaigns in. When two or more are declared:
 - The FIRST entry is the **primary** market and supplies the evaluation-mode file (`oferta.md`/`angebot.md`/...) — one JD can only be evaluated against one set of A-F rules at a time.
-- EVERY declared market's `_shared.md` is loaded into context, not just the primary one.
+- For modes that load shared context, EVERY declared market's `_shared.md` is loaded into context, not just the primary one (a mode that loads only its mode file, such as `triage`, still loads only its mode file).
 - `modes` itself is a valid list entry: it represents the default/global rules for a target market that has no localized directory. It still counts as a declared candidate market; when first, it supplies `modes/oferta.md`, and `modes/_shared.md` is loaded once as the baseline rather than duplicated as an additional market include.
 - Per-JD, which declared market's concepts actually apply is determined from the JD's own **MARKET signals** — hiring-entity jurisdiction, currency, benefits/legal vocabulary — the same judgment Block G's posting-legitimacy signals already exercise (`modes/oferta.md`: "benefits/employment terminology country mismatch", "third-party platform location tag mismatch"). **Never infer the market from the JD's language alone.** A French-language Quebec/federal-Canada JD needs Canada's concepts (EI, CPP, ESA) — not `modes/fr`'s France/Belgium/Switzerland/Luxembourg concepts (CDI/CDD, SYNTEC, RTT) — because language and market are different axes.
 - When the market signal is genuinely ambiguous between two declared candidates, branch on whether anyone can answer: in an **interactive session**, ask the candidate and stop before writing or merging a report/tracker entry until they choose; in an **unattended run** (`<cli> -p`, `codex exec`, or a batch worker), continue with the first/primary market and state the ambiguity plus the primary-market fallback explicitly in the report header or Block G.
 
-A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as before — this is additive, not a breaking change.
+A single-string `modes_dir` (today's default, ~90% of users) layers the market files on the English canon the same way: the English version of every mode-loaded file is read first and English workflow rules prevail on conflicts, so rules a translator did not copy still apply.
 
 ### Skill Modes
 
