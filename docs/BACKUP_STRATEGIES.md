@@ -90,7 +90,7 @@ unchanged files and never deletes anything in the backup:
 ```bash
 node backup.mjs --dest ~/Backups/career-ops --dry-run   # print counts and bytes that would be copied (no file list)
 node backup.mjs --dest ~/Backups/career-ops             # run it
-node backup.mjs --provider google-drive                 # or a signed-in cloud drive (needs a `Backups` folder in it)
+node backup.mjs --provider google-drive                 # or a signed-in cloud drive (creates Backups/career-ops in it)
 ```
 
 It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The files that hold other people's contact details (`data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json`, `output/contacts.vcf`) are

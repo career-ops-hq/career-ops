@@ -55,7 +55,6 @@ export const DEFAULT_FOLDER = join('Backups', 'career-ops');
 export const PROVIDERS = ['google-drive', 'dropbox', 'onedrive', 'icloud'];
 export const MANIFEST_NAME = '.career-ops-backup.json';
 
-/** The one file under data/ that holds other people's data (a LinkedIn export). */
 // Files that hold other people's contact details (DATA_CONTRACT.md: third-party
 // PII). Left out unless the caller opts in with --include-contacts.
 const CONTACT_FILES = ['data/Connections.csv', 'data/contacts.tsv', 'data/reply-candidates.json', 'output/contacts.vcf'];
@@ -112,15 +111,15 @@ function templateUserFiles(dataRoot, warnings) {
   return found.sort();
 }
 
-/**
- * Never copied: secrets, rebuildable caches, lock/temp files, and (unless
- * `includeContacts`) the files holding other people's contact details.
- */
 // Agent-tool settings can hold API tokens. They are kept out of a backup that
 // goes into a sync folder, whose client would upload them.
 const isAgentSetting = (lower) => lower.startsWith('.claude/') || lower === 'opencode.json'
   || lower === 'plugins.local' || lower.startsWith('plugins.local/');
 
+/**
+ * Never copied: secrets, rebuildable caches, lock/temp files, and (unless
+ * `includeContacts`) the files holding other people's contact details.
+ */
 export function isExcluded(relPath, { includeContacts = false, skipAgentSettings = false } = {}) {
   const p = relPath.split(sep).join('/');
   // Lowercased: macOS and Windows volumes are case-insensitive, so a renamed
