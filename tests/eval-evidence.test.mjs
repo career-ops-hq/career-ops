@@ -191,3 +191,28 @@ test('an explicit deprioritize_if_absent penalty is left as written', () => {
   assert.equal(out.includes(CULTURE_SCORE_FLAG), false);
   assert.match(out, /culture: "supported"/);
 });
+
+test('a cap named only to say it does not apply still counts as a default', () => {
+  for (const line of [
+    'Cultural signals: no evidence; no cap applies, 3/5 by default.',
+    'Cultural signals: 3/5 by default, no evidence in the posting; deprioritize_if_absent is not set.',
+  ]) {
+    const out = normalizeEvaluationText(reply().replace(
+      'Cultural signals: 3/5 by default, no evidence in the posting.',
+      line,
+    ), JD_WITH_PAY);
+    assert.equal(out.includes(line), false, line);
+    assert.match(out, /Cultural signals: unknown/);
+    assert.equal(out.includes(CULTURE_SCORE_FLAG), true, line);
+  }
+});
+
+test('a culture cap with no evidence is left as written', () => {
+  const capped = 'Cultural signals: no evidence in the posting, capped at 2/5.';
+  const out = normalizeEvaluationText(reply().replace(
+    'Cultural signals: 3/5 by default, no evidence in the posting.',
+    capped,
+  ), JD_WITH_PAY);
+  assert.equal(out.includes(capped), true);
+  assert.equal(out.includes(CULTURE_SCORE_FLAG), false);
+});
