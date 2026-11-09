@@ -119,6 +119,20 @@ export function cvCopyFields(cvText) {
   };
 }
 
+/** Paste blocks for the manual apply page. The first argument is the tailored
+ *  HTML behind the Resume PDF. A section in that HTML is the only paste text.
+ *  A section it omits comes from masterText (cv.md). */
+export function pasteCopyFields(_tailoredHtml, masterText) {
+  const fields = masterText == null ? { work: [], education: "" } : cvCopyFields(masterText);
+  const missing = masterText == null;
+  return {
+    work: fields.work,
+    education: fields.education,
+    workEmpty: missing ? "cv.md is not in this workspace." : fields.work.length ? "" : "No work history in cv.md.",
+    educationEmpty: missing ? "cv.md is not in this workspace." : fields.education ? "" : "No education section in cv.md.",
+  };
+}
+
 function pushItem(items, label, text) {
   const value = String(text ?? "").trim();
   if (!value) return;

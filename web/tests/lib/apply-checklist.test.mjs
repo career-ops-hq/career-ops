@@ -9,6 +9,7 @@ import {
   answerCopyItems,
   cvCopyFields,
   indexedPdf,
+  pasteCopyFields,
   reportNumberFor,
 } from "../../src/lib/apply-checklist.mjs";
 
@@ -46,6 +47,92 @@ test("cvCopyFields returns plain work and education blocks for Jane Example", ()
 
 test("cvCopyFields is empty when the sections are missing", () => {
   assert.deepEqual(cvCopyFields("# Jane Example\n\n## Skills\n\nWriting\n"), { work: [], education: "" });
+});
+
+const MASTER_CV = `# Jane Example
+
+## Work Experience
+
+### Northwind -- Chicago
+**Coordinator**
+2018-2020
+
+- Scheduled the example review.
+
+## Education
+
+Example University, BA, 2018
+`;
+
+const TAILORED_HTML = `<div class="section">
+  <div class="section-title">Work Experience</div>
+  <div class="job">
+    <div class="job-header">
+      <span class="job-company">Example Studio</span>
+      <span class="job-period">2020-2024</span>
+    </div>
+    <div class="job-role">Analyst</div>
+    <ul><li>Kept a weekly status note for the example program.</li></ul>
+  </div>
+</div>
+<div class="section">
+  <div class="section-title">Education</div>
+  <div class="edu-item">
+    <div class="edu-title">BA <span class="edu-org">State College</span></div>
+    <div class="edu-year">2016</div>
+  </div>
+</div>`;
+
+test("paste blocks copy the tailored resume, not the master CV", () => {
+  const fields = pasteCopyFields(TAILORED_HTML, MASTER_CV);
+  assert.equal(fields.work.length, 1);
+  assert.match(fields.work[0].text, /Example Studio/);
+  assert.match(fields.work[0].text, /Analyst/);
+  assert.match(fields.work[0].text, /2020-2024/);
+  assert.match(fields.work[0].text, /Kept a weekly status note/);
+  assert.equal(/Northwind/.test(fields.work[0].text), false);
+  assert.match(fields.education, /State College/);
+  assert.equal(/Example University/.test(fields.education), false);
+});
+
+test("a section the tailored resume omits falls back to cv.md, and the other section does not", () => {
+  const html = `<div class="section"><div class="section-title">Work Experience</div>
+    <div class="job"><span class="job-company">Example Studio</span><div class="job-role">Analyst</div></div>
+  </div>`;
+  const fields = pasteCopyFields(html, MASTER_CV);
+  assert.match(fields.work[0].text, /Example Studio/);
+  assert.equal(/Northwind/.test(JSON.stringify(fields.work)), false);
+  assert.match(fields.education, /Example University/);
+});
+
+test("an empty tailored section does not also show the master CV", () => {
+  const html = `<div class="section"><div class="section-title">Work Experience</div></div>
+    <div class="section"><div class="section-title">Education</div></div>`;
+  const fields = pasteCopyFields(html, MASTER_CV);
+  assert.deepEqual(fields.work, []);
+  assert.equal(fields.education, "");
+  assert.equal(fields.workEmpty, "No work history in this resume.");
+  assert.equal(fields.educationEmpty, "No education section in this resume.");
+});
+
+test("the apply page pastes from the tailored HTML of the indexed resume, not cvCopyFields(cv.md)", () => {
+  const page = fs.readFileSync(new URL("../../src/app/pipeline/[id]/apply/page.tsx", import.meta.url), "utf8");
+  const checklist = fs.readFileSync(new URL("../../src/components/apply-checklist.tsx", import.meta.url), "utf8");
+  assert.match(page, /pasteCopyFields\(/);
+  assert.doesNotMatch(page, /cvCopyFields\(/);
+  assert.match(checklist, /workEmpty/);
+  assert.doesNotMatch(checklist, /No work history in cv\.md\./);
+});
+
+test("with no tailored HTML, paste blocks stay on cv.md", () => {
+  const fields = pasteCopyFields(null, MASTER_CV);
+  assert.match(fields.work[0].text, /Northwind/);
+  assert.match(fields.education, /Example University/);
+  const gone = pasteCopyFields(null, null);
+  assert.deepEqual(gone.work, []);
+  assert.equal(gone.education, "");
+  assert.equal(gone.workEmpty, "cv.md is not in this workspace.");
+  assert.equal(gone.educationEmpty, "cv.md is not in this workspace.");
 });
 
 test("answerCopyItems follows the application-answers format and skips empty values", () => {
