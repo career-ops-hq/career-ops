@@ -193,6 +193,15 @@ test("a script end tag with a space does not leave the script body in the paste 
   assert.match(text, /Studio/);
 });
 
+test("a script end tag with junk before the bracket does not leave the script body", () => {
+  const html = `<div class="section-title">Work Experience</div><div class="job"><span class="job-company">Example <script>alert(1)</script\t\n bar> Studio</span></div>`;
+  const text = pasteCopyFields(html, MASTER_CV).work[0].text;
+  assert.equal(text.includes("alert"), false);
+  assert.equal(text.includes("<script"), false);
+  assert.match(text, /Example/);
+  assert.match(text, /Studio/);
+});
+
 test("a style body and a comment stay out of the paste text", () => {
   const html = `<div class="section-title">Work Experience</div><div class="job"><span class="job-company">Example <style>secret-style</style > Studio <!-- secret-note --> Lab</span></div>`;
   const text = pasteCopyFields(html, MASTER_CV).work[0].text;

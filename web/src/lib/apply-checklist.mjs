@@ -222,20 +222,64 @@ const NAMED_ENTITIES = {
 
 const INLINE_TAG = "a|b|strong|i|em|u|mark|small|sub|sup|code|abbr|time";
 
+function findNamedOpen(text, name, from) {
+  const lower = text.toLowerCase();
+  const open = `<${name}`;
+  let at = from;
+  while (at < text.length) {
+    const start = lower.indexOf(open, at);
+    if (start === -1) return -1;
+    const next = text[start + open.length];
+    if (next === undefined || next === ">" || next === "/" || next === " " || next === "\t" || next === "\n" || next === "\r" || next === "\f") return start;
+    at = start + open.length;
+  }
+  return -1;
+}
+
+function cutOneBlock(text, name) {
+  const start = findNamedOpen(text, name, 0);
+  if (start === -1) return text;
+  const openEnd = text.indexOf(">", start);
+  if (openEnd === -1) return text.slice(0, start);
+  const close = `</${name}`;
+  const closeAt = text.toLowerCase().indexOf(close, openEnd + 1);
+  if (closeAt === -1) return text.slice(0, start);
+  const closeEnd = text.indexOf(">", closeAt + close.length);
+  if (closeEnd === -1) return text.slice(0, start);
+  return text.slice(0, start) + text.slice(closeEnd + 1);
+}
+
+function stripNamedBlocks(text, name) {
+  let next = text;
+  let prev;
+  do {
+    prev = next;
+    next = cutOneBlock(next, name);
+  } while (next !== prev);
+  return next;
+}
+
+function stripComments(text) {
+  let next = text;
+  let prev;
+  do {
+    prev = next;
+    const start = next.indexOf("<!--");
+    if (start === -1) break;
+    const end = next.indexOf("-->", start + 4);
+    next = end === -1 ? next.slice(0, start) : next.slice(0, start) + next.slice(end + 3);
+  } while (next !== prev);
+  return next;
+}
+
 function stripHiddenHtml(html) {
   let text = String(html ?? "");
   let prev;
   do {
     prev = text;
-    text = text
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
-      .replace(/<!--[\s\S]*?-->/g, "");
+    text = stripComments(stripNamedBlocks(stripNamedBlocks(text, "script"), "style"));
   } while (text !== prev);
-  return text
-    .replace(/<script\b[^>]*>[\s\S]*$/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*$/gi, "")
-    .replace(/<!--[\s\S]*$/g, "");
+  return text;
 }
 
 function decodeEntities(text) {
