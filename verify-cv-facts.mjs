@@ -2362,7 +2362,10 @@ function sourceSpellsFact(sourceText, value) {
  * compared with the words a reader sees. Handles inline links whose target holds
  * balanced parentheses or a title (`[a](https://x/Foo_(bar) "t")`), reference
  * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`, the
- * title on the same line or on the line right after it).
+ * title on the same line or on the line right after it). A definition's target
+ * may also sit on the line after `[id]:`, as CommonMark allows; that form is
+ * taken only when the label starts its line, so a bracketed word that ends a
+ * line of prose does not hide the line after it.
  * A bracket pair with no link target after it is left alone.
  */
 export function collapseMarkdownLinks(text) {
@@ -2393,7 +2396,7 @@ export function collapseMarkdownLinks(text) {
   }
   return out
     .replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1')
-    .replace(/(?:^|[^\S\r\n])\[[^\][]+\]:[^\S\r\n]*\S+(?:[^\S\r\n]+(?:"[^"]*"|'[^']*'|\([^)]*\))|\r?\n[^\S\r\n]*(?:"[^"]*"|'[^']*'|\([^)]*\)))?[^\S\r\n]*(?=\r?$)/gm, ' ');
+    .replace(/(?:(?:^|[^\S\r\n])\[[^\][]+\]:[^\S\r\n]*|^[^\S\r\n]{0,3}\[[^\][]+\]:[^\S\r\n]*\r?\n[^\S\r\n]*)\S+(?:[^\S\r\n]+(?:"[^"]*"|'[^']*'|\([^)]*\))|\r?\n[^\S\r\n]*(?:"[^"]*"|'[^']*'|\([^)]*\)))?[^\S\r\n]*(?=\r?$)/gm, ' ');
 }
 
 export function verifyFacts(targetText, {

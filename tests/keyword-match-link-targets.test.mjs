@@ -66,3 +66,20 @@ test('a keyword in the link text is present', (t) => {
   }, 'cv.md');
   assert.deepEqual(r.missing, []);
 });
+
+// CommonMark also lets a definition put its target on the line after the label.
+test('a keyword only in a reference definition whose target is on the next line is missing', (t) => {
+  const r = coverage(t, {
+    'cv.md': '## Experience\n- Wrote the [infrastructure modules][tf] the team still uses.\n\n[tf]:\n  https://github.com/jane/terraform-modules\n\n## Skills\nGo, Docker\n',
+  }, 'cv.md');
+  assert.deepEqual(r.missing, ['Terraform']);
+});
+
+// That form needs the label at the start of its line. A bracketed word that
+// ends a line of prose is not a definition, and the line after it is visible.
+test('the line after a bracketed word ending a line of prose is still read', (t) => {
+  const r = coverage(t, {
+    'cv.md': '## Experience\n- Ran the payments platform.\n\n## Skills\nInfrastructure [daily]:\nTerraform\n\nLanguages: Go, Docker\n',
+  }, 'cv.md');
+  assert.deepEqual(r.missing, []);
+});
