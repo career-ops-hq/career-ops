@@ -52,10 +52,20 @@ check(
   rule.includes('Thresholds stay profile-defined') && rule.includes('`modes/_profile.md` or `config/profile.yml`'),
   'the rule keeps thresholds in the profile and names the profile inputs',
 );
-const order = ['(1) target archetype', '(2) required experience', '(3) responsibilities', '(4) required versus preferred gaps'];
+const order = ['(1) target archetype', '(2) required experience', '(3) responsibilities'];
 check(
   order.every((s, i) => rule.includes(s) && (i === 0 || rule.indexOf(s) > rule.indexOf(order[i - 1]))),
-  'the four evidence inputs are listed in the agreed order',
+  'the evidence inputs are listed in the agreed order',
+);
+check(
+  rule.includes('(`role_family`)') && rule.includes('with required versus preferred gaps (`required_experience`)')
+    && rule.includes('(`scope`)') && rule.includes('`seniority` records the resulting level band'),
+  'each evidence key is tied to its input, and required versus preferred gaps are recorded under required_experience',
+);
+check(
+  batch.includes('- `## Score Evidence`, followed by one line `**Positioning band:**')
+    && batch.indexOf('`**Positioning band:**') < batch.indexOf('- `## Extracted Keywords`'),
+  'the batch saved-report list places the Positioning band line after Score Evidence',
 );
 
 check(
