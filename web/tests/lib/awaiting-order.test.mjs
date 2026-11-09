@@ -155,6 +155,56 @@ test("a flagged posting above the line is not Recommended", () => {
   );
 });
 
+// The one-click target is whichever row the page would hand to Apply next:
+// the first Recommended card among the six on screen. Recommended is a score
+// band, so a stored Skip at 4.9 beats a stored Apply at 4.1, and the Apply
+// past the sixth card is not on the page at all.
+function applyNextTarget(rows) {
+  const shown = pickAwaitingDecision(rows, scoreOf);
+  const recommended = groupAwaiting(shown, () => "High Confidence").find(([label]) => label === "Recommended")?.[1] ?? [];
+  return recommended[0] ?? null;
+}
+
+const queued = (n, score, company) => ({ n, date: "2026-11-01", score, status: "Evaluated", company });
+
+test("Apply next names the best stored Apply, and a Skip stays on the page", () => {
+  const rows = [
+    queued("1", "4.9/5", "Fixture Northwind"),
+    queued("2", "4.8/5", "Fixture Contoso Research"),
+    queued("3", "4.7/5", "Fixture Fabrikam"),
+    queued("4", "4.6/5", "Fixture Alpine"),
+    queued("5", "4.5/5", "Fixture Harbor"),
+    queued("6", "4.4/5", "Fixture Ledger"),
+    queued("7", "4.1/5", "Fixture Apply Co"),
+  ];
+  const calls = {
+    "1": "Skip",
+    "2": "Research first",
+    "3": "Consider",
+    "4": "Skip",
+    "5": "Skip",
+    "6": "Research first",
+    "7": "Apply",
+  };
+  const shown = pickAwaitingDecision(rows, scoreOf);
+  assert.ok(shown.some((row) => row.company === "Fixture Northwind" && calls[row.n] === "Skip"));
+  assert.equal(rows.find((row) => row.n === "1").score, "4.9/5");
+  assert.equal(rows.find((row) => row.n === "7").score, "4.1/5");
+  assert.equal(applyNextTarget(rows)?.company, "Fixture Apply Co");
+});
+
+test("within the six cards, a lower Apply is the one-click target", () => {
+  const rows = [
+    queued("10", "4.8/5", "Fixture High Skip"),
+    queued("11", "4.2/5", "Fixture Lower Apply"),
+  ];
+  const shown = pickAwaitingDecision(rows, scoreOf);
+  assert.ok(shown.some((row) => row.company === "Fixture High Skip"));
+  assert.ok(shown.some((row) => row.company === "Fixture Lower Apply"));
+  assert.equal(applyNextTarget(rows)?.company, "Fixture Lower Apply");
+  assert.equal(rows.find((row) => row.n === "10").score, "4.8/5");
+});
+
 test("without legitimacy, grouping is by score alone", () => {
   assert.deepEqual(
     groupAwaiting([row("2026-08-01", "4.5/5")]).map(([label]) => label),
