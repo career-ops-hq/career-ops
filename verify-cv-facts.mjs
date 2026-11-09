@@ -2025,6 +2025,11 @@ const ZH_SCOPE_VERBS = [...ZH_SCOPE_VERB_TIERS.keys()].sort((a, b) => b.length -
 const ZH_SCOPE_VERB_RE = new RegExp(`(?:${ZH_SCOPE_VERBS.join('|')})[了过]?`, 'gu');
 // First-person prose opens with the subject, as in English (SUBJECT_PRONOUN_RE).
 const ZH_SUBJECT_RE = /^(?:我们|我|本人)/u;
+// Adverbs a Chinese CV puts before the verb: 主要负责, 深度参与, 全程主导.
+// Left in, 深度参与 opened with no known verb, so as a source it ranked as
+// unranked and vouched for 主导 on the same item. 独立 is not here: it is part
+// of the tier-3 verbs (独立完成, 独立负责).
+const ZH_ADVERB_RE = /^(?:主要|深度|全程|全面|积极|具体|核心|曾经|曾|成功|共同)+/u;
 // A clause split at a comma can open with a coordinator: "，并主导了重构".
 const ZH_CONNECTOR_RE = /^(?:并且|并|同时|以及)/u;
 // The same two characters are a noun when a person or product suffix follows:
@@ -2056,9 +2061,9 @@ function zhScopeClauses(statement) {
     .filter(Boolean);
 }
 
-/** A Chinese clause with its list marker and subject removed, so it opens with the verb. */
+/** A Chinese clause with its list marker, subject and leading adverbs removed, so it opens with the verb. */
 function zhClauseHead(clause) {
-  return stripListMarker(clause).replace(ZH_SUBJECT_RE, '').trim();
+  return stripListMarker(clause).replace(ZH_SUBJECT_RE, '').replace(ZH_ADVERB_RE, '').trim();
 }
 
 /** The opening verb of a Chinese clause by longest prefix, with its tier, or null. */
@@ -2121,7 +2126,13 @@ const ZH_ADOPTION_CHECKS = [
   { target: /被[^，。；,;]{0,12}采用|全面推广|推广至/gu, source: /采用|推广|落地/u },
   { target: /全公司|全集团|公司级|全员/gu, source: /全公司|全集团|公司级|全员|公司范围/u },
   { target: /日活|月活|\bDAU\b|\bMAU\b/giu, source: /日活|月活|\bDAU\b|\bMAU\b/iu },
-  { target: /服务[^，。；,;]{0,10}用户/gu, source: /服务|用户/u },
+  // Evidence has to state reach. 服务 or 用户 alone matched 微服务, 服务端 and
+  // 用户增长, which almost every engineering cv.md contains, and so does a
+  // window across a conjunction (微服务拆分和用户增长).
+  {
+    target: /服务[^，。；,;]{0,10}用户/gu,
+    source: /(?:(?<!微)服务|覆盖)[^，。；,;和与及]{0,10}用户|用户(?:量|规模|数)|[\d万千百亿]+(?:名|位)?用户/u,
+  },
   { target: /成为[^，。；,;]{0,8}标准/gu, source: /标准|规范/u },
 ];
 
@@ -3405,6 +3416,12 @@ function runSelfTest() {
     zhScopeOf('主导了支付模块重构。', '参与了计费系统迁移，主导了支付模块重构。'), []);
   equal('zh: a noun that starts with a verb is not a scope claim',
     zhScopeOf('负责人：计费系统迁移。', '参与了计费系统迁移。'), []);
+  equal('zh: an adverb before a weaker source verb does not make it vouch',
+    zhScopeOf('主导了计费系统迁移。', '深度参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: an adverb before an equal source verb still vouches',
+    zhScopeOf('主导了计费系统迁移。', '主要负责计费系统迁移。'), []);
+  equal('zh: 独立 stays part of the verb, not a stripped adverb',
+    zhScopeOf('独立负责计费系统迁移。', '负责计费系统迁移。'), []);
   // Positive cases.
   equal('zh: 参与 rewritten as 主导 is caught',
     zhScopeOf('主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
@@ -3432,6 +3449,14 @@ function runSelfTest() {
     zhAdoptionOf('内部工具被全公司采用。', '内部工具已推广至全公司。'), []);
   equal('zh: 日活 and 服务…用户 without a source warn',
     zhAdoptionOf('服务日活十万用户。', '开发了内部工具。'), ['日活', '服务日活十万用户']);
+  equal('zh: 微服务 and 用户增长 in the source are not reach evidence',
+    zhAdoptionOf('服务十万用户。', '负责微服务拆分和用户增长平台。'), ['服务十万用户']);
+  equal('zh: a verbatim reach statement in the source supports the claim',
+    zhAdoptionOf('服务日活十万用户。', '平台服务日活十万用户。'), []);
+  equal('zh: a source that states reach supports the claim',
+    zhAdoptionOf('服务十万用户。', '平台用户规模达到十万。'), []);
+  equal('zh: a source with a user count supports the claim',
+    zhAdoptionOf('服务十万用户。', '支撑了十万用户的访问。'), []);
   equal('zh: an English adoption phrase is not read on the zh path',
     zhAdoptionOf('Used daily across the engineering org.', '开发了内部工具。'), []);
 
