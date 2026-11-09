@@ -212,6 +212,14 @@ export function syncProviderOf(dest, machine = {}) {
   return null;
 }
 
+/** Refuse contact files going into a recognized sync folder: the client would upload them. */
+export function assertContactsNotSynced(dest, includeContacts, machine = {}) {
+  const synced = includeContacts ? syncProviderOf(dest, machine) : null;
+  if (synced) {
+    throw new Error(`--include-contacts cannot be used with a folder inside ${synced} (${dest}): the sync client would upload the contact files. Use a folder that is not synced.`);
+  }
+}
+
 /** The destination must not sit inside what it backs up (it would copy itself). */
 export function assertSafeDestination(dest, dataRoot, codeRoot = CODE_ROOT) {
   const d = canonical(dest);
@@ -304,6 +312,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   // The exported API enforces this too, not only the CLI: a caller must not be
   // able to point a backup at a folder that overlaps what it reads.
   assertSafeDestination(dest, dataRoot);
+  assertContactsNotSynced(dest, includeContacts);
   if (!dryRun) mkdirSync(dest, { recursive: true });
   // With an external data root, fork-local files declared in the checkout's
   // config/local-paths.txt are not looked up there: say so instead of
@@ -409,10 +418,7 @@ function main(args) {
       folder: flagValue(args, '--folder'),
     });
     assertSafeDestination(target.dest, dataRoot);
-    const synced = includeContacts ? syncProviderOf(target.dest) : null;
-    if (synced) {
-      throw new Error(`--include-contacts cannot be used with a folder inside ${synced} (${target.dest}): the sync client would upload the contact files. Use a folder that is not synced.`);
-    }
+    assertContactsNotSynced(target.dest, includeContacts);
     if (!existsSync(dirname(target.dest))) {
       throw new Error(`${dirname(target.dest)} does not exist (is the drive mounted?). Nothing was created.`);
     }

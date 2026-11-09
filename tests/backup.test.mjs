@@ -99,6 +99,20 @@ try {
   const dest = join(tmp, 'backup', 'career-ops');
   mkdirSync(join(tmp, 'backup'));
 
+  // The exported API refuses contact files bound for a synced folder too, not only the CLI.
+  const apiHome = join(tmp, 'api-home');
+  mkdirSync(join(apiHome, 'Dropbox'), { recursive: true });
+  const savedHome = process.env.HOME;
+  process.env.HOME = apiHome;
+  try {
+    const syncedDest = join(apiHome, 'Dropbox', 'Backups', 'career-ops');
+    assert.throws(() => b.runBackup({ dataRoot: root, dest: syncedDest, includeContacts: true }), /inside dropbox/);
+    assert.equal(existsSync(syncedDest), false);
+    assert.doesNotThrow(() => b.runBackup({ dataRoot: root, dest: syncedDest, dryRun: true }));
+  } finally {
+    process.env.HOME = savedHome;
+  }
+
   const dry = b.runBackup({ dataRoot: root, dest, dryRun: true });
   assert.equal(dry.copied, 6);
   assert.equal(dry.found, 6);
