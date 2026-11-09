@@ -460,6 +460,17 @@ this ceiling, never on its own. Reference: `providers/workday.mjs`
 truncated the list, warn the user (`raise max_pages on this entry`) so a
 partial list is not mistaken for a complete one.
 
+Also say it in the return value, so `scan.mjs` can act on it: set
+`jobs.truncated = { reason, fetched?, total? }` on the returned array
+(`markTruncated()` in `lib/board-truncation.mjs` does this), with a short
+machine-readable `reason` such as `'page-cap'` or `'rate-limited'`. A board
+marked this way is logged `partial` in `data/portal-health.tsv` instead of
+`reachable` and listed in the run summary and the `--json` receipt (Google
+AIP-217: a partly successful read must say what it did not reach). It does
+not count toward the persistent-failure streak, because the board answered;
+consecutive partial reads get their own repeat warning instead. The older per-provider tags
+(`workdayTruncated`, `eightfoldTruncated`, ...) are still recognized.
+
 `max_pages` and `ctx.maxPages` count **pages of results**. A one-shot
 bootstrap that carries no listings — a token/cookie primer, a board-id
 lookup — is free and sits outside the count (`providers/csod.mjs`: a
