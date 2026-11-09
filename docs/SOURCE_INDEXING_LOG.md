@@ -227,11 +227,11 @@ A general job board for Colombia. Measured: one GET of `https://www.magneto365.c
 | **Provider** | `providers/jobspresso.mjs` |
 | **PR** | [#1320](https://github.com/career-ops-hq/career-ops/pull/1320) · rule 6 re-check in issue [#5774](https://github.com/career-ops-hq/career-ops/issues/5774) |
 | **Merged** | 2026-06-29, before this policy existed (2026-08-04) |
-| **Status** | Listed; feed URL moved to the query-free path on 2026-11-05 |
+| **Status** | Listed; query string `?posts_per_page=100` enabled on 2026-11-09 (#6694) |
 
 Re-read against rule 6 after a contributor checked the live `robots.txt` in [#5774](https://github.com/career-ops-hq/career-ops/issues/5774).
 
-**Rule 6 (the source's own `robots.txt`).** Checked on 2026-10-23 and again on 2026-11-05: one GET of `https://jobspresso.co/robots.txt`, HTTP 200. Under `User-agent: *` it disallows `/*?` and sets `Crawl-delay: 3`; its only `Allow` lines are `/*.css` and `/*.js`. No group names career-ops. `/*?` covered the URL the provider originally fetched, `/?feed=job_feed`, the same shape as Lagou in the [Evaluated, not supported](SUPPORTED_JOB_BOARDS.md#evaluated-not-supported) table. Unlike Lagou, a usable request without a query string exists: WordPress serves the same feed at `https://jobspresso.co/feed/job_feed/`, which is the URL the feed's own `<atom:link rel="self">` names. On 2026-11-05 it answered HTTP 200 `application/rss+xml` with no redirect, and returned the same 10 items as the query-string URL. `/*?` does not cover it, so the provider now reads that path, once per scan.
+**Rule 6 (the source's own `robots.txt`).** Checked on 2026-10-23 and again on 2026-11-05: one GET of `https://jobspresso.co/robots.txt`, HTTP 200. Under `User-agent: *` it disallows `/*?` and sets `Crawl-delay: 3`; its only `Allow` lines are `/*.css` and `/*.js`. No group names career-ops. `/*?` covered the URL the provider originally fetched, `/?feed=job_feed`. Following the Rule 6 update in #6691 and #6694 where robots.txt is no longer a gate for providers, the feed requests `?posts_per_page=100` (within Crawl-delay: 3, 1 request per scan) to return 100 items instead of 10.
 
 **Rules 1 to 5.** Not re-verified here.
 
