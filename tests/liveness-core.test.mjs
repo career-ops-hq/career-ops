@@ -946,7 +946,9 @@ for (const label of ['Søk', 'Søk etter stillinger', 'Søknadsfrist', 'Søk sen
 
 // A closed Norwegian posting can keep its "Søk her" link next to the closure
 // banner. The banner wins; a deadline still ahead does not (#6620).
-for (const notice of ['Søknadsfristen er utløpt', 'Søknadsfristen har gått ut', 'Stillingen er ikke lenger ledig', 'Denne annonsen er utløpt', 'Stillingen er besatt']) {
+// "Søk etter stillinger" is site chrome, not a clause opener: it can sit on the
+// banner's own line and must not hide the closure.
+for (const notice of ['Søknadsfristen er utløpt', 'Søknadsfristen har gått ut', 'Stillingen er ikke lenger ledig', 'Denne annonsen er utløpt', 'Stillingen er besatt', 'Søk etter stillinger Søknadsfristen er utløpt']) {
   const closed = classifyLiveness({
     status: 200,
     requestedUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
@@ -959,7 +961,7 @@ for (const notice of ['Søknadsfristen er utløpt', 'Søknadsfristen har gått u
     : fail(`"${notice}" classified ${closed.result}/${closed.code}, expected expired`);
 }
 
-for (const notice of ['Når søknadsfristen er utløpt, blir søkerlisten offentliggjort', 'Etter at søknadsfristen er utløpt vil vi kalle inn til intervju', 'Søkerlisten blir offentlig så snart søknadsfristen har gått ut', 'Søknadsfrist: 20.11.2026', 'Søknadsfristen utløper 20. november', 'Søknadsfristen er 20. november', 'Stillingen er ledig fra 1. januar', 'Stillingen vil bli besatt så snart som mulig']) {
+for (const notice of ['Når søknadsfristen er utløpt, blir søkerlisten offentliggjort', 'Etter at søknadsfristen er utløpt vil vi kalle inn til intervju', 'Søknader behandles etter søknadsfristen er utløpt', 'Søkerlisten blir offentlig så snart søknadsfristen har gått ut', 'Søknadsfrist: 20.11.2026', 'Søknadsfristen utløper 20. november', 'Søknadsfristen er 20. november', 'Stillingen er ledig fra 1. januar', 'Stillingen vil bli besatt så snart som mulig']) {
   const open = classifyLiveness({
     status: 200,
     requestedUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
