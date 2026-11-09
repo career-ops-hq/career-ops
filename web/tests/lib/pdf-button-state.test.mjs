@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { coverDraftButtonState, pdfButtonState, pdfJobRefreshesReport } from "../../src/lib/pdf-button-state.mjs";
 
-const reason = "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify. (The agent emitted no <<cv-html>> envelope, so there is no CV to render.)";
+const reason = "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify. (The agent emitted no <<cv-payload>> envelope, so there is no CV payload to render.)";
 const failed = {
   id: "job-7",
   status: "error",

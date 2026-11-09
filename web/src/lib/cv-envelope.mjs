@@ -6,9 +6,9 @@
  * injection in a job posting or an evaluation report — both of which enter that
  * agent's context — could redirect a write to cv.md, data/applications.md or
  * .env. Rather than fence those writes, pdf mode no longer grants them: the
- * agent emits the tailored HTML inline in a `<<cv-html …>>` envelope and the
- * BACKEND persists it. That completes the arc #2182 started, which moved
- * rendering out of the agent for the same reason.
+ * agent emits the canonical modes/pdf.md JSON payload inline in a
+ * `<<cv-payload>>` envelope and the BACKEND persists it. build-cv-html.mjs
+ * remains the sole HTML writer, so web and CLI share one rendering contract.
  *
  * Plain .mjs (same pattern as pdf-paths.mjs / pdf-render.mjs) so this can be
  * unit-tested with `node --test`, no TypeScript build step.
@@ -19,8 +19,6 @@
  * injected closer truncates instead of escaping), and more than one envelope is
  * refused outright rather than guessed at.
  */
-import { PAGE_FORMATS, DEFAULT_PAGE_FORMAT } from "./page-formats.mjs";
-
 // Markers must own their line — otherwise an agent merely *mentioning* the
 // syntax in its prose (or a CLI echoing the prompt, as `codex exec` does) would
 // open or close an envelope.
@@ -28,15 +26,15 @@ import { PAGE_FORMATS, DEFAULT_PAGE_FORMAT } from "./page-formats.mjs";
 // that reads them, and any guard that checks them all derive from one string.
 // Restating them by hand in the prompt is how you get a rename that breaks every
 // pdf run at runtime with the whole suite still green.
-export const OPEN_MARK = "<<cv-html";
-export const CLOSE_MARK = "<</cv-html>>";
+export const OPEN_MARK = "<<cv-payload>>";
+export const CLOSE_MARK = "<</cv-payload>>";
 
 // One pattern source per marker. The closer needs two compiled flavours because
 // `exec` on a global regex advances `lastIndex` between calls, so the single-shot
 // lookup and the scanning one must not share an object; the opener is only ever
 // scanned with `matchAll`, which clones and needs just the one.
-const OPENER_SRC = String.raw`^<<cv-html(?:[ \t]+format="([^"\n]*)")?>>[ \t]*$`;
-const CLOSER_SRC = String.raw`^<<\/cv-html>>[ \t]*$`;
+const OPENER_SRC = String.raw`^<<cv-payload>>[ \t]*$`;
+const CLOSER_SRC = String.raw`^<<\/cv-payload>>[ \t]*$`;
 const OPENER = new RegExp(OPENER_SRC, "gm");
 const CLOSER = new RegExp(CLOSER_SRC, "m");
 const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
@@ -49,10 +47,10 @@ const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
  * shown on their own lines: `codex exec` echoes its prompt to stdout, and a
  * line-start marker in that echo parses as a second envelope, failing the run.
  *
- * The page formats are spelled out literally rather than interpolated from
- * DEFAULT_PAGE_FORMAT: that constant is the parser's fallback for an agent that
- * declares NOTHING, which is a different question from what the agent should
- * choose. Tying them together once produced "choose letter … otherwise letter".
+ * Paper size is not chosen here. The agent follows modes/pdf.md's paper-format
+ * step exactly as on the CLI (a profile page_format wins; `auto` means set the
+ * payload's country), and build-cv-html.mjs resolves the sheet through
+ * lib/page-format.mjs, the one owner of that rule (#4405).
  *
  * It says "do not save" rather than "you have no write tools": that claim is only
  * true on Claude Code. The six CLIs invoked via clis.ts's bare args keep their own
@@ -60,18 +58,17 @@ const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
  * capabilities invites it to test the claim.
  */
 export const CV_ENVELOPE_INSTRUCTION =
-  `Do NOT save or edit any file — the platform persists your output for you. Instead OUTPUT the finished HTML inline, between two marker lines. The first line contains only the opening marker carrying your chosen page format — \`${OPEN_MARK} format="a4">>\` or \`${OPEN_MARK} format="letter">>\`, and nothing else on that line. Choose letter for a US/Canada company, otherwise a4. Then the complete HTML document, then a final line containing only \`${CLOSE_MARK}\`. Each marker appears exactly once. Emit the WHOLE document from <!DOCTYPE html> to </html> — never abbreviate, summarize, or write "unchanged"; the platform renders exactly these bytes and nothing else.`;
+  `Do NOT save or edit any file — the platform persists your output for you. Instead OUTPUT only the complete JSON payload described by modes/pdf.md, between two marker lines. The first line contains only \`${OPEN_MARK}\`, and nothing else on that line. Then one valid JSON object, then a final line containing only \`${CLOSE_MARK}\`. Each marker appears exactly once. Set page_format and country exactly as modes/pdf.md's paper-format step says. Include the WHOLE payload — never abbreviate, summarize, use Markdown fences, or write "unchanged". The platform parses it and passes it to build-cv-html.mjs.`;
 
 /**
  * @typedef {Object} CvEnvelope
  * @property {true} ok
- * @property {string} html - The tailored CV HTML, byte-exact as emitted.
- * @property {"a4"|"letter"} format - Page format for generate-pdf.mjs.
+ * @property {Record<string, unknown>} payload - Parsed canonical CV payload, as emitted.
  * @property {string[]} warnings - Non-fatal issues to surface in the run log.
  */
 
 /**
- * Extract the tailored CV HTML and page format from an agent's full output.
+ * Extract the tailored CV payload from an agent's full output.
  *
  * Returns a result rather than throwing so the caller (the /api/run close
  * handler) can route the failure through the same honesty gate as every other
@@ -82,62 +79,56 @@ export const CV_ENVELOPE_INSTRUCTION =
  */
 export function parseCvEnvelope(text) {
   if (typeof text !== "string") {
-    return { ok: false, error: "No agent output to read a CV envelope from." };
+    return { ok: false, error: "No agent output to read a CV payload envelope from." };
   }
   // Normalize CRLF once so the line-anchored markers match on a Windows stream
-  // and no stray \r rides into the HTML handed to the renderer.
+  // and no stray \r rides into the JSON handed to the builder.
   const normalized = text.replace(/\r\n/g, "\n");
 
   const openers = [...normalized.matchAll(OPENER)];
   if (openers.length === 0) {
-    return { ok: false, error: "The agent emitted no <<cv-html>> envelope, so there is no CV to render." };
+    return { ok: false, error: "The agent emitted no <<cv-payload>> envelope, so there is no CV payload to render." };
   }
   if (openers.length > 1) {
     // Choosing one would be choosing blind — an injected envelope looks exactly
     // like the real one from here.
-    return { ok: false, error: `Found ${openers.length} <<cv-html>> envelopes; refusing to guess which is the real CV.` };
+    return { ok: false, error: `Found ${openers.length} <<cv-payload>> envelopes; refusing to guess which is the real CV payload.` };
   }
 
   const opener = openers[0];
   const afterOpener = normalized.slice(opener.index + opener[0].length);
   const closer = CLOSER.exec(afterOpener);
   if (!closer) {
-    return { ok: false, error: "The <<cv-html>> envelope was never closed — the CV output is incomplete." };
+    return { ok: false, error: "The <<cv-payload>> envelope was never closed — the CV payload is incomplete." };
   }
 
   // The opener match stops before its newline and the closer starts on its own
   // line, so exactly one delimiting newline sits on each side of the body.
-  const html = afterOpener.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
-  if (!html.trim()) {
-    return { ok: false, error: "The <<cv-html>> envelope was empty — no CV was tailored." };
+  const body = afterOpener.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
+  if (!body.trim()) {
+    return { ok: false, error: "The <<cv-payload>> envelope was empty — no CV was tailored." };
   }
-  // A closing </html> is what distinguishes a whole document from one the agent
-  // cut off mid-emission — the realistic failure when emitting 15-25 KB inline.
-  // This belongs here, not in the caller: the caller reports THIS error string, so
-  // splitting the rule out would leave the user with a generic message.
-  if (!/<\/html\s*>/i.test(html)) {
-    return { ok: false, error: "The CV was cut off before its closing </html> tag — the output is incomplete." };
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, error: "The <<cv-payload>> envelope did not contain valid JSON — the CV payload is incomplete or malformed." };
   }
-
-  const warnings = [];
-  const declared = opener[1];
-  let format = DEFAULT_PAGE_FORMAT;
-  if (declared === undefined) {
-    warnings.push(`The agent declared no page format; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
-  } else {
-    const lower = declared.trim().toLowerCase();
-    if (PAGE_FORMATS.has(lower)) format = lower;
-    else warnings.push(`Unrecognized page format "${declared}"; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    return { ok: false, error: "The <<cv-payload>> envelope must contain one JSON object — arrays and primitive values are not CV payloads." };
   }
 
-  return { ok: true, html, format, warnings };
+  // The payload goes to build-cv-html.mjs untouched. It validates the content
+  // (lib/cv-payload-schema.mjs) and resolves the paper size, so this parser
+  // checks only what the transport owns: one envelope holding one JSON object.
+  return { ok: true, payload: parsed, warnings: [] };
 }
 
 /**
  * Could `line` still become a marker once more characters arrive?
  *
  * True both while the text is a prefix of a marker (`<`, `<<c`) and once it has
- * passed one (`<<cv-html format="a4"` is still growing towards `>>`).
+ * passed one (`<<cv-payload` is still growing towards `>>`).
  *
  * @param {string} line - The unterminated final line.
  * @returns {boolean}
@@ -175,7 +166,7 @@ function completeMarker(re, s) {
  * for parsing while keeping the envelope body out of the user's run log.
  *
  * Both halves are needed at once. The route must see every byte to reconstruct
- * the CV, but streaming 15-25 KB of raw HTML into the log would bury the agent's
+ * the CV, but streaming the raw payload into the log would bury the agent's
  * actual narration. Chunk boundaries fall wherever the transport likes, so the
  * markers are matched across pushes rather than per chunk.
  *

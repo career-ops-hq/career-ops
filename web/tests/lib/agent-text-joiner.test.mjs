@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { createAgentTextJoiner, parseGrokEvent } from "../../src/lib/run-cli-support.mjs";
 import { createCvEnvelopeFilter } from "../../src/lib/cv-envelope.mjs";
 
-const html = '<!DOCTYPE html>\n<html lang="en"><body><h1>Jordan Rivera</h1></body></html>';
+const payload = { page_format: "letter", candidate: { name: "Jordan Rivera" }, summary: "Builder" };
 const grokLines = [
-  { type: "text", data: "I'll tailor from the title, then check the HTML against the fact gate." },
+  { type: "text", data: "I'll tailor from the title, then check the payload against the fact gate." },
   { type: "tool_call", toolName: "run_terminal_command" },
   { type: "tool_call", toolName: "read_file" },
-  { type: "text", data: '<<cv-html format="letter">>\n' },
-  { type: "text", data: `${html}\n` },
-  { type: "text", data: "<</cv-html>>\nVERDICT: 5/5 — Letter CV tailored for Monarch AI" },
+  { type: "text", data: "<<cv-payload>>\n" },
+  { type: "text", data: `${JSON.stringify(payload)}\n` },
+  { type: "text", data: "<</cv-payload>>\nVERDICT: 5/5 — Letter CV tailored for Monarch AI" },
 ].map((e) => JSON.stringify(e));
 
 function runPdfStream(lines) {
@@ -27,8 +27,8 @@ function runPdfStream(lines) {
 
 test("a cv envelope that opens a new grok message after a tool call is parsed", () => {
   const { log, envelope } = runPdfStream(grokLines);
-  assert.deepEqual(envelope, { ok: true, html, format: "letter", warnings: [] });
-  assert.equal(log, "I'll tailor from the title, then check the HTML against the fact gate.\nVERDICT: 5/5 — Letter CV tailored for Monarch AI");
+  assert.deepEqual(envelope, { ok: true, payload, warnings: [] });
+  assert.equal(log, "I'll tailor from the title, then check the payload against the fact gate.\nVERDICT: 5/5 — Letter CV tailored for Monarch AI");
 });
 
 test("text deltas inside one message are joined without breaks", () => {

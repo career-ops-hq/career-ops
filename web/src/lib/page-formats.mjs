@@ -1,12 +1,9 @@
 /**
  * page-formats.mjs — the page sizes generate-pdf.mjs accepts (#2185).
  *
- * A leaf module on purpose. Both the envelope parser (which validates the format
- * the agent declares) and the render pipeline (which passes it to
- * `generate-pdf.mjs --format=`) are CONSUMERS of this contract; neither owns it.
- * Keeping it here stops a pure parser from having to import the module that
- * orchestrates child processes just to learn two constants, and leaves no room
- * for an import cycle if the renderer ever needs the parser.
+ * A leaf module on purpose. The render pipeline checks the size build-cv-html.mjs
+ * reports against it before passing that size to `generate-pdf.mjs --format=`;
+ * it is a CONSUMER of this contract, not its owner (lib/page-format.mjs is).
  *
  * No dependencies, so `node --test` and the core suite can both import it.
  */
@@ -21,7 +18,5 @@ export const PAGE_FORMATS = new Set(["a4", "letter"]);
  * table says `page_format` "Defaults to `letter`". Picking a4 here would make the
  * web disagree with the CLI about the same missing field — and would silently
  * change the page size of an existing render path, which #2185 never asked for.
- * The prompt still tells the agent to CHOOSE a4 unless the company is US/Canada;
- * this only applies when it declares nothing at all.
  */
 export const DEFAULT_PAGE_FORMAT = "letter";

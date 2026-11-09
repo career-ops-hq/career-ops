@@ -21,15 +21,25 @@ export function slugify(s) {
 }
 
 /**
+ * Return the run-scoped filename prefix shared by scratch creation and cleanup.
+ * @param {string} reportNum - The canonical report number resolvePdfPaths returns.
+ * @returns {string}
+ */
+export function pdfScratchPrefix(reportNum) {
+  return `cv-web-${reportNum}.`;
+}
+
+/**
  * @typedef {Object} PdfPaths
  * @property {string} reportNum - Canonical report number, used for filenames and the PDF manifest.
  * @property {string} reportFile - Resolved report path relative to the data root, used by the tailoring prompt.
- * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
+ * @property {string} payload - Where the backend writes the CV payload it parsed out of the agent's envelope (#2185).
+ * @property {string} html - Where build-cv-html.mjs writes the tailored HTML built from that payload.
  * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{report}-{company}-{date}.pdf).
  */
 
 /**
- * Precompute the scratch HTML and final PDF paths for a
+ * Precompute the scratch payload, HTML, and final PDF paths for a
  * "pdf" run, so the agent never chooses its own filenames — the backend owns
  * naming, writing (#2185) and rendering. Resolves the report for its identity
  * and company slug, and config/profile.yml for the candidate slug. Including
@@ -39,7 +49,7 @@ export function slugify(s) {
  * the caller (a Next.js route today) decides how to surface `ok: false`.
  *
  * Side effect: creates `.career-ops-web/pdf-tmp/` under `root` if it doesn't
- * exist yet (the backend writes the parsed envelope there, #2185) — this is
+ * exist yet (the backend writes the parsed payload there, #2185) — this is
  * NOT a pure path computation, despite the name.
  *
  * @param {string} input - The application/report selector (e.g. "018").
@@ -86,13 +96,15 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
     }
   }
   const scratchDir = path.join(root, ".career-ops-web", "pdf-tmp");
+  const scratchPrefix = pdfScratchPrefix(reportNum);
   fs.mkdirSync(scratchDir, { recursive: true });
   return {
     ok: true,
     paths: {
       reportNum,
       reportFile: path.relative(root, reportFile).split(path.sep).join("/"),
-      html: path.join(scratchDir, `cv-web-${reportNum}.html`),
+      payload: path.join(scratchDir, `${scratchPrefix}payload.json`),
+      html: path.join(scratchDir, `${scratchPrefix}html`),
       finalPdf: path.join(root, "output", `cv-${candidateSlug}-${reportNum}-${companySlug}-${today}.pdf`),
     },
   };

@@ -7,7 +7,8 @@
  * or career-ops.ts directly, keeping this module free of TypeScript
  * dependencies and letting tests substitute a fake child process.
  *
- * Runs generate-pdf.mjs and mark-pdf-ready.mjs as plain Node child processes
+ * Runs build-cv-html.mjs, generate-pdf.mjs and mark-pdf-ready.mjs as plain Node
+ * child processes
  * — no agent CLI or its sandbox involved — so a browser launch never depends
  * on an interactive sandbox-escalation approval nobody is present to grant in
  * a headless/web-triggered run. The tracker is marked ✅ only after a
@@ -15,6 +16,19 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { pdfScratchPrefix } from "./pdf-paths.mjs";
+import { PAGE_FORMATS } from "./page-formats.mjs";
+
+/**
+ * Upper bound for each PDF child; a hung browser must not hold the run open
+ * forever. The render gets the browser's budget; the builder and the tracker
+ * mark are plain file work that finishes in well under a second. Together
+ * (plus kill grace) they stay inside the ~200s route.ts leaves after the
+ * agent's 600s, so a slow run ends with our message, not maxDuration's cutoff.
+ */
+export const DEFAULT_PDF_CHILD_TIMEOUT_MS = 120_000;
+export const QUICK_PDF_CHILD_TIMEOUT_MS = 30_000;
+const PDF_CHILD_KILL_GRACE_MS = 1_000;
 
 /**
  * @typedef {Object} PdfRunSignals
@@ -60,32 +74,121 @@ export function pdfRunOutcome({ envelope, noOutputMessage, sawError, cleanExit, 
 }
 
 /**
- * Persist the CV the agent emitted through its <<cv-html>> envelope (#2185).
+ * Persist the CV payload the agent emitted through its <<cv-payload>> envelope
+ * (#2185), for build-cv-html.mjs to read.
  *
- * The agent emits the tailored HTML inline and the backend saves it here. The
- * chosen page format is NOT written to disk: it is already in memory and goes
- * straight to renderAndMarkPdf. A sidecar written and re-read inside one request
- * bought only a fallback branch for a state that could not occur, plus an
- * undeclared ordering dependency between these two functions.
+ * The payload is written as-is. build-cv-html.mjs validates it and owns every
+ * trust decision about its contents, including candidate.photo (#5094), so the
+ * web path applies exactly the policy the CLI path does rather than a second one.
  *
  * The scratch directory is created by resolvePdfPaths earlier in the same
  * request, so this deliberately does not mkdir — a missing directory here means
  * something is wrong upstream and should surface, not be papered over.
  *
- * @param {{pdfPaths: {html: string}, html: string}} args
+ * @param {{pdfPaths: {payload: string}, payload: Record<string, unknown>}} args
  * @returns {{ok: true} | {ok: false, error: string}} Never throws: the caller
  *   routes the failure through the same honesty gate as every other pdf failure.
  */
-export function writeCvHtml({ pdfPaths, html }) {
+export function writeCvPayload({ pdfPaths, payload }) {
   try {
-    fs.writeFileSync(pdfPaths.html, html, "utf8");
+    fs.writeFileSync(pdfPaths.payload, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     return { ok: true };
   } catch (err) {
     // err.path when the platform gives it: a non-fs throw (an oversized-content
     // RangeError, a bad argument type) carries none, and "could not save to
     // undefined" tells the user nothing.
-    return { ok: false, error: `Could not save the tailored CV to ${err.path ?? pdfPaths.html}: ${err.message}` };
+    return { ok: false, error: `Could not save the tailored CV payload to ${err.path ?? pdfPaths.payload}: ${err.message}` };
   }
+}
+
+/**
+ * Run one bounded child process and normalize spawn, exit and timeout failures.
+ *
+ * A timed-out child is sent SIGTERM, then SIGKILL after a short grace, and the
+ * promise settles only on `close`: the caller deletes the scratch files next,
+ * and must not do that while the child may still be writing them.
+ *
+ * Output is decoded on the stream, not per chunk: a chunk boundary inside a
+ * multibyte character (the renderer's warnings open with ⚠️) would otherwise
+ * leave U+FFFD in the text an error message is built from.
+ *
+ * @param {{spawnFn: Function, execPath: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv, startError: string, timeoutMs?: number}} args
+ * @returns {Promise<{ok: boolean, code: number | null, stdout: string, stderr: string}>}
+ */
+function spawnResult({ spawnFn, execPath, args, cwd, env, startError, timeoutMs = DEFAULT_PDF_CHILD_TIMEOUT_MS }) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeoutId;
+    let killTimeoutId;
+    let timeoutResult;
+    /** Settle once and cancel the outstanding timers. */
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      clearTimeout(killTimeoutId);
+      resolve(result);
+    };
+    let child;
+    try {
+      // windowsHide: see api/doctor/route.ts — a stale inherited console
+      // kills every child with 0xC0000142 on Windows; never inherit one.
+      child = spawnFn(execPath, args, { cwd, windowsHide: true, ...(env ? { env } : {}) });
+    } catch (e) {
+      finish({ ok: false, code: null, stdout: "", stderr: `${startError}: ${e.message}` });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding?.("utf8");
+    child.stderr?.setEncoding?.("utf8");
+    child.stdout?.on("data", (d) => { stdout += d.toString(); });
+    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    child.on("close", (code) => finish(timeoutResult ?? { ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() }));
+    child.on("error", (e) => {
+      // A ChildProcess emits error when signal delivery fails as well as when
+      // spawn fails. Once timed out, only close proves it is safe for the
+      // caller to clean scratch files, so keep the SIGKILL escalation armed.
+      if (timeoutResult) return;
+      finish({ ok: false, code: null, stdout: "", stderr: `${startError}: ${e.message}` });
+    });
+    timeoutId = setTimeout(() => {
+      timeoutResult = { ok: false, code: null, stdout: "", stderr: `${startError}: timed out after ${timeoutMs}ms` };
+      try { child.kill?.("SIGTERM"); } catch { /* escalate below */ }
+      if (settled) return;
+      killTimeoutId = setTimeout(() => {
+        try { child.kill?.("SIGKILL"); } catch { /* close still owns settlement */ }
+      }, Math.min(PDF_CHILD_KILL_GRACE_MS, timeoutMs));
+    }, timeoutMs);
+  });
+}
+
+/**
+ * Spawn build-cv-html.mjs, the one HTML writer for both the CLI and the web.
+ *
+ * `pageFormat` is the sheet the builder laid the body out for, read from its JSON
+ * report, or null when the report carries no recognised size. The builder owns
+ * that decision (profile, payload, `auto` by country — lib/page-format.mjs), so
+ * the renderer is handed its answer instead of reaching one of its own.
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, payload: string, html: string, template?: string, timeoutMs?: number}} args
+ * @returns {Promise<{ok: boolean, stderr: string, pageFormat: "a4"|"letter"|null}>}
+ */
+export function spawnBuildCvHtml({ spawnFn, execPath, coreRoot, payload, html, template, timeoutMs }) {
+  return spawnResult({
+    spawnFn,
+    execPath,
+    // path.resolve, not join: an absolute template (a data-root template, or
+    // another drive on Windows) must stay itself rather than be glued under coreRoot.
+    args: [path.join(coreRoot, "build-cv-html.mjs"), payload, html, ...(template ? [path.resolve(coreRoot, template)] : [])],
+    cwd: coreRoot,
+    startError: "CV builder failed to start",
+    timeoutMs: timeoutMs ?? QUICK_PDF_CHILD_TIMEOUT_MS,
+  }).then(({ ok, stdout, stderr }) => {
+    let report = null;
+    try { report = JSON.parse(stdout); } catch { /* no report: generate-pdf.mjs resolves the size itself */ }
+    const pageFormat = PAGE_FORMATS.has(report?.page_format) ? report.page_format : null;
+    return { ok, stderr, pageFormat };
+  });
 }
 
 /**
@@ -127,40 +230,31 @@ export function pdfFingerprint(file) {
  * this render has a new identity, one that was kept or never written has the
  * old one (or none). Every caller reads `delivered`, so the judgement lives
  * here and not in one of them.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string}} args
+ *
+ * A null `format` omits --format, leaving the size to generate-pdf.mjs's own
+ * profile-then-default resolution (the web path never passes null: see
+ * renderAndMarkPdf).
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4"|null, reportNum: string, timeoutMs?: number}} args
  * @returns {Promise<{ok: boolean, delivered: boolean, stderr: string}>}
  */
-export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, reportNum }) {
+export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, reportNum, timeoutMs }) {
   const before = pdfFingerprint(finalPdf);
-  return new Promise((resolve) => {
-    const child = spawnFn(
-      execPath,
-      // --allow-reorder: a real cv.md's section order can legitimately diverge
-      // from the template's fixed markup order, so this guard would otherwise
-      // hard-fail every web-triggered render — same bypass a human already
-      // applies manually via the CLI when this diverges.
-      [path.join(coreRoot, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, `--report=${reportNum}`, "--allow-reorder"],
-      // windowsHide: see api/doctor/route.ts — a stale inherited console
-      // kills every child with 0xC0000142 on Windows; never inherit one.
-      {
-        cwd: coreRoot,
-        windowsHide: true,
-        env: { ...process.env, CAREER_OPS_PDF_SHARED: "1" },
-      },
-    );
-    let stderr = "";
-    // Decode on the stream, not per chunk: a chunk boundary inside a multibyte
-    // character (the warnings open with ⚠️) would otherwise leave U+FFFD in the
-    // text the error message is built from.
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (d) => { stderr += d; });
-    child.on("close", (code) => {
-      const ok = code === 0;
-      const after = pdfFingerprint(finalPdf);
-      const landed = after !== null && after !== before;
-      resolve({ ok, delivered: ok && landed, stderr: stderr.trim() });
-    });
-    child.on("error", (e) => resolve({ ok: false, delivered: false, stderr: `PDF rendering failed to start: ${e.message}` }));
+  return spawnResult({
+    spawnFn,
+    execPath,
+    // --allow-reorder: a real cv.md's section order can legitimately diverge
+    // from the template's fixed markup order, so this guard would otherwise
+    // hard-fail every web-triggered render — same bypass a human already
+    // applies manually via the CLI when this diverges.
+    args: [path.join(coreRoot, "generate-pdf.mjs"), html, finalPdf, ...(format ? [`--format=${format}`] : []), `--report=${reportNum}`, "--allow-reorder"],
+    cwd: coreRoot,
+    env: { ...process.env, CAREER_OPS_PDF_SHARED: "1" },
+    startError: "PDF rendering failed to start",
+    timeoutMs,
+  }).then(({ ok, stderr }) => {
+    const after = pdfFingerprint(finalPdf);
+    const landed = after !== null && after !== before;
+    return { ok, delivered: ok && landed, stderr };
   });
 }
 
@@ -201,23 +295,22 @@ export function undeliveredRenderError(render, finalPdf) {
  * JSON stdout when present (mark-pdf-ready.mjs prints a JSON payload even on
  * a failure exit when --json is passed) so a caller can surface the specific
  * reason (not-found / ambiguous / lock-timeout / ...) rather than raw stderr.
- * `code` is the exit code, or null when the child never started.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, reportNum: string}} args
+ * `code` is the exit code, or null when the child never started or timed out.
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, reportNum: string, timeoutMs?: number}} args
  * @returns {Promise<{ok: boolean, code: number | null, data: {error?: string} | null, stderr: string}>}
  */
-export function markTrackerReady({ spawnFn, execPath, coreRoot, reportNum }) {
-  return new Promise((resolve) => {
-    const child = spawnFn(execPath, [path.join(coreRoot, "mark-pdf-ready.mjs"), reportNum, "--json"], { cwd: coreRoot, windowsHide: true });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => { stdout += d.toString(); });
-    child.stderr.on("data", (d) => { stderr += d.toString(); });
-    child.on("close", (code) => {
-      let data = null;
-      try { data = JSON.parse(stdout); } catch { /* not JSON, or exited before printing any */ }
-      resolve({ ok: code === 0, code, data, stderr: stderr.trim() });
-    });
-    child.on("error", (e) => resolve({ ok: false, code: null, data: null, stderr: `mark-pdf-ready.mjs failed to start: ${e.message}` }));
+export function markTrackerReady({ spawnFn, execPath, coreRoot, reportNum, timeoutMs }) {
+  return spawnResult({
+    spawnFn,
+    execPath,
+    args: [path.join(coreRoot, "mark-pdf-ready.mjs"), reportNum, "--json"],
+    cwd: coreRoot,
+    startError: "mark-pdf-ready.mjs failed to start",
+    timeoutMs: timeoutMs ?? QUICK_PDF_CHILD_TIMEOUT_MS,
+  }).then(({ ok, code, stdout, stderr }) => {
+    let data = null;
+    try { data = JSON.parse(stdout); } catch { /* not JSON, or exited before printing any */ }
+    return { ok, code, data, stderr };
   });
 }
 
@@ -266,13 +359,13 @@ export function keepTailoredHtml(pdfPaths, warnings) {
 
 /**
  * @typedef {Object} RenderFailedResult
- * @property {"render-failed"} kind
+ * @property {"build-failed"|"render-failed"} kind
  * @property {string} error
  */
 /**
  * @typedef {Object} RenderedResult
  * @property {"rendered"} kind
- * @property {string[]} warnings - Non-fatal issues to surface to the user (e.g. a renderer advisory, or a tracker row that was not marked).
+ * @property {string[]} warnings - Non-fatal issues to surface to the user (e.g. a builder or renderer advisory, or a tracker row that was not marked).
  */
 /** @typedef {RenderFailedResult | RenderedResult} RenderResult */
 
@@ -296,42 +389,64 @@ export function failureReason(stderr) {
 }
 
 /**
- * Render the tailored HTML to a PDF, then mark the tracker's PDF column
- * ready — only after the render is CONFIRMED successful, never
- * optimistically. Always cleans up scratch files, whether the render
- * succeeds or fails.
- *
- * Call after writeCvHtml for the same pdfPaths — this reads the HTML that
- * function wrote. `format` is passed in rather than read back off disk, so the two
- * no longer share a file and the only coupling left is the HTML itself.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string}} args
- * @returns {Promise<RenderResult>}
+ * Collect a successful child's stderr as warnings, one per non-blank line.
+ * @param {string} stderr
+ * @param {string[]} warnings
  */
-export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, format, reportNum }) {
-  const warnings = [];
-
-  // A render over a warn-only page budget exits 0 but writes nothing to the
-  // final path (#6377): there is then no PDF to keep an HTML beside or to mark
-  // ready, and "done" would point the user at a file that was never written,
-  // so it is reported the way a strict overflow is. spawnGeneratePdf judges
-  // delivery from the file itself.
-  const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
-  if (render.delivered) keepTailoredHtml(pdfPaths, warnings);
-  cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
-
-  if (!render.delivered) {
-    return { kind: "render-failed", error: undeliveredRenderError(render, pdfPaths.finalPdf) };
-  }
-
-  // A render that exits 0 can still have written advisories to stderr, and
-  // they matter to whoever asked for this PDF: the CV fact check's advisory
-  // phrases, the portal-length warnings. Reading render.stderr only in the
-  // failure branch above collected them and dropped them, so on the web path
-  // an unsupported claim the fact gate flagged reached nobody. One warning per
-  // line, blank lines skipped, so a clean render still reports none.
-  for (const line of render.stderr.split("\n")) {
+function pushStderrWarnings(stderr, warnings) {
+  for (const line of stderr.split("\n")) {
     const text = line.trim();
     if (text) warnings.push(text);
+  }
+}
+
+/**
+ * Save the tailored payload, build its HTML with build-cv-html.mjs (the same
+ * builder the CLI uses), render that HTML to a PDF, then mark the tracker's PDF
+ * column ready — only after the render is CONFIRMED successful, never
+ * optimistically. Always cleans up scratch files, whether any step succeeds or
+ * fails.
+ *
+ * `template` is the path resolveCvTemplate() returned for this run, made
+ * absolute by the route, so the web renders the template cv.template selects, as
+ * the CLI does. The sheet is the one the builder reports, so the body and the
+ * paper match.
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {payload: string, html: string, finalPdf: string}, payload: Record<string, unknown>, template?: string, reportNum: string}} args
+ * @returns {Promise<RenderResult>}
+ */
+export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, payload, template, reportNum }) {
+  const warnings = [];
+  try {
+    const written = writeCvPayload({ pdfPaths, payload });
+    if (!written.ok) return { kind: "build-failed", error: written.error };
+
+    const build = await spawnBuildCvHtml({ spawnFn, execPath, coreRoot, payload: pdfPaths.payload, html: pdfPaths.html, template });
+    if (!build.ok) return { kind: "build-failed", error: build.stderr || "CV HTML build failed." };
+    // Without the builder's sheet, generate-pdf.mjs would resolve its own from
+    // fewer inputs (no payload country), and the body and the paper could
+    // disagree (#4405). Fail closed rather than print a mismatched CV.
+    if (!build.pageFormat) return { kind: "build-failed", error: "The CV builder did not report the page size it laid out, so no PDF was rendered." };
+    // The builder's warnings name payload sections the chosen template has no
+    // slot for (#5908): content the user wrote that this PDF will not show.
+    pushStderrWarnings(build.stderr, warnings);
+
+    // A render over a warn-only page budget exits 0 but writes nothing to the
+    // final path (#6377): there is then no PDF to keep an HTML beside or to mark
+    // ready, and "done" would point the user at a file that was never written,
+    // so it is reported the way a strict overflow is. spawnGeneratePdf judges
+    // delivery from the file itself.
+    const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format: build.pageFormat, reportNum });
+    if (!render.delivered) {
+      return { kind: "render-failed", error: undeliveredRenderError(render, pdfPaths.finalPdf) };
+    }
+    keepTailoredHtml(pdfPaths, warnings);
+    // A render that exits 0 can still have written advisories to stderr, and
+    // they matter to whoever asked for this PDF: the CV fact check's advisory
+    // phrases, the portal-length warnings. Dropping them would mean an
+    // unsupported claim the fact gate flagged reached nobody on the web path.
+    pushStderrWarnings(render.stderr, warnings);
+  } finally {
+    cleanupPdfScratch(path.dirname(pdfPaths.html), pdfScratchPrefix(reportNum));
   }
 
   // The PDF is the real deliverable and it already rendered successfully — a
