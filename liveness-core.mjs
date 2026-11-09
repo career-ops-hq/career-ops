@@ -64,6 +64,12 @@ const HARD_EXPIRED_PATTERNS = [
   // renders. Spelled in the normalized alphabet like every pattern here.
   /can't view this job because it's not available/i,
   /the page you are looking for doesn.t exist/i,
+  // Eightfold career sites (e.g. netapp.eightfold.ai) render a closed req as a
+  // near-empty page whose only body is "The job you are looking for may have
+  // closed." Without this it read as insufficient_content (uncertain). Anchored
+  // on the subject "the job you are looking for" plus a closed verb, so prose
+  // that merely contains the word "closed" never matches.
+  /\bthe job you(?:'re| are) (?:looking|searching) for (?:may |might |could )?(?:have |has )?closed\b/i,
   /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
   // "Was closed on 15 December" is a closure. "Will be closed on", "is to be
   // closed on" and "may be closed on" give a date still ahead, on a posting

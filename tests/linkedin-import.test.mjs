@@ -328,6 +328,11 @@ test('doctor output includes the paste path', () => {
   const dir = mkdtempSync(join(tmpdir(), 'doctor-linkedin-'));
   try {
     writeFileSync(join(dir, 'package.json'), '{"name":"fixture","version":"0.0.0"}\n');
+    // cv.md and profile.yml are required for a passing doctor. This check is
+    // about the paste line, so the fixture supplies both and the exit stays 0.
+    mkdirSync(join(dir, 'config'));
+    writeFileSync(join(dir, 'cv.md'), '# Jane Doe\n\n## Experience\n\nAnalyst at Example Co.\n');
+    writeFileSync(join(dir, 'config', 'profile.yml'), 'candidate:\n  full_name: "Jane Doe"\n  email: "jane@example.com"\n');
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(PLAYWRIGHT_STUB).href, DOCTOR, '--target', dir], {
       cwd: dir,
       encoding: 'utf8',

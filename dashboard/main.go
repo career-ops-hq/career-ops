@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -343,15 +344,78 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 			}
 			cmd.Env = append(cmd.Env, "CAREER_OPS_PDF_INDEX="+absolute)
 		}
+		// A render over a warn-only page budget exits 0 but writes nothing to
+		// the PDF path: the PDF went to a sibling .overflow.pdf draft (#6377).
+		// Opening the path would then show the previous PDF, or nothing, as
+		// "generated". A PDF this render wrote is a new file there.
+		// Only a missing file is an expected absence; any other stat error is
+		// reported as itself rather than read as "no previous PDF" (which
+		// would open whatever the render left) or "wrote nothing".
+		before, beforeErr := os.Stat(pdfAbs)
+		if beforeErr != nil && !errors.Is(beforeErr, fs.ErrNotExist) {
+			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("cannot read the PDF path: %v", beforeErr)}
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: summarizeCmdError(err, out)}
+		}
+		after, afterErr := os.Stat(pdfAbs)
+		if afterErr != nil && !errors.Is(afterErr, fs.ErrNotExist) {
+			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("cannot read the PDF path: %v", afterErr)}
+		}
+		if afterErr != nil || !pdfWrittenBetween(before, after) {
+			return screens.PipelinePDFGeneratedMsg{Err: summarizeUndelivered(out, pdfAbs)}
 		}
 		if err := openWithDefaultApp(pdfAbs); err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("PDF generated but could not open: %v", err)}
 		}
 		return screens.PipelinePDFGeneratedMsg{Path: pdfAbs}
 	}
+}
+
+// pdfWrittenBetween reports whether the PDF at the path is a file the render
+// left there: generate-pdf.mjs writes a temp file and renames it into place,
+// so a delivered PDF is a different file (and has a new modification time and
+// usually a new size), while a kept previous PDF is the same file as before.
+// The identity check covers a filesystem whose timestamps are too coarse to
+// tell a same-sized rerender apart.
+func pdfWrittenBetween(before, after fs.FileInfo) bool {
+	if after == nil {
+		return false
+	}
+	if before == nil {
+		return true
+	}
+	return !os.SameFile(before, after) || !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size()
+}
+
+// reOverflowDraftLine finds the draft generate-pdf.mjs names when a render
+// ran over its page budget, so the help bar can point at the file to inspect.
+var reOverflowDraftLine = regexp.MustCompile(`Overflow draft: (.*?\.overflow(?:-\d+)?\.pdf) \(`)
+
+// rePageBudgetLine is the page-count sentence of the same warning.
+var rePageBudgetLine = regexp.MustCompile(`CV is \d+ pages?; the allowed maximum is \d+ pages?\.`)
+
+// summarizeUndelivered is the help-bar line for a render that exited 0 but
+// wrote nothing to the PDF path. It leads with the page counts and the
+// outcome, and names the draft this render wrote, so the user does not open an
+// older one.
+func summarizeUndelivered(out []byte, pdfAbs string) string {
+	budget := rePageBudgetLine.FindString(string(out))
+	draft := ""
+	if m := reOverflowDraftLine.FindStringSubmatch(string(out)); m != nil {
+		draft = filepath.Base(m[1])
+	}
+	if budget == "" && draft == "" {
+		return fmt.Sprintf("generate-pdf.mjs reported success but wrote nothing to %s", filepath.Base(pdfAbs))
+	}
+	if budget == "" {
+		budget = "The CV is over its page budget."
+	}
+	if draft == "" {
+		return budget + " No PDF was written; the over-budget render was kept as an .overflow.pdf draft beside it."
+	}
+	return fmt.Sprintf("%s No PDF was written; the over-budget draft is %s.", budget, draft)
 }
 
 // summarizeCmdError condenses a failed command into one help-bar-sized line:
