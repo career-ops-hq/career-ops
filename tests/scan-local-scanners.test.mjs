@@ -150,6 +150,20 @@ test('seek pagination walks pages with daterange and stops on an empty or repeat
   ]);
   assert.deepStrictEqual(waits, [50, 50]);
 
+  const repeatedCalls = [];
+  const repeatedOffers = await scanSeekSearch(
+    { keyword: 'devops', location: '' },
+    {
+      maxPages: 5,
+      fetchText: async (url) => {
+        repeatedCalls.push(url);
+        return pageHtml(['101', '102']);
+      },
+    },
+  );
+  assert.strictEqual(repeatedCalls.length, 2);
+  assert.deepStrictEqual(repeatedOffers.map((o) => o.id), ['101', '102']);
+
   // Respects max_pages on the search entry when CLI maxPages is not set.
   const cappedCalls = [];
   const cappedOffers = await scanSeekSearch(
