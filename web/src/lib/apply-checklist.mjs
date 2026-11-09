@@ -198,24 +198,65 @@ function elementsNamed(html, names) {
 function decodePoint(raw, radix) {
   const n = radix === 16 ? Number.parseInt(raw, 16) : Number(raw);
   if (!Number.isInteger(n) || n < 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return "";
+  if (n === 160) return " ";
   return String.fromCodePoint(n);
 }
 
+const NAMED_ENTITIES = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  ndash: "\u2013",
+  mdash: "\u2014",
+  middot: "\u00b7",
+  bull: "\u2022",
+  rsquo: "\u2019",
+  lsquo: "\u2018",
+  rdquo: "\u201d",
+  ldquo: "\u201c",
+  hellip: "\u2026",
+};
+
+const INLINE_TAG = "a|b|strong|i|em|u|mark|small|sub|sup|code|abbr|time";
+
+function stripHiddenHtml(html) {
+  let text = String(html ?? "");
+  let prev;
+  do {
+    prev = text;
+    text = text
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
+      .replace(/<!--[\s\S]*?-->/g, "");
+  } while (text !== prev);
+  return text
+    .replace(/<script\b[^>]*>[\s\S]*$/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*$/gi, "")
+    .replace(/<!--[\s\S]*$/g, "");
+}
+
+function decodeEntities(text) {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]+);/gi, (entity, body) => {
+    if (body[0] === "#") {
+      const hex = body[1] === "x" || body[1] === "X";
+      return decodePoint(body.slice(hex ? 2 : 1), hex ? 16 : 10);
+    }
+    const named = NAMED_ENTITIES[body.toLowerCase()];
+    return named === undefined ? entity : named;
+  });
+}
+
 function visibleText(html) {
-  const decoded = String(html ?? "")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "\n")
-    .replace(/&nbsp;|&#160;|&#xa0;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&#(\d+);/g, (_, n) => decodePoint(n, 10))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => decodePoint(n, 16));
+  const inline = new RegExp(`</?(?:${INLINE_TAG})\\b[^>]*>`, "gi");
+  const decoded = decodeEntities(
+    stripHiddenHtml(html)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(inline, "")
+      .replace(/<[^>]+>/g, "\n"),
+  );
   const out = [];
   for (const line of decoded.split("\n")) {
     const text = line.replace(/[ \t]+/g, " ").trim();
@@ -290,16 +331,16 @@ function containedHtmlFile(root, relCandidate) {
   if (!stored || path.isAbsolute(stored) || !stored.toLowerCase().endsWith(".html")) return null;
   const abs = path.resolve(root, stored);
   let realAbs;
-  let realRoot;
+  let realOutput;
   try {
     if (!fs.statSync(abs).isFile()) return null;
     realAbs = fs.realpathSync(abs);
-    realRoot = fs.realpathSync(root);
+    realOutput = fs.realpathSync(path.join(root, "output"));
   } catch {
     return null;
   }
-  const rel = path.relative(realRoot, realAbs);
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  const rel = path.relative(realOutput, realAbs);
+  if (!rel || path.isAbsolute(rel) || rel.split(path.sep).includes("..")) return null;
   return realAbs;
 }
 

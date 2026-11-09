@@ -128,25 +128,79 @@ test("the apply page pastes from the tailored HTML of the indexed resume, not cv
 
 test("the indexed resume PDF stays the resume row, and its HTML is the paste source", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "apply-paste-"));
-  const output = path.join(root, "output");
-  fs.mkdirSync(output);
-  fs.writeFileSync(path.join(output, "cv-jane-example.pdf"), "%PDF-1.4\n");
-  fs.writeFileSync(path.join(output, "cv-jane-example.html"), TAILORED_HTML);
-  fs.writeFileSync(path.join(output, "other.html"), "<div class=\"section-title\">Work Experience</div><p>Other Employer</p>");
-  const index = "12\toutput/cv-jane-example.pdf\toutput/cv-jane-example.html\tpdf\t2026-02-01\t\n12\toutput/other.pdf\toutput/other.html\tpdf\t2026-02-01\t\n";
-  const exists = (abs) => fs.existsSync(abs);
-  const resume = indexedPdf(index, 12, "cv", root, exists);
-  assert.equal(resume.relativePath, "output/cv-jane-example.pdf");
-  const html = tailoredResumeText(index, resume.relativePath, root, (abs) => fs.readFileSync(abs, "utf8"));
+  const secret = path.join(path.dirname(root), "apply-paste-secret.html");
+  try {
+    const output = path.join(root, "output");
+    fs.mkdirSync(output);
+    fs.writeFileSync(path.join(output, "cv-jane-example.pdf"), "%PDF-1.4\n");
+    fs.writeFileSync(path.join(output, "cv-jane-example.html"), TAILORED_HTML);
+    fs.writeFileSync(path.join(output, "other.html"), "<div class=\"section-title\">Work Experience</div><p>Other Employer</p>");
+    const index = "12\toutput/cv-jane-example.pdf\toutput/cv-jane-example.html\tpdf\t2026-02-01\t\n12\toutput/other.pdf\toutput/other.html\tpdf\t2026-02-01\t\n";
+    const exists = (abs) => fs.existsSync(abs);
+    const resume = indexedPdf(index, 12, "cv", root, exists);
+    assert.equal(resume.relativePath, "output/cv-jane-example.pdf");
+    const html = tailoredResumeText(index, resume.relativePath, root, (abs) => fs.readFileSync(abs, "utf8"));
+    const fields = pasteCopyFields(html, MASTER_CV);
+    assert.match(fields.work[0].text, /Example Studio/);
+    assert.equal(/Northwind|Other Employer/.test(fields.work[0].text), false);
+    fs.mkdirSync(path.join(root, "notes"));
+    fs.writeFileSync(path.join(root, "notes", "secret.html"), "<div class=\"section-title\">Work Experience</div><p>Outside Employer</p>");
+    fs.writeFileSync(path.join(output, "cover-only.pdf"), "%PDF-1.4\n");
+    const outside = "12\toutput/cover-only.pdf\tnotes/secret.html\tpdf\t2026-02-01\n";
+    assert.equal(tailoredResumeText(outside, "output/cover-only.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), null);
+    const dotCache = path.join(output, "..cache");
+    fs.mkdirSync(dotCache);
+    fs.writeFileSync(path.join(dotCache, "note.html"), "<div class=\"section-title\">Work Experience</div><p>Dot Cache Employer</p>");
+    const dotted = "12\toutput/cover-only.pdf\toutput/..cache/note.html\tpdf\t2026-02-01\n";
+    assert.match(tailoredResumeText(dotted, "output/cover-only.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), /Dot Cache Employer/);
+    fs.writeFileSync(secret, "<div class=\"section-title\">Work Experience</div><p>Linked Employer</p>");
+    fs.symlinkSync(secret, path.join(output, "linked.html"));
+    const linked = "12\toutput/cover-only.pdf\toutput/linked.html\tpdf\t2026-02-01\n";
+    assert.equal(tailoredResumeText(linked, "output/cover-only.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(secret, { force: true });
+  }
+});
+
+test("inline formatting stays on one line, and a span still separates the header", () => {
+  const html = `<div class="section-title">Work Experience</div>
+    <div class="job">
+      <span class="job-company">Example Studio</span><span class="job-period">2020-2024</span>
+      <ul><li>Led <strong>5</strong> engineers</li></ul>
+    </div>
+    <div class="section-title">Education</div>
+    <div>BA <span class="edu-org">State College</span></div>`;
   const fields = pasteCopyFields(html, MASTER_CV);
-  assert.match(fields.work[0].text, /Example Studio/);
-  assert.equal(/Northwind|Other Employer/.test(fields.work[0].text), false);
-  const outside = "12\toutput/cv-jane-example.pdf\t../secret.html\tpdf\t2026-02-01\n";
-  fs.writeFileSync(path.join(output, "cv-jane-example.html"), TAILORED_HTML);
-  assert.match(tailoredResumeText(outside, "output/cv-jane-example.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), /Example Studio/);
-  fs.rmSync(path.join(output, "cv-jane-example.html"));
-  assert.equal(tailoredResumeText(outside, "output/cv-jane-example.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), null);
-  fs.rmSync(root, { recursive: true, force: true });
+  assert.match(fields.work[0].text, /Led 5 engineers/);
+  assert.equal(fields.work[0].text.includes("Led\n5"), false);
+  assert.match(fields.work[0].text, /Example Studio\n+2020-2024/);
+  assert.match(fields.education, /BA\nState College/);
+});
+
+test("character references decode once, including typographic marks", () => {
+  const html = `<div class="section-title">Work Experience</div><div class="job"><span class="job-company">R&amp;lt;D &ndash; Lab</span></div>`;
+  const text = pasteCopyFields(html, MASTER_CV).work[0].text;
+  assert.match(text, /R&lt;D \u2013 Lab/);
+  assert.equal(text.includes("R<D"), false);
+});
+
+test("a script end tag with a space does not leave the script body in the paste text", () => {
+  const html = `<div class="section-title">Work Experience</div><div class="job"><span class="job-company">Example <script>alert(1)</script > Studio</span></div>`;
+  const text = pasteCopyFields(html, MASTER_CV).work[0].text;
+  assert.equal(text.includes("alert"), false);
+  assert.match(text, /Example/);
+  assert.match(text, /Studio/);
+});
+
+test("a style body and a comment stay out of the paste text", () => {
+  const html = `<div class="section-title">Work Experience</div><div class="job"><span class="job-company">Example <style>secret-style</style > Studio <!-- secret-note --> Lab</span></div>`;
+  const text = pasteCopyFields(html, MASTER_CV).work[0].text;
+  assert.equal(text.includes("secret-style"), false);
+  assert.equal(text.includes("secret-note"), false);
+  assert.match(text, /Example/);
+  assert.match(text, /Studio/);
+  assert.match(text, /Lab/);
 });
 
 test("a broken character reference does not drop the tailored role", () => {
