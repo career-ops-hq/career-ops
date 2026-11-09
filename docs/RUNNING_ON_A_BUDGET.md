@@ -355,7 +355,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```bash
 > OPENAI_BASE_URL=https://api.stdcmpt.com/v1 \
 > OPENAI_MODEL=StandardCompute \
-> OPENAI_API_KEY="$STANDARDCOMPUTE_API_KEY" \
+> OPENAI_API_KEY=your_standardcompute_key \
 > node openai-eval.mjs --file ./jds/job.txt
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint.
