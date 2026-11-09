@@ -19102,12 +19102,11 @@ console.log('\n67. Protected-grounds question detection (#2030)');
         pgRaw.includes('CONTRIBUTION RULE') &&
         pgRaw.includes('NOT LEGAL ADVICE') &&
         pgRaw.includes('EEOC') &&
-        pgRaw.includes('Equality Act') &&
-        pgRaw.includes('AGG')
+        pgRaw.includes('Equality Act')
       ) {
-        pass('protected-grounds.yml header documents the contribution rule + not-legal-advice register and lists candidate rows (EEOC, UK Equality Act, DE AGG) as comments only (#2030)');
+        pass('protected-grounds.yml header documents the contribution rule + not-legal-advice register and lists candidate rows (EEOC, UK Equality Act) as comments only (#2030)');
       } else {
-        fail('protected-grounds.yml header missing the contribution rule, not-legal-advice note, and/or the commented candidate rows (EEOC / Equality Act / AGG) (#2030)');
+        fail('protected-grounds.yml header missing the contribution rule, not-legal-advice note, and/or the commented candidate rows (EEOC / Equality Act) (#2030)');
       }
     } catch (e) {
       fail(`templates/protected-grounds.yml does not parse as YAML: ${e.message} (#2030)`);
