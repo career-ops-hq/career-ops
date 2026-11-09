@@ -113,8 +113,10 @@ const englishWins = /the English rule wins/.test(router);
 const keepsTriageLean = /never adds a file the mode's section does not load/.test(router);
 const listRespectsModes = /A mode whose section loads no `_shared\.md` \(such as `triage`\) still loads only its mode file/.test(router);
 const workerPrecedence = /when a localized file contradicts an English workflow rule, follow the English rule/.test(router);
-if (layersCanon && englishWins && keepsTriageLean && listRespectsModes && workerPrecedence) {
-  pass('router layers localized files on the English canon for a scalar modes_dir, with English precedence, no extra files, and the precedence rule carried into worker prompts');
+const dedupesBaseline = /already covered by the English read, so never read it twice/.test(router);
+const workerListModes = /each declared modes_dir directory's version of that mode file/.test(router);
+if (layersCanon && englishWins && keepsTriageLean && listRespectsModes && workerPrecedence && dedupesBaseline && workerListModes) {
+  pass('router layers localized files on the English canon for a scalar modes_dir, with English precedence, no extra files, list dedupe, and the precedence rule carried into worker prompts');
 } else {
-  fail('router layering contract regressed: canon-first=' + layersCanon + ' english-precedence=' + englishWins + ' no-extra-files=' + keepsTriageLean + ' list-respects-modes=' + listRespectsModes + ' worker-precedence=' + workerPrecedence);
+  fail('router layering contract regressed: canon-first=' + layersCanon + ' english-precedence=' + englishWins + ' no-extra-files=' + keepsTriageLean + ' list-respects-modes=' + listRespectsModes + ' worker-precedence=' + workerPrecedence + ' dedupes-baseline=' + dedupesBaseline + ' worker-list-modes=' + workerListModes);
 }
