@@ -78,7 +78,10 @@ export function createLocalGate({ config = {}, gateOptions = {}, seenRoles } = {
   const counts = gate.counts;
   counts.duplicateRole = 0;
 
-  const roleKey = (offer) => companyRoleDedupKey(offer.company, offer.title, normalizeCompanyName, includeLocation ? offer.location : undefined);
+  const baseKeyOf = (offer) => companyRoleDedupKey(offer.company, offer.title, normalizeCompanyName);
+  const roleKey = (offer) => (includeLocation
+    ? companyRoleDedupKey(offer.company, offer.title, normalizeCompanyName, offer.location)
+    : baseKeyOf(offer));
 
   return {
     counts,
@@ -87,7 +90,11 @@ export function createLocalGate({ config = {}, gateOptions = {}, seenRoles } = {
       const reason = gate.check(offer);
       if (reason) return reason;
       const key = roleKey(offer);
-      if (roles.has(key)) {
+      // A tracker row with no city is the wildcard. A located posting still
+      // matches that bare key, the same way the main scan does. A key that
+      // already names a different city does not.
+      const bare = includeLocation ? baseKeyOf(offer) : key;
+      if (roles.has(key) || (key !== bare && roles.has(bare))) {
         // gate.check already counted this posting as admitted.
         counts.admitted--;
         counts.duplicateRole++;

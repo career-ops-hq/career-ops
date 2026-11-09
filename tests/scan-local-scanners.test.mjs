@@ -9,6 +9,8 @@ import {
   slugify, decodeHtml,
   createLocalGate, writeRunLog,
 } from '../scan-local-lib.mjs';
+import { companyRoleDedupKey } from '../scan.mjs';
+import { normalizeCompanyName } from '../invite-match.mjs';
 import {
   buildSeekUrl, parseSeekPage, extractReduxJson,
   scanSeekSearch, loadSearches as seekSearches,
@@ -62,6 +64,37 @@ test('local gate: title, seen URL, same-role dedup within and across runs', () =
     seenRoles: new Set([gate.roleKey(a)]),
   });
   assert.strictEqual(known.check({ ...a, url: 'https://y.test/1' }), 'duplicate-role');
+});
+
+test('a locationless seen role still blocks a located local offer, and another city does not', () => {
+  const open = {
+    titleFilter: () => true,
+    locationFilter: () => true,
+    blacklist: new Map(),
+    seen: new Set(),
+  };
+  const config = { location_filter: { workplace_policy: { onsite_locations: ['Harbor Bay'] } } };
+  const bare = companyRoleDedupKey('Lumenfield', 'Automation Analyst', normalizeCompanyName);
+  const blocked = createLocalGate({
+    config,
+    gateOptions: open,
+    seenRoles: new Set([bare]),
+  });
+  assert.strictEqual(
+    blocked.check({ url: 'https://boards.example/jobs/1', company: 'Lumenfield', title: 'Automation Analyst', location: 'Harbor Bay' }),
+    'duplicate-role',
+  );
+
+  const pebble = companyRoleDedupKey('Lumenfield', 'Automation Analyst', normalizeCompanyName, 'Pebbleford, TX');
+  const otherCity = createLocalGate({
+    config,
+    gateOptions: { ...open, seen: new Set() },
+    seenRoles: new Set([pebble]),
+  });
+  assert.strictEqual(
+    otherCity.check({ url: 'https://boards.example/jobs/2', company: 'Lumenfield', title: 'Automation Analyst', location: 'Harbor Bay' }),
+    null,
+  );
 });
 
 test('writeRunLog appends a scan-runs.tsv row stats.mjs can read by header name', async () => {
