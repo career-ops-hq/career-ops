@@ -4,7 +4,7 @@
 import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nbrowser-extract.mjs (config + normalizers)');
@@ -15,8 +15,8 @@ try {
   const {
     resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
     workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
-    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob,
-    fetchJdViaKnownApi, JD_FETCHERS,
+    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
+    normalizeZohoJob, fetchJdViaKnownApi, JD_FETCHERS,
   } = mod;
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
@@ -82,6 +82,34 @@ try {
     fail(`normalizeJd => ${JSON.stringify(jd)}`);
   }
 
+  // normalizeJd prefers a schema.org JobPosting from JSON-LD when the page
+  // ships one, over the rendered DOM text — but the comparison must be on
+  // NORMALIZED length, not raw length. Phenom-style chrome ("Apply now / Save
+  // job / Share ...") is mostly repeated newlines: it can out-length a real,
+  // shorter-in-raw-HTML JSON-LD description before whitespace is collapsed,
+  // even though the JSON-LD is clearly the substantive content once both are
+  // normalized. (Regression for the case where raw-length comparison let DOM
+  // chrome win and the JD came out empty.)
+  const chromeHeavy = 'Apply now\n\n\n\n\n\n\n\nSave job\n\n\n\n\n\n\n\nShare\n\n\n\n\n\n\n\nLocation\n\n\n\n\n\n\n\nBasel\n\n\n\n\n\n\n\nJob ID\n\n\n\n\n\n\n\n2024\n\n\n\n\n\n\n\n';
+  const substantiveLd = '<p>Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.</p>';
+  const ldWins = normalizeJd({ title: '', text: chromeHeavy, jsonLdDescription: substantiveLd }, 'https://x/1');
+  if (ldWins.text === 'Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.') {
+    pass('normalizeJd compares normalized (not raw) DOM length, so JSON-LD wins over whitespace-heavy DOM chrome');
+  } else {
+    fail(`normalizeJd chrome-vs-ld => ${JSON.stringify(ldWins.text)}`);
+  }
+
+  // ...and the rule stays "longer wins", not "JSON-LD always wins": a genuinely
+  // longer, substantive DOM text must still beat a short stub JobPosting.
+  const realDomText = 'Full job description with responsibilities, requirements, and a benefits section spanning several sentences.';
+  const stubLd = '<p>Rust Engineer</p>';
+  const domWins = normalizeJd({ title: '', text: realDomText, jsonLdDescription: stubLd }, 'https://x/1');
+  if (domWins.text === realDomText) {
+    pass('normalizeJd keeps the rendered DOM text when the JSON-LD is a shorter stub');
+  } else {
+    fail(`normalizeJd dom-vs-stub-ld => ${JSON.stringify(domWins.text)}`);
+  }
+
   // normalizeJd honors a custom text cap (a long JD is truncated at the cap, not
   // silently at the 12000 default) while leaving the default behavior unchanged.
   const longText = 'y'.repeat(20000);
@@ -136,6 +164,18 @@ try {
     pass('jdHtmlToText double-decodes entity-escaped markup');
   } else {
     fail(`jdHtmlToText escaped => ${JSON.stringify(jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
+  }
+  const comparison = jdHtmlToText('<p>Teams of &lt; 5 people, &gt; 2 years of experience, &lt;10 engineers and &gt;150k users.</p>');
+  if (comparison === 'Teams of < 5 people, > 2 years of experience, <10 engineers and >150k users.') {
+    pass('jdHtmlToText keeps comparison text between decoded angle brackets');
+  } else {
+    fail(`jdHtmlToText comparison => ${JSON.stringify(comparison)}`);
+  }
+  const quotedAttr = jdHtmlToText('<p title="a > b">Text</p>');
+  if (quotedAttr === 'Text') {
+    pass('jdHtmlToText strips a whole tag whose quoted attribute holds an angle bracket');
+  } else {
+    fail(`jdHtmlToText quoted attribute => ${JSON.stringify(quotedAttr)}`);
   }
   if (jdHtmlToText(null) === '' && jdHtmlToText('') === '' && jdHtmlToText(42) === '') {
     pass('jdHtmlToText returns "" for a non-string / empty body');
@@ -332,6 +372,88 @@ try {
   if (ghNulls.every((v) => v === null)) pass('normalizeGreenhouseJob returns null without a description body');
   else fail(`normalizeGreenhouseJob nulls => ${JSON.stringify(ghNulls)}`);
 
+  // normalizeSmartRecruitersJob — the JD is jobAd.sections (HTML blocks in page
+  // order); location carries remote/hybrid flags, often the only work-model signal.
+  const sr = normalizeSmartRecruitersJob(
+    {
+      name: 'Senior Engineer',
+      location: { city: 'Bengaluru', country: 'in', fullLocation: 'Bengaluru, KA, India', remote: false, hybrid: true },
+      jobAd: { sections: {
+        companyDescription: { title: 'Company', text: '<p>We make things.</p>' },
+        jobDescription: { title: 'Job Description', text: '&lt;p&gt;Own the API.&lt;/p&gt;' },
+        qualifications: { title: 'Qualifications', text: '<ul><li>5+ years</li></ul>' },
+        additionalInformation: { title: '', text: '' },
+      } },
+    },
+    'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer',
+  );
+  if (sr
+      && sr.title === 'Senior Engineer'
+      && sr.text.includes('Location: Bengaluru, KA, India')
+      && sr.text.includes('Work model: Hybrid')
+      && sr.text.indexOf('We make things.') < sr.text.indexOf('Own the API.')
+      && sr.text.includes('- 5+ years')
+      && !sr.text.includes('&lt;')) {
+    pass('normalizeSmartRecruitersJob joins sections in page order and surfaces location + work model');
+  } else {
+    fail(`normalizeSmartRecruitersJob => ${JSON.stringify(sr)}`);
+  }
+
+  const srNulls = [
+    normalizeSmartRecruitersJob(null, 'https://x/1'),
+    normalizeSmartRecruitersJob({ name: 'X' }, 'https://x/1'),
+    normalizeSmartRecruitersJob({ name: 'X', jobAd: { sections: { jobDescription: { text: '<p> </p>' } } } }, 'https://x/1'),
+  ];
+  if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
+  else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
+
+  // A closed posting can still ship its ad. The marker carries `active: false`
+  // with the text, the way Workday carries `canApply: false`.
+  const srAd = { sections: { jobDescription: { title: 'Job Description', text: '<p>Own the API.</p>' } } };
+  const srClosed = normalizeSmartRecruitersJob({ name: 'X', active: false, jobAd: srAd }, 'https://x/1');
+  const srOpen = normalizeSmartRecruitersJob({ name: 'X', active: true, jobAd: srAd }, 'https://x/1');
+  const srUnflagged = normalizeSmartRecruitersJob({ name: 'X', jobAd: srAd }, 'https://x/1');
+  if (srClosed?.text.startsWith('Applications closed (active: false)')
+      && srClosed.text.includes('Own the API.')
+      && srOpen?.text.includes('Own the API.')
+      && !srOpen.text.includes('Applications closed')
+      && srUnflagged?.text === srOpen.text) {
+    pass('normalizeSmartRecruitersJob keeps an inactive posting with an Applications closed marker; active or unflagged ones carry none');
+  } else {
+    fail(`normalizeSmartRecruitersJob active flag => ${JSON.stringify({ srClosed, srOpen, srUnflagged })}`);
+  }
+
+  // normalizeZohoJob — Zoho Recruit has no JSON API; the posting page embeds
+  // the record as a JS string literal, and its Job_Description is HTML.
+  const zohoFixture = (name) => readFileSync(join(ROOT, 'tests', 'fixtures', name), 'utf8');
+  const ZOHO_URL = 'https://exampleco.zohorecruit.com/jobs/Careers/100000000001853029';
+  const zoho = normalizeZohoJob(zohoFixture('zoho-recruit-detail.html'), '100000000001853029', ZOHO_URL);
+  if (zoho
+      && zoho.url === ZOHO_URL
+      && zoho.title === 'Senior DevOps Engineer / Ruby'
+      && zoho.text.startsWith('Work model: Remote\nJob type: Full time\nSalary: 65.000 EUR-75.000 EUR\nPosted: 2026-05-14\n\n')
+      && zoho.text.includes('Senior DevOps Engineer / Ruby & Rails')
+      && zoho.text.includes("What you'll do")
+      && !zoho.text.includes('<')) {
+    pass('normalizeZohoJob reads the embedded record: HTML description to text, plus work model, salary and date');
+  } else {
+    fail(`normalizeZohoJob => ${JSON.stringify(zoho)}`);
+  }
+  const zohoLocked = normalizeZohoJob(zohoFixture('zoho-recruit-detail-locked.html'), '100000000009803001', ZOHO_URL);
+  if (zohoLocked?.text.includes('Location: New Britain, United States')
+      && zohoLocked.text.includes('Applications closed (the career site shows the posting as filled)')) {
+    pass('normalizeZohoJob surfaces a filled posting as closed');
+  } else {
+    fail(`normalizeZohoJob locked => ${JSON.stringify(zohoLocked)}`);
+  }
+  const zohoNulls = [
+    normalizeZohoJob(zohoFixture('zoho-recruit-detail.html'), '999', ZOHO_URL),
+    normalizeZohoJob(zohoFixture('zoho-recruit-detail-gone.html'), '100000000001853029', ZOHO_URL),
+    normalizeZohoJob(null, '1', ZOHO_URL),
+  ];
+  if (zohoNulls.every((v) => v === null)) pass('normalizeZohoJob returns null for another id, a removed posting, or no body');
+  else fail(`normalizeZohoJob nulls => ${JSON.stringify(zohoNulls)}`);
+
   // normalizeLeverJob — `lists` carries the labeled sections (Requirements,
   // etc.) as separate HTML blocks; dropping them loses half the JD.
   const lever = normalizeLeverJob(
@@ -376,6 +498,17 @@ try {
     pass('normalizeLeverJob appends the additional plain text after the labeled lists.');
   } else {
     fail(`normalizeLeverJob  => ${JSON.stringify(lever)}`);
+  }
+
+  const leverHtmlIntro = normalizeLeverJob(
+    { text: 'X', descriptionPlain: '', description: '<div>This position is listed on behalf of a partner.</div>', lists: [{ text: 'Requirements', content: '<li>Go</li>' }] },
+    'https://jobs.lever.co/acme/1',
+  );
+  if (leverHtmlIntro && leverHtmlIntro.text.indexOf('listed on behalf of a partner') >= 0
+      && leverHtmlIntro.text.indexOf('listed on behalf of a partner') < leverHtmlIntro.text.indexOf('Requirements')) {
+    pass('normalizeLeverJob falls back to the description HTML when descriptionPlain is empty');
+  } else {
+    fail(`normalizeLeverJob html intro => ${JSON.stringify(leverHtmlIntro)}`);
   }
 
   const leverNulls = [
@@ -468,6 +601,12 @@ try {
     ['lever', 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555'],
     ['ashby', 'https://jobs.ashbyhq.com/acme/some-job-id'],
     ['workday', 'https://acme.wd5.myworkdayjobs.com/External/job/Seattle-WA/Engineer_R1234'],
+    ['greenhouse-embedded', 'https://www.acme.com/careers/job?gh_jid=12345'],
+    ['smartrecruiters', 'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer'],
+    ['zoho-recruit', 'https://acme.zohorecruit.com/jobs/Careers/100000000001853029/Senior-Engineer'],
+    ['ultipro', 'https://recruiting.ultipro.com/EXA1000EXCO/JobBoard/0c8a6f9e-2b1d-4e57-9a3c-5d7f1e2b4c60/OpportunityDetail?opportunityId=5e0c2b9a-7f41-4d2e-8b6a-1c9d3e7f2a10'],
+    ['hirehive', 'https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd'],
+    ['hibob', 'https://acme.careers.hibob.com/jobs/0b1c2d3e-0000-4000-8000-000000000001'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);
@@ -491,6 +630,50 @@ try {
     fail(`JD_TEXT_API_ATS routing drift => ${JSON.stringify(routed)}`);
   }
 
+  // A fetcher that gives up on a response is done with its body before it
+  // returns. fetch-jd.mjs exits once nothing is left to run, and an unread body
+  // that is still arriving keeps its socket open, and with it the process.
+  // Every request here gets a 404 whose body starts arriving and never ends,
+  // as a real one would until the fetcher's abort timer cuts it off; the
+  // timers are shortened so that takes milliseconds. The redirect hops
+  // (greenhouse-embedded, the Workable share link) give up on a 404 too.
+  const DISCARD_PROBES = [
+    ...ATS_URL_SHAPES.map(([, url]) => url),
+    'https://apply.workable.com/fictional-employer/j/FIXTURE123/',
+    'https://apply.workable.com/j/FIXTURE123',
+  ];
+  /** @type {Record<string, {result: any, sent: number, ended: number}>} */
+  const discards = {};
+  try {
+    globalThis.setTimeout = (/** @type {any} */ fn, /** @type {any} */ ms, /** @type {any[]} */ ...rest) =>
+      realSetTimeout(fn, Math.min(ms, 20), ...rest);
+    for (const url of DISCARD_PROBES) {
+      const seen = { result: undefined, sent: 0, ended: 0 };
+      globalThis.fetch = async (/** @type {any} */ _url, /** @type {any} */ init) => {
+        seen.sent += 1;
+        const body = new ReadableStream({
+          start(stream) {
+            stream.enqueue(new TextEncoder().encode('<h1>Not Found</h1>'));
+            init?.signal?.addEventListener('abort', () => { seen.ended += 1; stream.error(init.signal.reason); });
+          },
+          cancel() { seen.ended += 1; },
+        });
+        return new Response(body, { status: 404 });
+      };
+      seen.result = await fetchJdViaKnownApi(url);
+      discards[resolveAtsApi(url)?.ats] = seen;
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    globalThis.setTimeout = realSetTimeout;
+  }
+  if (Object.keys(discards).sort().join(',') === fetcherIds
+      && Object.values(discards).every((d) => d.result === null && d.sent > 0 && d.ended === d.sent)) {
+    pass('every JD fetcher ends the body of a response it gives up on before returning');
+  } else {
+    fail(`JD fetchers left a body open => ${JSON.stringify(discards)}`);
+  }
+
   // fetchAshbyJd is the one fetcher that needs a field off resolveAtsApi beyond
   // apiUrl: Ashby's API is org-level, so the posting is picked out of the board
   // by parts.jobId. If that field is ever renamed or stops being populated the
@@ -501,6 +684,46 @@ try {
     pass('resolveAtsApi populates parts.jobId for an Ashby posting (fetchAshbyJd selects on it)');
   } else {
     fail(`resolveAtsApi ashby parts => ${JSON.stringify(ashbyParts)}`);
+  }
+
+  // An Ashby org slug can contain a space. The posting URL carries it as %20
+  // (the URL parser encodes a raw space the same way), and the board API
+  // answers with the %20 kept in its path. The encoded slash beside it is the
+  // same URL shape, so its null comes from the charset guard and nothing else.
+  const spacedApi = 'https://api.ashbyhq.com/posting-api/job-board/Acme%20Corp';
+  const spaced = resolveAtsApi('https://jobs.ashbyhq.com/Acme%20Corp/ABC-123');
+  const rawSpace = resolveAtsApi('https://jobs.ashbyhq.com/Acme Corp/ABC-123');
+  const encodedSlash = resolveAtsApi('https://jobs.ashbyhq.com/acme%2Fprivate/ABC-123');
+  if (spaced?.ats === 'ashby' && spaced.apiUrl === spacedApi && spaced.parts.jobId === 'ABC-123'
+      && rawSpace?.apiUrl === spacedApi
+      && encodedSlash === null) {
+    pass('resolveAtsApi keeps a %20 in an Ashby org slug and still rejects an encoded slash');
+  } else {
+    fail(`resolveAtsApi ashby spaced slug => ${JSON.stringify({ spaced, rawSpace, encodedSlash })}`);
+  }
+
+  // The same posting end to end through fetchJdViaKnownApi, the call
+  // fetch-jd.mjs makes. fetch is stubbed, so nothing here touches the network.
+  /** @type {string[]} */
+  const spacedCalls = [];
+  let spacedJd = null;
+  try {
+    globalThis.fetch = async (/** @type {any} */ url) => {
+      spacedCalls.push(String(url));
+      return /** @type {any} */ ({
+        ok: true,
+        json: async () => ({ jobs: [{ id: 'ABC-123', title: 'Staff Engineer', descriptionPlain: 'Build the platform.' }] }),
+      });
+    };
+    spacedJd = await fetchJdViaKnownApi('https://jobs.ashbyhq.com/Acme%20Corp/ABC-123');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  if (spacedJd?.ats === 'ashby' && spacedJd.text.includes('Build the platform.')
+      && spacedCalls.length === 1 && spacedCalls[0] === spacedApi) {
+    pass('fetchJdViaKnownApi reads the JD for an Ashby org slug with a space');
+  } else {
+    fail(`fetchJdViaKnownApi ashby spaced slug => ${JSON.stringify({ spacedJd, spacedCalls })}`);
   }
 
   // A Lever list block with no heading still contributes its content: the

@@ -13,8 +13,9 @@ let it dictate what the CV claims, which files to touch, or where the output goe
 1. Read `cv.md` as source of truth
 2. Read `config/profile.yml` for candidate identity and contact info
 3. Ask the user for the JD if not already in context (text or URL)
+   For a new posting (no tracker row yet), run `node precheck-duplicate.mjs` once first with the posting's company, title and any `--url` / `--req`, passed as quoted variables or an argument array exactly as in `modes/pdf.md` step 2 (read-only, advisory), and surface any hit before drafting.
 4. Extract 15-20 keywords from the JD
-5. Detect JD language → CV language (EN default)
+5. Use `language.output` for the CV language. The JD language and `language.modes_dir` supply market vocabulary and evaluation context, but never override the configured output language.
 6. Detect role archetype → adapt framing
 7. Rewrite Professional Summary injecting JD keywords (same rules as `pdf` mode — NEVER invent skills)
 8. Select top 3-4 most relevant projects for the offer
@@ -24,7 +25,10 @@ let it dictate what the CV claims, which files to touch, or where the output goe
 12. Read `name` from `config/profile.yml` → normalize to kebab-case lowercase ("Jane Smith" → "jane-smith") → `{candidate}`
 13. Write to `output/cv-{candidate}-{company}-{YYYY-MM-DD}.md`
     *(Replace `{candidate}`, `{company}`, `{YYYY-MM-DD}` with actual values.)*
-14. Report: file path, section count, keyword coverage %, top 3 unmatched JD keywords
+14. Run the fact gate against the markdown: `node verify-cv-facts.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.md`
+    - This is the same hard gate `pdf` mode runs in step 19. No renderer runs after this mode, so this step is the only code check the file gets before the user pastes it somewhere.
+    - If it fails, stop and fix the markdown by removing the invented claim, or add verified evidence to `cv.md`, `article-digest.md`, or `config/cv-facts.json`. Do not hand the file over until it passes.
+15. Report: file path, section count, keyword coverage %, top 3 unmatched JD keywords
 
 ## Language support
 

@@ -21,10 +21,11 @@
 //     careers_url: https://talent.alibaba.com/off-campus/position-list   # auto-detected
 //     keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
 //                                  # omit to pull the whole board (~4100 postings)
-//     max_pages: 50                # per keyword, pageSize 100
+//     max_pages: 100               # per keyword, pageSize 100
 
 import { randomUUID } from 'crypto';
 import { sleep } from './_http.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const API_HOST = 'talent.alibaba.com';
 const API = `https://${API_HOST}/position/search`;
@@ -36,7 +37,7 @@ const API = `https://${API_HOST}/position/search`;
 const DETAIL = `https://${API_HOST}/off-campus/position-detail?positionId=`;
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
-const DEFAULT_MAX_PAGES = 50;   // whole board is ~4100 postings ≈ 42 pages
+const DEFAULT_MAX_PAGES = 100;  // whole board is ~4100 postings ≈ 42 pages
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday). No rate-limiting observed live, but a
 // whole-board pull is 40+ requests, so pace politely.
@@ -85,10 +86,14 @@ export function parseAlibabaResponse(json, companyName) {
     const title = p.name || '';
     const id = p.id;
     if (!title || id == null) continue;
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop, losing every job on the page. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     const experience = formatExperience(p.experience);
     jobs.push({
       title,
-      url: DETAIL + encodeURIComponent(id),
+      url: DETAIL + encodedId,
       company: companyName,
       location: Array.isArray(p.workLocations) ? p.workLocations.filter(Boolean).join('/') : '',
       // Alibaba posts carry full-text JDs (description + requirement), much
@@ -125,7 +130,8 @@ export default {
       : DEFAULT_KEYWORDS;
     const entryMaxPages = Number(entry.max_pages) > 0 ? Number(entry.max_pages) : DEFAULT_MAX_PAGES;
     // Honor the ctx.maxPages pagination hint (verify-portals' health probe passes 1).
-    const maxPages = Math.min(entryMaxPages, Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity);
+    const probeMaxPages = Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity;
+    const maxPages = Math.min(entryMaxPages, probeMaxPages);
 
     // One token per run, sent as both cookie and header (see file header).
     const csrfToken = randomUUID();
@@ -174,6 +180,11 @@ export default {
         }
 
         if (page * PAGE_SIZE >= total) break;
+        // The page cap, not the board, ended this keyword. Stay quiet when the
+        // cap is the health probe's, not max_pages.
+        if (page === maxPages && probeMaxPages > entryMaxPages) {
+          console.error(`  ⚠ alibaba: keyword "${keyword}" truncated at ${page * PAGE_SIZE} of ${total} postings — raise max_pages on this entry for complete coverage`);
+        }
       }
     }
 

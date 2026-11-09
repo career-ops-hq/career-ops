@@ -10,22 +10,42 @@
  *      node analyze-patterns.mjs --summary (human-readable table)
  *      node analyze-patterns.mjs --min-threshold 3
  *      node analyze-patterns.mjs --min-vendor-n 8   (per-vendor sample floor)
+ *      node analyze-patterns.mjs --min-family-n 20  (role-family suggestion floor)
  *      node analyze-patterns.mjs --self-test
  */
 
 import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
-import { join, dirname, relative, sep } from 'path';
+import { join, dirname, relative, isAbsolute, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { load as yamlLoad } from 'js-yaml';
-import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
+import { resolveColumns, parseTrackerRow, normalizeVia, firstLinkTarget } from './tracker-parse.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { loadCanonicalStates, resolveCanonicalStateId, foldStatusInput, trackerLinkDirsFor, resolveWorkspaceRoot, resolveWorkspaceRootFor } from './tracker-utils.mjs';
+import { atsVendorOf } from './ats-vendor.mjs';
+import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+// Report links resolve from the same directories verify-pipeline.mjs checks:
+// the tracker's folder as realpathed and as spelled (a symlinked tracker FILE
+// writes links relative to its target; a symlinked data root, or macOS's
+// /var -> /private/var tmpdir, needs the spelled form, since withinReports()
+// compares lexically), then the data root.
+const TRACKER_DIRS = trackerLinkDirsFor(CAREER_OPS);
+// A CAREER_OPS_TRACKER that points at another workspace brings that
+// workspace's reports/ with it (see resolveWorkspaceRoot): the workspace of
+// the tracker as spelled, and of its target when the tracker is a symlink into
+// another workspace. The data root's own reports/ stays allowed for a tracker
+// kept apart from its reports.
+const REPORTS_ROOTS = [...new Set([
+  join(CAREER_OPS, 'reports'),
+  join(resolveWorkspaceRootFor(CAREER_OPS), 'reports'),
+  join(resolveWorkspaceRoot(APPS_FILE), 'reports'),
+])];
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
 
 const MACHINE_SUMMARY_FIELDS = new Set([
@@ -40,6 +60,11 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'top_strengths',
   'risk_level',
   'confidence',
+  // Evidence states and unresolved checks behind the existing confidence tier.
+  // Preserved for report consumers; historical outcome analysis does not use
+  // them to change the Global Score or calibration rates.
+  'score_evidence',
+  'confidence_gaps',
   'next_action',
   // Optional context fields accepted for future reports.
   'domain',
@@ -49,6 +74,9 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Issue 1380: predicted skip/discard reasons from the agent.
   'discard_reasons',
   'advertised_comp',
+  // JD-stated work location used by salary-gap's informational relocation
+  // comparison. Preserved for report consumers; pattern scoring ignores it.
+  'posting_location',
   'via',
   'company_confidential',
   'risk_summary',
@@ -58,6 +86,8 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Reporting line stated by the JD, verbatim (report + Machine Summary only).
   // Allowlisted so it round-trips; no consumer logic yet.
   'reports_to',
+  // Optional local cache metadata; never an input to candidate pattern analysis.
+  'job_facts_cache',
   // Block B's requirement -> importance table, mirrored row by row (evidence
   // tier, importance band, match). Allowlisted so it round-trips; no consumer
   // logic yet, deliberately: importance is score-neutral, so nothing that folds
@@ -67,61 +97,44 @@ const MACHINE_SUMMARY_FIELDS = new Set([
 
 const args = process.argv.slice(2);
 
-const KNOWN_FLAGS = ['--min-threshold', '--min-vendor-n', '--self-test', '--summary', '--help', '-h'];
-const VALUE_FLAGS = ['--min-threshold', '--min-vendor-n'];
+const KNOWN_FLAGS = ['--min-threshold', '--min-vendor-n', '--min-family-n', '--self-test', '--summary', '--help', '-h'];
+const VALUE_FLAGS = ['--min-threshold', '--min-vendor-n', '--min-family-n'];
 const USAGE = `Usage:
   node analyze-patterns.mjs                       # analyze application patterns as JSON
   node analyze-patterns.mjs --summary             # print a human-readable summary
   node analyze-patterns.mjs --min-threshold <n>   # minimum submitted applications required (default: 5)
   node analyze-patterns.mjs --min-vendor-n <n>    # minimum sample per vendor/channel (default: 8)
+  node analyze-patterns.mjs --min-family-n <n>    # minimum applications per role family before a suggestion (default: 20)
   node analyze-patterns.mjs --self-test           # run the built-in consistency checks
   node analyze-patterns.mjs --help                # show this message`;
 
 // --- CLI args ---
 const summaryMode = args.includes('--summary');
-const MIN_THRESHOLD = (() => {
-  const raw = flagValue(args, '--min-threshold');
-  if (raw === undefined) return 5;
 
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) ? 5 : value;
-})();
+// CLI values stay at their defaults when this module is imported by tests.
+// Parsing/validation is performed only in the main-module guard below.
+let MIN_THRESHOLD = 5;
+let MIN_VENDOR_N = 8;
 
-const MIN_VENDOR_N = (() => {
-  const raw = flagValue(args, '--min-vendor-n');
-  if (raw === undefined) return 8;
-
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) || value < 1 ? 8 : value;
-})();
-
-// --- Status normalization (mirrors verify-pipeline.mjs) ---
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated',
-  'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
-  'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'contratado': 'hired', 'contratada': 'hired', 'accepted': 'hired', 'accept': 'hired',
-  'descartado': 'discarded', 'descartada': 'discarded',
-  'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-};
+// --- Status normalization ---
+// Every alias comes from templates/states.yml, the single source of truth —
+// no table here. states.yml ships with the code, so it is read from the
+// script's own directory, never from the (overridable) data root.
+const CANONICAL_STATES = loadCanonicalStates(
+  join(dirname(fileURLToPath(import.meta.url)), 'templates', 'states.yml'));
 
 function normalizeStatus(raw) {
-  const clean = raw.replace(/\*\*/g, '').trim().toLowerCase()
-    .replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
-  return ALIASES[clean] || clean;
+  // An unrecognized status keeps its own folded text, so it still shows up
+  // under its own name in the funnel instead of vanishing.
+  return resolveCanonicalStateId(raw, CANONICAL_STATES)
+    ?? foldStatusInput(String(raw ?? '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, ''));
 }
 
 export function classifyOutcome(status) {
   const s = normalizeStatus(status);
   // 'hired' is the strongest positive outcome — a landed job. It must not fall
   // through to the 'pending' default, which would drag conversion rates down.
-  if (['hired', 'interview', 'offer', 'responded'].includes(s)) return 'positive';
+  if (['hired', 'interview', 'offer', 'responded', 'assessment'].includes(s)) return 'positive';
   // 'applied' is SENT, not answered: denominator only, never the numerator.
   // Mirrors ADVANCED_STATUSES, which already excludes it.
   if (s === 'applied') return 'awaiting';
@@ -266,21 +279,32 @@ export function scoreThresholdFrom(positiveScoresRaw, negativeScoresRaw) {
   };
 }
 
+// Vendor outcome analysis intentionally stays on the five URL-fingerprintable
+// community ATS families it has always reported. The shared detector knows
+// more providers for scan routing, but those do not widen this analysis.
+const VENDOR_ANALYSIS_SCOPE = Object.freeze(['greenhouse', 'lever', 'ashby', 'workday', 'icims']);
+
+/** Keep vendor analysis inside its declared taxonomy, not arbitrary hosts. */
+export function knownAtsVendorOf(rawUrl) {
+  const vendor = atsVendorOf(rawUrl);
+  return VENDOR_ANALYSIS_SCOPE.includes(vendor) ? vendor : null;
+}
+
 // Statuses that count as a submitted application for channel-yield analysis.
 // 'evaluated' was never sent, 'skip' is self-filtered, and 'discarded' (withdrawn
 // or the posting closed) proves neither a submission nor an answer — the same
 // set stats.mjs uses for its canonical funnel. Module-scoped so the self-test
 // can assert membership and the channel-yield pass and self-test share one set.
-const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'interview', 'offer', 'hired', 'rejected']);
+const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected']);
 
 // Statuses that count as "advanced past screening" — STRICTER than
 // outcome=='positive': a bare 'applied' (submitted, no reply yet) does NOT
 // count. 'hired' is the furthest advance of all.
-const ADVANCED_STATUSES = new Set(['responded', 'interview', 'offer', 'hired']);
+const ADVANCED_STATUSES = new Set(['responded', 'assessment', 'interview', 'offer', 'hired']);
 
 // Print order for the CONVERSION FUNNEL summary. A status absent here is
 // silently omitted from the printed funnel, so this must track states.yml.
-const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
+const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
 
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
@@ -295,15 +319,15 @@ function normalizeScalar(value) {
   return null;
 }
 
-function parseMachineSummary(content) {
-  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+export function parseMachineSummary(content) {
+  const fenceMatch = machineSummarySection(content).match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (!fenceMatch) return null;
 
   const raw = fenceMatch[1].trim();
   if (!raw) return null;
 
   try {
-    const parsed = yamlLoad(raw);
+    const parsed = loadYaml(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     return Object.fromEntries(
       Object.entries(parsed).filter(([key]) => MACHINE_SUMMARY_FIELDS.has(key))
@@ -330,7 +354,10 @@ function buildViaChannelAnalysis(submitted, isAdvanced, minSample = MIN_VENDOR_N
   const isDirect = (v) => v === '—' || v === '-';
   const agencySubmitted = submitted.filter(e => { const v = viaOf(e); return v !== '' && !isDirect(v); });
   const directSubmitted = submitted.filter(e => isDirect(viaOf(e)));
-  const rate = (arr) => (arr.length > 0 ? Math.round((arr.filter(isAdvanced).length / arr.length) * 100) : 0);
+  // null, not 0, for a channel nothing went through, as decidedRate is: a
+  // "direct 0 apps 0% advance" line reads as a channel that was tried and
+  // failed, for a user who simply applies through agencies.
+  const rate = (arr) => (arr.length > 0 ? Math.round((arr.filter(isAdvanced).length / arr.length) * 100) : null);
 
   const byAgency = new Map();
   for (const e of agencySubmitted) {
@@ -430,6 +457,7 @@ risk_level: "Medium"
 confidence: "High"
 next_action: "Follow up on ticket #42 with tailored CV"
 work_auth: "unstated"
+posting_location: "Halifax, NS"
 via: "Hays"
 company_confidential: true
 \`\`\`
@@ -444,6 +472,7 @@ company_confidential: true
   if (summary?.via !== 'Hays') failures.push('via was not preserved from Machine Summary');
   if (summary?.company_confidential !== true) failures.push('company_confidential boolean was not preserved from Machine Summary');
   if (summary?.work_auth !== 'unstated') failures.push('work_auth field was not preserved from Machine Summary');
+  if (summary?.posting_location !== 'Halifax, NS') failures.push('posting_location field was not preserved from Machine Summary');
 
   // Backward compat (#1737): summaries without risk_summary parse as before, key simply absent.
   if ('risk_summary' in (summary ?? {})) failures.push('summary without risk_summary must not gain the key');
@@ -533,14 +562,15 @@ requirement_importance:
     ['https://jobs.ashbyhq.com/acme/uuid', 'ashby'],
     ['https://acme.wd1.myworkdayjobs.com/en-US/careers/job/R-1', 'workday'],
     ['https://careers.icims.com/jobs/9/x', 'icims'],
-    ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', null],
+    ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', 'dayforce'],
+    ['https://careers.example.com/jobs/1', 'careers.example.com'],
     ['not a url', null],
     ['', null],
     [null, null],
   ];
   for (const [url, expected] of vendorCases) {
-    const got = detectVendor(url);
-    if (got !== expected) failures.push(`detectVendor(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+    const got = atsVendorOf(url);
+    if (got !== expected) failures.push(`atsVendorOf(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
 
   // Report header fields survive the locale they were written in. French output
@@ -777,6 +807,11 @@ requirement_importance:
     if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
     const sibling = join(CAREER_OPS, 'reports-evil', 'x.md');
     if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+    // The same lexical guard against a workspace's reports root (REPORTS_ROOTS).
+    const otherRoot = join(CAREER_OPS, 'workspace', 'reports');
+    if (withinReports(join(otherRoot, '..', '..', 'reports', 'x.md'), otherRoot)) failures.push('containment: traversal escaped a workspace reports root');
+    if (withinReports(join(otherRoot, '..', 'reports-evil', 'x.md'), otherRoot)) failures.push('containment: sibling of a workspace reports root wrongly accepted');
+    if (withinReports(otherRoot, otherRoot)) failures.push('containment: a reports root itself wrongly accepted as a report');
   }
 
   // Symlink-escape + missing-file graceful degradation (#2655). realpath
@@ -826,6 +861,16 @@ requirement_importance:
     }
   }
 
+  // Role-family interview rate (#6028): a small family must not earn a suggestion.
+  {
+    const rows = [];
+    for (let i = 1; i <= 8; i++) rows.push({ num: i, role: 'Office Administrator', normalizedStatus: i === 1 ? 'interview' : 'applied', report: null });
+    for (let i = 9; i <= 40; i++) rows.push({ num: i, role: 'Payroll Clerk', normalizedStatus: 'applied', report: null });
+    const rf = buildRoleFamilyInterviewRate(rows, '');
+    const admin = rf.families.find(f => f.family === 'Administrative');
+    if (admin?.verdict !== NOT_ENOUGH_DATA || rf.suggestions.length > 0) failures.push('role-family: 8 applications with 1 interview produced a suggestion');
+  }
+
   if (failures.length > 0) {
     console.error(`analyze-patterns self-test failed: ${failures.join('; ')}`);
     process.exit(1);
@@ -833,6 +878,12 @@ requirement_importance:
 
   console.log('analyze-patterns self-test OK (Machine Summary parser + vendor detection + via channel analysis)');
   process.exit(0);
+}
+
+// The ledger sits next to the tracker (same rule as stats.mjs/funnel-velocity.mjs).
+function readStatusLog() {
+  const file = join(dirname(APPS_FILE), 'status-log.tsv');
+  return existsSync(file) ? readFileSync(file, 'utf-8') : '';
 }
 
 // --- Parse applications.md ---
@@ -850,23 +901,24 @@ function parseTracker() {
 }
 
 // Canonical reports-root containment. A tracker link resolves to a candidate
-// path; accept it only if it stays inside the repo's reports/ directory. Two
+// path; accept it only if it stays inside a reports/ directory (the data
+// root's by default; see REPORTS_ROOTS for the others). Two
 // layers: a cheap lexical traversal guard (no stat) rejects a crafted link like
-// reports/../../etc/passwd, which join() collapses to a repo-relative path that
-// no longer starts with reports/; then realpath canonicalization rejects a
+// reports/../../etc/passwd, which join() collapses to a path that is no longer
+// under reports/; then realpath canonicalization rejects a
 // symlink whose target escapes reports/ (a lexical-only check would follow it).
 // realpathSync throws ENOENT/ENOTDIR for a not-yet-created candidate or a
 // missing reports root — both are non-fatal: a missing candidate falls through
 // to the downstream read (which returns null, preserving prior semantics), a
 // missing root means there are simply no reports. Only genuinely unexpected
-// errors rethrow, matching readTextIfExists. Identical to the guard in
-// upskill.mjs so both sites behave the same.
-function withinReports(candidate) {
-  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
-  if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
+// errors rethrow, matching readTextIfExists. The same guard as upskill.mjs's,
+// with the reports root as a parameter.
+function withinReports(candidate, reportsRoot = join(CAREER_OPS, 'reports')) {
+  const rootRelative = relative(reportsRoot, candidate);
+  if (!rootRelative || isAbsolute(rootRelative) || rootRelative.includes('..')) return false;
   let realRoot;
   try {
-    realRoot = realpathSync(join(CAREER_OPS, 'reports'));
+    realRoot = realpathSync(reportsRoot);
   } catch (err) {
     if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
     throw err;
@@ -1106,28 +1158,6 @@ function classifyRemote(raw) {
 // (which needs the full posting path to build an API URL) — a tracker report's
 // URL may point at a board/careers page, not a canonical posting.
 //
-// SCOPE (intentional): only ATS with clean, public URL fingerprints — Greenhouse,
-// Lever, Ashby, Workday, iCIMS. White-labeled ATS (UKG, Dayforce, and similar) are
-// NOT detectable from the URL alone and are deferred until the community adds a
-// reliable signal (e.g. confirmation-email domain). Undetected → 'unknown'.
-const VENDOR_HOST_PATTERNS = [
-  { id: 'greenhouse', test: (h) => /(^|\.)greenhouse\.io$/.test(h) },
-  { id: 'lever',      test: (h) => h === 'jobs.lever.co' || h.endsWith('.lever.co') },
-  { id: 'ashby',      test: (h) => h === 'jobs.ashbyhq.com' || h.endsWith('.ashbyhq.com') },
-  { id: 'workday',    test: (h) => h.endsWith('.myworkdayjobs.com') || h.endsWith('.myworkdaysite.com') },
-  { id: 'icims',      test: (h) => h.endsWith('.icims.com') },
-];
-
-function detectVendor(rawUrl) {
-  if (!rawUrl || typeof rawUrl !== 'string') return null;
-  let u;
-  try { u = new URL(rawUrl.trim()); } catch { return null; }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-  const host = u.hostname.toLowerCase();
-  for (const v of VENDOR_HOST_PATTERNS) if (v.test(host)) return v.id;
-  return null;
-}
-
 // --- Classify company size ---
 function classifyCompanySize(teamSize) {
   if (!teamSize) return 'unknown';
@@ -1155,6 +1185,110 @@ function extractBlockerType(gap) {
   if (/\b(senior|staff|lead|principal|director|manager|head)\b/.test(desc)) return 'seniority-mismatch';
   if (/\b(hybrid|on-?site|office|relocat)\b/.test(desc)) return 'onsite-requirement';
   return 'other';
+}
+
+function recordedDiscardReasons(entry) {
+  if (!REASON_BEARING.has(entry.outcome)) return new Set();
+  const matches = (entry.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi) || [];
+  return new Set(matches
+    .map(match => match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase())
+    .filter(Boolean));
+}
+
+// The vocabulary ships with the code, not with the user's data, so it resolves
+// from this file's directory rather than CAREER_OPS_ROOT.
+const DISCARD_REASONS_FILE = join(dirname(fileURLToPath(import.meta.url)), 'templates/discard-reasons.yml');
+
+/**
+ * Canonical discard-reason ids from templates/discard-reasons.yml (#2785).
+ * Returns null when the file is missing, malformed, or lists no id; callers
+ * then report every label as `other` instead of inventing a vocabulary.
+ */
+export function loadDiscardReasonVocabulary(file = DISCARD_REASONS_FILE) {
+  try {
+    const parsed = loadYaml(readFileSync(file, 'utf8'));
+    const reasons = Array.isArray(parsed?.reasons) ? parsed.reasons : [];
+    const ids = reasons.map(reason => reason?.id).filter(id => typeof id === 'string' && id);
+    return ids.length > 0 ? new Set(ids) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Spelling only: case, surrounding whitespace, and space/hyphen vs underscore.
+// Synonyms are never guessed; an unmatched label stays `other`.
+function discardReasonKey(label) {
+  return label.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+/**
+ * Forecasts stay separate from recorded outcomes (#2785). The base is tracker
+ * entries whose linked report explicitly supplies prediction data, including
+ * an empty list; a missing or malformed field is unknown, not an empty forecast.
+ * All statuses remain eligible: advancing later does not erase a prediction.
+ * Only canonical ids from templates/discard-reasons.yml enter the shares. Every
+ * other label is listed under `predictedDiscardReasonOther` with its own
+ * spelling (case and surrounding whitespace normalized) and is never counted
+ * in `predictedDiscardReasonStats`.
+ */
+export function buildPredictedDiscardReasonSignals(enriched, vocabulary = loadDiscardReasonVocabulary()) {
+  const counts = new Map();
+  const otherCounts = new Map();
+  let entriesWithOther = 0;
+  const coverage = {
+    entriesWithReports: 0,
+    entriesWithPredictionData: 0,
+    entriesWithPredictions: 0,
+    entriesWithRecordedReasons: 0,
+    // Valid prediction data (even []) plus an eligible recorded reason. This
+    // measures comparison coverage, never agreement between the two sources.
+    entriesWithBothSources: 0,
+  };
+  for (const entry of enriched) {
+    const hasRecordedReasons = recordedDiscardReasons(entry).size > 0;
+    if (hasRecordedReasons) coverage.entriesWithRecordedReasons++;
+    if (!entry.report) continue;
+    coverage.entriesWithReports++;
+    const raw = entry.report.machineSummary?.discard_reasons;
+    // normalizeList accepts scalars for older reports, but also stringifies
+    // objects inside lists. Do not publish those coercions as predicted reasons.
+    if (typeof raw !== 'string'
+        && !(Array.isArray(raw) && raw.every(reason => typeof reason === 'string'))) continue;
+    coverage.entriesWithPredictionData++;
+    if (hasRecordedReasons) coverage.entriesWithBothSources++;
+    const reasons = new Set((entry.report.discardReasons || [])
+      .map(reason => reason.trim().toLowerCase()).filter(Boolean));
+    if (reasons.size > 0) coverage.entriesWithPredictions++;
+    const canonical = new Set();
+    const other = new Set();
+    for (const reason of reasons) {
+      const key = discardReasonKey(reason);
+      if (vocabulary?.has(key)) canonical.add(key);
+      else other.add(reason);
+    }
+    for (const reason of canonical) counts.set(reason, (counts.get(reason) || 0) + 1);
+    for (const reason of other) otherCounts.set(reason, (otherCounts.get(reason) || 0) + 1);
+    if (other.size > 0) entriesWithOther++;
+  }
+  const base = coverage.entriesWithPredictionData;
+  const byFrequency = (a, b) => b.frequency - a.frequency || a.reason.localeCompare(b.reason);
+  return {
+    predictedDiscardReasonStats: [...counts.entries()]
+      .map(([reason, frequency]) => ({ reason, frequency, percentage: Math.round(frequency / base * 100) }))
+      .sort(byFrequency),
+    // Reported beside the shares, never inside them. A growing `entries` share
+    // is the signal that the vocabulary needs a new member.
+    predictedDiscardReasonOther: {
+      vocabularyLoaded: vocabulary !== null,
+      entries: entriesWithOther,
+      percentage: base ? Math.round(entriesWithOther / base * 100) : 0,
+      reasons: [...otherCounts.entries()]
+        .map(([reason, frequency]) => ({ reason, frequency }))
+        .sort(byFrequency),
+    },
+    predictedDiscardReasonBase: base,
+    discardReasonCoverage: coverage,
+  };
 }
 
 /**
@@ -1187,15 +1321,7 @@ function buildPatternSignals(enriched) {
 
   const discardReasonCounts = new Map();
   for (const e of enriched) {
-    if (!REASON_BEARING.has(e.outcome)) continue;
-    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
-    if (!notesMatch) continue;
-    const entryReasons = new Set();
-    for (const match of notesMatch) {
-      const key = match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
-      if (key) entryReasons.add(key);
-    }
-    for (const key of entryReasons) {
+    for (const key of recordedDiscardReasons(e)) {
       discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
     }
   }
@@ -1246,29 +1372,137 @@ function buildPatternSignals(enriched) {
 }
 
 // --- Main analysis ---
-function analyze() {
-  const entries = parseTracker();
+// --- Interview rate by role family (#6028) ---
+// Advisory and read-only: groups rows by role family and reports how often each
+// family reached Interview, so a user can see where applications convert. It
+// never feeds scoring, targeting or portals.yml.
+//
+// Role family = the archetype recorded in the row's report; rows without one
+// fall back to the first matching keyword group below (first match wins), and
+// otherwise land in "Unclassified". The table is built in and deliberately
+// small; it is system-layer code, so user-specific families belong in report
+// archetypes (user layer), not here.
+const ROLE_FAMILY_KEYWORDS = Object.freeze([
+  ['HR / people operations', /\b(hr|human resources|talent|recruit\w*|payroll|people (ops|operations|partner|coordinator))\b/i],
+  ['Learning and development', /\b(instruction\w*|learning|training|curriculum|l&d|e-?learning|educator|teacher)\b/i],
+  ['Administrative', /\b(administrat\w*|office|receptionist|secretary|executive assistant|clerk)\b/i],
+  ['Data and reporting', /\b(data|analyst|analytics|reporting|bi)\b/i],
+  ['Software engineering', /\b(software|engineer\w*|developer|devops|programmer)\b/i],
+]);
+const UNCLASSIFIED_FAMILY = 'Unclassified';
+const familyKey = (name) => name.normalize('NFKC').toLowerCase();
+const UNCLASSIFIED_KEY = familyKey(UNCLASSIFIED_FAMILY);
+// A suggestion needs at least this many applications in the family AND a rate
+// at least this multiple of the overall rate. Below either, only counts print.
+let MIN_FAMILY_N = 20;
+const MIN_FAMILY_LIFT = 2;
+const NOT_ENOUGH_DATA = 'not enough data';
 
+export function roleFamilyOf(entry) {
+  const archetype = String(entry?.report?.archetype ?? '').trim();
+  if (archetype) return archetype;
+  const role = String(entry?.role ?? '');
+  for (const [family, re] of ROLE_FAMILY_KEYWORDS) {
+    if (re.test(role)) return family;
+  }
+  return UNCLASSIFIED_FAMILY;
+}
+
+/** Wilson 95% interval for k of n, as percentages with one decimal. */
+function wilson95(k, n) {
+  if (n === 0) return null;
+  const z = 1.96, p = k / n, d = 1 + (z * z) / n;
+  const centre = (p + (z * z) / (2 * n)) / d;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  const r1 = (x) => Math.round(x * 1000) / 10;
+  return [r1(Math.max(0, centre - half)), r1(Math.min(1, centre + half))];
+}
+
+/**
+ * Interview rate per role family. "Reached interview" folds the status-log the
+ * same way stats.mjs/funnel-velocity.mjs do (recoverFunnelStages), so a row
+ * rejected after an interview still counts; with no ledger it falls back to
+ * the current status. Only rows that were actually applied count.
+ *
+ * @param {Array} enriched - tracker rows (num, role, normalizedStatus, report).
+ * @param {string} [statusLogContent] - raw data/status-log.tsv text.
+ */
+export function buildRoleFamilyInterviewRate(enriched, statusLogContent = '', { minFamilyN = MIN_FAMILY_N } = {}) {
+  const ledger = parseStatusLogStages(statusLogContent);
+  const statusByNum = new Map(enriched.map(e => [e.num, e.normalizedStatus]));
+  const reached = recoverFunnelStages(statusByNum, ledger);
+  const r1 = (x) => Math.round(x * 10) / 10;
+
+  const groups = new Map();
+  const seen = new Set();
+  let applied = 0, interviews = 0;
+  for (const e of enriched) {
+    if (seen.has(e.num)) continue;
+    seen.add(e.num);
+    const rank = reached.get(e.num) || 0;
+    if (rank < 1) continue;
+    const family = roleFamilyOf(e);
+    const key = familyKey(family);
+    if (!groups.has(key)) groups.set(key, { family, applied: 0, interviews: 0 });
+    const g = groups.get(key);
+    g.applied++;
+    applied++;
+    if (rank >= 4) { g.interviews++; interviews++; }
+  }
+
+  const families = [...groups.entries()].map(([key, g]) => {
+    const sufficientSample = g.applied >= minFamilyN;
+    const lifts = interviews > 0 && g.interviews > 0
+      && g.interviews * applied >= MIN_FAMILY_LIFT * interviews * g.applied;
+    const suggest = key !== UNCLASSIFIED_KEY && sufficientSample && lifts;
+    return {
+      family: g.family,
+      applied: g.applied,
+      interviews: g.interviews,
+      ratePct: r1((g.interviews / g.applied) * 100),
+      ci95Pct: sufficientSample ? wilson95(g.interviews, g.applied) : null,
+      sufficientSample,
+      verdict: suggest ? 'suggest' : (sufficientSample ? 'no clear lift' : NOT_ENOUGH_DATA),
+    };
+  }).sort((a, b) => b.applied - a.applied || a.family.localeCompare(b.family));
+
+  const overallRatePct = applied > 0 ? r1((interviews / applied) * 100) : null;
+  const suggestions = families.filter(f => f.verdict === 'suggest').map(f =>
+    `${f.family}: ${f.interviews}/${f.applied} reached interview (${f.ratePct}%) vs ${overallRatePct}% overall -- consider weighting more applications here. Advisory only; location, pay and visa fit may still outweigh it.`);
+
+  return {
+    basis: ledger.length > 0 ? 'ledger' : 'snapshot',
+    minFamilyN,
+    minLiftRatio: MIN_FAMILY_LIFT,
+    overall: { applied, interviews, ratePct: overallRatePct },
+    families,
+    suggestions,
+  };
+}
+
+export function analyze(entries = parseTracker(), { statusLogContent } = {}) {
   if (entries.length === 0) {
-    return { error: 'No applications found in tracker.' };
+    // noData marks this as the empty-tracker case rather than a failure, so the
+    // exit status below does not have to match on the message text.
+    return { error: 'No applications found in tracker.', noData: true };
   }
 
   // Enrich entries with report data and classification
   const enriched = entries.map(e => {
-    const reportMatch = e.report.match(/\]\(([^)]+)\)/);
+    const reportTarget = firstLinkTarget(e.report);
     // Tracker links are relative to the tracker file's own directory (see
-    // merge-tracker.mjs link normalization); fall back to repo root for
-    // legacy root-relative links. Each candidate is guarded to reports/
-    // before the read is attempted; parseReport returns null for a missing
-    // file, so no pre-flight existsSync is needed (#2385).
+    // merge-tracker.mjs link normalization, and TRACKER_DIRS); fall back to
+    // repo root for legacy root-relative links. Each candidate is guarded to
+    // a reports/ root before the read is attempted; parseReport returns null
+    // for a missing file, so no pre-flight existsSync is needed (#2385).
     let reportData = null;
-    if (reportMatch) {
+    if (reportTarget != null) {
       const candidates = new Set([
-        join(dirname(APPS_FILE), reportMatch[1]),
-        join(CAREER_OPS, reportMatch[1]),
+        ...TRACKER_DIRS.map((dir) => join(dir, reportTarget)),
+        join(CAREER_OPS, reportTarget),
       ]);
       for (const candidate of candidates) {
-        if (!withinReports(candidate)) continue;
+        if (!REPORTS_ROOTS.some((root) => withinReports(candidate, root))) continue;
         reportData = parseReport(candidate);
         if (reportData) break;
       }
@@ -1291,7 +1525,7 @@ function analyze() {
       report: reportData,
       remoteBucket: classifyRemote(remoteSource),
       companySize: classifyCompanySize(teamSource),
-      vendor: detectVendor(reportData?.url),
+      vendor: knownAtsVendorOf(reportData?.url),
     };
   });
 
@@ -1399,7 +1633,7 @@ function analyze() {
 
   const identifiedCount = submitted.length - (vendorMap.get('unknown')?.total || 0);
   const vendorAnalysis = {
-    scope: ['greenhouse', 'lever', 'ashby', 'workday', 'icims'],
+    scope: [...VENDOR_ANALYSIS_SCOPE],
     minSampleForClaim: MIN_VENDOR_N,
     submitted: submitted.length,
     identified: identifiedCount,
@@ -1522,7 +1756,7 @@ function analyze() {
     metadata: {
       total: enriched.length,
       dateRange: { from: dates[0], to: dates[dates.length - 1] },
-      analysisDate: new Date().toISOString().split('T')[0],
+      analysisDate: localToday(),
       byOutcome,
       // The same rates as every breakdown row, over the whole tracker — the
       // one honest place to quote "X% of what I sent advanced".
@@ -1531,6 +1765,7 @@ function analyze() {
     funnel,
     scoreComparison,
     archetypeBreakdown,
+    roleFamilyInterviewRate: buildRoleFamilyInterviewRate(enriched, statusLogContent ?? readStatusLog()),
     blockerAnalysis,
     remotePolicy,
     companySizeBreakdown,
@@ -1539,6 +1774,7 @@ function analyze() {
     scoreThreshold,
     techStackGaps,
     discardReasonStats,
+    ...buildPredictedDiscardReasonSignals(enriched),
     // Populations the percentages above are shares of. Exported because a
     // consumer cannot sanity-check a rate whose denominator is invisible —
     // that opacity is precisely what let the wrong base survive unnoticed.
@@ -1555,7 +1791,7 @@ function printSummary(result) {
     return;
   }
 
-  const { metadata, funnel, scoreComparison, archetypeBreakdown, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, discardReasonStats, recommendations } = result;
+  const { metadata, funnel, scoreComparison, archetypeBreakdown, roleFamilyInterviewRate, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, discardReasonStats, recommendations } = result;
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  Pattern Analysis — ${metadata.analysisDate}`);
@@ -1579,6 +1815,21 @@ function printSummary(result) {
     if (stats.count > 0) {
       console.log(`  ${group.padEnd(15)} avg ${stats.avg}/5  (${stats.count} entries, range ${stats.min}-${stats.max})`);
     }
+  }
+
+  // Interview rate by role family (#6028)
+  const rf = roleFamilyInterviewRate;
+  if (rf && rf.families.length > 0) {
+    console.log('\nINTERVIEW RATE BY ROLE FAMILY');
+    console.log('-'.repeat(40));
+    console.log(`  overall ${rf.overall.interviews}/${rf.overall.applied} reached interview (${rf.overall.ratePct}%)${rf.basis === 'ledger' ? '; status-log history folded' : ''}`);
+    for (const f of rf.families) {
+      const ci = f.ci95Pct ? ` 95% CI ${f.ci95Pct[0]}-${f.ci95Pct[1]}%` : '';
+      const tail = f.verdict === 'suggest' ? 'focus here' : f.verdict;
+      console.log(`  ${f.family.slice(0, 28).padEnd(28)} n=${String(f.applied).padStart(3)}  ${String(f.interviews).padStart(2)} interviews  ${String(f.ratePct).padStart(5)}%${ci}  ${tail}`);
+    }
+    for (const s of rf.suggestions) console.log(`  -> ${s}`);
+    console.log(`  A suggestion needs n >= ${rf.minFamilyN} and a rate >= ${rf.minLiftRatio}x overall.`);
   }
 
   // Blockers
@@ -1617,6 +1868,33 @@ function printSummary(result) {
     }
   }
 
+  const coverage = result.discardReasonCoverage;
+  console.log(`\nPREDICTED DISCARD / SKIP REASONS (of ${result.predictedDiscardReasonBase} entries with prediction data)`);
+  console.log('-'.repeat(40));
+  console.log(`  Prediction data: ${coverage.entriesWithPredictionData}/${coverage.entriesWithReports} entries with linked reports; ${coverage.entriesWithPredictions} contain reasons.`);
+  console.log(`  Recorded reasons: ${coverage.entriesWithRecordedReasons}/${result.discardReasonBase} eligible entries; ${coverage.entriesWithBothSources} entries have both sources.`);
+  console.log('  Forecasts cover all statuses; recorded reasons cover skipped, discarded, and rejected entries.');
+  console.log('  Predictions are not outcomes. Missing data is unknown; canonical ids are matched by spelling, not meaning.');
+  const other = result.predictedDiscardReasonOther;
+  if (!other.vocabularyLoaded) {
+    console.log('  templates/discard-reasons.yml could not be read; every predicted reason is listed as other.');
+  }
+  if (result.predictedDiscardReasonBase === 0) {
+    console.log('  No prediction data recorded yet.');
+  } else if (result.predictedDiscardReasonStats.length === 0 && other.reasons.length === 0) {
+    console.log('  No reasons predicted in the recorded data.');
+  } else {
+    for (const d of result.predictedDiscardReasonStats.slice(0, 10)) {
+      console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
+    }
+    if (other.entries > 0) {
+      console.log(`  other (outside the vocabulary, not counted above): ${other.entries} entries (${other.percentage}%)`);
+      for (const d of other.reasons.slice(0, 10)) {
+        console.log(`    ${d.reason.padEnd(28)} ${String(d.frequency).padStart(2)}x`);
+      }
+    }
+  }
+
   // ATS vendor / channel analysis
   const va = result.vendorAnalysis;
   if (va && va.breakdown.length > 0) {
@@ -1635,8 +1913,10 @@ function printSummary(result) {
   if (via && (via.breakdown.length > 0 || via.directSubmitted > 0)) {
     console.log('\nVIA CHANNEL ANALYSIS (agency vs direct, #1596)');
     console.log('-'.repeat(40));
-    console.log(`  direct  ${String(via.directSubmitted).padStart(3)} apps  ${String(via.directAdvanceRate).padStart(3)}% advance`);
-    console.log(`  agency  ${String(via.agencySubmitted).padStart(3)} apps  ${String(via.agencyAdvanceRate).padStart(3)}% advance`);
+    // A channel with no submissions has no rate; "—" keeps the column aligned.
+    const pct = (r) => (r == null ? '   —' : `${String(r).padStart(3)}%`);
+    console.log(`  direct  ${String(via.directSubmitted).padStart(3)} apps  ${pct(via.directAdvanceRate)} advance`);
+    console.log(`  agency  ${String(via.agencySubmitted).padStart(3)} apps  ${pct(via.agencyAdvanceRate)} advance`);
     if (via.unknownVia > 0) {
       console.log(`  unknown ${String(via.unknownVia).padStart(3)} apps  (no Via recorded — not counted in either channel)`);
     }
@@ -1678,6 +1958,37 @@ if (isMainModule(import.meta.url)) {
     requireOperand: true,
   });
 
+  const rawMinThreshold = flagValue(args, '--min-threshold');
+  const rawMinVendorN = flagValue(args, '--min-vendor-n');
+
+  if (hasFlag(args, '--min-threshold')) {
+    if (rawMinThreshold === undefined || !/^\d+$/.test(String(rawMinThreshold)) ||
+        !Number.isSafeInteger(Number(rawMinThreshold))) {
+      console.error(`Error: --min-threshold requires a non-negative integer, got "${rawMinThreshold ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_THRESHOLD = Number(rawMinThreshold);
+  }
+
+  if (hasFlag(args, '--min-family-n')) {
+    const rawMinFamilyN = flagValue(args, '--min-family-n');
+    if (rawMinFamilyN === undefined || !/^\d+$/.test(String(rawMinFamilyN)) ||
+        !Number.isSafeInteger(Number(rawMinFamilyN)) || Number(rawMinFamilyN) < 1) {
+      console.error(`Error: --min-family-n requires a positive integer, got "${rawMinFamilyN ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_FAMILY_N = Number(rawMinFamilyN);
+  }
+
+  if (hasFlag(args, '--min-vendor-n')) {
+    if (rawMinVendorN === undefined || !/^\d+$/.test(String(rawMinVendorN)) ||
+        !Number.isSafeInteger(Number(rawMinVendorN)) || Number(rawMinVendorN) < 1) {
+      console.error(`Error: --min-vendor-n requires a positive integer, got "${rawMinVendorN ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_VENDOR_N = Number(rawMinVendorN);
+  }
+
   if (args.includes('--self-test')) {
     runSelfTest();
   }
@@ -1690,5 +2001,16 @@ if (isMainModule(import.meta.url)) {
     console.log(JSON.stringify(result, null, 2));
   }
 
-  if (result.error) process.exit(1);
+  // "No applications found" is the state of a NEW USER, not a failure. Every
+  // other analysis script over the same tracker — stats, upskill, salary-gap,
+  // process-quality, rejection-latency, detect-reposts, company-history,
+  // calibrate, funnel-velocity, tracker-sync-check — reports it and exits 0.
+  // This one exited 1, which breaks `&&` chaining and makes the batch runners
+  // treat an empty tracker as a broken command.
+  //
+  // Still non-zero for a genuine failure: the check is on the KIND of error, so
+  // a future `result.error` that is not "no data" keeps its exit 1. Written as
+  // an allowlist of no-data codes rather than a message match, so the exit
+  // status does not depend on prose.
+  if (result.error && !result.noData) process.exit(1);
 }

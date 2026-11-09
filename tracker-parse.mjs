@@ -12,7 +12,9 @@
  * leading pipe, so the first real column ("#"/num) is index 1.
  */
 
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
+import { join } from 'path';
+import { createHash } from 'node:crypto';
 
 /** The original fixed 9-column layout (num … notes at indices 1 … 9). */
 export const LEGACY_COLMAP = {
@@ -61,6 +63,21 @@ export const SCORE_CELL_RE = /^\d+(?:\.\d+)?\/5$/;
 export function looksLikeScoreCell(v) {
   const t = String(v ?? '').replace(/\*\*/g, '').trim();
   return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP' || t === '—' || t === '-';
+}
+
+/**
+ * Parse numeric score from a Score cell string.
+ *
+ * Extracts the first number (including decimals), stripping markdown bold syntax.
+ * Normalizes European decimal comma to dot. Returns 0 when no numeric value is
+ * present, preserving the documented tracker 'no score' sentinel (#2803).
+ *
+ * @param {string} [s] - Raw score cell such as `4.2/5` or `**4.2/5**`.
+ * @returns {number} Parsed score, or 0 when no numeric value is present.
+ */
+export function parseScore(s) {
+  const m = String(s ?? '').replace(/\*\*/g, '').match(/(\d+(?:[.,]\d+)?)/);
+  return m ? parseFloat(m[1].replace(',', '.')) : 0;
 }
 
 /**
@@ -240,6 +257,24 @@ export function resolveTsvColumns(cells) {
   return { map, missing, duplicates, unknown };
 }
 
+// The dashboard also reads legacy rows with a leading pipe and tab-separated
+// cells. Opt in only where readers/writers handle that format: other writers
+// still rebuild pipe rows and must not silently start accepting tab rows. A tab
+// inside a normal pipe table is ordinary whitespace, not a column delimiter.
+export function trackerRowSeparator(line) {
+  return line.includes('\t') && line.split('|').length <= 3 ? '\t' : '|';
+}
+
+/** Return raw cells in the same index space as line.split('|'). */
+export function splitTrackerCells(line) {
+  if (trackerRowSeparator(line) === '|') return line.split('|');
+  const opening = line.indexOf('|');
+  if (opening < 0) return line.split('|');
+  const closing = line.trimEnd().endsWith('|') ? line.lastIndexOf('|') : -1;
+  const body = line.slice(opening + 1, closing > opening ? closing : undefined);
+  return [line.slice(0, opening), ...body.split('\t'), ...(closing > opening ? [line.slice(closing + 1)] : [])];
+}
+
 /**
  * Scan the table for a header row and build a field-name → column-index map.
  * Indexing matches `line.split('|')`. Returns null — caller should fall back to
@@ -247,12 +282,14 @@ export function resolveTsvColumns(cells) {
  * line can't yield a bogus mapping.
  *
  * @param {string[]} lines - All lines of applications.md.
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options] - Explicit legacy-layout support.
  * @returns {Object<string,number>|null}
  */
-export function detectColumns(lines) {
+export function detectColumns(lines, { allowTabs = false, allowIndentation = false } = {}) {
   for (const line of lines) {
-    if (!line.startsWith('|')) continue;
-    const map = headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase()));
+    if (!(allowIndentation ? line.trimStart() : line).startsWith('|')) continue;
+    const cells = allowTabs ? splitTrackerCells(line) : line.split('|');
+    const map = headerSchemaMap(cells.map(s => s.trim().toLowerCase()));
     if (map) return map;
   }
   return null;
@@ -261,10 +298,11 @@ export function detectColumns(lines) {
 /**
  * Convenience: detect the header layout, falling back to the legacy fixed one.
  * @param {string[]} lines
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options]
  * @returns {Object<string,number>}
  */
-export function resolveColumns(lines) {
-  return detectColumns(lines) || LEGACY_COLMAP;
+export function resolveColumns(lines, options) {
+  return detectColumns(lines, options) || LEGACY_COLMAP;
 }
 
 /**
@@ -275,11 +313,12 @@ export function resolveColumns(lines) {
  *
  * @param {string} line - One line from applications.md.
  * @param {Object<string,number>} [colmap] - From resolveColumns(); defaults to legacy.
- * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,location?,raw}`.
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options] - Opt in only when writes preserve this layout.
+ * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,url,location?,via?,raw}`.
  */
-export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
-  if (typeof line !== 'string' || !line.startsWith('|')) return null;
-  const parts = line.split('|').map(s => s.trim());
+export function parseTrackerRow(line, colmap = LEGACY_COLMAP, { allowTabs = false, allowIndentation = false } = {}) {
+  if (typeof line !== 'string' || !(allowIndentation ? line.trimStart() : line).startsWith('|')) return null;
+  const parts = (allowTabs ? splitTrackerCells(line) : line.split('|')).map(s => s.trim());
   // Dynamic width guard: a complete row splits into leading '' + one cell per
   // column (+ trailing '' when the row ends with a pipe). Anything shorter is
   // missing a cell, and a missing INTERIOR cell shifts every later column one
@@ -302,23 +341,88 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
     pdf: at('pdf'),
     report: at('report'),
     notes: at('notes'),
+    // The posting URL, always the HREF rather than the raw cell (#3516): the
+    // cell is written as a markdown link, and `normalizeUrl('[l](u)')` returns
+    // '' — which every consumer reads as "this row has no URL", not as a parse
+    // failure. Always present (''), never conditional on the column existing,
+    // so `row.url` means the same thing on every tracker layout.
+    url: extractCellUrl(at('url')),
     raw: line,
   };
   if (colmap.location != null) row.location = at('location');
   if (colmap.via != null) row.via = at('via');
+  // No `row.url = at('url')` here. `url` is set above, always the HREF, and
+  // scan.mjs's same-title requisition dedup (#4267) reads it off this row:
+  // re-assigning the raw cell hands it `[label](href)`, from which no
+  // requisition id can be extracted, so two distinct openings read as one.
   return row;
 }
 
 /**
- * Extract report IDs referenced by one tracker Report cell.
+ * Hash of every parsed cell of a tracker row except Status.
  *
- * Both the numeric markdown label and the local report filename are returned.
- * Keeping both makes tracker drift visible instead of silently trusting one
- * side of a malformed link. External URLs are ignored even when their path
- * happens to contain a reports/ segment.
+ * A reviewer that shows a row, asks a human, and then hands the write to
+ * set-status.mjs (`--expect-row`) needs to know the row it writes is still the
+ * one that was shown. Status is left out because it has its own guard
+ * (`--expect-status`), and `raw` because it repeats the status cell.
  *
- * @param {string} reportCell - Raw Report cell value.
- * @returns {number[]} Unique positive report IDs in encounter order.
+ * @param {object} row - parseTrackerRow output (extra keys such as lineIdx are ignored).
+ * @returns {string} Lowercase SHA-256 hex digest.
+ */
+export function trackerRowIdentity(row) {
+  const cells = ['num', 'date', 'company', 'role', 'score', 'pdf', 'report', 'notes', 'url', 'location', 'via']
+    .map(key => [key, row[key] ?? null]);
+  return createHash('sha256').update(JSON.stringify(cells), 'utf8').digest('hex');
+}
+
+// Matches the req/job-number labels actually seen in this tracker's free-text
+// Notes column: `R_1488728`, `Req PRACT011038`, `Req #1311`, `REQ-2026-32061`,
+// `Job 202606-116491`, `Job ID 65136`, `Posting ID 5340`, `JR00124259`,
+// `Ref R2857957`. The label is required so we don't grab an unrelated number
+// (a salary figure, a date fragment) — only text explicitly tagged as a
+// req/job/posting/reference id counts.
+//
+// One id-parameter name may sit between the label and the id (`job id gh_jid
+// 1234567`, where `gh_jid` is the Greenhouse parameter the id came from). The id
+// must contain a digit, so without this skip the parameter name ended the match
+// and the row lost its req id. Only named id parameters are skipped, never any
+// snake_case word: `job posted_at 2026-10-01` must not read the date as an id,
+// since two rows with different dates would then block a legitimate merge.
+export const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)(?:[\s:#-]+(?:gh_jid|(?:job|req|requisition|posting)_id)(?=[\s:#-]))?[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
+
+/**
+ * Extract a req/job/posting number from a tracker Notes cell, if present.
+ *
+ * Tier-3 duplicate detection (company + fuzzy role match) has no awareness of
+ * req numbers on its own, which lets two distinct postings at the same company
+ * with similarly-worded titles collapse into one row (#1524 — e.g. two TD Bank
+ * L&D postings distinguished only by `R_1494379` vs `R_1488728`). This helper
+ * pulls out that number so the caller can treat a confirmed mismatch as proof
+ * the rows are NOT duplicates, without touching cases where no number is
+ * present on either side. Shared by merge-tracker.mjs (tracker merge) and
+ * scan.mjs (company+role scan dedupe).
+ *
+ * @param {string} notes - Raw Notes cell from a tracker row or TSV addition.
+ * @returns {string|null} Uppercased req/job number, or null when none is found.
+ */
+export function extractReqNumber(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(REQ_NUMBER_RE);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * The destination of one markdown link, given everything between `](` and the
+ * matching `)`.
+ *
+ * Deliberately not a `\(([^)]+)\)` one-liner: a destination may be wrapped in
+ * angle brackets, may contain balanced parentheses, and may escape either.
+ * Getting that wrong truncates the destination — and for the URL cell a
+ * truncated href is worse than none at all, because normalizeUrl() still parses
+ * it and it becomes a WRONG dedup key rather than an absent one.
+ *
+ * @param {string} raw - Text after `](`, up to the closing paren.
+ * @returns {string|null} The destination, or null when there is none.
  */
 function markdownLinkDestination(raw) {
   const value = String(raw).trimStart();
@@ -351,7 +455,52 @@ function markdownLinkDestination(raw) {
   return destination ? destination.replace(/\\([\\()<> ])/g, '$1') : null;
 }
 
-function parseMarkdownLinks(value) {
+/**
+ * Every markdown link in a string, as `{label, target}` in encounter order.
+ *
+ * Shared by the two tracker cells that carry links — `Report`
+ * (`[61](../reports/061-….md)`) and `URL` (`[ashby](https://…)`, #3516) — so
+ * the strict destination handling above can never be half-applied to one of
+ * them. Every script that reads a link out of either cell goes through here
+ * (or through firstLinkTarget / soleMarkdownLink below): a private
+ * `\]\(([^)]+)\)` copy cut a report named `001-acme-(berlin)-….md` short at
+ * the first `)`, so set-status --report-link refused the row and
+ * verify-pipeline called a present report missing (#5482).
+ *
+ * @param {string} value - A raw tracker cell.
+ * @returns {{label: string, target: string}[]}
+ */
+export function parseMarkdownLinks(value) {
+  return scanMarkdownLinks(value).map(({ label, target }) => ({ label, target }));
+}
+
+/**
+ * The destination of the first markdown link in a cell, or null when the cell
+ * holds none.
+ *
+ * @param {string} value - A raw tracker cell.
+ * @returns {string|null}
+ */
+export function firstLinkTarget(value) {
+  return scanMarkdownLinks(String(value ?? ''))[0]?.target ?? null;
+}
+
+/**
+ * The cell's one link, when the trimmed cell is exactly one markdown link and
+ * nothing else; null otherwise (no link, two links, or text around it).
+ *
+ * @param {string} value - A raw tracker cell.
+ * @returns {{label: string, target: string}|null}
+ */
+export function soleMarkdownLink(value) {
+  const cell = String(value ?? '').trim();
+  const links = scanMarkdownLinks(cell);
+  if (links.length !== 1 || links[0].start !== 0 || links[0].end !== cell.length) return null;
+  return { label: links[0].label, target: links[0].target };
+}
+
+// parseMarkdownLinks plus each link's span in `value` (`end` exclusive).
+function scanMarkdownLinks(value) {
   const links = [];
   let cursor = 0;
   while (cursor < value.length) {
@@ -389,52 +538,161 @@ function parseMarkdownLinks(value) {
     }
 
     const target = markdownLinkDestination(value.slice(labelEnd + 2, linkEnd));
-    if (target != null) links.push({ label: value.slice(labelStart + 1, labelEnd), target });
+    if (target != null) links.push({ label: value.slice(labelStart + 1, labelEnd), target, start: labelStart, end: linkEnd + 1 });
     cursor = linkEnd + 1;
   }
   return links;
 }
 
-export function extractTrackerReportNumbers(reportCell, notesCell = '') {
+/**
+ * The posting URL a tracker `URL` cell points at, in either written form.
+ *
+ * The cell is written as a markdown link (`[careers.acme.com](https://…)`) so
+ * the table stays readable — a raw posting URL runs to 141 characters and
+ * pushes every other column off screen (#3516). Older trackers, and any row a
+ * merge has not rewritten since, still carry the bare URL. Both forms must
+ * produce the SAME dedup key, which is why the extraction lives HERE, in the
+ * shared row parser, rather than inside merge-tracker alone.
+ *
+ * THE FAILURE THIS PREVENTS IS SILENT. `normalizeUrl()` (url-key.mjs) starts
+ * with `new URL(s)` and returns '' when that throws, and '' means "this row has
+ * no URL" — not "parse error". So handing it a markdown-wrapped cell does not
+ * error: the row quietly drops out of merge-tracker's exact-match dedup tier
+ * (Pass 0) and falls back to fuzzy company+role, where two genuinely distinct
+ * postings at one employer merge into one row. The damage surfaces much later,
+ * with nothing tying it back to a formatting change.
+ *
+ * The first http(s) link target wins; a cell with no link (a bare URL, `N/A`,
+ * `—`, empty) is returned verbatim, so the callers' placeholder handling and
+ * normalizeUrl()'s "no key is not a key" rule keep working unchanged.
+ *
+ * @param {string} cellValue - Raw `URL` cell from a tracker row.
+ * @returns {string} The href, or the trimmed cell when it holds no link.
+ */
+export function extractCellUrl(cellValue) {
+  const value = String(cellValue ?? '').trim();
+  if (!value) return '';
+  for (const link of parseMarkdownLinks(value)) {
+    const target = String(link.target).trim().replace(/^<|>$/g, '');
+    if (/^https?:\/\//i.test(target)) return target;
+  }
+  return value;
+}
+
+// URL cells that say "no URL" in words: the tracker's em-dash and hyphen
+// empty-cell markers and N/A.
+const URL_PLACEHOLDER_RE = /^(?:—|-|n\/a)$/i;
+
+/**
+ * Whether a URL cell names no posting: empty, or a placeholder. A reader that
+ * falls back to the row's report has to ask this rather than test the cell for
+ * truth: `—` is a truthy string, so it hides the report, and then nothing can
+ * tell the row from another with the same title.
+ *
+ * @param {string} [cell] - A URL cell, raw or through extractCellUrl().
+ * @returns {boolean}
+ */
+export function isUnsetUrlCell(cell) {
+  const value = String(cell ?? '').trim();
+  return value === '' || URL_PLACEHOLDER_RE.test(value);
+}
+
+function reportNumberFromTarget(rawTarget) {
+  const target = String(rawTarget).trim().replace(/^<|>$/g, '');
+  if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
+  const pathname = target.split(/[?#]/, 1)[0];
+  const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i)
+    || pathname.match(/(?:^|[\\/])0*(\d+)-[^\\/]*\.md$/i);
+  if (!match) return null;
+  const num = parseInt(match[1], 10);
+  return Number.isInteger(num) && num > 0 ? num : null;
+}
+
+/**
+ * Report links a tracker row names, with the two numbers kept apart: the one
+ * the link *points at* and the one the link *says*.
+ *
+ * `extractTrackerReportNumbers` below flattens both into one list on purpose —
+ * for a membership test ("does this row reference report N?") a mismatched link
+ * genuinely references both numbers, and collapsing them would hide the
+ * collision that `find.mjs` and `set-status.mjs` exist to surface.
+ *
+ * A caller that needs report *identity* rather than membership needs the
+ * opposite: `[5](../reports/006-globex-...md)` names one report, and it is the
+ * target, because the target is the file whose contents the row will be joined
+ * against. Treating both numbers as linked reports let salary-gap.mjs attach
+ * two different companies' advertised figures to one row (#4368 review).
+ *
+ * The label is returned alongside so the disagreement can be reported instead
+ * of silently discarded — a wrong label is a tracker typo worth fixing, and
+ * only the caller knows whether it matters.
+ *
+ * @param {string} reportCell - Report cell, markdown link or bare path.
+ * @param {string} [notesCell] - Free-form Notes cell, used when Report is empty.
+ * @returns {{target: number, label: number|null}[]} One entry per resolvable
+ *   link, in cell order. `label` is null when absent or non-numeric.
+ */
+export function extractTrackerReportLinks(reportCell, notesCell = '') {
   const value = String(reportCell ?? '').trim();
-  if (!value || value === '-' || value === '—') return scanNotesForReportNumbers(notesCell);
+  if (!value || value === '-' || value === '—') return scanNotesForReportLinks(notesCell);
 
-  const numbers = new Set();
-  const numberFromTarget = (rawTarget) => {
-    const target = String(rawTarget).trim().replace(/^<|>$/g, '');
-    if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
-    const pathname = target.split(/[?#]/, 1)[0];
-    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i)
-      || pathname.match(/(?:^|[\\/])0*(\d+)-[^\\/]*\.md$/i);
-    if (!match) return null;
-    const num = parseInt(match[1], 10);
-    return Number.isInteger(num) && num > 0 ? num : null;
-  };
-
+  const links = [];
   const markdownLinks = parseMarkdownLinks(value);
   for (const link of markdownLinks) {
-    const pathNum = numberFromTarget(link.target);
-    if (pathNum == null) continue;
-    const label = link.label.trim();
-    if (/^\d+$/.test(label)) {
-      const labelNum = parseInt(label, 10);
-      if (labelNum > 0) numbers.add(labelNum);
-    }
-    numbers.add(pathNum);
+    const target = reportNumberFromTarget(link.target);
+    if (target == null) continue;
+    const rawLabel = link.label.trim();
+    const labelNum = /^\d+$/.test(rawLabel) ? parseInt(rawLabel, 10) : null;
+    links.push({ target, label: labelNum != null && labelNum > 0 ? labelNum : null });
   }
 
   if (markdownLinks.length === 0) {
-    const pathNum = numberFromTarget(value);
-    if (pathNum != null) numbers.add(pathNum);
+    const target = reportNumberFromTarget(value);
+    if (target != null) links.push({ target, label: null });
   }
   // A layout with a Report column that simply has no link yet still falls back
   // to Notes, so a customized tracker behaves the same whether its Report cell
   // is absent or empty.
-  return numbers.size > 0 ? [...numbers] : scanNotesForReportNumbers(notesCell);
+  return links.length > 0 ? links : scanNotesForReportLinks(notesCell);
 }
 
 /**
- * Report numbers named by a report link inside a free-form Notes cell.
+ * Extract report IDs referenced by one tracker Report cell.
+ *
+ * Both the numeric markdown label and the local report filename are returned.
+ * Keeping both makes tracker drift visible instead of silently trusting one
+ * side of a malformed link. External URLs are ignored even when their path
+ * happens to contain a reports/ segment.
+ *
+ * @param {string} reportCell - Raw Report cell value.
+ * @returns {number[]} Unique positive report IDs in encounter order.
+ */
+export function extractTrackerReportNumbers(reportCell, notesCell = '') {
+  const numbers = new Set();
+  for (const { target, label } of extractTrackerReportLinks(reportCell, notesCell)) {
+    // Label first, then target: a mismatched link reports the number it claims
+    // before the number it points at, which is the order callers already saw.
+    if (label != null) numbers.add(label);
+    numbers.add(target);
+  }
+  return [...numbers];
+}
+
+export function linkedReportNumbers(reportCell, notesCell) {
+  // Link syntax decides the Notes fallback, not a parsed target: `[1](<missing)`
+  // is a present-but-invalid link and must not borrow a number from Notes. The
+  // label rule is parseMarkdownLinks': it ends at the first unescaped `]`.
+  if (!/\[(?:\\[\s\S]|[^\]\\])*\]\(/.test(String(reportCell ?? ''))) return extractTrackerReportNumbers(reportCell, notesCell);
+  // Reuse the tracker's canonical local-target validation. It rejects HTTP(S)
+  // and protocol-relative links, and returns both numbers on a label/target
+  // mismatch. Exactly one number therefore proves a local, self-consistent
+  // report link. A present-but-invalid link must not fall back to Notes.
+  const validated = extractTrackerReportNumbers(reportCell);
+  return validated.length === 1 ? validated : [];
+}
+
+/**
+ * Report links inside a free-form Notes cell.
  *
  * Customized trackers with no dedicated Report column embed the link in Notes
  * prose instead — the layout merge-tracker.mjs learned to read in 8668ac1, via
@@ -451,12 +709,14 @@ export function extractTrackerReportNumbers(reportCell, notesCell = '') {
  * claiming to be a report number.
  *
  * @param {string} [notesCell] - Free-form Notes cell.
- * @returns {number[]} Report numbers, or [] when the cell names none.
+ * @returns {{target: number, label: null}[]} One entry per report link found.
+ *   `label` is always null: a number in prose is not a link label.
  */
-function scanNotesForReportNumbers(notesCell) {
+function scanNotesForReportLinks(notesCell) {
   const notes = String(notesCell ?? '').trim();
   if (!notes) return [];
-  const numbers = new Set();
+  const seen = new Set();
+  const links = [];
   for (const link of parseMarkdownLinks(notes)) {
     const target = String(link.target).trim().replace(/^<|>$/g, '');
     // Absolute URLs are never a local report path, and a posting URL is the
@@ -467,9 +727,11 @@ function scanNotesForReportNumbers(notesCell) {
     const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i);
     if (!match) continue;
     const num = parseInt(match[1], 10);
-    if (Number.isInteger(num) && num > 0) numbers.add(num);
+    if (!Number.isInteger(num) || num <= 0 || seen.has(num)) continue;
+    seen.add(num);
+    links.push({ target: num, label: null });
   }
-  return [...numbers];
+  return links;
 }
 
 /**
@@ -546,4 +808,60 @@ export function normalizeTextKey(value, separator = '') {
     .replace(/̇/gu, '')
     .replace(/[^\p{L}\p{M}\p{N}]+/gu, separator)
     .trim();
+}
+
+/**
+ * Strip trailing punctuation and a markdown autolink wrapper from a raw
+ * `**URL:**` token. Punctuation first: `<https://…/job>,` must become the bare
+ * URL, not `https://…/job>` (angle-first leaves the `>` when a comma follows).
+ *
+ * A trailing `)` is stripped only while the token has more `)` than `(`. One
+ * that closes a `(` inside the URL is part of it: `…/eng-(remote)` must not
+ * become `…/eng-(remote`, which keys differently from the same posting's URL
+ * carried verbatim in a TSV and splits one posting into two tracker rows. The
+ * `)` of a wrapping `(see https://…/job)` has no partner and is still dropped.
+ *
+ * @param {string} token
+ * @returns {string}
+ */
+export function unwrapReportUrlToken(token) {
+  let url = String(token);
+  let depth = 0;
+  for (const ch of url) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+  }
+  for (;;) {
+    const last = url.at(-1);
+    if (last === ',' || last === '.' || last === ';') url = url.slice(0, -1);
+    else if (last === ')' && depth < 0) {
+      url = url.slice(0, -1);
+      depth++;
+    } else break;
+  }
+  return url.replace(/^<|>$/g, '');
+}
+
+/**
+ * The posting URL recorded in the first of `reportNumbers` whose report file in
+ * `reportsRoot` has a `**URL:**` line that `accept` takes. Lives here, not in
+ * history-ats-seeds.mjs, because liveness-core.mjs needs it and the web app
+ * loads liveness-core: it must not pull in tracker-utils.mjs and its npm
+ * dependencies, which the web install does not have.
+ */
+export function reportUrlForNumbers(reportNumbers, reportsRoot, accept) {
+  if (!reportsRoot || !existsSync(reportsRoot) || reportNumbers.length === 0) return null;
+  let filenames;
+  try { filenames = readdirSync(reportsRoot); } catch { return null; }
+  for (const reportNum of reportNumbers) {
+    const reportName = filenames.find((name) => new RegExp(`^0*${reportNum}-.*\\.md$`, 'i').test(name));
+    if (!reportName) continue;
+    let report;
+    try { report = readFileSync(join(reportsRoot, reportName), 'utf-8'); } catch { continue; }
+    const match = report.match(/\*\*URL:\*\*[ \t]*(\S+)/);
+    if (!match) continue;
+    const url = unwrapReportUrlToken(match[1]);
+    if (accept(url)) return url;
+  }
+  return null;
 }

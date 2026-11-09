@@ -35,14 +35,15 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
-  rebuildRow, resolveTrackerPath, writeFileAtomic, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
+  rebuildRow, resolveTrackerPath, writeFileAtomic, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// The USER's data root, not this file's directory — same defect, same fix as
+// set-status.mjs above it in this change.
+const DATA_ROOT = getCareerOpsRoot();
 
 // LOCK_TIMEOUT is not destructured here — that exit path is raised inside
 // acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
@@ -59,6 +60,14 @@ const USAGE = `Usage: node mark-pdf-ready.mjs <report#> [--dry-run] [--json]
 const rawArgs = process.argv.slice(2);
 const positional = [];
 const flags = { dryRun: false, json: false };
+
+// Before the parse loop: failUsage runs on the first bad token, and a const
+// is not hoisted the way the previous function declaration was.
+const failUsage = makeCliFailUsage({
+  argv: rawArgs,
+  usage: USAGE,
+  defaultMessage: 'Expected 1 argument: <report#>',
+});
 
 for (const a of rawArgs) {
   if (a === '--dry-run') { flags.dryRun = true; }
@@ -77,24 +86,6 @@ const [reportSelector] = positional;
 // contract can't drift between the two canonical tracker-writer CLIs.
 const failWith = makeCliFailWith(flags.json);
 
-/**
- * Print usage (plus an optional specific complaint) and exit 1.
- *
- * @param {string|null} message - What was wrong with the invocation, if known.
- * @returns {never}
- */
-function failUsage(message) {
-  const msg = message ?? 'Expected 1 argument: <report#>';
-  if (rawArgs.includes('--json')) {
-    console.log(JSON.stringify({ error: msg, code: 'usage' }));
-    console.error(`❌ ${msg}`);
-  } else {
-    if (message) console.error(`❌ ${message}\n`);
-    console.error(USAGE);
-  }
-  process.exit(EXIT_USAGE);
-}
-
 if (!/^\d+$/.test(reportSelector)) {
   failUsage(`"${reportSelector}" is not a valid report number`);
 }
@@ -102,7 +93,7 @@ const targetReportNum = parseInt(reportSelector, 10);
 
 // ── tracker access ───────────────────────────────────────────────
 
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(APPS_FILE)) {
   failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
 }

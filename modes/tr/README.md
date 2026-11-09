@@ -31,7 +31,7 @@ veya
 
 ```yaml
 language:
-  primary: tr
+  output: tr
   modes_dir: modes/tr
 ```
 
@@ -42,11 +42,24 @@ Ardından ilk oturumda Claude'a bu ayarı hatırlat ("profile.yml'e baktım, `la
 | Dosya | Kaynak | Amaç |
 |-------|--------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | Paylaşılan bağlam, arketipler, global kurallar, Türkiye piyasa özelinde terimler |
-| `is-ilani.md` | `modes/oferta.md` (ES) | Tek bir ilanın tam değerlendirmesi (Bloklar A-G) |
+| `is-ilani.md` | `modes/oferta.md` (ES) | Tek bir ilanın tam değerlendirmesi (Bloklar A-H) |
 | `basvuru.md` | `modes/apply.md` (EN) | Başvuru formu için canlı asistan |
 | `pipeline.md` | `modes/pipeline.md` (ES) | URL gelen kutusu / biriktirilmiş ilanlar için ikinci beyin |
-
-Diğer modlar (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) İngilizce/İspanyolca orijinalleriyle çalışmaya devam eder — içerikleri büyük ölçüde araç komutları, dosya yolları ve yapılandırma talimatlarından oluştuğundan dilden bağımsız kalmaları tercih edilmiştir.
+| `project.md` | `modes/project.md` (EN) | Portfolyo projesi değerlendirmesi |
+| `training.md` | `modes/training.md` (EN) | Eğitim ve kurs değerlendirmesi |
+| `tracker.md` | `modes/tracker.md` (EN) | Başvuru takipçisi |
+| `auto-pipeline.md` | `modes/auto-pipeline.md` (EN) | Tam otomatik süreç (ilan çıkarma, değerlendirme, pdf, yanıt taslağı) |
+| `interview-prep.md` | `modes/interview-prep.md` (EN) | Mülakat hazırlığı |
+| `deep.md` | `modes/deep.md` (EN) | Derinlemesine şirket araştırması |
+| `contacto.md` | `modes/contacto.md` (EN) | İletişim / Soğuk e-posta şablonları |
+| `ofertas.md` | `modes/ofertas.md` (EN) | Teklif karşılaştırma / değerlendirme |
+| `patterns.md` | `modes/patterns.md` (EN) | Başvuru örüntüleri analizi |
+| `followup.md` | `modes/followup.md` (EN) | Takip / Durum kontrolü |
+| `cover.md` | `modes/cover.md` (EN) | Ön yazı hazırlama |
+| `email.md` | `modes/email.md` (EN) | E-posta taslakları |
+| `scan.md` | `modes/scan.md` (EN) | Portal Tarayıcı (İş Keşfi) |
+| `batch.md` | `modes/batch.md` (EN) | Toplu (Batch) değerlendirme çalıştırıcısı |
+| `pdf.md` | `modes/pdf.md` (EN) | Özgeçmiş PDF Üreticisi |
 
 ## Türkiye'ye Özgü Piyasa Kapsamı
 
@@ -114,5 +127,5 @@ Bir çeviriyi iyileştirmek veya başka bir modu Türkçeleştirmek istersen:
 1. `CONTRIBUTING.md`'ye göre bir Issue aç
 2. Yukarıdaki kelime kılavuzuna uy — tutarlı ton için
 3. Kelimesi kelimesine çeviri değil, anlam ve deyim bakımından doğal çeviri yap
-4. Yapısal öğeleri (Blok A-G, tablolar, kod blokları, araç talimatları) aynen koru
+4. Yapısal öğeleri (Blok A-H, tablolar, kod blokları, araç talimatları) aynen koru
 5. PR açmadan önce gerçek bir Türkçe ilan (Kariyer.net veya Yenibiris.com) üzerinde test et

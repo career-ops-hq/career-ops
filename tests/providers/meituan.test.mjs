@@ -1,7 +1,7 @@
 // tests/providers/meituan.test.mjs — Meituan careers provider (zhaopin.meituan.com
 // public JSON API). Added with the provider in the same PR; follows the
 // discovered-test layout from #1440.
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, captureConsoleErrors } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -184,22 +184,53 @@ try {
   const capped = mkCtx(() => ({
     data: { page: { totalCount: 500 }, list: Array.from({ length: 100 }, (_, i) => mkJob(5000 + i, `岗位E${i}`)) },
   }));
-  await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+  const { errors: cappedErrors } = await captureConsoleErrors(() =>
+    meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx));
   if (capped.calls.length === 1) {
     pass('meituan.fetch() honors entry.max_pages');
   } else {
     fail(`meituan.fetch() entry.max_pages=1 made ${capped.calls.length} requests`);
   }
 
+  if (cappedErrors.some((line) => String(line).includes('truncated at 100 of 500 postings'))) {
+    pass('meituan.fetch() warns when max_pages truncates the board instead of stopping silently');
+  } else {
+    fail(`meituan.fetch() truncation warnings = ${JSON.stringify(cappedErrors)}`);
+  }
+
   const probe = mkCtx(() => ({
     data: { page: { totalCount: 500 }, list: Array.from({ length: 100 }, (_, i) => mkJob(6000 + i, `岗位F${i}`)) },
   }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, probe.ctx);
+  const { result: probeJobs, errors: probeErrors } = await captureConsoleErrors(() =>
+    meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, probe.ctx));
   if (probe.calls.length === 1 && probe.calls[0].keywords === '' && probeJobs.length === 100) {
     pass('meituan.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (empty keyword) query');
   } else {
     fail(`meituan.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keywords=${JSON.stringify(probe.calls[0] && probe.calls[0].keywords)}`);
+  }
+
+  if (probeErrors.length === 0) {
+    pass('meituan.fetch() stays quiet when the ctx.maxPages probe, not max_pages, stops pagination');
+  } else {
+    fail(`meituan.fetch() ctx.maxPages=1 warned: ${JSON.stringify(probeErrors)}`);
+  }
+
+  // A board whose reported total never runs out still stops at the
+  // DEFAULT_MAX_PAGES runaway guard, and says so.
+  const endless = mkCtx(({ pageNo }) => ({
+    data: {
+      page: { totalCount: 1000000 },
+      list: Array.from({ length: 100 }, (_, i) => mkJob(100000 + pageNo * 100 + i, `岗位H${pageNo}-${i}`)),
+    },
+  }));
+  const { result: endlessJobs, errors: endlessErrors } = await captureConsoleErrors(() =>
+    meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, endless.ctx));
+  if (endless.calls.length === 100 && endlessJobs.length === 10000
+      && endlessErrors.some((line) => String(line).includes('truncated at 10000 of 1000000 postings'))) {
+    pass('meituan.fetch() stops at the 100-page default when the reported total keeps going, and warns');
+  } else {
+    fail(`meituan.fetch() default cap: ${endless.calls.length} requests, ${endlessJobs.length} jobs, warnings ${JSON.stringify(endlessErrors)}`);
   }
 
   const blip = mkCtx(({ keywords }) => {

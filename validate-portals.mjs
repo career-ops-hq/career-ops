@@ -7,18 +7,69 @@
  *   node validate-portals.mjs
  *   node validate-portals.mjs --file templates/portals.example.yml
  *   node validate-portals.mjs --self-test
+ *   node validate-portals.mjs --help
  */
 
+import { buildWorkplacePolicy } from './providers/_country.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import * as yaml from 'js-yaml';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { barePrefixDomainKeywords, compileContentTraits } from './title-keywords.mjs';
+import { nearestKey } from './validate-profile.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+// providers/ ships with the checkout, but portals.yml is user data: it lives in
+// the data root, where scan.mjs reads it. A bare 'portals.yml' resolved against
+// the cwd instead, so `npm run validate:portals` (npm always runs it from the
+// checkout) could not find an external data root's file, and a run from any
+// other directory validated whatever copy sat there.
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
+
+function hasText(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function hasValue(value) {
+  if (Array.isArray(value)) return value.some(hasValue);
+  return hasText(value) || typeof value === 'number' || typeof value === 'boolean';
+}
+
+// amazon.jobs facets filter only as `key[]=`, which the provider emits for a
+// YAML array (or a key already ending in `[]`); a scalar facet is ignored.
+const AMAZON_FACETS = new Set([
+  'normalized_country_code', 'normalized_state_name', 'normalized_city_name', 'normalized_location',
+  'location', 'category', 'business_category', 'job_function_id', 'schedule_type_id',
+  'employee_class', 'is_manager', 'is_intern',
+]);
+// Never narrow: request shaping, facet-count requests, and loc_query, which
+// leaves the hit count unchanged.
+const AMAZON_NON_FILTERS = new Set(['sort', 'result_limit', 'offset', 'facets', 'loc_query']);
+
+// Providers that narrow a large board with a block named after themselves and
+// silently treat a missing or unusable block as `{}`. Each predicate reports
+// whether the block carries a filter the provider actually sends; without one
+// the scan reads the whole board (amazon.jobs: 100k+ postings) while the entry
+// reads as coverage. Hand-kept: there is no provider metadata to derive this from.
+// A warning, not an error: the entry still scans, just too broadly.
+const PROVIDER_BLOCK_FILTERS = {
+  amazon: (block) => Object.entries(block).some(([key, value]) => {
+    if (key.endsWith('[]')) return hasValue(value);
+    if (AMAZON_NON_FILTERS.has(key)) return false;
+    if (AMAZON_FACETS.has(key)) return Array.isArray(value) && value.some(hasValue);
+    return hasValue(value);
+  }),
+  ibm: (block) => hasText(block.country)
+    || (Array.isArray(block.categories) && block.categories.some(hasText)),
+  // lang and urlPrefix only shape the request; country 'global' is the default.
+  phenom: (block) => (hasText(block.country) && block.country !== 'global')
+    || (isObject(block.selectedFields) && Object.values(block.selectedFields).some(hasValue)),
+};
 
 function add(list, path, message) {
   list.push({ path, message });
@@ -50,6 +101,20 @@ function validateUrl(value, path, errors) {
   }
 }
 
+// buildTitleFilter reads only an array as a keyword list and drops anything else,
+// so a bare string leaves the filter matching every title. validateKeywordList
+// accepts one (location_filter and content_filter do wrap it), so the title
+// filter's own lists are checked here. A warning, not an error: title_filter has
+// always been lenient about this and a hard failure would break configs that
+// currently load.
+function warnBareStringKeywords(block, path, warnings) {
+  for (const key of ['positive', 'negative']) {
+    if (typeof block[key] === 'string') {
+      add(warnings, `${path}.${key}`, `a bare string is ignored by the title filter, so this list does nothing; write it as a list: [${JSON.stringify(block[key])}]`);
+    }
+  }
+}
+
 function validateKeywordList(value, path, errors) {
   if (value === undefined || value === null) return;
   const arr = Array.isArray(value) ? value : [value];
@@ -61,6 +126,22 @@ function validateKeywordList(value, path, errors) {
     if (item.trim() === '') {
       add(errors, `${path}[${idx}]`, 'keyword must not be empty');
     }
+  }
+}
+
+// content_filter `min_match` (#6020): an integer from 1 to the number of
+// distinct positive traits, counted the way scan.mjs counts them (" | "
+// alternatives are one trait, case-insensitive duplicates are one trait).
+// scan.mjs refuses to start on the same shapes, so this only reports them
+// earlier.
+function validateContentMinMatch(rule, path, errors) {
+  if (rule.min_match === undefined) return;
+  const traits = compileContentTraits(rule.positive).length;
+  const minMatch = rule.min_match;
+  if (traits === 0) {
+    add(errors, `${path}.min_match`, `needs a non-empty ${path}.positive list`);
+  } else if (!Number.isInteger(minMatch) || minMatch < 1 || minMatch > traits) {
+    add(errors, `${path}.min_match`, `must be an integer from 1 to ${traits} (the number of distinct ${path}.positive entries)`);
   }
 }
 
@@ -117,6 +198,59 @@ async function loadProviderIds() {
 }
 
 const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
+// #3438. field_filters blocks are compiled by buildTitleFilter(), which reads
+// positive and negative and nothing else — seniority_boost is a title-level
+// concept with no consumer here. A block containing only seniority_boost would
+// otherwise validate clean and compile to an empty positive list, which reads
+// as "no positive constraint" and matches every posting: the pass-all
+// whitelist this validation exists to catch.
+const FIELD_FILTER_FIELDS = ['positive', 'negative'];
+
+// Settings a scan actually reads. A key outside this list is left alone: people
+// keep private notes in the same file, and those must not fail a scan. A key
+// one or two edits from a real setting is different. `tracked_companys` is not
+// `tracked_companies`, so the company list is read as missing, the scan reports
+// zero companies, and the process exits 0.
+export const PORTAL_TOP_LEVEL_KEYS = [
+  'title_filter',
+  'title_filter_full',
+  'title_filter_overrides',
+  'search_queries',
+  'tracked_companies',
+  'job_boards',
+  'scan_history',
+  'preferred_languages',
+  'interamt_searches',
+  'dayforce_boards',
+  'location_filter',
+  'country_eligibility_filter',
+  'salary_filter',
+  'experience_filter',
+  'portal_prune_quiet_days',
+  'max_posting_age_days',
+  'trust_filter',
+  'content_filter',
+  'visa_filter',
+  'skip_tiers',
+  'domain_filter',
+  'field_filters',
+  'company_aliases',
+  'portal_health_threshold',
+  'portal_health_stale_days',
+];
+
+export function portalTopLevelTypos(config) {
+  if (!isObject(config)) return [];
+  const known = new Set(PORTAL_TOP_LEVEL_KEYS);
+  const found = [];
+  for (const key of Object.keys(config)) {
+    if (known.has(key)) continue;
+    const suggestion = nearestKey(key, PORTAL_TOP_LEVEL_KEYS, 2);
+    if (!suggestion) continue;
+    found.push({ key, suggestion });
+  }
+  return found;
+}
 
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
@@ -127,10 +261,19 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     return { errors, warnings };
   }
 
+  for (const typo of portalTopLevelTypos(config)) {
+    add(
+      errors,
+      typo.key,
+      `unknown top-level key "${typo.key}" — did you mean "${typo.suggestion}"? The misspelled key is ignored, so the setting never applies`,
+    );
+  }
+
   if (config.title_filter !== undefined) {
     if (!isObject(config.title_filter)) {
       add(errors, 'title_filter', 'title_filter must be an object');
     } else {
+      warnBareStringKeywords(config.title_filter, 'title_filter', warnings);
       validateKeywordList(config.title_filter.positive, 'title_filter.positive', errors);
       validateKeywordList(config.title_filter.negative, 'title_filter.negative', errors);
       validateKeywordList(config.title_filter.seniority_boost, 'title_filter.seniority_boost', errors);
@@ -156,9 +299,104 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           add(errors, `title_filter_full.${key}`, `unknown title_filter_full field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
         }
       }
+      warnBareStringKeywords(config.title_filter_full, 'title_filter_full', warnings);
       validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
       validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
       validateKeywordList(config.title_filter_full.seniority_boost, 'title_filter_full.seniority_boost', errors);
+    }
+  }
+
+  // Consumed only by scan-ats-full.mjs's board gate (#3105). A bare list, not
+  // an object like the filters around it: the gate has one dimension. A
+  // negative domain term would have to mean "this employer is NOT in my
+  // industry because of one posting", which no single posting can establish,
+  // and the threshold is fixed at one by measurement rather than configurable.
+  //
+  // Validated even though its failure direction is the safe one. A malformed
+  // domain_filter leaves the gate OFF, which is exactly today's behaviour — but
+  // the user is then sweeping unguarded while believing the opposite, and the
+  // scanner cannot warn them, because an absent domain_filter is a legitimate
+  // configuration it has to stay silent about. That silence is what makes this
+  // the only place the typo can surface.
+  if (config.domain_filter !== undefined) {
+    if (!Array.isArray(config.domain_filter)) {
+      add(errors, 'domain_filter', 'domain_filter must be a list of keywords');
+    } else {
+      validateKeywordList(config.domain_filter, 'domain_filter', errors);
+      // A bare `word:` or `stem:` is nonblank, so the check above passes it,
+      // but it compiles to a term that never matches: the gate stays on and
+      // drops every complete board. Checked per AND-group term too, since
+      // `solana + word:` can never match either.
+      for (const idx of barePrefixDomainKeywords(config.domain_filter)) {
+        add(errors, `domain_filter[${idx}]`, 'a word:/stem: prefix needs a term after it');
+      }
+    }
+  }
+
+  // The languages a posting is wanted in, best first. scan.mjs skips an entry
+  // it cannot read, so a malformed list would quietly fall back to the default
+  // version — the typo can only surface here.
+  if (config.preferred_languages !== undefined) {
+    const list = config.preferred_languages;
+    if (!Array.isArray(list) && typeof list !== 'string') {
+      add(errors, 'preferred_languages', 'preferred_languages must be a list of language codes (e.g. [en])');
+    } else {
+      (Array.isArray(list) ? list : [list]).forEach((entry, idx) => {
+        if (typeof entry !== 'string' || !entry.trim()) {
+          add(errors, `preferred_languages[${idx}]`, 'each preferred language must be a non-empty language code');
+        }
+      });
+    }
+  }
+
+  // #3438. Per-field whitelists a target can gate on instead of title. Each
+  // block has the same shape as title_filter and is compiled by the same
+  // buildTitleFilter(), so it gets the same structural checks for the same
+  // reason: a misspelled `positve:` leaves positive empty, and an empty
+  // positive list means "no positive constraint" — the whitelist would match
+  // everything while looking configured.
+  if (config.field_filters !== undefined) {
+    if (!isObject(config.field_filters)) {
+      add(errors, 'field_filters', 'field_filters must be an object keyed by field name');
+    } else {
+      for (const [field, block] of Object.entries(config.field_filters)) {
+        if (field === 'title') {
+          // title routes to the top-level title_filter by definition. A block
+          // here would be silently ignored, so say so rather than ignore it.
+          add(errors, 'field_filters.title', 'field_filters.title is not read - filter_on: title uses the top-level title_filter');
+          continue;
+        }
+        if (!isObject(block)) {
+          add(errors, `field_filters.${field}`, `field_filters.${field} must be an object`);
+          continue;
+        }
+        for (const key of Object.keys(block)) {
+          if (!FIELD_FILTER_FIELDS.includes(key)) {
+            add(errors, `field_filters.${field}.${key}`, `unknown field_filters field - expected one of ${FIELD_FILTER_FIELDS.join(', ')}`);
+          }
+        }
+        // Stricter than title_filter on purpose: a bare-string list is dropped
+        // by buildTitleFilter, and a block with no keyword at all matches every
+        // posting. title_filter keeps that leniency for existing configs;
+        // field_filters is new and has none to preserve. scan.mjs applies the
+        // same rules at startup.
+        let keywordCount = 0;
+        let malformedList = false;
+        for (const key of FIELD_FILTER_FIELDS) {
+          const list = block[key];
+          if (list === undefined || list === null) continue;
+          if (!Array.isArray(list)) {
+            add(errors, `field_filters.${field}.${key}`, 'must be a list of strings - a bare string is ignored');
+            malformedList = true;
+            continue;
+          }
+          validateKeywordList(list, `field_filters.${field}.${key}`, errors);
+          keywordCount += list.length;
+        }
+        if (keywordCount === 0 && !malformedList) {
+          add(errors, `field_filters.${field}`, 'no keyword in positive or negative - it would match every posting');
+        }
+      }
     }
   }
 
@@ -166,10 +404,26 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
     } else {
+      if (config.location_filter.workplace_policy !== undefined) {
+        const policy = config.location_filter.workplace_policy;
+        if (!isObject(policy)) add(errors, 'location_filter.workplace_policy', 'must be an object');
+        else {
+          for (const key of ['onsite_locations', 'onsite_countries', 'remote_countries', 'remote_regions']) {
+            validateKeywordList(policy[key], 'location_filter.workplace_policy.' + key, errors);
+          }
+          try { buildWorkplacePolicy(policy); } catch (error) { add(errors, 'location_filter.workplace_policy', error.message); }
+        }
+      }
       validateKeywordList(config.location_filter.always_allow, 'location_filter.always_allow', errors);
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
       validateKeywordList(config.location_filter.block_hard, 'location_filter.block_hard', errors);
+      if (config.location_filter.strict !== undefined && typeof config.location_filter.strict !== 'boolean') {
+        add(errors, 'location_filter.strict', 'must be a boolean when set');
+      }
+      if (config.location_filter.remote_title_fallback !== undefined && typeof config.location_filter.remote_title_fallback !== 'boolean') {
+        add(errors, 'location_filter.remote_title_fallback', 'must be a boolean when set');
+      }
     }
   }
 
@@ -179,19 +433,30 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     } else {
       validateKeywordList(config.content_filter.positive, 'content_filter.positive', errors);
       validateKeywordList(config.content_filter.negative, 'content_filter.negative', errors);
+      validateContentMinMatch(config.content_filter, 'content_filter', errors);
+      const rescue = config.content_filter.rescue_title_misses;
+      if (rescue !== undefined && typeof rescue !== 'boolean') {
+        add(errors, 'content_filter.rescue_title_misses', 'must be a boolean when set');
+      } else if (rescue === true && compileContentTraits(config.content_filter.positive).length === 0) {
+        add(errors, 'content_filter.rescue_title_misses', 'needs a non-empty content_filter.positive list: a title miss is kept only on a positive match');
+      }
       if (config.content_filter.by_title_keyword !== undefined) {
         if (!isObject(config.content_filter.by_title_keyword)) {
-          add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive keyword');
+          add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive (or title_filter_full.positive) keyword');
         } else {
+          // scan-ats-full matches titles against title_filter_full when it is
+          // set and scopes by_title_keyword by that match, so a key that only
+          // exists there is live config for the sweep, not dead config.
           const titlePositive = new Set(
-            (Array.isArray(config.title_filter?.positive) ? config.title_filter.positive : [])
+            [config.title_filter?.positive, config.title_filter_full?.positive]
+              .flatMap(list => (Array.isArray(list) ? list : []))
               .filter(k => typeof k === 'string')
               .map(k => k.trim().toLowerCase())
           );
           for (const [kw, rule] of Object.entries(config.content_filter.by_title_keyword)) {
             const path = `content_filter.by_title_keyword.${kw}`;
             if (!titlePositive.has(kw.trim().toLowerCase())) {
-              add(warnings, path, `"${kw}" does not match any title_filter.positive keyword and will never apply`);
+              add(warnings, path, `"${kw}" does not match any title_filter.positive or title_filter_full.positive keyword and will never apply`);
             }
             if (!isObject(rule)) {
               add(errors, path, 'must be an object with positive/negative keyword lists');
@@ -199,6 +464,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
             }
             validateKeywordList(rule.positive, `${path}.positive`, errors);
             validateKeywordList(rule.negative, `${path}.negative`, errors);
+            validateContentMinMatch(rule, path, errors);
           }
         }
       }
@@ -217,6 +483,28 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       }
       validateKeywordList(config.visa_filter.positive, 'visa_filter.positive', errors);
       validateKeywordList(config.visa_filter.negative, 'visa_filter.negative', errors);
+    }
+  }
+
+  if (config.experience_filter !== undefined) {
+    const ef = config.experience_filter;
+    if (!isObject(ef)) {
+      add(errors, 'experience_filter', 'experience_filter must be an object');
+    } else {
+      if (ef.enabled !== undefined && typeof ef.enabled !== 'boolean') {
+        add(errors, 'experience_filter.enabled', 'must be a boolean when set');
+      }
+      for (const key of ['years', 'stretch_years']) {
+        if (ef[key] !== undefined && (typeof ef[key] !== 'number' || !Number.isFinite(ef[key]) || ef[key] < 0 || ef[key] > 60)) {
+          add(errors, `experience_filter.${key}`, 'must be a number from 0 to 60 when set');
+        }
+      }
+      if (ef.action !== undefined && ef.action !== 'drop' && ef.action !== 'label') {
+        add(errors, 'experience_filter.action', 'must be "drop" or "label" when set');
+      }
+      if (ef.concurrency !== undefined && (!Number.isInteger(ef.concurrency) || ef.concurrency < 1 || ef.concurrency > 16)) {
+        add(errors, 'experience_filter.concurrency', 'must be an integer from 1 to 16 when set');
+      }
     }
   }
 
@@ -240,6 +528,13 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       if (!isObject(entry)) {
         add(errors, base, `${noun} entry must be an object`);
         continue;
+      }
+      // Every consumer reads only a boolean `false` as "off". js-yaml follows
+      // YAML 1.2, where `no`, `off` and a quoted "false" are strings, so such an
+      // entry is scanned while looking disabled. Flagged here, because the
+      // scanners cannot tell a typo from a deliberate non-boolean.
+      if (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') {
+        add(errors, `${base}.enabled`, `enabled must be true or false, got ${JSON.stringify(entry.enabled)} - only a boolean false turns this ${noun} off, so it is still scanned`);
       }
       if (entry.enabled === false) continue;
 
@@ -265,6 +560,45 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
         }
       }
 
+      const blockFilters = typeof entry.provider === 'string' && Object.hasOwn(PROVIDER_BLOCK_FILTERS, entry.provider)
+        ? PROVIDER_BLOCK_FILTERS[entry.provider]
+        : null;
+      // An absent block is not flagged: a global sweep is a valid choice.
+      if (blockFilters && entry[entry.provider] !== undefined) {
+        const block = entry[entry.provider];
+        if (!isObject(block) || !blockFilters(block)) {
+          add(
+            warnings,
+            `${base}.${entry.provider}`,
+            `${entry.provider} block sets no filter, so the scan reads the provider's entire board — add a location or keyword filter`
+          );
+        }
+      }
+
+      // #3438. Which field this target's whitelist reads. scan.mjs exits on a
+      // name with no field_filters block; this catches the shape earlier and
+      // checks the cross-reference here too, where the whole config is in hand.
+      if (entry.filter_on !== undefined) {
+        const declared = Array.isArray(entry.filter_on) ? entry.filter_on : [entry.filter_on];
+        if (declared.length === 0) {
+          add(errors, `${base}.filter_on`, 'filter_on must not be an empty list - omit the key to gate on title');
+        }
+        for (const field of declared) {
+          if (typeof field !== 'string' || field.trim() === '') {
+            add(errors, `${base}.filter_on`, 'filter_on must be a non-empty string or a list of them');
+            continue;
+          }
+          const name = field.trim();
+          // Own keys only: `filter_on: __proto__` must not find Object.prototype.
+          const block = isObject(config.field_filters) && Object.hasOwn(config.field_filters, name)
+            ? config.field_filters[name]
+            : undefined;
+          if (name !== 'title' && !isObject(block)) {
+            add(errors, `${base}.filter_on`, `filter_on "${name}" has no field_filters.${name} block`);
+          }
+        }
+      }
+
       validateParser(entry.parser, `${base}.parser`, errors);
     }
   };
@@ -284,7 +618,7 @@ async function validateFile(filePath) {
     throw new Error(`file not found: ${filePath}`);
   }
   const providerIds = await loadProviderIds();
-  const parsed = yaml.load(readFileSync(filePath, 'utf-8'));
+  const parsed = loadYaml(readFileSync(filePath, 'utf-8'));
   return validatePortalsConfig(parsed, { providerIds });
 }
 
@@ -305,13 +639,43 @@ tracked_companies:
       throw new Error(`expected 2 errors, got ${result.errors.length}`);
     }
     console.log('validate-portals self-test OK');
+
+    const typoFile = join(tmp, 'typo.yml');
+    writeFileSync(typoFile, 'tracked_companys:\n  - name: "Example Co"\n    careers_url: "https://boards.example.com/example"\n', 'utf-8');
+    const typo = await validateFile(typoFile);
+    const typoPaths = typo.errors.map((e) => e.path);
+    if (!typoPaths.includes('tracked_companys')) {
+      throw new Error(`expected tracked_companys to be rejected, got ${JSON.stringify(typo.errors)}`);
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 }
 
+const KNOWN_FLAGS = ['--file', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--file'];
+
+const USAGE = `Usage:
+  node validate-portals.mjs                                    # validate portals.yml in the data root
+  node validate-portals.mjs --file templates/portals.example.yml  # validate a specific portals file
+  node validate-portals.mjs --self-test                        # run the built-in fixture checks
+  node validate-portals.mjs --help                             # print this usage block and exit`;
+
 async function main() {
   const args = process.argv.slice(2);
+  // Before any file is read: an unrecognized flag exits 1, --help/-h prints
+  // USAGE and exits 0. Neither used to be checked at all (#4601) — only
+  // --self-test and --file were read, so `--fiel templates/portals.example.yml`
+  // validated the data root's own portals.yml and exited 0 with its counts.
+  // The path on the first output line was the only hint that the file the
+  // caller named was never opened.
+  // requireOperand: without it, `--file --self-test` reads --self-test as the
+  // file path (flagValue() returns args[idx + 1] unconditionally, with no check
+  // that it is not itself another flag), and a bare trailing --file reaches
+  // resolve('') — the current directory. Same shape, same fix as the sibling
+  // verify-portals.mjs (#4250/#4254).
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
   if (args.includes('--self-test')) {
     await runSelfTest();
     return;
@@ -343,7 +707,9 @@ async function main() {
   if (result.errors.length > 0) process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(`validate-portals failed: ${err.message}`);
-  process.exit(1);
-});
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`validate-portals failed: ${err.message}`);
+    process.exit(1);
+  });
+}

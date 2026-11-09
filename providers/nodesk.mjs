@@ -1,5 +1,5 @@
-import { decodeEntities } from './_html-entities.mjs';
 // @ts-check
+import { decodeEntities } from './_html-entities.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // NoDesk provider - board-wide RSS feed
@@ -117,7 +117,13 @@ export function parseNodeskFeed(xml, defaultCompany = 'NoDesk') {
     const url = cleanUrl(tagText(item, 'link'));
     if (!url) continue;
 
-    const rawTitle = tagText(item, 'title');
+    // The feed escapes titles twice: the raw XML carries `Hybrid Platform
+    // &amp;amp; Deployment Models`, so tagText()'s one decode leaves `&amp;` in
+    // the title. Every `&` in a title is written that way, in each archived
+    // copy of the feed since January 2025. Exactly one more pass, not a
+    // decode-until-stable loop, as in providers/cryptocurrencyjobs.mjs, whose
+    // feed has the same shape.
+    const rawTitle = decodeEntities(tagText(item, 'title'));
     if (!rawTitle) continue;
 
     const { title, company } = splitTitle(rawTitle, fallback);

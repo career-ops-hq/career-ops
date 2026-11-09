@@ -1,0 +1,135 @@
+// tests/skill-router-modes.test.mjs — every mode AGENTS.md documents has a
+// route in the skill router (#4811).
+//
+// `/career-ops <mode>` goes through `.agents/skills/career-ops/SKILL.md`
+// (every other CLI's SKILL.md is a symlink to it). Its fallback reads "If
+// `$mode` is not a sub-command AND doesn't look like a JD, show discovery", so
+// a mode with no row in the routing table is not just undocumented on that
+// path: `/career-ops triage` printed the command menu instead of running
+// triage. Plain-language requests still worked, since those go through
+// AGENTS.md, which is why the gap went unnoticed for triage, calibrate,
+// intake and ats.
+
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { fail, pass, ROOT } from './helpers.mjs';
+
+console.log('\nSkill router covers every documented mode (#4811)');
+
+const skill = readFileSync(join(ROOT, '.agents', 'skills', 'career-ops', 'SKILL.md'), 'utf-8').replace(/\r\n/g, '\n');
+const agents = readFileSync(join(ROOT, 'AGENTS.md'), 'utf-8').replace(/\r\n/g, '\n');
+
+// The "Skill Modes" table in AGENTS.md: the Mode column starts with the
+// backticked mode name (`pdf --hm-audit` is the pdf mode with a flag).
+const skillModesTable = agents.match(/### Skill Modes\n\n([\s\S]*?)\n\n/)?.[1] ?? '';
+const documentedModes = [...new Set(
+  [...skillModesTable.matchAll(/\|\s*`([a-z][a-z/-]*)[^`]*`[^|\n]*\|\s*$/gm)].map((m) => m[1]),
+)];
+
+if (documentedModes.length < 20) {
+  fail(`could not read the AGENTS.md Skill Modes table (found ${documentedModes.length} modes)`);
+} else {
+  const unrouted = documentedModes.filter((m) => !new RegExp(`^\\| \`[^\`]+\` \\| \`${m}\` \\|$`, 'm').test(skill));
+  if (unrouted.length === 0) {
+    pass(`all ${documentedModes.length} modes in AGENTS.md Skill Modes have a row in the router's routing table`);
+  } else {
+    fail(`modes documented in AGENTS.md but missing from the router's routing table (fall through to discovery): ${unrouted.join(', ')}`);
+  }
+}
+
+const argumentHint = skill.match(/^argument-hint: "\[(.*)\]"$/m)?.[1].split(' | ') ?? [];
+const appliesTo = (heading) => {
+  const section = skill.split(`### ${heading}`)[1]?.split('\n### ')[0] ?? '';
+  return section.match(/^Applies to: (.*)$/m)?.[1] ?? '';
+};
+const shared = appliesTo('Modes that require `_shared.md` + their mode file');
+const standalone = appliesTo('Standalone modes with profile and custom context');
+const ownContext = appliesTo('Modes that load only their mode file');
+const delegated = skill.split('### Modes delegated to subagent')[1] ?? '';
+
+for (const mode of ['triage', 'calibrate', 'intake', 'ats', 'retro']) {
+  const missing = [];
+  if (!argumentHint.includes(mode)) missing.push('argument-hint');
+  if (!skill.includes(`| \`${mode}\` | \`${mode}\` |`)) missing.push('routing table');
+  if (!new RegExp(`^  /career-ops ${mode} +→`, 'm').test(skill)) missing.push('discovery menu');
+  // triage reads only modes/_brief.md and tells the agent NOT to read
+  // _profile.md or _shared.md (modes/triage.md "Context"), so it must not sit
+  // in either list that would load them for it.
+  const loadList = mode === 'triage' ? ownContext : standalone;
+  if (!loadList.includes(`\`${mode}\``)) missing.push('context-loading list');
+  if (mode === 'triage' && (standalone.includes('`triage`') || shared.includes('`triage`'))) {
+    missing.push('kept out of the _profile/_shared loading lists');
+  }
+  if (delegated.includes(`\`${mode}\``)) missing.push('kept out of subagent delegation');
+
+  if (missing.length === 0) {
+    pass(`router registers ${mode} (argument-hint, routing table, discovery menu, context loading)`);
+  } else {
+    fail(`router registration for ${mode} is incomplete: ${missing.join(', ')}`);
+  }
+}
+
+// Every routed mode needs a context-loading rule too. A mode in none of the
+// three lists is loaded however the agent guesses: without `_custom.md` it
+// skips the user's house rules, which AGENTS.md says apply in every mode.
+const routedModes = [...skill.matchAll(/^\| `[^`]+` \| `([^`]+)` \|$/gm)].map((m) => m[1]);
+const withoutContextRule = [...new Set(routedModes)]
+  .filter((m) => ![shared, standalone, ownContext].some((list) => list.includes(`\`${m}\``)));
+if (routedModes.length < 20) {
+  fail(`could not read the router's routing table (found ${routedModes.length} modes)`);
+} else if (withoutContextRule.length === 0) {
+  pass(`all ${routedModes.length} routed modes have a context-loading rule`);
+} else {
+  fail(`routed modes with no context-loading rule: ${withoutContextRule.join(', ')}`);
+}
+
+// The discovery menu is what the agent prints for `/career-ops` with no
+// arguments. It had drifted from the routing table: `interview-redflag` and
+// `reply-watch` were routed but never listed, and `oferta` still read "A-F"
+// after the evaluation grew to A-H (#6214). The per-mode loop above only knows
+// five hard-coded names, so compare the two lists in full.
+const menu = skill.split('Show this menu:')[1]?.match(/```\n([\s\S]*?)\n```/)?.[1] ?? '';
+// The first word after `/career-ops` is the input, whatever arguments follow it.
+// `{JD}` is the auto-pipeline line, not a mode name, so it is checked on its own.
+const menuLines = [...menu.matchAll(/^  \/career-ops (\S+)/gm)].map((m) => m[1]);
+const menuInputs = menuLines.filter((input) => input !== '{JD}');
+// Rows may carry extra spacing; the two special rows (no arguments, a pasted JD)
+// are the only ones without a backticked input and mode.
+const routingSection = skill.split('## Mode Routing')[1]?.split('**Auto-pipeline')[0] ?? '';
+const routingRows = routingSection.split('\n').filter((line) => line.startsWith('|')).slice(2);
+const parsedRows = routingRows.map((row) => row.match(/^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|$/));
+const unparsedRows = routingRows.filter((row, i) => !parsedRows[i] && !/^\|\s*(\(empty|JD text)/.test(row));
+const routeInputs = new Map(parsedRows.filter(Boolean).map((m) => [m[1], m[2]]));
+// A Map keeps one mode per input, so a second row for the same input would
+// drop a mode from the comparison below without a word.
+const duplicateInputs = [...new Set(parsedRows.filter(Boolean).map((m) => m[1])
+  .filter((input, i, all) => all.indexOf(input) !== i))];
+
+if (menuInputs.length < 20 || routeInputs.size < 20 || unparsedRows.length) {
+  fail(`could not read the discovery menu (${menuInputs.length} entries) or routing table (${routeInputs.size} inputs${unparsedRows.length ? `; unparsed rows: ${unparsedRows.join(' ')}` : ''})`);
+} else if (duplicateInputs.length) {
+  fail(`routing table routes the same input more than once: ${duplicateInputs.join(', ')}`);
+} else if (!menuLines.includes('{JD}')) {
+  fail('discovery menu has no `/career-ops {JD}` auto-pipeline line');
+} else {
+  // An alias such as `inbox` → `agent-inbox` needs no line of its own while
+  // another input for the same mode is listed.
+  const listedModes = new Set(menuInputs.map((input) => routeInputs.get(input)));
+  const missing = [...new Set(routeInputs.values())].filter((mode) => !listedModes.has(mode));
+  const unrouted = menuInputs.filter((input) => !routeInputs.has(input));
+  if (missing.length === 0 && unrouted.length === 0) {
+    pass(`discovery menu lists every routed mode (${listedModes.size}) and only routed ones`);
+  } else {
+    if (missing.length) fail(`routed modes missing from the discovery menu: ${missing.join(', ')}`);
+    if (unrouted.length) fail(`discovery menu lists inputs the routing table does not route: ${unrouted.join(', ')}`);
+  }
+}
+
+const oferta = menu.match(/^  \/career-ops oferta .*$/m)?.[0] ?? '';
+// Oferta always writes blocks A-G. Block H is included at or above 4.5.
+// The short "A-H" token hides that, and "A-F" drops Block H entirely.
+if (/A-G always/.test(oferta) && /Block H at or above 4\.5/.test(oferta) && !/A-F/.test(oferta)) {
+  pass('discovery menu describes oferta as blocks A-G always, Block H at or above 4.5');
+} else {
+  fail(`discovery menu line for oferta should say "A-G always" and "Block H at or above 4.5", not A-F: ${oferta || '(no oferta line found)'}`);
+}

@@ -3,7 +3,7 @@
  * normalize-statuses.mjs — Clean non-canonical states in applications.md
  *
  * Maps all non-canonical statuses to canonical ones per states.yml:
- *   Evaluada, Aplicado, Respondido, Entrevista, Oferta, Rechazado, Descartado, NO APLICAR
+ *   Evaluated, Applied, Responded, Assessment, Interview, Offer, Hired, Rejected, Discarded, SKIP
  *
  * Also strips markdown bold (**) and dates from the status field,
  * moving DUPLICADO info to the notes column.
@@ -17,9 +17,10 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   openTrackerTransaction, rebuildRow,
-  loadCanonicalStates, resolveCanonicalState,
+  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId, statusTextAfterDate, prependNote, hasNoteEntry,
 } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 // System Layer files (templates/, modes/, scripts) live in the codebase and are
@@ -30,7 +31,6 @@ import { isMainModule } from './lib/is-main-module.mjs';
 const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
-const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure required directories exist (fresh setup)
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
@@ -56,6 +56,9 @@ function canonicalStates() {
 }
 
 function normalizeStatus(raw) {
+  // A dated cell's state. Text after the date is no part of it, so the whole
+  // cell moves to Notes rather than losing those words.
+  const dated = (status) => (statusTextAfterDate(raw) ? { status, moveToNotes: raw.trim() } : { status });
   // Strip markdown bold
   let s = raw.replace(/\*\*/g, '').trim();
   const lower = s.toLowerCase();
@@ -77,10 +80,10 @@ function normalizeStatus(raw) {
   // form this comment claims to handle, that states.yml lists as an alias, and that
   // the header of this file names. A bare "Rechazado" fell through to unknown.
   if (/^rechazad[oa]$/i.test(s)) return { status: 'Rejected' };
-  if (/^rechazado\s+\d{4}/i.test(s)) return { status: 'Rejected' };
+  if (/^rechazado\s+\d{4}/i.test(s)) return dated('Rejected');
 
   // Aplicado with date → Applied (strip date)
-  if (/^aplicado\s+\d{4}/i.test(s)) return { status: 'Applied' };
+  if (/^aplicado\s+\d{4}/i.test(s)) return dated('Applied');
 
   // CONDICIONAL / HOLD / EVALUAR / Verificar → Evaluated
   if (/^(condicional|hold|evaluar|verificar)$/i.test(s)) return { status: 'Evaluated' };
@@ -99,7 +102,7 @@ function normalizeStatus(raw) {
 
   // Already canonical (English, per states.yml) — just fix casing/bold
   const canonical = [
-    'Evaluated', 'Applied', 'Responded', 'Interview',
+    'Evaluated', 'Applied', 'Responded', 'Assessment', 'Interview',
     'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP',
   ];
   for (const c of canonical) {
@@ -115,11 +118,34 @@ function normalizeStatus(raw) {
   const fromStates = resolveCanonicalState(lower, canonicalStates());
   if (fromStates) return { status: fromStates };
 
+  // A legacy cell with a date appended: `Applied 2026-01-02`,
+  // `**Interview** 2026-02-10`. Every reader resolves one through
+  // resolveCanonicalStateId(), which strips the bold and the date, and
+  // verify-pipeline's fix for "Status contains date" is to run this script.
+  // Only the two Spanish special cases above stripped a date, so every other
+  // dated cell was reported as unknown and left in place. Resolve it the way
+  // the readers do: the date goes, the state stays. Text after the date
+  // (`… 2026-01-02 via referral`) is not part of any state, so the cell is
+  // kept in Notes rather than dropped with it.
+  const datedId = resolveCanonicalStateId(raw, canonicalStates());
+  if (datedId) {
+    const status = canonicalStates().find(st => st.id.toLowerCase() === datedId).label;
+    return dated(status);
+  }
+
   // Unknown — flag it
   return { status: null, unknown: true };
 }
 
 export { normalizeStatus };
+
+const KNOWN_FLAGS = ['--help', '-h', '--dry-run'];
+const USAGE = `Usage: node normalize-statuses.mjs [options]
+
+  Options:
+  --dry-run        Report what would change without writing applications.md
+  -h, --help       Show this help and exit
+  `;
 
 // Everything below is the CLI. It is guarded because importing this module used to
 // run it: the import alone opened a tracker transaction and rewrote applications.md.
@@ -128,12 +154,18 @@ export { normalizeStatus };
 const IS_CLI = isMainModule(import.meta.url);
 
 if (IS_CLI) {
+const args = process.argv.slice(2);
+
+// Unrecognized flags exit 1 naming the flag; --help/-h print USAGE and exit 0.
+validateFlags(args, KNOWN_FLAGS, USAGE);
+
 // Read applications.md
 if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
   process.exit(0);
 }
 
+const DRY_RUN = process.argv.includes('--dry-run');
 let trackerTransaction = null;
 if (!DRY_RUN) {
   try {
@@ -152,20 +184,26 @@ const lines = content.split('\n');
 
 let changes = 0;
 let unknowns = [];
+let noNotes = [];
 
 // Map columns by header name (tracker-parse.mjs, #954/#1596). Fixed indices
 // assumed the original 9-column layout, so a customized tracker — an inserted
 // Location or Via column — shifted every field one to the left: the Score cell
 // was normalized as if it were the status and overwritten, while the real
 // status was left alone and reported as unknown (#1955).
-const COLS = resolveColumns(lines);
+// Legacy tab-layout rows are readable here the same way set-status.mjs and
+// mark-pdf-ready.mjs already read them: opt in explicitly, keep the layout on
+// the way out (a pipe-only writer must not migrate the table as a side effect).
+const PARSE_OPTS = { allowTabs: true };
+const COLS = resolveColumns(lines, PARSE_OPTS);
 
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
-  const row = parseTrackerRow(line, COLS);
+  const row = parseTrackerRow(line, COLS, PARSE_OPTS);
   if (!row) continue; // header, separator, non-row, or a row missing cells
 
-  const parts = line.split('|').map(s => s.trim());
+  const separator = trackerRowSeparator(line);
+  const parts = splitTrackerCells(line).map(s => s.trim());
   const num = row.num;
   const rawStatus = row.status;
   const result = normalizeStatus(rawStatus);
@@ -177,6 +215,14 @@ for (let i = 0; i < lines.length; i++) {
 
   if (result.status === rawStatus) continue; // Already canonical
 
+  // Words after a date (`Applied 2026-01-02 via referral`) move to Notes. A
+  // layout without a Notes column has nowhere to put them, and the bare state
+  // would drop them, so the row stays as it is.
+  if (COLS.notes == null && statusTextAfterDate(rawStatus)) {
+    noNotes.push({ num, rawStatus, line: i + 1 });
+    continue;
+  }
+
   // Apply change
   const oldStatus = rawStatus;
   parts[COLS.status] = result.status;
@@ -186,8 +232,8 @@ for (let i = 0; i < lines.length; i++) {
   // table has no header for.
   if (result.moveToNotes && COLS.notes != null) {
     const existing = parts[COLS.notes] || '';
-    if (!existing.includes(result.moveToNotes)) {
-      parts[COLS.notes] = result.moveToNotes + (existing ? '. ' + existing : '');
+    if (!hasNoteEntry(existing, result.moveToNotes)) {
+      parts[COLS.notes] = prependNote(existing, result.moveToNotes);
     }
   }
 
@@ -196,8 +242,12 @@ for (let i = 0; i < lines.length; i++) {
     parts[COLS.score] = parts[COLS.score].replace(/\*\*/g, '');
   }
 
-  // Reconstruct line
-  const newLine = rebuildRow(parts);
+  // Reconstruct line, preserving the row's own layout: rebuildRow is the
+  // pipe writer; a tab row goes back out tab-delimited, same canonical shape
+  // set-status.mjs writes (`|a\tb\tc|`).
+  let cells = parts.slice(1);
+  if (cells.length > 0 && cells[cells.length - 1] === '') cells = cells.slice(0, -1);
+  const newLine = separator === '\t' ? '|' + cells.join('\t') + '|' : rebuildRow(parts);
   lines[i] = newLine;
   changes++;
 
@@ -207,6 +257,13 @@ for (let i = 0; i < lines.length; i++) {
 if (unknowns.length > 0) {
   console.log(`\n⚠️  ${unknowns.length} unknown statuses:`);
   for (const u of unknowns) {
+    console.log(`  #${u.num} (line ${u.line}): "${u.rawStatus}"`);
+  }
+}
+
+if (noNotes.length > 0) {
+  console.log(`\n⚠️  ${noNotes.length} dated statuses left as they are: the tracker has no Notes column for the words after the date:`);
+  for (const u of noNotes) {
     console.log(`  #${u.num} (line ${u.line}): "${u.rawStatus}"`);
   }
 }

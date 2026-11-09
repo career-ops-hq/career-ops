@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap><loc>https://careers.example.com/sitemap-pages.xml</loc><lastmod>2026-10-01</lastmod></sitemap>
+  <sitemap><loc>https://careers.example.com/sitemap-jobs-1.xml</loc><lastmod>2026-11-05</lastmod></sitemap>
+  <sitemap><loc>https://careers.example.com/sitemap-jobs-2.xml</loc></sitemap>
+  <sitemap><loc>https://cdn.evil.example/sitemap-jobs-3.xml</loc></sitemap>
+  <sitemap><loc>https://careers.example.com/sitemap-jobs-4.xml.gz</loc></sitemap>
+</sitemapindex>

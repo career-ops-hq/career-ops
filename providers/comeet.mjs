@@ -105,7 +105,7 @@ export default {
  *   `url_comeet_hosted_page` (the Comeet-hosted page). Both are public, display-
  *   only URLs (recorded in the pipeline/history, never server-fetched here), so
  *   they are NOT host-locked. Require a well-formed https: URL; a position whose
- *   URL is missing/non-https/malformed is dropped (url is the dedup key).
+ *   two URLs are both missing/non-https/malformed is dropped (url is the dedup key).
  * - location: `location.name`, appending "Remote" when `location.is_remote`.
  *
  * @param {any} json
@@ -120,13 +120,16 @@ export function parseComeetResponse(json, companyName) {
       const j = (row && typeof row === 'object') ? row : {};
       // Resolve a display-only https URL; drop the position if none is usable.
       let url = '';
-      const rawUrl = j.url_active_page || j.url_comeet_hosted_page || '';
-      if (typeof rawUrl === 'string' && rawUrl) {
+      for (const rawUrl of [j.url_active_page, j.url_comeet_hosted_page]) {
+        if (typeof rawUrl !== 'string' || !rawUrl) continue;
         try {
           const parsed = new URL(rawUrl);
-          if (parsed.protocol === 'https:') url = parsed.href;
+          if (parsed.protocol === 'https:') {
+            url = parsed.href;
+            break;
+          }
         } catch {
-          // malformed URL → leave url = ''
+          // malformed active URL → try the hosted fallback
         }
       }
 

@@ -107,6 +107,43 @@ try {
   if (sawAuth === 'Bearer tok.abc') pass('csod.fetch() sends the extracted anonymous bearer token');
   else fail(`csod.fetch() auth header wrong: ${JSON.stringify(sawAuth)}`);
 
+  // The short-page stop compares the row count the SOURCE returned for the page,
+  // not the count parseRequisitions() kept (ADDING_A_PROVIDER.md, "Defensive
+  // parsing"): one untitled requisition on a full page must not end the walk.
+  const mkPagedCtx = (pages, totalCount) => {
+    const calls = { search: 0 };
+    return {
+      calls,
+      sleep: async () => {},
+      fetchText: async () => '{"token":"tok.abc"}',
+      fetchJson: async () => {
+        const requisitions = pages[calls.search++] ?? [];
+        return { data: totalCount === undefined ? { requisitions } : { totalCount, requisitions } };
+      },
+    };
+  };
+  const pagedEntry = { name: 'P', api: 'https://p.csod.com/ux/ats/careersite/3/home?c=p' };
+  // 25 raw rows, one with an empty title (24 survive the parser).
+  const fullPageWithUntitled = Array.from({ length: 25 }, (_, i) => mkReq(i + 1, i === 4 ? '' : `Job ${i + 1}`));
+  const secondFullPage = Array.from({ length: 25 }, (_, i) => mkReq(i + 26, `Job ${i + 26}`));
+
+  const untitledTotalCtx = mkPagedCtx([fullPageWithUntitled, secondFullPage, Array.from({ length: 10 }, (_, i) => mkReq(i + 51, `Job ${i + 51}`))], 60);
+  const untitledTotalJobs = await csod.fetch(pagedEntry, untitledTotalCtx);
+  if (untitledTotalJobs.length === 59 && untitledTotalCtx.calls.search === 3) pass('csod.fetch() keeps paging past a full page that carries an untitled requisition (totalCount present)');
+  else fail(`csod.fetch() returned ${untitledTotalJobs.length} jobs after ${untitledTotalCtx.calls.search} calls, expected 59 after 3`);
+
+  const untitledNoTotalCtx = mkPagedCtx([fullPageWithUntitled, secondFullPage, [mkReq(51, 'Job 51'), mkReq(52, 'Job 52'), mkReq(53, 'Job 53')]]);
+  const untitledNoTotalJobs = await csod.fetch(pagedEntry, untitledNoTotalCtx);
+  if (untitledNoTotalJobs.length === 52 && untitledNoTotalCtx.calls.search === 3) pass('csod.fetch() keeps paging past a full page that carries an untitled requisition (no totalCount)');
+  else fail(`csod.fetch() returned ${untitledNoTotalJobs.length} jobs after ${untitledNoTotalCtx.calls.search} calls, expected 52 after 3`);
+
+  // Control: a genuinely short last page still ends the walk, even when one of
+  // its rows is dropped by the parser.
+  const shortLastCtx = mkPagedCtx([secondFullPage, [mkReq(51, 'Job 51'), mkReq(52, ''), mkReq(53, 'Job 53')]]);
+  const shortLastJobs = await csod.fetch(pagedEntry, shortLastCtx);
+  if (shortLastJobs.length === 27 && shortLastCtx.calls.search === 2) pass('csod.fetch() still stops on a short last page that carries an untitled requisition');
+  else fail(`csod.fetch() returned ${shortLastJobs.length} jobs after ${shortLastCtx.calls.search} calls, expected 27 after 2`);
+
   // Token missing → hard error (never a silent empty scan).
   let tokenErr = '';
   await csod.fetch({ name: 'X', api: 'https://x.csod.com/ux/ats/careersite/1/home?c=x' }, { ...mockCtx, fetchText: async () => '<html/>' }).catch((e) => { tokenErr = e.message; });
