@@ -115,6 +115,9 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   ENV
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_TIMEOUT_MS
+    CAREER_OPS_MAX_TOKENS  Output cap per evaluation (default 32768). Keeps a
+                     gateway like OpenRouter from reserving credit for the
+                     model's whole output window (HTTP 402 on a low balance).
 
   PROVIDER EXAMPLES (cheap / free-tier friendly — addresses token cost)
     OpenRouter:  --url https://openrouter.ai/api/v1   --model deepseek/deepseek-chat
@@ -354,6 +357,24 @@ export function buildSystemMessage(prompt, host) {
 }
 
 // ---------------------------------------------------------------------------
+// Output cap. With no limit in the request, a gateway budgets the call for the
+// model's whole output window: OpenRouter reserves prompt + max output at the
+// model's price before generating anything, and answers HTTP 402 when the
+// balance cannot cover that reservation, even when the report costs cents.
+//
+// 32768 holds a full A-G report (about 9K tokens at the 99th percentile) plus
+// the reasoning a thinking model spends before it (up to ~26K seen), so the cap
+// bounds the reservation without cutting a normal evaluation short.
+const DEFAULT_MAX_TOKENS = 32768;
+
+// Same host gate as buildSystemMessage: api.openai.com's reasoning models
+// reject `max_tokens` and take `max_completion_tokens`, which its other chat
+// models accept as well; gateways and local servers read `max_tokens`.
+function buildTokenLimit(limit, host) {
+  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
+}
+
+// ---------------------------------------------------------------------------
 // Call the OpenAI-compatible endpoint
 // ---------------------------------------------------------------------------
 const timeoutMs = parseInt(process.env.OPENAI_TIMEOUT_MS || '300000', 10);
@@ -362,8 +383,17 @@ if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
   process.exit(1);
 }
 
+// Empty means unset, as for every other variable here. Digits only, so "8k"
+// is refused instead of being read as 8.
+const maxTokensEnv = process.env.CAREER_OPS_MAX_TOKENS?.trim();
+const maxTokens = maxTokensEnv ? (/^\d+$/.test(maxTokensEnv) ? Number(maxTokensEnv) : NaN) : DEFAULT_MAX_TOKENS;
+if (!(maxTokens > 0)) {
+  console.error(`❌  Invalid CAREER_OPS_MAX_TOKENS: "${process.env.CAREER_OPS_MAX_TOKENS}" — must be a positive integer (output tokens).`);
+  process.exit(1);
+}
+
 console.log(`\n🔒  Privacy: your cv.md + JD will be sent to ${endpointHost}.`);
-console.log(`🤖  Calling ${modelName} via ${endpointHost}... this may take a minute.\n`);
+console.log(`🤖  Calling ${modelName} via ${endpointHost} (output cap ${maxTokens} tokens)... this may take a minute.\n`);
 
 // One evaluation is one conversation: a single id for every request in this run.
 const SESSION_ID = randomUUID();
@@ -396,6 +426,7 @@ try {
       stream:      true,
       ...(withUsage && { stream_options: { include_usage: true } }),
       temperature: 0.4,
+      ...buildTokenLimit(maxTokens, endpointHost),
     });
     assertLlmRequestAllowed(endpoint, requestBody);
     return fetch(endpoint, {
@@ -419,6 +450,9 @@ try {
     console.error(`    ${body.slice(0, 300)}`);
     if (res.status === 401 || res.status === 403) {
       console.error(`    → Check your API key for ${endpointHost}.`);
+    } else if (res.status === 402) {
+      console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
+      console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);
     } else if (res.status === 404) {
       console.error(`    → Check --url (it should include any /v1 segment) and --model id.`);
     }
@@ -432,6 +466,7 @@ try {
   let sseBuf = '';
   let thinkOpen = false;
   let streamUsage;
+  let finishReason = null;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -446,6 +481,7 @@ try {
       let delta;
       try { delta = JSON.parse(payload); } catch { continue; }
       streamUsage = delta.usage ?? delta.x_groq?.usage ?? streamUsage;
+      finishReason = delta.choices?.[0]?.finish_reason ?? finishReason;
       const d = delta.choices?.[0]?.delta ?? {};
       if (d.reasoning_content) {
         if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
@@ -459,6 +495,12 @@ try {
   if (thinkOpen) parts.push('\n</think>\n');
   if (streamUsage) tracker.record('evaluation', normalizeOpenAIUsage(streamUsage));
   evaluationText = parts.join('').trim();
+  // Before the empty check: a thinking model can spend the whole cap on
+  // reasoning, and then this is the only explanation the user gets.
+  if (finishReason === 'length') {
+    console.error(`⚠️   The reply stopped at the ${maxTokens}-token output cap, so the evaluation may be truncated (missing blocks or score summary).`);
+    console.error(`    Raise CAREER_OPS_MAX_TOKENS to allow a longer reply.`);
+  }
   if (!evaluationText) {
     console.error('❌  The endpoint returned an empty response.');
     process.exit(1);
