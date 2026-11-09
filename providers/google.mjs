@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 import { coerceId } from './_ids.mjs';
 import { htmlToText } from './_html-to-text.mjs';
+import { sleep } from './_http.mjs';
 
 // Google provider — Google Careers is server-rendered, so the results page HTML
 // contains every job link:
@@ -46,6 +47,10 @@ const BASE = 'https://www.google.com/about/careers/applications/jobs/results/';
 // First page only unless the entry sets `max_pages` (see the header comment).
 const DEFAULT_MAX_PAGES = 1;
 const MAX_PAGES_CAP = 20;
+// Politeness delay between pages of one query, and the walk's cancellation
+// checkpoint (ctx.sleep is the framework's watchdog-aware hook) - the same
+// convention kalibrr and the other paged providers follow.
+const INTER_PAGE_DELAY_MS = 200;
 // The anchor that closes each card; the markup since the previous anchor is that
 // card. Google serves the href relative ("jobs/results/…"); a path prefix is
 // tolerated, and the URL is rebuilt from BASE either way.
@@ -149,9 +154,21 @@ export default {
       // portals.yml, and URLSearchParams never throws on a malformed string.
       const params = new URLSearchParams({ q: String(q), location: String(location), sort_by: 'date' });
       for (let page = 1; page <= pageBudget; page++) {
+        if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
         // Page 1 keeps the bare URL; deeper pages carry page=N.
         const url = page === 1 ? `${BASE}?${params}` : `${BASE}?${params}&page=${page}`;
-        const html = await ctx.fetchText(url, { redirect: 'error' });
+        let html;
+        try {
+          html = await ctx.fetchText(url, { redirect: 'error' });
+        } catch (err) {
+          // kalibrr's failure contract: a probe sees the rejection unwrapped,
+          // a first-page failure fails loud rather than report a quiet empty
+          // board, and a deeper page keeps what earlier pages already
+          // collected instead of losing the whole board to one bad page.
+          if (probing || page === 1) throw err;
+          console.warn(`google: page ${page} failed - ${err.message}`);
+          break;
+        }
         let added = 0;
         for (const { id, slug, title, employer, locations } of parseResultsPage(html)) {
           if (byId.has(id)) continue;
