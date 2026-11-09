@@ -3446,7 +3446,8 @@ tracked_companies:
   #
   # The scanner reads LatAm job boards (Get on Board, OCC, Gupy, HiringRoom),
   # but no LatAm employer was tracked here. These companies publish through
-  # Greenhouse, Lever, Ashby and Workable, whose public zero-auth APIs the
+  # Greenhouse, Lever, Ashby, Workable, Teamtailor, SuccessFactors and
+  # Magneto365, whose public zero-auth endpoints the
   # scanner already reads. The note on each says where it actually hires, so a
   # candidate in Colombia doesn't enable a board that only posts in Brazil.
   # Left `enabled: false` like every other example.
@@ -3501,6 +3502,33 @@ tracked_companies:
     notes: "Remote LatAm + US. Financial reconciliation."
     enabled: false
 
+  - name: La Haus
+    careers_url: https://jobs.lever.co/lahaus
+    notes: "Colombia (Bogotá / Medellín). Proptech. Verified 2026-11-07: small board, 2 postings."
+    enabled: false
+
+  - name: Sofka
+    careers_url: https://oportunidades.sofka.com.co
+    provider: teamtailor
+    notes: "Colombia / Panama / Honduras. Software services and QA. Branded Teamtailor domain. Verified 2026-11-07: 37 postings."
+    enabled: false
+
+  - name: Habi
+    careers_url: https://www.magneto365.com/co/empresas/habi/empleos
+    notes: "Colombia (Bogotá / Cali). Proptech. Company page on Magneto365, mostly commercial roles. Verified 2026-11-07: 10 postings."
+    enabled: false
+
+  - name: Davivienda
+    careers_url: https://www.magneto365.com/co/empresas/davivienda/empleos
+    notes: "Colombia, several cities. Bank. Company page on Magneto365. Verified 2026-11-07: 20 postings."
+    enabled: false
+
+  - name: Bancolombia
+    careers_url: https://empleo.grupobancolombia.com/bancolombia
+    provider: successfactors
+    notes: "Colombia. Bank. Branded SuccessFactors board; /bancolombia scopes it to the bank within the Grupo Bancolombia tenant. Verified 2026-11-07: 42 postings."
+    enabled: false
+    
   # -- Cybersecurity (vendors, offensive security, bug bounty) --
   #
   # No security employer was tracked here, though a SOC analyst, pentester or
