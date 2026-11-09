@@ -163,6 +163,8 @@ A general job board with one host per Latin American country. Only the Colombian
 
 **Rule 6 (`robots.txt`).** Checked on 2026-10-23: one GET of `https://co.computrabajo.com/robots.txt` with career-ops' default User-Agent, HTTP 200, a single `User-agent: *` group. Its `Disallow` lines cover `/ofertas-de-trabajo/` with filter parameters (`*by=`, `*pubdate=`, ...), `/hojas-de-vida/`, `/curriculums/`, `/empresas/` filters, `/Ajax/`, `/_services/` and `/go/`; none covers the search page the provider fetches (`/trabajo-de-sistemas?by=publicationtime&p=N`). A configured search URL under `/ofertas-de-trabajo/` would fall under the `*by=` rule once the provider adds `by=publicationtime`; the shipped entry's path is not under it. Other country hosts: unverified.
 
+**Update (2026-11-08):** rule 6 no longer treats `robots.txt` as a gate ([#6691](https://github.com/career-ops-hq/career-ops/pull/6691), [#6694](https://github.com/career-ops-hq/career-ops/issues/6694)). The provider used to strip `by=` from a search URL under `/ofertas-de-trabajo/`, so such a search could not ask for the newest postings first; it now sets `by=publicationtime` on every path (a `by=` already in the URL still wins), so an `/ofertas-de-trabajo/` search is read newest-first like any other. Verified that `by=publicationtime` reorders results on the reachable `/trabajo-de-{category}` path (the first card changes); the `/ofertas-de-trabajo/` search path answers HTTP 403 to a non-Colombian egress (the board's documented geo/WAF behaviour), so it was not fetched 200 from here — the change is to the URL the provider builds, not to that path's reachability.
+
 ---
 
 ## ElEmpleo (not listed)

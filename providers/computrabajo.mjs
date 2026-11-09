@@ -151,13 +151,14 @@ export default {
       if (page > 1) await sleep(2000 + Math.random() * 3000, ctx);
 
       const pageUrl = new URL(listUrl);
-      // Newest first (the board's own "Fecha" sort). Employers can pay Computrabajo to
-      // feature a posting ("Empleo destacado"), and those cards are interleaved in every
-      // sort order; a `by=` the user put in their URL wins.
-      // robots.txt disallows `/ofertas-de-trabajo/*by=`, so no sort is sent there, not even one from the URL.
-      if (pageUrl.pathname.startsWith('/ofertas-de-trabajo/')) {
-        pageUrl.searchParams.delete('by');
-      } else if (!pageUrl.searchParams.has('by')) {
+      // Newest first (the board's own "Fecha" sort) unless the URL already names
+      // a sort, in which case the user's `by=` wins. Employers can pay
+      // Computrabajo to feature a posting ("Empleo destacado"), and those cards
+      // are interleaved in every sort order, so this only decides the order of
+      // the rest. Until 2026-11-08 no sort was sent under /ofertas-de-trabajo/,
+      // because robots.txt disallows `*by=` there; rule 6 no longer treats
+      // robots.txt as a gate (#6691, #6694), so the sort is set on every path.
+      if (!pageUrl.searchParams.has('by')) {
         pageUrl.searchParams.set('by', 'publicationtime');
       }
       pageUrl.searchParams.set('p', String(page));
