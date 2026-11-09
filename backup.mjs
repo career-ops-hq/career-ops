@@ -38,7 +38,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'pat
 import { fileURLToPath } from 'url';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { walkTree } from './lib/walk-tree.mjs';
+import { isScratchDir } from './lib/scratch-dirs.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import {
   LOCAL_PATHS_FILE,
@@ -120,7 +120,12 @@ function templateUserFiles(dataRoot, warnings) {
  * Never copied: secrets, rebuildable caches, lock/temp files, and (unless
  * `includeContacts`) the files holding other people's contact details.
  */
-export function isExcluded(relPath, { includeContacts = false } = {}) {
+// Agent-tool settings can hold API tokens. They are kept out of a backup that
+// goes into a sync folder, whose client would upload them.
+const isAgentSetting = (lower) => lower.startsWith('.claude/') || lower === 'opencode.json'
+  || lower === 'plugins.local' || lower.startsWith('plugins.local/');
+
+export function isExcluded(relPath, { includeContacts = false, skipAgentSettings = false } = {}) {
   const p = relPath.split(sep).join('/');
   // Lowercased: macOS and Windows volumes are case-insensitive, so a renamed
   // `Data/connections.csv` or `.ENV` is the same file.
@@ -131,6 +136,7 @@ export function isExcluded(relPath, { includeContacts = false } = {}) {
   // URLs can embed tokens) and dependency folders are not.
   if (lower.split('/').some((seg) => seg === '.git' || seg === 'node_modules')) return true;
   if (lower === 'data/cache' || lower.startsWith('data/cache/')) return true;
+  if (skipAgentSettings && isAgentSetting(lower)) return true;
   if (!includeContacts && CONTACT_FILES.some((f) => lower === f.toLowerCase())) return true;
   // plugins.lock is a User Layer file (USER_PATHS), not a transient lock.
   if (lower === 'plugins.lock') return false;
@@ -220,7 +226,7 @@ export function resolveDestination({ dest, provider, account, folder, env = proc
       '\nPick one with --account <text from the folder name> or --dest <dir>.',
     );
   }
-  return { dest: join(roots[0].path, sub), source: `${name} (${roots[0].label})` };
+  return { dest: join(roots[0].path, sub), base: roots[0].path, source: `${name} (${roots[0].label})` };
 }
 
 // ── Safety ───────────────────────────────────────────────────────────────
@@ -313,16 +319,27 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
     return [];
   }
   if (isExcluded(entry, include)) return [];
-  const paths = st.isDirectory()
-    ? walkTree(abs, {
-      // Symlinks are skipped (the default), so the backup never follows a link
-      // out of the data root.
-      // Nested checkouts (a git-cloned plugin under plugins.local/) are the
-      // user's own work, so they are copied rather than skipped.
-      allowNestedCheckouts: true,
-      skip: (dirent, dir) => isExcluded(relative(dataRoot, join(dir, dirent.name)), include),
-    })
-    : [abs];
+  // Symlinks are skipped, so the backup never follows a link out of the data
+  // root. Nested checkouts (a git-cloned plugin under plugins.local/) are the
+  // user's own work, so they are copied. An unreadable folder is reported and the
+  // walk carries on with the rest.
+  const walk = (dir, out = []) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      onError(relative(dataRoot, dir), error);
+      return out;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (isScratchDir(e.name) || isExcluded(relative(dataRoot, p), include)) continue;
+      if (e.isDirectory()) walk(p, out);
+      else if (e.isFile()) out.push(p);
+    }
+    return out;
+  };
+  const paths = st.isDirectory() ? walk(abs) : [abs];
   const files = [];
   for (const p of paths) {
     try {
@@ -354,7 +371,8 @@ const unchanged = (src, destPath) => {
  * @returns {{found: number, copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number, warnings: string[]}}
  */
 export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = false }) {
-  const include = { includeContacts };
+  const syncedTo = syncProviderOf(dest);
+  const include = { includeContacts, skipAgentSettings: Boolean(syncedTo) };
   const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
   const fail = (path, error) => result.failed.push({ path, error: error.message });
   // The exported API enforces this too, not only the CLI: a caller must not be
@@ -368,8 +386,6 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   if (resolve(dataRoot) !== resolve(CODE_ROOT) && existsSync(join(CODE_ROOT, LOCAL_PATHS_FILE))) {
     result.warnings.push(`${LOCAL_PATHS_FILE} in the checkout is not read when the data root is elsewhere; back up fork-local files it declares separately.`);
   }
-  const syncedTo = syncProviderOf(dest);
-  let agentSettings = 0;
   for (const entry of backupPaths(dataRoot, result.warnings)) {
     let files;
     try {
@@ -384,8 +400,6 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     }
     for (const file of files) {
       result.found++;
-      const relPosix = file.rel.split(sep).join('/');
-      if (relPosix.startsWith('.claude/') || relPosix === 'opencode.json' || relPosix.startsWith('plugins.local/')) agentSettings++;
       const target = join(dest, file.rel);
       // A symlinked folder inside the destination could point back at live files.
       if (hasSymlinkedParent(dest, file.rel.split(sep).join('/'))) {
@@ -408,8 +422,8 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
       }
     }
   }
-  if (syncedTo && agentSettings > 0) {
-    result.warnings.push(`${agentSettings} agent-tool settings file(s) (.claude/, opencode.json, plugins.local/) are in a ${syncedTo} folder and can contain tokens; the sync client will upload them.`);
+  if (syncedTo && ['.claude/settings.json', '.claude/hooks', 'opencode.json', 'plugins.local'].some((f) => existsSync(join(dataRoot, f)))) {
+    result.warnings.push(`agent-tool settings (.claude/, opencode.json, plugins.local/) were not copied: the destination is in a ${syncedTo} folder and they can contain tokens. Back them up to a folder that is not synced.`);
   }
   if (!dryRun && result.found > 0) {
     try {
@@ -474,8 +488,11 @@ function main(args) {
     });
     assertSafeDestination(target.dest, dataRoot);
     assertContactsNotSynced(target.dest, includeContacts);
-    if (!existsSync(dirname(target.dest))) {
-      throw new Error(`${dirname(target.dest)} does not exist (is the drive mounted?). Nothing was created.`);
+    // A provider destination only needs its drive to be there: runBackup creates
+    // Backups/career-ops under it. --dest and CAREER_OPS_BACKUP_DIR need their parent.
+    const mustExist = target.base ?? dirname(target.dest);
+    if (!existsSync(mustExist)) {
+      throw new Error(`${mustExist} does not exist (is the drive mounted?). Nothing was created.`);
     }
   } catch (error) {
     return refuse(error.message);

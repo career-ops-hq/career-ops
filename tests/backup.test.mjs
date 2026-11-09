@@ -222,6 +222,22 @@ try {
     assert.equal(partial.failed.length, 1);
     assert.equal(partial.failed[0].path, join('data', 'locked.md'));
     assert.equal(partial.copied, 2);
+
+    // One unreadable folder is a failure entry too; the other files still back up.
+    const lockedDir = join(tmp, 'locked-dir-root');
+    put(lockedDir, 'cv.md', 'cv');
+    put(lockedDir, 'output/ok.md', 'ok');
+    put(lockedDir, 'output/private/secret.md', 'x');
+    chmodSync(join(lockedDir, 'output/private'), 0o000);
+    let dirRun;
+    try {
+      dirRun = b.runBackup({ dataRoot: lockedDir, dest: join(tmp, 'backup', 'locked-dir') });
+    } finally {
+      chmodSync(join(lockedDir, 'output/private'), 0o700);
+    }
+    assert.equal(dirRun.failed.length, 1);
+    assert.equal(dirRun.failed[0].path, join('output', 'private'));
+    assert.equal(existsSync(join(tmp, 'backup', 'locked-dir', 'output', 'ok.md')), true);
     assert.equal(existsSync(join(tmp, 'backup', 'bad', 'data', 'ok.md')), true);
     pass('an I/O error on one file does not abort the run');
   }
@@ -247,9 +263,13 @@ try {
   process.env.USERPROFILE = warnHome;
   try {
     const syncedRun = b.runBackup({ dataRoot: warnRoot, dest: join(warnHome, 'Dropbox', 'Backups', 'career-ops') });
-    assert.equal(syncedRun.warnings.some((w) => /agent-tool settings.*dropbox/.test(w)), true);
+    // Agent-tool settings are kept out of a synced destination, and the run says so.
+    assert.equal(syncedRun.warnings.some((w) => /agent-tool settings.*not copied.*dropbox/.test(w)), true);
+    assert.equal(existsSync(join(warnHome, 'Dropbox', 'Backups', 'career-ops', '.claude', 'settings.json')), false);
+    assert.equal(existsSync(join(warnHome, 'Dropbox', 'Backups', 'career-ops', 'cv.md')), true);
     const localRun = b.runBackup({ dataRoot: warnRoot, dest: join(tmp, 'backup', 'warn-local') });
     assert.equal(localRun.warnings.some((w) => /agent-tool settings/.test(w)), false);
+    assert.equal(existsSync(join(tmp, 'backup', 'warn-local', '.claude', 'settings.json')), true);
   } finally {
     for (const [key, value] of [['HOME', prevHome], ['USERPROFILE', prevProfile]]) {
       if (value === undefined) delete process.env[key];
@@ -341,6 +361,12 @@ try {
   assert.equal(syncedOk.status, 0);
   const localOk = spawnSync(NODE, ['backup.mjs', '--dest', join(tmp, 'backup', 'local-contacts'), '--include-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
   assert.equal(localOk.status, 0);
+  // A fresh drive with no Backups/ folder yet works with --provider.
+  const freshHome = join(tmp, 'fresh-home');
+  mkdirSync(join(freshHome, 'Dropbox'), { recursive: true });
+  const fresh = spawnSync(NODE, ['backup.mjs', '--provider', 'dropbox', '--json'], { cwd: ROOT, env: { ...env, HOME: freshHome, USERPROFILE: freshHome }, encoding: 'utf8' });
+  assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
+  assert.equal(existsSync(join(freshHome, 'Dropbox', 'Backups', 'career-ops', 'cv.md')), true);
   pass('CLI exits 0 on success, 1 for a failed or empty run, 2 for a bad destination or option');
 } catch (e) {
   fail(`backup.mjs: ${e.message}`);
