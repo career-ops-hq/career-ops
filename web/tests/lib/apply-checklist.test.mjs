@@ -11,6 +11,7 @@ import {
   indexedPdf,
   pasteCopyFields,
   reportNumberFor,
+  tailoredResumeText,
 } from "../../src/lib/apply-checklist.mjs";
 
 const CV = `# Jane Example
@@ -119,9 +120,55 @@ test("the apply page pastes from the tailored HTML of the indexed resume, not cv
   const page = fs.readFileSync(new URL("../../src/app/pipeline/[id]/apply/page.tsx", import.meta.url), "utf8");
   const checklist = fs.readFileSync(new URL("../../src/components/apply-checklist.tsx", import.meta.url), "utf8");
   assert.match(page, /pasteCopyFields\(/);
+  assert.match(page, /tailoredResumeText\(/);
   assert.doesNotMatch(page, /cvCopyFields\(/);
   assert.match(checklist, /workEmpty/);
   assert.doesNotMatch(checklist, /No work history in cv\.md\./);
+});
+
+test("the indexed resume PDF stays the resume row, and its HTML is the paste source", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "apply-paste-"));
+  const output = path.join(root, "output");
+  fs.mkdirSync(output);
+  fs.writeFileSync(path.join(output, "cv-jane-example.pdf"), "%PDF-1.4\n");
+  fs.writeFileSync(path.join(output, "cv-jane-example.html"), TAILORED_HTML);
+  fs.writeFileSync(path.join(output, "other.html"), "<div class=\"section-title\">Work Experience</div><p>Other Employer</p>");
+  const index = "12\toutput/cv-jane-example.pdf\toutput/cv-jane-example.html\tpdf\t2026-02-01\t\n12\toutput/other.pdf\toutput/other.html\tpdf\t2026-02-01\t\n";
+  const exists = (abs) => fs.existsSync(abs);
+  const resume = indexedPdf(index, 12, "cv", root, exists);
+  assert.equal(resume.relativePath, "output/cv-jane-example.pdf");
+  const html = tailoredResumeText(index, resume.relativePath, root, (abs) => fs.readFileSync(abs, "utf8"));
+  const fields = pasteCopyFields(html, MASTER_CV);
+  assert.match(fields.work[0].text, /Example Studio/);
+  assert.equal(/Northwind|Other Employer/.test(fields.work[0].text), false);
+  const outside = "12\toutput/cv-jane-example.pdf\t../secret.html\tpdf\t2026-02-01\n";
+  fs.writeFileSync(path.join(output, "cv-jane-example.html"), TAILORED_HTML);
+  assert.match(tailoredResumeText(outside, "output/cv-jane-example.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), /Example Studio/);
+  fs.rmSync(path.join(output, "cv-jane-example.html"));
+  assert.equal(tailoredResumeText(outside, "output/cv-jane-example.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), null);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a broken character reference does not drop the tailored role", () => {
+  const html = `<div class="section-title">Work Experience</div><div class="job"><span class="job-company">Example Studio&#999999999;</span></div>`;
+  const fields = pasteCopyFields(html, MASTER_CV);
+  assert.match(fields.work[0].text, /Example Studio/);
+  assert.equal(/Northwind/.test(fields.work[0].text), false);
+});
+
+test("two tailored roles stay two paste blocks, in the resume's order", () => {
+  const html = `<h2>Work Experience</h2>
+    <div class="job"><span class="job-company">R&amp;D Lab</span><div class="job-role">Analyst</div></div>
+    <div class="job"><span class="job-company">Example Studio</span><div class="job-role">Coordinator</div></div>
+    <h2>Projects</h2><p>Side project</p>`;
+  const fields = pasteCopyFields(html, MASTER_CV);
+  assert.equal(fields.work.length, 2);
+  assert.match(fields.work[0].text, /R&D Lab/);
+  assert.equal(fields.work[0].text.includes("&amp;"), false);
+  assert.ok(fields.work[0].text.indexOf("R&D Lab") < fields.work[0].text.indexOf("Analyst"));
+  assert.match(fields.work[1].text, /Example Studio/);
+  assert.equal(/Northwind|Side project/.test(fields.work.map((item) => item.text).join("\n")), false);
+  assert.match(fields.education, /Example University/);
 });
 
 test("with no tailored HTML, paste blocks stay on cv.md", () => {
