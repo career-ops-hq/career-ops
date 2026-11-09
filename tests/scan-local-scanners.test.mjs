@@ -177,6 +177,33 @@ test('seek pagination walks pages with daterange and stops on an empty or repeat
   );
   assert.strictEqual(cappedCalls.length, 2);
   assert.deepStrictEqual(cappedOffers.map((o) => o.id), ['1', '2']);
+
+  // Retains earlier-page offers and marks the search incomplete when a later
+  // page fails, while still rejecting when page 1 fails.
+  const partialCalls = [];
+  const partialOffers = await scanSeekSearch(
+    { keyword: 'devops', location: '' },
+    {
+      maxPages: 4,
+      fetchText: async (url) => {
+        partialCalls.push(url);
+        if (partialCalls.length === 1) return pageHtml(['201', '202']);
+        throw new Error('HTTP 503');
+      },
+    },
+  );
+  assert.strictEqual(partialCalls.length, 2);
+  assert.deepStrictEqual(partialOffers.map((o) => o.id), ['201', '202']);
+  assert.strictEqual(partialOffers.incomplete, true);
+  assert.strictEqual(partialOffers.error?.seekUrl, 'https://nz.seek.com/devops-jobs?page=2');
+
+  await assert.rejects(
+    scanSeekSearch(
+      { keyword: 'devops', location: '' },
+      { fetchText: async () => { throw new Error('HTTP 503'); } },
+    ),
+    (err) => err.message === 'HTTP 503' && err.seekUrl === 'https://nz.seek.com/devops-jobs',
+  );
 });
 
 test('seek page parsing reads SEEK_REDUX_DATA, dedups ids, decodes text', () => {

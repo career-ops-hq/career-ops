@@ -278,8 +278,8 @@ export async function scanSeekSearch(
   const collected = [];
   let lastUrl = search?.keyword ?? '';
 
-  try {
-    for (let page = 1; page <= pageLimit; page++) {
+  for (let page = 1; page <= pageLimit; page++) {
+    try {
       lastUrl = buildSeekUrl(search, effectiveDaterange, page);
       if (page > 1 && delayMs > 0) await sleepImpl(delayMs);
       const html = await fetchText(lastUrl);
@@ -290,10 +290,13 @@ export async function scanSeekSearch(
         seenIds.add(o.id);
         collected.push(o);
       }
+    } catch (err) {
+      if (err && typeof err === 'object' && !err.seekUrl) err.seekUrl = lastUrl;
+      if (page === 1) throw err;
+      collected.incomplete = true;
+      collected.error = err;
+      break;
     }
-  } catch (err) {
-    if (err && typeof err === 'object' && !err.seekUrl) err.seekUrl = lastUrl;
-    throw err;
   }
   return collected;
 }
@@ -361,6 +364,10 @@ async function main(args) {
         if (gate.check(offer)) continue;
         added.push(offer);
         console.log(`  ✅ ${offer.company} — ${offer.title}`);
+      }
+      if (offers.error) {
+        errors++;
+        console.warn(`⚠️  ${offers.error.seekUrl || searches[i].keyword}: ${offers.error.message}`);
       }
     } catch (err) {
       errors++;
