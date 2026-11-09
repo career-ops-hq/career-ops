@@ -3,12 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { latestOnly, loadFailureView, pendingAfterReload, settleChoice } from "@/lib/templates-state.mjs";
 
 // The CV templates the core resolves, each shown filled with a fictional resume
 // so the design is visible before it is chosen. Choosing one writes cv.template
 // in config/profile.yml, the key the CLI reads, so web and CLI agree.
 
-type Template = { name: string; displayName: string; isDefault: boolean };
+type Template = { name: string; displayName: string; layer: "user" | "system"; isDefault: boolean };
+type Pending = { name: string; mode: "duplicate" | "rename" | "delete" };
+
+// Matches isValidTemplateName() on the server, which stays the authority.
+const NAME_HINT = "Lowercase letters and digits, joined by single hyphens.";
 
 const PAGE_WIDTH = 816;
 const PAGE_HEIGHT = 1056;
@@ -22,38 +27,102 @@ const COPY = {
 export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   const copy = COPY[kind];
   const [templates, setTemplates] = useState<Template[] | null>(null);
-  const [loadError, setLoadError] = useState(false);
+  // false: fine. "replace": the error stands in for the list. "alongside": the
+  // list is current, so it stays and the error sits beside it.
+  const [loadError, setLoadError] = useState<false | "replace" | "alongside">(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [draft, setDraft] = useState("");
 
-  const load = useCallback(() => {
+  // One guard per mounted section: a response applies only if its load is the
+  // newest, and none applies after unmount.
+  const guardRef = useRef(latestOnly());
+  // Whether a list has ever loaded, read by a failing reload. Set from the load
+  // handler, not during render.
+  const hasListRef = useRef(false);
+
+  const load = useCallback((listIsCurrent = false) => {
     setLoadError(false);
+    const current = guardRef.current();
     fetch(`/api/templates?kind=${kind}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status));
         return r.json();
       })
-      .then((d) => setTemplates(Array.isArray(d?.templates) ? d.templates : []))
-      .catch(() => setLoadError(true));
+      .then((d) => {
+        if (!current()) return;
+        const list: Template[] = Array.isArray(d?.templates) ? d.templates : [];
+        setTemplates(list);
+        hasListRef.current = true;
+        setPending((p) => pendingAfterReload(p, list));
+      })
+      .catch(() => {
+        if (current()) setLoadError(loadFailureView(listIsCurrent, hasListRef.current));
+      });
   }, [kind]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    const guard = guardRef.current;
+    load();
+    return () => guard.stop();
+  }, [load]);
 
   const choose = async (name: string) => {
     setBusy(name);
     setError(null);
+    await settleChoice(
+      async () => {
+        const res = await fetch("/api/templates/default", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, kind }),
+        });
+        const j = await res.json().catch(() => ({}));
+        return { ok: res.ok, error: typeof j.error === "string" ? j.error : undefined };
+      },
+      {
+        applied: () => setTemplates((prev) => prev && prev.map((t) => ({ ...t, isDefault: t.name === name }))),
+        // The list shown now is already right, so a failed reload must not hide it.
+        reload: () => load(true),
+        failed: setError,
+      },
+    );
+    setBusy(null);
+  };
+
+  // Duplicate, rename and delete share one round trip: post, then reload the list
+  // so the card set, defaults and layers all come from the server.
+  const manage = async () => {
+    if (!pending) return;
+    setBusy(pending.name);
+    setError(null);
+    const body =
+      pending.mode === "duplicate" ? { kind, from: pending.name, name: draft.trim() }
+      : pending.mode === "rename" ? { kind, name: pending.name, to: draft.trim() }
+      : { kind, name: pending.name };
     try {
-      const res = await fetch("/api/templates/default", {
+      const res = await fetch(`/api/templates/${pending.mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, kind }),
+        body: JSON.stringify(body),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) setError(typeof j.error === "string" ? j.error : "Could not save.");
-      else setTemplates((prev) => prev && prev.map((t) => ({ ...t, isDefault: t.name === name })));
+      else {
+        setPending(null);
+        setDraft("");
+      }
+      if (res.ok || res.status === 409) load();
     } catch {
       setError("Could not save.");
     }
     setBusy(null);
+  };
+
+  const ask = (name: string, mode: Pending["mode"]) => {
+    setError(null);
+    setPending({ name, mode });
+    setDraft("");
   };
 
   return (
@@ -62,11 +131,14 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
         {copy.title}
       </h2>
       <p className="mt-1 text-sm text-muted">{copy.note}</p>
+      <p id={`${copy.id}-hint`} className="sr-only">
+        {NAME_HINT}
+      </p>
 
-      {loadError ? (
+      {loadError === "replace" ? (
         <p role="alert" className="mt-3 text-sm text-red-500">
           Could not load the templates.{" "}
-          <button type="button" className="underline" onClick={load}>
+          <button type="button" className="underline" onClick={() => load(false)}>
             Retry
           </button>
         </p>
@@ -94,9 +166,76 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
                   </button>
                 )}
               </div>
+              {pending?.name === t.name ? (
+                <form
+                  className="mt-2 space-y-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void manage();
+                  }}
+                >
+                  {pending.mode === "delete" ? (
+                    <p className="text-xs">Delete {t.displayName}? This removes its file.</p>
+                  ) : (
+                    <input
+                      autoFocus
+                      disabled={busy !== null}
+                      aria-label={pending.mode === "rename" ? "New name" : "Name for the copy"}
+                      aria-describedby={`${copy.id}-hint`}
+                      value={draft}
+                      onChange={(e) => {
+                        setDraft(e.target.value);
+                        setError(null);
+                      }}
+                      placeholder={pending.mode === "rename" ? "new-name" : "copy-name"}
+                      className="w-full rounded-md border border-border bg-transparent px-2 py-1 text-xs"
+                    />
+                  )}
+                  <div className="flex gap-2">
+                    <button type="submit" disabled={busy !== null} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-surface">
+                      {busy === t.name ? "Working…" : pending.mode === "delete" ? "Delete" : pending.mode === "rename" ? "Rename" : "Duplicate"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => {
+                        setPending(null);
+                        setError(null);
+                      }}
+                      className="rounded-md px-2 py-1 text-xs underline disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="mt-2 flex gap-3 text-xs">
+                  <button type="button" disabled={busy !== null} onClick={() => ask(t.name, "duplicate")} className="underline">
+                    Duplicate
+                  </button>
+                  {t.layer === "user" && (
+                    <>
+                      <button type="button" disabled={busy !== null} onClick={() => ask(t.name, "rename")} className="underline">
+                        Rename
+                      </button>
+                      <button type="button" disabled={busy !== null || t.isDefault} title={t.isDefault ? "Make another template the default first" : undefined} onClick={() => ask(t.name, "delete")} className="underline">
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>
+      )}
+      {loadError === "alongside" && (
+        <p role="alert" className="mt-3 text-sm text-red-500">
+          Could not refresh the templates; the list above may be out of date.{" "}
+          <button type="button" className="underline" onClick={() => load(true)}>
+            Retry
+          </button>
+        </p>
       )}
       {error && (
         <p role="alert" className="mt-3 text-sm text-red-500">

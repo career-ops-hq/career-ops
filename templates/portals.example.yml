@@ -1285,6 +1285,7 @@ search_queries:
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
 #   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (the company id is required; a bare tenant host is not claimed)
+#   turbohire       <tenant>.turbohire.co               (TurboHire careers page, any path; the org id is looked up from the subdomain)
 #   solidjobs       solid.jobs/public-api/offers/<division>
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
 #   personio        <slug>.jobs.personio.(de|com)
@@ -1345,6 +1346,7 @@ search_queries:
 #                   recruiting.ultipro.(ca|com) / recruiting2/3.ultipro.com variants, matched by pattern —
 #                   whichever host the tenant's own board URL uses is preserved, not normalized)
 #   adp-workforcenow  workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...
+#   adp-myjobs      myjobs.adp.com/<site>/cx/...  (ADP Recruiting Management career site; <site> is the first path segment, e.g. apply or wwtexternalcareersite)
 #   zoho-recruit    <tenant>.zohorecruit.<com|ca|eu|in|com.au|jp|sa|com.cn>  (any path; the board is always read from /jobs/Careers)
 #   hibob           <tenant>.careers.hibob.com  (HiBob "Bob" careers site; any path, including a /jobs/<uuid> or /jobs/<uuid>/apply link)
 #   factorial       <tenant>.factorialhr.com, <tenant>.factorial.com or another Factorial domain (.factorialhr.pt, .factorial.es, ...)  (Factorial ATS careers site; any path, the board is always read from the tenant's home page)
@@ -1428,6 +1430,10 @@ search_queries:
 # - name: Example Darwinbox Co
 #   careers_url: https://exampleco.darwinbox.in/ms/candidatev2/main/careers/allJobs   # keep the id after /candidatev2/ as your link has it
 #   max_pages: 20          # optional page cap (50 jobs/page, default 20, max 200)
+#   enabled: true
+#
+# - name: Example TurboHire Co
+#   careers_url: https://exampleco.turbohire.co/          # any <tenant>.turbohire.co host
 #   enabled: true
 #
 # - name: Example Paylocity Co
@@ -1560,6 +1566,15 @@ search_queries:
 #
 # - name: Example Workable Co
 #   careers_url: https://apply.workable.com/exampleco   # any apply.workable.com/<slug> host
+#   enabled: true
+#
+# - name: Example ADP Myjobs Co
+#   careers_url: https://myjobs.adp.com/examplesite/cx/job-listing   # <site> = first path segment of the career site
+#   max_pages: 100          # optional page cap (200 jobs/page, default 100, max 1500)
+#   adpMyjobs:
+#     orgoid: ABCDEFGH12345678   # optional: skip the site-slug -> orgoid lookup (GET /public/staffing/v1/career-site/<site> returns it)
+#     fetchDetails: true    # optional: fetch each posting's detail for a description + posted date (off by default — the list carries neither)
+#     detailLimit: 25       # optional: max detail calls per sweep when fetchDetails is true
 #   enabled: true
 #
 # - name: Example ADP Workforce Now Co
@@ -2379,6 +2394,11 @@ tracked_companies:
   - name: YMCA of Greater Toronto
     careers_url: https://recruiting.ultipro.ca/YMC5001YMGT/JobBoard/7fde8f3e-7920-4d9d-8394-87bd44cc2330/
     provider: ultipro
+    enabled: false
+
+  - name: ADP
+    careers_url: https://myjobs.adp.com/apply/cx/job-listing
+    provider: adp-myjobs
     enabled: false
 
   - name: Ivey Business School
