@@ -304,6 +304,9 @@ for (const seed of SEEDS) {
       batchStateFile: join(dir, 'batch', 'batch-state.tsv'),
       pdfIndexFile: join(dataDir, 'pdf-index.tsv'),
       lockDir: sandbox.lockDir, logger: quiet,
+      // The seeded additions below are positional (no header row), which the
+      // merge accepts only with the opt-in flag.
+      flags: { allowHeaderless: true },
     };
 
     for (const r of rows) writeFileSync(join(reportsDir, r.reportFile), `# ${r.company}\n\n**URL:** ${r.url.replace(/ /g, '%20')}\n`);

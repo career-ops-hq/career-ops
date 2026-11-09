@@ -141,7 +141,10 @@ async function merge(sb, flags = {}) {
     additionsDir: sb.additions,
     batchStateFile: sb.batchState,
     lockDir: sb.lock,
-    flags,
+    // This suite exercises column-mapping behaviour using headerless fixtures;
+    // every merge here opts into that legacy path. Callers can pass
+    // allowHeaderless: false to exercise the new refusal path.
+    flags: { allowHeaderless: true, ...flags },
     logger,
   });
   return { code, stdout: text() };
@@ -252,7 +255,7 @@ describe('merge-tracker CLI: 10-column tracker', () => {
   let sb, res, cells;
   before(async () => {
     sb = makeSandbox(HEADER_10, { '2-globex.tsv': TSV_WITH_LOCATION });
-    res = await runScript('merge-tracker.mjs', [], sb);
+    res = await runScript('merge-tracker.mjs', ['--allow-headerless'], sb);
     // cells: ['', num, date, company, role, location, score, status, pdf, report, notes, '']
     cells = cellsOf(dataRows(sb.tracker).find(l => l.includes('Globex')));
   });

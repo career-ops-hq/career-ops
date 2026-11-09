@@ -301,6 +301,8 @@ export default {
       // Same tag workday.mjs / eightfold.mjs put on a cut-short board, so a
       // caller that cannot see stderr can still tell.
       /** @type {any} */ (all).oraclecloudTruncated = true;
+      // Canonical shape read by lib/board-truncation.mjs (scan.mjs).
+      /** @type {any} */ (all).truncated = { reason: 'page-cap', fetched: all.length, ...(total === null ? {} : { total }) };
     }
     return all;
   },

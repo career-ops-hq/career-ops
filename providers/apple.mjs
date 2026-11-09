@@ -270,6 +270,10 @@ export default {
       console.error(`⚠️  apple: ${entry.name} hit the ${maxPages}-page cap on at least one search — raise max_pages on this entry for more`);
     }
 
-    return [...byUrl.values()];
+    const result = [...byUrl.values()];
+    // Canonical partial-read signal (lib/board-truncation.mjs): scan.mjs logs
+    // this board `partial` instead of `reachable`.
+    if (truncated) /** @type {any} */ (result).truncated = { reason: 'page-cap', fetched: result.length };
+    return result;
   },
 };
