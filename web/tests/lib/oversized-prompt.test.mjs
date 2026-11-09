@@ -40,6 +40,8 @@ test("win32: quote escaping counts toward the limit", () => {
   const quotes = '"'.repeat(Math.ceil(WIN32_COMMAND_LINE_LIMIT / 2));
   assert.equal(quotes.length < WIN32_COMMAND_LINE_LIMIT, true);
   assert.equal(launchIsOversized("claude", buildArgs(quotes), "win32"), true);
+  // the same length without quotes fits, so the escaping is what pushed it over
+  assert.equal(launchIsOversized("claude", buildArgs("x".repeat(quotes.length)), "win32"), false);
 });
 
 test("posix: the single-argument byte cap applies, not the total", () => {
@@ -76,5 +78,17 @@ test("an oversized prompt is written whole to a file and argv references it", t 
   assert.ok(promptOf(r.args).includes(JSON.stringify(file)));
   assert.match(promptOf(r.args), /completely/);
   r.cleanup();
+  assert.deepEqual(fs.readdirSync(root), []);
+});
+
+test("a launch still oversized after spilling throws and leaves no file behind", t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "co-spill-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // every argv this builder makes is oversized, including the short pointer prompt
+  const alwaysHuge = prompt => buildArgs(prompt + "z".repeat(WIN32_COMMAND_LINE_LIMIT));
+  assert.throws(
+    () => spillOversizedPrompt({ prompt: "p".repeat(40000), buildArgs: alwaysHuge, binPath: "claude", fencing, root, platform: "win32" }),
+    /too long even after moving the prompt to a file/,
+  );
   assert.deepEqual(fs.readdirSync(root), []);
 });
