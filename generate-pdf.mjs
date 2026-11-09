@@ -4,8 +4,8 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
- *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
  *
  * --batch renders every document in a JSON manifest (an array of
  * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
@@ -45,6 +45,16 @@
  * keeps whatever it held. By default that is a warning and the process still
  * exits 0; --strict-pages turns it into a hard rejection. Either way the draft
  * is never logged as a successful render or indexed in data/pdf-index.tsv.
+ *
+ * --strict-fact-check makes a `warn` verdict from the fact gate fatal, the same
+ * way --strict-pages makes a page-budget overflow fatal. The gate's `warn`
+ * covers findings that are advisory by nature — claims it could not read
+ * (`#5348`), a missing config/cv-facts.json — so a careful caller may still
+ * want them to stop a render instead of scrolling past them. The warnings are
+ * printed exactly as they are without the flag; only the exit changes. It does
+ * not make the gate RUN: --skip-fact-check, or a workspace with no cv.md, still
+ * means no gate, and combining the two is rejected rather than silently
+ * honouring one over the other. A `block` verdict already fails without it.
  *
  * Requires: @playwright/test (or playwright) installed.
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
@@ -1753,10 +1763,11 @@ async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
  * @param {string} html - Normalized HTML, as it will be printed.
  * @param {string} label - Document name for the error and warning lines.
  * @param {string} [rawHtml] - HTML before ATS normalization, so an em dash is still visible.
- * @returns {Promise<void>} Resolves when the document passes or only warns.
- * @throws {Error} When the voice check or the fact gate rejects the document.
+ * @param {{strictFactCheck?: boolean}} [options] - `strictFactCheck` makes a `warn` verdict fatal.
+ * @returns {Promise<void>} Resolves when the document passes, or only warns without strict mode.
+ * @throws {Error} When the voice check or the fact gate rejects the document, or a warning is fatal under strict mode.
  */
-async function runFactGate(html, label, rawHtml = html) {
+async function runFactGate(html, label, rawHtml = html, { strictFactCheck = false } = {}) {
   // Imported lazily, by the callers' guard. A static import is resolved at module
   // load whether or not the gate runs, and the page-budget/batch suites copy
   // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
@@ -1786,6 +1797,11 @@ async function runFactGate(html, label, rawHtml = html) {
   if (factCheck.verdict === 'warn') {
     console.warn(`⚠️  CV fact check warning: ${label}`);
     printFactWarnings(factCheck, console.warn);
+    // Same output either way; only the exit differs. Thrown AFTER the warnings
+    // print, so a CI log carries the reason the render stopped.
+    if (strictFactCheck) {
+      throw new Error(`Fact check failed for ${label} (--strict-fact-check: a warning is fatal)`);
+    }
   } else {
     console.log(`✅ Fact check passed: ${label}`);
   }
@@ -1831,6 +1847,7 @@ function warnFactGateNotRun() {
 async function generatePDF() {
   const args = process.argv.slice(2);
   let skipFactCheck = false;
+  let strictFactCheck = false;
 
   // Parse arguments
   // Empty, not 'cv': an omitted --kind must fall through to inference from the
@@ -1893,6 +1910,8 @@ async function generatePDF() {
       allowNonChronological = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
+    } else if (arg === '--strict-fact-check') {
+      strictFactCheck = true;
     } else if (arg === '--skip-fact-check') {
       skipFactCheck = true;
     } else if (!inputPath) {
@@ -1922,6 +1941,15 @@ async function generatePDF() {
 
   if (!Number.isInteger(maxPages) || maxPages < 1) {
     console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
+    process.exit(1);
+  }
+
+  // Contradictory pair, rejected for the same reason --kind is rejected with
+  // --batch: one flag asks for the gate to run and be fatal, the other asks for
+  // it not to run at all. Letting either win silently turns a CI gate into a
+  // no-op the day someone adds --skip-fact-check to a shared invocation.
+  if (strictFactCheck && skipFactCheck) {
+    console.error('--strict-fact-check cannot be combined with --skip-fact-check: one runs the fact gate, the other skips it.');
     process.exit(1);
   }
 
@@ -1982,12 +2010,12 @@ async function generatePDF() {
       console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
       process.exit(1);
     }
-    return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, flagBudget, profileBudget, allowReorder, allowNonChronological, skipFactCheck });
+    return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, flagBudget, profileBudget, allowReorder, allowNonChronological, skipFactCheck, strictFactCheck });
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]');
-    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
     console.error('{input, output, format?, country?, reportNum?, kind?}) through one shared Chromium and writes');
@@ -2091,7 +2119,7 @@ async function generatePDF() {
 
   // Fact gate, on the normalized HTML: the document that actually prints.
   if (!skipFactCheck) {
-    if (cvMarkdown) await runFactGate(html, basename(inputPath), rawHtml);
+    if (cvMarkdown) await runFactGate(html, basename(inputPath), rawHtml, { strictFactCheck });
     else warnFactGateNotRun();
   }
 
@@ -2163,7 +2191,7 @@ export function pageBudgetFor(kind, flags, profile = {}) {
  * for success; it exits zero only when every document rendered.
  *
  * @param {string} manifestPath - Path to the JSON manifest.
- * @param {{format: string, flagFormat?: string|null, country?: string|null, flagBudget: {maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}, profileBudget: {maxPages?: number, strictPages?: boolean}, allowReorder: boolean, allowNonChronological: boolean, skipFactCheck: boolean}} globals
+ * @param {{format: string, flagFormat?: string|null, country?: string|null, flagBudget: {maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}, profileBudget: {maxPages?: number, strictPages?: boolean}, allowReorder: boolean, allowNonChronological: boolean, skipFactCheck: boolean, strictFactCheck?: boolean}} globals
  * @returns {Promise<{ok: number, failed: number, results: Array}>}
  */
 async function runBatchFromManifest(manifestPath, globals) {
@@ -2291,7 +2319,7 @@ async function runBatchFromManifest(manifestPath, globals) {
       // Same gate, same guard and same place as the single render. A blocked
       // entry throws into the catch below: it is recorded as failed and never
       // reaches Chromium, and the rest of the batch still renders.
-      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput), rawHtml);
+      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput), rawHtml, { strictFactCheck: globals.strictFactCheck === true });
       const entryBudget = pageBudgetFor(resolveArtifactKind(entryKind, entryOutput).kind, globals.flagBudget, globals.profileBudget);
 
       entries.push({
