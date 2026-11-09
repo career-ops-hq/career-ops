@@ -616,6 +616,15 @@ try {
   if (fit.result.length === 400 && fit.lines.length === 0) pass('oraclecloud.fetch() is silent when the cap equals the board exactly');
   else fail(`exact fit warned or short: ${fit.result.length}, ${JSON.stringify(fit.lines)}`);
 
+  // A short final page that lands on the cap, with a total reported: the board ended, so no warning.
+  const shortCount = { n: 0 };
+  const shortFit = await captureWarn(() => oc.fetch({ name: 'ShortFit', careers_url: careers, max_pages: 2 }, pagedCtx(399, shortCount)));
+  if (shortFit.result.length === 399 && shortCount.n === 2 && shortFit.lines.length === 0 && !shortFit.result.truncated) {
+    pass('oraclecloud.fetch() is silent when a short last page coincides with the cap (399 of 399)');
+  } else {
+    fail(`short page at cap: ${shortFit.result.length} jobs, ${shortCount.n} requests, ${JSON.stringify(shortFit.lines)}`);
+  }
+
   // No reported total: warn when the cap is reached, because nothing says the board ended.
   const nt = await captureWarn(() => oc.fetch({ name: 'NoTotalCap', careers_url: careers, max_pages: 2 }, {
     transport: 'http', sleep: async () => {}, fetchText: async () => {},
