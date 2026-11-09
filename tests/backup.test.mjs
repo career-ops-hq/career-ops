@@ -241,6 +241,20 @@ try {
   const combo = cli('--provider', 'google-drive', '--include-contacts', '--json');
   assert.equal(combo.status, 2);
   assert.match(JSON.parse(combo.stdout).error, /cannot be combined/);
+  // --dest inside a sync folder is refused with --include-contacts too.
+  const fakeHome = join(tmp, 'home');
+  mkdirSync(join(fakeHome, 'Dropbox', 'Backups'), { recursive: true });
+  const homeEnv = { ...env, HOME: fakeHome, USERPROFILE: fakeHome };
+  const syncedDest = join(fakeHome, 'Dropbox', 'Backups', 'career-ops');
+  const synced = spawnSync(NODE, ['backup.mjs', '--dest', syncedDest, '--include-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
+  assert.equal(synced.status, 2);
+  assert.match(JSON.parse(synced.stdout).error, /inside dropbox/);
+  assert.equal(existsSync(syncedDest), false);
+  // Without the flag the same destination is fine, and a non-synced one is fine with it.
+  const syncedOk = spawnSync(NODE, ['backup.mjs', '--dest', syncedDest, '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
+  assert.equal(syncedOk.status, 0);
+  const localOk = spawnSync(NODE, ['backup.mjs', '--dest', join(tmp, 'backup', 'local-contacts'), '--include-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
+  assert.equal(localOk.status, 0);
   pass('CLI exits 0 on success, 1 for a failed or empty run, 2 for a bad destination or option');
 } catch (e) {
   fail(`backup.mjs: ${e.message}`);

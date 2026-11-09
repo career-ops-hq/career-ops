@@ -196,6 +196,20 @@ const within = (child, parent) => {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 };
 
+/**
+ * The provider whose sync folder holds `dest`, or null. Uses the same folders
+ * `--provider` resolves, so a `--dest` pointed into one is recognised too.
+ */
+export function syncProviderOf(dest, machine = {}) {
+  const d = canonical(dest);
+  for (const name of PROVIDERS) {
+    for (const root of providerRoots(name, machine)) {
+      if (within(d, canonical(root.path))) return name;
+    }
+  }
+  return null;
+}
+
 /** The destination must not sit inside what it backs up (it would copy itself). */
 export function assertSafeDestination(dest, dataRoot, codeRoot = CODE_ROOT) {
   const d = canonical(dest);
@@ -357,7 +371,7 @@ const USAGE = `Usage:
   node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
-  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json (other people's contact details); not with --provider
+  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json (other people's contact details); not with --provider or a synced --dest
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
   node backup.mjs ... --json | --quiet     # machine-readable result | errors only
   CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest
@@ -393,6 +407,10 @@ function main(args) {
       folder: flagValue(args, '--folder'),
     });
     assertSafeDestination(target.dest, dataRoot);
+    const synced = includeContacts ? syncProviderOf(target.dest) : null;
+    if (synced) {
+      throw new Error(`--include-contacts cannot be used with a folder inside ${synced} (${target.dest}): the sync client would upload the contact files. Use a folder that is not synced.`);
+    }
     if (!existsSync(dirname(target.dest))) {
       throw new Error(`${dirname(target.dest)} does not exist (is the drive mounted?). Nothing was created.`);
     }
