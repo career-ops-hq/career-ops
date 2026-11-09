@@ -174,13 +174,14 @@ try {
     fail(`bei-prefix company = ${JSON.stringify(beiJobs[0]?.company)}`);
   }
 
-  // description: the <description> text ships in the same payload, so it is
-  // carried as plain text for content_filter / visa_filter (whitespace
-  // collapsed, markup stripped by the shared htmlToText helper).
-  if (jobs[0]?.description === 'Own the platform that powers the whole engineering org. Amsterdam, Netherlands · €130,000 – €160,000 per year') {
-    pass('parseStartupJobsFeed carries the <description> text as job.description');
+  // description: the <description> is a one-sentence teaser plus the
+  // location line, not the JD. Carried as `description`, content_filter would
+  // drop every posting whose teaser lacks a required keyword (an empty
+  // description passes), so the provider sets none.
+  if (jobs.every((j) => !('description' in j))) {
+    pass('parseStartupJobsFeed sets no job.description from the <description> teaser');
   } else {
-    fail(`row 0 description = ${JSON.stringify(jobs[0]?.description)}`);
+    fail(`descriptions = ${JSON.stringify(jobs.map((j) => j.description))}`);
   }
 
   const descriptionXml = [
@@ -188,7 +189,7 @@ try {
     '<item>',
     '  <title>Backend Engineer at Gamma</title>',
     '  <link>https://startup.jobs/backend-engineer-gamma-10260827</link>',
-    '  <description>&lt;p&gt;We sponsor &lt;strong&gt;visas&lt;/strong&gt; for this role.&lt;/p&gt;',
+    '  <description>&lt;p&gt;Run &lt;strong&gt;Kubernetes&lt;/strong&gt; clusters; we offer visa sponsorship.&lt;/p&gt;',
     '',
     'Berlin, Germany</description>',
     '</item>',
@@ -204,8 +205,10 @@ try {
     '</channel></rss>',
   ].join('\n');
   const descJobs = parseStartupJobsFeed(descriptionXml);
-  if (descJobs[0]?.description === 'We sponsor visas for this role. Berlin, Germany' && descJobs[0]?.location === 'Berlin, Germany') {
-    pass('parseStartupJobsFeed strips markup from job.description and still reads the location from the last line');
+  // A teaser that names a stack keyword and visa sponsorship still yields no
+  // description, while the location keeps coming from its last line.
+  if (descJobs[0] && !('description' in descJobs[0]) && descJobs[0].location === 'Berlin, Germany') {
+    pass('a keyword-bearing teaser sets no job.description, and the location is still read from its last line');
   } else {
     fail(`markup row = ${JSON.stringify(descJobs[0])}`);
   }
@@ -293,15 +296,12 @@ try {
     fail(`CDATA-with-item-text feed returned ${JSON.stringify(cdataJobs)}`);
   }
   // The embedded "</item>" text must not end the item block early either —
-  // description and location (both of which live AFTER that embedded text
-  // in source order) have to survive intact, not just the company.
-  if (
-    cdataJobs[0]?.description === 'Experience with elements and closing tags in RSS feeds. Remote, Canada' &&
-    cdataJobs[0]?.location === 'Remote, Canada'
-  ) {
-    pass('a CDATA-embedded "</item>" does not truncate the item block — description and location both survive intact');
+  // the location (which lives AFTER that embedded text in source order) has
+  // to survive intact, not just the company.
+  if (cdataJobs[0]?.location === 'Remote, Canada') {
+    pass('a CDATA-embedded "</item>" does not truncate the item block — the location after it survives intact');
   } else {
-    fail(`CDATA-with-item-text description/location = ${JSON.stringify([cdataJobs[0]?.description, cdataJobs[0]?.location])}`);
+    fail(`CDATA-with-item-text location = ${JSON.stringify(cdataJobs[0]?.location)}`);
   }
 
   // A non-startup.jobs link in <link> is dropped, never trusted as the job URL.
