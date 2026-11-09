@@ -2159,6 +2159,12 @@ search_queries:
 #   # max_pages: 25         # optional page cap (100 postings/page, default 25, max 100)
 #   enabled: true
 #
+# - name: Tes                             # UK and international teaching jobs; walks the whole board
+#   provider: tes
+#   # keywords: maths       # optional: Tes's own keyword search, applied server-side
+#   # max_pages: 40         # optional page cap (50 postings/page, default 150, max 400)
+#   enabled: true
+#
 # - name: getManfred                      # Spanish/EU tech roles, salary ranges published
 #   provider: manfred
 #   lang: EN                              # EN or ES; the API rejects the call without it
