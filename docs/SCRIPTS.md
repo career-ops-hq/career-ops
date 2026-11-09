@@ -393,7 +393,7 @@ Besides metrics, it blocks a bullet whose verb drifted from the source bullet it
 { "allow_swaps": ["evaluated -> conducted", "used -> led"] }
 ```
 
-A swap is pairwise: `"used -> led"` allows "led" only in a bullet whose source says "used". A later clause that opens with a regular "-ed" word that no determiner follows ("…and automated reporting", "…and related to billing") is ambiguous between verb and adjective, so it warns instead of blocking; "…and managed the vendors" and irregular forms ("…and wrote …") still block. Bullets with no source anchor, and documents not in English, are left to the other checks.
+A swap is pairwise: `"used -> led"` allows "led" only in a bullet whose source says "used". A later clause that opens with an "-ed" word or an irregular participle that no determiner or object pronoun follows ("…and automated reporting", "…and related to billing", "…and written communication") is ambiguous between verb and adjective, so it warns instead of blocking; simple-past irregular forms ("…and wrote …") and words before a determiner ("…and managed the vendors") still block. The same holds for the bullet's first word: one that does not read as a verb ("Scalable ETL pipeline built in Python") warns. Bullets with no source anchor, and documents not in English, are left to the other checks.
 
 ---
 

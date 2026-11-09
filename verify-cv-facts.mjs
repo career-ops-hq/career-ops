@@ -2308,7 +2308,7 @@ function renderedBullets(text) {
  * The words in predicate position: the first word of each clause, where a CV
  * bullet states what the candidate did (Dowty 1991: the verb, not its object,
  * selects the agent's role). The statement-initial word always counts, since a
- * CV bullet opens with its action verb. A later clause counts only when it
+ * CV bullet opens with its action verb; it blocks only when it reads as one. A later clause counts only when it
  * opens with a past-tense verb form ("..., and wrote the renderer"), so a
  * comma-separated list of nouns is not read as a list of predicates. A
  * present participle is left out there because list nouns take the same
@@ -2365,7 +2365,11 @@ function predicateWords(statement) {
     if (tokens[0] === 'to' && tokens.length > 1) tokens = tokens.slice(1);
     const [first, next] = tokens;
     if (!first || DRIFT_FUNCTION_WORDS.has(first) || !/\p{L}/u.test(first)) return;
-    if (index === 0) words.push({ word: first, certain: true });
+    // The statement-initial word always counts. It blocks when it reads as a
+    // verb (a past or "-ing" form, or any word before an object opener:
+    // "Lead the migration"); otherwise it may be an opening modifier from the
+    // JD ("Scalable ETL pipeline built in Python"), so it warns.
+    if (index === 0) words.push({ word: first, certain: isVerbal(first) || /ing$/u.test(first) || takesObject(first, next) });
     else if (isVerbal(first)) words.push({ word: first, certain: takesObject(first, next) });
   });
   return words;

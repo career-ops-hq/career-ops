@@ -114,6 +114,15 @@ check('-ing list nouns in later clauses are not read as verbs',
   check('one shared non-verb word is still not an anchor',
     bulletDriftClaims(ul('Built it using a 3CX'), '- Ran it on 3CX.\n').length === 0, null);
 }
+// Review on #6630: an opening modifier from the JD is not a verb, so it warns.
+{
+  const [modifier] = drift(ul('Scalable ETL pipeline built in Python for finance reporting'));
+  check('an opening non-verb modifier warns instead of blocking',
+    modifier?.blocking === false && modifier.added.includes('scalable'), modifier);
+  const [present] = drift(ul('Spearhead the 2024 repricing analysis'));
+  check('a present-tense opening verb before a determiner still blocks',
+    present?.blocking === true, present);
+}
 check('a bullet with no source anchor is left to the other checks',
   drift(ul('Organised the company hackathon')).length === 0, null);
 
