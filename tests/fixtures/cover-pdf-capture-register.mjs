@@ -1,11 +1,16 @@
-// Like cover-pdf-register.mjs, but the stubbed renderHtmlToPdf also writes the
-// options it was called with to $COVER_PDF_CAPTURE, so a test can assert what
-// generate-cover-letter.mjs passed to the renderer without launching Chromium.
+// Intercept PDF rendering in cover-letter CLI tests without changing the
+// production HTML normalization and ATS replacement diagnostics. Both the
+// ATS-normalization and CLI-flags suites share this fixture.
 import { register } from 'node:module';
 
+const pdfModule = new URL('../../generate-pdf.mjs', import.meta.url).href;
 const stub = 'data:text/javascript,' + encodeURIComponent(`
 import { writeFileSync } from 'node:fs';
+export { normalizeTextForATS, reportAtsReplacements } from ${JSON.stringify(pdfModule)};
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
+  if (process.env.COVER_HTML_CAPTURE) {
+    writeFileSync(process.env.COVER_HTML_CAPTURE, html);
+  }
   if (process.env.COVER_PDF_CAPTURE) {
     writeFileSync(process.env.COVER_PDF_CAPTURE, JSON.stringify({ outputPath, opts }));
   }
