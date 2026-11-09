@@ -240,7 +240,9 @@ export function readState(root, env = process.env, now = new Date()) {
 function openInBrowser(url) {
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
   const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  try { execFileSync(cmd, args, { stdio: 'ignore' }); return true; } catch { return false; }
+  // Bounded: on Linux xdg-open can hand the URL to a handler that waits, and the
+  // agent's shell would hang after the user said yes. On timeout the URL is printed.
+  try { execFileSync(cmd, args, { stdio: 'ignore', timeout: 10_000, windowsHide: true }); return true; } catch { return false; }
 }
 
 function parseArgs(argv) {

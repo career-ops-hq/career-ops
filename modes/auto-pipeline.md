@@ -113,4 +113,4 @@ Record it in the tracker the way `oferta` does ("Record in tracker"): a tracker-
 
 **If an artifact-generation step fails after the JD and gates are resolved**, continue with the next ones and mark the failed step as pending in the tracker. An unavailable JD or unresolved liveness/confirmation gate stops the pipeline before evaluation and all artifact/tracker writes.
 
-**Last step: the community ask (interactive runs only).** When `auto-pipeline` runs on its own, not inside `pipeline` (which asks once, at the end of its run), finish with `node community-asks.mjs next` and follow AGENTS.md → "Community asks".
+**Last step: the community ask (interactive runs only).** When `auto-pipeline` runs on its own, not inside `pipeline` (which asks once, at the end of its run), and this run saved its evaluation report, finish with `node community-asks.mjs next` and follow AGENTS.md → "Community asks".
