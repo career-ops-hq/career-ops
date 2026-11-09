@@ -228,6 +228,16 @@ check('an aged orphan row leaves a pending pipeline row pinning', [dup(AGED)], P
 check('an aged orphan row cannot un-pin the `- [x]` entry it repeats', [dup(AGED)], PINNED, { sources: TICKED });
 check('an aged orphan row cannot un-pin the ## Processed entry it repeats', [dup(AGED)], PINNED, { sources: PROCESSED });
 
+// A first_seen outside the calendar is no date. The row pins, as an undated
+// row does, instead of throwing out of collectSeenUrls and stopping the scan.
+for (const [label, rows] of [['an orphan skipped_dup row', [dup('2026-13-01')]], ['an added row', [row('2026-13-01')]]]) {
+  try {
+    check(`${label} dated 2026-13-01 stays seen`, rows, PINNED);
+  } catch (err) {
+    fail(`${label} dated 2026-13-01 threw: ${err.message}`);
+  }
+}
+
 // The tracker and pipeline rules read the same with a repeat in the file.
 check('an aged added row and its repeat stay pinned by a tracker row', [row(AGED), dup('2026-08-06')], PINNED, { sources: TRACKED });
 check('an aged added row and its repeat stay pinned by a pending pipeline row', [row(AGED), dup('2026-08-06')], PINNED, { sources: QUEUED });
