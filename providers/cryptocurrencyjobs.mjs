@@ -86,9 +86,21 @@ export function parseCryptocurrencyJobsRss(xml) {
       // characters) and never names a stack. scan.mjs's content_filter passes
       // a posting with no description but treats any text as the JD, so the
       // teaser would drop every posting from this board for a user with
-      // `content_filter.positive` set (visa_filter with require_mention too).
-      // Same decision as _wp-job-feed.mjs, which refuses WordPress's excerpt.
-      // It's a remote-only board, so location stays 'Remote'.
+      // `content_filter.positive` set. Same decision as _wp-job-feed.mjs,
+      // which refuses WordPress's excerpt.
+      //
+      // What the other description readers lose:
+      // - visa_filter with `require_mention: true` rejects these postings with
+      //   or without the teaser: the template never mentions sponsorship (0 of
+      //   54), and a missing description fails require_mention by design.
+      // - country_eligibility_filter no longer sees the teaser's location
+      //   clause ("can be done remotely anywhere in the United States, or
+      //   Canada"). That clause is the feed's only country signal; carrying it
+      //   needs an input other than `description`, since the content filter
+      //   would read it as the JD.
+      //
+      // Location stays 'Remote' as before, although some teasers name an
+      // on-site city ("is based in New York NY").
       results.push({
         title,
         url: link,
