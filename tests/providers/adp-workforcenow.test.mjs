@@ -46,6 +46,39 @@ try {
   if (hitApi) pass('adp-workforcenow.detect() honors api: over a non-ADP careers_url');
   else fail('adp-workforcenow.detect() should honor api: over careers_url');
 
+  // lang propagation — tenants whose career center is configured for a
+  // non-en_US locale return totalNumber 0 when lang/locale are missing or
+  // mismatched (verified live 2026-11-07 on three en_CA tenants), so the
+  // careers_url's lang must reach the list URL, defaulting to en_US.
+  const hitLang = adp.detect({ name: 'ExampleCo', careers_url: `${CAREERS_URL}&lang=en_CA` });
+  if (hitLang && hitLang.url.includes('lang=en_CA') && hitLang.url.includes('locale=en_CA')) {
+    pass('adp-workforcenow.detect() propagates careers_url lang into the list URL');
+  } else {
+    fail(`adp-workforcenow.detect() should propagate lang, returned ${JSON.stringify(hitLang)}`);
+  }
+  if (hit && hit.url.includes('lang=en_US') && hit.url.includes('locale=en_US')) {
+    pass('adp-workforcenow.detect() defaults lang to en_US');
+  } else {
+    fail(`adp-workforcenow.detect() should default lang to en_US, returned ${JSON.stringify(hit)}`);
+  }
+
+  // api without lang + careers_url with lang for the SAME tenant: the
+  // careers_url lang must win over the en_US default — an api entry alone
+  // would silently pin an en_CA board to en_US and read totalNumber 0.
+  const hitApiNoLang = adp.detect({ name: 'ExampleCo', api: CAREERS_URL, careers_url: `${CAREERS_URL}&lang=en_CA` });
+  if (hitApiNoLang && hitApiNoLang.url.includes('lang=en_CA')) {
+    pass('adp-workforcenow.detect() inherits same-tenant careers_url lang when api omits it');
+  } else {
+    fail(`adp-workforcenow.detect() should inherit careers_url lang, returned ${JSON.stringify(hitApiNoLang)}`);
+  }
+  // A DIFFERENT tenant's careers_url lang is never inherited.
+  const hitOtherTenant = adp.detect({ name: 'ExampleCo', api: CAREERS_URL, careers_url: `https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=other-cid&ccId=999&lang=fr_CA` });
+  if (hitOtherTenant && hitOtherTenant.url.includes('lang=en_US') && !hitOtherTenant.url.includes('fr_CA')) {
+    pass('adp-workforcenow.detect() keeps en_US when careers_url is a different tenant');
+  } else {
+    fail(`adp-workforcenow.detect() should not inherit another tenant's lang, returned ${JSON.stringify(hitOtherTenant)}`);
+  }
+
   // Missing cid or ccId → null, not a throw.
   if (adp.detect({ name: 'X', careers_url: 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=only-cid' }) === null) {
     pass('adp-workforcenow.detect() returns null when ccId is missing');
@@ -350,6 +383,50 @@ try {
       pass('adp-workforcenow.fetch() strips the internal _itemId plumbing field from output rows');
     } else {
       fail('adp-workforcenow.fetch() leaked _itemId into a Job row');
+    }
+  }
+
+  {
+    // Same-tenant api+careers_url where only careers_url carries lang: the
+    // resolved en_CA must reach EVERY request the provider makes — first list
+    // page, the next page, and each detail call — as both lang and locale.
+    // detect() only proves the list URL it builds, so a builder that dropped
+    // one of the two params (or the detail URL entirely) would pass that test
+    // and still read an empty en_CA board in production.
+    const seen = [];
+    const listPages = [
+      { jobRequisitions: fullPage(1), meta: { totalNumber: 22 } },
+      { jobRequisitions: [mkJob('item-21', 'Job 21', 'ext-21'), mkJob('item-22', 'Job 22', 'ext-22')], meta: { totalNumber: 22 } },
+    ];
+    let listCall = 0;
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async (url) => {
+        const u = new URL(url);
+        seen.push(u);
+        if (/\/job-requisitions\/[^/]+$/.test(u.pathname)) return { requisitionDescription: '<p>Detail body</p>' };
+        return listPages[listCall++] ?? { jobRequisitions: [], meta: { totalNumber: 22 } };
+      },
+    };
+    const jobs = await adp.fetch({
+      name: 'ExampleCo',
+      api: CAREERS_URL,
+      careers_url: `${CAREERS_URL}&lang=en_CA`,
+      adpWorkforcenow: { fetchDetails: true, detailLimit: 3 },
+    }, mockCtx);
+    const listUrls = seen.filter((u) => /\/job-requisitions$/.test(u.pathname));
+    const detailUrls = seen.filter((u) => /\/job-requisitions\/[^/]+$/.test(u.pathname));
+    const carries = (u) => u.searchParams.get('lang') === 'en_CA' && u.searchParams.get('locale') === 'en_CA';
+    const offenders = seen.filter((u) => !carries(u)).map((u) => u.href);
+    if (listUrls.length === 2 && detailUrls.length === 3) {
+      pass('adp-workforcenow.fetch() same-tenant lang: requests the first list page, the second page and every detail');
+    } else {
+      fail(`adp-workforcenow.fetch() same-tenant lang: saw ${listUrls.length} list and ${detailUrls.length} detail requests, expected 2 and 3`);
+    }
+    if (jobs.length === 22 && offenders.length === 0) {
+      pass('adp-workforcenow.fetch() carries lang=en_CA and locale=en_CA on every list and detail request');
+    } else {
+      fail(`adp-workforcenow.fetch() dropped lang/locale on ${offenders.length} request(s): ${JSON.stringify(offenders)}`);
     }
   }
 

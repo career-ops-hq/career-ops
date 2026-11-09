@@ -28,7 +28,7 @@ import { pathToFileURL } from 'url';
 import { tmpdir } from 'os';
 import { localToday } from '../lib/local-today.mjs';
 import { trackedFiles } from '../lib/mjs-files.mjs';
-import { collectSeenCompanyRoles, collectSeenUrls, formatScanHistoryRow, normalizeUrlForDedup, shouldDedupScanHistoryRow } from '../scan.mjs';
+import { collectSeenCompanyRoles, collectSeenUrls, formatScanHistoryRow, seenJobKey, shouldDedupScanHistoryRow } from '../scan.mjs';
 
 console.log('\nscan_history.recheck_after_days — the gate and the sibling scanners apply it too');
 
@@ -81,7 +81,7 @@ const probeSource = `
     out[name] = urls.map((url) => ({
       url,
       gate: gate.check({ url, company: 'Acme', title: 'Engineer', location: 'Remote' }),
-      scanSeen: scanSeen.has(scan.normalizeUrlForDedup(url)),
+      scanSeen: scanSeen.has(scan.seenJobKey(url)),
     }));
   }
   process.stdout.write(JSON.stringify(out));
@@ -159,7 +159,7 @@ const NO_WINDOW = { today: POLICY.today };
 const AGED = '2026-01-01';
 const RECENT = '2026-08-01';
 const POSTING = { url: 'https://boards.greenhouse.io/acme/jobs/2001', source: 'dayforce', title: 'Engineer', company: 'Acme', location: 'Remote' };
-const KEY = normalizeUrlForDedup(POSTING.url);
+const KEY = seenJobKey(POSTING.url);
 // Through the writer, so the rows have the shape scan-dayforce appends.
 const row = (date, status = 'added', offer = POSTING) => formatScanHistoryRow(offer, date, status);
 const dup = (date, offer) => row(date, 'skipped_dup', offer);

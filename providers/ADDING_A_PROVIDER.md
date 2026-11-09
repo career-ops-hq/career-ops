@@ -21,8 +21,7 @@ that gate is decided on the source's data, not on how the client is written.
 **A single-company ATS adapter** (a new Greenhouse/Workday/Ashby-class
 vendor, or a company on its own careers API) clears this by construction: the
 postings are the employer's own, and the adapter reads exactly one source.
-Nothing to do here — including the `robots.txt` bullet below, which is a
-board/aggregator gate — go to section 1.
+Nothing to do here: go to section 1.
 
 **A job board, aggregator, or talent network** is where the policy bites.
 In short:
@@ -37,16 +36,12 @@ In short:
 - **Complete inventory, no paid placement (rule 3).** The provider must
   traverse the source's full inventory, not a promoted or default-filtered
   view.
-- **`robots.txt`, per path (rule 6).** Check the source's `robots.txt`
-  before writing code. A `Disallow` under `User-agent: *` (or a group
-  matching the scanner) that covers the listing paths the provider reads is
-  a stop (precedent: Lagou); a `Disallow` on routes the parser never touches
-  — `/api`, `/data`, a subscribe form — is not (ITviec, CareerViet route
-  around theirs). A rule that only names an AI/agent crawler (`ClaudeBot`,
-  `anthropic-ai`) doesn't name the scanner — a distinct, bounded
-  `career-ops` fetcher — but a scan can still feed a later model-driven
-  `pipeline` step, so honouring it is a maintainer call on a source
-  proposal, not an automatic no.
+- **Read like a visitor (rule 6).** A provider reads only what any visitor
+  sees without signing in, with a bounded number of requests per host,
+  honouring a `Crawl-delay` the source states. A login, a user account or a
+  CAPTCHA in the way is a stop, and so is a source whose operator has asked
+  career-ops not to read it. `robots.txt` is not a gate: it is written for
+  crawlers, and a provider reads for one person who may apply there.
 
 If such a source is operator-run, or its eligibility is not obvious, open a
 [source proposal](../.github/ISSUE_TEMPLATE/source-proposal.yml) before
@@ -465,6 +460,17 @@ this ceiling, never on its own. Reference: `providers/workday.mjs`
 truncated the list, warn the user (`raise max_pages on this entry`) so a
 partial list is not mistaken for a complete one.
 
+Also say it in the return value, so `scan.mjs` can act on it: set
+`jobs.truncated = { reason, fetched?, total? }` on the returned array
+(`markTruncated()` in `lib/board-truncation.mjs` does this), with a short
+machine-readable `reason` such as `'page-cap'` or `'rate-limited'`. A board
+marked this way is logged `partial` in `data/portal-health.tsv` instead of
+`reachable` and listed in the run summary and the `--json` receipt (Google
+AIP-217: a partly successful read must say what it did not reach). It does
+not count toward the persistent-failure streak, because the board answered;
+consecutive partial reads get their own repeat warning instead. The older per-provider tags
+(`workdayTruncated`, `eightfoldTruncated`, ...) are still recognized.
+
 `max_pages` and `ctx.maxPages` count **pages of results**. A one-shot
 bootstrap that carries no listings — a token/cookie primer, a board-id
 lookup — is free and sits outside the count (`providers/csod.mjs`: a
@@ -766,6 +772,7 @@ Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 | Retry/backoff via the shared helper, default policy | `providers/a16z-speedrun-talent.mjs`, `providers/getro.mjs` |
 | Retry/backoff via the shared helper, policy override | `providers/workday.mjs`, `providers/oraclecloud.mjs` |
 | Detecting a clamped `total`, recovering it via query fan-out + dedup | `providers/workday.mjs` (facet split) |
+| Employer careers-site sitemap, robots.txt checked before every fetch, detail enrichment only for `ctx.titleWanted` survivors | `providers/sitemap.mjs` |
 
 `fetchJsonWithRetry` / `fetchTextWithRetry` (`providers/_http.mjs`) take an
 optional 4th argument `policy: { retries, baseDelayMs, maxDelayMs }` for a

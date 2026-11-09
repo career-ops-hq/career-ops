@@ -79,7 +79,9 @@ try {
   ]);
 } catch (err) {
   let missing = [];
-  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: rethrow below */ }
+  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: the error still names the package */ }
+  const name = /Cannot find package '((?:@[^/'\\:]+\/)?[^/'\\:]+)'/.exec(err?.message)?.[1];
+  if (name && !missing.includes(name)) missing.unshift(name);
   if (err?.code !== 'ERR_MODULE_NOT_FOUND' || missing.length === 0) throw err;
   console.error(`career-ops dependencies are not installed in ${__dirname} (missing: ${missing.join(', ')}), so doctor cannot run its checks.\nFix: run \`npm install\` in ${__dirname}, then run doctor again.`);
   process.exit(1);
@@ -1705,7 +1707,6 @@ async function main() {
     }
     console.log('');
     console.log('Join the community: https://discord.gg/8pRpHETxa4');
-    console.log('Read the manifesto: `npm run manifesto` — a new way of job searching is taking shape, and you are now part of it.');
     process.exit(0);
   }
 }

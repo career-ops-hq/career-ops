@@ -19,6 +19,10 @@ Resolve the inbox file once, before the liveness sweep, and use it for every sea
 
 Name the inbox in your first line of output (`Inbox: data/pipeline.bridge.md`) when it is not `data/pipeline.md`, so the user can see which lane is being processed. If that file does not exist, say so and stop. Do not fall back to `data/pipeline.md`: that is the other lane's inbox.
 
+## Session title
+
+In an interactive session, apply the router's **Session Title** rule (`SKILL.md`, #5303) when the host allows it. A run on one URL uses the single-evaluation titles. A run that follows a scan keeps the scan's `{remaining}/{found}` counter: `checking` through the liveness sweep and the pre-screen gate, `evaluating` from the first full evaluation, and one count down for each removal of a posting the scan counted. An `unreadable` posting the scan counted is an unconfirmed link: it stays in Pending, but it leaves this run's count, once. A `needs_confirmation` posting is on hold, not removed, so it stays counted. Older pending entries that this run also processes do not move the counter, so track the counted URLs the scan returned with its counts (a delegated run is handed them). A worker running this mode never renames anything. It ends its result with `Title counts: {remaining}/{found}`, plus the role, employer and end state (evaluated or on hold) of the last posting when one remains.
+
 ## Liveness sweep
 
 **Run this before processing any URLs.** Inbox entries are usually unchecked: `scan.mjs` adds postings without checking that each one is still open unless it ran with `--verify`, and a URL the user pasted was never checked at all. Without a sweep, dead postings reach evaluation one tab at a time, burning time and tokens on phantom roles (a single inbox of 8 stale URLs produces 8 wasted evaluations).
@@ -69,6 +73,8 @@ List `unreadable` items separately too, with URL and a reason code, when the JD 
 ```
 | # | Company | Role | Score | PDF | Recommended action |
 ```
+
+5. **Then, once per run (interactive runs only):** if the run saved at least one report, finish with `node community-asks.mjs next` and follow AGENTS.md → "Community asks".
 
 ## Format of pipeline.md
 

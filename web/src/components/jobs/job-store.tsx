@@ -36,6 +36,7 @@ type StartOpts = { title: string; subtitle?: string; kind: string; input: string
 
 type Ctx = {
   jobs: Job[];
+  ready: boolean;
   startJob: (opts: StartOpts) => string | null;
   removeJob: (id: string) => void;
   clearFinished: () => void;
@@ -66,6 +67,7 @@ function parseVerdict(text: string): JobResult {
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [ready, setReady] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const feedback = useRef<ReturnType<typeof createWorkerFeedback> | null>(null);
   useEffect(() => {
@@ -89,6 +91,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
     loaded.current = true;
+    setReady(true);
   }, []);
 
   // persist. Every streamed chunk replaces `jobs`, so writes go through the
@@ -266,7 +269,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   // A new object only when the list or an action changes, not on every render
   // of this provider (the screen-reader announcement re-renders it too).
-  const value = useMemo(() => ({ jobs, startJob, removeJob, clearFinished }), [jobs, startJob, removeJob, clearFinished]);
+  const value = useMemo(() => ({ jobs, ready, startJob, removeJob, clearFinished }), [jobs, ready, startJob, removeJob, clearFinished]);
 
   return (
     <JobsContext.Provider value={value}>

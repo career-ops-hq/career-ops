@@ -211,15 +211,16 @@ test('computrabajo keeps a sort order the user put in the URL', async () => {
   assert.equal(new URL(calls[0].url).searchParams.get('by'), 'salary');
 });
 
-test('computrabajo adds no sort under /ofertas-de-trabajo/, which robots.txt keeps free of by=', async () => {
+test('computrabajo sends the default sort under /ofertas-de-trabajo/ too (rule 6 changed in #6691)', async () => {
   const { ctx, calls } = makeCtx({ 1: page(card('R1')) });
   await provider.fetch({ name: 'Computrabajo Colombia', careers_url: 'https://co.computrabajo.com/ofertas-de-trabajo/?q=python' }, ctx);
-  assert.equal(new URL(calls[0].url).searchParams.has('by'), false);
+  assert.equal(new URL(calls[0].url).searchParams.get('by'), 'publicationtime');
+  assert.equal(new URL(calls[0].url).searchParams.get('q'), 'python');
 });
 
-test('computrabajo drops a by= the user put under /ofertas-de-trabajo/', async () => {
+test('computrabajo keeps a user sort under /ofertas-de-trabajo/ too', async () => {
   const { ctx, calls } = makeCtx({ 1: page(card('R2')) });
   await provider.fetch({ name: 'Computrabajo Colombia', careers_url: 'https://co.computrabajo.com/ofertas-de-trabajo/?q=python&by=salary' }, ctx);
-  assert.equal(new URL(calls[0].url).searchParams.has('by'), false);
+  assert.equal(new URL(calls[0].url).searchParams.get('by'), 'salary');
   assert.equal(new URL(calls[0].url).searchParams.get('q'), 'python');
 });

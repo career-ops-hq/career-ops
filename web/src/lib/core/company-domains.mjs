@@ -35,7 +35,9 @@ import { asciiFold } from "./ascii-fold.mjs";
  *
  * @param {string} company - Raw company name, as it appears on a posting.
  * @param {(name: string) => string|null} curatedDomain - The curated brand-map
- *   lookup (lib/company.ts). Injected rather than imported: this file is plain
+ *   lookup (curatedCompanyDomain in lib/company.ts). It must return a map hit or
+ *   null and never a guess of its own, because its answer goes first, ahead of
+ *   the folded stems below. Injected rather than imported: this file is plain
  *   .mjs so node:test can load it without a TS runner, and the map is TS.
  * @returns {string[]} Up to 5 domain candidates, curated first.
  */

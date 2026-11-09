@@ -14,7 +14,9 @@
 // resolved by name, which is what removes the score/status ambiguity at its
 // source rather than working around it. So the second leg below asserts the
 // opposite of what it once did, and the source guard asserts the header IS
-// written. The first leg is unchanged: headerless files stay supported forever.
+// written. The first leg is unchanged in what it MERGES, but it now states the
+// opt-in that form needs: a headerless file is refused by default, so the leg
+// drives `merge-tracker.mjs --allow-headerless`; the headed form needs no flag.
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -81,7 +83,7 @@ try {
 
   let output = '';
   try {
-    output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+    output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
       encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir) },
     });
@@ -108,7 +110,7 @@ try {
     writeFileSync(join(a2, `or-0${num}-${slug}.tsv`), `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${dataLine}`);
     let out2 = '';
     try {
-      out2 = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+      out2 = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
         encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, CAREER_OPS_TRACKER: t2, CAREER_OPS_ADDITIONS: a2, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(a2) },
       });

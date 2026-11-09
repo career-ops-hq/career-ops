@@ -7,7 +7,7 @@ import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusFor
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
-import { markTrackerReady, spawnGeneratePdf } from "@/lib/pdf-render.mjs";
+import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
 import { htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
 import { unsupportedClaims } from "./rewrite.mjs";
@@ -38,15 +38,20 @@ function originalOf(htmlPath: string) {
 }
 
 /**
- * The tailored HTML for a report: the sibling of the PDF recorded in
- * data/pdf-index.tsv when there is one, else the newest output/ HTML for the
- * report's company. An edited copy is never a source, because edits are always
- * made against the original the tailor wrote.
+ * The tailored HTML for a report: the HTML path recorded in data/pdf-index.tsv
+ * when it sits inside output/, else the sibling of the recorded PDF, else the
+ * newest output/ HTML for the report's company. An edited copy is never a
+ * source, because edits are always made against the original the tailor wrote.
  */
 async function findTailoredHtml(reportNum: string, slug: string): Promise<string | null> {
   const dir = path.join(careerOpsRoot(), "output");
   const indexed = await pdfPathStatusForReport(reportNum);
   if (indexed.status === "found") {
+    if (indexed.html) {
+      const candidate = originalOf(indexed.html);
+      const name = path.basename(candidate).toLowerCase();
+      if (name.endsWith(".html") && !name.endsWith(`${EDITED_SUFFIX}.html`) && isRegularContainedFile(candidate, dir)) return candidate;
+    }
     const sibling = originalOf(indexed.path.replace(/\.pdf$/i, ".html"));
     if (isRegularContainedFile(sibling, dir)) return sibling;
   }
@@ -129,7 +134,7 @@ export async function loadStudio(n: string): Promise<StudioLoad> {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   const { edits, stale } = parseEdits(raw, sourceHash) ?? { edits: emptyEdits(sourceHash), stale: false };
-  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.basename(file), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
+  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.relative(path.join(careerOpsRoot(), "output"), file).split(path.sep).join("/"), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
 }
 
 export function saveEdits(reportNum: string, edits: StudioEdits) {
@@ -197,10 +202,14 @@ export async function renderEditedPdf(load: Extract<StudioLoad, { ok: true }>, e
   atomicWrite(editedHtml, html);
   const format = /size:\s*a4/i.test(html) ? "a4" : "letter";
   const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
-  if (!render.ok) {
+  // A render over a warn-only page budget exits 0 but leaves nothing at
+  // editedPdf (the PDF went to a sibling .overflow.pdf draft, #6377), so the
+  // exit code alone would keep an HTML and mark the tracker ready for a PDF
+  // that was never written. Delivery is the file landing, same as the pdf run.
+  if (!render.delivered) {
     if (previousHtml === null) fs.rmSync(editedHtml, { force: true });
     else atomicWrite(editedHtml, previousHtml);
-    return { ok: false, error: render.stderr || "PDF rendering failed." };
+    return { ok: false, error: undeliveredRenderError(render, editedPdf) };
   }
   const warnings = render.stderr.split("\n").map((l: string) => l.trim()).filter(Boolean);
   const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), reportNum: load.reportNum });
