@@ -86,6 +86,8 @@ export function isExcluded(relPath, { includeContacts = false } = {}) {
   if (lower.split('/').some((seg) => seg === '.git' || seg === 'node_modules')) return true;
   if (lower === 'data/cache' || lower.startsWith('data/cache/')) return true;
   if (!includeContacts && CONTACT_FILES.some((f) => lower === f.toLowerCase())) return true;
+  // plugins.lock is a User Layer file (USER_PATHS), not a transient lock.
+  if (lower === 'plugins.lock') return false;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
 }
 
@@ -320,6 +322,8 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   if (resolve(dataRoot) !== resolve(CODE_ROOT) && existsSync(join(CODE_ROOT, LOCAL_PATHS_FILE))) {
     result.warnings.push(`${LOCAL_PATHS_FILE} in the checkout is not read when the data root is elsewhere; back up fork-local files it declares separately.`);
   }
+  const syncedTo = syncProviderOf(dest);
+  let agentSettings = 0;
   for (const entry of backupPaths(dataRoot, result.warnings)) {
     let files;
     try {
@@ -334,6 +338,8 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     }
     for (const file of files) {
       result.found++;
+      const relPosix = file.rel.split(sep).join('/');
+      if (relPosix.startsWith('.claude/') || relPosix === 'opencode.json' || relPosix.startsWith('plugins.local/')) agentSettings++;
       const target = join(dest, file.rel);
       // A symlinked folder inside the destination could point back at live files.
       if (hasSymlinkedParent(dest, file.rel.split(sep).join('/'))) {
@@ -355,6 +361,9 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
         fail(file.rel, error);
       }
     }
+  }
+  if (syncedTo && agentSettings > 0) {
+    result.warnings.push(`${agentSettings} agent-tool settings file(s) (.claude/, opencode.json, plugins.local/) are in a ${syncedTo} folder and can contain tokens; the sync client will upload them.`);
   }
   if (!dryRun && result.found > 0) {
     try {

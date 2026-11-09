@@ -2028,7 +2028,7 @@ node backup.mjs --provider google-drive    # <Google Drive>/Backups/career-ops; 
 node backup.mjs --provider google-drive --account work@example.com   # when several accounts are signed in
 node backup.mjs --provider dropbox --folder Work/career-ops       # folder under the drive (default Backups/career-ops)
 node backup.mjs --dest ~/Backups/career-ops --include-contacts # also copy the three contact files
-node backup.mjs --dest ~/Backups/career-ops --dry-run             # list what would be copied, copy nothing
+node backup.mjs --dest ~/Backups/career-ops --dry-run             # print the counts and bytes that would be copied, copy nothing
 node backup.mjs --dest ~/Backups/career-ops --json                # machine-readable result
 ```
 

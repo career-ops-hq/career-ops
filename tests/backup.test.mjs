@@ -222,12 +222,45 @@ try {
     pass('an I/O error on one file does not abort the run');
   }
 
+  // plugins.lock is a User Layer file despite the .lock suffix.
+  const lockRoot = join(tmp, 'lock-root');
+  put(lockRoot, 'plugins.lock', '{}');
+  put(lockRoot, 'other.lock', 'x');
+  const lockRun = b.runBackup({ dataRoot: lockRoot, dest: join(tmp, 'backup', 'lock') });
+  assert.equal(existsSync(join(tmp, 'backup', 'lock', 'plugins.lock')), true);
+  assert.equal(existsSync(join(tmp, 'backup', 'lock', 'other.lock')), false);
+  assert.equal(lockRun.failed.length, 0);
+
+  // Agent-tool settings headed for a synced folder carry a warning.
+  const warnHome = join(tmp, 'warn-home');
+  mkdirSync(join(warnHome, 'Dropbox'), { recursive: true });
+  const warnRoot = join(tmp, 'warn-root');
+  put(warnRoot, 'cv.md', 'cv');
+  put(warnRoot, '.claude/settings.json', '{}');
+  const prevHome = process.env.HOME;
+  const prevProfile = process.env.USERPROFILE;
+  process.env.HOME = warnHome;
+  process.env.USERPROFILE = warnHome;
+  try {
+    const syncedRun = b.runBackup({ dataRoot: warnRoot, dest: join(warnHome, 'Dropbox', 'Backups', 'career-ops') });
+    assert.equal(syncedRun.warnings.some((w) => /agent-tool settings.*dropbox/.test(w)), true);
+    const localRun = b.runBackup({ dataRoot: warnRoot, dest: join(tmp, 'backup', 'warn-local') });
+    assert.equal(localRun.warnings.some((w) => /agent-tool settings/.test(w)), false);
+  } finally {
+    for (const [key, value] of [['HOME', prevHome], ['USERPROFILE', prevProfile]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
   // A declaration file that cannot be parsed falls back to the built-in list.
   const decl = join(tmp, 'decl-root');
   put(decl, 'cv.md', 'cv');
   put(decl, 'config/local-paths.txt', '/etc/passwd\n');
   const warned = b.runBackup({ dataRoot: decl, dest: join(tmp, 'backup', 'decl') });
-  assert.equal(warned.warnings.length, 1);
+  // The checkout's own local-paths.txt, if a fork has one, adds an unrelated warning.
+  const declWarnings = warned.warnings.filter((w) => !w.includes('is not read when the data root is elsewhere'));
+  assert.equal(declWarnings.length, 1);
   assert.equal(warned.copied, 2);
   pass('an unparseable local-paths.txt warns and backs up the built-in paths');
 
