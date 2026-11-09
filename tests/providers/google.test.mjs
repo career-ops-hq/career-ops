@@ -137,6 +137,41 @@ try {
       : fail(`google paginated redirect opts: ${JSON.stringify(calls.map((c) => c.opts))}`);
   }
 
+  // Paged requests pause between pages and the pause is ctx.sleep - the
+  // framework's watchdog-aware cancellation checkpoint (kalibrr/gupy convention).
+  {
+    const PAGE2_NEW = `<!doctype html><a href="/about/careers/applications/jobs/results/555666777-head-of-strategy">z</a>`;
+    const sleeps = [];
+    const { ctx, calls } = recordingCtx((call) => (/[?&]page=2\b/.test(call.url) ? PAGE2_NEW : RESULTS_HTML));
+    ctx.sleep = async (ms) => { sleeps.push(ms); };
+    await provider.fetch({ ...ENTRY, max_pages: 3, google: { queries: ['business strategy'], location: 'United States' } }, ctx);
+
+    calls.length === 3 && sleeps.length === 2
+      ? pass('google.fetch() pauses on ctx.sleep between paged requests')
+      : fail(`google inter-page sleep: ${calls.length} calls, ${sleeps.length} sleeps`);
+  }
+
+  // A deeper page failing keeps what earlier pages collected; a probe sees the
+  // same rejection unwrapped (kalibrr's failure contract).
+  {
+    const { ctx } = recordingCtx((call) => { if (/[?&]page=2\b/.test(call.url)) throw new Error('boom'); return RESULTS_HTML; });
+    const jobs = await provider.fetch({ ...ENTRY, max_pages: 3, google: { queries: ['business strategy'], location: 'United States' } }, ctx);
+
+    jobs.length === 2
+      ? pass('google.fetch() keeps earlier pages when a deeper page fails')
+      : fail(`google deeper-page failure lost the board: ${jobs.length} jobs`);
+
+    let probeThrew = false;
+    try {
+      await provider.fetch({ ...ENTRY, max_pages: 3, google: { queries: ['business strategy'], location: 'United States' } }, { ...ctx, maxPages: 3 });
+    } catch {
+      probeThrew = true;
+    }
+    probeThrew
+      ? pass('google.fetch() probe sees a deeper-page rejection unwrapped')
+      : fail('google probe swallowed a deeper-page rejection');
+  }
+
   // The probe budget caps paging: ctx.maxPages wins over the entry's max_pages.
   {
     const { ctx, calls } = recordingCtx(() => RESULTS_HTML);
