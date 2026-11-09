@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  CULTURE_SCORE_FLAG,
   NO_INVENTED_PAY_RULE,
   UNKNOWN_COMP_SENTENCE,
   normalizeEvaluationText,
@@ -168,4 +169,25 @@ test('the CLI evaluators use the shared pay rule and run the normalizer', () => 
   assert.match(read('modes/_shared.md'), /does not move the global score/);
   assert.match(read('modes/oferta.md'), /Do not invent a salary/);
   assert.match(read('modes/triage.md'), /Unknown comp does\s+not move the score/);
+});
+
+test('a neutralized culture line flags that the score was not recalculated', () => {
+  const once = normalizeEvaluationText(reply(), JD_WITH_PAY);
+  assert.match(once, /Cultural signals: unknown/);
+  assert.equal(once.split(CULTURE_SCORE_FLAG).length - 1, 1);
+  assert.match(once, /^SCORE:\s*4\.2\s*$/m);
+  const twice = normalizeEvaluationText(once, JD_WITH_PAY);
+  assert.equal(twice.split(CULTURE_SCORE_FLAG).length - 1, 1);
+});
+
+test('an explicit deprioritize_if_absent penalty is left as written', () => {
+  const penalty = 'Cultural signals: 2/5, capped because deprioritize_if_absent is set and there is no evidence in the posting.';
+  const out = normalizeEvaluationText(reply().replace(
+    'Cultural signals: 3/5 by default, no evidence in the posting.',
+    penalty,
+  ), JD_WITH_PAY);
+  assert.equal(out.includes(penalty), true);
+  assert.equal(out.includes('Cultural signals: unknown'), false);
+  assert.equal(out.includes(CULTURE_SCORE_FLAG), false);
+  assert.match(out, /culture: "supported"/);
 });
