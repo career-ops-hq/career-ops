@@ -132,6 +132,8 @@ check('reads "1)" numbered bullets',
   check('"…, built on AWS" warns instead of blocking', participle?.blocking === false, participle);
   const [bare] = bulletDriftClaims(ul('Developed a data platform on AWS and built Kafka pipelines'), src);
   check('"and built Kafka pipelines" still blocks', bare?.blocking === true, bare);
+  const [wrote] = bulletDriftClaims(ul('Developed a data platform on AWS and Kafka and wrote in Go'), src);
+  check('"and wrote in Go" still blocks: its participle is "written"', wrote?.blocking === true, wrote);
 }
 check('a bullet with no source anchor is left to the other checks',
   drift(ul('Organised the company hackathon')).length === 0, null);
@@ -141,6 +143,11 @@ check('allow_swaps clears a declared verb swap',
   drift(ul('Led a Kafka migration for the billing service'), { allowSwaps: ['used -> led'] }).length === 0, null);
 check('allow_swaps folds inflections on both sides',
   drift(ul('Leading Kafka ingestion for the billing service'), { allowSwaps: ['uses -> led'] }).length === 0, null);
+check('a multi-word swap needs every source-side word in the anchor',
+  bulletDriftClaims(ul('Spearheaded Kafka pipelines for billing'), '- Reviewed Kafka pipelines for billing\n',
+    { allowSwaps: ['used kafka -> spearheaded'] }).length === 1
+    && bulletDriftClaims(ul('Spearheaded Kafka pipelines for billing'), '- Used Kafka pipelines for billing\n',
+      { allowSwaps: ['used kafka -> spearheaded'] }).length === 0, null);
 check('a swap does not apply to a bullet whose anchor lacks its source word',
   drift(ul('Led the 2024 repricing analysis'), { allowSwaps: ['used -> led'] }).length === 1, null);
 check('a single-word allow_facts entry allows that verb',

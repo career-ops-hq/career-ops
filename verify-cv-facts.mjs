@@ -2355,6 +2355,14 @@ const DRIFT_SIMPLE_PASTS = new Set([
   'dealt', 'struck', 'spoke', 'broke', 'drew', 'rebuilt', 'rewrote', 'undertook',
 ]);
 
+// Simple pasts whose passive participle is the same word. Only these can be a
+// participial modifier ("built on AWS"); "wrote", "ran" or "drove" before a
+// preposition is still the candidate's action ("and wrote in Go").
+const DRIFT_SAME_FORM_PASTS = new Set([
+  'led', 'built', 'made', 'brought', 'sold', 'taught', 'won', 'held', 'kept', 'spent', 'sent', 'met',
+  'understood', 'bought', 'stood', 'told', 'said', 'paid', 'dealt', 'struck', 'rebuilt',
+]);
+
 // Prepositions that follow a passive participle used as a modifier.
 const DRIFT_PASSIVE_PREPOSITIONS = new Set([
   'by', 'on', 'in', 'with', 'from', 'into', 'upon', 'around', 'across', 'via', 'through', 'under', 'over', 'within', 'atop',
@@ -2367,7 +2375,7 @@ function predicateWords(statement) {
   // "led", "made") is a modifier before a passive preposition ("a platform,
   // built on AWS", "a team led by the CTO"), so only then does it warn.
   const takesObject = (word, next) => DRIFT_OBJECT_OPENERS.has(next)
-    || (DRIFT_SIMPLE_PASTS.has(word) && !DRIFT_PASSIVE_PREPOSITIONS.has(next));
+    || (DRIFT_SIMPLE_PASTS.has(word) && !(DRIFT_SAME_FORM_PASTS.has(word) && DRIFT_PASSIVE_PREPOSITIONS.has(next)));
   const text = stripListMarker(statement);
   const label = text.match(/^([^,;:.!?]{1,60}):\s+(?=\S)/u);
   if (label) {
@@ -2408,7 +2416,9 @@ function parseSwaps(entries = []) {
     const parts = splitSwap(entry);
     if (!parts) throw new Error(`${SWAP_FORMAT}, got: ${entry}`);
     const [from, to] = parts;
-    return { from: driftKeySet(driftWords(from)), to: driftKeySet(driftWords(to)) };
+    // Every source-side word must be in the anchor: "used Kafka -> led" must
+    // not apply to a bullet whose source mentions Kafka but never says "used".
+    return { from: driftWords(from), to: driftKeySet(driftWords(to)) };
   });
 }
 
@@ -2466,7 +2476,7 @@ export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], all
       }
       if (!anchors.length || !required || best < required) continue;
       const allowedBy = (anchor, word) => hasKey(anchor.keys, word) || hasKey(declared, word)
-        || swaps.some(swap => hasKey(swap.to, word) && [...swap.from].some(key => anchor.keys.has(key)));
+        || swaps.some(swap => hasKey(swap.to, word) && swap.from.every(fromWord => hasKey(anchor.keys, fromWord)));
       const unsupported = predicates
         .filter(({ word }) => !anchors.some(anchor => allowedBy(anchor, word)));
       if (!unsupported.length) continue;
